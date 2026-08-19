@@ -394,15 +394,16 @@ func TestPluginSPI_InjectedSessionTokenUntrusted(t *testing.T) {
 	}
 }
 
-// IdentityProvider SPI: admin runtime register and list roundtrip.
-func TestPluginSPI_RuntimeRegisterList(t *testing.T) {
+// IdentityProvider SPI: `admin runtime register --keys-file` writes the
+// trusted key set the registry reads at startup (§6.3.2). The command is a
+// local file writer, so it needs no running registry.
+func TestPluginSPI_RuntimeRegisterWritesKeysFile(t *testing.T) {
 	t.Parallel()
 	pubKeyFile := extGenRSAPubKeyFile(t)
-	srv := startServer(t, "")
+	keysFile := filepath.Join(t.TempDir(), "runtimes.json")
 
-	// register
 	regRes := runPodium(t, "", nil, "admin", "runtime", "register",
-		"--registry", srv.BaseURL,
+		"--keys-file", keysFile,
 		"--issuer", "ext-test-runtime",
 		"--algorithm", "RS256",
 		"--public-key-file", pubKeyFile,
@@ -410,21 +411,17 @@ func TestPluginSPI_RuntimeRegisterList(t *testing.T) {
 	if regRes.Exit != 0 {
 		t.Fatalf("runtime register: exit=%d stderr=%s stdout=%s", regRes.Exit, regRes.Stderr, regRes.Stdout)
 	}
-	// list
-	listRes := runPodium(t, "", nil, "admin", "runtime", "list", "--registry", srv.BaseURL)
-	if listRes.Exit != 0 {
-		t.Fatalf("runtime list: exit=%d stderr=%s", listRes.Exit, listRes.Stderr)
+	body, err := os.ReadFile(keysFile)
+	if err != nil {
+		t.Fatalf("read keys file: %v", err)
 	}
-	combined := listRes.Stdout + listRes.Stderr
-	if !strings.Contains(combined, "ext-test-runtime") {
-		t.Errorf("runtime list missing issuer ext-test-runtime: %s", combined)
+	for _, want := range []string{"ext-test-runtime", "RS256", "BEGIN PUBLIC KEY"} {
+		if !strings.Contains(string(body), want) {
+			t.Errorf("keys file missing %q:\n%s", want, body)
+		}
 	}
-	if !strings.Contains(combined, "RS256") {
-		t.Errorf("runtime list missing RS256: %s", combined)
-	}
-	// no private key material
-	if strings.Contains(combined, "BEGIN RSA PRIVATE") || strings.Contains(combined, "PRIVATE KEY") {
-		t.Errorf("runtime list contains private key material: %s", combined)
+	if strings.Contains(string(body), "PRIVATE KEY") {
+		t.Errorf("keys file contains private key material:\n%s", body)
 	}
 }
 
@@ -432,25 +429,30 @@ func TestPluginSPI_RuntimeRegisterList(t *testing.T) {
 func TestPluginSPI_RuntimeRegisterMissingFlags(t *testing.T) {
 	t.Parallel()
 	pubKeyFile := extGenRSAPubKeyFile(t)
-	srv := startServer(t, "")
+	keysFile := filepath.Join(t.TempDir(), "runtimes.json")
 
 	cases := []struct {
 		name string
 		args []string
 	}{
 		{
+			name: "missing-keys-file",
+			args: []string{"admin", "runtime", "register", "--issuer", "ext-test-runtime",
+				"--algorithm", "RS256", "--public-key-file", pubKeyFile},
+		},
+		{
 			name: "missing-issuer",
-			args: []string{"admin", "runtime", "register", "--registry", srv.BaseURL,
+			args: []string{"admin", "runtime", "register", "--keys-file", keysFile,
 				"--algorithm", "RS256", "--public-key-file", pubKeyFile},
 		},
 		{
 			name: "missing-algorithm",
-			args: []string{"admin", "runtime", "register", "--registry", srv.BaseURL,
+			args: []string{"admin", "runtime", "register", "--keys-file", keysFile,
 				"--issuer", "ext-test-runtime", "--public-key-file", pubKeyFile},
 		},
 		{
 			name: "missing-public-key-file",
-			args: []string{"admin", "runtime", "register", "--registry", srv.BaseURL,
+			args: []string{"admin", "runtime", "register", "--keys-file", keysFile,
 				"--issuer", "ext-test-runtime", "--algorithm", "RS256"},
 		},
 	}

@@ -2,12 +2,13 @@
 // injected-session-token JWTs for the manual validation scenarios in
 // test/manual-validation.md. A standalone registry started with
 // PODIUM_IDENTITY_PROVIDER=injected-session-token verifies these tokens once
-// the public key is registered with `podium admin runtime register`.
+// the public key is written into the registry's keys file with
+// `podium admin runtime register --keys-file`.
 //
 // First run, which writes a keypair under --keys and names the register
-// command to run:
+// command to run before the registry starts:
 //
-//	go run ./tools/minttoken --keys "$WORK/keys" --register-cmd "$PODIUM_REGISTRY"
+//	go run ./tools/minttoken --keys "$WORK/keys" --register-cmd "$WORK/keys/runtimes.json"
 //
 // Mint a caller token (the signed JWT is the only thing printed to stdout, so
 // it can be captured directly):
@@ -46,7 +47,7 @@ func main() {
 	iss := flag.String("iss", "manual-runtime", "issuer (must match the registered runtime)")
 	aud := flag.String("aud", "https://podium.manual", "audience (must equal the server's PODIUM_OAUTH_AUDIENCE)")
 	ttl := flag.Duration("ttl", 30*time.Minute, "token lifetime")
-	registerFor := flag.String("register-cmd", "", "print the `podium admin runtime register` command for this registry URL, then exit")
+	registerFor := flag.String("register-cmd", "", "print the `podium admin runtime register` command for this keys-file path, then exit")
 	flag.Parse()
 
 	priv, pubPath, created, err := loadOrCreateKey(*keys)
@@ -59,15 +60,15 @@ func main() {
 	}
 
 	registerCmd := fmt.Sprintf(
-		"podium admin runtime register --registry %s --issuer %s --algorithm RS256 --public-key-file %s",
-		"$PODIUM_REGISTRY", *iss, pubPath)
+		"podium admin runtime register --keys-file %s --issuer %s --algorithm RS256 --public-key-file %s",
+		"$PODIUM_RUNTIME_KEYS_PATH", *iss, pubPath)
 	if *registerFor != "" {
-		registerCmd = strings.Replace(registerCmd, "$PODIUM_REGISTRY", *registerFor, 1)
+		registerCmd = strings.Replace(registerCmd, "$PODIUM_RUNTIME_KEYS_PATH", *registerFor, 1)
 		fmt.Println(registerCmd)
 		return
 	}
 	if *sub == "" {
-		fmt.Fprintf(os.Stderr, "Public key: %s\nRegister it, then re-run with --sub to mint a token:\n  %s\n", pubPath, registerCmd)
+		fmt.Fprintf(os.Stderr, "Public key: %s\nRegister it before the registry starts, then re-run with --sub to mint a token:\n  %s\n", pubPath, registerCmd)
 		return
 	}
 

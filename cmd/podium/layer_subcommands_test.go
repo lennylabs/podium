@@ -333,7 +333,7 @@ func TestLayerRegister_FallsBackToSyncYAMLRegistry(t *testing.T) {
 	}
 }
 
-// adminRuntime list/register also have validation paths.
+// adminRuntimeRegister has flag-validation and file paths (§6.3.2).
 
 func TestAdminRuntimeRegister_MissingFlagsExits2(t *testing.T) {
 	withStderr(t, func() {
@@ -344,9 +344,9 @@ func TestAdminRuntimeRegister_MissingFlagsExits2(t *testing.T) {
 }
 
 func TestAdminRuntimeRegister_MissingKeyFile(t *testing.T) {
-	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 	withStderr(t, func() {
 		args := []string{
+			"--keys-file", filepath.Join(t.TempDir(), "runtimes.json"),
 			"--issuer", "podium-runtime",
 			"--algorithm", "RS256",
 			"--public-key-file", filepath.Join(t.TempDir(), "absent.pem"),
@@ -358,28 +358,17 @@ func TestAdminRuntimeRegister_MissingKeyFile(t *testing.T) {
 }
 
 func TestAdminRuntimeRegister_HappyPath(t *testing.T) {
-	srv := stubRegistry(t, http.MethodPost, "/v1/admin/runtime")
-	t.Setenv("PODIUM_REGISTRY", srv.URL)
-	pem := filepath.Join(t.TempDir(), "key.pem")
-	_ = os.WriteFile(pem, []byte("-----BEGIN PUBLIC KEY-----\nfake\n-----END PUBLIC KEY-----\n"), 0o644)
+	tmp := t.TempDir()
+	keyFile := writeTestPublicKeyPEM(t, tmp, "key.pem")
 	withStderr(t, func() {
 		args := []string{
+			"--keys-file", filepath.Join(tmp, "runtimes.json"),
 			"--issuer", "podium-runtime",
-			"--algorithm", "RS256",
-			"--public-key-file", pem,
+			"--algorithm", "EdDSA",
+			"--public-key-file", keyFile,
 		}
 		if code := adminRuntimeRegister(args); code != 0 {
 			t.Errorf("adminRuntimeRegister happy = %d, want 0", code)
-		}
-	})
-}
-
-func TestAdminRuntimeList_HappyPath(t *testing.T) {
-	srv := stubRegistry(t, http.MethodGet, "/v1/admin/runtime")
-	t.Setenv("PODIUM_REGISTRY", srv.URL)
-	withStderr(t, func() {
-		if code := adminRuntimeList(nil); code != 0 {
-			t.Errorf("adminRuntimeList = %d, want 0", code)
 		}
 	})
 }

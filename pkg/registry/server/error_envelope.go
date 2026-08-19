@@ -61,7 +61,7 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	// issuer is not a registered runtime key. The remediation text is the
 	// verbatim spec string.
 	"auth.untrusted_runtime": {
-		suggestedAction: "Register the runtime's signing key via 'podium admin runtime register'.",
+		suggestedAction: "Add the runtime's signing key with 'podium admin runtime register --keys-file', then restart the registry.",
 	},
 	// §6.3.3 / §6.10: the gateway-delegated oidc-jwt provider's codes.
 	"auth.token_expired": {
