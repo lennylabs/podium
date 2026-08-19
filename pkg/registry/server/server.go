@@ -298,8 +298,10 @@ func New(r *core.Registry, opts ...Option) *Server {
 // bootstrap helper used by tests and the standalone server.
 // A filesystem-source registry configures no identity provider by
 // definition (§13.10), so it authenticates no caller and the re-embed
-// endpoint is ungated here. The option is applied ahead of the caller's
-// options so a caller can still tighten anything it sets.
+// endpoint is ungated here. The option runs before the caller's options,
+// which may still override the other server settings; the flag itself is
+// set-only and no option clears it, so a filesystem-source server is
+// always ungated for re-embed.
 func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 	opts = append([]Option{WithUnauthenticatedReembed()}, opts...)
 	reg, err := filesystem.Open(path)
