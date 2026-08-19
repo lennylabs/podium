@@ -60,6 +60,26 @@ const replanEvery = input.replanEvery || 4;
 const maxReplans = input.maxReplans || 6;
 const replanStruggleAttempts = input.replanStruggleAttempts || 4;
 
+// A StructuredOutput miss is a transport failure rather than a verdict: the agent
+// ran and its answer did not come back in the shape the schema demanded. Retrying
+// costs one call; treating it as a result loses the step.
+async function agentTry(p, o) {
+  for (let i = 0; i < 4; i++) {
+    try {
+      return await agent(p, o);
+    } catch (e) {
+      const msg = String((e && e.message) || e);
+      if (i < 3 && msg.indexOf("StructuredOutput") !== -1) {
+        try {
+          log("agent " + ((o && o.label) || "?") + ": StructuredOutput miss; retry " + (i + 1) + "/3");
+        } catch (_) {}
+        continue;
+      }
+      throw e;
+    }
+  }
+}
+
 const RULES =
   "Follow the project rules in " +
   repo +
@@ -68,6 +88,21 @@ const RULES =
   "/.claude/rules/doc-style.md for any prose or comments. Write idiomatic Go that matches the surrounding code: small single-purpose functions, reuse over duplication, wrapped errors, context propagation, fail-closed security, and no backward-compat shims (Podium is pre-1.0). REMOVE DEAD CODE: when the proposal eliminates a surface (a mode, field, function, struct, env var, error code, meta-tool, adapter value, §6.7.1 capability cell, or whole file), delete it together with every code path, helper, test, fixture, golden file, doc reference, and identifier that becomes unreferenced as a result; never leave a removed surface compiling-but-dead or two implementations side by side. A removal is part of the change, not a follow-up. Do not hand-edit files under spec/ — the spec is already applied and committed, and the code phase never touches spec/." +
   "\n\nPER-STEP VERIFICATION — TEST the step, avoid the 180s no-progress watchdog, and keep test runs scoped. Podium is a Go project tested with `go test` plus the Makefile targets. DO test every step; do NOT skip tests. Follow these: (1) DEFAULT to scoped FOREGROUND verification — do not use `run_in_background` for tests unless a single suite will genuinely exceed the 180s watchdog without output (see rule (4)). (2) SCOPE every command to the changed packages, not the whole repo: `go build ./<changed-pkg>/...`, `go vet ./<changed-pkg>/...`, `golangci-lint run ./<changed-pkg>/...` (or `make lint` whole-repo when fast enough), `go test ./<changed-pkg>/... -count=1`. Scoped runs finish well under 180s; do NOT pipe through `| tail`/`| head` (let output stream). (3) LIVE-SERVICE TESTS: tests that need a real Postgres or S3/MinIO take the live path only when the `PODIUM_POSTGRES_DSN` / `PODIUM_S3_*` env vars point at running services. Start the local docker-compose stack with `make services-up`, then run the live path with `make test-live` (it maps the local-service `LIVE_*` Make variables into the `PODIUM_*` env vars the tests read and serializes package runs with `-p 1`), and `make services-down` when done. A bare `go test` after `services-up` still SKIPS the live tests unless those `PODIUM_*` vars are set, as `make test-live` and a local `test.env` provide; to run one live package in the foreground, set the `PODIUM_POSTGRES_DSN` / `PODIUM_S3_*` vars yourself. The standalone (SQLite/filesystem) paths need no services. A pre-existing whole-repo failure unrelated to this step's changed packages is not this step's failure. (4) LONG-SILENT SUITE EXCEPTION: if and only if a single suite will genuinely run longer than ~150s without emitting any output, launch it with `run_in_background: true` to a log file and poll for completion using the READ TOOL on that log file path — do NOT use a Bash `tail -f`/`until` loop. A Bash poll loop depends on the task `.output` file remaining on disk; if the 180s watchdog kills the foreground Bash wrapper, the harness deletes that `.output` file and the poll loop hangs forever. The Read tool reads the log file directly, immune to that cleanup. (5) HARNESS-ADAPTER STEPS: a step that changes pkg/adapter, pkg/materialize, or the §6.7.1 capability matrix must run the materialization golden and validity tests (`go test ./test/materialization/... -count=1`, no external deps) and the matrix audit (`make matrix-audit`); when the harness-native output legitimately changes, regenerate the golden files with `UPDATE_GOLDEN=1 go test ./test/materialization/` and confirm the diff is exactly the intended change. test/harness_integration (build tag `harness_integration`, gated on a harness binary on PATH) is opt-in and normally skipped." +
   "\n\nBRANCH SAFETY (critical): you MUST stay on the current feature branch and commit ONLY to it. NEVER run `git checkout <branch-or-commit>`, `git switch`, `git reset --hard`, or `git branch -f` — switching the checkout has caused build commits to land on the wrong branch (a real, damaging failure). To inspect a historical commit or the pre-implementation baseline, use `git diff <SHA>..HEAD`, `git diff <SHA> -- <path>`, or `git show <SHA>:<path>`, which read history WITHOUT changing the working tree. Immediately before every `git commit`, confirm `git rev-parse --abbrev-ref HEAD` prints the feature branch (not `HEAD`/detached, and not `main` or any base branch); if it does not, `git checkout <feature-branch>` to return before committing.";
+
+const BLANKS_BLOCK =
+  "\n\nBLANKS THE PROPOSAL LEAVES TO YOU. A proposal may delegate a detail rather than specify it, marked as " +
+  "**IMPLEMENTOR'S CHOICE:** naming what is open and the constraint any answer must satisfy. When you reach " +
+  "one: make the choice, satisfy the constraint, and record in your commit message and your result which " +
+  "choice you made and how it satisfies the constraint. A marked blank is a delegation, so it is not a defect " +
+  "and not a reason to stop. An UNMARKED gap is different: the proposal neither says what to do nor delegates " +
+  "it, so report it rather than guessing.\n";
+
+// The proposal's Summary carries the top-level changes, the decisions that are
+// closed, and the traps, so an implementer building step nine orients the same way
+// as one building step one. A workflow script has no filesystem access, so the
+// planner returns it (it reads the proposal in full anyway) and every later agent
+// is given it. RULES_FULL is therefore assigned once the plan is in hand.
+let RULES_FULL = RULES + BLANKS_BLOCK;
 
 // One build step, shared by the initial plan and the tail re-plan.
 const STEP_ITEM = {
@@ -86,6 +121,26 @@ const STEP_ITEM = {
         "test levels this step must create and run (e.g. unit package tests, integration in test/integration, conformance in test/conformance, materialization golden+validity in test/materialization, e2e in test/e2e)",
     },
     specRefs: { type: "array", items: { type: "string" } },
+    checklistStep: {
+      type: "string",
+      description:
+        "the id of the proposal's implementation-checklist step this step carries across, when the proposal has a checklist",
+    },
+    alreadyDone: {
+      type: "boolean",
+      description:
+        "the step's surface is already present in the tree; keep it in the sequence so dependencies still resolve, but build nothing",
+    },
+    needsIntent: {
+      type: "boolean",
+      description:
+        "the step cannot be built literally as the checklist words it; the implementer works from the proposal's stated intent, recorded in work",
+    },
+    blocked: {
+      type: "string",
+      description:
+        "why this step cannot be built at all, when even its intent could not be recovered; steps that do not depend on it still run",
+    },
   },
 };
 
@@ -105,6 +160,17 @@ const PLAN = {
       items: STEP_ITEM,
     },
     risks: { type: "array", items: { type: "string" } },
+    summary: {
+      type: "string",
+      description:
+        "the proposal's `## Summary` section, verbatim, so every later agent can be given it. Empty string when the proposal has no Summary section.",
+    },
+    deviations: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "every place the proposal's implementation checklist did not match the tree: a step already done, a step re-sequenced because its prerequisite was elsewhere, a step whose deliverable is missing, or the absence of a checklist entirely. Reported so the proposal can be corrected; an imperfect checklist is expected and is not a reason to stop.",
+    },
   },
 };
 
@@ -217,15 +283,33 @@ let plan = await agent(
     "Proposal: " +
     proposal +
     ". The proposal's spec amendments are ALREADY applied to spec/. Read the proposal in full — every section, especially Summary, Current state and the gap, Decisions, Proposed solution, the '## Spec amendment: §X.Y' sections (now landed in spec/), Documentation changes, and any Testing notes. The proposal defines the complete change.\n\n" +
+    "READ THE PROPOSAL'S SUMMARY AND ITS IMPLEMENTATION CHECKLIST FIRST. The checklist is an ordered list of steps, each naming the staged deliverables it lands, the test levels it must run, and the earlier steps it depends on. It was written and maintained while the proposal was reviewed, so it is the sequence, and you are not being asked to invent one. Carry its steps across in order, keeping their ids, their deliverable ids, their levels, and their dependencies.\n\n" +
+    "THEN CHECK IT AGAINST THE TREE, because a checklist written during review can be stale or wrong in three ways, and the run must survive all three rather than stopping at them.\n" +
+    "  A step whose surface is ALREADY PRESENT. Grep-confirm before you assume; a proposal can be partially implemented from an interrupted run or from work that landed by another route. Mark such a step alreadyDone with the evidence, and keep it in the sequence so the dependency graph stays intact.\n" +
+    "  A step that DEPENDS ON SOMETHING ABSENT that the checklist says an earlier step provides. The checklist is mis-ordered. Re-sequence locally: move the step after whatever genuinely provides its prerequisite, and record the move in deviations. Do not stop.\n" +
+    "  A step that CANNOT BE BUILT AS WRITTEN, because a deliverable it names does not exist in the proposal, or its target is gone. Keep the step, mark it needsIntent, and say what the proposal's own text says the step is for; the implementer will work from the intent. Only when the intent cannot be recovered either does the step become blocked, and a blocked step does not stop the steps that do not depend on it.\n\n" +
+    "A checklist that is imperfect is expected. Your job is to produce a runnable sequence from it and a clear record of where it was wrong, so the proposal can be corrected afterwards. Never abandon the checklist and derive your own order from scratch: the order encodes review decisions you cannot see.\n\n" +
+    "IF THE PROPOSAL HAS NO IMPLEMENTATION CHECKLIST, say so in deviations and derive the sequence yourself, the way a planner had to before checklists existed, using the blast radius below as the source of the order rather than as a check on it.\n\n" +
     "Then map the full blast radius: grep spec/, pkg/, cmd/, internal/, sdks/, test/, tools/, and deploy/ for every existing surface the change touches (call sites, the registry core and HTTP handlers, the MCP server, the CLI commands, the harness adapters in pkg/adapter and the materialization pipeline in pkg/materialize, the §6.7.1 capability matrix in pkg/adapter/capability.go, the SPI implementations, the language SDKs, the spec-matrix definitions in tools/matrix/matrices.go, the doccov manifest, the golden files in test/materialization/testdata/golden, and the Helm chart and deployment manifests under deploy/) and every new surface it adds. " +
     "The blast radius and the build sequence MUST include the surfaces the proposal REMOVES, not only those it adds or changes: for every mode, field, function, env var, error code, meta-tool, adapter value, or whole file the proposal eliminates, include an explicit removal step that deletes it plus the code paths, tests, fixtures, golden files, and doc references orphaned by its removal, sequenced so the removal lands without breaking the build (remove consumers before the surface, or in the same step). A surface the proposal eliminates that has no removal step is a planning gap. " +
     "When the change touches a harness, an artifact type, a frontmatter field, a rule mode, a hook event, or a target path, the blast radius MUST keep every parallel representation consistent: the §6.7 path table is in spec/06, but the code-side surfaces are the adapter in pkg/adapter (adapter.go, none.go, claudecode.go, builtins.go, layout.go), the §6.7.1 matrix mirror in pkg/adapter/capability.go, the golden files and validity checks in test/materialization, the matrix-audit cells in tools/matrix/matrices.go, and the per-harness docs in docs/consuming. " +
+    "Return the proposal's `## Summary` section verbatim in summary, so the agents that build each step can be given it; this script cannot read the file itself. Return an empty string when the proposal has none.\n\n" +
     "Produce blastRadius (one entry per surface) and an ORDERED build sequence of steps where each step is independently implementable once its dependencies are done. For each step give the work, the target files or packages, dependsOn (earlier step ids), the test levels it must create and run (per " +
     repo +
     "/.claude/rules/test-coverage.md), and the spec sections it implements. Sequence so foundational changes (shared types, schemas, the capability matrix) come before the code that consumes them, and tests for each step land within that step.\n\n" +
     "NOTE ON RESUMING: if a prefix of this proposal is already implemented and committed on the current branch (run `git log --oneline -40` and grep the current code to confirm), begin the plan at the FIRST surface that is NOT yet implemented and cover only the remainder; grep-confirm each step targets a surface genuinely absent from the current code before emitting it, and skip any already present.",
   { schema: PLAN, label: "plan", phase: "Plan" },
 );
+
+if (plan && plan.summary) {
+  RULES_FULL =
+    RULES +
+    "\n\nTHE PROPOSAL'S SUMMARY. Read this before anything else. It states the top-level changes, the " +
+    "decisions that are closed and must not be reopened, and the traps this change has already fallen into.\n\n" +
+    plan.summary +
+    "\n" +
+    BLANKS_BLOCK;
+}
 
 for (let round = 1; round < maxPlanRounds; round++) {
   const critique = await agent(
@@ -352,7 +436,7 @@ for (let i = 0; i < plan.steps.length; i++) {
             stepHeader +
             priorContext +
             "\n\nImplement the code for this step, create or modify its tests at the listed levels (and any other level this step reaches per the test-coverage rule), and RUN them: always `go build ./...`, `go vet ./<changed-pkg>/...`, and `golangci-lint run ./<changed-pkg>/...` (or `make lint`), plus `go test ./<changed-pkg>/... -count=1` for the changed packages and each listed higher level (for a test that needs live services, run `make services-up` then `make test-live`, or set the `PODIUM_POSTGRES_DSN` / `PODIUM_S3_*` env vars so a scoped `go test` takes the live path; the standalone SQLite/filesystem paths need none). Fix the code until the tests pass. Then commit this step on the current branch with a message in the repository's convention (read `git log --oneline -5`). " +
-            RULES +
+            RULES_FULL +
             "\n\nReturn whether you implemented it, the files changed, the tests added or modified, the levels you ran, whether they passed, and the commit SHA. If a level genuinely cannot run here (a cloud-only resource), say so in notes and set testsPassed from the levels that can run."
         : "Continue one build step of an applied spec proposal that is not yet green-and-conformant.\n\n" +
             "HARD CONSTRAINT: work only on this step. Do not start later steps. Do not edit spec/. Work in the repository root.\n\n" +
@@ -363,7 +447,7 @@ for (let i = 0; i < plan.steps.length; i++) {
             "\n\nThe prior attempt left this step not done. Address this:\n" +
             issues +
             "\n\nFix the code (add or correct tests where the issue is a missing or wrong test; change the code to match the proposal's design where the issue is a divergence), run `go build ./...`, `go vet`, the linter, and this step's listed test levels to green (skip only a level that genuinely needs a cloud-only resource, noting it), then commit on the current branch. " +
-            RULES +
+            RULES_FULL +
             "\n\nReturn the step result with testsPassed reflecting the levels that can run here.",
       { schema: STEP, label: "build:" + step.id + (attempt > 1 ? ":fix" + attempt : ""), phase: "Build" },
     );
@@ -683,7 +767,7 @@ let verify = await agent(
     coverageFloor +
     "%; if coverage is below " +
     coverageFloor +
-    "%, set green=false and add a failure entry naming the under-covered new or changed files and lines so the fix loop adds tests for them (per the test-coverage rule, the floor is on new code; a pure behavior-preserving refactor is exempt — note it instead of failing). Run a DEAD-CODE SWEEP: grep the whole tree for every identifier, mode value, field, function, env var, error code, adapter value, and §6.7.1 capability cell the proposal removes, and confirm none survives as a live reference; the `unused` linter catches unused package-level symbols, but also check for orphaned exported symbols, whole unreferenced files, stale test fixtures or golden files, and dangling matrix or doccov entries. Treat a surviving removed surface or an orphaned caller as a failure (list it precisely so the fix loop deletes it). List any failures precisely.",
+    "%, set green=false and add a failure entry naming the under-covered new or changed files and lines so the fix loop adds tests for them (per the test-coverage rule, the floor is on new code; a pure behavior-preserving refactor is exempt — note it instead of failing). REGRESSION-TEST GATE (in addition to the coverage gate): green=true also requires that every behavioral FIX in this change is pinned by a test that asserts the CORRECTED outcome, not merely line-covered by a pre-existing happy-path test. Inspect the diff against the base ref: for each changed hunk that alters a runtime decision (a returned error code, a visibility or tenancy gate or branch, a state transition, a retry, recovery, or fail-open/fail-closed path, an ingest-idempotency, webhook-dedup, config-merge, or re-sync reconciliation path, or a client-facing field), confirm the diff also adds or changes a test that exercises the corrected outcome and would fail against the pre-fix code, at the level that owns it: identity, visibility, and CLI behavior end-to-end under test/e2e; reconciliation, idempotency, and dedup at integration; harness output paths and layouts in test/materialization; store and SPI contracts in test/conformance; pure logic and error mapping at unit. A fix that landed with no such regression test, even at 100% line coverage, is a failure: set green=false and add an entry naming the fix (file:line), the corrected behavior, and the missing regression test so the fix loop writes it. A purely additive new feature, which corrects no pre-existing behavior, is covered by the coverage gate alone; a behavior-preserving refactor is exempt. Run a DEAD-CODE SWEEP: grep the whole tree for every identifier, mode value, field, function, env var, error code, adapter value, and §6.7.1 capability cell the proposal removes, and confirm none survives as a live reference; the `unused` linter catches unused package-level symbols, but also check for orphaned exported symbols, whole unreferenced files, stale test fixtures or golden files, and dangling matrix or doccov entries. Treat a surviving removed surface or an orphaned caller as a failure (list it precisely so the fix loop deletes it). List any failures precisely.",
   { schema: VERIFY, label: "verify", phase: "Verify" },
 );
 
@@ -821,7 +905,7 @@ if (green) {
       "Fix design-conformance divergences between the landed implementation and the proposal at " +
         proposal +
         ".\n\nWork in the repository root. The proposal's spec edits are applied; do not edit spec/. Apply each finding so the code matches the proposal's design, add or correct tests for the corrected behavior, run `go build ./...`, `go vet`, the linter, and the test levels the change reaches to green, and commit. " +
-        RULES +
+        RULES_FULL +
         "\n\nFindings to fix:\n" +
         JSON.stringify(findings, null, 2),
       { label: "review-fix:r" + reviewRound, phase: "Review" },
@@ -849,7 +933,7 @@ if (green && reviewFixApplied) {
       (tierSet.join(", ") || "from the diff") +
       ". Run each level in the FOREGROUND, scoped to the changed packages, one at a time (no `run_in_background` for tests; stream output, no `| tail`); for any level that needs live services, run `make services-up` then `make test-live`. Re-run `make coverage-gate`. Apply the coverage gate (changed-line coverage at least " +
       coverageFloor +
-      "% via `go test -coverpkg=./... -coverprofile=cover.out ./...` then `go tool cover -func=cover.out`, refactors exempt). Report green, the levels run, the coverage, and any remaining failures.",
+      "% via `go test -coverpkg=./... -coverprofile=cover.out ./...` then `go tool cover -func=cover.out`, refactors exempt). REGRESSION-TEST GATE FOR REVIEW FIXES: the design-conformance review just caught defects the automated tests had passed over. Inspect the commits made during the review rounds (`git log` since the review began) and confirm each code fix with a runtime effect is pinned by a test that asserts the corrected outcome and would fail against the pre-fix code, not merely line-covered by a pre-existing happy-path test. If any review-driven fix landed with no such regression test, set green=false and name the fix (file:line), the corrected behavior, and the missing test so the gap is closed before this returns. Report green, the levels run, the coverage, and any remaining failures.",
     { schema: VERIFY, label: "verify-postreview", phase: "Review" },
   );
   finalGreen = !!(recheck && recheck.green);
@@ -876,6 +960,11 @@ if (green && reviewFixApplied) {
 return {
   status: finalGreen && reviewClean ? "implemented" : "implemented-not-green",
   blastRadius: plan.blastRadius,
+  // Where the proposal's checklist disagreed with the tree. Reported whatever the
+  // status, because a run that recovered silently has hidden a defect in the
+  // proposal rather than fixed one.
+  checklistDeviations: plan.deviations || [],
+  skippedSteps: (plan.steps || []).filter((s) => s.blocked).map((s) => s.id),
   steps: stepResults,
   commits: stepResults.map((s) => s.commit).filter(Boolean),
   green: finalGreen,

@@ -27,7 +27,7 @@ func recordingObserver() (LatencyObserver, *[]obs) {
 
 // Spec: §7.1 — the operation key keeps SLO-budgeted meta-tools under their
 // spec names, gives the other routes a stable key, and excludes the
-// liveness/readiness probes and the long-lived SSE stream (which carry no
+// liveness/readiness probes and the long-lived NDJSON event stream (which carry no
 // SLO budget) by mapping them to "".
 func TestOperationName(t *testing.T) {
 	t.Parallel()
@@ -120,7 +120,7 @@ func TestWithLatencyObserver_CapturesStatus(t *testing.T) {
 	})
 }
 
-// Spec: §7.1 — liveness/readiness probes and the SSE event stream are not
+// Spec: §7.1 — liveness/readiness probes and the NDJSON event stream are not
 // SLO operations, so the middleware passes them through without recording
 // (and without dropping the request).
 func TestWithLatencyObserver_SkipsUnobservedPaths(t *testing.T) {
@@ -156,7 +156,7 @@ func TestWithLatencyObserver_NilIsPassthrough(t *testing.T) {
 }
 
 // Spec: §7.1 — the status-capturing wrapper must preserve http.Flusher so
-// the /v1/events SSE handler (which type-asserts http.Flusher) still works
+// the /v1/events NDJSON handler (which type-asserts http.Flusher) still works
 // behind the latency middleware. httptest.ResponseRecorder implements
 // Flusher, so the assertion inside the handler exercises the forwarding.
 func TestLatencyRecorder_PreservesFlusher(t *testing.T) {

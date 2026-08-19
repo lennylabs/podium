@@ -15,7 +15,7 @@ package e2e
 //   - AutoDisablesAfterMaxFailures: with PODIUM_WEBHOOK_MAX_FAILURES=2 and a
 //     receiver pointed at a sink that fails every delivery, two reingests drive
 //     the failure counter to the cap and the receiver auto-disables (§7.3.2).
-//   - SSEDeliversChangeEvent: a bounded /v1/events reader subscribed to
+//   - EventStreamDeliversChangeEvent: a bounded /v1/events reader subscribed to
 //     artifact.published receives the event a reingest fires (§7.6).
 //   - WebhookNotificationProviderRecorder: the same sink is a valid §9.1 webhook
 //     NotificationProvider endpoint (it records the signed operational body),
@@ -174,19 +174,19 @@ func TestNotificationSink_AutoDisablesAfterMaxFailures(t *testing.T) {
 	}
 }
 
-// TestNotificationSink_SSEDeliversChangeEvent proves the bounded SSE client: a
+// TestNotificationSink_EventStreamDeliversChangeEvent proves the bounded event-stream client: a
 // subscriber on the §7.6 /v1/events stream filtered to artifact.published
 // receives the event a reingest fires, with the published id in the body.
-func TestNotificationSink_SSEDeliversChangeEvent(t *testing.T) {
+func TestNotificationSink_EventStreamDeliversChangeEvent(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"seed/ARTIFACT.md": smallteamLowArtifact("seed"),
 	}))
-	// openSSE returns only after the server has registered the subscription and
+	// openEventStream returns only after the server has registered the subscription and
 	// flushed the response headers, so an event fired after this point cannot be
 	// missed by the subscriber. newRepublishLayer only registers the layer;
 	// publishVersion fires the artifact.published event.
-	sub := openSSE(t, srv, "artifact.published")
+	sub := openEventStream(t, srv, "artifact.published")
 	rl := newRepublishLayer(t, srv, "sse-layer")
 	rl.publishVersion(t, versionSpec{
 		ID:          niArtifact,
@@ -196,13 +196,13 @@ func TestNotificationSink_SSEDeliversChangeEvent(t *testing.T) {
 
 	ev, ok := sub.waitForEvent(t, "artifact.published", 5*time.Second)
 	if !ok {
-		t.Fatalf("no artifact.published event on the SSE stream within deadline\nserver log:\n%s", srv.log())
+		t.Fatalf("no artifact.published event on the event stream within deadline\nserver log:\n%s", srv.log())
 	}
 	if ev.Data["id"] != niArtifact {
-		t.Errorf("SSE event data.id = %v, want %s", ev.Data["id"], niArtifact)
+		t.Errorf("event data.id = %v, want %s", ev.Data["id"], niArtifact)
 	}
 	if ev.Timestamp == "" {
-		t.Errorf("SSE event missing timestamp: %+v", ev)
+		t.Errorf("event missing timestamp: %+v", ev)
 	}
 }
 

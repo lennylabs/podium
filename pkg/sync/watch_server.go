@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -34,7 +35,7 @@ func runServerWatch(ctx context.Context, opts WatchOptions, events chan<- WatchE
 	emit(res, err)
 
 	trigger := make(chan struct{}, 1)
-	go streamServerEvents(ctx, opts.Sync.RegistryPath, opts.Sync.HTTPClient, trigger)
+	go streamServerEvents(ctx, opts.Sync.RegistryPath, opts.Sync.HTTPClient, opts.Sync.Token, trigger)
 
 	var timer *time.Timer
 	var timerC <-chan time.Time
@@ -68,7 +69,7 @@ func runServerWatch(ctx context.Context, opts WatchOptions, events chan<- WatchE
 // until ctx is canceled, then closes trigger. The §7.5 event types are
 // requested server-side so every delivered line (apart from heartbeats) is
 // relevant to the watcher.
-func streamServerEvents(ctx context.Context, registry string, client *http.Client, trigger chan<- struct{}) {
+func streamServerEvents(ctx context.Context, registry string, client *http.Client, token string, trigger chan<- struct{}) {
 	defer close(trigger)
 
 	// A streaming subscription must not carry an overall client timeout, or
@@ -82,7 +83,7 @@ func streamServerEvents(ctx context.Context, registry string, client *http.Clien
 	url := base + "/v1/events?type=artifact.published&type=artifact.deprecated&type=layer.config_changed"
 
 	for ctx.Err() == nil {
-		readServerEventStream(ctx, stream, url, trigger)
+		readServerEventStream(ctx, stream, url, token, trigger)
 		if ctx.Err() != nil {
 			return
 		}
@@ -96,10 +97,17 @@ func streamServerEvents(ctx context.Context, registry string, client *http.Clien
 
 // readServerEventStream opens one /v1/events connection and signals trigger
 // for every non-heartbeat NDJSON line until the stream ends or ctx is done.
-func readServerEventStream(ctx context.Context, client *http.Client, url string, trigger chan<- struct{}) {
+func readServerEventStream(ctx context.Context, client *http.Client, url, token string, trigger chan<- struct{}) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return
+	}
+	// spec: §6.3.2 — /v1/events is not exempt from identity verification, so the
+	// subscription carries the same credential the one-shot sync fetch sends. A
+	// registry with an identity provider configured rejects it otherwise, and the
+	// watcher would reconnect forever without ever triggering a run.
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -107,6 +115,10 @@ func readServerEventStream(ctx context.Context, client *http.Client, url string,
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		// Returning silently here is why a rejected subscription looked like an
+		// idle one: the caller reconnects on a fixed delay, so an auth failure
+		// presents as a watcher that never triggers rather than as an error.
+		log.Printf("watch: /v1/events subscription rejected: HTTP %d; retrying in %s", resp.StatusCode, serverWatchReconnectDelay)
 		return
 	}
 
