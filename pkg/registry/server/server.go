@@ -35,7 +35,18 @@ import (
 type Server struct {
 	core       *core.Registry
 	publicMode bool
-	resolveID  func(*http.Request) layer.Identity
+	// unauthenticatedReembed records that the deployment authenticates no
+	// caller, which the boot path decides from its own configuration
+	// (§4.7). handleReembed is the only reader: no caller can hold the
+	// per-tenant admin role there, so the endpoint admits the request and
+	// the local operator owns the pass. requireAdmin must not consult this
+	// field, because that would reopen /v1/admin/grants,
+	// /v1/admin/show-effective, the /v1/webhooks receiver CRUD, and the
+	// as_admin override to anonymous callers. The zero value gates the
+	// endpoint, so a Server built without WithUnauthenticatedReembed fails
+	// closed.
+	unauthenticatedReembed bool
+	resolveID              func(*http.Request) layer.Identity
 	// idVerifier verifies the per-request caller token and maps it to an
 	// Identity (§6.3.2 injected-session-token). When set, the meta-tool
 	// routes verify on every call: a verification failure rejects the
@@ -161,6 +172,20 @@ type Option func(*Server)
 // that).
 func WithPublicMode() Option { return func(s *Server) { s.publicMode = true } }
 
+// WithUnauthenticatedReembed records that the deployment authenticates no
+// caller, so POST /v1/admin/reembed admits the request (§4.7). Only
+// handleReembed reads the flag. requireAdmin must not consult it: the
+// carve-out is specific to re-embed, and generalizing it would reopen
+// /v1/admin/grants, /v1/admin/show-effective, the /v1/webhooks receiver
+// CRUD, and the as_admin override to anonymous callers. The boot path is
+// the authority on whether the deployment authenticates anyone, so the
+// server never re-derives it from the installed identity verifier: a
+// registry can name an identity provider this build installs no verifier
+// for, and it still gates the endpoint.
+func WithUnauthenticatedReembed() Option {
+	return func(s *Server) { s.unauthenticatedReembed = true }
+}
+
 // WithIdentityResolver swaps the default anonymous-public resolver for
 // one that maps an HTTP request to an Identity (e.g., decoded JWT).
 func WithIdentityResolver(fn func(*http.Request) layer.Identity) Option {
@@ -271,7 +296,12 @@ func New(r *core.Registry, opts ...Option) *Server {
 // resources above the §4.2 cutoff serve via presigned URL; otherwise
 // they stay inline on the manifest record. This is the standalone
 // bootstrap helper used by tests and the standalone server.
+// A filesystem-source registry configures no identity provider by
+// definition (§13.10), so it authenticates no caller and the re-embed
+// endpoint is ungated here. The option is applied ahead of the caller's
+// options so a caller can still tighten anything it sets.
 func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
+	opts = append([]Option{WithUnauthenticatedReembed()}, opts...)
 	reg, err := filesystem.Open(path)
 	if err != nil {
 		return nil, err
@@ -865,11 +895,28 @@ func (s *Server) handleDependents(w http.ResponseWriter, r *http.Request) {
 // handleReembed runs the §4.7 reembed flow over the tenant. POST
 // /v1/admin/reembed?artifact=<id>&version=<v>&only_missing=true to
 // scope to one artifact or limit to artifacts without a current
-// embedding. Admin-only in production deployments.
+// embedding. The pass is authorized by the per-tenant admin role
+// (§4.7.2) and is a §13.2.1 write endpoint, so a caller without the role
+// is rejected with auth.forbidden and a read-only registry rejects the
+// request with registry.read_only. A deployment that authenticates no
+// caller sets WithUnauthenticatedReembed, which skips the role check.
 func (s *Server) handleReembed(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
 			"method not allowed: "+r.Method)
+		return
+	}
+	if !s.unauthenticatedReembed {
+		// A store failure inside requireAdmin is reported as 403
+		// auth.forbidden, mirroring handleAdminGrants and
+		// handleAdminShowEffective: an authorization the registry cannot
+		// evaluate denies rather than admits.
+		if err := s.requireAdmin(r); err != nil {
+			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+			return
+		}
+	}
+	if rejectIfReadOnly(w, s.mode) {
 		return
 	}
 	q := r.URL.Query()

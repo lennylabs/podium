@@ -1459,8 +1459,9 @@ func TestStandardDeploy_AdminReembedEndpoint(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, "")
 	st, body := orgPostJSON(t, srv.BaseURL+"/v1/admin/reembed", map[string]any{})
-	// The reembed endpoint is reachable (not admin-gated) but requires a
-	// configured vector backend. A plain standalone server has none, so the
+	// Spec: §4.7 — a standalone boot configures no identity provider, so it
+	// authenticates no caller, the admin gate is skipped, and the endpoint is
+	// reachable. It still requires a configured vector backend. A plain standalone server has none, so the
 	// POST returns 500 registry.unavailable "vector search not configured".
 	// When a backend is wired the endpoint returns 200; accept either.
 	if st == 200 {

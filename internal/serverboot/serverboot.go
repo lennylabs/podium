@@ -2187,6 +2187,13 @@ func bootstrapOptions(c *Config, objStore objectstore.Provider) []server.Option 
 	if c.publicMode {
 		out = append(out, server.WithPublicMode())
 	}
+	// §4.7: a registry that configures no identity provider, or one in
+	// §13.10 public mode, authenticates no caller, so no caller can hold
+	// the per-tenant admin role and the re-embed endpoint would be
+	// unreachable. The predicate matches the LayerEndpoint admin callback.
+	if c.publicMode || c.identityProvider == "" {
+		out = append(out, server.WithUnauthenticatedReembed())
+	}
 	if objStore != nil {
 		out = append(out, server.WithObjectStore(objStore, c.publicURL, c.presignTTL))
 	}

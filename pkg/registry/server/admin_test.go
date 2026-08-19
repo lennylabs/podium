@@ -139,3 +139,54 @@ func TestAdminShowEffective_PerLayerVisibility(t *testing.T) {
 		}
 	}
 }
+
+// postReembed posts a bare tenant-wide re-embed and returns the status
+// and the §6.10 envelope code the registry answered with.
+func postReembed(t *testing.T, base string) (int, string) {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodPost, base+"/v1/admin/reembed", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+	var env struct {
+		Code string `json:"code"`
+	}
+	buf, _ := io.ReadAll(resp.Body)
+	_ = json.Unmarshal(buf, &env)
+	return resp.StatusCode, env.Code
+}
+
+// Spec: §4.7.2 — POST /v1/admin/reembed is authorized by the per-tenant
+// admin role, so a caller without it is rejected with auth.forbidden.
+// The helper passes no WithUnauthenticatedReembed, so the gate is live
+// and the resolver supplies the anonymous-public identity requireAdmin
+// reads.
+func TestAdminReembed_AnonymousCallerForbidden(t *testing.T) {
+	t.Parallel()
+	ts := bootRegistryWithAdmin(t, "", nil)
+	status, code := postReembed(t, ts.URL)
+	if status != http.StatusForbidden {
+		t.Errorf("status = %d, want 403", status)
+	}
+	if code != "auth.forbidden" {
+		t.Errorf("code = %q, want auth.forbidden", code)
+	}
+}
+
+// Spec: §4.7.2 — a caller holding the per-tenant admin role passes the
+// gate and reaches the handler. The test registry wires no vector search
+// backend, so the pass itself fails with registry.unavailable; what this
+// pins is that the request is not rejected as forbidden.
+func TestAdminReembed_AdminCallerReachesHandler(t *testing.T) {
+	t.Parallel()
+	ts := bootRegistryWithAdmin(t, "alice", nil)
+	status, code := postReembed(t, ts.URL)
+	if status == http.StatusForbidden {
+		t.Fatalf("status = 403 (code %q), want the handler to run for an admin caller", code)
+	}
+	if status != http.StatusOK && status != http.StatusInternalServerError {
+		t.Errorf("status = %d, want 200 or 500", status)
+	}
+}

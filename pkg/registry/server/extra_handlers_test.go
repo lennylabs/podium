@@ -64,6 +64,11 @@ func TestDependents_ReturnsEdgesArray(t *testing.T) {
 }
 
 // /v1/admin/reembed: GET method is rejected as method-not-allowed.
+//
+// Spec: §4.7 — the harness registry is filesystem-sourced, so it
+// configures no identity provider and authenticates no caller. Every
+// re-embed case in this file therefore posts with no identity and is
+// admitted: server.NewFromFilesystem applies WithUnauthenticatedReembed.
 func TestAdminReembed_WrongMethodReturns405(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t)
