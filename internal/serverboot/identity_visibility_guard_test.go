@@ -55,3 +55,27 @@ func TestIdentityVisibilityGuard(t *testing.T) {
 		})
 	}
 }
+
+// The guard's message tells the operator which providers to choose instead, so
+// a stale list sends them at the wrong one. It named injected-session-token as
+// the only verified provider long after oidc-jwt and trusted-headers gained
+// verifiers, and the existing coverage did not catch it because it asserted
+// only the error code and the offending provider's name.
+func TestIdentityVisibilityGuard_MessageNamesEveryVerifiedProvider(t *testing.T) {
+	t.Parallel()
+	err := identityVisibilityGuard("oauth-device-code", true, false, false)
+	if err == nil {
+		t.Fatal("expected an error for a selected but unverified provider")
+	}
+	msg := err.Error()
+	for _, p := range verifiedProviders {
+		if !strings.Contains(msg, p) {
+			t.Errorf("message does not offer %q, which this build verifies:\n%s", p, msg)
+		}
+	}
+	// The previous message singled one provider out. Naming a subset is the
+	// defect; assert the phrasing that did so cannot come back.
+	if strings.Contains(msg, "only injected-session-token") {
+		t.Errorf("message still claims a single verified provider:\n%s", msg)
+	}
+}

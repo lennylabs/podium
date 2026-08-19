@@ -77,6 +77,17 @@ func layerIdentityResolver(verify func(*http.Request) (layer.Identity, error)) f
 // layers silently vanish from every effective view. Refuse to start in that
 // state rather than serve a registry whose visibility never applies.
 //
+// verifiedProviders names the identity providers this build verifies at
+// request time, in the order the guard message offers them. The message is
+// built from this list so the two cannot drift: the previous message named
+// injected-session-token as the only verified provider long after oidc-jwt
+// (§6.3.3) and trusted-headers (§6.3.3) gained verifiers, which sent an
+// operator toward the one provider that needs a runtime key registered first.
+//
+// A provider that gains or loses a request-time verifier in serverboot must be
+// added to or removed from this list in the same change.
+var verifiedProviders = []string{"injected-session-token", "oidc-jwt", "trusted-headers"}
+
 // The guard keys on providerSelected: a real provider resolved from the
 // identity.Default registry (the documented oauth-device-code /
 // injected-session-token built-ins, or an imported custom provider). A
@@ -89,7 +100,7 @@ func identityVisibilityGuard(identityProvider string, providerSelected, publicMo
 	if !providerSelected || publicMode || verifierInstalled {
 		return nil
 	}
-	return fmt.Errorf("config.identity_provider_unverified: PODIUM_IDENTITY_PROVIDER=%q has no request-time token verifier wired, so the registry would resolve every caller as anonymous-public and never apply per-layer visibility (§2.2, §6.3.1); only injected-session-token is verified server-side in this build. Set PODIUM_PUBLIC_MODE=true to run an open registry, or use injected-session-token", identityProvider)
+	return fmt.Errorf("config.identity_provider_unverified: PODIUM_IDENTITY_PROVIDER=%q has no request-time token verifier wired, so the registry would resolve every caller as anonymous-public and never apply per-layer visibility (§2.2, §6.3.1); the registry verifies %s server-side. Set PODIUM_PUBLIC_MODE=true to run an open registry, or select one of those", identityProvider, strings.Join(verifiedProviders, ", "))
 }
 
 // injectedTokenAudienceGuard refuses startup when the injected-session-token
