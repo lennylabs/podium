@@ -122,7 +122,7 @@ ASCII fallback for the diagram above (hybrid retrieval):
 
 | Arg | Use |
 |:--|:--|
-| `query` | Free-text search target. Embedded and matched against the artifact projection (name, description, when_to_use, tags). For an artifact declaring `extends:`, the projection's `description` and `tags` are the values resolved against the parent. The registry does not resolve `name` or `when_to_use` against the parent for indexing, and the SQL metadata stores persist neither field, so neither contributes to retrieval there. |
+| `query` | Free-text search target. Embedded and matched against the artifact projection (name, description, when_to_use, tags). For an artifact declaring `extends:`, the projection's `description` and `tags` are the values resolved against the parent. The registry indexes `name` and `when_to_use` from the child's own authored values and never resolves them against the parent. The SQL metadata stores persist neither column, so lexical matching sees neither field, and a later `podium admin reembed` drops both from the vector as well. |
 | `type` | Filter by artifact type. |
 | `tags` | Filter by tag. |
 | `scope` | Constrain to a domain path prefix. |
