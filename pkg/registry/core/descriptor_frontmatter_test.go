@@ -46,3 +46,74 @@ func TestDescriptorOf_SearchDropsBody(t *testing.T) {
 		t.Errorf("manifest body leaked into search frontmatter: %q", d.Frontmatter)
 	}
 }
+
+// Spec: §4.6 hidden parents — frontmatterBlockHidingParent removes the
+// top-level extends key and keeps every other authored key, including one
+// manifest.Artifact does not declare. It fails closed on any input it cannot
+// split, decode, or re-encode, because the block it could not rewrite is the
+// block that names the parent.
+func TestFrontmatterBlockHidingParent(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		want []string // substrings the result must contain
+		gone []string // substrings the result must not contain
+		zero bool
+	}{
+		{
+			name: "drops extends and keeps undeclared keys",
+			src:  "---\ntype: agent\nversion: 2.0.0\nacme_owner: platform-team\nextends: shared/parent@1.0.0\n---\n\nbody\n",
+			want: []string{"type: agent", "acme_owner: platform-team"},
+			gone: []string{"extends", "shared/parent", "body"},
+		},
+		{
+			name: "no extends key leaves the mapping intact",
+			src:  "---\ntype: agent\nversion: 2.0.0\n---\n\nbody\n",
+			want: []string{"type: agent", "version: 2.0.0"},
+		},
+		{
+			name: "unsplittable source fails closed",
+			src:  "extends: shared/parent@1.0.0\n\nno frontmatter fence\n",
+			zero: true,
+		},
+		{
+			name: "undecodable header fails closed",
+			src:  "---\nextends: shared/parent@1.0.0\n  bad: [unclosed\n---\n\nbody\n",
+			zero: true,
+		},
+		{
+			name: "non-mapping header fails closed",
+			src:  "---\n- extends: shared/parent@1.0.0\n---\n\nbody\n",
+			zero: true,
+		},
+		{
+			name: "empty header fails closed",
+			src:  "---\n---\n\nbody\n",
+			zero: true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := frontmatterBlockHidingParent([]byte(tc.src))
+			if tc.zero {
+				if got != "" {
+					t.Fatalf("got %q, want empty (fail closed)", got)
+				}
+				return
+			}
+			if !strings.HasPrefix(got, "---\n") || !strings.HasSuffix(got, "\n---\n") {
+				t.Errorf("result is not a fenced frontmatter block: %q", got)
+			}
+			for _, w := range tc.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("result %q is missing %q", got, w)
+				}
+			}
+			for _, g := range tc.gone {
+				if strings.Contains(got, g) {
+					t.Errorf("result %q still contains %q", got, g)
+				}
+			}
+		})
+	}
+}

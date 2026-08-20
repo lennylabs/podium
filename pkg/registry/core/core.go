@@ -20,6 +20,8 @@ import (
 	"sync"
 	"unicode"
 
+	"gopkg.in/yaml.v3"
+
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/layer"
@@ -1275,35 +1277,22 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 	for _, sc := range scored {
 		d := descriptorOf(sc.rec)
 		d.Score = sc.score
-		// spec: §4.7.4 — surface the sensitivity label in search results,
-		// resolved most-restrictive across the extends chain (§4.6) so the
-		// search and load_artifact surfaces report the same value.
-		d.Sensitivity = r.mergedSensitivity(ctx, sc.rec)
+		// spec: §4.7.4 — surface the sensitivity label in search results.
+		// The record's indexed columns are already §4.6-merged at ingest,
+		// so the stored value is the resolved one and the search path runs
+		// no read-time fold per result.
+		d.Sensitivity = sc.rec.Sensitivity
+		// spec: §4.6 hidden parents — an extends child's descriptor names
+		// no parent, so the authored block travels with its extends: key
+		// removed. A record with no pin keeps the block descriptorOf built,
+		// which leaves the common path free of a YAML decode.
+		if sc.rec.ExtendsPin != "" {
+			d.Frontmatter = frontmatterBlockHidingParent(sc.rec.Frontmatter)
+		}
 		res.Results = append(res.Results, d)
 	}
 	ev.ResultSize = len(res.Results)
 	return res, nil
-}
-
-// mergedSensitivity returns rec's effective sensitivity. When rec declares
-// extends:, it folds the chain most-restrictively (§4.6 field-semantics
-// table) to match what assembleResult/load_artifact reports; otherwise it
-// returns the record's own value. A chain that fails to resolve falls back
-// to the record's own sensitivity rather than erroring, since this feeds a
-// display field on an already-authorized result.
-func (r *Registry) mergedSensitivity(ctx context.Context, rec store.ManifestRecord) string {
-	if rec.ExtendsPin == "" {
-		return rec.Sensitivity
-	}
-	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
-	if err != nil {
-		return rec.Sensitivity
-	}
-	s := ""
-	for _, c := range chain {
-		s = mostRestrictiveSensitivity(s, c.Sensitivity)
-	}
-	return s
 }
 
 // vectorRanks embeds the query and returns the top-K nearest
@@ -2054,6 +2043,51 @@ func frontmatterBlock(src []byte) string {
 		return ""
 	}
 	return "---\n" + string(fm) + "\n---\n"
+}
+
+// frontmatterBlockHidingParent returns the ---fenced--- frontmatter header of
+// src with the top-level extends: key and its value removed.
+// Spec: §4.6 hidden parents — a consumer of an extends child never learns the
+// parent's identity, so the search descriptor must not carry the key that
+// names it.
+//
+// The header is decoded into a yaml.Node rather than into manifest.Artifact.
+// The struct declares a closed field set with no catch-all map, and
+// ParseArtifact unmarshals non-strictly, so a typed round-trip would silently
+// drop every authored key the struct does not declare, including the
+// extension-type fields §4.6 names as inheritable.
+//
+// It fails closed: any failure to split, decode, or re-encode returns "",
+// because the block that could not be rewritten is the block that names the
+// parent.
+func frontmatterBlockHidingParent(src []byte) string {
+	fm, _, err := manifest.SplitFrontmatter(src)
+	if err != nil {
+		return ""
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(fm, &doc); err != nil {
+		return ""
+	}
+	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+		return ""
+	}
+	root := doc.Content[0]
+	kept := make([]*yaml.Node, 0, len(root.Content))
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		if root.Content[i].Value == "extends" {
+			continue
+		}
+		kept = append(kept, root.Content[i], root.Content[i+1])
+	}
+	root.Content = kept
+	out, err := yaml.Marshal(root)
+	if err != nil {
+		// Not reachable from a node the decoder just produced; kept because
+		// the alternative to failing closed here is emitting the parent.
+		return ""
+	}
+	return "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
 }
 
 func inPrefix(id, prefix string) bool {
