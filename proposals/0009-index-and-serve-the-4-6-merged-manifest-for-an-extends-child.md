@@ -1,7 +1,7 @@
 # Proposal 0009: Index and serve the §4.6-merged manifest for an extends child
 
 - Issue: (to be filed)
-- Status: Verified (2026-08-19). Converged after 9 adversarial review rounds (21 findings fixed); awaiting sign-off.
+- Status: Approved (2026-08-19). Converged after 9 adversarial review rounds (21 findings fixed).
 - Date: 2026-08-19
 
 ## Summary
