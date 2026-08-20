@@ -617,6 +617,50 @@ func TestSearchArtifacts_DescriptorFrontmatterUndecodable(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 hidden parents — the guard is scoped to the extends the manifest
+// parser resolved. A child that supplies extends through a YAML merge key is
+// ingested as an extends child, and deleting the top-level key would leave the
+// parent's ID inside the merged mapping, so the descriptor fails closed.
+func TestSearchArtifacts_DescriptorHidesParentSuppliedByMergeKey(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\n---\n\nparent body\n"
+	child := "---\nbase: &b\n  extends: shared/parent@1.x\ntype: agent\nversion: 2.0.0\n" +
+		"description: child desc\n<<: *b\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	got := findResult(t, res, "finance/child")
+	if got.Frontmatter != "" {
+		t.Errorf("Frontmatter = %q, want empty (fail closed)", got.Frontmatter)
+	}
+	if strings.Contains(got.Description, "shared/parent") {
+		t.Errorf("descriptor leaks the parent ID: %+v", got)
+	}
+}
+
+// Spec: §4.6 hidden parents — deleting an anchored extends value strands every
+// alias into it, so the rewritten block is undecodable YAML. The descriptor
+// fails closed rather than serving a block with a dangling alias.
+func TestSearchArtifacts_DescriptorHidesParentAnchoredValue(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child desc\n" +
+		"extends: &p shared/parent@1.x\nnote: *p\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	got := findResult(t, res, "finance/child")
+	if got.Frontmatter != "" {
+		t.Errorf("Frontmatter = %q, want empty (fail closed)", got.Frontmatter)
+	}
+}
+
 // Spec: §7.6.1 — a load_domain notable entry carries {id, type, summary,
 // source, folded_from}. For an extends child the entry carries neither a
 // frontmatter block nor a sensitivity label, and its summary is the §4.6

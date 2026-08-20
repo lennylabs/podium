@@ -2039,14 +2039,17 @@ func frontmatterBlock(src []byte) string {
 // drop every authored key the struct does not declare, including the
 // extension-type fields §4.6 names as inheritable.
 //
-// It fails closed on exactly one predicate: any failure to split, decode, or
-// re-encode returns "", because the block that could not be rewritten is the
-// block that names the parent.
+// It fails closed on exactly one predicate: any failure to split, decode,
+// re-encode, or re-read the rewritten block returns "", because the block that
+// could not be rewritten is the block that names the parent.
 //
-// The strip is scoped to the top-level key. The registry surfaces no parent of
-// its own accord, which is what §4.6 constrains; a value the child's own author
-// wrote under another key is the child's authored text and it survives here for
-// the same reason every other sibling key does.
+// The guard is scoped to what the manifest parser resolves rather than to the
+// literal top-level key. ParseArtifact resolves YAML merge keys, so a child can
+// carry an operative extends: inside an anchored mapping it merges in, and
+// deleting an anchored extends value leaves a dangling alias behind. Both are
+// caught by re-reading the rewritten block: it must decode, and it must resolve
+// no extends value. A value under a key the parser never resolves is the
+// child's authored text and survives with every other sibling key.
 func frontmatterBlockHidingParent(src []byte) string {
 	fm, _, err := manifest.SplitFrontmatter(src)
 	if err != nil {
@@ -2074,7 +2077,28 @@ func frontmatterBlockHidingParent(src []byte) string {
 		// the alternative to failing closed here is emitting the parent.
 		return ""
 	}
+	if !hidesParent(out) {
+		return ""
+	}
 	return "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
+}
+
+// hidesParent reports whether the rewritten header is a mapping that reads back
+// and resolves no extends value.
+// Spec: §4.6 hidden parents.
+//
+// Deleting the top-level entry is not sufficient on its own. A merge key can
+// carry the extends the manifest parser acted on, and deleting an anchored
+// extends value strands the aliases into it, which makes the rewritten block
+// undecodable rather than parent-free. Decoding into a map both resolves merge
+// keys and rejects an unresolvable alias.
+func hidesParent(header []byte) bool {
+	var resolved map[string]any
+	if err := yaml.Unmarshal(header, &resolved); err != nil {
+		return false
+	}
+	_, named := resolved["extends"]
+	return !named
 }
 
 func inPrefix(id, prefix string) bool {

@@ -117,7 +117,7 @@ Hybrid retrieval over artifact frontmatter. Every argument is optional. When `qu
 
 `as_admin=1` (or `as_admin=true`) requests the admin diagnostic visibility override, which searches across every layer regardless of the caller's visibility. A caller without the admin role is rejected with `403 auth.forbidden`.
 
-Each result's `frontmatter` is the artifact's stored YAML frontmatter as a string. For an artifact that declares `extends:`, the `extends` key is removed before the block is returned, so the result does not surface the parent. That block is re-encoded from the remaining keys, which normalizes comments, quoting, and indentation, and the result carries no `frontmatter` key when the child's stored frontmatter cannot be read, rewritten, or re-encoded.
+Each result's `frontmatter` is the artifact's stored YAML frontmatter as a string. For an artifact that declares `extends:`, the `extends` key is removed before the block is returned, so the result does not surface the parent. That block is re-encoded from the remaining keys, which normalizes comments, quoting, and indentation, and the result carries no `frontmatter` key when the child's stored frontmatter cannot be read, rewritten, or re-encoded, or when the rewritten block still resolves a parent, which is the case for a child that supplies `extends:` through a YAML merge key or anchors its value.
 
 Response:
 

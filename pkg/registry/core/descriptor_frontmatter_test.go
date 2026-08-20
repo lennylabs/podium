@@ -50,8 +50,9 @@ func TestDescriptorOf_SearchDropsBody(t *testing.T) {
 // Spec: §4.6 hidden parents — frontmatterBlockHidingParent removes the
 // top-level extends key and keeps every other authored key, including one
 // manifest.Artifact does not declare. It fails closed on any input it cannot
-// split, decode, or re-encode, because the block it could not rewrite is the
-// block that names the parent.
+// split, decode, or re-encode, and on any rewritten block that does not read
+// back as a mapping free of an extends value, because the block it could not
+// rewrite is the block that names the parent.
 func TestFrontmatterBlockHidingParent(t *testing.T) {
 	tests := []struct {
 		name string
@@ -102,22 +103,31 @@ func TestFrontmatterBlockHidingParent(t *testing.T) {
 			gone: []string{"extends", "shared/parent", "body"},
 		},
 		{
-			// Only the top-level key is deleted. A value the child's own
-			// author wrote under another key is the child's authored text and
-			// is served with the rest of the block.
-			name: "a nested extends the child authored is served",
+			// ParseArtifact resolves merge keys, so this child is ingested as
+			// an extends child of shared/parent. Deleting the top-level key
+			// leaves the operative extends inside the merged mapping, so the
+			// rewritten block still resolves a parent and the helper fails
+			// closed.
+			name: "an extends supplied through a merge key fails closed",
 			src:  "---\nbase: &b\n  extends: shared/parent@1.0.0\ntype: agent\n<<: *b\n---\n\nbody\n",
-			want: []string{"type: agent", "<<: *b", "extends: shared/parent@1.0.0"},
+			zero: true,
+		},
+		{
+			// A nested extends the child never merges in is not what the
+			// parser resolved, so it is the child's authored text and rides
+			// along with the rest of the block.
+			name: "an unmerged nested extends is served",
+			src:  "---\nbase:\n  extends: shared/parent@1.0.0\ntype: agent\n---\n\nbody\n",
+			want: []string{"type: agent", "extends: shared/parent@1.0.0"},
 			gone: []string{"body"},
 		},
 		{
-			// The anchor the alias points at was deleted with the extends
-			// entry, so the re-encoded block carries the alias name alone and
-			// names no parent.
-			name: "an alias into the deleted extends value keeps the parent unnamed",
+			// Deleting the anchored extends value strands the alias, so the
+			// rewritten block is undecodable YAML rather than a parent-free
+			// header and the helper fails closed.
+			name: "an alias into the deleted extends value fails closed",
 			src:  "---\ntype: agent\nextends: &p shared/parent@1.0.0\nnote: *p\n---\n\nbody\n",
-			want: []string{"type: agent", "note: *p"},
-			gone: []string{"shared/parent", "body"},
+			zero: true,
 		},
 		{
 			// The strip works on the YAML node, so a key whose YAML type does
