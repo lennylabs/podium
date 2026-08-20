@@ -1,7 +1,7 @@
 # Proposal 0010: Refuse an extends pin onto a deprecated parent version
 
 - Issue: (to be filed)
-- Status: Approved (2026-08-20). Converged after 8 adversarial review rounds (8 findings fixed).
+- Status: Applied to spec (2026-08-20). Converged after 8 adversarial review rounds (8 findings fixed).
 - Date: 2026-08-19
 
 This document stages no changes yet. It records one defect, its reachability, the resolution options, and the tests each staged change carries, so a review run stages the edits rather than rediscovering the analysis. The adversarial review passes it has been through are recorded in "Resolved in adversarial review".
