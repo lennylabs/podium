@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/projection"
@@ -31,6 +33,66 @@ func ingestOne(t *testing.T, st store.Store, layerID, id, src string) *ingest.Re
 		t.Fatalf("ingest %s: %v", id, err)
 	}
 	return res
+}
+
+// ingestOneAt is ingestOne with an injected clock, so a caller can give each
+// ingested version a distinct controlled IngestedAt.
+func ingestOneAt(t *testing.T, st store.Store, clk clock.Clock, layerID, id, src string) *ingest.Result {
+	t.Helper()
+	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1", LayerID: layerID, Clock: clk, Files: fstest.MapFS{
+			id + "/ARTIFACT.md": &fstest.MapFile{Data: []byte(src)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ingest %s: %v", id, err)
+	}
+	return res
+}
+
+// agentVersion is a type:agent artifact at an arbitrary version, suitable as
+// an extends target.
+func agentVersion(ver, desc string) string {
+	return "---\ntype: agent\nversion: " + ver + "\ndescription: " + desc + "\nsensitivity: low\n---\n\nagent body\n"
+}
+
+// Spec: §4.7.6 — an unpinned extends reference resolves to `latest`, which is
+// the most recently ingested version rather than the highest semver. A
+// backported 1.1.0 published after 2.0.0 is therefore the parent a bare
+// `extends: shared/parent` pins to.
+func TestIngest_ExtendsUnpinnedPinsMostRecentlyIngestedParent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	// A shared frozen clock advanced between calls separates the two parent
+	// versions in ingest time, so the assertion cannot be satisfied by
+	// ResolveLatest's higher-semver tiebreak on an exact timestamp tie.
+	clk := clock.NewFrozen(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	// The newer major line lands first.
+	if res := ingestOneAt(t, st, clk, "L1", "shared/parent", agentVersion("2.0.0", "next line")); res.Accepted != 1 {
+		t.Fatalf("parent 2.0.0 not accepted: %+v", res)
+	}
+	clk.Advance(time.Hour)
+	// The backport onto the older line is published afterwards. A version
+	// bump within the same layer is not a collision (§4.7.6).
+	if res := ingestOneAt(t, st, clk, "L1", "shared/parent", agentVersion("1.1.0", "backport")); res.Accepted != 1 {
+		t.Fatalf("parent 1.1.0 not accepted: %+v", res)
+	}
+	clk.Advance(time.Hour)
+
+	child := "---\ntype: agent\nversion: 3.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent\n---\n\nchild body\n"
+	if res := ingestOneAt(t, st, clk, "L2", "finance/child", child); res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a clean accept", res.Accepted, res.Rejected)
+	}
+
+	rec, err := st.GetManifest(ctx, "tenant-1", "finance/child", "3.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest child: %v", err)
+	}
+	if rec.ExtendsPin != "shared/parent@1.1.0" {
+		t.Errorf("ExtendsPin = %q, want shared/parent@1.1.0 (most recently ingested)", rec.ExtendsPin)
+	}
 }
 
 // Spec: §4.6 — "The child's type: must match the parent's; ingest rejects
