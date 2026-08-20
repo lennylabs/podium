@@ -1431,6 +1431,11 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 	versions := make([]string, 0, 4)
 	hashByVersion := map[string]string{}
 	typeByVersion := map[string]string{}
+	// deprecatedByVersion and ingestedAtByVersion carry the two columns
+	// §4.7.6 candidate selection needs: the deprecation flag the filter
+	// removes on, and the ingest timestamp `latest` orders by.
+	deprecatedByVersion := map[string]bool{}
+	ingestedAtByVersion := map[string]time.Time{}
 	// frontmatterByVersion lets the resolver recover the parent's license
 	// (not an indexed column) so ingest can flag a cross-layer license
 	// change per the §4.6 field-semantics table.
@@ -1453,6 +1458,8 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 		versions = append(versions, m.Version)
 		hashByVersion[m.Version] = m.ContentHash
 		typeByVersion[m.Version] = m.Type
+		deprecatedByVersion[m.Version] = m.Deprecated
+		ingestedAtByVersion[m.Version] = m.IngestedAt
 		frontmatterByVersion[m.Version] = m.Frontmatter
 	}
 	if len(versions) == 0 {
@@ -1473,11 +1480,67 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 		if resolved == "" {
 			return "", "", "", fmt.Errorf("no parent version with content hash sha256:%s", p.Hash)
 		}
-	} else {
+	} else if p.Kind == version.PinExact {
+		// Spec: §4.7.6 — the deprecation filter covers a range or unpinned
+		// reference only. An exact pin names one version, so it resolves
+		// against the unfiltered candidate set and a pin onto a deprecated
+		// version reaches the §4.6 deprecation refusal with a message that
+		// names deprecation, rather than being reported as an unsatisfiable
+		// range by the arm below.
 		resolved, err = version.Resolve(p, versions)
 		if err != nil {
 			return "", "", "", fmt.Errorf("no parent version satisfies %q", ref)
 		}
+	} else {
+		// Spec: §4.7.6 — a range or unpinned reference selects among the
+		// parent's non-deprecated versions only, so deprecated candidates
+		// leave the selection set before resolution. The unfiltered
+		// `versions` slice stays intact for the empty-candidate checks
+		// above and below.
+		selectable := make([]string, 0, len(versions))
+		for _, v := range versions {
+			if !deprecatedByVersion[v] {
+				selectable = append(selectable, v)
+			}
+		}
+		// Spec: §4.7.6 — the parent has stored versions and the filter left
+		// no candidate, so the reference is refused rather than falling back
+		// to the deprecated set. The message names deprecation, because the
+		// arms that report an unpublished parent or an unsatisfied range
+		// would send the author looking for a publication that already
+		// happened.
+		if len(selectable) == 0 {
+			return "", "", "", fmt.Errorf("every stored version of parent %q is deprecated", id)
+		}
+		if p.Kind == version.PinLatest {
+			// Spec: §4.7.6 — `latest` is the most recently ingested
+			// non-deprecated version, so order by ingest time rather than
+			// by semver and a backported fix published after a newer major
+			// line wins. The read path runs the same rule at
+			// pkg/registry/core/core.go, and it deliberately diverges by
+			// falling back to the full candidate set when every version is
+			// deprecated so a caller still receives stored bytes. Ingest
+			// writes a new row instead of serving one, so it fails closed
+			// here and lets the author correct the source.
+			cands := make([]version.Candidate, 0, len(selectable))
+			for _, v := range selectable {
+				cands = append(cands, version.Candidate{Version: v, IngestedAt: ingestedAtByVersion[v]})
+			}
+			resolved, err = version.ResolveLatest(cands)
+		} else {
+			resolved, err = version.Resolve(p, selectable)
+		}
+		if err != nil {
+			return "", "", "", fmt.Errorf("no parent version satisfies %q", ref)
+		}
+	}
+	// Spec: §4.6 — a child may not extend a deprecated parent version. An
+	// explicit reference, by exact semver or by content hash, names one
+	// version and is refused when that version is deprecated. A range or
+	// unpinned reference never reaches this check, because its selection set
+	// already excludes every deprecated candidate.
+	if deprecatedByVersion[resolved] {
+		return "", "", "", fmt.Errorf("parent version %s@%s is deprecated", id, resolved)
 	}
 	// Parse the resolved parent's license from its stored source. The
 	// frontmatter holds the full ARTIFACT.md bytes; a parse failure leaves

@@ -42,6 +42,20 @@ At request time the registry folds the parent's frontmatter into the child's per
 
 Parent version is resolved at the child's ingest time and stored as a hard pin in the ingested manifest's resolved form. Parent updates do not silently propagate. Re-ingesting the child's unchanged bytes is counted idempotent and changes nothing, so the child picks up a newer parent only when it is published at a new `version:`.
 
+An unpinned `<id>` reference resolves to the most recently ingested non-deprecated version of the parent, which is the version with the latest ingest timestamp rather than the highest semver.
+
+### Deprecated parent versions
+
+A child may not extend a deprecated parent version.
+
+- An `extends:` reference that names a deprecated version explicitly, by exact semver (`<id>@1.2.0`) or by content hash (`<id>@sha256:<hash>`), is rejected at ingest with `ingest.invalid_artifact`.
+- A range (`<id>@1.x`) or unpinned (`<id>`) reference selects among the parent's non-deprecated versions. Deprecated versions are removed from the candidate set before resolution, so `latest` for such a reference is the most recently ingested non-deprecated version.
+- When the parent has stored versions and the filter leaves no candidate, ingest rejects the child with `ingest.invalid_artifact` and reports that the parent's candidate versions are deprecated. The reference does not fall back to the deprecated versions.
+
+Deprecation is per-version and a stored version's flag never changes. Deprecating a parent line means publishing a new parent version that carries `deprecated: true`, which adds a candidate the filter skips. A child that is already stored keeps the parent pin recorded at its own ingest, and a later deprecated parent version leaves that stored pin and its resolution on the read path unchanged.
+
+The refusal therefore applies to the child version being ingested, and it never invalidates a child already stored against a parent version that was live when the child was ingested. A child runs the check again when it is published at a new `version:`. At that point a range or unpinned reference re-pins onto a non-deprecated candidate, and an exact or content-hash pin naming a deprecated version is refused. A pin that names a version already deprecated when the child is first ingested is rejected on that ingest and on every retry until the `extends:` reference names a live version.
+
 ---
 
 ## Field merge semantics
@@ -237,6 +251,7 @@ The parent's `sandbox_profile: unrestricted` is overridden by the child's `read-
 - Cycle detected: ingest error.
 - Child declaring `extends:` against a parent in a layer the child's layer cannot see: ingest succeeds; the parent resolves at request time per the visibility rules above.
 - Child declaring `extends:` with a parent type that doesn't match the child's type: ingest error.
+- Child declaring `extends:` with an exact or content-hash pin onto a deprecated parent version, or with a range or unpinned reference when every stored version of the parent is deprecated: ingest error (`ingest.invalid_artifact`).
 
 ---
 

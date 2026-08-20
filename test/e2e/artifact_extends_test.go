@@ -479,6 +479,29 @@ func TestExtends_UnknownParentRejected(t *testing.T) {
 	}
 }
 
+// an extends pin naming a deprecated parent version is rejected at ingest, so
+// the overlay child never reaches the store and the shared canonical ID keeps
+// serving the lower-precedence parent unmerged.
+// Spec: §4.6 — a child may not extend a deprecated parent version.
+// Matrix: §6.10 (ingest.invalid_artifact)
+func TestExtends_DeprecatedParentPinRejected(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: context\nversion: 1.0.0\ndescription: org parent\ntags: [from-parent]\ndeprecated: true\n---\n\nparent body\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: " + exParentID + "@1.0.0\n---\n\nbody\n"
+	srv := extendsBoot(t, parent, child, nil)
+
+	got := exLoad(t, srv, exParentID)
+	if got.Version != "1.0.0" {
+		t.Fatalf("version = %q, want 1.0.0 (the child pinned onto a deprecated parent is dropped at ingest)", got.Version)
+	}
+	if strings.Contains(got.Frontmatter, "description: child") {
+		t.Errorf("the rejected child must not be merged into the served artifact:\n%s", got.Frontmatter)
+	}
+	if !strings.Contains(srv.log(), "rejected=1") {
+		t.Errorf("server log missing the single ingest rejection:\n%s", srv.log())
+	}
+}
+
 // a self-referencing extends is rejected as a cycle at ingest.
 // The artifact is dropped and a valid sibling keeps boot alive, so the rejection
 // is observable as a 404. spec: docs/authoring/extends.md § "Constraints", cycle

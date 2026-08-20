@@ -6,7 +6,9 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/projection"
@@ -31,6 +33,177 @@ func ingestOne(t *testing.T, st store.Store, layerID, id, src string) *ingest.Re
 		t.Fatalf("ingest %s: %v", id, err)
 	}
 	return res
+}
+
+// ingestOneAt is ingestOne with an injected clock, so a caller can give each
+// ingested version a distinct controlled IngestedAt.
+func ingestOneAt(t *testing.T, st store.Store, clk clock.Clock, layerID, id, src string) *ingest.Result {
+	t.Helper()
+	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1", LayerID: layerID, Clock: clk, Files: fstest.MapFS{
+			id + "/ARTIFACT.md": &fstest.MapFile{Data: []byte(src)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ingest %s: %v", id, err)
+	}
+	return res
+}
+
+// agentVersion is a type:agent artifact at an arbitrary version, suitable as
+// an extends target.
+func agentVersion(ver, desc string) string {
+	return "---\ntype: agent\nversion: " + ver + "\ndescription: " + desc + "\nsensitivity: low\n---\n\nagent body\n"
+}
+
+// Spec: §4.7.6 — an unpinned extends reference resolves to `latest`, which is
+// the most recently ingested version rather than the highest semver. A
+// backported 1.1.0 published after 2.0.0 is therefore the parent a bare
+// `extends: shared/parent` pins to.
+func TestIngest_ExtendsUnpinnedPinsMostRecentlyIngestedParent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	// A shared frozen clock advanced between calls separates the two parent
+	// versions in ingest time, so the assertion cannot be satisfied by
+	// ResolveLatest's higher-semver tiebreak on an exact timestamp tie.
+	clk := clock.NewFrozen(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+
+	// The newer major line lands first.
+	if res := ingestOneAt(t, st, clk, "L1", "shared/parent", agentVersion("2.0.0", "next line")); res.Accepted != 1 {
+		t.Fatalf("parent 2.0.0 not accepted: %+v", res)
+	}
+	clk.Advance(time.Hour)
+	// The backport onto the older line is published afterwards. A version
+	// bump within the same layer is not a collision (§4.7.6).
+	if res := ingestOneAt(t, st, clk, "L1", "shared/parent", agentVersion("1.1.0", "backport")); res.Accepted != 1 {
+		t.Fatalf("parent 1.1.0 not accepted: %+v", res)
+	}
+	clk.Advance(time.Hour)
+
+	child := "---\ntype: agent\nversion: 3.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent\n---\n\nchild body\n"
+	if res := ingestOneAt(t, st, clk, "L2", "finance/child", child); res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a clean accept", res.Accepted, res.Rejected)
+	}
+
+	rec, err := st.GetManifest(ctx, "tenant-1", "finance/child", "3.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest child: %v", err)
+	}
+	if rec.ExtendsPin != "shared/parent@1.1.0" {
+		t.Errorf("ExtendsPin = %q, want shared/parent@1.1.0 (most recently ingested)", rec.ExtendsPin)
+	}
+}
+
+// deprecatedAgentVersion is a type:agent artifact published as deprecated, so
+// it enters the candidate set with the §4.7.6 flag already set. Deprecation is
+// per-version and immutable (§4.7), so a test cannot flip an existing row.
+func deprecatedAgentVersion(ver, desc string) string {
+	return "---\ntype: agent\nversion: " + ver + "\ndescription: " + desc + "\nsensitivity: low\ndeprecated: true\n---\n\nagent body\n"
+}
+
+// Spec: §4.6 — an exact `extends:` pin naming a deprecated parent version is
+// rejected with ingest.invalid_artifact, and the child is not stored.
+// Matrix: §6.10 (ingest.invalid_artifact)
+func TestExtends_ExactPinOntoDeprecatedParentRejected(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	ingestOne(t, st, "L1", "shared/parent", agentParent("live"))
+	ingestOne(t, st, "L1", "shared/parent", deprecatedAgentVersion("1.0.1", "retired"))
+
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent@1.0.1\n---\n\nbody\n"
+	res := ingestOne(t, st, "L2", "finance/child", child)
+	if len(res.Rejected) != 1 || res.Accepted != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a single rejection", res.Accepted, res.Rejected)
+	}
+	if res.Rejected[0].Code != "ingest.invalid_artifact" {
+		t.Errorf("code = %q, want ingest.invalid_artifact", res.Rejected[0].Code)
+	}
+	if !strings.Contains(res.Rejected[0].Reason, "deprecated") {
+		t.Errorf("reason should name the deprecated parent version: %q", res.Rejected[0].Reason)
+	}
+	if _, err := st.GetManifest(context.Background(), "tenant-1", "finance/child", "2.0.0"); err == nil {
+		t.Errorf("a child pinned onto a deprecated parent version must not be stored")
+	}
+}
+
+// Spec: §4.7.6 — a range reference whose every candidate is deprecated is
+// rejected, and the reason names deprecation rather than reporting the parent
+// as never published.
+// Matrix: §6.10 (ingest.invalid_artifact)
+func TestExtends_AllCandidatesDeprecatedRejected(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	ingestOne(t, st, "L1", "shared/parent", deprecatedAgentVersion("1.0.0", "retired"))
+
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent@1.x\n---\n\nbody\n"
+	res := ingestOne(t, st, "L2", "finance/child", child)
+	if len(res.Rejected) != 1 {
+		t.Fatalf("rejected=%+v, want a single rejection", res.Rejected)
+	}
+	if res.Rejected[0].Code != "ingest.invalid_artifact" {
+		t.Errorf("code = %q, want ingest.invalid_artifact", res.Rejected[0].Code)
+	}
+	if !strings.Contains(res.Rejected[0].Reason, "deprecated") {
+		t.Errorf("reason should name deprecation: %q", res.Rejected[0].Reason)
+	}
+	if strings.Contains(res.Rejected[0].Reason, "ingested yet") {
+		t.Errorf("reason must not report the parent as unpublished: %q", res.Rejected[0].Reason)
+	}
+}
+
+// Spec: §4.7 version immutability — an unchanged re-ingest of an accepted
+// child classifies as idempotent even after a deprecated parent version lands
+// alongside the one the child pinned. The resolution re-runs and still
+// succeeds against the live candidate, so ingest reaches the idempotency
+// classification.
+func TestExtends_RangeReingestStaysIdempotentAfterParentDeprecation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	ingestOne(t, st, "L1", "shared/parent", agentParent("live"))
+
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent@1.x\n---\n\nbody\n"
+	if res := ingestOne(t, st, "L2", "finance/child", child); res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a clean accept", res.Accepted, res.Rejected)
+	}
+	ingestOne(t, st, "L1", "shared/parent", deprecatedAgentVersion("1.0.1", "retired"))
+
+	res := ingestOne(t, st, "L2", "finance/child", child)
+	if res.Idempotent != 1 || res.Accepted != 0 || len(res.Rejected) != 0 {
+		t.Fatalf("idempotent=%d accepted=%d rejected=%+v, want a single idempotent no-op",
+			res.Idempotent, res.Accepted, res.Rejected)
+	}
+	rec, err := st.GetManifest(ctx, "tenant-1", "finance/child", "2.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest child: %v", err)
+	}
+	if rec.ExtendsPin != "shared/parent@1.0.0" {
+		t.Errorf("ExtendsPin = %q, want the stored pin to stay on shared/parent@1.0.0", rec.ExtendsPin)
+	}
+}
+
+// Spec: §4.7.6 — a child published at a new version resolves its range again
+// against the candidate set as it stands then, and the deprecated version that
+// landed in the meantime is skipped.
+func TestExtends_ChildVersionBumpRepinsPastDeprecatedParent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	ingestOne(t, st, "L1", "shared/parent", agentParent("live"))
+	ingestOne(t, st, "L1", "shared/parent", deprecatedAgentVersion("1.1.0", "retired"))
+
+	child := "---\ntype: agent\nversion: 3.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent@1.x\n---\n\nbody\n"
+	if res := ingestOne(t, st, "L2", "finance/child", child); res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a clean accept", res.Accepted, res.Rejected)
+	}
+	rec, err := st.GetManifest(ctx, "tenant-1", "finance/child", "3.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest child: %v", err)
+	}
+	if rec.ExtendsPin != "shared/parent@1.0.0" {
+		t.Errorf("ExtendsPin = %q, want shared/parent@1.0.0 (1.1.0 is deprecated)", rec.ExtendsPin)
+	}
 }
 
 // Spec: §4.6 — "The child's type: must match the parent's; ingest rejects
