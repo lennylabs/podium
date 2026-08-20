@@ -220,7 +220,7 @@ func ingestFoldFixture(t *testing.T, st store.Store) store.ManifestRecord {
 	return rec
 }
 
-// Spec: §4.6 "Default for unlisted fields" — an omitted child scalar
+// Spec: §4.6 "Omitted fields" — an omitted child scalar
 // inherits the parent's value, and ingest writes the resolved values into
 // the columns the registry filters, ranks, and embeds on.
 // Spec: §4.7 "Artifact embeddings" — the projection reads the §4.6-resolved

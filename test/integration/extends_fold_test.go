@@ -53,7 +53,7 @@ func ingestFoldLayer(t *testing.T, st store.Store, layerID, id, src string) {
 	}
 }
 
-// Spec: §4.6 "Default for unlisted fields" — the columns ingest folds are
+// Spec: §4.6 "Omitted fields" — the columns ingest folds are
 // the ones every store backend persists, so the resolved description, tags,
 // sensitivity, and search visibility survive a round trip through the
 // memory store, file-backed SQLite, and Postgres alike.

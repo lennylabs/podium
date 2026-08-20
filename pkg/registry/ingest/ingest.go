@@ -690,14 +690,19 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			parentID, parentVersion := splitRef(pin)
 			parent, gerr := st.GetManifest(ctx, req.TenantID, parentID, parentVersion)
 			if gerr != nil {
+				// A store failure is not an authoring defect: match the
+				// loop's convention below and abort the ingest call.
+				if !errors.Is(gerr, store.ErrNotFound) {
+					return nil, fmt.Errorf("ingest: load extends parent %s: %w", pin, gerr)
+				}
 				// resolveExtendsPin picked the pin out of the tenant's own
-				// manifest listing, so this reads as a store failure between
-				// the two calls rather than a missing parent. Reject, because
-				// accepting the child would index it under its unresolved
-				// columns and no later pass repairs a stored version.
+				// manifest listing, so a missing record here means the parent
+				// went away between the two calls. Reject, because accepting
+				// the child would index it under its unresolved columns and no
+				// later pass repairs a stored version.
 				res.Rejected = append(res.Rejected, RejectedArtifact{
 					ArtifactID: rec.ID,
-					Reason:     fmt.Sprintf("extends: load parent %s: %v", pin, gerr),
+					Reason:     fmt.Sprintf("extends: parent %s not found", pin),
 					Code:       "ingest.invalid_artifact",
 				})
 				continue
