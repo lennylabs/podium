@@ -1,7 +1,7 @@
 # Proposal 0010: Refuse an extends pin onto a deprecated parent version
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-08-20). Converged after 8 adversarial review rounds (8 findings fixed).
+- Status: Implemented (2026-08-20). Converged after 8 adversarial review rounds (8 findings fixed).
 - Date: 2026-08-19
 
 This document stages no changes yet. It records one defect, its reachability, the resolution options, and the tests each staged change carries, so a review run stages the edits rather than rediscovering the analysis. The adversarial review passes it has been through are recorded in "Resolved in adversarial review".
@@ -45,12 +45,16 @@ An earlier draft of this file bundled a second defect on the same read path. Tha
 
 The document records no staged deliverables and no application order, so every step below is inferred from the leading resolution in "Resolutions" and from the surfaces named in "The defect". The review run that stages the edits assigns the real ids and confirms or replaces this sequence.
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2. §4.6's extends paragraph and §4.7.6 state whether a child may extend a deprecated parent version, how a range or unpinned reference selects when a candidate is deprecated, and that a range or unpinned reference left with no non-deprecated candidate is refused at ingest. Bundled because one reader reviews both sentences together. The order is inferred, and the tests citing the new sentences land in S2 and S3.
+- [x] **S1 · spec** — SPEC-1, SPEC-2. §4.6's extends paragraph and §4.7.6 state whether a child may extend a deprecated parent version, how a range or unpinned reference selects when a candidate is deprecated, and that a range or unpinned reference left with no non-deprecated candidate is refused at ingest. Bundled because one reader reviews both sentences together. The order is inferred, and the tests citing the new sentences land in S2 and S3.
       Levels: — Depends on: —
-- [ ] **S2 · code** — CODE-1, CODE-3. `resolveExtendsPin` builds a deprecation map, filters deprecated candidates out of range and unpinned selection, and selects `latest` as the most recently ingested non-deprecated version. Bundled because both edits are the same candidate-selection code in one function, which "A second divergence in the same resolver" asks for in the same edit. This step deletes the `TestSearchArtifacts_FiltersReadMergedFields` subtest "child of a deprecated parent is still returned" (`pkg/registry/core/extends_test.go:726-736`), because the filter empties that fixture's candidate set and the resolver's existing empty-candidate arm already rejects the child.
+- [x] **S2 · code** — CODE-1, CODE-3. `resolveExtendsPin` builds a deprecation map, filters deprecated candidates out of range and unpinned selection, and selects `latest` as the most recently ingested non-deprecated version. Bundled because both edits are the same candidate-selection code in one function, which "A second divergence in the same resolver" asks for in the same edit. This step deletes the `TestSearchArtifacts_FiltersReadMergedFields` subtest "child of a deprecated parent is still returned" (`pkg/registry/core/extends_test.go:726-736`), because the filter empties that fixture's candidate set and the resolver's existing empty-candidate arm already rejects the child.
       Levels: unit, integration. Tests: the selection cases in "Testing", and the deletion recorded under "The existing test the change removes". The end-to-end case belongs to S3, because the rejection it asserts is an exact pin refusal. Depends on: S1
-- [ ] **S3 · code** — CODE-2. `resolveExtendsPin` refuses with `ingest.invalid_artifact` when an exact or content-hash pin names a deprecated version, and when a range or unpinned reference is left with no non-deprecated candidate. The empty-candidate refusal is a new check that fires when the unfiltered candidate set is non-empty and the deprecation-filtered selection set S2 builds is empty, and it carries its own message naming deprecation. S3 leaves the messages on both existing failure returns unchanged, so a range that misses against live candidates still reports the pin as unsatisfiable.
+- [x] **S3 · code** — CODE-2. `resolveExtendsPin` refuses with `ingest.invalid_artifact` when an exact or content-hash pin names a deprecated version, and when a range or unpinned reference is left with no non-deprecated candidate. The empty-candidate refusal is a new check that fires when the unfiltered candidate set is non-empty and the deprecation-filtered selection set S2 builds is empty, and it carries its own message naming deprecation. S3 leaves the messages on both existing failure returns unchanged, so a range that misses against live candidates still reports the pin as unsatisfiable.
       Levels: unit, integration, e2e. Tests: the refusal cases in "Testing", including the range-miss boundary case that keeps the existing `no parent version satisfies %q` message. Depends on: S2
+
+## Deviations from the checklist
+
+The implementation ran five steps against the three the checklist inferred, which the document flagged as provisional. S2 was split: the deprecation filter and the `latest` recency correction landed separately, because the recency rule needed the injected clock in its fixture and the filter did not. A documentation step was added for `docs/authoring/extends.md`, which the checklist omitted; the page documents pin resolution and would otherwise have described the old behavior.
 
 ## The defect
 
