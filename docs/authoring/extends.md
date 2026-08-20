@@ -249,7 +249,7 @@ The parent's `sandbox_profile: unrestricted` is overridden by the child's `read-
 - Cycle detected: ingest error.
 - Child declaring `extends:` against a parent in a layer the child's layer cannot see: ingest succeeds; the parent resolves at request time per the visibility rules above.
 - Child declaring `extends:` with a parent type that doesn't match the child's type: ingest error.
-- Child declaring `extends:` with an exact or content-hash pin onto a deprecated parent version, or with a range or unpinned reference whose every candidate version is deprecated: ingest error (`ingest.invalid_artifact`).
+- Child declaring `extends:` with an exact or content-hash pin onto a deprecated parent version, or with a range or unpinned reference when every stored version of the parent is deprecated: ingest error (`ingest.invalid_artifact`).
 
 ---
 
