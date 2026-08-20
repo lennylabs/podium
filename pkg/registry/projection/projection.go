@@ -13,9 +13,9 @@ import (
 // Artifact is the canonical §4.7 embedding-input projection for an
 // artifact, built from the stored record's frontmatter fields only: name,
 // description, when_to_use (joined with newlines), and tags (joined with
-// spaces). The record's columns are already §4.6-resolved at ingest, so a
-// child that declares extends: is indexed under the description and tags
-// its parent supplies.
+// spaces). Callers pass the stored record as it stands, and the ingest
+// path is responsible for writing the §4.6-resolved Description and Tags
+// into that record before the projection is taken.
 //
 // The prose body is deliberately excluded ("The prose body is not
 // embedded"): it is noisy for retrieval and risks busting embedding-model
