@@ -116,11 +116,11 @@ func TestNotificationSink_FilterOmitsNonMatchingEvents(t *testing.T) {
 
 	// The all-events receiver must record at least the artifact.published and
 	// layer.ingested events the reingest fires.
-	if !all.waitForDelivery(1, 5*time.Second) {
-		t.Fatalf("all-events receiver recorded nothing for the reingest\nserver log:\n%s", srv.log())
-	}
-	if _, ok := all.firstMatching("artifact.published"); !ok {
-		t.Errorf("all-events receiver missing artifact.published; got: %+v", all.all())
+	// An unfiltered receiver takes every event the registry fires, and the
+	// probe registers a layer, so the §7.6 layer.config_changed can land
+	// first. Wait for the type under assertion rather than for a count.
+	if !all.waitForEventType("artifact.published", 5*time.Second) {
+		t.Fatalf("all-events receiver missing artifact.published; got: %+v\nserver log:\n%s", all.all(), srv.log())
 	}
 	// Give any stray delivery to the filtered receiver time to arrive, then
 	// assert it stayed empty: the filter excluded every fired event type.
