@@ -1,6 +1,7 @@
 package core
 
 import (
+	"github.com/lennylabs/podium/pkg/manifest"
 	"strings"
 	"testing"
 
@@ -146,7 +147,7 @@ func TestFrontmatterBlockHidingParent(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := frontmatterBlockHidingParent([]byte(tc.src))
+			got := manifest.FrontmatterHidingParent([]byte(tc.src))
 			if tc.zero {
 				if got != "" {
 					t.Fatalf("got %q, want empty (fail closed)", got)

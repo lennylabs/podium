@@ -53,11 +53,13 @@ func resolveExtends(deduped, all []ArtifactRecord) error {
 		}
 		out := rec
 		out.Artifact = merged
-		// Re-serialize the merged manifest with extends stripped so every
-		// consumer of ArtifactBytes observes the resolved frontmatter (§4.6).
-		stripped := *merged
-		stripped.Extends = ""
-		bytes, serr := manifest.SerializeArtifact(&stripped)
+		// Re-serialize the merged manifest through the shared helper so every
+		// consumer of ArtifactBytes observes the resolved frontmatter with the
+		// parent hidden (§4.6), and so this mode and the server mode produce
+		// identical bytes for the same artifact (§11). The helper restores the
+		// frontmatter keys manifest.Artifact does not declare, which a typed
+		// round-trip drops.
+		bytes, serr := manifest.SerializeMerged(merged, authoredChain(rec, idx, deduped, effective, layered)...)
 		if serr != nil {
 			return fmt.Errorf("extends: re-serialize %q: %w", rec.ID, serr)
 		}
@@ -131,4 +133,44 @@ func stripPin(ref string) string {
 		return ref[:i]
 	}
 	return ref
+}
+
+// authoredChain returns the authored ARTIFACT.md bytes of rec's extends chain,
+// parent first, which is the order manifest.SerializeMerged wants: a key the
+// child also sets keeps the child's value. It walks the same links mergeRecord
+// walks and stops on any it cannot follow, because a chain mergeRecord rejects
+// never reaches the serializer.
+func authoredChain(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, effective map[string]int, layered map[string][]ArtifactRecord) [][]byte {
+	var out [][]byte
+	seen := map[string]bool{}
+	cur, curIdx := rec, layerIdx
+	for {
+		key := fmt.Sprintf("%s#%d", cur.ID, curIdx)
+		if seen[key] || cur.Artifact == nil || cur.Artifact.Extends == "" {
+			break
+		}
+		seen[key] = true
+		parentID := stripPin(cur.Artifact.Extends)
+		if parentID == cur.ID {
+			if curIdx-1 < 0 {
+				break
+			}
+			curIdx--
+			cur = layered[cur.ID][curIdx]
+		} else {
+			di, ok := effective[parentID]
+			if !ok {
+				break
+			}
+			cur = deduped[di]
+			curIdx = len(layered[parentID]) - 1
+		}
+		out = append(out, cur.ArtifactBytes)
+	}
+	// Reverse into parent-first order, then append the child's own block last
+	// so its value wins for a key both declare.
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+	return append(out, rec.ArtifactBytes)
 }
