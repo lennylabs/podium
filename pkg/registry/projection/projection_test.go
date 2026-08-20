@@ -96,12 +96,13 @@ func TestArtifact_Projection(t *testing.T) {
 	}
 }
 
-// artifactMD is the authored ARTIFACT.md the agreement test ingests. It
-// carries a description, when_to_use, and tags so every part of the
+// artifactMD is the authored ARTIFACT.md the ingest call-site test ingests.
+// It carries a name, description, when_to_use, and tags so every part of the
 // projection is exercised, plus a prose body that must never be embedded.
 const artifactMD = "---\n" +
 	"type: agent\n" +
 	"version: 1.0.0\n" +
+	"name: reconcile-payments\n" +
 	"description: matches vendor payments against purchase orders\n" +
 	"when_to_use:\n" +
 	"  - at month-end close\n" +
@@ -134,37 +135,94 @@ func (e *recordingEmbedder) Embed(_ context.Context, texts []string) ([][]float3
 }
 
 // Spec: §4.7 "Artifact embeddings" and §4.7 "Dual-write semantics for
-// external vector backends" — the ingest write path (embedAndStore on the
-// inline path and the outbox enqueue in commitManifest) and `podium admin
+// external vector backends" — the ingest write path and `podium admin
 // reembed` (Registry.ReembedOne) must embed identical text for one
 // artifact. A managed backend takes the outbox text and a collocated one
 // takes the inline text, so a divergence between them indexes the same
 // artifact differently per deployment mode (§2.2).
 //
-// Each of the three strings is captured from the path that produces it
-// rather than recomputed here, so reintroducing a local projection copy at
-// any call site fails this test.
-//
-// The paths run against store.Memory rather than a SQL backend on purpose:
-// neither SQL store persists Name or WhenToUse, so a record read back from
-// SQLite or Postgres projects less text than the one ingest holds. That
-// divergence predates this change, and collapsing the two copies does not
-// close it.
+// The comparison is taken over one store.ManifestRecord value rather than
+// over a store round-trip. Neither SQL store persists Name or WhenToUse, so
+// a record read back from SQLite or Postgres projects less text than the one
+// ingest holds. That divergence predates this change and collapsing the two
+// projection copies does not close it, so a round-trip comparison would fail
+// on the persistence gap instead of on a projection drift.
 func TestProjection_IngestAndReembedAgree(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	rec := store.ManifestRecord{
+		TenantID:    "acme",
+		ArtifactID:  "finance/reconcile",
+		Version:     "1.0.0",
+		ContentHash: "sha256:deadbeef",
+		Type:        "agent",
+		Name:        "reconcile-payments",
+		Description: "matches vendor payments against purchase orders",
+		WhenToUse:   []string{"at month-end close", "before an audit"},
+		Tags:        []string{"finance", "ap"},
+		Layer:       "L",
+		Frontmatter: []byte("type: agent\n"),
+		Body:        []byte("prose that is never embedded"),
+		IngestedAt:  time.Now().UTC(),
+	}
+
+	// Both ingest write-path call sites, embedAndStore on the inline path and
+	// the outbox enqueue in commitManifest, project the record they are about
+	// to write through this call.
+	ingested := projection.Artifact(rec)
+
+	// ReembedOne re-projects the record it loads. store.Memory hands the
+	// record back verbatim, so the reembed leg runs over the same value.
+	st := store.NewMemory()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: rec.TenantID}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if err := st.PutManifest(ctx, rec); err != nil {
+		t.Fatalf("PutManifest: %v", err)
+	}
+	emb := &recordingEmbedder{}
+	reg := core.New(st, rec.TenantID, nil).WithVectorSearch(vector.NewMemory(8), emb)
+	if err := reg.ReembedOne(ctx, rec.ArtifactID, rec.Version); err != nil {
+		t.Fatalf("ReembedOne: %v", err)
+	}
+	if len(emb.texts) != 1 {
+		t.Fatalf("embedder called %d times on the reembed path, want 1", len(emb.texts))
+	}
+	reembedded := emb.texts[0]
+
+	if ingested != reembedded {
+		t.Errorf("ingest text %q != reembed text %q", ingested, reembedded)
+	}
+	const want = "reconcile-payments\nmatches vendor payments against purchase orders\n" +
+		"at month-end close\nbefore an audit\nfinance ap"
+	if ingested != want {
+		t.Errorf("projected %q, want %q", ingested, want)
+	}
+	if strings.Contains(reembedded, "prose that is never embedded") {
+		t.Errorf("the prose body must not be embedded; got %q", reembedded)
+	}
+}
+
+// Spec: §4.7 "Dual-write semantics for external vector backends" — ingest
+// takes the projection at two sites, embedAndStore on the inline path and
+// the outbox enqueue in commitManifest, and both must hand the same text
+// downstream. Each string is captured from the path that produces it rather
+// than recomputed here, so reintroducing a local projection copy at either
+// call site fails this test.
+func TestProjection_IngestCallSitesAgree(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 	files := fstest.MapFS{
 		"finance/reconcile/ARTIFACT.md": &fstest.MapFile{Data: []byte(artifactMD)},
 	}
 
-	// The inline ingest path: embedAndStore hands the projection to the
-	// configured embedder.
-	st := store.NewMemory()
-	if err := st.CreateTenant(ctx, store.Tenant{ID: "acme"}); err != nil {
+	inlineStore := store.NewMemory()
+	if err := inlineStore.CreateTenant(ctx, store.Tenant{ID: "acme"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	var inlineTexts []string
-	res, err := ingest.Ingest(ctx, st, ingest.Request{
+	res, err := ingest.Ingest(ctx, inlineStore, ingest.Request{
 		TenantID: "acme",
 		LayerID:  "L",
 		Files:    files,
@@ -185,8 +243,6 @@ func TestProjection_IngestAndReembedAgree(t *testing.T) {
 	}
 	inline := inlineTexts[0]
 
-	// The outbox ingest path: commitManifest enqueues the same projection
-	// on the vector_pending row a managed backend drains.
 	outboxStore := store.NewMemory()
 	if err := outboxStore.CreateTenant(ctx, store.Tenant{ID: "acme"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
@@ -208,31 +264,11 @@ func TestProjection_IngestAndReembedAgree(t *testing.T) {
 	}
 	outbox := pending[0].Text
 
-	// The reembed path: Registry.ReembedOne re-projects the stored record.
-	stored, err := st.ListManifests(ctx, "acme")
-	if err != nil {
-		t.Fatalf("ListManifests: %v", err)
-	}
-	if len(stored) != 1 {
-		t.Fatalf("stored manifests = %d, want 1", len(stored))
-	}
-	emb := &recordingEmbedder{}
-	reg := core.New(st, "acme", nil).WithVectorSearch(vector.NewMemory(8), emb)
-	if err := reg.ReembedOne(ctx, stored[0].ArtifactID, stored[0].Version); err != nil {
-		t.Fatalf("ReembedOne: %v", err)
-	}
-	if len(emb.texts) != 1 {
-		t.Fatalf("embedder called %d times on the reembed path, want 1", len(emb.texts))
-	}
-	reembed := emb.texts[0]
-
 	if inline != outbox {
 		t.Errorf("ingest inline text %q != outbox text %q", inline, outbox)
 	}
-	if inline != reembed {
-		t.Errorf("ingest text %q != reembed text %q", inline, reembed)
-	}
-	const want = "matches vendor payments against purchase orders\nat month-end close\nbefore an audit\nfinance ap"
+	const want = "reconcile-payments\nmatches vendor payments against purchase orders\n" +
+		"at month-end close\nbefore an audit\nfinance ap"
 	if inline != want {
 		t.Errorf("ingest embedded %q, want %q", inline, want)
 	}
