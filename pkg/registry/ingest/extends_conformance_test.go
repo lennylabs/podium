@@ -2,6 +2,7 @@ package ingest_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -287,5 +288,86 @@ func TestIngest_ExtendsChildReingestIsIdempotent(t *testing.T) {
 	}
 	if got.Description != "" {
 		t.Errorf("Description = %q, want the unfolded value to persist", got.Description)
+	}
+}
+
+// parentLoadStore fails the extends fold's parent load. GetManifest returns
+// err for the pinned parent record and delegates every other call, so the
+// stub reproduces a parent that becomes unreadable between
+// resolveExtendsPin's listing and the fold's load.
+type parentLoadStore struct {
+	store.Store
+	parentID string
+	err      error
+}
+
+func (s parentLoadStore) GetManifest(ctx context.Context, tenantID, artifactID, version string) (store.ManifestRecord, error) {
+	if artifactID == s.parentID {
+		return store.ManifestRecord{}, s.err
+	}
+	return s.Store.GetManifest(ctx, tenantID, artifactID, version)
+}
+
+// Spec: §4.6 — the fold reads the pinned parent's stored record. A store
+// failure is an infrastructure fault rather than an authoring defect, so
+// Ingest aborts and reports it instead of accepting the child under its
+// unresolved columns.
+func TestIngest_ExtendsParentLoadFailureAbortsIngest(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	if res := ingestOne(t, st, "L1", "shared/parent", foldParentSrc); res.Accepted != 1 {
+		t.Fatalf("parent not accepted: %+v", res)
+	}
+	boom := errors.New("connection reset")
+	failing := parentLoadStore{Store: st, parentID: "shared/parent", err: boom}
+
+	_, err := ingest.Ingest(ctx, failing, ingest.Request{
+		TenantID: "tenant-1", LayerID: "L2", Files: fstest.MapFS{
+			"finance/child/ARTIFACT.md": &fstest.MapFile{Data: []byte(foldChildSrc)},
+		},
+	})
+	if !errors.Is(err, boom) {
+		t.Fatalf("Ingest error = %v, want it to wrap the store failure", err)
+	}
+	if !strings.Contains(err.Error(), "load extends parent shared/parent@1.0.0") {
+		t.Errorf("error = %q, want it to name the pinned parent", err)
+	}
+	if _, gerr := st.GetManifest(ctx, "tenant-1", "finance/child", "2.0.0"); gerr == nil {
+		t.Errorf("child must not be stored when the parent load fails")
+	}
+}
+
+// Spec: §4.6 — the pin resolves against the tenant's manifests, so a parent
+// that is gone by the time the fold loads it leaves the child unresolvable.
+// Ingest rejects the child rather than indexing it under its authored subset.
+func TestIngest_ExtendsParentMissingAtFoldRejectsChild(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	if res := ingestOne(t, st, "L1", "shared/parent", foldParentSrc); res.Accepted != 1 {
+		t.Fatalf("parent not accepted: %+v", res)
+	}
+	vanished := parentLoadStore{Store: st, parentID: "shared/parent", err: store.ErrNotFound}
+
+	res, err := ingest.Ingest(ctx, vanished, ingest.Request{
+		TenantID: "tenant-1", LayerID: "L2", Files: fstest.MapFS{
+			"finance/child/ARTIFACT.md": &fstest.MapFile{Data: []byte(foldChildSrc)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if len(res.Rejected) != 1 || res.Accepted != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want the child rejected", res.Accepted, res.Rejected)
+	}
+	if res.Rejected[0].Code != "ingest.invalid_artifact" {
+		t.Errorf("code = %q, want ingest.invalid_artifact", res.Rejected[0].Code)
+	}
+	if want := "extends: parent shared/parent@1.0.0 not found"; res.Rejected[0].Reason != want {
+		t.Errorf("reason = %q, want %q", res.Rejected[0].Reason, want)
+	}
+	if _, gerr := st.GetManifest(ctx, "tenant-1", "finance/child", "2.0.0"); gerr == nil {
+		t.Errorf("rejected child must not be stored")
 	}
 }
