@@ -40,7 +40,7 @@ At request time the registry folds the parent's frontmatter into the child's per
 | `<id>@<semver>.x` | Minor or patch range (e.g., `1.2.x`, `1.x`). |
 | `<id>@sha256:<hash>` | Content-pinned. |
 
-Parent version is resolved at the child's ingest time and stored as a hard pin in the ingested manifest's resolved form. Parent updates do not silently propagate; the child must be re-ingested (typically by bumping its `version:` and merging) to pick up changes.
+Parent version is resolved at the child's ingest time and stored as a hard pin in the ingested manifest's resolved form. Parent updates do not silently propagate. Re-ingesting the child's unchanged bytes is counted idempotent and changes nothing, so the child picks up a newer parent only when it is published at a new `version:`.
 
 ---
 
@@ -124,7 +124,7 @@ The content hash the registry records covers the child's own package: its `ARTIF
 - **Single inheritance.** `extends:` is a single scalar; no multiple inheritance. To compose from multiple parents, restructure the parents to chain (`A extends B; B extends C`).
 - **Cycle detection.** Cycles in the `extends:` graph are detected at ingest time and rejected.
 - **Parent reference.** A child may extend a different canonical ID, inheriting from a separate artifact pinned to the version resolved at the child's ingest time. A child may also extend its own canonical ID, which overlays the artifact contributed by the next-lower-precedence layer; that form is what a cross-layer collision requires. In both forms the child's `type:` must match the parent's.
-- **Re-ingest required for parent updates.** Parent version is pinned at the child's ingest time. Bumping the parent does not retroactively update the child's resolved manifest until the child is re-ingested.
+- **Republishing required for parent updates.** Parent version is pinned at the child's ingest time and is fixed for that version of the child. Bumping the parent does not retroactively update the child's resolved manifest, and re-ingesting the child's unchanged bytes is counted idempotent and changes nothing. Publish a new `version:` of the child to pin the newer parent.
 
 ---
 
