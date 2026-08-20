@@ -1355,8 +1355,8 @@ func stripPin(ref string) string {
 // foldExtendsParent folds the pinned parent's stored record into the
 // child's and returns the child. Only the columns every store backend
 // persists are written: Description, Tags, Sensitivity, and
-// SearchVisibility. spec: §4.6 field-semantics table and "Default for
-// unlisted fields".
+// SearchVisibility. spec: §4.6 field-semantics table and "Omitted
+// fields".
 //
 // The projection stays a pure function of the stored record, so the
 // inline embed, the vector-outbox row, and `podium admin reembed` all
