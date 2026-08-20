@@ -1,7 +1,7 @@
 # Proposal 0009: Index and serve the §4.6-merged manifest for an extends child
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-08-19). Converged after 9 adversarial review rounds (21 findings fixed).
+- Status: Implemented (2026-08-19). Converged after 9 adversarial review rounds (21 findings fixed).
 - Date: 2026-08-19
 
 ## Summary
@@ -43,17 +43,17 @@
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §4.6's omitted-field rule is restated over every frontmatter field, covering an empty scalar, and the §4.6 layer-resolution sentence cross-references the §9.1 `LayerComposer` row.
+- [x] **S1 · spec** — SPEC-1. §4.6's omitted-field rule is restated over every frontmatter field, covering an empty scalar, and the §4.6 layer-resolution sentence cross-references the §9.1 `LayerComposer` row.
       Levels: — Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §4.7 names the §4.6-resolved frontmatter as the source of the artifact embedding projection.
+- [x] **S2 · spec** — SPEC-2. §4.7 names the §4.6-resolved frontmatter as the source of the artifact embedding projection.
       Levels: — Depends on: S1
-- [ ] **S3 · code** — CODE-3. The §4.7 artifact projection collapses into `pkg/registry/projection`, on the reembed semantics, with a case pinning that the ingest write path and `ReembedOne` produce identical text. Lands before the fold so S4's test asserts the merged projection through one exported function.
+- [x] **S3 · code** — CODE-3. The §4.7 artifact projection collapses into `pkg/registry/projection`, on the reembed semantics, with a case pinning that the ingest write path and `ReembedOne` produce identical text. Lands before the fold so S4's test asserts the merged projection through one exported function.
       Levels: unit. Depends on: —
-- [ ] **S4 · code** — CODE-1, TEST-1. Ingest folds the pinned parent into `Description`, `Tags`, `Sensitivity`, and `SearchVisibility` on the stored record, with the ingest-level tests and the cross-backend `test/integration/` round-trip case that pin it.
+- [x] **S4 · code** — CODE-1, TEST-1. Ingest folds the pinned parent into `Description`, `Tags`, `Sensitivity`, and `SearchVisibility` on the stored record, with the ingest-level tests and the cross-backend `test/integration/` round-trip case that pin it.
       Levels: integration. Depends on: S2, S3
-- [ ] **S5 · code** — CODE-2, TEST-2. The `SearchArtifacts` result loop carries the stored sensitivity and strips the `extends:` key from the frontmatter block, `mergedSensitivity` is deleted, and the search-path tests pin agreement with `load_artifact`, recall on a parent-only term, the hidden-parent descriptor including its failure arm and its unknown-key arm, the pre-rank filters reading the merged fields, and the absence of `frontmatter` and `sensitivity` on a `load_domain` notable entry.
+- [x] **S5 · code** — CODE-2, TEST-2. The `SearchArtifacts` result loop carries the stored sensitivity and strips the `extends:` key from the frontmatter block, `mergedSensitivity` is deleted, and the search-path tests pin agreement with `load_artifact`, recall on a parent-only term, the hidden-parent descriptor including its failure arm and its unknown-key arm, the pre-rank filters reading the merged fields, and the absence of `frontmatter` and `sensitivity` on a `load_domain` notable entry.
       Levels: integration, e2e. Depends on: S4
-- [ ] **S6 · docs** — DOCS-1. Every documentation page the staged spec edits and CODE-2 reach is corrected: the pages restating §4.6's omitted-field rule follow SPEC-1, the page naming the artifact projection's fields follows SPEC-2, and the page documenting the `search_artifacts` result's `frontmatter` field follows CODE-2. The "Documentation changes" section states the constraint each page must satisfy and how its page set is derived. The release's CHANGELOG entry carries decision 14's operator note that a version already ingested keeps its unfolded columns.
+- [x] **S6 · docs** — DOCS-1. Every documentation page the staged spec edits and CODE-2 reach is corrected: the pages restating §4.6's omitted-field rule follow SPEC-1, the page naming the artifact projection's fields follows SPEC-2, and the page documenting the `search_artifacts` result's `frontmatter` field follows CODE-2. The "Documentation changes" section states the constraint each page must satisfy and how its page set is derived. The release's CHANGELOG entry carries decision 14's operator note that a version already ingested keeps its unfolded columns.
       Levels: — Depends on: S1, S2, S5
 
 ## Current state and the gap
