@@ -1431,6 +1431,11 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 	versions := make([]string, 0, 4)
 	hashByVersion := map[string]string{}
 	typeByVersion := map[string]string{}
+	// deprecatedByVersion and ingestedAtByVersion carry the two columns
+	// §4.7.6 candidate selection needs: the deprecation flag the filter
+	// removes on, and the ingest timestamp `latest` orders by.
+	deprecatedByVersion := map[string]bool{}
+	ingestedAtByVersion := map[string]time.Time{}
 	// frontmatterByVersion lets the resolver recover the parent's license
 	// (not an indexed column) so ingest can flag a cross-layer license
 	// change per the §4.6 field-semantics table.
@@ -1453,6 +1458,8 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 		versions = append(versions, m.Version)
 		hashByVersion[m.Version] = m.ContentHash
 		typeByVersion[m.Version] = m.Type
+		deprecatedByVersion[m.Version] = m.Deprecated
+		ingestedAtByVersion[m.Version] = m.IngestedAt
 		frontmatterByVersion[m.Version] = m.Frontmatter
 	}
 	if len(versions) == 0 {
@@ -1474,7 +1481,35 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 			return "", "", "", fmt.Errorf("no parent version with content hash sha256:%s", p.Hash)
 		}
 	} else {
-		resolved, err = version.Resolve(p, versions)
+		// Spec: §4.7.6 — a range or unpinned reference selects among the
+		// parent's non-deprecated versions only, so deprecated candidates
+		// leave the selection set before resolution. The unfiltered
+		// `versions` slice stays intact for the empty-candidate checks
+		// above and below.
+		selectable := make([]string, 0, len(versions))
+		for _, v := range versions {
+			if !deprecatedByVersion[v] {
+				selectable = append(selectable, v)
+			}
+		}
+		if p.Kind == version.PinLatest {
+			// Spec: §4.7.6 — `latest` is the most recently ingested
+			// non-deprecated version, so order by ingest time rather than
+			// by semver and a backported fix published after a newer major
+			// line wins. The read path runs the same rule at
+			// pkg/registry/core/core.go, and it deliberately diverges by
+			// falling back to the full candidate set when every version is
+			// deprecated so a caller still receives stored bytes. Ingest
+			// writes a new row instead of serving one, so it fails closed
+			// here and lets the author correct the source.
+			cands := make([]version.Candidate, 0, len(selectable))
+			for _, v := range selectable {
+				cands = append(cands, version.Candidate{Version: v, IngestedAt: ingestedAtByVersion[v]})
+			}
+			resolved, err = version.ResolveLatest(cands)
+		} else {
+			resolved, err = version.Resolve(p, selectable)
+		}
 		if err != nil {
 			return "", "", "", fmt.Errorf("no parent version satisfies %q", ref)
 		}

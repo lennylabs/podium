@@ -723,17 +723,6 @@ func TestSearchArtifacts_FiltersReadMergedFields(t *testing.T) {
 			opts:   core.SearchArtifactsOptions{Tags: []string{"parent-tag"}},
 			want:   true,
 		},
-		{
-			// Accepted deferral: deprecated: true is not folded into the
-			// child's record, because PutManifest stamps DeprecatedAt from it
-			// and would arm the §8.4 purge against a child whose author never
-			// deprecated it. A child of a deprecated parent is therefore still
-			// returned by a default search.
-			name:   "child of a deprecated parent is still returned",
-			parent: "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\ndeprecated: true\n---\n\nparent body\n",
-			child:  "---\ntype: agent\nversion: 2.0.0\ndescription: child desc\nextends: shared/parent@1.x\n---\n\nchild body\n",
-			want:   true,
-		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
