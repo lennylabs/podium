@@ -64,6 +64,12 @@ type LayerEndpoint struct {
 	// reorder. It is the §8.3 registry sink (a file sink or an EndpointSink
 	// when redirected to a SIEM). Nil is a no-op.
 	auditSink audit.Sink
+	// publishEvent fans a §7.6 layer.config_changed onto the registry event
+	// bus so a `podium sync --watch` subscriber re-resolves its profile. It
+	// is distinct from auditSink, which records the §8.1 event for an
+	// operator rather than waking a client. Nil is a no-op, which is the
+	// deployment that wires no event bus.
+	publishEvent func(context.Context, string, map[string]any)
 	// auditFile is the file-backed form of the §8.3 registry sink, set only
 	// when the sink writes a local log. The §8.5 erasure pass rewrites the
 	// on-disk hash chain in place (audit.EraseUser), so it needs the concrete
@@ -200,6 +206,15 @@ func (e *LayerEndpoint) WithAudit(sink audit.Sink) *LayerEndpoint {
 	return e
 }
 
+// WithEventPublisher installs the hook that fans a layer.config_changed onto
+// the registry event bus. serverboot passes the registry server's
+// PublishEvent, so the event reaches both the streamed /v1/events
+// subscription a watcher holds and any §7.3.2 outbound webhook receiver.
+func (e *LayerEndpoint) WithEventPublisher(fn func(context.Context, string, map[string]any)) *LayerEndpoint {
+	e.publishEvent = fn
+	return e
+}
+
 // WithEraseSink installs the file-backed sink the §8.5 erasure flow
 // rewrites in place. Pass the same file sink given to WithAudit when the
 // registry writes a local log; pass nil when redirected to an external
@@ -225,6 +240,27 @@ func (e *LayerEndpoint) emitLayerEvent(r *http.Request, cfg store.LayerConfig, a
 		fields["owner"] = cfg.Owner
 	}
 	emitAuditEvent(e.auditSink, r, e.identify(r), typ, cfg.ID, fields)
+	// Spec: §7.6 — the watcher re-resolves its profile on
+	// layer.config_changed, so an admin layer change wakes it. A personal
+	// layer emits layer.user_registered instead and is not a §7.6 trigger:
+	// it changes one user's composition rather than the admin-defined one
+	// every watcher in the tenant resolves.
+	if typ == audit.EventLayerConfigChanged {
+		e.publishConfigChanged(r.Context(), cfg.ID, fields["action"])
+	}
+}
+
+// publishConfigChanged fans a §7.6 layer.config_changed onto the event bus.
+// The payload names the layer and the action so a receiver can tell a
+// registration from a reorder without a second call.
+func (e *LayerEndpoint) publishConfigChanged(ctx context.Context, layerID, action string) {
+	if e.publishEvent == nil {
+		return
+	}
+	e.publishEvent(ctx, string(audit.EventLayerConfigChanged), map[string]any{
+		"layer":  layerID,
+		"action": action,
+	})
 }
 
 func boolString(b bool) string {
@@ -887,6 +923,7 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	if len(req.Order) > 0 {
 		emitAuditEvent(e.auditSink, r, e.identify(r), audit.EventLayerConfigChanged,
 			strings.Join(req.Order, ","), map[string]string{"action": "reorder"})
+		e.publishConfigChanged(r.Context(), strings.Join(req.Order, ","), "reorder")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"layers": updated})
 }

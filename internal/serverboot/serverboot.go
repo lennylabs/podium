@@ -1197,6 +1197,10 @@ func run(ctx context.Context, stop func()) error {
 	// anonymous caller.
 	layerIdentity := layerIdentityResolver(layerVerify)
 	layers := server.NewLayerEndpoint(st, tenantID, mode).
+		// §7.6: an admin layer change wakes a `podium sync --watch`
+		// subscriber, so the endpoint publishes onto the same bus
+		// /v1/events streams from.
+		WithEventPublisher(srv.PublishEvent).
 		WithDefaultVisibility(cfg.defaultLayerVisibility).
 		WithMaxUserLayers(cfg.maxUserLayers).
 		WithPublicBaseURL(cfg.publicURL).
