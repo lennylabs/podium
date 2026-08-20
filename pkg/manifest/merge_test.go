@@ -138,6 +138,29 @@ func TestMergeExtends_FieldSemanticsTable(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 — the sensitivity ordering the merge folds on. The empty
+// string and an unrecognized value both rank below "low", so a parent or a
+// child that declares nothing never raises the result.
+func TestMostRestrictiveSensitivity(t *testing.T) {
+	t.Parallel()
+	cases := []struct{ a, b, want string }{
+		{"", "", ""},
+		{"low", "", "low"},
+		{"", "low", "low"},
+		{"low", "medium", "medium"},
+		{"medium", "low", "medium"},
+		{"medium", "high", "high"},
+		{"high", "low", "high"},
+		{"high", "high", "high"},
+		{"unknown", "low", "low"},
+	}
+	for _, c := range cases {
+		if got := mostRestrictiveSensitivity(c.a, c.b); got != c.want {
+			t.Errorf("mostRestrictiveSensitivity(%q, %q) = %q, want %q", c.a, c.b, got, c.want)
+		}
+	}
+}
+
 // Spec: §4.6 — the child cannot relax the parent's sensitivity or sandbox.
 func TestMergeExtends_MostRestrictiveCannotRelax(t *testing.T) {
 	t.Parallel()

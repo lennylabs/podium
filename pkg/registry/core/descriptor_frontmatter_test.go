@@ -87,6 +87,16 @@ func TestFrontmatterBlockHidingParent(t *testing.T) {
 			zero: true,
 		},
 		{
+			name: "merge-key declared extends fails closed",
+			src:  "---\nbase: &b\n  extends: shared/parent@1.0.0\ntype: agent\n<<: *b\n---\n\nbody\n",
+			zero: true,
+		},
+		{
+			name: "anchored extends value with a sibling alias fails closed",
+			src:  "---\ntype: agent\nextends: &p shared/parent@1.0.0\nnote: *p\n---\n\nbody\n",
+			zero: true,
+		},
+		{
 			name: "empty header fails closed",
 			src:  "---\n---\n\nbody\n",
 			zero: true,

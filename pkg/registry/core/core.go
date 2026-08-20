@@ -1770,24 +1770,6 @@ func parsedArtifact(rec store.ManifestRecord) *manifest.Artifact {
 	}
 }
 
-func mostRestrictiveSensitivity(a, b string) string {
-	rank := func(s string) int {
-		switch s {
-		case "high":
-			return 3
-		case "medium":
-			return 2
-		case "low":
-			return 1
-		}
-		return 0
-	}
-	if rank(b) > rank(a) {
-		return b
-	}
-	return a
-}
-
 // splitParentRef splits "<id>@<version>" into its components. It splits on
 // the first "@" so it parses the §4.2 reference grammar identically to the
 // other split helpers (ingest.splitRef/stripPin, composer.SplitArtifactRef);
@@ -2073,6 +2055,13 @@ func frontmatterBlockHidingParent(src []byte) string {
 		return ""
 	}
 	root := doc.Content[0]
+	if hasAnchorOrAlias(root) {
+		// An anchor, an alias, or a merge key can carry the parent reference
+		// under a key that is not "extends", and deleting an anchoring key
+		// leaves a dangling alias behind. Neither is rewritable at the node
+		// level, so the whole block is dropped.
+		return ""
+	}
 	kept := make([]*yaml.Node, 0, len(root.Content))
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		if root.Content[i].Value == "extends" {
@@ -2087,7 +2076,31 @@ func frontmatterBlockHidingParent(src []byte) string {
 		// the alternative to failing closed here is emitting the parent.
 		return ""
 	}
-	return "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
+	block := "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
+	// Re-read the rewritten block the way ingest reads a manifest. Anything
+	// that still resolves to an extends reference names the parent, so the
+	// block is dropped rather than served.
+	if a, err := manifest.ParseArtifact([]byte(block)); err != nil || a.Extends != "" {
+		return ""
+	}
+	return block
+}
+
+// hasAnchorOrAlias reports whether n or any node beneath it is a YAML alias,
+// carries an anchor, or is a merge key. Spec: §4.6 hidden parents.
+func hasAnchorOrAlias(n *yaml.Node) bool {
+	if n == nil {
+		return false
+	}
+	if n.Kind == yaml.AliasNode || n.Anchor != "" || n.Tag == "!!merge" {
+		return true
+	}
+	for _, c := range n.Content {
+		if hasAnchorOrAlias(c) {
+			return true
+		}
+	}
+	return false
 }
 
 func inPrefix(id, prefix string) bool {
