@@ -42,7 +42,7 @@ At request time the registry folds the parent's frontmatter into the child's per
 
 Parent version is resolved at the child's ingest time and stored as a hard pin in the ingested manifest's resolved form. Parent updates do not silently propagate. Re-ingesting the child's unchanged bytes is counted idempotent and changes nothing, so the child picks up a newer parent only when it is published at a new `version:`.
 
-An unpinned `<id>` reference resolves to the most recently ingested version of the parent, which is the version with the latest ingest timestamp rather than the highest semver.
+An unpinned `<id>` reference resolves to the most recently ingested non-deprecated version of the parent, which is the version with the latest ingest timestamp rather than the highest semver.
 
 ### Deprecated parent versions
 
