@@ -51,9 +51,10 @@ func TestDescriptorOf_SearchDropsBody(t *testing.T) {
 // top-level extends key and keeps every other authored key, including one
 // manifest.Artifact does not declare. It fails closed on any input it cannot
 // split, decode, or re-encode, and on the two node-level cases that leave the
-// parent reachable after the key is deleted (a top-level merge key and an
-// alias into the deleted value), because the block it could not rewrite is the
-// block that names the parent.
+// parent reachable after the key is deleted (a top-level merge key whose
+// anchored mapping carries an extends entry, and an alias into the deleted
+// value), because the block it could not rewrite is the block that names the
+// parent.
 func TestFrontmatterBlockHidingParent(t *testing.T) {
 	tests := []struct {
 		name string
@@ -98,6 +99,32 @@ func TestFrontmatterBlockHidingParent(t *testing.T) {
 			name: "merge-key declared extends fails closed",
 			src:  "---\nbase: &b\n  extends: shared/parent@1.0.0\ntype: agent\n<<: *b\n---\n\nbody\n",
 			zero: true,
+		},
+		{
+			name: "merge-key declared extends behind a nested merge fails closed",
+			src:  "---\ninner: &i\n  extends: shared/parent@1.0.0\nouter: &o\n  <<: *i\ntype: agent\n<<: *o\n---\n\nbody\n",
+			zero: true,
+		},
+		{
+			name: "merge-key sequence reaching extends fails closed",
+			src:  "---\ndefaults: &d\n  acme_owner: platform-team\nbase: &b\n  extends: shared/parent@1.0.0\ntype: agent\n<<: [*d, *b]\n---\n\nbody\n",
+			zero: true,
+		},
+		{
+			// A scalar merge value reaches no mapping, so it names no parent.
+			name: "merge-key with a scalar value is served",
+			src:  "---\ntype: agent\n<<: not-an-alias\nextends: shared/parent@1.0.0\n---\n\nbody\n",
+			want: []string{"type: agent", "not-an-alias"},
+			gone: []string{"extends", "shared/parent", "body"},
+		},
+		{
+			// A merge key the child authored for an unrelated purpose keeps
+			// the parent unnamed, so the block is served with the merge key
+			// and the top-level extends key gone.
+			name: "merge-key unrelated to extends is served",
+			src:  "---\ndefaults: &d\n  acme_owner: platform-team\ntype: agent\n<<: *d\nextends: shared/parent@1.0.0\n---\n\nbody\n",
+			want: []string{"type: agent", "acme_owner: platform-team", "<<: *d"},
+			gone: []string{"extends", "shared/parent", "body"},
 		},
 		{
 			name: "anchored extends value with a sibling alias fails closed",

@@ -2042,10 +2042,10 @@ func frontmatterBlock(src []byte) string {
 // It fails closed: any failure to split, decode, or re-encode returns "",
 // because the block that could not be rewritten is the block that names the
 // parent. Two node-level cases join that set, because in both of them deleting
-// the top-level key leaves the parent reachable: a top-level merge key can
-// carry an extends: entry in from an anchored mapping, and an alias can point
-// at an anchor defined inside the deleted subtree. An anchor unrelated to
-// extends is untouched and its block is served.
+// the top-level key leaves the parent reachable: a top-level merge key whose
+// anchored mapping itself carries an extends: entry, and an alias that points
+// at an anchor defined inside the deleted subtree. A merge key or an anchor
+// that does not reach an extends: entry is untouched and its block is served.
 func frontmatterBlockHidingParent(src []byte) string {
 	fm, _, err := manifest.SplitFrontmatter(src)
 	if err != nil {
@@ -2064,7 +2064,11 @@ func frontmatterBlockHidingParent(src []byte) string {
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		key := root.Content[i]
 		if key.Tag == "!!merge" || key.Value == "<<" {
-			return ""
+			if mergeContributesExtends(root.Content[i+1], map[*yaml.Node]bool{}) {
+				return ""
+			}
+			kept = append(kept, key, root.Content[i+1])
+			continue
 		}
 		if key.Value == "extends" {
 			dropped = append(dropped, key, root.Content[i+1])
@@ -2083,6 +2087,49 @@ func frontmatterBlockHidingParent(src []byte) string {
 		return ""
 	}
 	return "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
+}
+
+// mergeContributesExtends reports whether the value of a top-level merge key
+// pulls an extends entry into the mapping. A merge value is an alias to an
+// anchored mapping or a sequence of such aliases, and an anchored mapping may
+// carry a merge key of its own, so the walk follows both. The seen set guards
+// against an alias cycle, which the decoder can produce and which would
+// otherwise recur without end.
+// Spec: §4.6 hidden parents — deleting the top-level extends key does not
+// remove one merged in from elsewhere, so a merge value that reaches an
+// extends entry fails the strip closed. A merge value that does not reach one
+// leaves the parent unnamed and is kept.
+func mergeContributesExtends(v *yaml.Node, seen map[*yaml.Node]bool) bool {
+	if v == nil || seen[v] {
+		return false
+	}
+	seen[v] = true
+	switch v.Kind {
+	case yaml.AliasNode:
+		return mergeContributesExtends(v.Alias, seen)
+	case yaml.SequenceNode:
+		for _, e := range v.Content {
+			if mergeContributesExtends(e, seen) {
+				return true
+			}
+		}
+		return false
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(v.Content); i += 2 {
+			key := v.Content[i]
+			if key.Value == "extends" {
+				return true
+			}
+			if key.Tag == "!!merge" || key.Value == "<<" {
+				if mergeContributesExtends(v.Content[i+1], seen) {
+					return true
+				}
+			}
+		}
+		return false
+	default:
+		return false
+	}
 }
 
 // nodeSet collects every node reachable from roots, so a later alias check can
