@@ -725,6 +725,8 @@ Hybrid retrieval (BM25 + vectors via RRF) needs an embedding for every artifact 
 - `when_to_use` (joined with newlines)
 - `tags` (joined)
 
+The projection is built from the artifact's §4.6-resolved frontmatter. When a manifest declares `extends:`, the chain is folded per the §4.6 field-semantics table before the projection is taken, so an artifact is indexed under the same `description` and `tags` that `load_artifact` and `search_artifacts` serve for it. The requirement is over `description` and `tags`; a registry whose metadata store persists no resolved `name` or `when_to_use` is under no obligation for those two fields.
+
 The prose body is **not** embedded (the `SKILL.md` body for skills, the `ARTIFACT.md` body for other types). The body is noisy for retrieval and risks busting embedding-model context limits at the long-tail end. Authors who want richer search recall put discoverability content in `description` and `when_to_use`. The same projection is applied to `search_artifacts` queries when the caller passes a text `query` (the `query` is treated as a free-text search target rather than concatenated with the projection).
 
 **Domain embeddings.** A canonical text projection per domain, built when a `DOMAIN.md` is present:
