@@ -175,7 +175,7 @@ func TestMergeExtends_MostRestrictiveCannotRelax(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 "Default for unlisted fields" — a child can override an
+// Spec: §4.6 "Omitted fields" — a child can override an
 // inherited field by setting it.
 func TestMergeExtends_UnlistedChildOverrides(t *testing.T) {
 	t.Parallel()

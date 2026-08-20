@@ -548,7 +548,7 @@ func TestExtends_AllowsSameIDWithExtends(t *testing.T) {
 
 // a cross-type extends is rejected (child type must match the
 // parent type), so the child is dropped and the parent serves.
-// spec: docs/authoring/extends.md § "Default for unlisted fields".
+// spec: docs/authoring/extends.md § "Omitted fields".
 func TestExtends_CrossTypeRejected(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent agent\n---\n\nagent body\n"
@@ -693,7 +693,7 @@ func TestExtends_SearchVisibilityMostRestrictiveInMergedFrontmatter(t *testing.T
 }
 
 // a child omitting a parent field inherits the parent's value.
-// spec: docs/authoring/extends.md § "Default for unlisted fields".
+// spec: docs/authoring/extends.md § "Omitted fields".
 func TestExtends_UnlistedFieldInherited(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\neffort_hint: high\n---\n\nbody\n"
@@ -944,7 +944,7 @@ func TestExtends_SyncFilesystemNotMerged(t *testing.T) {
 // cross-type extends chain. The child's type: must match the parent's; the
 // filesystem-source materialization path enforces the same rejection the
 // server ingest path applies. spec: docs/authoring/extends.md §
-// "Default for unlisted fields"; §4.6.
+// "Omitted fields"; §4.6.
 func TestExtends_SyncFilesystemCrossTypeRejected(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
