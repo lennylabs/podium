@@ -1749,14 +1749,15 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 		// extends a parent still ships its own authored SKILL.md.
 		out.SkillRaw = c.SkillRaw
 	}
-	// Surface the merged structured fields back onto the record so search
-	// descriptors, sensitivity gating, and deprecation reporting agree
-	// with the served frontmatter.
+	// Surface the merged structured fields the served result reads. Every
+	// field here has a consumer: resultFromRecord copies Type, Sensitivity,
+	// Deprecated, and ReplacedBy, and withDeprecationWarning reads the last
+	// two. Description, Tags, and SearchVisibility are deliberately absent,
+	// because LoadArtifactResult declares no such fields; the search path
+	// reads the stored columns the ingest fold writes rather than this
+	// record.
 	out.Type = string(merged.Type)
-	out.Description = merged.Description
-	out.Tags = append([]string(nil), merged.Tags...)
 	out.Sensitivity = string(merged.Sensitivity)
-	out.SearchVisibility = string(merged.SearchVisibility)
 	out.Deprecated = merged.Deprecated
 	out.ReplacedBy = merged.ReplacedBy
 	// §4.6 makes audit_redact inheritable and manifest.MergeExtends folds it,
