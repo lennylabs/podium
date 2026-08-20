@@ -52,7 +52,12 @@ A child may not extend a deprecated parent version.
 - A range (`<id>@1.x`) or unpinned (`<id>`) reference selects among the parent's non-deprecated versions. Deprecated versions are removed from the candidate set before resolution, so `latest` for such a reference is the most recently ingested non-deprecated version.
 - When the parent has stored versions and the filter leaves no candidate, ingest rejects the child with `ingest.invalid_artifact` and reports that the parent's candidate versions are deprecated. The reference does not fall back to the deprecated versions.
 
-Deprecation is per-version and a stored version's flag never changes, so the rule applies to the child version being ingested. A child already stored against a parent version that was live at the child's ingest time keeps resolving that pin after the parent version is deprecated.
+Deprecation is per-version and a stored version's flag never changes, so the check runs against the candidate set as it stands at the moment of ingest. A child row that is already stored keeps its recorded parent pin, and the read path continues to resolve that pin after the parent version is deprecated.
+
+Re-ingesting an already-stored child re-runs the resolution before the idempotency check, so the outcome depends on the pin:
+
+- A child with a range or unpinned reference re-ingests idempotently, because its resolution still finds a non-deprecated candidate.
+- A child whose exact or content-hash pin names the now-deprecated parent version is rejected on every subsequent ingest of its layer until the `extends:` reference is updated to a live parent version.
 
 ---
 
