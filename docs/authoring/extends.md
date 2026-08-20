@@ -52,12 +52,9 @@ A child may not extend a deprecated parent version.
 - A range (`<id>@1.x`) or unpinned (`<id>`) reference selects among the parent's non-deprecated versions. Deprecated versions are removed from the candidate set before resolution, so `latest` for such a reference is the most recently ingested non-deprecated version.
 - When the parent has stored versions and the filter leaves no candidate, ingest rejects the child with `ingest.invalid_artifact` and reports that the parent's candidate versions are deprecated. The reference does not fall back to the deprecated versions.
 
-Deprecation is per-version and a stored version's flag never changes, so the check runs against the candidate set as it stands at the moment of ingest. A child row that is already stored keeps its recorded parent pin, and the read path continues to resolve that pin after the parent version is deprecated.
+Deprecation is per-version and a stored version's flag never changes. Deprecating a parent line means publishing a new parent version that carries `deprecated: true`, which adds a candidate the filter skips. A child that is already stored keeps the parent pin recorded at its own ingest, and a later deprecated parent version leaves that stored pin and its resolution on the read path unchanged.
 
-Re-ingesting an already-stored child re-runs the resolution before the idempotency check, so the outcome depends on the pin:
-
-- A child with a range or unpinned reference re-ingests idempotently, because its resolution still finds a non-deprecated candidate.
-- A child whose exact or content-hash pin names the now-deprecated parent version is rejected on every subsequent ingest of its layer until the `extends:` reference is updated to a live parent version.
+The refusal therefore applies to the child version being ingested, and it never invalidates a child already stored against a parent version that was live when the child was ingested. A child runs the check again when it is published at a new `version:`. At that point a range or unpinned reference re-pins onto a non-deprecated candidate, and an exact or content-hash pin naming a deprecated version is refused. A pin that names a version already deprecated when the child is first ingested is rejected on that ingest and on every retry until the `extends:` reference names a live version.
 
 ---
 
