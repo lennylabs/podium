@@ -1717,15 +1717,23 @@ func mergeChain(chain []store.ManifestRecord) store.ManifestRecord {
 		out.ArtifactID = c.ArtifactID
 		out.Version = c.Version
 		out.ContentHash = c.ContentHash
+		// Spec: §4.7.9 — the signature covers the content hash, and the line
+		// above takes the child's, so the envelope must follow it. Left at
+		// the root parent's, an extends child was served a signature that
+		// could not verify against the hash it was served with, which fails
+		// closed and makes signing and extends: mutually exclusive.
+		out.Signature = c.Signature
 		out.Layer = c.Layer
 		out.IngestedAt = c.IngestedAt
 		out.ExtendsPin = c.ExtendsPin
 		// The body takes the child's; the parent's prose is not
 		// concatenated — extends inherits structured fields, not the
-		// markdown body.
-		if len(c.Body) > 0 {
-			out.Body = c.Body
-		}
+		// markdown body. The assignment is unconditional, matching
+		// manifest.MergeExtends and the filesystem resolver: guarding on a
+		// non-empty child body served the parent's prose to a child that
+		// authored none, and reached a requester who may hold no access to
+		// the parent's layer.
+		out.Body = c.Body
 		// Bundled resources belong to the concrete package: the child's
 		// own files ship, not the hidden parent's (§4.6). The leaf record
 		// is last in the chain, so its refs win.
