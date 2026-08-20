@@ -1480,6 +1480,17 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 		if resolved == "" {
 			return "", "", "", fmt.Errorf("no parent version with content hash sha256:%s", p.Hash)
 		}
+	} else if p.Kind == version.PinExact {
+		// Spec: §4.7.6 — the deprecation filter covers a range or unpinned
+		// reference only. An exact pin names one version, so it resolves
+		// against the unfiltered candidate set and a pin onto a deprecated
+		// version reaches the §4.6 deprecation refusal with a message that
+		// names deprecation, rather than being reported as an unsatisfiable
+		// range by the arm below.
+		resolved, err = version.Resolve(p, versions)
+		if err != nil {
+			return "", "", "", fmt.Errorf("no parent version satisfies %q", ref)
+		}
 	} else {
 		// Spec: §4.7.6 — a range or unpinned reference selects among the
 		// parent's non-deprecated versions only, so deprecated candidates

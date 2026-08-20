@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -68,13 +69,14 @@ func TestResolveExtendsPin_UnpinnedSelectsMostRecentlyIngestedNonDeprecated(t *t
 	}
 }
 
-// Spec: §4.7.6 — an exact pin resolves against the filtered candidate set, so
-// the resolved parent type comes from the version the reference names.
+// Spec: §4.7.6 — an exact pin against a live candidate set resolves to the
+// version the reference names, and carries the parent's type.
 func TestResolveExtendsPin_ExactPinResolvesLiveVersion(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	putParentVersion(t, st, "1.0.0", false, base)
+	putParentVersion(t, st, "1.0.1", false, base.Add(time.Hour))
 
 	pin, parentType, _, err := resolveExtendsPin(ctx, st, "default", "shared/parent@1.0.0",
 		"finance/child", "1.0.0", "finance")
@@ -83,5 +85,22 @@ func TestResolveExtendsPin_ExactPinResolvesLiveVersion(t *testing.T) {
 	}
 	if pin != "shared/parent@1.0.0" || parentType != "agent" {
 		t.Errorf("pin = %q, type = %q, want shared/parent@1.0.0 and agent", pin, parentType)
+	}
+}
+
+// Spec: §4.7.6 — the deprecation filter covers a range or unpinned reference
+// only. An exact pin naming a deprecated version keeps its own candidate, so
+// the failure it reports names deprecation rather than an unsatisfiable range.
+func TestResolveExtendsPin_ExactPinOntoDeprecatedIsNotARangeMiss(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	putParentVersion(t, st, "1.0.0", false, base)
+	putParentVersion(t, st, "1.0.1", true, base.Add(time.Hour))
+
+	_, _, _, err := resolveExtendsPin(ctx, st, "default", "shared/parent@1.0.1",
+		"finance/child", "1.0.0", "finance")
+	if err != nil && strings.Contains(err.Error(), "no parent version satisfies") {
+		t.Errorf("err = %v, want the exact pin to keep its deprecated candidate rather than read as a range miss", err)
 	}
 }
