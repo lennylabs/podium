@@ -42,6 +42,18 @@ At request time the registry folds the parent's frontmatter into the child's per
 
 Parent version is resolved at the child's ingest time and stored as a hard pin in the ingested manifest's resolved form. Parent updates do not silently propagate. Re-ingesting the child's unchanged bytes is counted idempotent and changes nothing, so the child picks up a newer parent only when it is published at a new `version:`.
 
+An unpinned `<id>` reference resolves to the most recently ingested version of the parent, which is the version with the latest ingest timestamp rather than the highest semver.
+
+### Deprecated parent versions
+
+A child may not extend a deprecated parent version.
+
+- An `extends:` reference that names a deprecated version explicitly, by exact semver (`<id>@1.2.0`) or by content hash (`<id>@sha256:<hash>`), is rejected at ingest with `ingest.invalid_artifact`.
+- A range (`<id>@1.x`) or unpinned (`<id>`) reference selects among the parent's non-deprecated versions. Deprecated versions are removed from the candidate set before resolution, so `latest` for such a reference is the most recently ingested non-deprecated version.
+- When the parent has stored versions and the filter leaves no candidate, ingest rejects the child with `ingest.invalid_artifact` and reports that the parent's candidate versions are deprecated. The reference does not fall back to the deprecated versions.
+
+Deprecation is per-version and a stored version's flag never changes, so the rule applies to the child version being ingested. A child already stored against a parent version that was live at the child's ingest time keeps resolving that pin after the parent version is deprecated.
+
 ---
 
 ## Field merge semantics
@@ -237,6 +249,7 @@ The parent's `sandbox_profile: unrestricted` is overridden by the child's `read-
 - Cycle detected: ingest error.
 - Child declaring `extends:` against a parent in a layer the child's layer cannot see: ingest succeeds; the parent resolves at request time per the visibility rules above.
 - Child declaring `extends:` with a parent type that doesn't match the child's type: ingest error.
+- Child declaring `extends:` with an exact or content-hash pin onto a deprecated parent version, or with a range or unpinned reference whose every candidate version is deprecated: ingest error (`ingest.invalid_artifact`).
 
 ---
 
