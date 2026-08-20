@@ -678,6 +678,31 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				})
 			}
 			mr.ExtendsPin = pin
+
+			// spec: §4.6 — an omitted or empty child scalar inherits the
+			// parent's value. Fold the pinned parent's stored record into
+			// the child's indexed columns so the values the registry
+			// filters, ranks, and (§4.7) embeds on are the resolved ones
+			// rather than the child's authored subset. The fold is one
+			// level deep: a parent is always stored before its child is
+			// accepted, so the parent's own columns already carry its
+			// ancestors' values by induction.
+			parentID, parentVersion := splitRef(pin)
+			parent, gerr := st.GetManifest(ctx, req.TenantID, parentID, parentVersion)
+			if gerr != nil {
+				// resolveExtendsPin picked the pin out of the tenant's own
+				// manifest listing, so this reads as a store failure between
+				// the two calls rather than a missing parent. Reject, because
+				// accepting the child would index it under its unresolved
+				// columns and no later pass repairs a stored version.
+				res.Rejected = append(res.Rejected, RejectedArtifact{
+					ArtifactID: rec.ID,
+					Reason:     fmt.Sprintf("extends: load parent %s: %v", pin, gerr),
+					Code:       "ingest.invalid_artifact",
+				})
+				continue
+			}
+			mr = foldExtendsParent(parent, mr)
 		}
 
 		// spec: §4.6 — reject a cross-layer same-ID collision unless an
@@ -1320,6 +1345,46 @@ func stripPin(ref string) string {
 		return ref[:i]
 	}
 	return ref
+}
+
+// foldExtendsParent folds the pinned parent's stored record into the
+// child's and returns the child. Only the columns every store backend
+// persists are written: Description, Tags, Sensitivity, and
+// SearchVisibility. spec: §4.6 field-semantics table and "Default for
+// unlisted fields".
+//
+// The projection stays a pure function of the stored record, so the
+// inline embed, the vector-outbox row, and `podium admin reembed` all
+// derive the same §4.7 text for the artifact.
+//
+// Three §4.6 fields are deliberately left unfolded. Name, WhenToUse, and
+// ReplacedBy have no column in either SQL store, so a merged value would
+// survive only until read-back and would differ per deployment mode.
+// Deprecated is excluded because PutManifest stamps DeprecatedAt from it,
+// which would arm the §8.4 hard purge against a child whose author never
+// deprecated it. The authored bytes in Frontmatter, ContentHash, Body,
+// and SkillRaw are untouched.
+func foldExtendsParent(parent, child store.ManifestRecord) store.ManifestRecord {
+	merged := manifest.MergeExtends(indexedArtifact(parent), indexedArtifact(child))
+	child.Description = merged.Description
+	child.Tags = merged.Tags
+	child.Sensitivity = string(merged.Sensitivity)
+	child.SearchVisibility = string(merged.SearchVisibility)
+	return child
+}
+
+// indexedArtifact projects the folded columns of a stored record back
+// into a manifest.Artifact so manifest.MergeExtends stays the single
+// canonical §4.6 fold. Reading the record rather than the stored
+// frontmatter matters for a skill, whose Name and Description are
+// indexed from SKILL.md while ARTIFACT.md omits them.
+func indexedArtifact(mr store.ManifestRecord) manifest.Artifact {
+	return manifest.Artifact{
+		Description:      mr.Description,
+		Tags:             mr.Tags,
+		Sensitivity:      manifest.Sensitivity(mr.Sensitivity),
+		SearchVisibility: manifest.SearchVisibility(mr.SearchVisibility),
+	}
 }
 
 // resolveExtendsPin resolves a parent reference (e.g.,

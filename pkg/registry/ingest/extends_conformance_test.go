@@ -7,6 +7,7 @@ import (
 	"testing/fstest"
 
 	"github.com/lennylabs/podium/pkg/registry/ingest"
+	"github.com/lennylabs/podium/pkg/registry/projection"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -173,5 +174,118 @@ func TestIngest_SameLayerVersionBumpNotCollision(t *testing.T) {
 	res := ingestOne(t, st, "L1", "finance/pay", "---\ntype: context\nversion: 2.0.0\ndescription: v2\nsensitivity: low\n---\n\nbody\n")
 	if res.Accepted != 1 || len(res.Rejected) != 0 {
 		t.Fatalf("same-layer version bump: accepted=%d rejected=%+v, want clean accept", res.Accepted, res.Rejected)
+	}
+}
+
+// foldParentSrc is a type:agent parent that populates every field the
+// §4.6 fold reads, plus three fields (name, when_to_use, replaced_by) the
+// fold must leave alone because no SQL store persists them.
+const foldParentSrc = "---\n" +
+	"type: agent\n" +
+	"version: 1.0.0\n" +
+	"name: parent-agent\n" +
+	"description: parent desc\n" +
+	"replaced_by: finance/successor\n" +
+	"when_to_use:\n  - parent case\n" +
+	"tags: [a, shared]\n" +
+	"sensitivity: high\n" +
+	"search_visibility: direct-only\n" +
+	"---\n\nparent body\n"
+
+// foldChildSrc extends foldParentSrc and omits description, name, and
+// replaced_by so the §4.6 inheritance rule has something to resolve.
+const foldChildSrc = "---\n" +
+	"type: agent\n" +
+	"version: 2.0.0\n" +
+	"extends: shared/parent@1.x\n" +
+	"when_to_use:\n  - child case\n" +
+	"tags: [b]\n" +
+	"sensitivity: low\n" +
+	"---\n\nchild body\n"
+
+// ingestFoldFixture ingests the parent and the extends child and returns
+// the child's stored record.
+func ingestFoldFixture(t *testing.T, st store.Store) store.ManifestRecord {
+	t.Helper()
+	if res := ingestOne(t, st, "L1", "shared/parent", foldParentSrc); res.Accepted != 1 {
+		t.Fatalf("parent not accepted: %+v", res)
+	}
+	if res := ingestOne(t, st, "L2", "finance/child", foldChildSrc); res.Accepted != 1 {
+		t.Fatalf("child not accepted: %+v", res)
+	}
+	rec, err := st.GetManifest(context.Background(), "tenant-1", "finance/child", "2.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest child: %v", err)
+	}
+	return rec
+}
+
+// Spec: §4.6 "Default for unlisted fields" — an omitted child scalar
+// inherits the parent's value, and ingest writes the resolved values into
+// the columns the registry filters, ranks, and embeds on.
+// Spec: §4.7 "Artifact embeddings" — the projection reads the §4.6-resolved
+// frontmatter, so the child is indexed under the inherited description.
+func TestIngest_ExtendsChildStoresMergedIndexColumns(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	rec := ingestFoldFixture(t, st)
+
+	if rec.Description != "parent desc" {
+		t.Errorf("Description = %q, want %q", rec.Description, "parent desc")
+	}
+	if got, want := strings.Join(rec.Tags, ","), "a,shared,b"; got != want {
+		t.Errorf("Tags = %q, want %q", got, want)
+	}
+	if rec.Sensitivity != "high" {
+		t.Errorf("Sensitivity = %q, want high (most restrictive wins)", rec.Sensitivity)
+	}
+	if rec.SearchVisibility != "direct-only" {
+		t.Errorf("SearchVisibility = %q, want direct-only", rec.SearchVisibility)
+	}
+	// The fold's field set stops at the four persisted columns.
+	if got := strings.Join(rec.WhenToUse, ","); got != "child case" {
+		t.Errorf("WhenToUse = %q, want the child's own entry only", got)
+	}
+	if rec.Name != "" || rec.ReplacedBy != "" {
+		t.Errorf("Name = %q, ReplacedBy = %q, want both unfolded", rec.Name, rec.ReplacedBy)
+	}
+	if txt := projection.Artifact(rec); !strings.Contains(txt, "parent desc") {
+		t.Errorf("§4.7 projection = %q, want it to carry the inherited description", txt)
+	}
+}
+
+// Spec: §4.7 Version immutability — re-ingesting unchanged bytes is
+// classified as idempotent before the write, so a version already stored
+// with unfolded columns keeps them. The repair is a new child version, and
+// ingest adds no backfill path.
+func TestIngest_ExtendsChildReingestIsIdempotent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	// A first store yields the record the pipeline computes, including the
+	// content hash the re-ingest below compares against.
+	rec := ingestFoldFixture(t, newStore(t))
+
+	// The store under test holds the pre-fold state a prior release wrote:
+	// the same content hash with the child's authored (empty) description.
+	st := newStore(t)
+	if res := ingestOne(t, st, "L1", "shared/parent", foldParentSrc); res.Accepted != 1 {
+		t.Fatalf("parent not accepted: %+v", res)
+	}
+	unfolded := rec
+	unfolded.Description = ""
+	if err := st.PutManifest(ctx, unfolded); err != nil {
+		t.Fatalf("PutManifest unfolded child: %v", err)
+	}
+
+	res := ingestOne(t, st, "L2", "finance/child", foldChildSrc)
+	if res.Idempotent != 1 || res.Accepted != 0 {
+		t.Fatalf("accepted=%d idempotent=%d, want the re-ingest to be idempotent", res.Accepted, res.Idempotent)
+	}
+	got, err := st.GetManifest(ctx, "tenant-1", "finance/child", "2.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.Description != "" {
+		t.Errorf("Description = %q, want the unfolded value to persist", got.Description)
 	}
 }
