@@ -2055,13 +2055,6 @@ func frontmatterBlockHidingParent(src []byte) string {
 		return ""
 	}
 	root := doc.Content[0]
-	if hasAnchorOrAlias(root) {
-		// An anchor, an alias, or a merge key can carry the parent reference
-		// under a key that is not "extends", and deleting an anchoring key
-		// leaves a dangling alias behind. Neither is rewritable at the node
-		// level, so the whole block is dropped.
-		return ""
-	}
 	kept := make([]*yaml.Node, 0, len(root.Content))
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		if root.Content[i].Value == "extends" {
@@ -2077,30 +2070,16 @@ func frontmatterBlockHidingParent(src []byte) string {
 		return ""
 	}
 	block := "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
-	// Re-read the rewritten block the way ingest reads a manifest. Anything
-	// that still resolves to an extends reference names the parent, so the
-	// block is dropped rather than served.
+	// Re-read the rewritten block the way ingest reads a manifest. This is the
+	// re-encode arm of the fail-closed set, and it covers the indirect ways a
+	// parent survives node-level deletion: a merge key that carries extends in
+	// from an anchored mapping still parses with Extends set, and an alias to
+	// the deleted extends value is now dangling and fails to parse. A benign
+	// anchor unrelated to extends re-parses cleanly and is served.
 	if a, err := manifest.ParseArtifact([]byte(block)); err != nil || a.Extends != "" {
 		return ""
 	}
 	return block
-}
-
-// hasAnchorOrAlias reports whether n or any node beneath it is a YAML alias,
-// carries an anchor, or is a merge key. Spec: §4.6 hidden parents.
-func hasAnchorOrAlias(n *yaml.Node) bool {
-	if n == nil {
-		return false
-	}
-	if n.Kind == yaml.AliasNode || n.Anchor != "" || n.Tag == "!!merge" {
-		return true
-	}
-	for _, c := range n.Content {
-		if hasAnchorOrAlias(c) {
-			return true
-		}
-	}
-	return false
 }
 
 func inPrefix(id, prefix string) bool {

@@ -87,6 +87,12 @@ func TestFrontmatterBlockHidingParent(t *testing.T) {
 			zero: true,
 		},
 		{
+			name: "an anchor unrelated to extends survives the strip",
+			src:  "---\ntype: agent\nversion: 2.0.0\ntags: &t [alpha, beta]\nother: *t\nextends: shared/parent@1.0.0\n---\n\nbody\n",
+			want: []string{"type: agent", "alpha", "other"},
+			gone: []string{"extends", "shared/parent", "body"},
+		},
+		{
 			name: "merge-key declared extends fails closed",
 			src:  "---\nbase: &b\n  extends: shared/parent@1.0.0\ntype: agent\n<<: *b\n---\n\nbody\n",
 			zero: true,
