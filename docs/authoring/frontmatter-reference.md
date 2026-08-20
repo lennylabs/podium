@@ -291,7 +291,7 @@ When two layers contribute artifacts with the same canonical ID, the higher-prec
 
 For skills, the merge applies to the `ARTIFACT.md` frontmatter. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's.
 
-Fields not in this table merge as "child wins": if the child sets the field its value replaces the parent's, otherwise the parent's value is inherited. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
+If a child omits a frontmatter field, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above. When both the parent and the child declare a value, a field in the table merges per its row, and every field outside the table takes the child's value. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
 
 See [Extends](extends) for examples and gotchas.
 

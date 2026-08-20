@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **Search over an `extends:` child**: an artifact that inherited `description`, `tags`, `sensitivity`, or `search_visibility` from its parent was indexed and filtered under its own authored values, so `search_artifacts` could not find it by the description `load_artifact` served for it. Ingest now folds the pinned parent into those four indexed columns, and a search result carries the resolved sensitivity.
+- **Parent disclosure in a search result**: the `frontmatter` block of a `search_artifacts` result carried the child's `extends:` line, which names a parent the caller may not be able to see. The key is now removed before the block is returned, and the block is empty when the stored frontmatter cannot be decoded.
+- **Embedding projection drift**: ingest and `podium admin reembed` composed the embedding text differently for a record holding an empty `when_to_use` or `tags` entry. Both now use one implementation, which drops the empty entry.
+
+Operators upgrading should note that a version already ingested keeps its unfolded `description`, `tags`, `sensitivity`, and `search_visibility`. Re-ingesting unchanged bytes is counted idempotent and skipped before the write, and `podium admin reembed` reads the stored columns, so neither repairs an existing row. The repair is publishing a new version of the child, which is ingested as a new row and takes the fold. A child of a `direct-only` parent stops being indexed once republished, which brings search into agreement with what layer resolution and `load_artifact` already report for that artifact.
+
 [Unreleased]: https://github.com/lennylabs/podium/compare/v0.3.1...HEAD
 
 ## [0.3.1] - 2026-08-18
