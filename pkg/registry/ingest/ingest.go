@@ -567,14 +567,12 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			continue
 		}
 
-		// Sensitivity floor (public mode) per §13.10.
-		if rejectsSensitivity(req.RejectAtOrAbove, rec.Artifact.Sensitivity) {
-			res.Rejected = append(res.Rejected, RejectedArtifact{
-				ArtifactID: rec.ID,
-				Reason: fmt.Sprintf("sensitivity %q rejected at floor %q",
-					rec.Artifact.Sensitivity, req.RejectAtOrAbove),
-				Code: "ingest.public_mode_rejects_sensitive",
-			})
+		// Sensitivity floor (public mode) per §13.10, on the authored value.
+		// The §4.6 fold below re-runs it on the merged value for an extends
+		// child; this check keeps every other artifact out before the extra
+		// store read the fold takes.
+		if rej, over := sensitivityRejection(rec.ID, req.RejectAtOrAbove, rec.Artifact.Sensitivity); over {
+			res.Rejected = append(res.Rejected, rej)
 			continue
 		}
 
@@ -708,6 +706,19 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				continue
 			}
 			mr = foldExtendsParent(parent, mr)
+
+			// spec: §13.10 / §4.6 — the floor above read the child's authored
+			// sensitivity, and the fold writes the most-restrictive value
+			// across the chain into the indexed column, so a child that
+			// authored none can land at its parent's level. A parent stored
+			// before public mode was enabled is still served under §13.10's
+			// carve-out, so that level is reachable. Re-run the floor on the
+			// folded value; otherwise ingest commits and serves a record whose
+			// indexed sensitivity is exactly what the floor refuses.
+			if rej, over := sensitivityRejection(rec.ID, req.RejectAtOrAbove, manifest.Sensitivity(mr.Sensitivity)); over {
+				res.Rejected = append(res.Rejected, rej)
+				continue
+			}
 		}
 
 		// spec: §4.6 — reject a cross-layer same-ID collision unless an
@@ -1510,6 +1521,21 @@ func dirToCanonical(dir string) string {
 func fsHasArtifactManifest(fsys fs.FS, dir string) bool {
 	info, err := fs.Stat(fsys, joinPath(dir, "ARTIFACT.md"))
 	return err == nil && !info.IsDir()
+}
+
+// sensitivityRejection reports the §13.10 public-mode rejection for an
+// artifact whose sensitivity sits at or above the floor, and false when the
+// floor admits it. The ingest loop takes it twice for an extends child: once
+// on the authored value and once on the §4.6-merged one.
+func sensitivityRejection(id string, floor, actual manifest.Sensitivity) (RejectedArtifact, bool) {
+	if !rejectsSensitivity(floor, actual) {
+		return RejectedArtifact{}, false
+	}
+	return RejectedArtifact{
+		ArtifactID: id,
+		Reason:     fmt.Sprintf("sensitivity %q rejected at floor %q", actual, floor),
+		Code:       "ingest.public_mode_rejects_sensitive",
+	}, true
 }
 
 func rejectsSensitivity(floor, actual manifest.Sensitivity) bool {

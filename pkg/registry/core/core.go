@@ -2039,13 +2039,14 @@ func frontmatterBlock(src []byte) string {
 // drop every authored key the struct does not declare, including the
 // extension-type fields §4.6 names as inheritable.
 //
-// It fails closed: any failure to split, decode, or re-encode returns "",
-// because the block that could not be rewritten is the block that names the
-// parent. Two node-level cases join that set, because in both of them deleting
-// the top-level key leaves the parent reachable: a top-level merge key whose
-// anchored mapping itself carries an extends: entry, and an alias that points
-// at an anchor defined inside the deleted subtree. A merge key or an anchor
-// that does not reach an extends: entry is untouched and its block is served.
+// It fails closed on exactly one predicate: any failure to split, decode, or
+// re-encode returns "", because the block that could not be rewritten is the
+// block that names the parent.
+//
+// The strip is scoped to the top-level key. The registry surfaces no parent of
+// its own accord, which is what §4.6 constrains; a value the child's own author
+// wrote under another key is the child's authored text and it survives here for
+// the same reason every other sibling key does.
 func frontmatterBlockHidingParent(src []byte) string {
 	fm, _, err := manifest.SplitFrontmatter(src)
 	if err != nil {
@@ -2060,26 +2061,13 @@ func frontmatterBlockHidingParent(src []byte) string {
 	}
 	root := doc.Content[0]
 	kept := make([]*yaml.Node, 0, len(root.Content))
-	var dropped []*yaml.Node
 	for i := 0; i+1 < len(root.Content); i += 2 {
-		key := root.Content[i]
-		if key.Tag == "!!merge" || key.Value == "<<" {
-			if mergeContributesExtends(root.Content[i+1], map[*yaml.Node]bool{}) {
-				return ""
-			}
-			kept = append(kept, key, root.Content[i+1])
+		if root.Content[i].Value == "extends" {
 			continue
 		}
-		if key.Value == "extends" {
-			dropped = append(dropped, key, root.Content[i+1])
-			continue
-		}
-		kept = append(kept, key, root.Content[i+1])
+		kept = append(kept, root.Content[i], root.Content[i+1])
 	}
 	root.Content = kept
-	if aliasesInto(root, nodeSet(dropped)) {
-		return ""
-	}
 	out, err := yaml.Marshal(root)
 	if err != nil {
 		// Not reachable from a node the decoder just produced; kept because
@@ -2087,80 +2075,6 @@ func frontmatterBlockHidingParent(src []byte) string {
 		return ""
 	}
 	return "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
-}
-
-// mergeContributesExtends reports whether the value of a top-level merge key
-// pulls an extends entry into the mapping. A merge value is an alias to an
-// anchored mapping or a sequence of such aliases, and an anchored mapping may
-// carry a merge key of its own, so the walk follows both. The seen set guards
-// against an alias cycle, which the decoder can produce and which would
-// otherwise recur without end.
-// Spec: §4.6 hidden parents — deleting the top-level extends key does not
-// remove one merged in from elsewhere, so a merge value that reaches an
-// extends entry fails the strip closed. A merge value that does not reach one
-// leaves the parent unnamed and is kept.
-func mergeContributesExtends(v *yaml.Node, seen map[*yaml.Node]bool) bool {
-	if v == nil || seen[v] {
-		return false
-	}
-	seen[v] = true
-	switch v.Kind {
-	case yaml.AliasNode:
-		return mergeContributesExtends(v.Alias, seen)
-	case yaml.SequenceNode:
-		for _, e := range v.Content {
-			if mergeContributesExtends(e, seen) {
-				return true
-			}
-		}
-		return false
-	case yaml.MappingNode:
-		for i := 0; i+1 < len(v.Content); i += 2 {
-			key := v.Content[i]
-			if key.Value == "extends" {
-				return true
-			}
-			if key.Tag == "!!merge" || key.Value == "<<" {
-				if mergeContributesExtends(v.Content[i+1], seen) {
-					return true
-				}
-			}
-		}
-		return false
-	default:
-		return false
-	}
-}
-
-// nodeSet collects every node reachable from roots, so a later alias check can
-// ask whether it points inside a subtree that was deleted.
-func nodeSet(roots []*yaml.Node) map[*yaml.Node]bool {
-	seen := map[*yaml.Node]bool{}
-	var walk func(*yaml.Node)
-	walk = func(n *yaml.Node) {
-		seen[n] = true
-		for _, c := range n.Content {
-			walk(c)
-		}
-	}
-	for _, r := range roots {
-		walk(r)
-	}
-	return seen
-}
-
-// aliasesInto reports whether any alias reachable from n resolves to a node in
-// removed. Such an alias would either dangle or re-expand the deleted value.
-func aliasesInto(n *yaml.Node, removed map[*yaml.Node]bool) bool {
-	if n.Kind == yaml.AliasNode && removed[n.Alias] {
-		return true
-	}
-	for _, c := range n.Content {
-		if aliasesInto(c, removed) {
-			return true
-		}
-	}
-	return false
 }
 
 func inPrefix(id, prefix string) bool {

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/projection"
 	"github.com/lennylabs/podium/pkg/store"
@@ -288,6 +289,80 @@ func TestIngest_ExtendsChildReingestIsIdempotent(t *testing.T) {
 	}
 	if got.Description != "" {
 		t.Errorf("Description = %q, want the unfolded value to persist", got.Description)
+	}
+}
+
+// Spec: §13.10 / §4.6 — public mode rejects ingest at or above the
+// sensitivity floor, and the §4.6 fold writes the most-restrictive value
+// across the chain into the child's indexed column. A child that authored no
+// sensitivity and inherits `high` is refused rather than stored and served at
+// the level the floor exists to keep out. The parent itself is ingested with
+// no floor, which is §13.10's carve-out for content stored before public mode
+// was enabled.
+// Matrix: §6.10 (ingest.public_mode_rejects_sensitive)
+func TestIngest_ExtendsFoldReappliesSensitivityFloor(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	if res := ingestOne(t, st, "L1", "shared/parent", foldParentSrc); res.Accepted != 1 {
+		t.Fatalf("parent not accepted: %+v", res)
+	}
+	child := "---\ntype: agent\nversion: 2.0.0\nextends: shared/parent@1.x\ntags: [b]\n---\n\nchild body\n"
+
+	res, err := ingest.Ingest(ctx, st, ingest.Request{
+		TenantID: "tenant-1", LayerID: "L2",
+		Files: fstest.MapFS{
+			"finance/child/ARTIFACT.md": &fstest.MapFile{Data: []byte(child)},
+		},
+		RejectAtOrAbove: manifest.SensitivityMedium,
+	})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Accepted != 0 || len(res.Rejected) != 1 {
+		t.Fatalf("accepted=%d rejected=%+v, want the inheriting child rejected", res.Accepted, res.Rejected)
+	}
+	if res.Rejected[0].Code != "ingest.public_mode_rejects_sensitive" {
+		t.Errorf("code = %q, want ingest.public_mode_rejects_sensitive", res.Rejected[0].Code)
+	}
+	if !strings.Contains(res.Rejected[0].Reason, `"high"`) {
+		t.Errorf("reason = %q, want it to name the inherited level", res.Rejected[0].Reason)
+	}
+	if _, gerr := st.GetManifest(ctx, "tenant-1", "finance/child", "2.0.0"); gerr == nil {
+		t.Errorf("child rejected at the floor must not be stored")
+	}
+}
+
+// Spec: §13.10 / §4.6 — the re-applied floor reads the merged value, so a
+// child whose chain stays below the floor is still accepted.
+func TestIngest_ExtendsFoldBelowFloorAccepted(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	if res := ingestOne(t, st, "L1", "shared/parent", agentParent("parent desc")); res.Accepted != 1 {
+		t.Fatalf("parent not accepted: %+v", res)
+	}
+	child := "---\ntype: agent\nversion: 2.0.0\nextends: shared/parent@1.x\ntags: [b]\n---\n\nchild body\n"
+
+	res, err := ingest.Ingest(ctx, st, ingest.Request{
+		TenantID: "tenant-1", LayerID: "L2",
+		Files: fstest.MapFS{
+			"finance/child/ARTIFACT.md": &fstest.MapFile{Data: []byte(child)},
+		},
+		RejectAtOrAbove: manifest.SensitivityMedium,
+	})
+	if err != nil {
+		t.Fatalf("Ingest: %v", err)
+	}
+	if res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want the low-sensitivity child accepted", res.Accepted, res.Rejected)
+	}
+	rec, err := st.GetManifest(ctx, "tenant-1", "finance/child", "2.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest child: %v", err)
+	}
+	if rec.Sensitivity != "low" {
+		t.Errorf("Sensitivity = %q, want the inherited low", rec.Sensitivity)
 	}
 }
 

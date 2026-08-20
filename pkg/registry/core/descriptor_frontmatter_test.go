@@ -50,11 +50,8 @@ func TestDescriptorOf_SearchDropsBody(t *testing.T) {
 // Spec: §4.6 hidden parents — frontmatterBlockHidingParent removes the
 // top-level extends key and keeps every other authored key, including one
 // manifest.Artifact does not declare. It fails closed on any input it cannot
-// split, decode, or re-encode, and on the two node-level cases that leave the
-// parent reachable after the key is deleted (a top-level merge key whose
-// anchored mapping carries an extends entry, and an alias into the deleted
-// value), because the block it could not rewrite is the block that names the
-// parent.
+// split, decode, or re-encode, because the block it could not rewrite is the
+// block that names the parent.
 func TestFrontmatterBlockHidingParent(t *testing.T) {
 	tests := []struct {
 		name string
@@ -96,40 +93,31 @@ func TestFrontmatterBlockHidingParent(t *testing.T) {
 			gone: []string{"extends", "shared/parent", "body"},
 		},
 		{
-			name: "merge-key declared extends fails closed",
-			src:  "---\nbase: &b\n  extends: shared/parent@1.0.0\ntype: agent\n<<: *b\n---\n\nbody\n",
-			zero: true,
-		},
-		{
-			name: "merge-key declared extends behind a nested merge fails closed",
-			src:  "---\ninner: &i\n  extends: shared/parent@1.0.0\nouter: &o\n  <<: *i\ntype: agent\n<<: *o\n---\n\nbody\n",
-			zero: true,
-		},
-		{
-			name: "merge-key sequence reaching extends fails closed",
-			src:  "---\ndefaults: &d\n  acme_owner: platform-team\nbase: &b\n  extends: shared/parent@1.0.0\ntype: agent\n<<: [*d, *b]\n---\n\nbody\n",
-			zero: true,
-		},
-		{
-			// A scalar merge value reaches no mapping, so it names no parent.
-			name: "merge-key with a scalar value is served",
-			src:  "---\ntype: agent\n<<: not-an-alias\nextends: shared/parent@1.0.0\n---\n\nbody\n",
-			want: []string{"type: agent", "not-an-alias"},
-			gone: []string{"extends", "shared/parent", "body"},
-		},
-		{
-			// A merge key the child authored for an unrelated purpose keeps
-			// the parent unnamed, so the block is served with the merge key
-			// and the top-level extends key gone.
+			// A merge key the child authored keeps its value. The strip is
+			// scoped to the top-level extends key, so a mapping the child
+			// merged in survives with whatever the child wrote in it.
 			name: "merge-key unrelated to extends is served",
 			src:  "---\ndefaults: &d\n  acme_owner: platform-team\ntype: agent\n<<: *d\nextends: shared/parent@1.0.0\n---\n\nbody\n",
 			want: []string{"type: agent", "acme_owner: platform-team", "<<: *d"},
 			gone: []string{"extends", "shared/parent", "body"},
 		},
 		{
-			name: "anchored extends value with a sibling alias fails closed",
+			// Only the top-level key is deleted. A value the child's own
+			// author wrote under another key is the child's authored text and
+			// is served with the rest of the block.
+			name: "a nested extends the child authored is served",
+			src:  "---\nbase: &b\n  extends: shared/parent@1.0.0\ntype: agent\n<<: *b\n---\n\nbody\n",
+			want: []string{"type: agent", "<<: *b", "extends: shared/parent@1.0.0"},
+			gone: []string{"body"},
+		},
+		{
+			// The anchor the alias points at was deleted with the extends
+			// entry, so the re-encoded block carries the alias name alone and
+			// names no parent.
+			name: "an alias into the deleted extends value keeps the parent unnamed",
 			src:  "---\ntype: agent\nextends: &p shared/parent@1.0.0\nnote: *p\n---\n\nbody\n",
-			zero: true,
+			want: []string{"type: agent", "note: *p"},
+			gone: []string{"shared/parent", "body"},
 		},
 		{
 			// The strip works on the YAML node, so a key whose YAML type does

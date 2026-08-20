@@ -84,7 +84,7 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 | `description` | Yes | "When should I use this?" The harness uses this to decide whether the artifact matches a prompt. Vague descriptions get ignored. ≤ 1024 chars for skills (per agentskills.io). |
 | `when_to_use` | Optional | List of explicit situations. Additional retrieval signal. |
 | `tags` | Optional | List of strings. Used for filtering in `search_artifacts`. |
-| `sensitivity` | Optional | `low` (default), `medium`, `high`. Exposed in search and load responses. A registry in public mode rejects ingest of an artifact at or above its configured floor; a private deployment treats the field as metadata. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection. |
+| `sensitivity` | Optional | `low` (default), `medium`, `high`. Exposed in search and load responses. A registry in public mode rejects ingest of an artifact at or above its configured floor, and the floor reads the value an artifact declaring `extends:` inherits from its parent; a private deployment treats the field as metadata. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection. |
 | `license` | Optional | SPDX identifier. |
 | `search_visibility` | Optional | `indexed` (default) or `direct-only`. `direct-only` artifacts don't appear in `search_artifacts` results; they're reachable via `load_artifact` if the caller knows the ID. |
 | `deprecated` | Optional | Boolean. When `true`, `load_artifact` returns a warning, and the artifact is excluded from default search results. |
