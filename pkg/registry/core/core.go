@@ -2041,7 +2041,11 @@ func frontmatterBlock(src []byte) string {
 //
 // It fails closed: any failure to split, decode, or re-encode returns "",
 // because the block that could not be rewritten is the block that names the
-// parent.
+// parent. Two node-level cases join that set, because in both of them deleting
+// the top-level key leaves the parent reachable: a top-level merge key can
+// carry an extends: entry in from an anchored mapping, and an alias can point
+// at an anchor defined inside the deleted subtree. An anchor unrelated to
+// extends is untouched and its block is served.
 func frontmatterBlockHidingParent(src []byte) string {
 	fm, _, err := manifest.SplitFrontmatter(src)
 	if err != nil {
@@ -2056,30 +2060,60 @@ func frontmatterBlockHidingParent(src []byte) string {
 	}
 	root := doc.Content[0]
 	kept := make([]*yaml.Node, 0, len(root.Content))
+	var dropped []*yaml.Node
 	for i := 0; i+1 < len(root.Content); i += 2 {
-		if root.Content[i].Value == "extends" {
+		key := root.Content[i]
+		if key.Tag == "!!merge" || key.Value == "<<" {
+			return ""
+		}
+		if key.Value == "extends" {
+			dropped = append(dropped, key, root.Content[i+1])
 			continue
 		}
-		kept = append(kept, root.Content[i], root.Content[i+1])
+		kept = append(kept, key, root.Content[i+1])
 	}
 	root.Content = kept
+	if aliasesInto(root, nodeSet(dropped)) {
+		return ""
+	}
 	out, err := yaml.Marshal(root)
 	if err != nil {
 		// Not reachable from a node the decoder just produced; kept because
 		// the alternative to failing closed here is emitting the parent.
 		return ""
 	}
-	block := "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
-	// Re-read the rewritten block the way ingest reads a manifest. This is the
-	// re-encode arm of the fail-closed set, and it covers the indirect ways a
-	// parent survives node-level deletion: a merge key that carries extends in
-	// from an anchored mapping still parses with Extends set, and an alias to
-	// the deleted extends value is now dangling and fails to parse. A benign
-	// anchor unrelated to extends re-parses cleanly and is served.
-	if a, err := manifest.ParseArtifact([]byte(block)); err != nil || a.Extends != "" {
-		return ""
+	return "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
+}
+
+// nodeSet collects every node reachable from roots, so a later alias check can
+// ask whether it points inside a subtree that was deleted.
+func nodeSet(roots []*yaml.Node) map[*yaml.Node]bool {
+	seen := map[*yaml.Node]bool{}
+	var walk func(*yaml.Node)
+	walk = func(n *yaml.Node) {
+		seen[n] = true
+		for _, c := range n.Content {
+			walk(c)
+		}
 	}
-	return block
+	for _, r := range roots {
+		walk(r)
+	}
+	return seen
+}
+
+// aliasesInto reports whether any alias reachable from n resolves to a node in
+// removed. Such an alias would either dangle or re-expand the deleted value.
+func aliasesInto(n *yaml.Node, removed map[*yaml.Node]bool) bool {
+	if n.Kind == yaml.AliasNode && removed[n.Alias] {
+		return true
+	}
+	for _, c := range n.Content {
+		if aliasesInto(c, removed) {
+			return true
+		}
+	}
+	return false
 }
 
 func inPrefix(id, prefix string) bool {

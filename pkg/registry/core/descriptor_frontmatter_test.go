@@ -50,7 +50,9 @@ func TestDescriptorOf_SearchDropsBody(t *testing.T) {
 // Spec: §4.6 hidden parents — frontmatterBlockHidingParent removes the
 // top-level extends key and keeps every other authored key, including one
 // manifest.Artifact does not declare. It fails closed on any input it cannot
-// split, decode, or re-encode, because the block it could not rewrite is the
+// split, decode, or re-encode, and on the two node-level cases that leave the
+// parent reachable after the key is deleted (a top-level merge key and an
+// alias into the deleted value), because the block it could not rewrite is the
 // block that names the parent.
 func TestFrontmatterBlockHidingParent(t *testing.T) {
 	tests := []struct {
@@ -101,6 +103,15 @@ func TestFrontmatterBlockHidingParent(t *testing.T) {
 			name: "anchored extends value with a sibling alias fails closed",
 			src:  "---\ntype: agent\nextends: &p shared/parent@1.0.0\nnote: *p\n---\n\nbody\n",
 			zero: true,
+		},
+		{
+			// The strip works on the YAML node, so a key whose YAML type does
+			// not match manifest.Artifact's field never reaches a typed decode
+			// and its block is served with the remaining keys intact.
+			name: "a key manifest.Artifact cannot type-decode is still served",
+			src:  "---\ntype: agent\nversion: 2.0.0\ntags: authored-as-a-scalar\nextends: shared/parent@1.0.0\n---\n\nbody\n",
+			want: []string{"type: agent", "tags: authored-as-a-scalar"},
+			gone: []string{"extends", "shared/parent", "body"},
 		},
 		{
 			name: "empty header fails closed",
