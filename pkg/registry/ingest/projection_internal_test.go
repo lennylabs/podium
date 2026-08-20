@@ -7,47 +7,9 @@ import (
 
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/registry/projection"
 	"github.com/lennylabs/podium/pkg/store"
 )
-
-// spec: §4.7 "Artifact embeddings" — the projection is name +
-// description + when_to_use (joined with newlines) + tags (joined),
-// built from frontmatter only. The prose body is NOT embedded.
-func TestComposeEmbeddingText_ProjectionFields(t *testing.T) {
-	mr := store.ManifestRecord{
-		Name:        "run-variance-analysis",
-		Description: "flag unusual variance",
-		WhenToUse:   []string{"after month-end close", "before board review"},
-		Tags:        []string{"finance", "variance"},
-		Body:        []byte("SECRET BODY PROSE that must not be embedded"),
-	}
-	got := composeEmbeddingText(mr)
-	want := "run-variance-analysis\nflag unusual variance\nafter month-end close\nbefore board review\nfinance variance"
-	if got != want {
-		t.Fatalf("composeEmbeddingText =\n%q\nwant\n%q", got, want)
-	}
-	if strings.Contains(got, "SECRET BODY") {
-		t.Errorf("projection must not embed the prose body; got %q", got)
-	}
-}
-
-// spec: §4.7 — empty optional fields leave no blank lines, and the
-// artifact id is never substituted for a missing name.
-func TestComposeEmbeddingText_SkipsEmptyParts(t *testing.T) {
-	mr := store.ManifestRecord{
-		ArtifactID:  "finance/x",
-		Name:        "x",
-		Description: "",
-		Tags:        []string{"t"},
-	}
-	got := composeEmbeddingText(mr)
-	if got != "x\nt" {
-		t.Fatalf("composeEmbeddingText = %q, want %q", got, "x\nt")
-	}
-	if strings.Contains(got, "finance/x") {
-		t.Errorf("artifact id must not appear in the projection; got %q", got)
-	}
-}
 
 // spec: §4.7 — manifestRecordFor must persist Name and WhenToUse so the
 // projection can be rebuilt at reembed time. For skills the name and
@@ -76,7 +38,7 @@ func TestManifestRecordFor_PersistsNameAndWhenToUse(t *testing.T) {
 	if len(mr.WhenToUse) != 1 || mr.WhenToUse[0] != "when X" {
 		t.Errorf("WhenToUse = %v, want [when X]", mr.WhenToUse)
 	}
-	got := composeEmbeddingText(mr)
+	got := projection.Artifact(mr)
 	if !strings.Contains(got, "run-variance") || !strings.Contains(got, "when X") {
 		t.Errorf("projection %q missing name or when_to_use", got)
 	}

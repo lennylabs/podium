@@ -8,6 +8,7 @@ import (
 
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/registry/projection"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/vector"
 )
@@ -211,12 +212,12 @@ func (r *Registry) ReembedOne(ctx context.Context, artifactID, version string) e
 	return r.embedAndUpsert(ctx, m)
 }
 
-// embedAndUpsert composes the embedding text and upserts the row, routing
+// embedAndUpsert takes the §4.7 embedding text projection and upserts the row, routing
 // through upsertVector so a self-embedding backend (§13.12)
 // receives raw text. Mirrors ingest's embedAndStore but operates on a
 // manifest fetched from the store rather than one mid-ingest.
 func (r *Registry) embedAndUpsert(ctx context.Context, mr store.ManifestRecord) error {
-	return r.upsertVector(ctx, mr.TenantID, mr.ArtifactID, mr.Version, composeEmbeddingText(mr))
+	return r.upsertVector(ctx, mr.TenantID, mr.ArtifactID, mr.Version, projection.Artifact(mr))
 }
 
 // embedAndUpsertDomain composes the §4.7 domain projection from a
@@ -230,33 +231,4 @@ func (r *Registry) embedAndUpsertDomain(ctx context.Context, dr store.DomainReco
 		return nil
 	}
 	return r.upsertVector(ctx, dr.TenantID, dr.Path, DomainVectorVersion, domainpkg.EmbeddingProjection(d))
-}
-
-// composeEmbeddingText mirrors the ingest-side §4.7 projection so the
-// embedding input stays consistent across ingest and reembed: name,
-// description, when_to_use (joined with newlines), and tags (joined).
-// The prose body is not embedded. spec: §4.7 "Artifact embeddings".
-func composeEmbeddingText(mr store.ManifestRecord) string {
-	parts := []string{mr.Name, mr.Description}
-	if len(mr.WhenToUse) > 0 {
-		parts = append(parts, joinNonEmpty(mr.WhenToUse, "\n"))
-	}
-	if len(mr.Tags) > 0 {
-		parts = append(parts, joinNonEmpty(mr.Tags, " "))
-	}
-	return joinNonEmpty(parts, "\n")
-}
-
-func joinNonEmpty(parts []string, sep string) string {
-	out := ""
-	for _, p := range parts {
-		if p == "" {
-			continue
-		}
-		if out != "" {
-			out += sep
-		}
-		out += p
-	}
-	return out
 }

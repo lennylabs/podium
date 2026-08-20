@@ -26,6 +26,7 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/registry/projection"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/version"
 )
@@ -873,7 +874,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	return res, nil
 }
 
-// commitManifest persists the manifest. Under the §4.7.2 outbox path
+// commitManifest persists the manifest. Under the §4.7 outbox path
 // (req.UseVectorOutbox set and the store implementing store.VectorOutbox) it
 // commits the manifest and a vector_pending row atomically, so an external
 // backend is reconciled asynchronously without ingest blocking on it. With no
@@ -882,7 +883,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 func commitManifest(ctx context.Context, st store.Store, req Request, mr store.ManifestRecord) error {
 	if req.UseVectorOutbox {
 		if ob, ok := st.(store.VectorOutbox); ok {
-			if text := composeEmbeddingText(mr); text != "" {
+			if text := projection.Artifact(mr); text != "" {
 				now := time.Now().UTC()
 				return ob.PutManifestWithVectorPending(ctx, mr, store.VectorPending{
 					TenantID:    mr.TenantID,
@@ -898,12 +899,10 @@ func commitManifest(ctx context.Context, st store.Store, req Request, mr store.M
 	return st.PutManifest(ctx, mr)
 }
 
-// embedAndStore composes the §4.7 embedding text projection from the
+// embedAndStore takes the §4.7 embedding text projection from the
 // manifest, calls the configured embedder, and upserts the vector.
-// The composition is the canonical input format every Podium
-// embedding provider sees: name + description + when_to_use + tags.
 func embedAndStore(ctx context.Context, req Request, mr store.ManifestRecord) error {
-	text := composeEmbeddingText(mr)
+	text := projection.Artifact(mr)
 	if text == "" {
 		return nil
 	}
@@ -938,37 +937,6 @@ func embedDomain(ctx context.Context, req Request, dr store.DomainRecord) error 
 		return fmt.Errorf("vector put: %w", err)
 	}
 	return nil
-}
-
-// composeEmbeddingText is the canonical §4.7 embedding-input
-// projection, built from frontmatter only: name, description,
-// when_to_use (joined with newlines), and tags (joined). The prose
-// body is deliberately excluded ("The prose body is not embedded");
-// it is noisy for retrieval and risks busting embedding-model context
-// limits. Authors influence recall via description and when_to_use.
-// spec: §4.7 "Artifact embeddings".
-func composeEmbeddingText(mr store.ManifestRecord) string {
-	parts := []string{mr.Name, mr.Description}
-	if len(mr.WhenToUse) > 0 {
-		parts = append(parts, strings.Join(mr.WhenToUse, "\n"))
-	}
-	if len(mr.Tags) > 0 {
-		parts = append(parts, strings.Join(mr.Tags, " "))
-	}
-	return joinNonEmpty(parts, "\n")
-}
-
-// joinNonEmpty joins the non-empty parts with sep so an absent name,
-// description, or when_to_use list does not leave a blank line in the
-// embedding projection.
-func joinNonEmpty(parts []string, sep string) string {
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return strings.Join(out, sep)
 }
 
 func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) {

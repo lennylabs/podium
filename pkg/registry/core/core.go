@@ -2224,7 +2224,7 @@ func bm25Rank(docs [][]string, tiebreak []string, query string) []scoredIndex {
 
 // tokensFor lowercases and tokenizes the searchable text of a manifest.
 // The lexical projection mirrors the §4.7 embedding projection
-// (composeEmbeddingText): the artifact id path segments plus the
+// (projection.Artifact): the artifact id path segments plus the
 // frontmatter fields name, description, when_to_use, and tags. The prose
 // body is deliberately excluded. §4.7 states "The prose body is not
 // embedded ... it is noisy for retrieval"; including it in the lexical
