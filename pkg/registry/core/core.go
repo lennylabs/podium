@@ -20,8 +20,6 @@ import (
 	"sync"
 	"unicode"
 
-	"gopkg.in/yaml.v3"
-
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/layer"
@@ -1287,7 +1285,7 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		// removed. A record with no pin keeps the block descriptorOf built,
 		// which leaves the common path free of a YAML decode.
 		if sc.rec.ExtendsPin != "" {
-			d.Frontmatter = frontmatterBlockHidingParent(sc.rec.Frontmatter)
+			d.Frontmatter = manifest.FrontmatterHidingParent(sc.rec.Frontmatter)
 		}
 		res.Results = append(res.Results, d)
 	}
@@ -1534,9 +1532,15 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			// column, so derive the key set from the frontmatter when the field
 			// is absent. This keeps redaction working uniformly across the
 			// memory, SQLite, and Postgres stores.
-			redactKeys := rec.AuditRedact
-			if len(redactKeys) == 0 && len(rec.Frontmatter) > 0 {
-				if a, perr := manifest.ParseArtifact(rec.Frontmatter); perr == nil {
+			// The served record rather than the stored one: for an extends
+			// child the two differ, and §4.6 makes audit_redact inheritable,
+			// so reading the leaf's own frontmatter would drop a directive
+			// the child inherits. served falls back to rec for a record with
+			// no extends chain, where the two are the same bytes.
+			served := servedRecord(rec, res)
+			redactKeys := served.AuditRedact
+			if len(redactKeys) == 0 && len(served.Frontmatter) > 0 {
+				if a, perr := manifest.ParseArtifact(served.Frontmatter); perr == nil {
 					redactKeys = a.AuditRedact
 				}
 			}
@@ -1544,7 +1548,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			// bank_account, ssn) into the read-event context so the directive
 			// has a concrete target. The audit emitter masks every RedactKeys
 			// entry, so these values reach the sink only as [redacted].
-			for k, v := range manifest.FrontmatterFields(rec.Frontmatter, redactKeys) {
+			for k, v := range manifest.FrontmatterFields(served.Frontmatter, redactKeys) {
 				if _, exists := ev.Context[k]; !exists {
 					ev.Context[k] = v
 				}
@@ -1653,7 +1657,10 @@ func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord)
 	if err != nil {
 		return nil, err
 	}
-	merged := mergeChain(chain)
+	merged, err := mergeChain(chain)
+	if err != nil {
+		return nil, err
+	}
 	result := resultFromRecord(merged)
 	// This branch runs only for an extends artifact, and mergeChain always
 	// re-serializes the frontmatter with the hidden parent stripped (§4.6),
@@ -1703,9 +1710,9 @@ func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRe
 // child's identity (id, version, content hash, layer, body) and surfaces
 // the merged scalar fields back onto the record for callers that read
 // them directly. spec: §4.6 field-semantics table.
-func mergeChain(chain []store.ManifestRecord) store.ManifestRecord {
+func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	if len(chain) == 0 {
-		return store.ManifestRecord{}
+		return store.ManifestRecord{}, nil
 	}
 	out := chain[0]
 	merged := parsedArtifact(out)
@@ -1742,22 +1749,52 @@ func mergeChain(chain []store.ManifestRecord) store.ManifestRecord {
 		// extends a parent still ships its own authored SKILL.md.
 		out.SkillRaw = c.SkillRaw
 	}
-	// Surface the merged structured fields back onto the record so search
-	// descriptors, sensitivity gating, and deprecation reporting agree
-	// with the served frontmatter.
+	// Surface the merged structured fields the served result reads. Every
+	// field here has a consumer: resultFromRecord copies Type, Sensitivity,
+	// Deprecated, and ReplacedBy, and withDeprecationWarning reads the last
+	// two. Description, Tags, and SearchVisibility are deliberately absent,
+	// because LoadArtifactResult declares no such fields; the search path
+	// reads the stored columns the ingest fold writes rather than this
+	// record.
 	out.Type = string(merged.Type)
-	out.Description = merged.Description
-	out.Tags = append([]string(nil), merged.Tags...)
 	out.Sensitivity = string(merged.Sensitivity)
-	out.SearchVisibility = string(merged.SearchVisibility)
 	out.Deprecated = merged.Deprecated
 	out.ReplacedBy = merged.ReplacedBy
-	// Strip the extends reference from the served manifest: the merge has
-	// been applied server-side and the parent's ID must not be surfaced to
-	// the requester (§4.6 hidden parents).
-	merged.Extends = ""
-	if fm, err := manifest.SerializeArtifact(merged); err == nil {
-		out.Frontmatter = fm
+	// §4.6 makes audit_redact inheritable and manifest.MergeExtends folds it,
+	// so the merged directive has to reach the record the §8.2 read emitter
+	// reads. Left at the leaf's, a child that inherits its parent's directive
+	// emits an event naming none of the parent's keys.
+	out.AuditRedact = append([]string(nil), merged.AuditRedact...)
+	// Serialize through the chain's authored blocks so an extension type's
+	// own frontmatter keys survive, and strip the extends reference so the
+	// hidden parent is not surfaced (§4.6). A block that cannot be rewritten
+	// into one naming no parent fails the read rather than being served.
+	authored := make([][]byte, 0, len(chain))
+	for _, c := range chain {
+		authored = append(authored, c.Frontmatter)
+	}
+	fm, err := manifest.SerializeMerged(merged, authored...)
+	if err != nil {
+		return store.ManifestRecord{}, fmt.Errorf("%w: extends manifest for %s: %v",
+			ErrInvalidArgument, out.ArtifactID, err)
+	}
+	out.Frontmatter = fm
+	return out, nil
+}
+
+// servedRecord returns the record the caller was served, which for an extends
+// child is the merged one rather than the stored leaf. The §8.2 read emitter
+// needs the merged frontmatter and the merged audit_redact directive, and
+// LoadArtifactResult carries the merged frontmatter but not the directive, so
+// the two are recombined here rather than by widening the client-facing type.
+func servedRecord(rec store.ManifestRecord, res *LoadArtifactResult) store.ManifestRecord {
+	if res == nil || rec.ExtendsPin == "" {
+		return rec
+	}
+	out := rec
+	out.Frontmatter = res.Frontmatter
+	if a, err := manifest.ParseArtifact(res.Frontmatter); err == nil && a != nil {
+		out.AuditRedact = append([]string(nil), a.AuditRedact...)
 	}
 	return out
 }
@@ -2033,80 +2070,6 @@ func frontmatterBlock(src []byte) string {
 		return ""
 	}
 	return "---\n" + string(fm) + "\n---\n"
-}
-
-// frontmatterBlockHidingParent returns the ---fenced--- frontmatter header of
-// src with the top-level extends: key and its value removed.
-// Spec: §4.6 hidden parents — a consumer of an extends child never learns the
-// parent's identity, so the search descriptor must not carry the key that
-// names it.
-//
-// The header is decoded into a yaml.Node rather than into manifest.Artifact.
-// The struct declares a closed field set with no catch-all map, and
-// ParseArtifact unmarshals non-strictly, so a typed round-trip would silently
-// drop every authored key the struct does not declare, including the
-// extension-type fields §4.6 names as inheritable.
-//
-// It fails closed on exactly one predicate: any failure to split, decode,
-// re-encode, or re-read the rewritten block returns "", because the block that
-// could not be rewritten is the block that names the parent.
-//
-// The guard is scoped to what the manifest parser resolves rather than to the
-// literal top-level key. ParseArtifact resolves YAML merge keys, so a child can
-// carry an operative extends: inside an anchored mapping it merges in, and
-// deleting an anchored extends value leaves a dangling alias behind. Both are
-// caught by re-reading the rewritten block: it must decode, and it must resolve
-// no extends value. A value under a key the parser never resolves is the
-// child's authored text and survives with every other sibling key.
-func frontmatterBlockHidingParent(src []byte) string {
-	fm, _, err := manifest.SplitFrontmatter(src)
-	if err != nil {
-		return ""
-	}
-	var doc yaml.Node
-	if err := yaml.Unmarshal(fm, &doc); err != nil {
-		return ""
-	}
-	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return ""
-	}
-	root := doc.Content[0]
-	kept := make([]*yaml.Node, 0, len(root.Content))
-	for i := 0; i+1 < len(root.Content); i += 2 {
-		if root.Content[i].Value == "extends" {
-			continue
-		}
-		kept = append(kept, root.Content[i], root.Content[i+1])
-	}
-	root.Content = kept
-	out, err := yaml.Marshal(root)
-	if err != nil {
-		// Not reachable from a node the decoder just produced; kept because
-		// the alternative to failing closed here is emitting the parent.
-		return ""
-	}
-	if !hidesParent(out) {
-		return ""
-	}
-	return "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
-}
-
-// hidesParent reports whether the rewritten header is a mapping that reads back
-// and resolves no extends value.
-// Spec: §4.6 hidden parents.
-//
-// Deleting the top-level entry is not sufficient on its own. A merge key can
-// carry the extends the manifest parser acted on, and deleting an anchored
-// extends value strands the aliases into it, which makes the rewritten block
-// undecodable rather than parent-free. Decoding into a map both resolves merge
-// keys and rejects an unresolvable alias.
-func hidesParent(header []byte) bool {
-	var resolved map[string]any
-	if err := yaml.Unmarshal(header, &resolved); err != nil {
-		return false
-	}
-	_, named := resolved["extends"]
-	return !named
 }
 
 func inPrefix(id, prefix string) bool {
