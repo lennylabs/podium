@@ -586,7 +586,7 @@ Composition order (lowest to highest precedence):
 2. User-defined layers belonging to the caller, in the user-controlled order returned by `podium layer list`.
 3. The workspace local overlay (when configured).
 
-Higher-precedence layers override lower on collisions. Resolution of layers 1 and 2 happens at the registry on every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call; layer 3 is merged in by the MCP server before returning results.
+Higher-precedence layers override lower on collisions. Resolution of layers 1 and 2 happens at the registry on every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call, and includes `extends:` resolution per the §9.1 `LayerComposer` row; layer 3 is merged in by the MCP server before returning results.
 
 ### Source types
 
@@ -695,7 +695,7 @@ To intentionally replace an artifact rather than extend it, the lower-precedence
 | `license`                              | Scalar; child wins (lint warning if changed across layers) |
 | `search_visibility`                    | Scalar; most-restrictive (`direct-only` > `indexed`)       |
 
-**Default for unlisted fields.** A child can override any frontmatter field by setting it; if the child omits the field, the parent's value is inherited unchanged. This applies to `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields not declared by their `TypeProvider`. Two fields are special cases. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent of the parent's; each artifact has its own version stored in the registry, and the parent version is pinned at the child's ingest time per §4.7.6.
+**Omitted fields.** If a child omits a frontmatter field, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above. When both the parent and the child declare a value, a field in the table merges per its row, and every other field takes the child's value: `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields not declared by their `TypeProvider`. Two fields are special cases. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent of the parent's; each artifact has its own version stored in the registry, and the parent version is pinned at the child's ingest time per §4.7.6.
 
 Extension types register their own field semantics via `TypeProvider`.
 
@@ -724,6 +724,8 @@ Hybrid retrieval (BM25 + vectors via RRF) needs an embedding for every artifact 
 - `description`
 - `when_to_use` (joined with newlines)
 - `tags` (joined)
+
+The projection is built from the artifact's §4.6-resolved frontmatter. When a manifest declares `extends:`, the chain is folded per the §4.6 field-semantics table before the projection is taken, so an artifact is indexed under the same `description` and `tags` that `load_artifact` and `search_artifacts` serve for it. The requirement is over `description` and `tags`; a registry whose metadata store persists no resolved `name` or `when_to_use` is under no obligation for those two fields.
 
 The prose body is **not** embedded (the `SKILL.md` body for skills, the `ARTIFACT.md` body for other types). The body is noisy for retrieval and risks busting embedding-model context limits at the long-tail end. Authors who want richer search recall put discoverability content in `description` and `when_to_use`. The same projection is applied to `search_artifacts` queries when the caller passes a text `query` (the `query` is treated as a free-text search target rather than concatenated with the projection).
 

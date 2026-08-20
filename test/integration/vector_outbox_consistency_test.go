@@ -303,7 +303,7 @@ func TestVectorOutbox_RetriesTransientFailureToConsistentState(t *testing.T) {
 }
 
 // vectorOutboxFixture returns one context artifact whose description drives both
-// its outbox embedding text (composeEmbeddingText projects frontmatter only)
+// its outbox embedding text (projection.Artifact projects frontmatter only)
 // and the semantic query match.
 func vectorOutboxFixture() fs.FS {
 	const art = "---\ntype: context\nversion: 1.0.0\ndescription: invoice reconciliation matching vendor payments against purchase orders\n---\n\ninvoice reconciliation body.\n"

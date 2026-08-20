@@ -26,6 +26,7 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/registry/projection"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/version"
 )
@@ -566,14 +567,12 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			continue
 		}
 
-		// Sensitivity floor (public mode) per §13.10.
-		if rejectsSensitivity(req.RejectAtOrAbove, rec.Artifact.Sensitivity) {
-			res.Rejected = append(res.Rejected, RejectedArtifact{
-				ArtifactID: rec.ID,
-				Reason: fmt.Sprintf("sensitivity %q rejected at floor %q",
-					rec.Artifact.Sensitivity, req.RejectAtOrAbove),
-				Code: "ingest.public_mode_rejects_sensitive",
-			})
+		// Sensitivity floor (public mode) per §13.10, on the authored value.
+		// The §4.6 fold below re-runs it on the merged value for an extends
+		// child; this check keeps every other artifact out before the extra
+		// store read the fold takes.
+		if rej, over := sensitivityRejection(rec.ID, req.RejectAtOrAbove, rec.Artifact.Sensitivity); over {
+			res.Rejected = append(res.Rejected, rej)
 			continue
 		}
 
@@ -677,6 +676,49 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				})
 			}
 			mr.ExtendsPin = pin
+
+			// spec: §4.6 — an omitted or empty child scalar inherits the
+			// parent's value. Fold the pinned parent's stored record into
+			// the child's indexed columns so the values the registry
+			// filters, ranks, and (§4.7) embeds on are the resolved ones
+			// rather than the child's authored subset. The fold is one
+			// level deep: a parent is always stored before its child is
+			// accepted, so the parent's own columns already carry its
+			// ancestors' values by induction.
+			parentID, parentVersion := splitRef(pin)
+			parent, gerr := st.GetManifest(ctx, req.TenantID, parentID, parentVersion)
+			if gerr != nil {
+				// A store failure is not an authoring defect: match the
+				// loop's convention below and abort the ingest call.
+				if !errors.Is(gerr, store.ErrNotFound) {
+					return nil, fmt.Errorf("ingest: load extends parent %s: %w", pin, gerr)
+				}
+				// resolveExtendsPin picked the pin out of the tenant's own
+				// manifest listing, so a missing record here means the parent
+				// went away between the two calls. Reject, because accepting
+				// the child would index it under its unresolved columns and no
+				// later pass repairs a stored version.
+				res.Rejected = append(res.Rejected, RejectedArtifact{
+					ArtifactID: rec.ID,
+					Reason:     fmt.Sprintf("extends: parent %s not found", pin),
+					Code:       "ingest.invalid_artifact",
+				})
+				continue
+			}
+			mr = foldExtendsParent(parent, mr)
+
+			// spec: §13.10 / §4.6 — the floor above read the child's authored
+			// sensitivity, and the fold writes the most-restrictive value
+			// across the chain into the indexed column, so a child that
+			// authored none can land at its parent's level. A parent stored
+			// before public mode was enabled is still served under §13.10's
+			// carve-out, so that level is reachable. Re-run the floor on the
+			// folded value; otherwise ingest commits and serves a record whose
+			// indexed sensitivity is exactly what the floor refuses.
+			if rej, over := sensitivityRejection(rec.ID, req.RejectAtOrAbove, manifest.Sensitivity(mr.Sensitivity)); over {
+				res.Rejected = append(res.Rejected, rej)
+				continue
+			}
 		}
 
 		// spec: §4.6 — reject a cross-layer same-ID collision unless an
@@ -873,7 +915,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	return res, nil
 }
 
-// commitManifest persists the manifest. Under the §4.7.2 outbox path
+// commitManifest persists the manifest. Under the §4.7 outbox path
 // (req.UseVectorOutbox set and the store implementing store.VectorOutbox) it
 // commits the manifest and a vector_pending row atomically, so an external
 // backend is reconciled asynchronously without ingest blocking on it. With no
@@ -882,7 +924,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 func commitManifest(ctx context.Context, st store.Store, req Request, mr store.ManifestRecord) error {
 	if req.UseVectorOutbox {
 		if ob, ok := st.(store.VectorOutbox); ok {
-			if text := composeEmbeddingText(mr); text != "" {
+			if text := projection.Artifact(mr); text != "" {
 				now := time.Now().UTC()
 				return ob.PutManifestWithVectorPending(ctx, mr, store.VectorPending{
 					TenantID:    mr.TenantID,
@@ -898,12 +940,10 @@ func commitManifest(ctx context.Context, st store.Store, req Request, mr store.M
 	return st.PutManifest(ctx, mr)
 }
 
-// embedAndStore composes the §4.7 embedding text projection from the
+// embedAndStore takes the §4.7 embedding text projection from the
 // manifest, calls the configured embedder, and upserts the vector.
-// The composition is the canonical input format every Podium
-// embedding provider sees: name + description + when_to_use + tags.
 func embedAndStore(ctx context.Context, req Request, mr store.ManifestRecord) error {
-	text := composeEmbeddingText(mr)
+	text := projection.Artifact(mr)
 	if text == "" {
 		return nil
 	}
@@ -938,37 +978,6 @@ func embedDomain(ctx context.Context, req Request, dr store.DomainRecord) error 
 		return fmt.Errorf("vector put: %w", err)
 	}
 	return nil
-}
-
-// composeEmbeddingText is the canonical §4.7 embedding-input
-// projection, built from frontmatter only: name, description,
-// when_to_use (joined with newlines), and tags (joined). The prose
-// body is deliberately excluded ("The prose body is not embedded");
-// it is noisy for retrieval and risks busting embedding-model context
-// limits. Authors influence recall via description and when_to_use.
-// spec: §4.7 "Artifact embeddings".
-func composeEmbeddingText(mr store.ManifestRecord) string {
-	parts := []string{mr.Name, mr.Description}
-	if len(mr.WhenToUse) > 0 {
-		parts = append(parts, strings.Join(mr.WhenToUse, "\n"))
-	}
-	if len(mr.Tags) > 0 {
-		parts = append(parts, strings.Join(mr.Tags, " "))
-	}
-	return joinNonEmpty(parts, "\n")
-}
-
-// joinNonEmpty joins the non-empty parts with sep so an absent name,
-// description, or when_to_use list does not leave a blank line in the
-// embedding projection.
-func joinNonEmpty(parts []string, sep string) string {
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return strings.Join(out, sep)
 }
 
 func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) {
@@ -1354,6 +1363,46 @@ func stripPin(ref string) string {
 	return ref
 }
 
+// foldExtendsParent folds the pinned parent's stored record into the
+// child's and returns the child. Only the columns every store backend
+// persists are written: Description, Tags, Sensitivity, and
+// SearchVisibility. spec: §4.6 field-semantics table and "Omitted
+// fields".
+//
+// The projection stays a pure function of the stored record, so the
+// inline embed, the vector-outbox row, and `podium admin reembed` all
+// derive the same §4.7 text for the artifact.
+//
+// Three §4.6 fields are deliberately left unfolded. Name, WhenToUse, and
+// ReplacedBy have no column in either SQL store, so a merged value would
+// survive only until read-back and would differ per deployment mode.
+// Deprecated is excluded because PutManifest stamps DeprecatedAt from it,
+// which would arm the §8.4 hard purge against a child whose author never
+// deprecated it. The authored bytes in Frontmatter, ContentHash, Body,
+// and SkillRaw are untouched.
+func foldExtendsParent(parent, child store.ManifestRecord) store.ManifestRecord {
+	merged := manifest.MergeExtends(indexedArtifact(parent), indexedArtifact(child))
+	child.Description = merged.Description
+	child.Tags = merged.Tags
+	child.Sensitivity = string(merged.Sensitivity)
+	child.SearchVisibility = string(merged.SearchVisibility)
+	return child
+}
+
+// indexedArtifact projects the folded columns of a stored record back
+// into a manifest.Artifact so manifest.MergeExtends stays the single
+// canonical §4.6 fold. Reading the record rather than the stored
+// frontmatter matters for a skill, whose Name and Description are
+// indexed from SKILL.md while ARTIFACT.md omits them.
+func indexedArtifact(mr store.ManifestRecord) manifest.Artifact {
+	return manifest.Artifact{
+		Description:      mr.Description,
+		Tags:             mr.Tags,
+		Sensitivity:      manifest.Sensitivity(mr.Sensitivity),
+		SearchVisibility: manifest.SearchVisibility(mr.SearchVisibility),
+	}
+}
+
 // resolveExtendsPin resolves a parent reference (e.g.,
 // "finance/parent" or "finance/parent@1.x" or
 // "finance/parent@sha256:<hex>") against existing manifests for the
@@ -1472,6 +1521,21 @@ func dirToCanonical(dir string) string {
 func fsHasArtifactManifest(fsys fs.FS, dir string) bool {
 	info, err := fs.Stat(fsys, joinPath(dir, "ARTIFACT.md"))
 	return err == nil && !info.IsDir()
+}
+
+// sensitivityRejection reports the §13.10 public-mode rejection for an
+// artifact whose sensitivity sits at or above the floor, and false when the
+// floor admits it. The ingest loop takes it twice for an extends child: once
+// on the authored value and once on the §4.6-merged one.
+func sensitivityRejection(id string, floor, actual manifest.Sensitivity) (RejectedArtifact, bool) {
+	if !rejectsSensitivity(floor, actual) {
+		return RejectedArtifact{}, false
+	}
+	return RejectedArtifact{
+		ArtifactID: id,
+		Reason:     fmt.Sprintf("sensitivity %q rejected at floor %q", actual, floor),
+		Code:       "ingest.public_mode_rejects_sensitive",
+	}, true
 }
 
 func rejectsSensitivity(floor, actual manifest.Sensitivity) bool {

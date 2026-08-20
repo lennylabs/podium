@@ -548,7 +548,7 @@ func TestExtends_AllowsSameIDWithExtends(t *testing.T) {
 
 // a cross-type extends is rejected (child type must match the
 // parent type), so the child is dropped and the parent serves.
-// spec: docs/authoring/extends.md § "Default for unlisted fields".
+// spec: docs/authoring/extends.md § "Omitted fields".
 func TestExtends_CrossTypeRejected(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent agent\n---\n\nagent body\n"
@@ -677,9 +677,11 @@ func TestExtends_LicenseChildWinsLintWarns(t *testing.T) {
 }
 
 // search_visibility takes the most-restrictive value
-// (direct-only > indexed); the child cannot relax the parent.
+// (direct-only > indexed) in the merged frontmatter load_artifact serves; the
+// child cannot relax the parent. The exclusion this value drives on the search
+// path is asserted separately in pkg/registry/core.
 // spec: docs/authoring/extends.md § "Field merge semantics", search_visibility.
-func TestExtends_SearchVisibilityMostRestrictive(t *testing.T) {
+func TestExtends_SearchVisibilityMostRestrictiveInMergedFrontmatter(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\nsearch_visibility: direct-only\n---\n\nbody\n"
 	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nsearch_visibility: indexed\nextends: " + exParentID + "@1.x\n---\n\nbody\n"
@@ -691,7 +693,7 @@ func TestExtends_SearchVisibilityMostRestrictive(t *testing.T) {
 }
 
 // a child omitting a parent field inherits the parent's value.
-// spec: docs/authoring/extends.md § "Default for unlisted fields".
+// spec: docs/authoring/extends.md § "Omitted fields".
 func TestExtends_UnlistedFieldInherited(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: parent\neffort_hint: high\n---\n\nbody\n"
@@ -942,7 +944,7 @@ func TestExtends_SyncFilesystemNotMerged(t *testing.T) {
 // cross-type extends chain. The child's type: must match the parent's; the
 // filesystem-source materialization path enforces the same rejection the
 // server ingest path applies. spec: docs/authoring/extends.md §
-// "Default for unlisted fields"; §4.6.
+// "Omitted fields"; §4.6.
 func TestExtends_SyncFilesystemCrossTypeRejected(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1132,5 +1134,53 @@ func TestSkill_ContentHashCoversSkillRaw(t *testing.T) {
 	// why skipping the check for skills left them unverified.
 	if "sha256:"+version.ContentHash([]byte(r.Frontmatter)) == r.ContentHash {
 		t.Error("hash reproduced without skill_raw; the SKILL.md is not actually covered")
+	}
+}
+
+// search_artifacts serves an extends child under its §4.6-resolved
+// description and hides the parent it extends. The child omits description:,
+// so the term the query matches on appears only in the parent's manifest, and
+// the child's descriptor must not name the parent it inherited from.
+// spec: §4.6 hidden parents, §4.7.
+func TestExtends_SearchDescriptorInheritsDescriptionAndHidesParent(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: performs zygomorphic reconciliation\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ntags: [child-tag]\nextends: shared/parent@1.x\n---\n\nchild body\n"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		".registry-config":                       "multi_layer: true\nlayer_order:\n  - org-defaults\n  - team-foo\n",
+		"org-defaults/shared/parent/ARTIFACT.md": parent,
+		"team-foo/finance/child/ARTIFACT.md":     child,
+	}))
+
+	var resp struct {
+		Results []struct {
+			ID          string `json:"id"`
+			Description string `json:"description"`
+			Frontmatter string `json:"frontmatter"`
+		} `json:"results"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/search_artifacts?query=zygomorphic", &resp)
+
+	var got *struct {
+		ID          string `json:"id"`
+		Description string `json:"description"`
+		Frontmatter string `json:"frontmatter"`
+	}
+	for i := range resp.Results {
+		if resp.Results[i].ID == "finance/child" {
+			got = &resp.Results[i]
+		}
+	}
+	if got == nil {
+		t.Fatalf("search on a parent-only description term did not return the child: %+v", resp.Results)
+	}
+	if got.Description != "performs zygomorphic reconciliation" {
+		t.Errorf("description = %q, want the inherited parent text", got.Description)
+	}
+	if strings.Contains(got.Frontmatter, "extends") || strings.Contains(got.Frontmatter, "shared/parent") {
+		t.Errorf("search descriptor names the extends parent:\n%s", got.Frontmatter)
+	}
+	if !strings.Contains(got.Frontmatter, "child-tag") {
+		t.Errorf("search descriptor lost the child's authored keys:\n%s", got.Frontmatter)
 	}
 }

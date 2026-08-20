@@ -40,7 +40,7 @@ At request time the registry folds the parent's frontmatter into the child's per
 | `<id>@<semver>.x` | Minor or patch range (e.g., `1.2.x`, `1.x`). |
 | `<id>@sha256:<hash>` | Content-pinned. |
 
-Parent version is resolved at the child's ingest time and stored as a hard pin in the ingested manifest's resolved form. Parent updates do not silently propagate; the child must be re-ingested (typically by bumping its `version:` and merging) to pick up changes.
+Parent version is resolved at the child's ingest time and stored as a hard pin in the ingested manifest's resolved form. Parent updates do not silently propagate. Re-ingesting the child's unchanged bytes is counted idempotent and changes nothing, so the child picks up a newer parent only when it is published at a new `version:`.
 
 ---
 
@@ -99,7 +99,7 @@ ASCII fallback for the diagram above (inheritance with extends:):
 | `license` | Scalar; child wins (lint warning if changed across layers). |
 | `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
 
-**Default for unlisted fields.** A child can override any frontmatter field by setting it; if the child omits the field, the parent's value is inherited unchanged. This applies to `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent; each artifact has its own version, and the parent version is pinned at the child's ingest time.
+**Omitted fields.** If a child omits a frontmatter field, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above. When both the parent and the child declare a value, a field in the table merges per its row, and every other field takes the child's value: `deprecated`, `replaced_by`, `effort_hint`, `model_class_hint`, `sbom`, `rule_mode`, `rule_globs`, `rule_description`, `hook_event`, `hook_action`, `server_identifier`, `target_harnesses`, `input`, `output`, and any extension-type fields. The child's `type:` must match the parent's; ingest rejects an `extends:` chain that crosses types. The child's `version:` is independent; each artifact has its own version, and the parent version is pinned at the child's ingest time.
 
 Extension types register their own merge semantics via `TypeProvider`.
 
@@ -124,7 +124,7 @@ The content hash the registry records covers the child's own package: its `ARTIF
 - **Single inheritance.** `extends:` is a single scalar; no multiple inheritance. To compose from multiple parents, restructure the parents to chain (`A extends B; B extends C`).
 - **Cycle detection.** Cycles in the `extends:` graph are detected at ingest time and rejected.
 - **Parent reference.** A child may extend a different canonical ID, inheriting from a separate artifact pinned to the version resolved at the child's ingest time. A child may also extend its own canonical ID, which overlays the artifact contributed by the next-lower-precedence layer; that form is what a cross-layer collision requires. In both forms the child's `type:` must match the parent's.
-- **Re-ingest required for parent updates.** Parent version is pinned at the child's ingest time. Bumping the parent does not retroactively update the child's resolved manifest until the child is re-ingested.
+- **Republishing required for parent updates.** Parent version is pinned at the child's ingest time and is fixed for that version of the child. Bumping the parent does not retroactively update the child's resolved manifest, and re-ingesting the child's unchanged bytes is counted idempotent and changes nothing. Publish a new `version:` of the child to pin the newer parent.
 
 ---
 

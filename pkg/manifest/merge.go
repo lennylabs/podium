@@ -63,7 +63,9 @@ func MergeExtends(parent, child Artifact) Artifact {
 	// runtime_requirements: map; deep-merge with child wins.
 	out.RuntimeRequirements = mergeRuntimeRequirements(parent.RuntimeRequirements, child.RuntimeRequirements)
 
-	// --- Default for unlisted fields: child overrides when set ------------
+	// --- Omitted fields (§4.6) ---------------------------------------------
+	// The child's value wins only when the child sets one. An omitted or
+	// empty child scalar inherits the parent's value unchanged.
 	// version is the child's own (independent of the parent per §4.7.6);
 	// out already carries the parent's, so take the child's verbatim.
 	out.Version = child.Version

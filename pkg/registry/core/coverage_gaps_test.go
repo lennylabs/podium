@@ -153,65 +153,6 @@ func gapMemStore(t *testing.T) *store.Memory {
 	return st
 }
 
-// --- composeEmbeddingText (reembed.go) ----------------------------------
-
-// Spec: §4.7 "Artifact embeddings" — the projection joins name, description,
-// when_to_use, and tags with newlines. Empty components are dropped so the
-// input never carries stray separators, and the prose body is excluded.
-func TestComposeEmbeddingText_Projection(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		rec  store.ManifestRecord
-		want string
-	}{
-		{
-			name: "name and description only",
-			rec:  store.ManifestRecord{Name: "Pay Invoice", Description: "settles an AP invoice", Body: []byte("ignored prose")},
-			want: "Pay Invoice\nsettles an AP invoice",
-		},
-		{
-			name: "when_to_use joined with newlines",
-			rec:  store.ManifestRecord{Name: "n", Description: "d", WhenToUse: []string{"first", "second"}},
-			want: "n\nd\nfirst\nsecond",
-		},
-		{
-			name: "tags joined with spaces",
-			rec:  store.ManifestRecord{Name: "n", Description: "d", Tags: []string{"finance", "ap"}},
-			want: "n\nd\nfinance ap",
-		},
-		{
-			name: "all components present",
-			rec:  store.ManifestRecord{Name: "n", Description: "d", WhenToUse: []string{"w"}, Tags: []string{"t"}},
-			want: "n\nd\nw\nt",
-		},
-		{
-			name: "empty name skipped, no leading separator",
-			rec:  store.ManifestRecord{Description: "only desc"},
-			want: "only desc",
-		},
-		{
-			name: "interior empty when_to_use entries dropped",
-			rec:  store.ManifestRecord{Name: "n", Description: "d", WhenToUse: []string{"", "kept", ""}},
-			want: "n\nd\nkept",
-		},
-		{
-			name: "fully empty record yields empty string",
-			rec:  store.ManifestRecord{Body: []byte("body is never embedded")},
-			want: "",
-		},
-	}
-	for _, c := range cases {
-		c := c
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			if got := composeEmbeddingText(c.rec); got != c.want {
-				t.Errorf("composeEmbeddingText() = %q, want %q", got, c.want)
-			}
-		})
-	}
-}
-
 // --- max1 / logf (core.go BM25 helpers) ---------------------------------
 
 // max1 floors its argument at 1 so a BM25 denominator never reaches zero.

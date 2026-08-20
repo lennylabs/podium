@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/lennylabs/podium/pkg/registry/projection"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -21,7 +22,7 @@ func TestCommitManifest_OutboxEnqueue(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()
 	mr := outboxTestRecord()
-	if got := composeEmbeddingText(mr); got == "" {
+	if got := projection.Artifact(mr); got == "" {
 		t.Fatal("test record has no embedding text; choose a record with description")
 	}
 	if err := commitManifest(ctx, st, Request{UseVectorOutbox: true}, mr); err != nil {

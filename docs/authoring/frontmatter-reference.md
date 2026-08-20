@@ -84,7 +84,7 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 | `description` | Yes | "When should I use this?" The harness uses this to decide whether the artifact matches a prompt. Vague descriptions get ignored. ≤ 1024 chars for skills (per agentskills.io). |
 | `when_to_use` | Optional | List of explicit situations. Additional retrieval signal. |
 | `tags` | Optional | List of strings. Used for filtering in `search_artifacts`. |
-| `sensitivity` | Optional | `low` (default), `medium`, `high`. Exposed in search and load responses. A registry in public mode rejects ingest of an artifact at or above its configured floor; a private deployment treats the field as metadata. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection. |
+| `sensitivity` | Optional | `low` (default), `medium`, `high`. Exposed in search and load responses. A registry in public mode rejects ingest of an artifact at or above its configured floor, and the floor reads the value an artifact declaring `extends:` inherits from its parent; a private deployment treats the field as metadata. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection. |
 | `license` | Optional | SPDX identifier. |
 | `search_visibility` | Optional | `indexed` (default) or `direct-only`. `direct-only` artifacts don't appear in `search_artifacts` results; they're reachable via `load_artifact` if the caller knows the ID. |
 | `deprecated` | Optional | Boolean. When `true`, `load_artifact` returns a warning, and the artifact is excluded from default search results. |
@@ -289,9 +289,9 @@ When two layers contribute artifacts with the same canonical ID, the higher-prec
 | `license` | Scalar; child wins (lint warning if changed across layers). |
 | `search_visibility` | Scalar; most-restrictive (`direct-only` > `indexed`). |
 
-For skills, the merge applies to the `ARTIFACT.md` frontmatter. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's.
+If a child omits a field of its `ARTIFACT.md` frontmatter, or sets an empty scalar, the parent's value is inherited unchanged. This holds for every frontmatter field, including the fields in the table above. When both the parent and the child declare a value, a field in the table merges per its row, and every field outside the table takes the child's value. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
 
-Fields not in this table merge as "child wins": if the child sets the field its value replaces the parent's, otherwise the parent's value is inherited. The child's `type:` must match the parent's, and the child's `version:` is independent of the parent's.
+For skills, the merge applies to the `ARTIFACT.md` frontmatter alone. The registry serves the child's `SKILL.md` verbatim, so `name`, `description`, `license`, and the other agentskills.io fields come from the child's `SKILL.md` and are not inherited from the parent's, whether or not the child's `SKILL.md` declares them.
 
 See [Extends](extends) for examples and gotchas.
 

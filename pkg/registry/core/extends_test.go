@@ -430,3 +430,328 @@ func TestSearchArtifacts_SensitivityOwnValueNoExtends(t *testing.T) {
 
 // quiet unused-import linter for tests that don't directly use errors
 var _ = errors.Is
+
+// ingestPair stores parent then child in two layers and returns a registry
+// that can see both. The two ingests are ordered because §4.6 requires the
+// parent to exist before the child is accepted.
+func ingestPair(t *testing.T, parentPath, parentSrc, childPath, childSrc string) (*core.Registry, store.Store) {
+	t.Helper()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "t", LayerID: "L1", Files: fstest.MapFS{
+			parentPath: &fstest.MapFile{Data: []byte(parentSrc)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ingest parent: %v", err)
+	}
+	if len(res.Rejected) > 0 {
+		t.Fatalf("parent rejected: %+v", res.Rejected)
+	}
+	res, err = ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "t", LayerID: "L2", Files: fstest.MapFS{
+			childPath: &fstest.MapFile{Data: []byte(childSrc)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ingest child: %v", err)
+	}
+	if len(res.Rejected) > 0 {
+		t.Fatalf("child rejected: %+v", res.Rejected)
+	}
+	reg := core.New(st, "t", []layer.Layer{
+		{ID: "L1", Visibility: layer.Visibility{Public: true}, Precedence: 1},
+		{ID: "L2", Visibility: layer.Visibility{Public: true}, Precedence: 2},
+	})
+	return reg, st
+}
+
+func findResult(t *testing.T, res *core.SearchResult, id string) core.ArtifactDescriptor {
+	t.Helper()
+	for _, r := range res.Results {
+		if r.ID == id {
+			return r
+		}
+	}
+	t.Fatalf("search did not return %s: %+v", id, res.Results)
+	return core.ArtifactDescriptor{}
+}
+
+// Spec: §4.6 Omitted fields / §4.7 — a child that omits description: inherits
+// the parent's, and the search descriptor carries the same text load_artifact
+// serves for the artifact.
+func TestSearchArtifacts_DescriptionInheritedAcrossExtends(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: reconciles the quarterly ledger\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\nextends: shared/parent@1.x\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	got := findResult(t, res, "finance/child")
+	if got.Description != "reconciles the quarterly ledger" {
+		t.Errorf("search Description = %q, want the parent's inherited text", got.Description)
+	}
+	loaded, err := reg.LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	merged, err := manifest.ParseArtifact(loaded.Frontmatter)
+	if err != nil {
+		t.Fatalf("ParseArtifact: %v", err)
+	}
+	if merged.Description != got.Description {
+		t.Errorf("search Description %q disagrees with load_artifact %q", got.Description, merged.Description)
+	}
+}
+
+// Spec: §4.7 — the artifact embedding and the lexical index read the
+// §4.6-resolved frontmatter, so a query on a term that appears only in the
+// parent's description recalls the child.
+func TestSearchArtifacts_RecallOnInheritedDescriptionTerm(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: performs zygomorphic reconciliation\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\nextends: shared/parent@1.x\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{Query: "zygomorphic"})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	findResult(t, res, "finance/child")
+}
+
+// Spec: §4.6 hidden parents — the search descriptor of an extends child names
+// no parent: the extends key is gone and the parent's ID appears nowhere in
+// the result, while the inherited indexed fields are served.
+func TestSearchArtifacts_DescriptorHidesParent(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\ntags: [parent-tag]\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ntags: [child-tag]\nextends: shared/parent@1.x\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	got := findResult(t, res, "finance/child")
+	if strings.Contains(got.Frontmatter, "extends") {
+		t.Errorf("descriptor frontmatter keeps the extends key: %q", got.Frontmatter)
+	}
+	if strings.Contains(got.Frontmatter, "shared/parent") || strings.Contains(got.Description, "shared/parent") {
+		t.Errorf("descriptor leaks the parent ID: %+v", got)
+	}
+	if got.Description != "parent desc" {
+		t.Errorf("Description = %q, want the inherited parent desc", got.Description)
+	}
+	if !containsStr(got.Tags, "parent-tag") || !containsStr(got.Tags, "child-tag") {
+		t.Errorf("Tags = %v, want the union of parent and child tags", got.Tags)
+	}
+	if !strings.Contains(got.Frontmatter, "child-tag") {
+		t.Errorf("descriptor frontmatter lost the child's authored keys: %q", got.Frontmatter)
+	}
+}
+
+// Spec: §4.6 hidden parents — the extends key is deleted at the YAML node
+// level, so a key manifest.Artifact does not declare survives with its value
+// in the search descriptor.
+func TestSearchArtifacts_DescriptorKeepsUndeclaredKeys(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child desc\n" +
+		"acme_owner: platform-team\nextends: shared/parent@1.x\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	got := findResult(t, res, "finance/child")
+	if !strings.Contains(got.Frontmatter, "acme_owner") || !strings.Contains(got.Frontmatter, "platform-team") {
+		t.Errorf("undeclared key dropped from the descriptor frontmatter: %q", got.Frontmatter)
+	}
+	if strings.Contains(got.Frontmatter, "extends") {
+		t.Errorf("descriptor frontmatter keeps the extends key: %q", got.Frontmatter)
+	}
+}
+
+// Spec: §4.6 hidden parents — the strip fails closed. A stored record whose
+// frontmatter cannot be decoded still returns as a search result, with an
+// empty frontmatter block rather than the raw block that names the parent.
+func TestSearchArtifacts_DescriptorFrontmatterUndecodable(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	broken := "---\nextends: shared/parent@1.0.0\n  bad: [unclosed\n---\n\nbody\n"
+	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+		TenantID:    "t",
+		ArtifactID:  "finance/child",
+		Version:     "2.0.0",
+		ContentHash: "sha256:deadbeef",
+		Type:        "agent",
+		Description: "child desc",
+		Layer:       "L1",
+		Frontmatter: []byte(broken),
+		ExtendsPin:  "shared/parent@1.0.0",
+	}); err != nil {
+		t.Fatalf("PutManifest: %v", err)
+	}
+	reg := core.New(st, "t", []layer.Layer{{ID: "L1", Visibility: layer.Visibility{Public: true}, Precedence: 1}})
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	got := findResult(t, res, "finance/child")
+	if got.Frontmatter != "" {
+		t.Errorf("Frontmatter = %q, want empty (fail closed)", got.Frontmatter)
+	}
+	if strings.Contains(got.Frontmatter, "shared/parent") {
+		t.Errorf("undecodable block leaked the parent: %q", got.Frontmatter)
+	}
+}
+
+// Spec: §4.6 hidden parents — the guard is scoped to the extends the manifest
+// parser resolved. A child that supplies extends through a YAML merge key is
+// ingested as an extends child, and deleting the top-level key would leave the
+// parent's ID inside the merged mapping, so the descriptor fails closed.
+func TestSearchArtifacts_DescriptorHidesParentSuppliedByMergeKey(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\n---\n\nparent body\n"
+	child := "---\nbase: &b\n  extends: shared/parent@1.x\ntype: agent\nversion: 2.0.0\n" +
+		"description: child desc\n<<: *b\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	got := findResult(t, res, "finance/child")
+	if got.Frontmatter != "" {
+		t.Errorf("Frontmatter = %q, want empty (fail closed)", got.Frontmatter)
+	}
+	if strings.Contains(got.Description, "shared/parent") {
+		t.Errorf("descriptor leaks the parent ID: %+v", got)
+	}
+}
+
+// Spec: §4.6 hidden parents — deleting an anchored extends value strands every
+// alias into it, so the rewritten block is undecodable YAML. The descriptor
+// fails closed rather than serving a block with a dangling alias.
+func TestSearchArtifacts_DescriptorHidesParentAnchoredValue(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child desc\n" +
+		"extends: &p shared/parent@1.x\nnote: *p\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	got := findResult(t, res, "finance/child")
+	if got.Frontmatter != "" {
+		t.Errorf("Frontmatter = %q, want empty (fail closed)", got.Frontmatter)
+	}
+}
+
+// Spec: §7.6.1 — a load_domain notable entry carries {id, type, summary,
+// source, folded_from}. For an extends child the entry carries neither a
+// frontmatter block nor a sensitivity label, and its summary is the §4.6
+// inherited description.
+func TestLoadDomain_NotableEntryCarriesNeitherFrontmatterNorSensitivity(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: inherited summary\nsensitivity: high\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\nsensitivity: medium\nextends: shared/parent@1.x\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	got, err := reg.LoadDomain(context.Background(), publicID, "finance", core.LoadDomainOptions{})
+	if err != nil {
+		t.Fatalf("LoadDomain: %v", err)
+	}
+	var entry *core.ArtifactDescriptor
+	for i := range got.Notable {
+		if got.Notable[i].ID == "finance/child" {
+			entry = &got.Notable[i]
+		}
+	}
+	if entry == nil {
+		t.Fatalf("load_domain did not list finance/child as notable: %+v", got.Notable)
+	}
+	if entry.Frontmatter != "" {
+		t.Errorf("notable Frontmatter = %q, want empty", entry.Frontmatter)
+	}
+	if entry.Sensitivity != "" {
+		t.Errorf("notable Sensitivity = %q, want empty", entry.Sensitivity)
+	}
+	if entry.Summary != "inherited summary" {
+		t.Errorf("notable Summary = %q, want the inherited description", entry.Summary)
+	}
+}
+
+// Spec: §4.6 field-semantics table / §4.7.4 — search filtering reads the
+// record's §4.6-merged columns.
+func TestSearchArtifacts_FiltersReadMergedFields(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name   string
+		parent string
+		child  string
+		opts   core.SearchArtifactsOptions
+		want   bool
+	}{
+		{
+			// An inherited search_visibility: direct-only excludes the child
+			// from default search results.
+			name:   "inherited direct-only excludes the child",
+			parent: "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\nsearch_visibility: direct-only\n---\n\nparent body\n",
+			child:  "---\ntype: agent\nversion: 2.0.0\ndescription: child desc\nextends: shared/parent@1.x\n---\n\nchild body\n",
+			want:   false,
+		},
+		{
+			// A tag only the parent declares matches the child under
+			// opts.Tags, because the tag union is stored on the child.
+			name:   "parent-only tag matches under opts.Tags",
+			parent: "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\ntags: [parent-tag]\n---\n\nparent body\n",
+			child:  "---\ntype: agent\nversion: 2.0.0\ndescription: child desc\ntags: [child-tag]\nextends: shared/parent@1.x\n---\n\nchild body\n",
+			opts:   core.SearchArtifactsOptions{Tags: []string{"parent-tag"}},
+			want:   true,
+		},
+		{
+			// Accepted deferral: deprecated: true is not folded into the
+			// child's record, because PutManifest stamps DeprecatedAt from it
+			// and would arm the §8.4 purge against a child whose author never
+			// deprecated it. A child of a deprecated parent is therefore still
+			// returned by a default search.
+			name:   "child of a deprecated parent is still returned",
+			parent: "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\ndeprecated: true\n---\n\nparent body\n",
+			child:  "---\ntype: agent\nversion: 2.0.0\ndescription: child desc\nextends: shared/parent@1.x\n---\n\nchild body\n",
+			want:   true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", tc.parent, "finance/child/ARTIFACT.md", tc.child)
+			res, err := reg.SearchArtifacts(context.Background(), publicID, tc.opts)
+			if err != nil {
+				t.Fatalf("SearchArtifacts: %v", err)
+			}
+			found := false
+			for _, r := range res.Results {
+				if r.ID == "finance/child" {
+					found = true
+				}
+			}
+			if found != tc.want {
+				t.Errorf("finance/child returned = %v, want %v: %+v", found, tc.want, res.Results)
+			}
+		})
+	}
+}
