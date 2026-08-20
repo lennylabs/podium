@@ -1532,9 +1532,15 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			// column, so derive the key set from the frontmatter when the field
 			// is absent. This keeps redaction working uniformly across the
 			// memory, SQLite, and Postgres stores.
-			redactKeys := rec.AuditRedact
-			if len(redactKeys) == 0 && len(rec.Frontmatter) > 0 {
-				if a, perr := manifest.ParseArtifact(rec.Frontmatter); perr == nil {
+			// The served record rather than the stored one: for an extends
+			// child the two differ, and §4.6 makes audit_redact inheritable,
+			// so reading the leaf's own frontmatter would drop a directive
+			// the child inherits. served falls back to rec for a record with
+			// no extends chain, where the two are the same bytes.
+			served := servedRecord(rec, res)
+			redactKeys := served.AuditRedact
+			if len(redactKeys) == 0 && len(served.Frontmatter) > 0 {
+				if a, perr := manifest.ParseArtifact(served.Frontmatter); perr == nil {
 					redactKeys = a.AuditRedact
 				}
 			}
@@ -1542,7 +1548,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			// bank_account, ssn) into the read-event context so the directive
 			// has a concrete target. The audit emitter masks every RedactKeys
 			// entry, so these values reach the sink only as [redacted].
-			for k, v := range manifest.FrontmatterFields(rec.Frontmatter, redactKeys) {
+			for k, v := range manifest.FrontmatterFields(served.Frontmatter, redactKeys) {
 				if _, exists := ev.Context[k]; !exists {
 					ev.Context[k] = v
 				}
@@ -1753,6 +1759,11 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	out.SearchVisibility = string(merged.SearchVisibility)
 	out.Deprecated = merged.Deprecated
 	out.ReplacedBy = merged.ReplacedBy
+	// §4.6 makes audit_redact inheritable and manifest.MergeExtends folds it,
+	// so the merged directive has to reach the record the §8.2 read emitter
+	// reads. Left at the leaf's, a child that inherits its parent's directive
+	// emits an event naming none of the parent's keys.
+	out.AuditRedact = append([]string(nil), merged.AuditRedact...)
 	// Serialize through the chain's authored blocks so an extension type's
 	// own frontmatter keys survive, and strip the extends reference so the
 	// hidden parent is not surfaced (§4.6). A block that cannot be rewritten
@@ -1768,6 +1779,23 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	}
 	out.Frontmatter = fm
 	return out, nil
+}
+
+// servedRecord returns the record the caller was served, which for an extends
+// child is the merged one rather than the stored leaf. The §8.2 read emitter
+// needs the merged frontmatter and the merged audit_redact directive, and
+// LoadArtifactResult carries the merged frontmatter but not the directive, so
+// the two are recombined here rather than by widening the client-facing type.
+func servedRecord(rec store.ManifestRecord, res *LoadArtifactResult) store.ManifestRecord {
+	if res == nil || rec.ExtendsPin == "" {
+		return rec
+	}
+	out := rec
+	out.Frontmatter = res.Frontmatter
+	if a, err := manifest.ParseArtifact(res.Frontmatter); err == nil && a != nil {
+		out.AuditRedact = append([]string(nil), a.AuditRedact...)
+	}
+	return out
 }
 
 // parsedArtifact decodes a record's stored frontmatter into a
