@@ -225,6 +225,25 @@ func (s *notificationSink) waitForDelivery(want int, within time.Duration) bool 
 	return s.count() >= want
 }
 
+// waitForEventType polls until a delivery whose body event field equals
+// eventType has been recorded, or the window closes. It is what an unfiltered
+// receiver needs: waitForDelivery(1) returns on whichever event the registry
+// fired first, which for a probe that registers a layer is the §7.6
+// layer.config_changed rather than the artifact.published the caller is
+// asserting. A receiver registered with a type filter can use the count, since
+// the filter admits only the type under test.
+func (s *notificationSink) waitForEventType(eventType string, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if _, ok := s.firstMatching(eventType); ok {
+			return true
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_, ok := s.firstMatching(eventType)
+	return ok
+}
+
 // firstMatching returns the first recorded delivery whose body event field
 // equals eventType, plus whether one was found.
 func (s *notificationSink) firstMatching(eventType string) (recordedDelivery, bool) {
