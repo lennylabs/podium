@@ -95,6 +95,117 @@ func TestIngest_ExtendsUnpinnedPinsMostRecentlyIngestedParent(t *testing.T) {
 	}
 }
 
+// deprecatedAgentVersion is a type:agent artifact published as deprecated, so
+// it enters the candidate set with the §4.7.6 flag already set. Deprecation is
+// per-version and immutable (§4.7), so a test cannot flip an existing row.
+func deprecatedAgentVersion(ver, desc string) string {
+	return "---\ntype: agent\nversion: " + ver + "\ndescription: " + desc + "\nsensitivity: low\ndeprecated: true\n---\n\nagent body\n"
+}
+
+// Spec: §4.6 — an exact `extends:` pin naming a deprecated parent version is
+// rejected with ingest.invalid_artifact, and the child is not stored.
+// Matrix: §6.10 (ingest.invalid_artifact)
+func TestExtends_ExactPinOntoDeprecatedParentRejected(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	ingestOne(t, st, "L1", "shared/parent", agentParent("live"))
+	ingestOne(t, st, "L1", "shared/parent", deprecatedAgentVersion("1.0.1", "retired"))
+
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent@1.0.1\n---\n\nbody\n"
+	res := ingestOne(t, st, "L2", "finance/child", child)
+	if len(res.Rejected) != 1 || res.Accepted != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a single rejection", res.Accepted, res.Rejected)
+	}
+	if res.Rejected[0].Code != "ingest.invalid_artifact" {
+		t.Errorf("code = %q, want ingest.invalid_artifact", res.Rejected[0].Code)
+	}
+	if !strings.Contains(res.Rejected[0].Reason, "deprecated") {
+		t.Errorf("reason should name the deprecated parent version: %q", res.Rejected[0].Reason)
+	}
+	if _, err := st.GetManifest(context.Background(), "tenant-1", "finance/child", "2.0.0"); err == nil {
+		t.Errorf("a child pinned onto a deprecated parent version must not be stored")
+	}
+}
+
+// Spec: §4.7.6 — a range reference whose every candidate is deprecated is
+// rejected, and the reason names deprecation rather than reporting the parent
+// as never published.
+// Matrix: §6.10 (ingest.invalid_artifact)
+func TestExtends_AllCandidatesDeprecatedRejected(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	ingestOne(t, st, "L1", "shared/parent", deprecatedAgentVersion("1.0.0", "retired"))
+
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent@1.x\n---\n\nbody\n"
+	res := ingestOne(t, st, "L2", "finance/child", child)
+	if len(res.Rejected) != 1 {
+		t.Fatalf("rejected=%+v, want a single rejection", res.Rejected)
+	}
+	if res.Rejected[0].Code != "ingest.invalid_artifact" {
+		t.Errorf("code = %q, want ingest.invalid_artifact", res.Rejected[0].Code)
+	}
+	if !strings.Contains(res.Rejected[0].Reason, "deprecated") {
+		t.Errorf("reason should name deprecation: %q", res.Rejected[0].Reason)
+	}
+	if strings.Contains(res.Rejected[0].Reason, "ingested yet") {
+		t.Errorf("reason must not report the parent as unpublished: %q", res.Rejected[0].Reason)
+	}
+}
+
+// Spec: §4.7 version immutability — an unchanged re-ingest of an accepted
+// child classifies as idempotent even after a deprecated parent version lands
+// alongside the one the child pinned. The resolution re-runs and still
+// succeeds against the live candidate, so ingest reaches the idempotency
+// classification.
+func TestExtends_RangeReingestStaysIdempotentAfterParentDeprecation(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	ingestOne(t, st, "L1", "shared/parent", agentParent("live"))
+
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent@1.x\n---\n\nbody\n"
+	if res := ingestOne(t, st, "L2", "finance/child", child); res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a clean accept", res.Accepted, res.Rejected)
+	}
+	ingestOne(t, st, "L1", "shared/parent", deprecatedAgentVersion("1.0.1", "retired"))
+
+	res := ingestOne(t, st, "L2", "finance/child", child)
+	if res.Idempotent != 1 || res.Accepted != 0 || len(res.Rejected) != 0 {
+		t.Fatalf("idempotent=%d accepted=%d rejected=%+v, want a single idempotent no-op",
+			res.Idempotent, res.Accepted, res.Rejected)
+	}
+	rec, err := st.GetManifest(ctx, "tenant-1", "finance/child", "2.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest child: %v", err)
+	}
+	if rec.ExtendsPin != "shared/parent@1.0.0" {
+		t.Errorf("ExtendsPin = %q, want the stored pin to stay on shared/parent@1.0.0", rec.ExtendsPin)
+	}
+}
+
+// Spec: §4.7.6 — a child published at a new version resolves its range again
+// against the candidate set as it stands then, and the deprecated version that
+// landed in the meantime is skipped.
+func TestExtends_ChildVersionBumpRepinsPastDeprecatedParent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	ingestOne(t, st, "L1", "shared/parent", agentParent("live"))
+	ingestOne(t, st, "L1", "shared/parent", deprecatedAgentVersion("1.1.0", "retired"))
+
+	child := "---\ntype: agent\nversion: 3.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent@1.x\n---\n\nbody\n"
+	if res := ingestOne(t, st, "L2", "finance/child", child); res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a clean accept", res.Accepted, res.Rejected)
+	}
+	rec, err := st.GetManifest(ctx, "tenant-1", "finance/child", "3.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest child: %v", err)
+	}
+	if rec.ExtendsPin != "shared/parent@1.0.0" {
+		t.Errorf("ExtendsPin = %q, want shared/parent@1.0.0 (1.1.0 is deprecated)", rec.ExtendsPin)
+	}
+}
+
 // Spec: §4.6 — "The child's type: must match the parent's; ingest rejects
 // an extends: chain that crosses types."
 func TestExtends_CrossTypeRejected(t *testing.T) {

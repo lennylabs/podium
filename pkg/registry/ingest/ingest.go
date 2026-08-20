@@ -1503,6 +1503,15 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 				selectable = append(selectable, v)
 			}
 		}
+		// Spec: §4.7.6 — the parent has stored versions and the filter left
+		// no candidate, so the reference is refused rather than falling back
+		// to the deprecated set. The message names deprecation, because the
+		// arms that report an unpublished parent or an unsatisfied range
+		// would send the author looking for a publication that already
+		// happened.
+		if len(selectable) == 0 {
+			return "", "", "", fmt.Errorf("every stored version of parent %q is deprecated", id)
+		}
 		if p.Kind == version.PinLatest {
 			// Spec: §4.7.6 — `latest` is the most recently ingested
 			// non-deprecated version, so order by ingest time rather than
@@ -1524,6 +1533,14 @@ func resolveExtendsPin(ctx context.Context, st store.Store, tenantID, ref, child
 		if err != nil {
 			return "", "", "", fmt.Errorf("no parent version satisfies %q", ref)
 		}
+	}
+	// Spec: §4.6 — a child may not extend a deprecated parent version. An
+	// explicit reference, by exact semver or by content hash, names one
+	// version and is refused when that version is deprecated. A range or
+	// unpinned reference never reaches this check, because its selection set
+	// already excludes every deprecated candidate.
+	if deprecatedByVersion[resolved] {
+		return "", "", "", fmt.Errorf("parent version %s@%s is deprecated", id, resolved)
 	}
 	// Parse the resolved parent's license from its stored source. The
 	// frontmatter holds the full ARTIFACT.md bytes; a parse failure leaves
