@@ -135,13 +135,20 @@ func stripPin(ref string) string {
 	return ref
 }
 
-// authoredChain returns the authored ARTIFACT.md bytes of rec's extends chain,
-// parent first, which is the order manifest.SerializeMerged wants: a key the
-// child also sets keeps the child's value. It walks the same links mergeRecord
-// walks and stops on any it cannot follow, because a chain mergeRecord rejects
-// never reaches the serializer.
-func authoredChain(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, effective map[string]int, layered map[string][]ArtifactRecord) [][]byte {
-	var out [][]byte
+// authoredChain returns the ARTIFACT.md bytes of rec's extends chain paired
+// with each member's declared extends reference, parent first, which is the
+// order manifest.SerializeMerged wants: a key the child also sets keeps the
+// child's value. It walks the same links mergeRecord walks and stops on any it
+// cannot follow, because a chain mergeRecord rejects never reaches the
+// serializer.
+//
+// The reference comes from the parsed Artifact, which resolveExtends leaves
+// naming the member's own parent even after it has replaced that member's
+// ArtifactBytes with the merged block. Reading it back out of the bytes would
+// make the chain the §4.6 strip checks depend on which records this loop has
+// already processed.
+func authoredChain(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, effective map[string]int, layered map[string][]ArtifactRecord) []manifest.MergedBlock {
+	var out []manifest.MergedBlock
 	seen := map[string]bool{}
 	cur, curIdx := rec, layerIdx
 	for {
@@ -165,12 +172,22 @@ func authoredChain(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, e
 			cur = deduped[di]
 			curIdx = len(layered[parentID]) - 1
 		}
-		out = append(out, cur.ArtifactBytes)
+		out = append(out, blockOf(cur))
 	}
 	// Reverse into parent-first order, then append the child's own block last
 	// so its value wins for a key both declare.
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
 	}
-	return append(out, rec.ArtifactBytes)
+	return append(out, blockOf(rec))
+}
+
+// blockOf pairs a record's manifest bytes with the extends reference its
+// parsed manifest declares.
+func blockOf(rec ArtifactRecord) manifest.MergedBlock {
+	block := manifest.MergedBlock{Frontmatter: rec.ArtifactBytes}
+	if rec.Artifact != nil {
+		block.Extends = rec.Artifact.Extends
+	}
+	return block
 }

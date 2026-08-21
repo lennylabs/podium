@@ -1773,9 +1773,16 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	// own frontmatter keys survive, and strip the extends reference so the
 	// hidden parent is not surfaced (§4.6). A block that cannot be rewritten
 	// into one naming no parent fails the read rather than being served.
-	authored := make([][]byte, 0, len(chain))
+	authored := make([]manifest.MergedBlock, 0, len(chain))
 	for _, c := range chain {
-		authored = append(authored, c.Frontmatter)
+		// The stored pin is the reference this record was ingested with,
+		// reduced to its canonical ID on the other side of the strip. Passing
+		// it rather than re-reading the block keeps both modes checking the
+		// same chain (§11).
+		authored = append(authored, manifest.MergedBlock{
+			Frontmatter: c.Frontmatter,
+			Extends:     c.ExtendsPin,
+		})
 	}
 	fm, err := manifest.SerializeMerged(merged, authored...)
 	if err != nil {

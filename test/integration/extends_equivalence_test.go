@@ -18,6 +18,12 @@ import (
 // `manifest.Artifact` does not, each child authors one of its own and no prose,
 // so the fixture exercises the inherited-key path, the empty-body path, and
 // both parent resolutions that the two extends resolvers must agree on.
+//
+// `shared/base` extends `shared/anchor`, which makes `team/derived` a
+// three-level chain. The filesystem resolver rewrites a record in place as it
+// processes it, so a chain deeper than one link is what separates a resolver
+// that reads the chain from each record's parsed manifest from one that reads
+// it back out of bytes it has already rewritten.
 func writeExtendsRegistry(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -34,9 +40,13 @@ func writeExtendsRegistry(t *testing.T) string {
 	write("base/.layer-config", "visibility:\n  public: true\n")
 	write("top/.layer-config", "visibility:\n  public: true\n")
 
+	write("base/shared/anchor/ARTIFACT.md",
+		"---\ntype: context\nversion: 1.0.0\ndescription: the anchor context\n"+
+			"tags: [anchor]\nsensitivity: low\nx_charter: platform/charter.md\n---\n\nanchor prose\n")
 	write("base/shared/base/ARTIFACT.md",
 		"---\ntype: context\nversion: 1.0.0\ndescription: the base context\n"+
-			"tags: [shared]\nsensitivity: low\nx_review_board: platform\n---\n\nbase prose\n")
+			"tags: [shared]\nsensitivity: low\nx_review_board: platform\n"+
+			"extends: shared/anchor@1.x\n---\n\nbase prose\n")
 	write("top/team/derived/ARTIFACT.md",
 		"---\ntype: context\nversion: 2.0.0\ndescription: the derived context\n"+
 			"tags: [team]\nx_runbook: ops/derived.md\nextends: shared/base@1.x\n---\n")
@@ -111,6 +121,12 @@ func TestSyncEquivalence_ExtendsChildMatchesAcrossModes(t *testing.T) {
 				if !strings.Contains(content, "x_runbook:") {
 					t.Errorf("%s: merged frontmatter lost the child's own key:\n%s", child, content)
 				}
+			}
+			// team/derived sits two links below shared/anchor, so the
+			// grandparent's inherited key pins the deeper chain both
+			// resolvers have to restore identically.
+			if content := soleMaterializedEntry(t, fsTree, "team/derived"); !strings.Contains(content, "x_charter: platform/charter.md") {
+				t.Errorf("team/derived: merged frontmatter lost the grandparent-inherited key:\n%s", content)
 			}
 
 			assertTreesEqual(t, fsTree, srvTree)

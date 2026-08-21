@@ -34,10 +34,32 @@ var declaredKeys = func() map[string]bool {
 	return keys
 }()
 
+// MergedBlock is one member of an extends chain as SerializeMerged reads it:
+// the frontmatter its author wrote, and the extends reference its parsed
+// manifest declares.
+//
+// The reference is carried beside the block rather than re-read out of it,
+// because a resolver hands back blocks it has already rewritten. The
+// filesystem resolver replaces a record's ArtifactBytes with the merged block
+// as soon as it processes that record, and the merged block names no parent,
+// so a chain whose middle member happened to be processed first would
+// contribute no reference at all. The set of IDs the served block is checked
+// against would then depend on slice order, and the filesystem mode would
+// serve a block the server mode refuses (§11, §2.2).
+type MergedBlock struct {
+	// Frontmatter is the member's authored block, with its delimiters.
+	Frontmatter []byte
+	// Extends is the reference the member's parsed manifest declares, empty
+	// for the chain's root.
+	Extends string
+}
+
 // SerializeMerged renders the merged artifact for an extends child and returns
 // the frontmatter block its consumers are served. It is the one implementation
 // both extends resolvers call, so the server mode and the filesystem-registry
 // mode serve identical bytes for the same artifact (§11, §2.2).
+//
+// chain holds the artifact's ancestry parent first, the leaf last.
 //
 // It does two things the typed serialization alone cannot. It restores the
 // frontmatter keys Artifact does not declare, taking them from the chain's
@@ -51,7 +73,7 @@ var declaredKeys = func() map[string]bool {
 // only it carries the §4.6 merge semantics: a union for a list field and the
 // most-restrictive value for sensitivity are not what a last-writer-wins
 // overlay over authored text would produce.
-func SerializeMerged(a *Artifact, authored ...[]byte) ([]byte, error) {
+func SerializeMerged(a *Artifact, chain ...MergedBlock) ([]byte, error) {
 	stripped := *a
 	stripped.Extends = ""
 	typed, err := SerializeArtifact(&stripped)
@@ -79,15 +101,28 @@ func SerializeMerged(a *Artifact, authored ...[]byte) ([]byte, error) {
 	}
 	root := doc.Content[0]
 
-	restored, refs := undeclaredKeysOf(authored)
-	for _, key := range restored {
-		root.Content = append(root.Content,
-			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
-			key.value)
+	refs := map[string]bool{}
+	for _, block := range chain {
+		addParentRef(refs, block.Extends)
 	}
 	// The merged artifact carries the leaf's reference, which a chain whose
 	// leaf resolved it through a merge key never spells out at the top level.
 	addParentRef(refs, a.Extends)
+
+	for _, key := range undeclaredKeysOf(chain) {
+		// Spec: §4.6 hidden parents. A key restored from a block above the
+		// leaf is text the requester may never have been able to read, so the
+		// disclosure test on it covers a chain ID mentioned anywhere inside
+		// the value rather than a value that is the reference. The leaf's own
+		// text ships to the requester in raw_frontmatter either way, so it
+		// keeps the narrower test the assembled block gets below.
+		if key.fromChain && nodeMentions(key.value, refs) {
+			return nil, ErrUnhidableParent
+		}
+		root.Content = append(root.Content,
+			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
+			key.value)
+	}
 
 	out, err := yaml.Marshal(root)
 	// Not reachable: every node in root came out of the decoder, and an
@@ -116,28 +151,29 @@ func SerializeMerged(a *Artifact, authored ...[]byte) ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// namedNode pairs a restored key with the node holding its value.
+// namedNode pairs a restored key with the node holding its value, and records
+// whether the winning value came from a block above the leaf.
 type namedNode struct {
-	name  string
-	value *yaml.Node
+	name      string
+	value     *yaml.Node
+	fromChain bool
 }
 
 // undeclaredKeysOf collects the frontmatter keys Artifact does not declare
 // from the chain's authored blocks, parent first, so a later block's value for
-// the same key wins. It also returns the extends references those blocks name,
-// which is what the assembled block is checked against under §4.6.
+// the same key wins. chain's last member is the leaf.
 //
 // The three skip arms below are not reachable behind either extends resolver.
 // Both feed blocks a parser has already accepted: the server mode passes the
 // stored frontmatter ingest parsed, and the filesystem mode passes the bytes
 // the walk parsed. They are kept so a caller that passes an unparsed block
 // contributes no keys rather than panicking on a nil node.
-func undeclaredKeysOf(authored [][]byte) ([]namedNode, map[string]bool) {
+func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 	seen := map[string]int{}
 	out := []namedNode{}
-	refs := map[string]bool{}
-	for _, raw := range authored {
-		header, _, err := SplitFrontmatter(raw)
+	for at, block := range chain {
+		fromChain := at < len(chain)-1
+		header, _, err := SplitFrontmatter(block.Frontmatter)
 		if err != nil {
 			continue
 		}
@@ -151,15 +187,6 @@ func undeclaredKeysOf(authored [][]byte) ([]namedNode, map[string]bool) {
 		m := doc.Content[0]
 		for i := 0; i+1 < len(m.Content); i += 2 {
 			name := m.Content[i].Value
-			if name == "extends" {
-				// Resolve before recording: a chain member above the leaf can
-				// carry its reference through an alias, whose node Value is the
-				// anchor name rather than the parent's ID. Recording the anchor
-				// name would leave the anchor-defining sibling key free to
-				// restore that parent's ID into the served block.
-				addParentRef(refs, resolveAliases(m.Content[i+1], map[*yaml.Node]bool{}).Value)
-				continue
-			}
 			if declaredKeys[name] {
 				continue
 			}
@@ -169,15 +196,16 @@ func undeclaredKeysOf(authored [][]byte) ([]namedNode, map[string]bool) {
 			// carried, so a restored alias into one would otherwise strand
 			// and cost the child a load it gets today.
 			value := resolveAliases(m.Content[i+1], map[*yaml.Node]bool{})
-			if at, ok := seen[name]; ok {
-				out[at].value = value
+			if prev, ok := seen[name]; ok {
+				out[prev].value = value
+				out[prev].fromChain = fromChain
 				continue
 			}
 			seen[name] = len(out)
-			out = append(out, namedNode{name: name, value: value})
+			out = append(out, namedNode{name: name, value: value, fromChain: fromChain})
 		}
 	}
-	return out, refs
+	return out
 }
 
 // resolveAliases returns a copy of n with every alias replaced by the value it
@@ -238,7 +266,7 @@ func addParentRef(refs map[string]bool, ref string) {
 // aliases, and rejects a block whose anchors do not resolve.
 //
 // refs holds the canonical IDs the chain names, and an empty set reduces the
-// check to the extends entry alone. SerializeMerged collects the chain's
+// check to the extends entry alone. SerializeMerged passes the chain's
 // references because it copies keys out of blocks other than the served
 // record's; FrontmatterHidingParent passes none because it rewrites the
 // record's own block.
@@ -253,11 +281,79 @@ func hidesParent(header []byte, refs map[string]bool) bool {
 	return !namesAny(resolved, refs)
 }
 
+// nodeMentions reports whether any scalar in n spells one of refs at a token
+// boundary. It is the wider of the two §4.6 disclosure tests and applies to a
+// value restored from a block above the leaf, where prose quoting the ID
+// discloses the hidden parent as plainly as a bare reference does.
+func nodeMentions(n *yaml.Node, refs map[string]bool) bool {
+	// Not reachable: every node here came out of resolveAliases over a parsed
+	// mapping, whose entries are non-nil. The guard is kept so the recursion
+	// answers rather than panicking on a node a later caller builds by hand.
+	if n == nil {
+		return false
+	}
+	if n.Kind == yaml.ScalarNode && mentionsRef(n.Value, refs) {
+		return true
+	}
+	for _, c := range n.Content {
+		if nodeMentions(c, refs) {
+			return true
+		}
+	}
+	return false
+}
+
+// mentionsRef reports whether s spells one of refs as a whole token. A match
+// inside a longer identifier is not a mention: "shared/parenthetical" and
+// "shared/parent/README.md" both name something other than "shared/parent".
+func mentionsRef(s string, refs map[string]bool) bool {
+	for id := range refs {
+		if containsToken(s, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsToken reports whether id occurs in s bounded on both sides by a byte
+// that cannot be part of an artifact reference. The pin separator is one such
+// byte, so prose quoting "shared/parent@1.x" mentions "shared/parent".
+func containsToken(s, id string) bool {
+	for at := 0; at+len(id) <= len(s); {
+		i := strings.Index(s[at:], id)
+		if i < 0 {
+			return false
+		}
+		i += at
+		before := i == 0 || !refByte(s[i-1])
+		after := i+len(id) == len(s) || !refByte(s[i+len(id)])
+		if before && after {
+			return true
+		}
+		at = i + 1
+	}
+	return false
+}
+
+// refByte reports whether b can appear inside an artifact reference's
+// canonical ID, which is what bounds a token in containsToken.
+func refByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	case b == '/', b == '-', b == '_', b == '.':
+		return true
+	}
+	return false
+}
+
 // namesAny reports whether any string within v is one of refs, comparing
 // canonical IDs so the pin a value carries does not decide the outcome. The
-// test is on a value that is the reference. A string that merely mentions the
-// ID inside longer text carries no artifact reference under any key, and
-// refusing it would cost a load that succeeds today.
+// test is on a value that is the reference. This is the narrower of the two
+// §4.6 disclosure tests and covers the assembled block, whose remaining
+// authored text is the leaf's own and already ships to the requester in
+// raw_frontmatter, so refusing prose that quotes the ID would cost the leaf a
+// load it gets today without withholding anything.
 func namesAny(v any, refs map[string]bool) bool {
 	switch t := v.(type) {
 	case string:
