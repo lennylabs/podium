@@ -147,12 +147,12 @@ func TestSerializeMerged_UnrewritableBlockFailsClosed(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents. The served block carries a chain parent's ID under
-// no key, so a restored key whose value references a parent is refused whichever
-// block in the chain authored it. The reference is compared by canonical ID, so
-// the pin either side happens to carry does not decide the outcome, and the
-// value is found at any nesting depth.
-func TestSerializeMerged_RestoredKeyReferencingTheParentFailsClosed(t *testing.T) {
+// Spec: §4.6 hidden parents. A key restored from a chain member above the leaf
+// carries that member's text out to the requester, so a value referencing a
+// chain parent is refused rather than served. The reference is compared by
+// canonical ID, so the pin either side happens to carry does not decide the
+// outcome, and the value is found at any nesting depth.
+func TestSerializeMerged_InheritedKeyReferencingTheParentFailsClosed(t *testing.T) {
 	t.Parallel()
 	const leaf = "---\ntype: agent\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nchild body\n"
 	parent := func(keys string) string {
@@ -164,12 +164,8 @@ func TestSerializeMerged_RestoredKeyReferencingTheParentFailsClosed(t *testing.T
 	}{
 		"literal id under another key": {"shared/parent@1.x", []manifest.MergedBlock{
 			block(parent("x_base: shared/parent\n"), ""), block(leaf, "shared/parent@1.x")}},
-		// §4.6's guarantee is unconditional, so the key the leaf itself
-		// authored takes the same test as one restored from a block above it.
-		"literal id the leaf authored": {"shared/parent@1.x", []manifest.MergedBlock{
-			block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
-				"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
-				"shared/parent@1.x")}},
+		"path below the parent": {"shared/parent@1.x", []manifest.MergedBlock{
+			block(parent("x_charter: shared/parent/CHARTER.md\n"), ""), block(leaf, "shared/parent@1.x")}},
 		"id inside a restored list": {"shared/parent@1.x", []manifest.MergedBlock{
 			block(parent("x_bases: [shared/other, shared/parent]\n"), ""), block(leaf, "shared/parent@1.x")}},
 		"id inside a restored mapping": {"shared/parent@1.x", []manifest.MergedBlock{
@@ -274,60 +270,73 @@ func TestSerializeMerged_SameIDOverlayStillRefusesADistinctParent(t *testing.T) 
 	}
 }
 
-// Spec: §4.6 hidden parents. The guarantee covers the assembled block rather
-// than the restored values alone, so a declared field the typed serialization
-// emits carries the parent's ID no more than a restored key does.
-func TestSerializeMerged_DeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
+// Spec: §4.6. A declared field takes its merged value from §4.6's merge
+// semantics, which the disclosure test does not second-guess. `replaced_by` is
+// the §4.4 deprecation pointer, and a child deprecated in favour of the
+// artifact it extends is served with the pointer the typed serialization has
+// always emitted.
+func TestSerializeMerged_DeclaredFieldNamingTheParentIsServed(t *testing.T) {
 	t.Parallel()
 	out, err := manifest.SerializeMerged(&manifest.Artifact{
 		Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
-		Extends: "shared/parent@1.x", ReplacedBy: "shared/parent", Body: "child body",
+		Extends: "shared/parent@1.x", Deprecated: true, ReplacedBy: "shared/parent",
+		Body: "child body",
 	}, "team/child", block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
-		"extends: shared/parent@1.x\nreplaced_by: shared/parent\n---\n\nchild body\n",
+		"deprecated: true\nreplaced_by: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
 		"shared/parent@1.x"))
-	if !errors.Is(err, manifest.ErrUnhidableParent) {
-		t.Fatalf("err = %v, want ErrUnhidableParent", err)
+	if err != nil {
+		t.Fatalf("SerializeMerged: %v", err)
 	}
-	if out != nil {
-		t.Errorf("a block that names the parent must not be returned: %s", out)
+	fm, _, err := manifest.SplitFrontmatter(out)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	got := decodeMapping(t, fm)
+	if got["replaced_by"] != "shared/parent" {
+		t.Errorf("replaced_by = %v, want %q\n%s", got["replaced_by"], "shared/parent", fm)
+	}
+	if _, named := got["extends"]; named {
+		t.Errorf("the merged block still names the parent under extends:\n%s", fm)
 	}
 }
 
-// Spec: §4.6 hidden parents. §4.6 scopes its guarantee to the parent's
-// existence and ID rather than to values that are reference-shaped, so a value
-// spelling the ID inside longer text discloses the parent as plainly as a bare
-// reference and fails the load closed whichever block authored it.
-func TestSerializeMerged_ValueSpellingTheParentIDFailsClosed(t *testing.T) {
+// Spec: §4.6 hidden parents. The leaf's own block reaches the requester
+// verbatim through raw_frontmatter and through the search descriptor, so a key
+// the leaf authored that references the parent conceals nothing by failing the
+// load. It is served, and the two surfaces agree about the leaf's own text.
+func TestSerializeMerged_LeafAuthoredKeyReferencingTheParentIsServed(t *testing.T) {
 	t.Parallel()
-	cases := map[string]string{
-		"path below the parent":       "shared/parent/CHARTER.md",
-		"id under a longer path":      "docs/shared/parent.md",
-		"prose quoting the reference": "see shared/parent@1.x for details",
+	out, err := serializeChild([]manifest.MergedBlock{
+		block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
+			"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
+			"shared/parent@1.x")})
+	if err != nil {
+		t.Fatalf("SerializeMerged: %v", err)
 	}
-	for name, value := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			forEachOrigin(t, value, func(t *testing.T, chain []manifest.MergedBlock) {
-				out, err := serializeChild(chain)
-				if !errors.Is(err, manifest.ErrUnhidableParent) {
-					t.Fatalf("err = %v, want ErrUnhidableParent", err)
-				}
-				if out != nil {
-					t.Errorf("a block that names the parent must not be returned: %s", out)
-				}
-			})
-		})
+	fm, _, err := manifest.SplitFrontmatter(out)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	got := decodeMapping(t, fm)
+	if got["x_base"] != "shared/parent" {
+		t.Errorf("x_base = %v, want %q\n%s", got["x_base"], "shared/parent", fm)
+	}
+	if _, named := got["extends"]; named {
+		t.Errorf("the merged block still names the parent under extends:\n%s", fm)
 	}
 }
 
-// Spec: §4.6 hidden parents. The ID has to appear as a token, so a longer
-// identifier that merely begins with it names a different artifact and stays
-// inheritable under §4.6's omitted-field rule.
+// Spec: §4.6 omitted fields. A value has to reference the parent for the
+// disclosure test to fire, so an artifact whose ID merely begins with the
+// parent's, a path that contains the ID further along, and prose that quotes
+// the reference are all inheritable and are served from either origin.
 func TestSerializeMerged_ValuesNamingAnotherArtifactAreServed(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
 		"longer word":                       "shared/parent-legacy",
 		"identifier continuing past the id": "shared/parenthetical",
+		"id under a longer path":            "docs/shared/parent.md",
+		"prose quoting the reference":       "see shared/parent@1.x for details",
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {

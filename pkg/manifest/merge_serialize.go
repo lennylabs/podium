@@ -67,8 +67,9 @@ type MergedBlock struct {
 // authored blocks in parent-first order so a key the child also sets with a
 // non-empty value keeps the child's value. And it applies the §4.6
 // hidden-parent strip to the result, returning ErrUnhidableParent when the
-// block resolves an extends value, when the assembled block names a chain
-// parent's ID under any key, or when the block cannot be read back at all.
+// block resolves an extends value, when a key restored from a chain member
+// above the leaf references a chain parent, or when the block cannot be read
+// back at all.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
@@ -93,19 +94,28 @@ func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, erro
 		return nil, err
 	}
 
-	for _, key := range undeclaredKeysOf(chain) {
+	restored := undeclaredKeysOf(chain)
+	// Spec: §4.6 hidden parents. The test covers what the merge introduces: a
+	// key restored from a chain member above the leaf carries that member's
+	// text to a requester who may not be able to see it. The leaf's own block
+	// is excluded because the requester already receives it verbatim as
+	// raw_frontmatter and through the search descriptor, so refusing it would
+	// cost the load without concealing anything, and the declared fields are
+	// excluded because §4.6's merge semantics already fix their merged values.
+	refs := chainRefs(a, id, chain)
+	for _, key := range restored {
+		if !key.inherited {
+			continue
+		}
+		if namesRef(key.name, refs) || namesAny(key.value, refs) {
+			return nil, ErrUnhidableParent
+		}
+	}
+
+	for _, key := range restored {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
 			key.value)
-	}
-
-	// Spec: §4.6 hidden parents. The guarantee covers the parent's ID under
-	// every key of the block a requester is served, whether the typed
-	// serialization emitted the value, a restored key carried it, or the key
-	// itself is named for the parent, so the test runs once over the assembled
-	// mapping rather than over the restored values alone.
-	if namesAny(root, chainRefs(a, id, chain)) {
-		return nil, ErrUnhidableParent
 	}
 
 	out, err := yaml.Marshal(root)
@@ -155,10 +165,15 @@ func mappingOf(src []byte) (*yaml.Node, []byte, error) {
 	return doc.Content[0], body, nil
 }
 
-// namedNode pairs a restored key with the node holding its value.
+// namedNode pairs a restored key with the node holding its value, and records
+// whether the block that contributed the value sits above the leaf in the
+// chain. The §4.6 disclosure test reads that flag: an inherited value is text
+// the merge carries out of a member the requester may not be able to see, and
+// a leaf-authored value is the requester's own artifact.
 type namedNode struct {
-	name  string
-	value *yaml.Node
+	name      string
+	value     *yaml.Node
+	inherited bool
 }
 
 // undeclaredKeysOf collects the frontmatter keys Artifact does not declare
@@ -177,7 +192,8 @@ type namedNode struct {
 func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 	seen := map[string]int{}
 	out := []namedNode{}
-	for _, block := range chain {
+	for at, block := range chain {
+		inherited := at < len(chain)-1
 		m, _, err := mappingOf(block.Frontmatter)
 		if err != nil {
 			continue
@@ -193,10 +209,11 @@ func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 					continue
 				}
 				out[prev].value = value
+				out[prev].inherited = inherited
 				continue
 			}
 			seen[name] = len(out)
-			out = append(out, namedNode{name: name, value: value})
+			out = append(out, namedNode{name: name, value: value, inherited: inherited})
 		}
 	}
 	return out
@@ -218,9 +235,9 @@ func parentID(ref string) string {
 	return id
 }
 
-// addParentRef records an extends reference under its canonical ID. namesAny
-// looks for that ID as a token, so a value naming the parent under a pin the
-// extends entry does not carry still matches.
+// addParentRef records an extends reference under its canonical ID. The
+// disclosure test compares against that ID, so a value naming the parent under
+// a pin the extends entry does not carry still matches.
 func addParentRef(refs map[string]bool, ref string) {
 	if id := parentID(ref); id != "" {
 		refs[id] = true
@@ -231,7 +248,8 @@ func addParentRef(refs map[string]bool, ref string) {
 // less the served artifact's own ID.
 //
 // Spec: §4.6 hidden parents. Every ID in the set is a parent the requester may
-// be unable to see, and no served byte names any of them.
+// be unable to see, and no value the merge carries out of one references any of
+// them.
 //
 // The served artifact's own ID is excluded because §4.6 introduces extends as
 // the resolution for two layers contributing one canonical ID, so a same-ID
@@ -250,21 +268,15 @@ func chainRefs(a *Artifact, id string, chain []MergedBlock) map[string]bool {
 	return refs
 }
 
-// namesAny reports whether any scalar within n names one of refs. It walks
-// every node of the assembled mapping, so a key name is tested on the same
-// terms as a value.
-//
-// A scalar names a parent when it spells the parent's canonical ID as a token,
-// so the ID discloses the hidden parent whether it stands alone, carries a
-// version pin, sits under a longer path, or is quoted in prose. §4.6 scopes its
-// guarantee to the parent's existence and ID rather than to values that are
-// reference-shaped, and `x_charter: shared/parent/CHARTER.md` discloses the
-// parent as plainly as a bare reference does.
+// namesAny reports whether any scalar reachable from n references one of refs.
+// It walks the whole subtree, so an ID nested in a list or a mapping, or used
+// as a key inside a restored value, is found on the same terms as a top-level
+// scalar.
 func namesAny(n *yaml.Node, refs map[string]bool) bool {
 	if n == nil {
 		return false
 	}
-	if n.Kind == yaml.ScalarNode && mentionsRef(n.Value, refs) {
+	if n.Kind == yaml.ScalarNode && namesRef(n.Value, refs) {
 		return true
 	}
 	for _, c := range n.Content {
@@ -275,52 +287,34 @@ func namesAny(n *yaml.Node, refs map[string]bool) bool {
 	return false
 }
 
-// mentionsRef reports whether s spells one of refs as a whole token.
-func mentionsRef(s string, refs map[string]bool) bool {
+// namesRef reports whether s references one of refs.
+func namesRef(s string, refs map[string]bool) bool {
 	for id := range refs {
-		if containsToken(s, id) {
+		if refersTo(s, id) {
 			return true
 		}
 	}
 	return false
 }
 
-// containsToken reports whether id occurs in s bounded on both sides by a byte
-// that cannot continue an identifier. A match inside a longer identifier names
-// something else: "shared/parenthetical" and "shared/parent-legacy" are their
-// own artifacts and stay inheritable. Every other byte bounds the token,
-// including the pin separator, the path separator, and the dot that opens a
-// file extension, so "see shared/parent@1.x for details", "docs/shared/parent",
-// and "docs/shared/parent.md" all name the parent and fail the load closed.
-func containsToken(s, id string) bool {
-	for at := 0; at+len(id) <= len(s); {
-		i := strings.Index(s[at:], id)
-		if i < 0 {
-			return false
-		}
-		i += at
-		before := i == 0 || !identByte(s[i-1])
-		after := i+len(id) == len(s) || !identByte(s[i+len(id)])
-		if before && after {
-			return true
-		}
-		at = i + 1
+// refersTo reports whether s is a reference to the artifact id names: the
+// canonical ID on its own, the ID under a version pin, or a path below it.
+//
+// The ID has to open the string and end at a boundary an artifact reference
+// uses, so "shared/parent", "shared/parent@2.0.0", and
+// "shared/parent/CHARTER.md" reference the parent while "shared/parenthetical"
+// and "shared/parent-legacy" name their own artifacts. A value that merely
+// contains the ID somewhere inside it, such as a prose sentence or an
+// unrelated path, is not a reference, and §4.6's omitted-field rule leaves it
+// inheritable.
+func refersTo(s, id string) bool {
+	if !strings.HasPrefix(s, id) {
+		return false
 	}
-	return false
-}
-
-// identByte reports whether b can continue an identifier, which is what bounds
-// a token in containsToken. A dot is excluded: an artifact ID is built from
-// path segments, so a dot after one opens a file extension and the string is a
-// path to the parent rather than the ID of another artifact.
-func identByte(b byte) bool {
-	switch {
-	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
-		return true
-	case b == '-', b == '_':
+	if len(s) == len(id) {
 		return true
 	}
-	return false
+	return s[len(id)] == '@' || s[len(id)] == '/'
 }
 
 // hidesParent reports whether a frontmatter header reads back as a mapping
