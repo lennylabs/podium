@@ -4,17 +4,20 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
-// writeExtendsRegistry lays out a one-layer filesystem registry holding a
-// parent and a child that extends it. The parent declares a frontmatter key
-// `manifest.Artifact` does not, and the child authors one of its own and no
-// prose, so the fixture exercises both the inherited-key and the empty-body
-// paths that the two extends resolvers must agree on.
+// writeExtendsRegistry lays out a two-layer filesystem registry covering both
+// §4.6 parent forms. `team/derived` extends a different canonical ID, and
+// `team/overlay` extends its own ID so the parent is the same artifact in the
+// lower-precedence layer. Each parent declares a frontmatter key
+// `manifest.Artifact` does not, each child authors one of its own and no prose,
+// so the fixture exercises the inherited-key path, the empty-body path, and
+// both parent resolutions that the two extends resolvers must agree on.
 func writeExtendsRegistry(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -27,12 +30,23 @@ func writeExtendsRegistry(t *testing.T) string {
 			t.Fatalf("write %s: %v", rel, err)
 		}
 	}
-	write("shared/base/ARTIFACT.md",
+	write(".registry-config", "multi_layer: true\nlayer_order:\n  - base\n  - top\n")
+	write("base/.layer-config", "visibility:\n  public: true\n")
+	write("top/.layer-config", "visibility:\n  public: true\n")
+
+	write("base/shared/base/ARTIFACT.md",
 		"---\ntype: context\nversion: 1.0.0\ndescription: the base context\n"+
 			"tags: [shared]\nsensitivity: low\nx_review_board: platform\n---\n\nbase prose\n")
-	write("team/derived/ARTIFACT.md",
+	write("top/team/derived/ARTIFACT.md",
 		"---\ntype: context\nversion: 2.0.0\ndescription: the derived context\n"+
 			"tags: [team]\nx_runbook: ops/derived.md\nextends: shared/base@1.x\n---\n")
+
+	write("base/team/overlay/ARTIFACT.md",
+		"---\ntype: context\nversion: 1.0.0\ndescription: the overlay base\n"+
+			"tags: [shared]\nsensitivity: low\nx_review_board: platform\n---\n\noverlay base prose\n")
+	write("top/team/overlay/ARTIFACT.md",
+		"---\ntype: context\nversion: 2.0.0\ndescription: the overlay child\n"+
+			"tags: [team]\nx_runbook: ops/overlay.md\nextends: team/overlay@1.x\n---\n")
 	return root
 }
 
@@ -44,43 +58,84 @@ func writeExtendsRegistry(t *testing.T) string {
 // manifest through the same call, so repairing one alone makes the two modes
 // serve different bytes for the same artifact.
 //
-// This case passes against the behavior that preceded it, where both resolvers
-// dropped the undeclared keys identically. It exists to fail the moment one
-// resolver is repaired without the other, which no other test in the tree
-// would catch.
+// The case runs through both a no-op adapter and a harness adapter, because the
+// harness path lays the merged bytes out under its own target paths and a
+// resolver divergence surfaces there too.
 func TestSyncEquivalence_ExtendsChildMatchesAcrossModes(t *testing.T) {
 	t.Parallel()
 	dir := writeExtendsRegistry(t)
 
-	fsTarget := t.TempDir()
-	if _, err := sync.Run(sync.Options{
-		RegistryPath: dir,
-		Target:       fsTarget,
-		AdapterID:    "none",
-	}); err != nil {
-		t.Fatalf("filesystem sync.Run: %v", err)
-	}
+	for _, adapterID := range []string{"none", "claude-code"} {
+		adapterID := adapterID
+		t.Run(adapterID, func(t *testing.T) {
+			t.Parallel()
 
-	srv, err := server.NewFromFilesystem(dir)
-	if err != nil {
-		t.Fatalf("NewFromFilesystem: %v", err)
-	}
-	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(ts.Close)
+			fsTarget := t.TempDir()
+			fsRes, err := sync.Run(sync.Options{
+				RegistryPath: dir,
+				Target:       fsTarget,
+				AdapterID:    adapterID,
+			})
+			if err != nil {
+				t.Fatalf("filesystem sync.Run: %v", err)
+			}
 
-	srvTarget := t.TempDir()
-	if _, err := sync.Run(sync.Options{
-		RegistryPath: ts.URL,
-		Target:       srvTarget,
-		AdapterID:    "none",
-	}); err != nil {
-		t.Fatalf("server sync.Run: %v", err)
-	}
+			srv, err := server.NewFromFilesystem(dir)
+			if err != nil {
+				t.Fatalf("NewFromFilesystem: %v", err)
+			}
+			ts := httptest.NewServer(srv.Handler())
+			t.Cleanup(ts.Close)
 
-	fsTree := materializedTree(t, fsTarget)
-	srvTree := materializedTree(t, srvTarget)
-	if len(fsTree) == 0 {
-		t.Fatalf("filesystem sync materialized nothing")
+			srvTarget := t.TempDir()
+			srvRes, err := sync.Run(sync.Options{
+				RegistryPath: ts.URL,
+				Target:       srvTarget,
+				AdapterID:    adapterID,
+			})
+			if err != nil {
+				t.Fatalf("server sync.Run: %v", err)
+			}
+
+			fsTree := materializedTree(t, fsTarget)
+			srvTree := materializedTree(t, srvTarget)
+
+			// Both extends children must be present and carry merged output,
+			// so the byte comparison below cannot pass on a tree that dropped
+			// them or served them unmerged.
+			for _, child := range []string{"team/derived", "team/overlay"} {
+				content := soleMaterializedEntry(t, fsTree, child)
+				if !strings.Contains(content, "x_review_board: platform") {
+					t.Errorf("%s: merged frontmatter lost the parent-inherited key:\n%s", child, content)
+				}
+				if !strings.Contains(content, "x_runbook:") {
+					t.Errorf("%s: merged frontmatter lost the child's own key:\n%s", child, content)
+				}
+			}
+
+			assertTreesEqual(t, fsTree, srvTree)
+
+			if got, want := artifactKeys(srvRes), artifactKeys(fsRes); !equalStringSlices(got, want) {
+				t.Errorf("artifacts list mismatch:\n filesystem=%v\n server=    %v", want, got)
+			}
+		})
 	}
-	assertTreesEqual(t, fsTree, srvTree)
+}
+
+// soleMaterializedEntry returns the content of the single materialized path
+// containing want, failing when the tree holds no such path or more than one.
+// The target path of an artifact depends on the adapter, so the assertion
+// matches on the canonical ID rather than on a fixed path.
+func soleMaterializedEntry(t testing.TB, tree map[string]string, want string) string {
+	t.Helper()
+	var matches []string
+	for path := range tree {
+		if strings.Contains(path, want) {
+			matches = append(matches, path)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("want exactly one materialized path containing %q, got %v", want, matches)
+	}
+	return tree[matches[0]]
 }
