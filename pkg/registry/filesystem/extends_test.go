@@ -258,12 +258,12 @@ func recordOf(t *testing.T, id, src string) ArtifactRecord {
 }
 
 // Spec: §4.6 hidden parents / §11 — the chain the hidden-parent test checks
-// comes from each record's parsed manifest, so a key naming the grandparent is
-// left out of the child's merged block whichever record this resolver reached
+// comes from each record's parsed manifest, so a child inheriting a key that
+// names the grandparent fails closed whichever record this resolver reached
 // first. Read back out of the record bytes, the grandparent's ID would go
 // missing once the middle record had been rewritten in place, and the
-// filesystem mode would serve a block the server mode does not.
-func TestResolveExtends_GrandparentIDLeftOutInAnyProcessingOrder(t *testing.T) {
+// filesystem mode would serve a block the server mode refuses.
+func TestResolveExtends_GrandparentIDFailsClosedInAnyProcessingOrder(t *testing.T) {
 	t.Parallel()
 	gp := recordOf(t, "shared/gp",
 		"---\ntype: context\nversion: 1.0.0\ndescription: grandparent\n---\n\ngp body\n")
@@ -283,23 +283,20 @@ func TestResolveExtends_GrandparentIDLeftOutInAnyProcessingOrder(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			deduped := append([]ArtifactRecord(nil), order...)
-			if err := resolveExtends(deduped, append([]ArtifactRecord(nil), order...)); err != nil {
-				t.Fatalf("resolveExtends: %v", err)
-			}
-			for _, rec := range deduped {
-				if strings.Contains(string(rec.ArtifactBytes), "shared/gp") {
-					t.Errorf("%s names the hidden grandparent:\n%s", rec.ID, rec.ArtifactBytes)
-				}
+			err := resolveExtends(deduped, append([]ArtifactRecord(nil), order...))
+			if !errors.Is(err, manifest.ErrUnhidableParent) {
+				t.Fatalf("resolveExtends err = %v, want ErrUnhidableParent", err)
 			}
 		})
 	}
 }
 
-// Spec: §4.6 hidden parents, §11 — the walk a consumer drives serves every
-// record, and no record's merged block names the hidden grandparent under an
-// inherited key. The server mode leaves the same key out of the same child, so
-// both deployment modes materialize the same bytes (§11, §2.2).
-func TestWalk_ResolveExtendsLeavesOutAKeyNamingTheGrandparent(t *testing.T) {
+// Spec: §4.6 hidden parents, §11 — the walk a consumer drives fails closed
+// when a child inherits a key naming the hidden grandparent, because serving
+// the key would name the grandparent and dropping it would serve an inheritable
+// key as nothing. The server mode refuses the same child, so neither deployment
+// mode materializes a tree the other refuses (§11, §2.2).
+func TestWalk_ResolveExtendsFailsOnAnInheritedKeyNamingTheGrandparent(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
@@ -326,16 +323,46 @@ func TestWalk_ResolveExtendsLeavesOutAKeyNamingTheGrandparent(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
+	if !errors.Is(err, manifest.ErrUnhidableParent) {
+		t.Fatalf("Walk err = %v, want ErrUnhidableParent", err)
+	}
+	if got != nil {
+		t.Errorf("a failed walk returned records: %v", idsOf(got))
+	}
+}
+
+// Spec: §4.6, §11 — an extends child keeps the key it authored itself, even
+// when that key names its own parent. The author wrote the reference in the
+// artifact's own text, and the server mode serves the same key on the same
+// terms, so the two deployment modes stay byte-identical (§11, §2.2).
+func TestWalk_ResolveExtendsKeepsTheChildsOwnKeyNamingItsParent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    "shared/parent/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		},
+		testharness.WriteTreeOption{
+			Path: "team/child/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 2.0.0\ndescription: child\n" +
+				"x_base: shared/parent\nextends: shared/parent\n---\n\nchild body\n",
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
 	if err != nil {
 		t.Fatalf("Walk: %v", err)
 	}
-	if len(got) != 4 {
-		t.Fatalf("walked %v, want every record served", idsOf(got))
+	served := string(recByID(t, got, "team/child").ArtifactBytes)
+	if !strings.Contains(served, "x_base: shared/parent") {
+		t.Errorf("the child's own key was dropped:\n%s", served)
 	}
-	for _, rec := range got {
-		if strings.Contains(string(rec.ArtifactBytes), "shared/gp") {
-			t.Errorf("%s names the hidden grandparent:\n%s", rec.ID, rec.ArtifactBytes)
-		}
+	if strings.Contains(served, "extends:") {
+		t.Errorf("the merged block still names the parent under extends:\n%s", served)
 	}
 }
 

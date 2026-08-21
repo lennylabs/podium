@@ -64,18 +64,24 @@ type MergedBlock struct {
 // It does two things the typed serialization alone cannot. It restores the
 // frontmatter keys Artifact does not declare, taking them from the chain's
 // authored blocks in parent-first order so a key the child also sets with a
-// non-empty value keeps the child's value. And it holds the restored keys to
-// §4.6's hidden-parent guarantee, leaving out a key whose name or value names a
-// chain parent and returning ErrUnhidableParent when the assembled block still
-// resolves an extends value or cannot be read back at all.
+// non-empty value keeps the child's value. And it holds the assembled block to
+// §4.6's hidden-parent guarantee, returning ErrUnhidableParent when a key
+// restored from an ancestor names a chain parent, when the block still resolves
+// an extends value, or when it cannot be read back at all.
 //
-// A restored key that names a parent is left out rather than costing the child
-// its whole read. The abort is reserved for a block the rewrite cannot produce,
-// which is the input class an extends reference carried by a YAML merge key or
-// an anchored mapping falls into. A declared key reaches the block through the
-// typed serialization, on the same terms as before this helper existed and as
-// the search descriptor serves it, so the §4.4 replaced_by pointer of a child
-// deprecated in favour of the artifact it extends still loads.
+// Every key §4.6's omitted-field rule makes inheritable reaches the served
+// block or the read fails. A key is never silently dropped, because a consumer
+// cannot tell an inherited-as-nothing key from one the chain never set.
+//
+// The disclosure test is scoped to the keys restored from an ancestor. A value
+// the leaf itself authored is the requester's own artifact's text, which the
+// same response already serves verbatim under raw_frontmatter and which the
+// search descriptor serves too, so testing it would only make load_artifact and
+// search_artifacts disagree about the same artifact again. A declared key
+// reaches the block through the typed serialization, on the same terms as
+// before this helper existed and as the search descriptor serves it, so the
+// §4.4 replaced_by pointer of a child deprecated in favour of the artifact it
+// extends still loads.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
@@ -101,17 +107,17 @@ func SerializeMerged(a *Artifact, chain ...MergedBlock) ([]byte, error) {
 	}
 
 	// Spec: §4.6 hidden parents. The parent's existence and ID are not
-	// surfaced to the requester, so a restored key is tested under its own name
-	// and at every nesting depth of its value, whichever chain member authored
-	// it.
+	// surfaced to the requester, so a key restored from an ancestor is tested
+	// under its own name and at every nesting depth of its value, and the read
+	// fails rather than serving a block that names the parent.
 	parents := parentsOf(a, chain)
 	for _, key := range undeclaredKeysOf(chain) {
-		if parents.discloses(key.name) || parents.namesAny(key.value) {
-			continue
+		if !key.fromLeaf && (parents.discloses(key.name) || parents.namesAny(key.value)) {
+			return nil, ErrUnhidableParent
 		}
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
-			key.value)
+			uncommented(key.value))
 	}
 
 	out, err := yaml.Marshal(root)
@@ -161,15 +167,40 @@ func mappingOf(src []byte) (*yaml.Node, []byte, error) {
 	return doc.Content[0], body, nil
 }
 
-// namedNode pairs a restored key with the node holding its value.
+// namedNode pairs a restored key with the node holding its value, and records
+// whether the leaf's own block contributed that value. The §4.6 disclosure test
+// runs on the inherited values only, so the authoring member has to travel with
+// the key.
 type namedNode struct {
-	name  string
-	value *yaml.Node
+	name     string
+	value    *yaml.Node
+	fromLeaf bool
+}
+
+// uncommented clears the YAML comments on n and everything below it, and
+// returns n.
+//
+// Spec: §4.6 hidden parents. A restored node comes straight out of the decoder
+// and carries the comments its author wrote, which yaml.Marshal re-emits, so a
+// parent's comment would otherwise carry text the requester cannot see into the
+// served block under a key whose value the disclosure test cleared. The typed
+// serialization already drops the comments on every declared key, so clearing
+// them here is also what keeps the two halves of the block consistent.
+//
+// n is a node the decoder produced, and a decoded node holds no nil child, so
+// the walk needs no nil guard.
+func uncommented(n *yaml.Node) *yaml.Node {
+	n.HeadComment, n.LineComment, n.FootComment = "", "", ""
+	for _, c := range n.Content {
+		uncommented(c)
+	}
+	return n
 }
 
 // undeclaredKeysOf collects the frontmatter keys Artifact does not declare
 // from the chain's authored blocks, parent first, so a later block's non-empty
-// value for the same key wins. chain's last member is the leaf.
+// value for the same key wins. chain's last member is the leaf, and each key
+// records whether the leaf contributed the winning value.
 //
 // Spec: §4.6 omitted fields. A child that omits a key, or sets it to an empty
 // scalar, inherits the parent's value, which is what MergeExtends applies to
@@ -183,7 +214,8 @@ type namedNode struct {
 func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 	seen := map[string]int{}
 	out := []namedNode{}
-	for _, block := range chain {
+	for at, block := range chain {
+		leaf := at == len(chain)-1
 		m, _, err := mappingOf(block.Frontmatter)
 		if err != nil {
 			continue
@@ -199,10 +231,11 @@ func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 					continue
 				}
 				out[prev].value = value
+				out[prev].fromLeaf = leaf
 				continue
 			}
 			seen[name] = len(out)
-			out = append(out, namedNode{name: name, value: value})
+			out = append(out, namedNode{name: name, value: value, fromLeaf: leaf})
 		}
 	}
 	return out

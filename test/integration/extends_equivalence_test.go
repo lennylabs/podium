@@ -196,10 +196,11 @@ func TestSyncEquivalence_UnhidableParentFailsBothModes(t *testing.T) {
 }
 
 // Spec: §11 (filesystem ↔ server equivalence) / §2.2 (shared library), §4.6
-// hidden parents — a key naming the parent is left out of the merged block in
-// both modes rather than costing the child its materialization, and the two
-// modes write the same tree.
-func TestSyncEquivalence_KeyNamingTheParentIsLeftOutInBothModes(t *testing.T) {
+// hidden parents — an inherited key naming the parent ends the sync in both
+// modes. Serving the key would name the hidden parent, and dropping it would
+// serve a key §4.6 makes inheritable as nothing, so both resolvers refuse and
+// neither mode materializes a tree the other refuses.
+func TestSyncEquivalence_InheritedKeyNamingTheParentFailsBothModes(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	write := func(rel, body string) {
@@ -212,18 +213,17 @@ func TestSyncEquivalence_KeyNamingTheParentIsLeftOutInBothModes(t *testing.T) {
 		}
 	}
 	// The parent authors a key holding its own canonical ID, which the child
-	// would inherit under §4.6's omitted-field rule, and a key that names no
-	// artifact, which the child does inherit.
+	// inherits under §4.6's omitted-field rule and cannot be served.
 	write("shared/base/ARTIFACT.md",
 		"---\ntype: context\nversion: 1.0.0\ndescription: the base context\n"+
-			"x_base: shared/base\nx_charter: docs/charter.md\n---\n\nbase prose\n")
+			"x_base: shared/base\n---\n\nbase prose\n")
 	write("team/derived/ARTIFACT.md",
 		"---\ntype: context\nversion: 2.0.0\ndescription: the derived context\n"+
 			"extends: shared/base@1.x\n---\n\nderived prose\n")
 
 	fsTarget := t.TempDir()
-	if _, err := sync.Run(sync.Options{RegistryPath: dir, Target: fsTarget}); err != nil {
-		t.Fatalf("filesystem sync.Run: %v", err)
+	if _, err := sync.Run(sync.Options{RegistryPath: dir, Target: fsTarget}); err == nil {
+		t.Fatalf("filesystem sync.Run succeeded on a child that cannot hide its parent:\n%v", materializedTree(t, fsTarget))
 	}
 
 	srv, err := server.NewFromFilesystem(dir)
@@ -234,22 +234,17 @@ func TestSyncEquivalence_KeyNamingTheParentIsLeftOutInBothModes(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	srvTarget := t.TempDir()
-	if _, err := sync.Run(sync.Options{RegistryPath: ts.URL, Target: srvTarget}); err != nil {
-		t.Fatalf("server sync.Run: %v", err)
+	if _, err := sync.Run(sync.Options{RegistryPath: ts.URL, Target: srvTarget}); err == nil {
+		t.Fatalf("server sync.Run succeeded on a child that cannot hide its parent:\n%v", materializedTree(t, srvTarget))
 	}
 
-	fsTree := materializedTree(t, fsTarget)
-	srvTree := materializedTree(t, srvTarget)
-	for name, tree := range map[string]map[string]string{"filesystem": fsTree, "server": srvTree} {
-		content := soleMaterializedEntry(t, tree, "team/derived")
-		if !strings.Contains(content, "x_charter: docs/charter.md") {
-			t.Errorf("%s mode dropped the inherited key that names no artifact:\n%s", name, content)
-		}
-		if strings.Contains(content, "shared/base") {
-			t.Errorf("%s mode materialized the hidden parent's ID:\n%s", name, content)
+	for name, target := range map[string]string{"filesystem": fsTarget, "server": srvTarget} {
+		for path, content := range materializedTree(t, target) {
+			if strings.Contains(content, "shared/base") {
+				t.Errorf("%s mode materialized %s naming the hidden parent:\n%s", name, path, content)
+			}
 		}
 	}
-	assertTreesEqual(t, fsTree, srvTree)
 }
 
 // soleMaterializedEntry returns the content of the single materialized path
