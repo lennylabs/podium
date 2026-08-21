@@ -2,6 +2,7 @@ package manifest_test
 
 import (
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -62,8 +63,6 @@ func TestSerializeMerged_EmptyChildValueInheritsTheParents(t *testing.T) {
 		"a null scalar":      "x_owner: null",
 		"a tilde":            "x_owner: ~",
 		"a capitalized null": "x_owner: Null",
-		"an empty list":      "x_owner: []",
-		"an empty mapping":   "x_owner: {}",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -85,6 +84,43 @@ func TestSerializeMerged_EmptyChildValueInheritsTheParents(t *testing.T) {
 			}
 			if got := decodeMapping(t, fm); got["x_owner"] != "platform" {
 				t.Errorf("x_owner = %v, want %q\n%s", got["x_owner"], "platform", fm)
+			}
+		})
+	}
+}
+
+// Spec: §4.6 omitted fields. §4.6 makes a child inherit when it omits a field
+// or sets an empty scalar, and for a field outside its merge table a value both
+// sides declare takes the child's. An undeclared key has no table row, so a
+// child that empties a list or a mapping is served its own empty collection
+// rather than the parent's contents.
+func TestSerializeMerged_EmptyChildCollectionWins(t *testing.T) {
+	t.Parallel()
+	for name, tc := range map[string]struct {
+		authored string
+		want     any
+	}{
+		"an empty list":    {"x_owner: []", []any{}},
+		"an empty mapping": {"x_owner: {}", map[string]any{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n" +
+				"x_owner: [platform]\n---\n\nparent body\n"
+			child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				tc.authored + "\nextends: shared/parent@1.x\n---\n\nchild body\n"
+
+			out, err := serializeChild([]manifest.MergedBlock{
+				block(parent, ""), block(child, "shared/parent@1.x")})
+			if err != nil {
+				t.Fatalf("SerializeMerged: %v", err)
+			}
+			fm, _, err := manifest.SplitFrontmatter(out)
+			if err != nil {
+				t.Fatalf("SplitFrontmatter: %v", err)
+			}
+			if got := decodeMapping(t, fm); !reflect.DeepEqual(got["x_owner"], tc.want) {
+				t.Errorf("x_owner = %#v, want %#v\n%s", got["x_owner"], tc.want, fm)
 			}
 		})
 	}
@@ -265,69 +301,74 @@ func TestSerializeMerged_InheritedKeyNamingTheParentFailsClosed(t *testing.T) {
 	}
 }
 
-// Spec: §4.4, §4.6. The declared fields are the typed serialization's, and
-// §4.6's merge table decides their values, so this helper does not re-test
-// them: a `replaced_by` pointer to the artifact the child extends and an
-// inherited description quoting the parent are what the merge table produces,
-// and they reach the requester today. Refusing them would take out every
-// deprecation pointer and every inherited description that happens to name its
-// baseline, which is a change to §4.6's own guarantee rather than to this
-// helper's restore step.
-func TestSerializeMerged_DeclaredFieldsNamingTheParentAreServed(t *testing.T) {
+// Spec: §4.6 hidden parents. §4.6 states its guarantee about the block the
+// registry serves, so a declared field is held to it like a restored key. The
+// merge table itself carries artifact references down a chain: delegates_to and
+// external_resources append the parent's entries onto the child's, and
+// replaced_by is the child's or the parent's. Each of those spells a chain
+// parent's canonical ID to a requester who cannot see the layer contributing it,
+// so the read fails.
+func TestSerializeMerged_DeclaredFieldsNamingTheParentFailClosed(t *testing.T) {
 	t.Parallel()
-	for name, tc := range map[string]struct {
-		a     manifest.Artifact
-		chain []manifest.MergedBlock
-		want  string
-		key   string
-	}{
+	const parentBlock = "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n"
+	const leafBlock = "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+		"extends: shared/parent@1.x\n---\n\nchild body\n"
+	for name, a := range map[string]manifest.Artifact{
 		"a deprecation pointer the leaf wrote": {
-			a: manifest.Artifact{
-				Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
-				Extends: "shared/parent@1.x", Deprecated: true, ReplacedBy: "shared/parent",
-				Body: "child body",
-			},
-			chain: []manifest.MergedBlock{
-				block("---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n", ""),
-				block("---\ntype: agent\nversion: 2.0.0\ndescription: child\ndeprecated: true\n"+
-					"replaced_by: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
-					"shared/parent@1.x"),
-			},
-			key: "replaced_by", want: "shared/parent",
+			Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
+			Deprecated: true, ReplacedBy: "shared/parent",
 		},
-		"a description the leaf inherits": {
-			a: manifest.Artifact{
-				Type: manifest.TypeAgent, Version: "2.0.0", Description: "the shared/parent baseline",
-				Extends: "shared/parent@1.x", Body: "child body",
+		"a delegates_to entry appended from the parent": {
+			Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
+			DelegatesTo: []string{"shared/parent", "finance/helper"},
+		},
+		"an external resource path naming the parent": {
+			Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
+			ExternalResources: []manifest.ExternalResource{
+				{Path: "shared/parent", URL: "https://acme.example/parent"},
 			},
-			chain: []manifest.MergedBlock{
-				block("---\ntype: agent\nversion: 1.0.0\ndescription: the shared/parent baseline\n"+
-					"---\n\nparent body\n", ""),
-				block("---\ntype: agent\nversion: 2.0.0\nextends: shared/parent@1.x\n---\n\nchild body\n",
-					"shared/parent@1.x"),
-			},
-			key: "description", want: "the shared/parent baseline",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			a := tc.a
-			out, err := manifest.SerializeMerged(&a, childID, tc.chain...)
-			if err != nil {
-				t.Fatalf("SerializeMerged: %v", err)
-			}
-			fm, _, err := manifest.SplitFrontmatter(out)
-			if err != nil {
-				t.Fatalf("SplitFrontmatter: %v", err)
-			}
-			got := decodeMapping(t, fm)
-			if got[tc.key] != tc.want {
-				t.Errorf("%s = %v, want %q\n%s", tc.key, got[tc.key], tc.want, fm)
-			}
-			if _, named := got["extends"]; named {
-				t.Errorf("the merged block still names the parent under extends:\n%s", fm)
-			}
+			merged := a
+			merged.Extends = "shared/parent@1.x"
+			merged.Body = "child body"
+			out, err := manifest.SerializeMerged(&merged, childID,
+				block(parentBlock, ""), block(leafBlock, "shared/parent@1.x"))
+			assertUnhidable(t, out, err)
 		})
+	}
+}
+
+// Spec: §4.4, §4.6. The disclosure test fires on a value that stands as an
+// artifact reference, so the prose the merge table carries down is served. A
+// description a child inherits from a parent that names its own ID in a sentence
+// resolves to no artifact on the next read, and refusing it would take out every
+// inherited description that happens to quote its baseline.
+func TestSerializeMerged_InheritedProseQuotingTheParentIsServed(t *testing.T) {
+	t.Parallel()
+	out, err := manifest.SerializeMerged(&manifest.Artifact{
+		Type: manifest.TypeAgent, Version: "2.0.0", Description: "the shared/parent baseline",
+		Extends: "shared/parent@1.x", Body: "child body",
+	}, childID,
+		block("---\ntype: agent\nversion: 1.0.0\ndescription: the shared/parent baseline\n"+
+			"---\n\nparent body\n", ""),
+		block("---\ntype: agent\nversion: 2.0.0\nextends: shared/parent@1.x\n---\n\nchild body\n",
+			"shared/parent@1.x"))
+	if err != nil {
+		t.Fatalf("SerializeMerged: %v", err)
+	}
+	fm, _, err := manifest.SplitFrontmatter(out)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	got := decodeMapping(t, fm)
+	if got["description"] != "the shared/parent baseline" {
+		t.Errorf("description = %v, want %q\n%s", got["description"], "the shared/parent baseline", fm)
+	}
+	if _, named := got["extends"]; named {
+		t.Errorf("the merged block still names the parent under extends:\n%s", fm)
 	}
 }
 

@@ -252,36 +252,51 @@ func TestExtendsFrontmatter_ValueNamingAnotherArtifactIsServed(t *testing.T) {
 	}
 }
 
-// Spec: §4.4, §4.6 — the declared fields take their values from §4.6's merge
-// table, so the load path does not re-test them for the parent's ID. A child
-// deprecated in favour of the artifact it extends keeps its `replaced_by`
-// pointer, and a child that inherits a description quoting its baseline keeps
-// that description. Both reach the requester today, and refusing them would
-// narrow §4.6's own merge semantics rather than the restore step this change
-// adds.
-func TestExtendsFrontmatter_DeclaredFieldsNamingTheParentAreServed(t *testing.T) {
+// Spec: §4.6 hidden parents — the guarantee covers the block the registry
+// serves, so a declared field is held to it like a restored key. §4.6's own
+// merge table carries artifact references down a chain: `delegates_to` and
+// `external_resources` append the parent's entries onto the child's, and
+// `replaced_by` is the child's or the parent's. Each of those hands the parent's
+// canonical ID to a requester who cannot see the parent's layer, so the load
+// fails closed with `registry.invalid_argument`.
+func TestExtendsFrontmatter_DeclaredFieldsNamingTheParentFailClosed(t *testing.T) {
 	t.Parallel()
-	for name, tc := range map[string]struct{ child, key, want string }{
+	for name, tc := range map[string]struct{ parentKeys, childKeys string }{
 		"a deprecation pointer the child wrote": {
-			"---\ntype: agent\nversion: 2.0.0\ndescription: child\ndeprecated: true\n" +
-				"replaced_by: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
-			"replaced_by", "shared/parent"},
-		"a description the child inherits": {
-			"---\ntype: agent\nversion: 2.0.0\nextends: shared/parent@1.x\n---\n\nchild body\n",
-			"description", "the shared/parent baseline"},
+			"", "deprecated: true\nreplaced_by: shared/parent\n"},
+		"a delegates_to entry the child inherits": {
+			"delegates_to: [shared/parent]\n", ""},
+		"an external resource the child inherits": {
+			"external_resources:\n  - path: shared/parent\n    url: https://acme.example/parent\n", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got, err := emfLoad(t,
-				"---\ntype: agent\nversion: 1.0.0\ndescription: the shared/parent baseline\n"+
-					"---\n\nparent body\n", tc.child)
-			if err != nil {
-				t.Fatalf("LoadArtifact: %v", err)
-			}
-			if served := decodeServedMapping(t, got.Frontmatter); served[tc.key] != tc.want {
-				t.Errorf("%s = %v, want %q\n%s", tc.key, served[tc.key], tc.want, got.Frontmatter)
-			}
+				"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n"+tc.parentKeys+
+					"---\n\nparent body\n",
+				"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+tc.childKeys+
+					"extends: shared/parent@1.x\n---\n\nchild body\n")
+			assertFailsClosed(t, got, err)
 		})
+	}
+}
+
+// Spec: §4.4, §4.6 — the disclosure test fires on a value that stands as an
+// artifact reference, so the prose §4.6's merge table carries down is served. A
+// child that inherits a description quoting its baseline keeps that description,
+// because the sentence resolves to no artifact on the next read.
+func TestExtendsFrontmatter_InheritedProseQuotingTheParentIsServed(t *testing.T) {
+	t.Parallel()
+	got, err := emfLoad(t,
+		"---\ntype: agent\nversion: 1.0.0\ndescription: the shared/parent baseline\n---\n\nparent body\n",
+		"---\ntype: agent\nversion: 2.0.0\nextends: shared/parent@1.x\n---\n\nchild body\n")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	served := decodeServedMapping(t, got.Frontmatter)
+	if served["description"] != "the shared/parent baseline" {
+		t.Errorf("description = %v, want %q\n%s",
+			served["description"], "the shared/parent baseline", got.Frontmatter)
 	}
 }
 
@@ -378,7 +393,6 @@ func TestExtendsFrontmatter_EmptyChildValueInheritsTheParents(t *testing.T) {
 		"an omitted value": "x_owner:",
 		"a null scalar":    "x_owner: null",
 		"a tilde":          "x_owner: ~",
-		"an empty list":    "x_owner: []",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -394,6 +408,26 @@ func TestExtendsFrontmatter_EmptyChildValueInheritsTheParents(t *testing.T) {
 				t.Errorf("x_owner = %v, want %q\n%s", served["x_owner"], "platform", got.Frontmatter)
 			}
 		})
+	}
+}
+
+// Spec: §4.6 omitted fields — §4.6 makes a child inherit when it omits a field
+// or sets an empty scalar, and for a field outside its merge table a value both
+// sides declare takes the child's. An extension-type key has no table row, so a
+// child that empties a list is served its own empty list rather than the
+// parent's contents.
+func TestExtendsFrontmatter_EmptyChildCollectionWins(t *testing.T) {
+	t.Parallel()
+	got, err := emfLoad(t,
+		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\nx_owner: [platform]\n---\n\nparent body\n",
+		"---\ntype: agent\nversion: 2.0.0\ndescription: child\nx_owner: []\n"+
+			"extends: shared/parent@1.x\n---\n\nchild body\n")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	served := decodeServedMapping(t, got.Frontmatter)
+	if owner, ok := served["x_owner"].([]any); !ok || len(owner) != 0 {
+		t.Errorf("x_owner = %#v, want an empty list\n%s", served["x_owner"], got.Frontmatter)
 	}
 }
 

@@ -74,19 +74,21 @@ type MergedBlock struct {
 // block or the read fails. A key is never silently dropped, because a consumer
 // cannot tell an inherited-as-nothing key from one the chain never set.
 //
-// The disclosure test covers the keys this helper adds. The declared fields are
-// the typed serialization's, and §4.6's own merge table decides their values, so
-// a description or a replaced_by pointer that quotes an ID is the merge
-// semantics working rather than a leak this helper introduces. The test is also
-// bounded to a value that stands as an artifact reference: a scalar equal to a
-// chain parent's ID once its version pin and the whitespace and slashes around
-// it are removed. A value that merely contains those characters, such as a path below
-// the parent or a sentence quoting it, names no artifact the next read resolves
-// and stays inheritable, which is what keeps the omitted-field rule working for
-// ordinary extension keys.
+// The disclosure test covers the whole assembled block. §4.6 states its
+// guarantee about the block the registry serves and draws no line between a key
+// the typed serialization emitted and a key this helper restored, so an
+// inherited delegates_to entry and a replaced_by pointer naming a chain parent
+// fail the read on the same terms as an undeclared key that spells it.
 //
-// The origin of a restored value does not enter into it. §4.6 states its
-// guarantee about the block the registry serves, so a reference the leaf
+// The test is bounded to a value that stands as an artifact reference: a scalar
+// equal to a chain parent's ID once its version pin and the whitespace and
+// slashes around it are removed. A value that merely contains those characters,
+// such as a path below the parent or a description quoting it, names no artifact
+// the next read resolves and stays inheritable, which is what keeps the
+// omitted-field rule working for ordinary extension keys and for the prose the
+// merge table carries down.
+//
+// The origin of a value does not enter into it either, so a reference the leaf
 // authored fails the read on the same terms as one the merge restored from an
 // ancestor.
 func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, error) {
@@ -112,19 +114,21 @@ func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
-	// Spec: §4.6 hidden parents. The parent's existence and ID are not
-	// surfaced to the requester, so a restored key that references a chain
-	// parent fails the read at whatever nesting depth and under whichever key
-	// the reference sits, whoever authored it. The body that follows the block
-	// is the leaf's own prose and is out of the block this section constrains.
-	parents := parentsOf(a, id, chain)
 	for _, key := range undeclaredKeysOf(authored) {
-		if parents.discloses(key.name) || parents.names(key.value) {
-			return nil, ErrUnhidableParent
-		}
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
 			uncommented(key.value))
+	}
+	// Spec: §4.6 hidden parents. The parent's existence and ID are not
+	// surfaced to the requester, so the assembled block fails the read when any
+	// node in it references a chain parent, at whatever nesting depth and under
+	// whichever key the reference sits, whoever authored it and whether the
+	// typed serialization or the restore step put it there. The body that
+	// follows the block is the leaf's own prose and is out of the block this
+	// section constrains.
+	parents := parentsOf(a, id, chain)
+	if parents.names(root) {
+		return nil, ErrUnhidableParent
 	}
 
 	out, err := yaml.Marshal(root)
@@ -263,27 +267,25 @@ func undeclaredKeysOf(authored []*yaml.Node) []namedNode {
 	return out
 }
 
-// isEmptyValue reports whether n carries nothing a requester can read.
+// isEmptyValue reports whether n is the empty scalar §4.6 treats as an omitted
+// field.
 //
-// Spec: §4.6 omitted fields. The null tag rather than the raw text decides an
-// empty scalar, because yaml.v3 decodes `x_owner:` to an empty value while
-// `x_owner: null` and `x_owner: ~` keep their spelling as the node's value.
-// ParseArtifact reduces all of them to a declared field's zero value, so
-// testing the tag is what keeps the restored keys agreeing with MergeExtends.
-// An empty list or mapping is empty on the same terms, because MergeExtends
-// inherits a parent's list whenever the child's holds no element.
+// Spec: §4.6 omitted fields. The section names a child that "omits a
+// frontmatter field, or sets an empty scalar", and for a field outside the
+// merge table a value both sides declare takes the child's. An undeclared key
+// has no table row, so an explicitly empty sequence or mapping is a value the
+// child declared and wins over the parent's.
+//
+// The null tag rather than the raw text decides an empty scalar, because
+// yaml.v3 decodes `x_owner:` to an empty value while `x_owner: null` and
+// `x_owner: ~` keep their spelling as the node's value. ParseArtifact reduces
+// all of them to a declared field's zero value, so testing the tag is what
+// keeps the restored keys agreeing with MergeExtends.
 //
 // n is the value node of a decoded mapping entry, which the decoder never
-// leaves nil, so the switch needs no nil guard.
+// leaves nil, so the test needs no nil guard.
 func isEmptyValue(n *yaml.Node) bool {
-	switch n.Kind {
-	case yaml.ScalarNode:
-		return n.Value == "" || n.Tag == "!!null"
-	case yaml.SequenceNode, yaml.MappingNode:
-		return len(n.Content) == 0
-	default:
-		return false
-	}
+	return n.Kind == yaml.ScalarNode && (n.Value == "" || n.Tag == "!!null")
 }
 
 // canonicalID reduces an artifact reference to its canonical ID by dropping the
