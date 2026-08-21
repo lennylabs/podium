@@ -661,10 +661,11 @@ func TestSearchArtifacts_DescriptorHidesParentAnchoredValue(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents — the descriptor applies the same parent-ID test
-// the load path applies, so a sibling key that spells the parent's ID out fails
-// the descriptor closed rather than disclosing the hidden parent.
-func TestSearchArtifacts_DescriptorHidesParentNamedByASiblingKey(t *testing.T) {
+// Spec: §4.6 hidden parents — the descriptor is the record's own stored block
+// with the resolved extends removed, and it is never merged with the parent. A
+// sibling key the parser never resolves is the child's authored text, so it
+// survives the strip.
+func TestSearchArtifacts_DescriptorKeepsASiblingKeyNamingTheParent(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\n---\n\nparent body\n"
 	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child desc\n" +
@@ -676,11 +677,11 @@ func TestSearchArtifacts_DescriptorHidesParentNamedByASiblingKey(t *testing.T) {
 		t.Fatalf("SearchArtifacts: %v", err)
 	}
 	got := findResult(t, res, "finance/child")
-	if got.Frontmatter != "" {
-		t.Errorf("Frontmatter = %q, want empty (fail closed)", got.Frontmatter)
+	if !strings.Contains(got.Frontmatter, "x_base: shared/parent") {
+		t.Errorf("descriptor dropped the child's authored sibling key: %q", got.Frontmatter)
 	}
-	if strings.Contains(got.Description, "shared/parent") {
-		t.Errorf("descriptor leaks the parent ID: %+v", got)
+	if strings.Contains(got.Frontmatter, "extends:") {
+		t.Errorf("descriptor still names the parent under extends: %q", got.Frontmatter)
 	}
 }
 
