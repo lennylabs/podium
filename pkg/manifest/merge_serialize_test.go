@@ -224,10 +224,12 @@ func TestSerializeMerged_UnrewritableBlockFailsClosed(t *testing.T) {
 
 // Spec: §4.6 hidden parents. An anchor on the extends value alone is inert. The
 // merged block is rebuilt from the merged fields, which carry no anchor, and no
-// other key aliases the reference back into the block, so the load succeeds and
-// the block names no parent. The refusal above is bounded to a reference some
+// other key aliases the reference back into the block, so the helper serves the
+// block and it names no parent. The refusal above is bounded to a reference some
 // other key resolves, and every other anchored fixture pairs its anchor with an
-// alias, so this case is what pins that boundary from the accepted side.
+// alias, so this case pins that boundary from the accepted side at the helper.
+// TestExtendsFrontmatter_AnchoredExtendsWithoutAnAliasIsServed in
+// pkg/registry/core pins the same input on the served LoadArtifactResult.
 func TestSerializeMerged_AnchoredExtendsWithoutAnAliasIsServed(t *testing.T) {
 	t.Parallel()
 	authored := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +

@@ -158,6 +158,31 @@ func TestExtendsFrontmatter_AnchoredReferenceFailsClosed(t *testing.T) {
 	assertFailsClosed(t, got, err)
 }
 
+// Spec: §4.6 hidden parents — the refusal above is bounded to a reference some
+// other key resolves back into the assembled block. An anchor on the `extends:`
+// value that no other key aliases costs no load: the merged block is rebuilt
+// from the merged fields, which carry neither the reference nor the anchor. This
+// pins the accepted side of that boundary at the served surface, beside the two
+// refused cases, so a later change that rejects the input anywhere on the load
+// path is caught here.
+func TestExtendsFrontmatter_AnchoredExtendsWithoutAnAliasIsServed(t *testing.T) {
+	t.Parallel()
+	got, err := emfLoad(t,
+		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
+			"extends: &p shared/parent@1.x\nx_owner: finance\n---\n\nchild body\n")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	fm := string(got.Frontmatter)
+	if strings.Contains(fm, "shared/parent") {
+		t.Errorf("the served frontmatter names the hidden parent:\n%s", fm)
+	}
+	if served := decodeServedMapping(t, got.Frontmatter); served["x_owner"] != "finance" {
+		t.Errorf("x_owner = %v, want %q\n%s", served["x_owner"], "finance", fm)
+	}
+}
+
 // Spec: §4.6 omitted fields — the typed serialization re-emits a declared key
 // without the anchor it carried, so a restored key that aliases that anchor has
 // no target left in the assembled block. The merge expands the alias into the
