@@ -630,7 +630,7 @@ Hosts can surface the offline status to the agent so it can adjust behavior (e.g
 
 ## Read-only mode
 
-When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to read-only mode. Read endpoints continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, freeze toggles, admin grants, login-driven token issuance) are rejected with `registry.read_only`.
+When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to read-only mode. Read endpoints continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, freeze toggles, admin grants, and tenant management) are rejected with `registry.read_only`.
 
 Read responses carry two headers:
 
