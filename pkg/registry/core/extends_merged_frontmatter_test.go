@@ -168,7 +168,8 @@ func TestExtendsFrontmatter_AnchoredReferenceFailsClosed(t *testing.T) {
 func TestExtendsFrontmatter_AnchoredExtendsWithoutAnAliasIsServed(t *testing.T) {
 	t.Parallel()
 	got, err := emfLoad(t,
-		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n"+
+			"x_review_board: platform\n---\n\nparent body\n",
 		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
 			"extends: &p shared/parent@1.x\nx_owner: finance\n---\n\nchild body\n")
 	if err != nil {
@@ -178,8 +179,15 @@ func TestExtendsFrontmatter_AnchoredExtendsWithoutAnAliasIsServed(t *testing.T) 
 	if strings.Contains(fm, "shared/parent") {
 		t.Errorf("the served frontmatter names the hidden parent:\n%s", fm)
 	}
-	if served := decodeServedMapping(t, got.Frontmatter); served["x_owner"] != "finance" {
+	served := decodeServedMapping(t, got.Frontmatter)
+	if served["x_owner"] != "finance" {
 		t.Errorf("x_owner = %v, want %q\n%s", served["x_owner"], "finance", fm)
+	}
+	// The parent-only key is what makes the case depend on the anchored
+	// reference being operative: it reaches the served block only when the
+	// chain resolved and merged.
+	if served["x_review_board"] != "platform" {
+		t.Errorf("x_review_board = %v, want %q, so the anchored extends did not resolve\n%s", served["x_review_board"], "platform", fm)
 	}
 }
 

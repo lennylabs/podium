@@ -103,8 +103,8 @@ func TestExtendsAuditRedact_InheritedDirectiveReachesTheReadEvent(t *testing.T) 
 		if e.Target != "finance/child" || e.Type != "artifact.loaded" {
 			continue
 		}
-		if _, ok := e.Context["x_bank_account"]; !ok {
-			t.Errorf("the inherited directive named a key the event context does not carry: %v", e.Context)
+		if got := e.Context["x_bank_account"]; got != "GB29-NWBK-0000" {
+			t.Errorf("Context[x_bank_account] = %q, want the inherited raw value the sink masks: %v", got, e.Context)
 		}
 	}
 }
