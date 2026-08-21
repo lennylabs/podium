@@ -222,6 +222,31 @@ func TestSerializeMerged_UnrewritableBlockFailsClosed(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 hidden parents. An anchor on the extends value alone is inert. The
+// merged block is rebuilt from the merged fields, which carry no anchor, and no
+// other key aliases the reference back into the block, so the load succeeds and
+// the block names no parent. The refusal above is bounded to a reference some
+// other key resolves, and every other anchored fixture pairs its anchor with an
+// alias, so this case is what pins that boundary from the accepted side.
+func TestSerializeMerged_AnchoredExtendsWithoutAnAliasIsServed(t *testing.T) {
+	t.Parallel()
+	authored := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+		"extends: &p shared/parent@1.x\nx_owner: finance\n---\n\nchild body\n"
+
+	out, err := serializeChild([]manifest.MergedBlock{block(authored, "shared/parent@1.x")})
+	if err != nil {
+		t.Fatalf("SerializeMerged: %v", err)
+	}
+	assertNamesNoParent(t, out, "shared/parent")
+	fm, _, err := manifest.SplitFrontmatter(out)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	if got := decodeMapping(t, fm); got["x_owner"] != "finance" {
+		t.Errorf("x_owner = %v, want %q\n%s", got["x_owner"], "finance", fm)
+	}
+}
+
 // Spec: §4.6 omitted fields. An alias is expanded into the value it points at
 // before the block is assembled, so a key that aliases a node the merge drops or
 // the typed serialization re-emits without its anchor is inherited rather than
