@@ -1784,7 +1784,7 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 			Extends:     c.ExtendsPin,
 		})
 	}
-	fm, err := manifest.SerializeMerged(merged, out.ArtifactID, authored...)
+	fm, err := manifest.SerializeMerged(merged, authored...)
 	if err != nil {
 		return store.ManifestRecord{}, fmt.Errorf("%w: extends manifest for %s: %v",
 			ErrInvalidArgument, out.ArtifactID, err)

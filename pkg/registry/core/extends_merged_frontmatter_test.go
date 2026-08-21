@@ -170,17 +170,32 @@ func TestExtendsFrontmatter_AliasIntoADeclaredKeyFailsClosed(t *testing.T) {
 	assertFailsClosed(t, got, err)
 }
 
-// Spec: §4.6 hidden parents — a key restored from the parent's block is text
-// the requester cannot otherwise read, so a value in it that references the
-// parent discloses the parent's ID. The load fails closed with
-// `registry.invalid_argument` rather than serving it.
-func TestExtendsFrontmatter_InheritedKeyReferencingTheParentFailsClosed(t *testing.T) {
+// Spec: §4.6 hidden parents — the served block carries the parent's ID under no
+// key, so a restored key whose value references the parent fails the load with
+// `registry.invalid_argument` rather than being served. The rule is
+// unconditional, so it holds whether the parent's block or the child's own block
+// authored the key.
+func TestExtendsFrontmatter_KeyReferencingTheParentFailsClosed(t *testing.T) {
 	t.Parallel()
-	got, err := emfLoad(t,
-		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\nx_base: shared/parent\n---\n\nparent body\n",
-		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
-			"extends: shared/parent@1.x\n---\n\nchild body\n")
-	assertFailsClosed(t, got, err)
+	for name, authored := range map[string]struct{ parent, child string }{
+		"restored from the parent": {
+			parent: "x_base: shared/parent\n",
+			child:  "",
+		},
+		"authored by the child": {
+			parent: "",
+			child:  "x_base: shared/parent\n",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := emfLoad(t,
+				"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n"+authored.parent+"---\n\nparent body\n",
+				"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+authored.child+
+					"extends: shared/parent@1.x\n---\n\nchild body\n")
+			assertFailsClosed(t, got, err)
+		})
+	}
 }
 
 // Spec: §4.6 hidden parents — a child can author frontmatter whose anchor
@@ -269,12 +284,10 @@ func TestExtendsFrontmatter_EmptyChildValueInheritsTheParents(t *testing.T) {
 }
 
 // Spec: §4.6 hidden parents — a child may extend its own canonical ID, and the
-// parent is then the row below it in layer order. §4.6's guarantee is
-// conditional on the requester being unable to see the layer that contributes
-// the parent, and here the parent's ID is the ID the requester asked for, so an
-// inherited key holding that ID discloses nothing the response does not already
-// carry and the omitted-field rule keeps it.
-func TestExtendsFrontmatter_SameIDOverlayKeepsTheInheritedKey(t *testing.T) {
+// parent is then the row below it in layer order. That row is a chain parent
+// like any other, so an inherited key holding its ID takes the same disclosure
+// test and the load fails closed with `registry.invalid_argument`.
+func TestExtendsFrontmatter_SameIDOverlayFailsClosed(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -302,48 +315,7 @@ func TestExtendsFrontmatter_SameIDOverlayKeepsTheInheritedKey(t *testing.T) {
 		{ID: "L2", Visibility: layer.Visibility{Public: true}, Precedence: 2},
 	})
 	got, err := reg.LoadArtifact(context.Background(), publicID, "shared/base", core.LoadArtifactOptions{})
-	if err != nil {
-		t.Fatalf("LoadArtifact: %v", err)
-	}
-	served := decodeServedMapping(t, got.Frontmatter)
-	if served["x_owner"] != "shared/base" {
-		t.Errorf("x_owner = %v, want %q\n%s", served["x_owner"], "shared/base", got.Frontmatter)
-	}
-	if _, named := served["extends"]; named {
-		t.Errorf("the served frontmatter still names the parent under extends:\n%s", got.Frontmatter)
-	}
-}
-
-// Spec: §4.6, §2.2 — the two surfaces must agree on the child's own authored
-// keys, including one whose value names the parent. The search descriptor is
-// the record's own block and keeps that key, so refusing the load for it would
-// cost a read without closing the disclosure a sibling path already makes.
-func TestExtendsFrontmatter_ChildKeyNamingTheParentMatchesTheSearchDescriptor(t *testing.T) {
-	t.Parallel()
-	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n"
-	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-		"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n"
-	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
-
-	loaded, err := reg.LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
-	if err != nil {
-		t.Fatalf("LoadArtifact: %v", err)
-	}
-	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
-	if err != nil {
-		t.Fatalf("SearchArtifacts: %v", err)
-	}
-	descriptor := findResult(t, res, "finance/child")
-
-	fromLoad := decodeServedMapping(t, loaded.Frontmatter)
-	fromSearch := decodeServedMapping(t, []byte(descriptor.Frontmatter))
-	if fromSearch["x_base"] != "shared/parent" {
-		t.Fatalf("the search descriptor dropped the child's own key: %q", descriptor.Frontmatter)
-	}
-	if fromLoad["x_base"] != fromSearch["x_base"] {
-		t.Errorf("load_artifact serves x_base = %v, search_artifacts serves %v",
-			fromLoad["x_base"], fromSearch["x_base"])
-	}
+	assertFailsClosed(t, got, err)
 }
 
 // Spec: §4.6 — a child that declares no undeclared key is served the typed

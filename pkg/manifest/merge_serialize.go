@@ -61,23 +61,19 @@ type MergedBlock struct {
 //
 // chain holds the artifact's ancestry parent first, the leaf last.
 //
-// artifactID is the canonical ID of the artifact being served. A chain
-// reference to that same ID is a §4.6 layer overlay rather than a hidden
-// parent, so it is excluded from the disclosure test below.
-//
 // It does two things the typed serialization alone cannot. It restores the
 // frontmatter keys Artifact does not declare, taking them from the chain's
 // authored blocks in parent-first order so a key the child also sets with a
 // non-empty value keeps the child's value. And it applies the §4.6
 // hidden-parent strip to the result, returning ErrUnhidableParent when the
-// block resolves an extends value, when a key restored from a block above the
-// leaf references a chain parent, or when the block cannot be read back at all.
+// block resolves an extends value, when any restored key references a chain
+// parent, or when the block cannot be read back at all.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
 // most-restrictive value for sensitivity are not what a last-writer-wins
 // overlay over authored text would produce.
-func SerializeMerged(a *Artifact, artifactID string, chain ...MergedBlock) ([]byte, error) {
+func SerializeMerged(a *Artifact, chain ...MergedBlock) ([]byte, error) {
 	stripped := *a
 	stripped.Extends = ""
 	typed, err := SerializeArtifact(&stripped)
@@ -96,15 +92,13 @@ func SerializeMerged(a *Artifact, artifactID string, chain ...MergedBlock) ([]by
 		return nil, err
 	}
 
-	refs := chainRefs(a, artifactID, chain)
+	refs := chainRefs(a, chain)
 	for _, key := range undeclaredKeysOf(chain) {
-		// Spec: §4.6 hidden parents. A key restored from a block above the
-		// leaf is text the requester cannot otherwise read, so a value in it
-		// that references a chain parent discloses the parent's ID. A key the
-		// leaf itself authored discloses nothing the leaf's own record does
-		// not already carry, and the search descriptor serves it, so the two
-		// surfaces agree on it (§2.2).
-		if key.inherited && referencesAny(key.value, refs) {
+		// Spec: §4.6 hidden parents. The guarantee covers the parent's ID
+		// under every key, whether the value was authored literally or
+		// produced by resolving an alias or a merge key, so the test runs on
+		// every restored key regardless of which block contributed it.
+		if referencesAny(key.value, refs) {
 			return nil, ErrUnhidableParent
 		}
 		root.Content = append(root.Content,
@@ -159,12 +153,10 @@ func mappingOf(src []byte) (*yaml.Node, []byte, error) {
 	return doc.Content[0], body, nil
 }
 
-// namedNode pairs a restored key with the node holding its value, and records
-// whether that value came from a block above the leaf.
+// namedNode pairs a restored key with the node holding its value.
 type namedNode struct {
-	name      string
-	value     *yaml.Node
-	inherited bool
+	name  string
+	value *yaml.Node
 }
 
 // undeclaredKeysOf collects the frontmatter keys Artifact does not declare
@@ -183,8 +175,7 @@ type namedNode struct {
 func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 	seen := map[string]int{}
 	out := []namedNode{}
-	for idx, block := range chain {
-		inherited := idx < len(chain)-1
+	for _, block := range chain {
 		m, _, err := mappingOf(block.Frontmatter)
 		if err != nil {
 			continue
@@ -200,11 +191,10 @@ func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 					continue
 				}
 				out[prev].value = value
-				out[prev].inherited = inherited
 				continue
 			}
 			seen[name] = len(out)
-			out = append(out, namedNode{name: name, value: value, inherited: inherited})
+			out = append(out, namedNode{name: name, value: value})
 		}
 	}
 	return out
@@ -235,15 +225,11 @@ func addParentRef(refs map[string]bool, ref string) {
 	}
 }
 
-// chainRefs returns the canonical IDs the chain's extends references name,
-// less the ID of the artifact being served.
+// chainRefs returns the canonical IDs the chain's extends references name.
 //
-// Spec: §4.6 hidden parents. The guarantee is conditional on the requester
-// being unable to see the layer that contributes the parent. Under §4.6 layer
-// stacking a higher-precedence layer may extend the same artifact ID in a
-// lower layer, and the "parent" is then the ID the requester just asked for,
-// so a value naming it discloses nothing the response does not already carry.
-func chainRefs(a *Artifact, artifactID string, chain []MergedBlock) map[string]bool {
+// Spec: §4.6 hidden parents. Every ID in the set is a parent the requester may
+// be unable to see, and the served block carries none of them under any key.
+func chainRefs(a *Artifact, chain []MergedBlock) map[string]bool {
 	refs := map[string]bool{}
 	for _, block := range chain {
 		addParentRef(refs, block.Extends)
@@ -251,7 +237,6 @@ func chainRefs(a *Artifact, artifactID string, chain []MergedBlock) map[string]b
 	// The merged artifact carries the leaf's reference, which a chain whose
 	// leaf resolved it through a merge key never spells out at the top level.
 	addParentRef(refs, a.Extends)
-	delete(refs, parentID(artifactID))
 	return refs
 }
 
@@ -299,10 +284,8 @@ func hidesParent(header []byte) bool {
 // and the merge has already been applied to the indexed columns.
 //
 // It shares hidesParent with SerializeMerged and applies no parent-ID test,
-// because it merges nothing. That test guards the keys the merge copies out of
-// chain blocks the requester cannot see, and this block holds only the child's
-// own authored text, which the merged load path serves for the same artifact.
-// Spec: §4.6.
+// because proposal 0009 settled the search descriptor on the node-level strip
+// of the record's own block and this repair does not reopen it. Spec: §4.6.
 //
 // The guard is scoped to what the parser resolves rather than to the literal
 // top-level key. ParseArtifact resolves YAML merge keys, so a child can carry
