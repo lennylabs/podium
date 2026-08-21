@@ -59,22 +59,29 @@ type MergedBlock struct {
 // both extends resolvers call, so the server mode and the filesystem-registry
 // mode serve identical bytes for the same artifact (§11, §2.2).
 //
-// id is the served artifact's own canonical ID, and chain holds its ancestry
-// parent first, the leaf last.
+// chain holds the artifact's ancestry, parent first and the leaf last.
 //
 // It does two things the typed serialization alone cannot. It restores the
 // frontmatter keys Artifact does not declare, taking them from the chain's
 // authored blocks in parent-first order so a key the child also sets with a
-// non-empty value keeps the child's value. And it applies the §4.6
-// hidden-parent strip to the result, returning ErrUnhidableParent when the
-// block resolves an extends value, when any value in it references a chain
-// parent, or when the block cannot be read back at all.
+// non-empty value keeps the child's value. And it holds the restored keys to
+// §4.6's hidden-parent guarantee, leaving out a key whose name or value names a
+// chain parent and returning ErrUnhidableParent when the assembled block still
+// resolves an extends value or cannot be read back at all.
+//
+// A restored key that names a parent is left out rather than costing the child
+// its whole read. The abort is reserved for a block the rewrite cannot produce,
+// which is the input class an extends reference carried by a YAML merge key or
+// an anchored mapping falls into. A declared key reaches the block through the
+// typed serialization, on the same terms as before this helper existed and as
+// the search descriptor serves it, so the §4.4 replaced_by pointer of a child
+// deprecated in favour of the artifact it extends still loads.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
 // most-restrictive value for sensitivity are not what a last-writer-wins
 // overlay over authored text would produce.
-func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, error) {
+func SerializeMerged(a *Artifact, chain ...MergedBlock) ([]byte, error) {
 	stripped := *a
 	stripped.Extends = ""
 	typed, err := SerializeArtifact(&stripped)
@@ -93,18 +100,18 @@ func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, erro
 		return nil, err
 	}
 
+	// Spec: §4.6 hidden parents. The parent's existence and ID are not
+	// surfaced to the requester, so a restored key is tested under its own name
+	// and at every nesting depth of its value, whichever chain member authored
+	// it.
+	parents := parentsOf(a, chain)
 	for _, key := range undeclaredKeysOf(chain) {
+		if parents.discloses(key.name) || parents.namesAny(key.value) {
+			continue
+		}
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
 			key.value)
-	}
-
-	// Spec: §4.6 hidden parents. The parent's existence and ID are not
-	// surfaced to the requester, so the test runs over the assembled block
-	// under any key and at any nesting depth, whichever chain member authored
-	// the value.
-	if namesAny(root, disclosureOf(a, id, chain)) {
-		return nil, ErrUnhidableParent
 	}
 
 	out, err := yaml.Marshal(root)
@@ -209,83 +216,124 @@ func isEmptyScalar(n *yaml.Node) bool {
 	return n != nil && n.Kind == yaml.ScalarNode && n.Value == ""
 }
 
-// parentID reduces an artifact reference to its canonical ID by dropping the
+// canonicalID reduces an artifact reference to its canonical ID by dropping the
 // version pin. §4.6's guarantee covers the parent's ID, so the pin an extends
 // entry happens to carry does not decide what the disclosure test looks for.
-func parentID(ref string) string {
+func canonicalID(ref string) string {
 	id, _, _ := strings.Cut(ref, "@")
 	return id
 }
 
-// addParentRef records an extends reference under its canonical ID. The
-// disclosure test compares against that ID, so a value naming the parent under
-// a pin the extends entry does not carry still matches.
-func addParentRef(refs map[string]bool, ref string) {
-	if id := parentID(ref); id != "" {
-		refs[id] = true
-	}
-}
+// parentIDs is the canonical ID of every extends reference in a chain, which is
+// the set §4.6 hides from a requester who cannot see the layer contributing the
+// parent.
+type parentIDs map[string]bool
 
-// disclosure is what a served scalar is tested against under §4.6's
-// hidden-parent guarantee: the chain's parent IDs and the served artifact's own
-// canonical ID.
-type disclosure struct {
-	// refs holds the canonical ID of every extends reference in the chain,
-	// including a same-ID overlay's own.
-	refs map[string]bool
-	// self is the served artifact's canonical ID.
-	self string
-}
-
-// disclosureOf builds the test SerializeMerged applies to the assembled block.
-//
-// Spec: §4.6 hidden parents. Every ID in refs is a parent the requester may be
-// unable to see, and the served block names none of them.
-func disclosureOf(a *Artifact, id string, chain []MergedBlock) disclosure {
-	d := disclosure{refs: map[string]bool{}, self: parentID(id)}
+// parentsOf collects the chain's parent IDs, including the reference the merged
+// artifact itself carries. That reference is the one a leaf resolving its
+// extends through a merge key never spells out at the top level.
+func parentsOf(a *Artifact, chain []MergedBlock) parentIDs {
+	p := parentIDs{}
 	for _, block := range chain {
-		addParentRef(d.refs, block.Extends)
+		p.add(block.Extends)
 	}
-	// The merged artifact carries the leaf's reference, which a chain whose
-	// leaf resolved it through a merge key never spells out at the top level.
-	addParentRef(d.refs, a.Extends)
-	return d
+	p.add(a.Extends)
+	return p
 }
 
-// discloses reports whether serving s would surface a parent §4.6 hides. A
-// scalar discloses a parent when the scalar is a reference to it: the canonical
-// ID on its own, or that ID under a version pin. Which chain member authored
-// the value does not enter into it, because §4.6 constrains the block the
-// registry serves rather than the provenance of the text inside it.
-//
-// One value is exempt. A scalar that is exactly the served artifact's canonical
-// ID names the artifact the requester asked for and was answered with, which is
-// the parent of a same-ID overlay. The exemption is that value alone: a pinned
-// reference to the lower-precedence row discloses that a second row for the ID
-// exists, which §4.6 puts alongside the ID in its guarantee.
-func (d disclosure) discloses(s string) bool {
-	if s == d.self {
-		return false
+// add records a reference under its canonical ID, so a value naming the parent
+// under a pin the extends entry does not carry still matches.
+func (p parentIDs) add(ref string) {
+	if id := canonicalID(ref); id != "" {
+		p[id] = true
 	}
-	return d.refs[parentID(s)]
+}
+
+// discloses reports whether serving s would surface a parent §4.6 hides.
+//
+// Spec: §4.6 hidden parents. The guarantee is about the parent's ID reaching
+// the requester, and a path below the parent or prose quoting the ID hands over
+// that ID together with the evidence that the artifact exists. The test
+// therefore fires wherever the ID appears at an identifier boundary, which
+// leaves a different artifact whose ID starts or ends with the parent's, such as
+// shared/parent-legacy or team/shared/parent, inheritable under §4.6's
+// omitted-field rule.
+func (p parentIDs) discloses(s string) bool {
+	for id := range p {
+		if mentions(s, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// mentions reports whether s names id at an identifier boundary. The occurrence
+// starts the string or follows a character that neither continues an identifier
+// nor extends a path leftward, and it ends the string or is followed by a
+// character that does not continue an identifier, so a version pin, a path
+// separator, and surrounding prose all count as boundaries.
+//
+// id is never empty, because add records a reference only under a non-empty
+// canonical ID.
+func mentions(s, id string) bool {
+	for from := 0; from+len(id) <= len(s); {
+		at := strings.Index(s[from:], id)
+		if at < 0 {
+			return false
+		}
+		start := from + at
+		if boundedLeft(s, start) && boundedRight(s, start+len(id)) {
+			return true
+		}
+		from = start + 1
+	}
+	return false
+}
+
+// boundedLeft reports whether the occurrence starting at i begins an
+// identifier. A preceding slash extends the path leftward, which makes the
+// occurrence the tail of a longer ID rather than the parent's.
+func boundedLeft(s string, i int) bool {
+	if i == 0 {
+		return true
+	}
+	return !identifierByte(s[i-1]) && s[i-1] != '/'
+}
+
+// boundedRight reports whether the occurrence ending at i ends an identifier.
+func boundedRight(s string, i int) bool {
+	return i == len(s) || !identifierByte(s[i])
+}
+
+// identifierByte reports whether c continues an artifact ID segment. A slash is
+// deliberately absent: shared/parent/CHARTER.md names shared/parent.
+func identifierByte(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	default:
+		return c == '-' || c == '_'
+	}
 }
 
 // namesAny reports whether any scalar reachable from n discloses a parent. It
 // walks the whole subtree, so an ID nested in a list or a mapping, or used as a
 // key inside a restored value, is found on the same terms as a top-level
-// scalar.
-func namesAny(n *yaml.Node, d disclosure) bool {
-	// Not reachable: the caller passes the decoded root, and a decoded node
-	// holds no nil child. The guard is kept because the alternative to
-	// returning here is a panic on the §4.6 path.
+// scalar. It does not follow an alias, whose target is either a node this walk
+// reaches anyway or one the assembled block cannot resolve, which the read-back
+// below catches.
+func (p parentIDs) namesAny(n *yaml.Node) bool {
+	// Not reachable: the caller passes a node the decoder produced, and a
+	// decoded node holds no nil child. The guard is kept because the
+	// alternative to returning here is a panic on the §4.6 path.
 	if n == nil {
 		return false
 	}
-	if n.Kind == yaml.ScalarNode && d.discloses(n.Value) {
+	if n.Kind == yaml.ScalarNode && p.discloses(n.Value) {
 		return true
 	}
 	for _, c := range n.Content {
-		if namesAny(c, d) {
+		if p.namesAny(c) {
 			return true
 		}
 	}

@@ -1771,8 +1771,9 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	out.AuditRedact = append([]string(nil), merged.AuditRedact...)
 	// Serialize through the chain's authored blocks so an extension type's
 	// own frontmatter keys survive, and strip the extends reference so the
-	// hidden parent is not surfaced (§4.6). A block that cannot be rewritten
-	// into one naming no parent fails the read rather than being served.
+	// hidden parent is not surfaced (§4.6). A restored key that names a chain
+	// parent is left out, and a block that cannot be rewritten at all fails the
+	// read rather than being served.
 	authored := make([]manifest.MergedBlock, 0, len(chain))
 	for _, c := range chain {
 		// The stored pin is the reference this record was ingested with,
@@ -1784,7 +1785,7 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 			Extends:     c.ExtendsPin,
 		})
 	}
-	fm, err := manifest.SerializeMerged(merged, out.ArtifactID, authored...)
+	fm, err := manifest.SerializeMerged(merged, authored...)
 	if err != nil {
 		return store.ManifestRecord{}, fmt.Errorf("%w: extends manifest for %s: %v",
 			ErrInvalidArgument, out.ArtifactID, err)

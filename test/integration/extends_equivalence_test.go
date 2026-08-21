@@ -42,7 +42,7 @@ func writeExtendsRegistry(t *testing.T) string {
 
 	write("base/shared/anchor/ARTIFACT.md",
 		"---\ntype: context\nversion: 1.0.0\ndescription: the anchor context\n"+
-			"tags: [anchor]\nsensitivity: low\nx_charter: shared/anchor/CHARTER.md\n---\n\nanchor prose\n")
+			"tags: [anchor]\nsensitivity: low\nx_charter: docs/charter.md\n---\n\nanchor prose\n")
 	write("base/shared/base/ARTIFACT.md",
 		"---\ntype: context\nversion: 1.0.0\ndescription: the base context\n"+
 			"tags: [shared]\nsensitivity: low\nx_review_board: platform\n"+
@@ -124,11 +124,10 @@ func TestSyncEquivalence_ExtendsChildMatchesAcrossModes(t *testing.T) {
 			}
 			// team/derived sits two links below shared/anchor, so the
 			// grandparent's inherited key pins the deeper chain both
-			// resolvers have to restore identically. Its value is a path
-			// below the grandparent's ID rather than a reference to it, so
-			// §4.6's omitted-field rule carries it through both modes
-			// instead of the hidden-parent test refusing the load.
-			if content := soleMaterializedEntry(t, fsTree, "team/derived"); !strings.Contains(content, "x_charter: shared/anchor/CHARTER.md") {
+			// resolvers have to restore identically. Its value names no
+			// ancestor, so §4.6's omitted-field rule carries it through both
+			// modes rather than the hidden-parent test leaving it out.
+			if content := soleMaterializedEntry(t, fsTree, "team/derived"); !strings.Contains(content, "x_charter: docs/charter.md") {
 				t.Errorf("team/derived: merged frontmatter lost the grandparent-inherited key:\n%s", content)
 			}
 
@@ -159,15 +158,14 @@ func TestSyncEquivalence_UnhidableParentFailsBothModes(t *testing.T) {
 			t.Fatalf("write %s: %v", rel, err)
 		}
 	}
-	// The parent authors a key holding its own canonical ID, which the child
-	// inherits under §4.6's omitted-field rule, so the merged block would name
-	// the parent the requester may be unable to see.
+	// The child carries its extends reference under an anchor, so deleting the
+	// entry strands the alias into it and the merged block cannot be read back
+	// to be checked against §4.6.
 	write("shared/base/ARTIFACT.md",
-		"---\ntype: context\nversion: 1.0.0\ndescription: the base context\n"+
-			"x_base: shared/base\n---\n\nbase prose\n")
+		"---\ntype: context\nversion: 1.0.0\ndescription: the base context\n---\n\nbase prose\n")
 	write("team/derived/ARTIFACT.md",
 		"---\ntype: context\nversion: 2.0.0\ndescription: the derived context\n"+
-			"extends: shared/base@1.x\n---\n\nderived prose\n")
+			"extends: &b shared/base@1.x\nnote: *b\n---\n\nderived prose\n")
 	write("team/other/ARTIFACT.md",
 		"---\ntype: context\nversion: 1.0.0\ndescription: an unrelated context\n---\n\nother prose\n")
 
@@ -195,6 +193,63 @@ func TestSyncEquivalence_UnhidableParentFailsBothModes(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Spec: §11 (filesystem ↔ server equivalence) / §2.2 (shared library), §4.6
+// hidden parents — a key naming the parent is left out of the merged block in
+// both modes rather than costing the child its materialization, and the two
+// modes write the same tree.
+func TestSyncEquivalence_KeyNamingTheParentIsLeftOutInBothModes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write := func(rel, body string) {
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	// The parent authors a key holding its own canonical ID, which the child
+	// would inherit under §4.6's omitted-field rule, and a key that names no
+	// artifact, which the child does inherit.
+	write("shared/base/ARTIFACT.md",
+		"---\ntype: context\nversion: 1.0.0\ndescription: the base context\n"+
+			"x_base: shared/base\nx_charter: docs/charter.md\n---\n\nbase prose\n")
+	write("team/derived/ARTIFACT.md",
+		"---\ntype: context\nversion: 2.0.0\ndescription: the derived context\n"+
+			"extends: shared/base@1.x\n---\n\nderived prose\n")
+
+	fsTarget := t.TempDir()
+	if _, err := sync.Run(sync.Options{RegistryPath: dir, Target: fsTarget}); err != nil {
+		t.Fatalf("filesystem sync.Run: %v", err)
+	}
+
+	srv, err := server.NewFromFilesystem(dir)
+	if err != nil {
+		t.Fatalf("NewFromFilesystem: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	srvTarget := t.TempDir()
+	if _, err := sync.Run(sync.Options{RegistryPath: ts.URL, Target: srvTarget}); err != nil {
+		t.Fatalf("server sync.Run: %v", err)
+	}
+
+	fsTree := materializedTree(t, fsTarget)
+	srvTree := materializedTree(t, srvTarget)
+	for name, tree := range map[string]map[string]string{"filesystem": fsTree, "server": srvTree} {
+		content := soleMaterializedEntry(t, tree, "team/derived")
+		if !strings.Contains(content, "x_charter: docs/charter.md") {
+			t.Errorf("%s mode dropped the inherited key that names no artifact:\n%s", name, content)
+		}
+		if strings.Contains(content, "shared/base") {
+			t.Errorf("%s mode materialized the hidden parent's ID:\n%s", name, content)
+		}
+	}
+	assertTreesEqual(t, fsTree, srvTree)
 }
 
 // soleMaterializedEntry returns the content of the single materialized path

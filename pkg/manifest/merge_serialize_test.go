@@ -25,7 +25,7 @@ func TestSerializeMerged_RestoresUndeclaredKeysParentFirst(t *testing.T) {
 	out, err := manifest.SerializeMerged(&manifest.Artifact{
 		Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
 		Extends: "shared/parent@1.x", Body: "child body",
-	}, "team/child", block(parent, ""), block(child, "shared/parent@1.x"))
+	}, block(parent, ""), block(child, "shared/parent@1.x"))
 	if err != nil {
 		t.Fatalf("SerializeMerged: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestSerializeMerged_EmptyChildValueInheritsTheParents(t *testing.T) {
 			out, err := manifest.SerializeMerged(&manifest.Artifact{
 				Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
 				Extends: "shared/parent@1.x", Body: "child body",
-			}, "team/child", block(parent, ""), block(child, "shared/parent@1.x"))
+			}, block(parent, ""), block(child, "shared/parent@1.x"))
 			if err != nil {
 				t.Fatalf("SerializeMerged: %v", err)
 			}
@@ -95,7 +95,7 @@ func TestSerializeMerged_EmptyExtendsEntryNamesNoParent(t *testing.T) {
 	out, err := manifest.SerializeMerged(&manifest.Artifact{
 		Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
 		Extends: "shared/parent@1.x", Body: "child body",
-	}, "team/child", block(parent, ""), block(child, "shared/parent@1.x"))
+	}, block(parent, ""), block(child, "shared/parent@1.x"))
 	if err != nil {
 		t.Fatalf("SerializeMerged: %v", err)
 	}
@@ -110,10 +110,9 @@ func TestSerializeMerged_EmptyExtendsEntryNamesNoParent(t *testing.T) {
 
 // Spec: §4.6 hidden parents. The assembled block must resolve no extends value
 // and must read back at all, and an authored block can defeat either through an
-// anchor or a merge key. Each case here is a load the closed round-trip serves
-// today, because it dropped every undeclared key along with the mapping that
-// carried the reference; preserving the keys §4.6 makes inheritable costs this
-// input class its load.
+// anchor or a merge key. This is the one input class that loses a load the
+// closed round-trip serves today, because that round-trip dropped every
+// undeclared key along with the mapping or the alias carrying the reference.
 func TestSerializeMerged_UnrewritableBlockFailsClosed(t *testing.T) {
 	t.Parallel()
 	const leaf = "---\ntype: agent\nversion: 2.0.0\ndescription: child\n"
@@ -148,12 +147,12 @@ func TestSerializeMerged_UnrewritableBlockFailsClosed(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents. A key restored from a chain member above the leaf
-// carries that member's text out to the requester, so a value referencing a
-// chain parent is refused rather than served. The reference is compared by
-// canonical ID, so the pin either side happens to carry does not decide the
-// outcome, and the value is found at any nesting depth.
-func TestSerializeMerged_InheritedKeyReferencingTheParentFailsClosed(t *testing.T) {
+// Spec: §4.6 hidden parents. A restored key whose name or value names a chain
+// parent is left out of the served block, whichever member authored it and at
+// whatever depth the ID sits. The child keeps its read: leaving the key out is
+// what §4.6 requires, and failing the whole load would deny the artifact to the
+// parent's own author as well.
+func TestSerializeMerged_KeysNamingTheParentAreLeftOut(t *testing.T) {
 	t.Parallel()
 	const leaf = "---\ntype: agent\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nchild body\n"
 	parent := func(keys string) string {
@@ -161,37 +160,38 @@ func TestSerializeMerged_InheritedKeyReferencingTheParentFailsClosed(t *testing.
 	}
 	cases := map[string]struct {
 		extends string
+		hidden  string
 		chain   []manifest.MergedBlock
 	}{
-		"literal id under another key": {"shared/parent@1.x", []manifest.MergedBlock{
+		"literal id under another key": {"shared/parent@1.x", "shared/parent", []manifest.MergedBlock{
 			block(parent("x_base: shared/parent\n"), ""), block(leaf, "shared/parent@1.x")}},
-		"id inside a restored list": {"shared/parent@1.x", []manifest.MergedBlock{
+		"id inside a restored list": {"shared/parent@1.x", "shared/parent", []manifest.MergedBlock{
 			block(parent("x_bases: [shared/other, shared/parent]\n"), ""), block(leaf, "shared/parent@1.x")}},
-		"id inside a restored mapping": {"shared/parent@1.x", []manifest.MergedBlock{
+		"id inside a restored mapping": {"shared/parent@1.x", "shared/parent", []manifest.MergedBlock{
 			block(parent("x_meta:\n  base: shared/parent\n"), ""), block(leaf, "shared/parent@1.x")}},
-		"id as a mapping key": {"shared/parent@1.x", []manifest.MergedBlock{
+		"id as a mapping key": {"shared/parent@1.x", "shared/parent", []manifest.MergedBlock{
 			block(parent("x_meta:\n  shared/parent: base\n"), ""), block(leaf, "shared/parent@1.x")}},
 		// The restored key's own name is the one node the assembler writes
 		// rather than walks, so a parent that names a frontmatter key for its
 		// own canonical ID would otherwise be served verbatim.
-		"id as a top-level key": {"shared/parent@1.x", []manifest.MergedBlock{
+		"id as a top-level key": {"shared/parent@1.x", "shared/parent", []manifest.MergedBlock{
 			block(parent("shared/parent: base\n"), ""), block(leaf, "shared/parent@1.x")}},
-		"id under a pin the extends entry does not carry": {"shared/parent@1.x", []manifest.MergedBlock{
+		"id under a pin the extends entry does not carry": {"shared/parent@1.x", "shared/parent", []manifest.MergedBlock{
 			block(parent("x_base: shared/parent@2.0.0\n"), ""), block(leaf, "shared/parent@1.x")}},
-		"pinned id against an unpinned extends": {"shared/parent", []manifest.MergedBlock{
+		"pinned id against an unpinned extends": {"shared/parent", "shared/parent", []manifest.MergedBlock{
 			block(parent("x_base: shared/parent@1.0.0\n"), ""),
 			block("---\ntype: agent\nversion: 2.0.0\ndescription: child\nextends: shared/parent\n---\n\nchild body\n",
 				"shared/parent")}},
 		// The grandparent's ID reaches the served block under the middle
 		// member's own key. The reference comes from the member beside its
-		// block, so the refusal does not depend on the block still spelling
+		// block, so the outcome does not depend on the block still spelling
 		// the reference out.
-		"grandparent id restored from a chain block": {"shared/parent@1.0.0", []manifest.MergedBlock{
+		"grandparent id restored from a chain block": {"shared/parent@1.0.0", "shared/gp", []manifest.MergedBlock{
 			block("---\ntype: agent\nversion: 1.0.0\ndescription: grandparent\n---\n\ngp body\n", ""),
 			block("---\ntype: agent\nversion: 1.0.0\ndescription: parent\n"+
 				"x_ref: shared/gp\n---\n\nparent body\n", "shared/gp@1.0.0"),
 			block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n---\n\nchild body\n", "shared/parent@1.0.0")}},
-		"grandparent id nested in a chain block": {"shared/parent@1.0.0", []manifest.MergedBlock{
+		"grandparent id nested in a chain block": {"shared/parent@1.0.0", "shared/gp", []manifest.MergedBlock{
 			block("---\ntype: agent\nversion: 1.0.0\ndescription: parent\n"+
 				"x_meta:\n  bases: [shared/other, shared/gp@2.0.0]\n---\n\nparent body\n", "shared/gp@1.0.0"),
 			block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n---\n\nchild body\n", "shared/parent@1.0.0")}},
@@ -202,28 +202,26 @@ func TestSerializeMerged_InheritedKeyReferencingTheParentFailsClosed(t *testing.
 			out, err := manifest.SerializeMerged(&manifest.Artifact{
 				Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
 				Extends: tc.extends, Body: "child body",
-			}, "team/child", tc.chain...)
-			if !errors.Is(err, manifest.ErrUnhidableParent) {
-				t.Fatalf("err = %v, want ErrUnhidableParent", err)
+			}, tc.chain...)
+			if err != nil {
+				t.Fatalf("SerializeMerged: %v", err)
 			}
-			if out != nil {
-				t.Errorf("a block that names the parent must not be returned: %s", out)
-			}
+			assertNamesNoParent(t, out, tc.hidden)
 		})
 	}
 }
 
-// Spec: §4.6 hidden parents. The same-ID exemption covers the bare canonical
-// ID alone. A pinned or nested reference discloses that a second, lower row for
-// the ID exists, which is the parent's existence §4.6 puts alongside its ID in
-// the guarantee, so the overlay is refused rather than served.
-func TestSerializeMerged_SameIDOverlayRefusesAPinnedOrNestedReference(t *testing.T) {
+// Spec: §4.6 hidden parents. The parent of a same-ID overlay is the row below
+// it in layer order, in a layer the requester may not be able to see, so a key
+// naming that row is left out on the same terms as any other chain parent.
+func TestSerializeMerged_SameIDOverlayLeavesOutAKeyNamingTheLowerRow(t *testing.T) {
 	t.Parallel()
 	overlay := "---\ntype: agent\nversion: 2.0.0\ndescription: overlay\n" +
 		"extends: shared/base@1.x\n---\n\noverlay body\n"
 	for name, keys := range map[string]string{
-		"a pinned reference to the lower row": "x_owner: shared/base@1.0.0\n",
-		"a nested extends entry":              "base_ref:\n  extends: shared/base@1.0.0\n",
+		"the bare canonical id":  "x_owner: shared/base\n",
+		"a pinned reference":     "x_owner: shared/base@1.0.0\n",
+		"a nested extends entry": "base_ref:\n  extends: shared/base@1.0.0\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -231,32 +229,29 @@ func TestSerializeMerged_SameIDOverlayRefusesAPinnedOrNestedReference(t *testing
 			out, err := manifest.SerializeMerged(&manifest.Artifact{
 				Type: manifest.TypeAgent, Version: "2.0.0", Description: "overlay",
 				Extends: "shared/base@1.x", Body: "overlay body",
-			}, "shared/base", block(base, ""), block(overlay, "shared/base@1.x"))
-			if !errors.Is(err, manifest.ErrUnhidableParent) {
-				t.Fatalf("err = %v, want ErrUnhidableParent", err)
+			}, block(base, ""), block(overlay, "shared/base@1.x"))
+			if err != nil {
+				t.Fatalf("SerializeMerged: %v", err)
 			}
-			if out != nil {
-				t.Errorf("a block that names the lower row must not be returned: %s", out)
-			}
+			assertNamesNoParent(t, out, "shared/base")
 		})
 	}
 }
 
-// Spec: §4.6 omitted fields. A child may extend its own canonical ID, and the
-// parent is then the row below it in layer order. That parent's ID is the ID
-// the requester asked for and was answered with, so the disclosure test has
-// nothing to conceal and the overlay inherits the key naming it.
-func TestSerializeMerged_SameIDOverlayInheritsAKeyNamingItsOwnID(t *testing.T) {
+// Spec: §4.6 hidden parents, §4.4. The deprecation pointer is a declared key,
+// so it reaches the served block through the typed serialization on the terms
+// it had before this helper existed and on the terms the search descriptor
+// serves it. A child deprecated in favour of the artifact it extends keeps its
+// read rather than becoming permanently unloadable.
+func TestSerializeMerged_ReplacedByNamingTheParentIsServed(t *testing.T) {
 	t.Parallel()
-	base := "---\ntype: agent\nversion: 1.0.0\ndescription: base\n" +
-		"x_owner: shared/base\n---\n\nbase body\n"
-	overlay := "---\ntype: agent\nversion: 2.0.0\ndescription: overlay\n" +
-		"extends: shared/base@1.x\n---\n\noverlay body\n"
-
 	out, err := manifest.SerializeMerged(&manifest.Artifact{
-		Type: manifest.TypeAgent, Version: "2.0.0", Description: "overlay",
-		Extends: "shared/base@1.x", Body: "overlay body",
-	}, "shared/base", block(base, ""), block(overlay, "shared/base@1.x"))
+		Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
+		Extends: "shared/parent@1.x", Deprecated: true, ReplacedBy: "shared/parent",
+		Body: "child body",
+	}, block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
+		"deprecated: true\nreplaced_by: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
+		"shared/parent@1.x"))
 	if err != nil {
 		t.Fatalf("SerializeMerged: %v", err)
 	}
@@ -265,93 +260,19 @@ func TestSerializeMerged_SameIDOverlayInheritsAKeyNamingItsOwnID(t *testing.T) {
 		t.Fatalf("SplitFrontmatter: %v", err)
 	}
 	got := decodeMapping(t, fm)
-	if got["x_owner"] != "shared/base" {
-		t.Errorf("x_owner = %v, want %q\n%s", got["x_owner"], "shared/base", fm)
+	if got["replaced_by"] != "shared/parent" {
+		t.Errorf("replaced_by = %v, want %q\n%s", got["replaced_by"], "shared/parent", fm)
 	}
 	if _, named := got["extends"]; named {
 		t.Errorf("the merged block still names the parent under extends:\n%s", fm)
 	}
 }
 
-// Spec: §4.6 hidden parents. A distinct parent in the chain of a same-ID
-// overlay is still a parent the requester may be unable to see, so excluding
-// the artifact's own ID from the disclosure test leaves every other chain
-// reference refused.
-func TestSerializeMerged_SameIDOverlayStillRefusesADistinctParent(t *testing.T) {
-	t.Parallel()
-	grandparent := "---\ntype: agent\nversion: 1.0.0\ndescription: gp\n---\n\ngp body\n"
-	base := "---\ntype: agent\nversion: 1.0.0\ndescription: base\n" +
-		"x_owner: shared/gp\nextends: shared/gp\n---\n\nbase body\n"
-	overlay := "---\ntype: agent\nversion: 2.0.0\ndescription: overlay\n" +
-		"extends: shared/base@1.x\n---\n\noverlay body\n"
-
-	out, err := manifest.SerializeMerged(&manifest.Artifact{
-		Type: manifest.TypeAgent, Version: "2.0.0", Description: "overlay",
-		Extends: "shared/base@1.x", Body: "overlay body",
-	}, "shared/base", block(grandparent, ""), block(base, "shared/gp"),
-		block(overlay, "shared/base@1.x"))
-	if !errors.Is(err, manifest.ErrUnhidableParent) {
-		t.Fatalf("err = %v, want ErrUnhidableParent", err)
-	}
-	if out != nil {
-		t.Errorf("a block that names the grandparent must not be returned: %s", out)
-	}
-}
-
-// Spec: §4.6 hidden parents. The served block names no chain parent under any
-// key, whichever member authored the value, so a leaf that writes the parent's
-// ID beside its own extends entry is refused rather than served. §4.4's
-// `replaced_by` pointer is one such field: a child deprecated in favour of the
-// artifact it extends loses its load, which is the cost of the guarantee.
-func TestSerializeMerged_ValuesNamingTheParentFailClosed(t *testing.T) {
-	t.Parallel()
-	cases := map[string]string{
-		"the parent's id":    "shared/parent",
-		"a pinned reference": "shared/parent@2.0.0",
-	}
-	for name, value := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			forEachOrigin(t, value, func(t *testing.T, chain []manifest.MergedBlock) {
-				out, err := serializeChild(chain)
-				if !errors.Is(err, manifest.ErrUnhidableParent) {
-					t.Fatalf("err = %v, want ErrUnhidableParent", err)
-				}
-				if out != nil {
-					t.Errorf("a block that names the parent must not be returned: %s", out)
-				}
-			})
-		})
-	}
-}
-
-// Spec: §4.6 hidden parents, §4.4. The §4.4 deprecation pointer is a declared
-// key, so it reaches the served block through the typed serialization rather
-// than through the restore step, and the parent-ID test covers it there too.
-func TestSerializeMerged_ReplacedByNamingTheParentFailsClosed(t *testing.T) {
-	t.Parallel()
-	out, err := manifest.SerializeMerged(&manifest.Artifact{
-		Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
-		Extends: "shared/parent@1.x", Deprecated: true, ReplacedBy: "shared/parent",
-		Body: "child body",
-	}, "team/child", block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
-		"deprecated: true\nreplaced_by: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
-		"shared/parent@1.x"))
-	if !errors.Is(err, manifest.ErrUnhidableParent) {
-		t.Fatalf("err = %v, want ErrUnhidableParent", err)
-	}
-	if out != nil {
-		t.Errorf("a block that names the parent must not be returned: %s", out)
-	}
-}
-
-// Spec: §4.6 omitted fields. A value has to be a reference to the parent for
-// the disclosure test to fire, so an artifact whose ID continues past the
-// parent's, a path below the parent, and prose that quotes the ID are all
-// inheritable and are served from either origin. Scoping the test to a
-// reference is what keeps §4.6's omitted-field rule working: the alternative
-// costs a child its whole read over an inherited value that merely mentions the
-// parent.
+// Spec: §4.6 omitted fields. The disclosure test fires at an identifier
+// boundary, so an artifact whose ID continues past the parent's and an ID that
+// ends with the parent's are inherited from either origin. Scoping the test
+// this way is what keeps §4.6's omitted-field rule working for ordinary
+// extension keys.
 func TestSerializeMerged_ValuesNamingAnotherArtifactAreServed(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
@@ -360,12 +281,6 @@ func TestSerializeMerged_ValuesNamingAnotherArtifactAreServed(t *testing.T) {
 		"id under a longer path":            "docs/shared/parent.md",
 		"id as a trailing path segment":     "team/shared/parent@2.0.0",
 		"identifier ending with the id":     "xshared/parent",
-		"path below the parent":             "shared/parent/CHARTER.md",
-		"pinned prose":                      "see shared/parent@1.x for details",
-		"pin-free prose":                    "see shared/parent for details",
-		"id before a comma":                 "shared/parent, and others",
-		"id at the end of a sentence":       "owner is shared/parent.",
-		"quoted id":                         `the base is "shared/parent"`,
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -382,6 +297,37 @@ func TestSerializeMerged_ValuesNamingAnotherArtifactAreServed(t *testing.T) {
 				if got := decodeMapping(t, fm); got["x_note"] != value {
 					t.Errorf("x_note = %v, want %q\n%s", got["x_note"], value, fm)
 				}
+			})
+		})
+	}
+}
+
+// Spec: §4.6 hidden parents. A value that spells the parent's ID at an
+// identifier boundary hands the requester the ID and the evidence that the
+// artifact exists, whether the ID stands alone, heads a path, carries a pin, or
+// sits inside prose. Every one of these is left out of the served block, from
+// either origin.
+func TestSerializeMerged_ValuesSpellingTheParentAreLeftOut(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"the bare id":                 "shared/parent",
+		"a pinned reference":          "shared/parent@2.0.0",
+		"path below the parent":       "shared/parent/CHARTER.md",
+		"pinned prose":                "see shared/parent@1.x for details",
+		"pin-free prose":              "see shared/parent for details",
+		"id before a comma":           "shared/parent, and others",
+		"id at the end of a sentence": "owner is shared/parent.",
+		"quoted id":                   `the base is "shared/parent"`,
+	}
+	for name, value := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			forEachOrigin(t, value, func(t *testing.T, chain []manifest.MergedBlock) {
+				out, err := serializeChild(chain)
+				if err != nil {
+					t.Fatalf("SerializeMerged: %v", err)
+				}
+				assertNamesNoParent(t, out, "shared/parent")
 			})
 		})
 	}
@@ -415,6 +361,24 @@ func TestSerializeMerged_UnreadableChainBlockContributesNoKeys(t *testing.T) {
 				t.Errorf("description = %v, want %q\n%s", got["description"], "child", fm)
 			}
 		})
+	}
+}
+
+// assertNamesNoParent requires that out reads back as a frontmatter block whose
+// bytes carry no mention of hidden, which is the property §4.6 states about the
+// block the registry serves.
+func assertNamesNoParent(t *testing.T, out []byte, hidden string) {
+	t.Helper()
+	fm, _, err := manifest.SplitFrontmatter(out)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v\n%s", err, out)
+	}
+	got := decodeMapping(t, fm)
+	if _, named := got["extends"]; named {
+		t.Errorf("the merged block still names the parent under extends:\n%s", fm)
+	}
+	if strings.Contains(string(fm), hidden) {
+		t.Errorf("the merged block names the hidden parent %q:\n%s", hidden, fm)
 	}
 }
 
@@ -466,30 +430,7 @@ func serializeChild(chain []manifest.MergedBlock) ([]byte, error) {
 	return manifest.SerializeMerged(&manifest.Artifact{
 		Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
 		Extends: "shared/parent@1.x", Body: "child body",
-	}, "team/child", chain...)
-}
-
-// FrontmatterHidingParent rewrites the record's own authored block and merges
-// nothing, so the parent-ID test the merge needs does not apply to it. A
-// sibling key the parser never resolves is the child's own text and survives
-// with the rest of the block. Spec: §4.6 hidden parents. The served-surface
-// claim is pinned in pkg/registry/core/extends_test.go.
-func TestFrontmatterHidingParent_SiblingKeyNamingTheParentSurvives(t *testing.T) {
-	t.Parallel()
-	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-		"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n"
-
-	fm, _, err := manifest.SplitFrontmatter([]byte(manifest.FrontmatterHidingParent([]byte(child))))
-	if err != nil {
-		t.Fatalf("SplitFrontmatter: %v", err)
-	}
-	got := decodeMapping(t, fm)
-	if got["x_base"] != "shared/parent" {
-		t.Errorf("x_base = %v, want %q", got["x_base"], "shared/parent")
-	}
-	if _, named := got["extends"]; named {
-		t.Errorf("the descriptor block still names the parent under extends: %+v", got)
-	}
+	}, chain...)
 }
 
 // block pairs an authored frontmatter block with the extends reference its

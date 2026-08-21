@@ -257,19 +257,13 @@ func recordOf(t *testing.T, id, src string) ArtifactRecord {
 	return ArtifactRecord{ID: id, Artifact: a, ArtifactBytes: []byte(src)}
 }
 
-// Spec: §4.6 hidden parents / §11 — the chain the hidden-parent strip checks
-// comes from each record's parsed manifest, so a child that inherits a key
-// naming its grandparent is refused whichever record this resolver reached
-// first. Read back out of the record bytes, the grandparent's ID would
-// go missing once the middle record had been rewritten in place, and the
-// filesystem mode would serve a block the server mode refuses.
-//
-// The refusal ends the walk with the sentinel the server mode reports as
-// registry.invalid_argument. pkg/sync aborts a server-mode run on the first
-// load that fails, so a walk that dropped the record and continued would
-// materialize a partial tree where the server mode materializes nothing
-// (§11, §2.2).
-func TestResolveExtends_GrandparentIDRefusedInAnyProcessingOrder(t *testing.T) {
+// Spec: §4.6 hidden parents / §11 — the chain the hidden-parent test checks
+// comes from each record's parsed manifest, so a key naming the grandparent is
+// left out of the child's merged block whichever record this resolver reached
+// first. Read back out of the record bytes, the grandparent's ID would go
+// missing once the middle record had been rewritten in place, and the
+// filesystem mode would serve a block the server mode does not.
+func TestResolveExtends_GrandparentIDLeftOutInAnyProcessingOrder(t *testing.T) {
 	t.Parallel()
 	gp := recordOf(t, "shared/gp",
 		"---\ntype: context\nversion: 1.0.0\ndescription: grandparent\n---\n\ngp body\n")
@@ -289,21 +283,23 @@ func TestResolveExtends_GrandparentIDRefusedInAnyProcessingOrder(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			deduped := append([]ArtifactRecord(nil), order...)
-			err := resolveExtends(deduped, append([]ArtifactRecord(nil), order...))
-			if !errors.Is(err, manifest.ErrUnhidableParent) {
-				t.Fatalf("resolveExtends err = %v, want ErrUnhidableParent", err)
+			if err := resolveExtends(deduped, append([]ArtifactRecord(nil), order...)); err != nil {
+				t.Fatalf("resolveExtends: %v", err)
+			}
+			for _, rec := range deduped {
+				if strings.Contains(string(rec.ArtifactBytes), "shared/gp") {
+					t.Errorf("%s names the hidden grandparent:\n%s", rec.ID, rec.ArtifactBytes)
+				}
 			}
 		})
 	}
 }
 
-// Spec: §4.6 hidden parents, §11 — the walk a consumer drives fails rather than
-// materializing a merged block that names the hidden grandparent under an
-// inherited key. The server mode ends its sync on the same input, because the
-// load of that child returns registry.invalid_argument and pkg/sync fetches
-// every listed artifact before it writes anything, so both deployment modes
-// materialize nothing (§11, §2.2).
-func TestWalk_ResolveExtendsRefusesAChildNamingItsGrandparent(t *testing.T) {
+// Spec: §4.6 hidden parents, §11 — the walk a consumer drives serves every
+// record, and no record's merged block names the hidden grandparent under an
+// inherited key. The server mode leaves the same key out of the same child, so
+// both deployment modes materialize the same bytes (§11, §2.2).
+func TestWalk_ResolveExtendsLeavesOutAKeyNamingTheGrandparent(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
@@ -323,6 +319,43 @@ func TestWalk_ResolveExtendsRefusesAChildNamingItsGrandparent(t *testing.T) {
 		testharness.WriteTreeOption{
 			Path:    "team/other/ARTIFACT.md",
 			Content: "---\ntype: context\nversion: 1.0.0\ndescription: unrelated\n---\n\nother body\n",
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("walked %v, want every record served", idsOf(got))
+	}
+	for _, rec := range got {
+		if strings.Contains(string(rec.ArtifactBytes), "shared/gp") {
+			t.Errorf("%s names the hidden grandparent:\n%s", rec.ID, rec.ArtifactBytes)
+		}
+	}
+}
+
+// Spec: §4.6 hidden parents, §11 — a child whose extends reference is carried
+// by an anchor leaves the merged block with an alias into a value that is gone,
+// so the block cannot be read back and its contents cannot be checked. The walk
+// ends with the sentinel the server mode reports as registry.invalid_argument,
+// so neither mode materializes a tree the other refuses (§11, §2.2).
+func TestWalk_ResolveExtendsFailsClosedOnAnAnchoredReference(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    "shared/parent/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		},
+		testharness.WriteTreeOption{
+			Path: "team/child/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 2.0.0\ndescription: child\n" +
+				"extends: &p shared/parent\nnote: *p\n---\n\nchild body\n",
 		},
 	)
 	reg, err := Open(root)

@@ -661,30 +661,6 @@ func TestSearchArtifacts_DescriptorHidesParentAnchoredValue(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents — the descriptor is the record's own stored block
-// with the resolved extends removed, and it is never merged with the parent. A
-// sibling key the parser never resolves is the child's authored text, so it
-// survives the strip.
-func TestSearchArtifacts_DescriptorKeepsASiblingKeyNamingTheParent(t *testing.T) {
-	t.Parallel()
-	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\n---\n\nparent body\n"
-	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child desc\n" +
-		"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n"
-	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
-
-	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
-	if err != nil {
-		t.Fatalf("SearchArtifacts: %v", err)
-	}
-	got := findResult(t, res, "finance/child")
-	if !strings.Contains(got.Frontmatter, "x_base: shared/parent") {
-		t.Errorf("descriptor dropped the child's authored sibling key: %q", got.Frontmatter)
-	}
-	if strings.Contains(got.Frontmatter, "extends:") {
-		t.Errorf("descriptor still names the parent under extends: %q", got.Frontmatter)
-	}
-}
-
 // Spec: §7.6.1 — a load_domain notable entry carries {id, type, summary,
 // source, folded_from}. For an extends child the entry carries neither a
 // frontmatter block nor a sensitivity label, and its summary is the §4.6
