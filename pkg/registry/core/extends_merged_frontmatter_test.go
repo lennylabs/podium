@@ -204,19 +204,22 @@ func TestExtendsFrontmatter_InheritedValuesSpellingTheParentFailClosed(t *testin
 	}
 }
 
-// Spec: §4.6 hidden parents, §2.2 — a key the child authored itself is served,
-// under every spelling of the parent's ID, and it is served with the value
-// `search_artifacts` serves for the same artifact. The child's own bytes reach
-// this requester as `raw_frontmatter` and through the search descriptor, so
-// refusing the merged block would cost the read without changing what the
-// requester learns, and it would put the load path back into the disagreement
-// with the search path that restoring these keys removes.
-func TestExtendsFrontmatter_ChildAuthoredValuesSpellingTheParentAreServed(t *testing.T) {
+// Spec: §4.6 hidden parents — the guarantee covers the block the requester is
+// served, so a key the child authored itself fails the load under those same
+// spellings. The child's own bytes reach this requester through
+// `raw_frontmatter` and through the search descriptor, which is a disclosure
+// recorded on those surfaces and does not license the merged block, and the
+// materialized bytes have neither surface at all.
+func TestExtendsFrontmatter_ChildAuthoredValuesSpellingTheParentFailClosed(t *testing.T) {
 	t.Parallel()
 	for name, value := range parentNamingValues {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			assertLoadMatchesSearch(t, "x_base", value)
+			got, err := emfLoad(t,
+				"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+				"---\ntype: agent\nversion: 2.0.0\ndescription: child\nx_base: '"+value+"'\n"+
+					"extends: shared/parent@1.x\n---\n\nchild body\n")
+			assertFailsClosed(t, got, err)
 		})
 	}
 }
@@ -253,30 +256,17 @@ func TestExtendsFrontmatter_ValueNamingAnotherArtifactIsServed(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 field semantics — the typed serialization is authoritative for
-// every declared key, because only it carries the merge table. `delegates_to`
-// and `external_resources` append the parent's entries onto the child's, and
-// `replaced_by` takes the child's value, so each of those rows can put the
-// parent's canonical ID on a declared field. The table fixes the outcome, and
-// the served block carries what the merge produced.
+// Spec: §4.6 field semantics — the typed serialization is authoritative for the
+// merge semantics of every declared key, because only it carries the merge
+// table. `delegates_to` and `external_resources` append the parent's entries
+// onto the child's, and `replaced_by` takes the child's value, and each of those
+// rows reaches the served block with the value the table produced.
 func TestExtendsFrontmatter_DeclaredFieldsFollowTheMergeTable(t *testing.T) {
 	t.Parallel()
-	for name, tc := range map[string]struct{ parentKeys, childKeys, want string }{
-		"a deprecation pointer the child wrote": {
-			"", "deprecated: true\nreplaced_by: shared/parent\n", "replaced_by"},
-		"a delegates_to entry the child inherits": {
-			"delegates_to: [shared/parent]\n", "", "delegates_to"},
-		"an external resource the child inherits": {
-			"external_resources:\n  - path: shared/parent\n    url: https://acme.example/parent\n",
-			"", "external_resources"},
-	} {
+	for name, tc := range declaredFieldMergeCases("shared/other") {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got, err := emfLoad(t,
-				"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n"+tc.parentKeys+
-					"---\n\nparent body\n",
-				"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+tc.childKeys+
-					"extends: shared/parent@1.x\n---\n\nchild body\n")
+			got, err := emfLoad(t, tc.parent, tc.child)
 			if err != nil {
 				t.Fatalf("LoadArtifact: %v", err)
 			}
@@ -288,6 +278,47 @@ func TestExtendsFrontmatter_DeclaredFieldsFollowTheMergeTable(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Spec: §4.6 hidden parents — §4.6 hides the parent's ID under every key of the
+// served block, so a declared field the merge table carries down fails the load
+// on the same terms as a restored undeclared key when its value stands as a
+// reference to a chain parent.
+func TestExtendsFrontmatter_DeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
+	t.Parallel()
+	for name, tc := range declaredFieldMergeCases("shared/parent") {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := emfLoad(t, tc.parent, tc.child)
+			assertFailsClosed(t, got, err)
+		})
+	}
+}
+
+// declaredFieldMergeCases builds the parent and child blocks for each merge
+// table row that can put an artifact reference on a declared field, with ref as
+// the reference the row carries.
+func declaredFieldMergeCases(ref string) map[string]struct{ parent, child, want string } {
+	build := func(parentKeys, childKeys string) (string, string) {
+		return "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n" + parentKeys +
+				"---\n\nparent body\n",
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" + childKeys +
+				"extends: shared/parent@1.x\n---\n\nchild body\n"
+	}
+	out := map[string]struct{ parent, child, want string }{}
+	for name, tc := range map[string]struct{ parentKeys, childKeys, want string }{
+		"a deprecation pointer the child wrote": {
+			"", "deprecated: true\nreplaced_by: " + ref + "\n", "replaced_by"},
+		"a delegates_to entry the child inherits": {
+			"delegates_to: [" + ref + "]\n", "", "delegates_to"},
+		"an external resource the child inherits": {
+			"external_resources:\n  - path: " + ref + "\n    url: https://acme.example/base\n",
+			"", "external_resources"},
+	} {
+		parent, child := build(tc.parentKeys, tc.childKeys)
+		out[name] = struct{ parent, child, want string }{parent, child, tc.want}
+	}
+	return out
 }
 
 // Spec: §4.4, §4.6 — the disclosure test fires on a value that stands as an

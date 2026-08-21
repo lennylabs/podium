@@ -331,12 +331,14 @@ func TestWalk_ResolveExtendsFailsOnAnInheritedKeyNamingTheGrandparent(t *testing
 	}
 }
 
-// Spec: §4.6 omitted fields, §11 — a key the child wrote itself already reaches
-// the requester through the search descriptor and through the authored bytes, so
-// the merged block carries it rather than ending the walk. The server mode
-// serves the same child, so neither deployment mode materializes a tree the
+// Spec: §4.6 hidden parents, §11 — §4.6 hides the parent's ID under every key
+// of the merged block, whoever authored it, so a key the child wrote itself
+// naming its parent ends the walk with the sentinel the server mode reports as
+// registry.invalid_argument. These are the bytes pkg/sync materializes, where
+// neither the search descriptor nor raw_frontmatter exists. The server mode
+// refuses the same child, so neither deployment mode materializes a tree the
 // other refuses (§11, §2.2).
-func TestWalk_ResolveExtendsServesTheChildsOwnKeyNamingItsParent(t *testing.T) {
+func TestWalk_ResolveExtendsFailsClosedOnTheChildsOwnKeyNamingItsParent(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
@@ -355,22 +357,12 @@ func TestWalk_ResolveExtendsServesTheChildsOwnKeyNamingItsParent(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
-	if err != nil {
-		t.Fatalf("Walk: %v", err)
+	if !errors.Is(err, manifest.ErrUnhidableParent) {
+		t.Fatalf("Walk err = %v, want ErrUnhidableParent", err)
 	}
-	for _, rec := range got {
-		if rec.ID != "team/child" {
-			continue
-		}
-		if !strings.Contains(string(rec.ArtifactBytes), "x_base: shared/parent") {
-			t.Errorf("the merged bytes dropped the child's own key:\n%s", rec.ArtifactBytes)
-		}
-		if strings.Contains(string(rec.ArtifactBytes), "extends:") {
-			t.Errorf("the merged bytes still name the parent under extends:\n%s", rec.ArtifactBytes)
-		}
-		return
+	if got != nil {
+		t.Errorf("a failed walk returned records: %v", idsOf(got))
 	}
-	t.Fatalf("the walk did not return the child: %v", idsOf(got))
 }
 
 // Spec: §4.6 hidden parents, §11 — a child whose extends reference is carried

@@ -339,47 +339,17 @@ func TestSerializeMerged_InheritedKeyNamingTheParentFailsClosed(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 field semantics. The typed serialization is authoritative for
-// every declared key, because only it carries the merge table: delegates_to and
-// external_resources append the parent's entries onto the child's, and
-// replaced_by takes the child's value. Each of those rows can put a chain
-// parent's canonical ID on a declared field, and the table fixes the outcome,
-// so the assembler emits the value the merge produced rather than refusing the
-// read.
+// Spec: §4.6 field semantics. The typed serialization is authoritative for the
+// merge semantics of every declared key, because only it carries the merge
+// table: delegates_to and external_resources append the parent's entries onto
+// the child's, and replaced_by takes the child's value. Each of those rows
+// reaches the served block with the value the table produced.
 func TestSerializeMerged_DeclaredFieldsFollowTheMergeTable(t *testing.T) {
 	t.Parallel()
-	const parentBlock = "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n"
-	const leafBlock = "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-		"extends: shared/parent@1.x\n---\n\nchild body\n"
-	for name, tc := range map[string]struct {
-		artifact  manifest.Artifact
-		key, want string
-	}{
-		"a deprecation pointer the leaf wrote": {
-			manifest.Artifact{
-				Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
-				Deprecated: true, ReplacedBy: "shared/parent",
-			}, "replaced_by", "shared/parent"},
-		"a delegates_to entry appended from the parent": {
-			manifest.Artifact{
-				Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
-				DelegatesTo: []string{"shared/parent", "finance/helper"},
-			}, "delegates_to", "shared/parent"},
-		"an external resource path naming the parent": {
-			manifest.Artifact{
-				Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
-				ExternalResources: []manifest.ExternalResource{
-					{Path: "shared/parent", URL: "https://acme.example/parent"},
-				},
-			}, "external_resources", "shared/parent"},
-	} {
+	for name, tc := range declaredFieldCases("shared/other") {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			merged := tc.artifact
-			merged.Extends = "shared/parent@1.x"
-			merged.Body = "child body"
-			out, err := manifest.SerializeMerged(&merged,
-				block(parentBlock, ""), block(leafBlock, "shared/parent@1.x"))
+			out, err := serializeDeclared(tc.artifact)
 			if err != nil {
 				t.Fatalf("SerializeMerged: %v", err)
 			}
@@ -388,14 +358,68 @@ func TestSerializeMerged_DeclaredFieldsFollowTheMergeTable(t *testing.T) {
 				t.Fatalf("SplitFrontmatter: %v", err)
 			}
 			got := decodeMapping(t, fm)
-			if !strings.Contains(encoded(t, got[tc.key]), tc.want) {
-				t.Errorf("%s = %v, want it to carry %q\n%s", tc.key, got[tc.key], tc.want, fm)
+			if !strings.Contains(encoded(t, got[tc.key]), "shared/other") {
+				t.Errorf("%s = %v, want it to carry %q\n%s", tc.key, got[tc.key], "shared/other", fm)
 			}
 			if _, named := got["extends"]; named {
 				t.Errorf("the merged block still names the parent under extends:\n%s", fm)
 			}
 		})
 	}
+}
+
+// Spec: §4.6 hidden parents. §4.6's guarantee covers the parent's ID under
+// every key of the served block, so a declared field the merge table carries
+// down fails the read on the same terms as a restored one when its value stands
+// as a reference to a chain parent. The disclosure test runs over the assembled
+// block, so where a value came from does not decide whether it is checked.
+func TestSerializeMerged_DeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
+	t.Parallel()
+	for name, tc := range declaredFieldCases("shared/parent") {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			out, err := serializeDeclared(tc.artifact)
+			assertUnhidable(t, out, err)
+		})
+	}
+}
+
+// declaredFieldCase is one row of §4.6's merge table, authored with ref as the
+// artifact reference the declared field carries.
+type declaredFieldCase struct {
+	artifact manifest.Artifact
+	key      string
+}
+
+// declaredFieldCases builds the merge-table rows that can put an artifact
+// reference on a declared field, each carrying ref.
+func declaredFieldCases(ref string) map[string]declaredFieldCase {
+	child := manifest.Artifact{
+		Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
+	}
+	deprecation, delegation, resource := child, child, child
+	deprecation.Deprecated, deprecation.ReplacedBy = true, ref
+	delegation.DelegatesTo = []string{ref, "finance/helper"}
+	resource.ExternalResources = []manifest.ExternalResource{
+		{Path: ref, URL: "https://acme.example/base"},
+	}
+	return map[string]declaredFieldCase{
+		"a deprecation pointer the leaf wrote":          {deprecation, "replaced_by"},
+		"a delegates_to entry appended from the parent": {delegation, "delegates_to"},
+		"an external resource path":                     {resource, "external_resources"},
+	}
+}
+
+// serializeDeclared renders a merged artifact whose declared fields a case
+// fixes, over the same parent-and-leaf chain every other case uses.
+func serializeDeclared(a manifest.Artifact) ([]byte, error) {
+	merged := a
+	merged.Extends = "shared/parent@1.x"
+	merged.Body = "child body"
+	return manifest.SerializeMerged(&merged,
+		block("---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n", ""),
+		block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
+			"extends: shared/parent@1.x\n---\n\nchild body\n", "shared/parent@1.x"))
 }
 
 // encoded renders a decoded frontmatter value back to YAML text, so a case can
@@ -539,49 +563,22 @@ var parentNamingValues = map[string]string{
 	"surrounding whitespace":   "  shared/parent  ",
 }
 
-// Spec: §4.6 hidden parents. A key restored from an ancestor fails the merge
-// under every spelling of the parent's ID and at whatever depth it sits,
-// because the merge is what carries an ancestor's text to a requester who
-// cannot see the ancestor's layer. Dropping the key instead would serve a key
-// §4.6 makes inheritable as nothing, which no consumer can tell from a key the
-// chain never set.
-func TestSerializeMerged_InheritedValuesSpellingTheParentFailClosed(t *testing.T) {
+// Spec: §4.6 hidden parents. A value that stands as a reference to a chain
+// parent fails the merge under every spelling of the parent's ID and at
+// whatever depth it sits, whoever authored it. The guarantee is a property of
+// the block the requester is served, so a literal the leaf wrote hands over the
+// hidden parent's ID on the same terms as a key restored from an ancestor.
+// Dropping the key instead would serve a key §4.6 makes inheritable as nothing,
+// which no consumer can tell from a key the chain never set.
+func TestSerializeMerged_ValuesSpellingTheParentFailClosed(t *testing.T) {
 	t.Parallel()
 	for name, keys := range parentNamingKeys() {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			out, err := serializeChild(inheritedChain(keys))
-			assertUnhidable(t, out, err)
-		})
-	}
-}
-
-// Spec: §4.6 hidden parents, §4.6 omitted fields. A key the leaf authored
-// itself is served under every one of those spellings. The leaf's own bytes
-// already reach this requester through the search descriptor and through
-// raw_frontmatter, so refusing the merged block would cost the read without
-// changing what the requester learns, and it would put the load path back into
-// the disagreement with the search path that restoring these keys removes.
-func TestSerializeMerged_LeafAuthoredValuesSpellingTheParentAreServed(t *testing.T) {
-	t.Parallel()
-	for name, keys := range parentNamingKeys() {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			out, err := serializeChild(leafChain(keys))
-			if err != nil {
-				t.Fatalf("SerializeMerged: %v", err)
-			}
-			fm, _, err := manifest.SplitFrontmatter(out)
-			if err != nil {
-				t.Fatalf("SplitFrontmatter: %v", err)
-			}
-			got := decodeMapping(t, fm)
-			if _, named := got["extends"]; named {
-				t.Errorf("the merged block still names the parent under extends:\n%s", fm)
-			}
-			if got["x_note"] == nil {
-				t.Errorf("the merged block lost the leaf's own key:\n%s", fm)
-			}
+			forEachOriginKeys(t, keys, func(t *testing.T, chain []manifest.MergedBlock) {
+				out, err := serializeChild(chain)
+				assertUnhidable(t, out, err)
+			})
 		})
 	}
 }
