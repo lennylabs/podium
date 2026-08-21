@@ -38,6 +38,7 @@ export const meta = {
   phases: [
     { title: "Plan", detail: "read the proposal, gate on approval, extract its staged spec edits" },
     { title: "Apply spec", detail: "land the staged spec edits and verify exact alignment until clean" },
+    { title: "Verify", detail: "record the landed steps and the outcome on the proposal" },
   ],
 };
 
@@ -641,6 +642,49 @@ log(
     !!build.reviewClean +
     (build.status === "step-stuck" ? ", stuck at step " + build.stuckStep : ""),
 );
+
+// Record the outcome on the proposal itself. The ticks are the resumption
+// record a later run reads to find where to continue, so a run that leaves
+// them unticked reports a document claiming no code was written. Landed
+// steps are ticked whatever the run's overall status, because a step that
+// is green and review-clean has landed even when a later one is stuck.
+const landedSteps = (build.steps || [])
+  .filter((s) => s && s.implemented && s.stepGreen && s.reviewClean)
+  .map((s) => s.step)
+  .filter(Boolean);
+if (landedSteps.length) {
+  const fullyImplemented =
+    build.status !== "step-stuck" && build.green && build.reviewClean;
+  await agent(
+    "Record the implementation outcome on a proposal and commit that change.\n\n" +
+      "Work in " +
+      repo +
+      ". Edit only " +
+      proposal +
+      ". Do not edit code, spec/, or any other file.\n\n" +
+      "1. Tick the implementation checklist box of each step that landed, changing `- [ ]` to " +
+      "`- [x]` on those steps only. The steps that landed are: " +
+      landedSteps.join(", ") +
+      ". Leave every other box unticked. A step id the checklist does not carry is a deviation " +
+      "rather than an error: record it under a `## Deviations from the checklist` heading, " +
+      "created after the checklist if absent, naming the step and what it did.\n" +
+      (fullyImplemented
+        ? '2. Replace the Status bullet\'s leading state (it reads "Applied to spec (...)") with: "Implemented (' +
+          date +
+          ')." Preserve later clauses that remain true.\n'
+        : "2. Leave the Status bullet as it is: the run did not finish green and review-clean, so the " +
+          "proposal is not implemented. Do not write an Implemented status.\n") +
+      "3. Follow " +
+      repo +
+      "/.claude/rules/doc-style.md and commit " +
+      relProposal +
+      " on the current branch, message in the repository's convention (read `git log --oneline -5`). " +
+      "The commit message references durable sources only: it may name the proposal file path, but " +
+      "must NOT carry the proposal's internal scaffolding labels, which are its change or section " +
+      "ids, decision ids, review pass numbers, or a step that exists only in the proposal.",
+    { label: "record-implementation", phase: "Verify" },
+  );
+}
 
 return {
   status:
