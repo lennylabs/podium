@@ -258,9 +258,9 @@ func recordOf(t *testing.T, id, src string) ArtifactRecord {
 }
 
 // Spec: §4.6 hidden parents / §11 — the chain the hidden-parent strip checks
-// comes from each record's parsed manifest, so a child that names its
-// grandparent under a key of its own is refused whichever record this resolver
-// reached first. Read back out of the record bytes, the grandparent's ID would
+// comes from each record's parsed manifest, so a child that inherits a key
+// naming its grandparent is refused whichever record this resolver reached
+// first. Read back out of the record bytes, the grandparent's ID would
 // go missing once the middle record had been rewritten in place, and the
 // filesystem mode would serve a block the server mode refuses.
 func TestResolveExtends_GrandparentIDRefusedInAnyProcessingOrder(t *testing.T) {
@@ -268,10 +268,10 @@ func TestResolveExtends_GrandparentIDRefusedInAnyProcessingOrder(t *testing.T) {
 	gp := recordOf(t, "shared/gp",
 		"---\ntype: context\nversion: 1.0.0\ndescription: grandparent\n---\n\ngp body\n")
 	parent := recordOf(t, "shared/parent",
-		"---\ntype: context\nversion: 1.0.0\ndescription: parent\nextends: shared/gp\n---\n\nparent body\n")
+		"---\ntype: context\nversion: 1.0.0\ndescription: parent\n"+
+			"x_base: shared/gp\nextends: shared/gp\n---\n\nparent body\n")
 	child := recordOf(t, "team/child",
-		"---\ntype: context\nversion: 2.0.0\ndescription: child\n"+
-			"x_base: shared/gp\nextends: shared/parent\n---\n\nchild body\n")
+		"---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent\n---\n\nchild body\n")
 
 	for name, order := range map[string][]ArtifactRecord{
 		"parent before child": {gp, parent, child},
@@ -290,7 +290,8 @@ func TestResolveExtends_GrandparentIDRefusedInAnyProcessingOrder(t *testing.T) {
 }
 
 // Spec: §4.6 hidden parents — the walk a consumer drives fails rather than
-// materializing a merged block that names the hidden grandparent.
+// materializing a merged block that names the hidden grandparent under an
+// inherited key.
 func TestWalk_ResolveExtendsRefusesAChildNamingItsGrandparent(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -300,13 +301,13 @@ func TestWalk_ResolveExtendsRefusesAChildNamingItsGrandparent(t *testing.T) {
 			Content: "---\ntype: context\nversion: 1.0.0\ndescription: grandparent\n---\n\ngp body\n",
 		},
 		testharness.WriteTreeOption{
-			Path:    "shared/parent/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\nextends: shared/gp\n---\n\nparent body\n",
+			Path: "shared/parent/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\n" +
+				"x_base: shared/gp\nextends: shared/gp\n---\n\nparent body\n",
 		},
 		testharness.WriteTreeOption{
-			Path: "team/child/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 2.0.0\ndescription: child\n" +
-				"x_base: shared/gp\nextends: shared/parent\n---\n\nchild body\n",
+			Path:    "team/child/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent\n---\n\nchild body\n",
 		},
 	)
 	reg, err := Open(root)
