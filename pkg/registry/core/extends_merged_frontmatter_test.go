@@ -208,18 +208,23 @@ func TestExtendsFrontmatter_InheritedValuesSpellingTheParentFailClosed(t *testin
 	}
 }
 
-// Spec: §4.6, §2.2 — a key the child authored itself is served under those same
-// spellings, and load_artifact serves what search_artifacts serves for it. The
-// child's own bytes already reach this requester through `raw_frontmatter` and
-// through the search descriptor, which proposal 0009 settled on the node-level
-// strip of that block, so refusing the load withholds no ID and would put the
-// two paths back into the disagreement defect 3 exists to close.
-func TestExtendsFrontmatter_ChildAuthoredValuesSpellingTheParentAreServed(t *testing.T) {
+// Spec: §4.6 hidden parents — the guarantee covers the block the requester is
+// served, so a key the child authored itself fails the load under those same
+// spellings. The child's own bytes reach this requester through
+// `raw_frontmatter` and through the search descriptor, which is a disclosure
+// recorded on those surfaces and does not license the merged block to repeat
+// it, and the materialized bytes pkg/sync feeds the harness adapters have
+// neither surface at all.
+func TestExtendsFrontmatter_ChildAuthoredValuesSpellingTheParentFailClosed(t *testing.T) {
 	t.Parallel()
 	for name, value := range parentNamingValues {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			assertLoadMatchesSearch(t, "x_base", value)
+			got, err := emfLoad(t,
+				"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+				"---\ntype: agent\nversion: 2.0.0\ndescription: child\nx_base: '"+value+"'\n"+
+					"extends: shared/parent@1.x\n---\n\nchild body\n")
+			assertFailsClosed(t, got, err)
 		})
 	}
 }
@@ -280,28 +285,19 @@ func TestExtendsFrontmatter_DeclaredFieldsFollowTheMergeTable(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 field semantics — a declared field is the typed serialization's
-// output and carries the value §4.6's merge table produced, so it is served
-// even when that value names the artifact the child extends. Holding the typed
-// block to the disclosure test would refuse every child that points
-// `replaced_by`, `delegates_to`, or an external resource at its own baseline,
-// which is a load the registry has always served and which this repair does not
-// restore any text to.
-func TestExtendsFrontmatter_DeclaredFieldNamingTheParentIsServed(t *testing.T) {
+// Spec: §4.6 hidden parents — §4.6 hides the parent's ID under every key of the
+// served block, so a declared field the merge table carries down fails the load
+// on the same terms as a restored undeclared key when its value stands as a
+// reference to a chain parent. A `delegates_to` entry and an
+// `external_resources` path the child inherits are the routes by which the
+// merge itself would hand the requester an ID no other surface carries.
+func TestExtendsFrontmatter_DeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
 	t.Parallel()
 	for name, tc := range declaredFieldMergeCases("shared/parent") {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got, err := emfLoad(t, tc.parent, tc.child)
-			if err != nil {
-				t.Fatalf("LoadArtifact: %v", err)
-			}
-			if served := decodeServedMapping(t, got.Frontmatter); served[tc.want] == nil {
-				t.Errorf("the served block dropped %s:\n%s", tc.want, got.Frontmatter)
-			}
-			if strings.Contains(string(got.Frontmatter), "extends:") {
-				t.Errorf("the served frontmatter still names the hidden parent:\n%s", got.Frontmatter)
-			}
+			assertFailsClosed(t, got, err)
 		})
 	}
 }

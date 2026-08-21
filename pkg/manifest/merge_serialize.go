@@ -65,11 +65,11 @@ type MergedBlock struct {
 // It does two things the typed serialization alone cannot. It restores the
 // frontmatter keys Artifact does not declare, taking them from the chain's
 // authored blocks in parent-first order so a key the child also sets with a
-// non-empty value keeps the child's value. And it holds what it restores to
-// §4.6's hidden-parent guarantee, returning ErrUnhidableParent when a restored
-// key or value stands as a reference to a chain parent, when the assembled
-// block still resolves an extends value, or when any block involved cannot be
-// read back at all.
+// non-empty value keeps the child's value. And it holds the assembled block to
+// §4.6's hidden-parent guarantee, returning ErrUnhidableParent when any key or
+// value in it stands as a reference to a chain parent, when the block still
+// resolves an extends value, or when any block involved cannot be read back at
+// all.
 //
 // Every key §4.6's omitted-field rule makes inheritable reaches the served
 // block or the read fails. A key is never silently dropped, because a consumer
@@ -78,18 +78,20 @@ type MergedBlock struct {
 // The typed serialization stays authoritative for the merge semantics of every
 // declared key, because only it carries §4.6's merge table: the table there
 // appends the parent's delegates_to and external_resources entries onto the
-// child's and takes the child's replaced_by. A declared field is therefore
-// served with the value the table produced and is not subject to the disclosure
-// test, which is why a child that points replaced_by at the artifact it extends
-// still loads.
+// child's and takes the child's replaced_by. What the table produces is then
+// held to the same hidden-parent rule as everything else, so a delegates_to
+// entry or an external resource path the child inherits cannot hand the
+// requester an ID the merge is what brings down.
 //
-// The disclosure test covers the text this step introduces into the block: a
-// value restored from an ancestor's block, and a value whose text an alias or a
-// merge key produced. A literal the leaf authored is not covered, because the
-// leaf's own bytes already reach the same requester verbatim through
-// raw_frontmatter and through the search descriptor, so refusing the load
-// withholds nothing and would make load_artifact and search_artifacts disagree
-// again about a key the child wrote.
+// The disclosure test runs once over the assembled block, so a declared field
+// and a restored key are held to one rule and the origin of a value does not
+// decide whether it is checked. §4.6's guarantee is a property of what the
+// requester is served, and a leaf-authored literal names the hidden parent to
+// that requester on the same terms as an inherited value or one an alias
+// produced. That the same text also reaches the requester through
+// raw_frontmatter is a separate disclosure recorded elsewhere, and it does not
+// license the merged block to repeat it. The materialized bytes have no such
+// second route at all: pkg/sync feeds this block into the harness adapters.
 //
 // The test is bounded to a value that stands as an artifact reference: a scalar
 // equal to a chain parent's ID once its version pin and the whitespace and
@@ -122,24 +124,19 @@ func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, erro
 	}
 	parents := parentsOf(a, id, chain)
 	for _, key := range undeclaredKeysOf(authored) {
-		value, aliased, err := resolved(key.value)
+		value, err := resolved(key.value)
 		if err != nil {
 			return nil, err
 		}
-		// Spec: §4.6 hidden parents. The parent's existence and ID are not
-		// surfaced to the requester, so a key this step introduces fails the
-		// read when it references a chain parent, at whatever nesting depth and
-		// under whichever key. A key restored from an ancestor's block and a
-		// value an alias or a merge key produced are both text the requester
-		// has no other route to; a literal the leaf authored is served, because
-		// the leaf's own block already reaches the same requester through
-		// raw_frontmatter and through the search descriptor.
-		if (key.inherited || aliased) &&
-			(parents.discloses(key.name) || parents.names(value)) {
-			return nil, ErrUnhidableParent
-		}
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name}, value)
+	}
+	// Spec: §4.6 hidden parents. The parent's existence and ID are not
+	// surfaced to the requester, so the assembled block fails the read when
+	// anything in it references a chain parent, at whatever nesting depth,
+	// under whichever key, and whoever authored it.
+	if parents.names(root) {
+		return nil, ErrUnhidableParent
 	}
 
 	out, err := yaml.Marshal(root)
@@ -212,12 +209,10 @@ func chainMappings(chain []MergedBlock) ([]*yaml.Node, error) {
 	return out, nil
 }
 
-// namedNode pairs a restored key with the node holding its value, and records
-// whether the value came from an ancestor's block rather than from the leaf's.
+// namedNode pairs a restored key with the node holding its value.
 type namedNode struct {
-	name      string
-	value     *yaml.Node
-	inherited bool
+	name  string
+	value *yaml.Node
 }
 
 // nodeBudget bounds how many nodes one restored value may expand to. Aliases
@@ -234,17 +229,14 @@ type namedNode struct {
 const nodeBudget = 10000
 
 // expansion carries the state of one resolved call: the nodes on the path from
-// the root, the nodes left in the budget, and whether an alias was resolved.
+// the root, and the nodes left in the budget.
 type expansion struct {
-	open    map[*yaml.Node]bool
-	budget  int
-	aliased bool
+	open   map[*yaml.Node]bool
+	budget int
 }
 
 // resolved returns a copy of n with every alias below it replaced by the node it
-// points at, and with the anchors and the authors' comments cleared. It also
-// reports whether resolving an alias contributed to the result, which is what
-// makes the served text something other than what the author wrote.
+// points at, and with the anchors and the authors' comments cleared.
 //
 // Spec: §4.6 hidden parents. The restore step drops an ancestor's node when the
 // child sets the same key, so an alias into a dropped node would strand and the
@@ -254,13 +246,9 @@ type expansion struct {
 // re-emits an author's comment, so a parent's comment would otherwise carry text
 // the requester cannot see into the served block, and the typed serialization
 // drops the comments on every declared key.
-func resolved(n *yaml.Node) (*yaml.Node, bool, error) {
+func resolved(n *yaml.Node) (*yaml.Node, error) {
 	e := &expansion{open: map[*yaml.Node]bool{}, budget: nodeBudget}
-	out, err := e.expand(n)
-	if err != nil {
-		return nil, false, err
-	}
-	return out, e.aliased, nil
+	return e.expand(n)
 }
 
 // expand implements resolved. open holds the nodes on the path from the root,
@@ -285,7 +273,6 @@ func (e *expansion) expand(n *yaml.Node) (*yaml.Node, error) {
 		if n.Alias == nil {
 			return nil, ErrUnhidableParent
 		}
-		e.aliased = true
 		return e.expand(n.Alias)
 	}
 
@@ -313,17 +300,10 @@ func (e *expansion) expand(n *yaml.Node) (*yaml.Node, error) {
 //
 // A chain member that stored no frontmatter at all holds no key to inherit and
 // contributes none.
-//
-// Each key records whether the block that supplied its value is an ancestor's,
-// which is what the §4.6 disclosure test reads: a value the merge brings down
-// from an ancestor reaches the requester only through the served block, while a
-// literal the leaf wrote reaches it through raw_frontmatter and the search
-// descriptor as well.
 func undeclaredKeysOf(authored []*yaml.Node) []namedNode {
 	seen := map[string]int{}
 	out := []namedNode{}
-	leaf := len(authored) - 1
-	for i, m := range authored {
+	for _, m := range authored {
 		if m == nil {
 			continue
 		}
@@ -332,7 +312,7 @@ func undeclaredKeysOf(authored []*yaml.Node) []namedNode {
 			if declaredKeys[name] {
 				continue
 			}
-			entry := namedNode{name: name, value: m.Content[j+1], inherited: i != leaf}
+			entry := namedNode{name: name, value: m.Content[j+1]}
 			if prev, ok := seen[name]; ok {
 				if isEmptyValue(entry.value) {
 					continue
@@ -473,9 +453,7 @@ func hidesParent(header []byte) bool {
 //
 // It shares hidesParent with SerializeMerged and applies no parent-ID test,
 // because proposal 0009 settled the search descriptor on the node-level strip
-// of the record's own block and this repair does not reopen it. The load path
-// serves a leaf-authored literal for the same reason, so the two paths agree
-// about what a child's own key carries. Spec: §4.6.
+// of the record's own block and this repair does not reopen it. Spec: §4.6.
 //
 // The guard is scoped to what the parser resolves rather than to the literal
 // top-level key. ParseArtifact resolves YAML merge keys, so a child can carry

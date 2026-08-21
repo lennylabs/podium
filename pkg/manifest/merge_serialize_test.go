@@ -377,32 +377,18 @@ func TestSerializeMerged_DeclaredFieldsFollowTheMergeTable(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 field semantics. A declared field is the typed serialization's
-// output and takes the value §4.6's merge table produced, so it is served even
-// when that value names the artifact the child extends. The disclosure test
-// covers the keys this helper restores; extending it over the typed block would
-// refuse a child that points replaced_by, delegates_to, or an external resource
-// at its own baseline, which is a load the registry has always served.
-func TestSerializeMerged_DeclaredFieldNamingTheParentIsServed(t *testing.T) {
+// Spec: §4.6 hidden parents. §4.6's guarantee covers the parent's ID under
+// every key of the served block, so a declared field the merge table carries
+// down fails the read on the same terms as a restored one when its value stands
+// as a reference to a chain parent. The disclosure test runs over the assembled
+// block, so where a value came from does not decide whether it is checked.
+func TestSerializeMerged_DeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
 	t.Parallel()
 	for name, tc := range declaredFieldCases("shared/parent") {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			out, err := serializeDeclared(tc.artifact)
-			if err != nil {
-				t.Fatalf("SerializeMerged: %v", err)
-			}
-			fm, _, err := manifest.SplitFrontmatter(out)
-			if err != nil {
-				t.Fatalf("SplitFrontmatter: %v", err)
-			}
-			got := decodeMapping(t, fm)
-			if !strings.Contains(encoded(t, got[tc.key]), "shared/parent") {
-				t.Errorf("%s = %v, want it to carry %q\n%s", tc.key, got[tc.key], "shared/parent", fm)
-			}
-			if _, named := got["extends"]; named {
-				t.Errorf("the merged block still names the parent under extends:\n%s", fm)
-			}
+			assertUnhidable(t, out, err)
 		})
 	}
 }
@@ -598,64 +584,24 @@ var parentNamingValues = map[string]string{
 	"surrounding whitespace":   "  shared/parent  ",
 }
 
-// Spec: §4.6 hidden parents. A value restored from an ancestor's block fails
-// the merge under every spelling of the parent's ID and at whatever depth it
-// sits, because the merge is what puts that text in front of a requester who
-// cannot see the parent's layer. Dropping the key instead would serve a key
-// §4.6 makes inheritable as nothing, which no consumer can tell from a key the
-// chain never set.
-func TestSerializeMerged_InheritedValuesSpellingTheParentFailClosed(t *testing.T) {
+// Spec: §4.6 hidden parents. A value that stands as a reference to a chain
+// parent fails the merge under every spelling of the parent's ID and at
+// whatever depth it sits, whoever authored it. The guarantee is a property of
+// the block the requester is served, so a literal the leaf wrote hands over the
+// hidden parent's ID on the same terms as a key restored from an ancestor.
+// Dropping the key instead would serve a key §4.6 makes inheritable as nothing,
+// which no consumer can tell from a key the chain never set.
+func TestSerializeMerged_ValuesSpellingTheParentFailClosed(t *testing.T) {
 	t.Parallel()
 	for name, keys := range parentNamingKeys() {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			out, err := serializeChild(inheritedChain(keys))
-			assertUnhidable(t, out, err)
+			forEachOriginKeys(t, keys, func(t *testing.T, chain []manifest.MergedBlock) {
+				out, err := serializeChild(chain)
+				assertUnhidable(t, out, err)
+			})
 		})
 	}
-}
-
-// Spec: §4.6 hidden parents. A literal the leaf authored is served under those
-// same spellings. The leaf's own block already reaches this requester verbatim
-// through raw_frontmatter and through the search descriptor, which proposal
-// 0009 settled on the node-level strip of that block, so refusing the load
-// withholds nothing and would put load_artifact and search_artifacts back into
-// disagreement about a key the child wrote.
-func TestSerializeMerged_LeafAuthoredValuesSpellingTheParentAreServed(t *testing.T) {
-	t.Parallel()
-	for name, value := range parentNamingValues {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			out, err := serializeChild(leafChain(noteKeys(value)))
-			if err != nil {
-				t.Fatalf("SerializeMerged: %v", err)
-			}
-			fm, _, err := manifest.SplitFrontmatter(out)
-			if err != nil {
-				t.Fatalf("SplitFrontmatter: %v", err)
-			}
-			got := decodeMapping(t, fm)
-			if got["x_note"] != value {
-				t.Errorf("x_note = %v, want %q\n%s", got["x_note"], value, fm)
-			}
-			if _, named := got["extends"]; named {
-				t.Errorf("the merged block still resolves an extends value:\n%s", fm)
-			}
-		})
-	}
-}
-
-// Spec: §4.6 hidden parents. A value whose text an alias produced is checked
-// whoever authored it, because the alias is what materializes the parent's ID
-// under a second key: the leaf's own block spells the alias rather than the ID,
-// so no other surface carries what the merged block would.
-func TestSerializeMerged_LeafAuthoredAliasOntoTheParentFailsClosed(t *testing.T) {
-	t.Parallel()
-	out, err := serializeChild([]manifest.MergedBlock{block(
-		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
-			"extends: &p shared/parent@1.x\nx_note: *p\n---\n\nchild body\n",
-		"shared/parent@1.x")})
-	assertUnhidable(t, out, err)
 }
 
 // Spec: §4.6 hidden parents. Aliases compose, so a block whose nested aliases

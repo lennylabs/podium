@@ -1771,8 +1771,8 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	out.AuditRedact = append([]string(nil), merged.AuditRedact...)
 	// Serialize through the chain's authored blocks so an extension type's
 	// own frontmatter keys survive, and strip the extends reference so the
-	// hidden parent is not surfaced (§4.6). A merged block whose restored keys
-	// name a chain parent, and one that cannot be rewritten at all, fail the
+	// hidden parent is not surfaced (§4.6). A merged block that names a chain
+	// parent under any key, and one that cannot be rewritten at all, fail the
 	// read rather than being served. The record's own ID goes with it, because
 	// a same-ID overlay's parent carries the ID the requester asked for and so
 	// discloses nothing.
