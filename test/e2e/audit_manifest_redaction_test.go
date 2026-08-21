@@ -76,9 +76,11 @@ func TestAudit_ManifestDeclaredRedaction(t *testing.T) {
 	}
 }
 
-// spec: §8.2, §4.6 — a child that declares neither the sensitive frontmatter
-// field nor the audit_redact directive inherits both from its parent, and the
-// inherited field is masked to [redacted] before any event reaches a sink. The
+// spec: §8.2 / §11 / §4.6 — a child that declares neither the sensitive
+// frontmatter field nor the audit_redact directive inherits both from its
+// parent, and the inherited field is masked to [redacted] before any event
+// reaches a sink, which is where the §11 redaction-propagation property is
+// observable. The
 // child is loaded through /v1/load_artifact against a standalone registry
 // forwarding its catalogue events to an in-test SIEM recorder, so the assertion
 // is on the same served surface TestAudit_ManifestDeclaredRedaction uses.
@@ -148,8 +150,10 @@ func TestAudit_ExtendsInheritedRedaction(t *testing.T) {
 	if loaded == "" {
 		t.Fatalf("no artifact.loaded event for %s; got:\n%s", childID, all)
 	}
+	// Reported without aborting, so the mask and the stream-wide leak assertions
+	// below still run when the inherited field goes missing.
 	if !strings.Contains(loaded, "x_bank_account") {
-		t.Fatalf("artifact.loaded event does not carry the inherited x_bank_account field:\n%s", loaded)
+		t.Errorf("artifact.loaded event does not carry the inherited x_bank_account field:\n%s", loaded)
 	}
 	if !strings.Contains(loaded, "[redacted]") {
 		t.Errorf("artifact.loaded event did not redact the inherited x_bank_account:\n%s", loaded)
