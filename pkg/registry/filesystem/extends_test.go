@@ -331,14 +331,12 @@ func TestWalk_ResolveExtendsFailsOnAnInheritedKeyNamingTheGrandparent(t *testing
 	}
 }
 
-// Spec: §4.6 hidden parents, §11 — §4.6 hides the parent's ID under every key
-// of the merged block, whoever authored it, so a key the child wrote itself
-// naming its parent ends the walk with the sentinel the server mode reports as
-// registry.invalid_argument. These are the bytes pkg/sync materializes, where
-// neither the search descriptor nor raw_frontmatter exists. The server mode
-// refuses the same child, so neither deployment mode materializes a tree the
-// other refuses (§11, §2.2).
-func TestWalk_ResolveExtendsFailsClosedOnTheChildsOwnKeyNamingItsParent(t *testing.T) {
+// Spec: §4.6 hidden parents, §11 — the disclosure test covers what the merge
+// introduces, so a key the child wrote itself is materialized with the value it
+// wrote, even when that value names the artifact it extends. The server mode
+// serves the same key on load_artifact and on the search descriptor, so the two
+// modes agree about the child's own bytes (§11, §2.2).
+func TestWalk_ResolveExtendsServesTheChildsOwnKeyNamingItsParent(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
@@ -357,11 +355,15 @@ func TestWalk_ResolveExtendsFailsClosedOnTheChildsOwnKeyNamingItsParent(t *testi
 		t.Fatalf("Open: %v", err)
 	}
 	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
-	if !errors.Is(err, manifest.ErrUnhidableParent) {
-		t.Fatalf("Walk err = %v, want ErrUnhidableParent", err)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
 	}
-	if got != nil {
-		t.Errorf("a failed walk returned records: %v", idsOf(got))
+	child := recByID(t, got, "team/child")
+	if !strings.Contains(string(child.ArtifactBytes), "x_base: shared/parent") {
+		t.Errorf("the merged bytes dropped the child's own key:\n%s", child.ArtifactBytes)
+	}
+	if strings.Contains(string(child.ArtifactBytes), "extends:") {
+		t.Errorf("the merged bytes still resolve an extends value:\n%s", child.ArtifactBytes)
 	}
 }
 

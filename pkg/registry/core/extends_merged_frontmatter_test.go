@@ -3,9 +3,11 @@ package core_test
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -206,22 +208,18 @@ func TestExtendsFrontmatter_InheritedValuesSpellingTheParentFailClosed(t *testin
 	}
 }
 
-// Spec: §4.6 hidden parents — the guarantee covers the block the requester is
-// served, so a key the child authored itself fails the load under those same
-// spellings. The child's own bytes reach this requester through
-// `raw_frontmatter` and through the search descriptor, which is a disclosure
-// recorded on those surfaces and does not license the merged block, and the
-// materialized bytes have neither surface at all.
-func TestExtendsFrontmatter_ChildAuthoredValuesSpellingTheParentFailClosed(t *testing.T) {
+// Spec: §4.6, §2.2 — a key the child authored itself is served under those same
+// spellings, and load_artifact serves what search_artifacts serves for it. The
+// child's own bytes already reach this requester through `raw_frontmatter` and
+// through the search descriptor, which proposal 0009 settled on the node-level
+// strip of that block, so refusing the load withholds no ID and would put the
+// two paths back into the disagreement defect 3 exists to close.
+func TestExtendsFrontmatter_ChildAuthoredValuesSpellingTheParentAreServed(t *testing.T) {
 	t.Parallel()
 	for name, value := range parentNamingValues {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got, err := emfLoad(t,
-				"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
-				"---\ntype: agent\nversion: 2.0.0\ndescription: child\nx_base: '"+value+"'\n"+
-					"extends: shared/parent@1.x\n---\n\nchild body\n")
-			assertFailsClosed(t, got, err)
+			assertLoadMatchesSearch(t, "x_base", value)
 		})
 	}
 }
@@ -282,17 +280,28 @@ func TestExtendsFrontmatter_DeclaredFieldsFollowTheMergeTable(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents — §4.6 hides the parent's ID under every key of the
-// served block, so a declared field the merge table carries down fails the load
-// on the same terms as a restored undeclared key when its value stands as a
-// reference to a chain parent.
-func TestExtendsFrontmatter_DeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
+// Spec: §4.6 field semantics — a declared field is the typed serialization's
+// output and carries the value §4.6's merge table produced, so it is served
+// even when that value names the artifact the child extends. Holding the typed
+// block to the disclosure test would refuse every child that points
+// `replaced_by`, `delegates_to`, or an external resource at its own baseline,
+// which is a load the registry has always served and which this repair does not
+// restore any text to.
+func TestExtendsFrontmatter_DeclaredFieldNamingTheParentIsServed(t *testing.T) {
 	t.Parallel()
 	for name, tc := range declaredFieldMergeCases("shared/parent") {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got, err := emfLoad(t, tc.parent, tc.child)
-			assertFailsClosed(t, got, err)
+			if err != nil {
+				t.Fatalf("LoadArtifact: %v", err)
+			}
+			if served := decodeServedMapping(t, got.Frontmatter); served[tc.want] == nil {
+				t.Errorf("the served block dropped %s:\n%s", tc.want, got.Frontmatter)
+			}
+			if strings.Contains(string(got.Frontmatter), "extends:") {
+				t.Errorf("the served frontmatter still names the hidden parent:\n%s", got.Frontmatter)
+			}
 		})
 	}
 }
@@ -357,6 +366,54 @@ func TestExtendsFrontmatter_SelfContainingAnchorFailsClosed(t *testing.T) {
 		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
 			"x_self: &s\n  k: *s\nextends: shared/parent@1.x\n---\n\nchild body\n")
 	assertFailsClosed(t, got, err)
+}
+
+// Spec: §4.6 hidden parents — ingest never decodes a key manifest.Artifact does
+// not declare, so a child whose frontmatter nests aliased sequences is accepted
+// and yaml.v3's own alias budget is never charged for it. The merge bounds the
+// expansion itself, so the read fails with `registry.invalid_argument` rather
+// than expanding an alias graph for the life of the process. mergeChain is on
+// the path of every read of an artifact that declares extends:, so an unbounded
+// expansion here stalls the load path in both deployment modes.
+func TestExtendsFrontmatter_AliasAmplificationFailsClosed(t *testing.T) {
+	t.Parallel()
+	type result struct {
+		got *core.LoadArtifactResult
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		got, err := emfLoad(t,
+			"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
+				amplifyingKeys(8, 9)+"extends: shared/parent@1.x\n---\n\nchild body\n")
+		done <- result{got, err}
+	}()
+	select {
+	case r := <-done:
+		assertFailsClosed(t, r.got, r.err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("the load expanded an aliased block instead of failing closed")
+	}
+}
+
+// amplifyingKeys authors depth frontmatter keys, each a sequence that aliases
+// the previous key width times, so expanding the last one materializes
+// width^depth nodes.
+func amplifyingKeys(depth, width int) string {
+	var b strings.Builder
+	b.WriteString("x_a0: &a0 [seed]\n")
+	for i := 1; i <= depth; i++ {
+		b.WriteString("x_a" + strconv.Itoa(i) + ": &a" + strconv.Itoa(i) + " [")
+		for j := 0; j < width; j++ {
+			if j > 0 {
+				b.WriteString(", ")
+			}
+			b.WriteString("*a" + strconv.Itoa(i-1))
+		}
+		b.WriteString("]\n")
+	}
+	return b.String()
 }
 
 // assertFailsClosed requires that the load returned no result, that the error
@@ -485,36 +542,30 @@ func TestExtendsFrontmatter_EmptyChildCollectionWins(t *testing.T) {
 }
 
 // Spec: §4.6 hidden parents, §4.6 collisions — a child may extend its own
-// canonical ID, and the parent is then the row below it in layer order, in a
-// layer the requester may not be able to see. That row is a chain parent like
-// any other, so an inherited key standing as a reference to it fails the load
-// with `registry.invalid_argument`, whatever the spelling and at whatever depth
-// the reference sits. A value that carries the ID without standing as a
-// reference to it stays inheritable.
-func TestExtendsFrontmatter_SameIDOverlayHidesTheRowBelow(t *testing.T) {
+// canonical ID, and the parent is then the row below it in layer order. That
+// row carries the canonical ID the requester asked for, so serving a value that
+// spells it surfaces neither an ID the requester lacks nor the existence of a
+// second row, and the overlay keeps every key it inherits.
+func TestExtendsFrontmatter_SameIDOverlayIsServed(t *testing.T) {
 	t.Parallel()
-	for name, tc := range map[string]struct {
-		key    string
-		keys   string
-		served bool
-	}{
-		"the bare canonical id":               {"x_owner", "x_owner: shared/base\n", false},
-		"a path below its own id":             {"x_owner", "x_owner: shared/base/README.md\n", true},
-		"a pinned reference to the lower row": {"x_owner", "x_owner: shared/base@1.0.0\n", false},
-		"a nested extends entry":              {"base_ref", "base_ref:\n  extends: shared/base@1.0.0\n", false},
+	for name, tc := range map[string]struct{ key, keys string }{
+		"the bare canonical id":               {"x_owner", "x_owner: shared/base\n"},
+		"a path below its own id":             {"x_owner", "x_owner: shared/base/README.md\n"},
+		"a pinned reference to the lower row": {"x_owner", "x_owner: shared/base@1.0.0\n"},
+		"a nested extends entry":              {"base_ref", "base_ref:\n  extends: shared/base@1.0.0\n"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got, err := overlayLoad(t, tc.keys)
-			if !tc.served {
-				assertFailsClosed(t, got, err)
-				return
-			}
 			if err != nil {
 				t.Fatalf("LoadArtifact: %v", err)
 			}
-			if served := decodeServedMapping(t, got.Frontmatter); served[tc.key] == nil {
+			served := decodeServedMapping(t, got.Frontmatter)
+			if served[tc.key] == nil {
 				t.Errorf("the overlay lost the key it inherits from the row below:\n%s", got.Frontmatter)
+			}
+			if _, named := served["extends"]; named {
+				t.Errorf("the served frontmatter still resolves an extends value:\n%s", got.Frontmatter)
 			}
 		})
 	}
