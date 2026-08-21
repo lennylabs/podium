@@ -268,7 +268,8 @@ func expand(n *yaml.Node, open map[*yaml.Node]bool) (*yaml.Node, error) {
 // Spec: §4.6 omitted fields. A child that omits a key, or sets it to an empty
 // value, inherits the parent's value, and the section states that this holds
 // for every frontmatter field. MergeExtends applies the same rule to every
-// declared field, so the two halves of a merged block agree on what an empty
+// declared field, including the list fields it inherits whenever the child's
+// list is empty, so the two halves of a merged block agree on what an empty
 // child value means.
 //
 // A chain member that stored no frontmatter at all holds no key to inherit and
@@ -300,14 +301,18 @@ func undeclaredKeysOf(authored []*yaml.Node) []namedNode {
 	return out
 }
 
-// isEmptyValue reports whether n is the empty scalar §4.6 treats as an omitted
-// field.
+// isEmptyValue reports whether n is a value §4.6 treats as an omitted field: an
+// empty scalar, a zero-length sequence, or a zero-length mapping.
 //
 // Spec: §4.6 omitted fields. The section names a child that "omits a
-// frontmatter field, or sets an empty scalar", and for a field outside the
-// merge table a value both sides declare takes the child's. An undeclared key
-// has no table row, so an explicitly empty sequence or mapping is a value the
-// child declared and wins over the parent's.
+// frontmatter field, or sets an empty scalar", and states that the rule holds
+// for every frontmatter field. MergeExtends carries it to a declared collection
+// by inheriting the parent's value whenever the child's is zero-length, on
+// target_harnesses, audit_redact, and lint_suppress, because a decoded Go slice
+// does not distinguish an authored `[]` from an omitted key. Holding a restored
+// key to that same reading is what keeps one served block under one rule: a
+// child that empties a collection inherits the parent's value whether or not
+// Artifact happens to declare the key.
 //
 // The null tag rather than the raw text decides an empty scalar, because
 // yaml.v3 decodes `x_owner:` to an empty value while `x_owner: null` and
@@ -316,9 +321,17 @@ func undeclaredKeysOf(authored []*yaml.Node) []namedNode {
 // keeps the restored keys agreeing with MergeExtends.
 //
 // n is the value node of a decoded mapping entry, which the decoder never
-// leaves nil, so the test needs no nil guard.
+// leaves nil, so the test needs no nil guard. An alias node holds whatever its
+// anchor does and is a value the child set, so it is not empty here.
 func isEmptyValue(n *yaml.Node) bool {
-	return n.Kind == yaml.ScalarNode && (n.Value == "" || n.Tag == "!!null")
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.Value == "" || n.Tag == "!!null"
+	case yaml.SequenceNode, yaml.MappingNode:
+		return len(n.Content) == 0
+	default:
+		return false
+	}
 }
 
 // canonicalID reduces an artifact reference to its canonical ID by dropping the

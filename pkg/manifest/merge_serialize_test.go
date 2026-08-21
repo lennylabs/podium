@@ -89,24 +89,26 @@ func TestSerializeMerged_EmptyChildValueInheritsTheParents(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 omitted fields. §4.6 makes a child inherit when it omits a field
-// or sets an empty scalar, and for a field outside its merge table a value both
-// sides declare takes the child's. An undeclared key has no table row, so a
-// child that empties a list or a mapping is served its own empty collection
-// rather than the parent's contents.
-func TestSerializeMerged_EmptyChildCollectionWins(t *testing.T) {
+// Spec: §4.6 omitted fields. §4.6's omitted-field rule holds for every
+// frontmatter field, and MergeExtends applies it to a declared collection by
+// inheriting the parent's value whenever the child's is zero-length. A restored
+// key follows the same rule, so the two halves of one served block do not read
+// the same authored spelling two ways.
+func TestSerializeMerged_EmptyChildCollectionInheritsTheParents(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
-		authored string
-		want     any
+		parentKeys string
+		authored   string
+		want       any
 	}{
-		"an empty list":    {"x_owner: []", []any{}},
-		"an empty mapping": {"x_owner: {}", map[string]any{}},
+		"an empty list": {"x_owner: [platform]", "x_owner: []", []any{"platform"}},
+		"an empty mapping": {"x_owner:\n  team: platform", "x_owner: {}",
+			map[string]any{"team": "platform"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n" +
-				"x_owner: [platform]\n---\n\nparent body\n"
+				tc.parentKeys + "\n---\n\nparent body\n"
 			child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
 				tc.authored + "\nextends: shared/parent@1.x\n---\n\nchild body\n"
 

@@ -137,10 +137,12 @@ func TestExtendsFrontmatter_MergeKeyReferenceFailsClosed(t *testing.T) {
 	assertFailsClosed(t, got, err)
 }
 
-// Spec: §4.6 hidden parents — deleting an anchored extends value strands every
-// alias into it, so the assembled block is not readable YAML and its contents
-// cannot be checked against §4.6. The load fails closed with
-// `registry.invalid_argument` rather than serving what it could not verify.
+// Spec: §4.6 hidden parents — an anchored extends value can be aliased under a
+// second key, and the merge expands that alias into the value the anchor holds
+// before it assembles the block, so the restored key stands as a reference to
+// the chain parent. The §4.6 disclosure test over the assembled block refuses
+// it, and the load fails closed with `registry.invalid_argument` rather than
+// handing the requester the parent's ID under another name.
 //
 // This is the second half of the input class the change deliberately loses.
 // The closed round-trip served these children a clean block by dropping every
@@ -342,10 +344,13 @@ func TestExtendsFrontmatter_InheritedProseQuotingTheParentIsServed(t *testing.T)
 
 // Spec: §4.6 hidden parents — a child can author frontmatter whose anchor
 // contains itself, which ingest accepts because it never decodes a key
-// manifest.Artifact does not declare. The assembled block carrying that key
-// does not read back as a mapping, so it cannot be checked for the parent's
-// ID, and the load fails closed rather than serving what it could not verify.
-func TestExtendsFrontmatter_UndecodableMergedBlockFailsClosed(t *testing.T) {
+// manifest.Artifact does not declare. A restored key whose anchor contains
+// itself cannot be expanded into the values it points at, so the merge fails
+// before it assembles a block, and the load fails closed rather than serving a
+// key it could neither check against §4.6 nor inherit. The arm that refuses a
+// chain block which does not read back as one mapping is pinned directly in
+// pkg/manifest/merge_serialize_test.go.
+func TestExtendsFrontmatter_SelfContainingAnchorFailsClosed(t *testing.T) {
 	t.Parallel()
 	got, err := emfLoad(t,
 		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
@@ -458,12 +463,12 @@ func TestExtendsFrontmatter_EmptyChildValueInheritsTheParents(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 omitted fields — §4.6 makes a child inherit when it omits a field
-// or sets an empty scalar, and for a field outside its merge table a value both
-// sides declare takes the child's. An extension-type key has no table row, so a
-// child that empties a list is served its own empty list rather than the
-// parent's contents.
-func TestExtendsFrontmatter_EmptyChildCollectionWins(t *testing.T) {
+// Spec: §4.6 omitted fields — §4.6's omitted-field rule holds for every
+// frontmatter field, and manifest.MergeExtends applies it to a declared list by
+// inheriting the parent's value whenever the child's is empty. A restored key
+// follows the same rule, so one served block applies one rule to an empty child
+// collection whether or not manifest.Artifact declares the key.
+func TestExtendsFrontmatter_EmptyChildCollectionInheritsTheParents(t *testing.T) {
 	t.Parallel()
 	got, err := emfLoad(t,
 		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\nx_owner: [platform]\n---\n\nparent body\n",
@@ -473,8 +478,9 @@ func TestExtendsFrontmatter_EmptyChildCollectionWins(t *testing.T) {
 		t.Fatalf("LoadArtifact: %v", err)
 	}
 	served := decodeServedMapping(t, got.Frontmatter)
-	if owner, ok := served["x_owner"].([]any); !ok || len(owner) != 0 {
-		t.Errorf("x_owner = %#v, want an empty list\n%s", served["x_owner"], got.Frontmatter)
+	owner, ok := served["x_owner"].([]any)
+	if !ok || len(owner) != 1 || owner[0] != "platform" {
+		t.Errorf("x_owner = %#v, want the parent's [platform]\n%s", served["x_owner"], got.Frontmatter)
 	}
 }
 
