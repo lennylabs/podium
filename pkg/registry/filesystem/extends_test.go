@@ -362,18 +362,6 @@ func TestWalk_ResolveExtendsFailsOnTheChildsOwnKeyNamingItsParent(t *testing.T) 
 	}
 }
 
-// recordByID returns the walked record with the given canonical ID.
-func recordByID(t *testing.T, got []ArtifactRecord, id string) ArtifactRecord {
-	t.Helper()
-	for _, r := range got {
-		if r.ID == id {
-			return r
-		}
-	}
-	t.Fatalf("walk returned no record for %q: %v", id, idsOf(got))
-	return ArtifactRecord{}
-}
-
 // Spec: §4.6 hidden parents, §11 — a child whose extends reference is carried
 // by an anchor leaves the merged block with an alias into a value that is gone,
 // so the block cannot be read back and its contents cannot be checked. The walk
