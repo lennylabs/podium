@@ -131,6 +131,15 @@ rm -rf "$WORK"
 | S34 | Marketplace publishing through a `kind: marketplace` sync target | solo | none | none | local git |
 | S35 | Webhook receiver hardening: admin gate and SSRF policy | standalone | none | none | none |
 | S36 | Successful oidc-jwt verification against a live IdP | standalone | none | none | OIDC IdP (AD FS for the split-issuer steps) |
+| S37 | `extends:` merged manifest, hidden parent, and inherited redaction | standalone | none | none | none |
+| S38 | `extends:` child under a signing registry | standalone | none | none | none |
+| S39 | same-ID `extends:` overlay and a three-level chain | standalone | none | none | none |
+| S40 | `extends:` for a skill, and filesystem-versus-server parity | solo then standalone | none | none | none |
+| S41 | inherited `audit_redact` over a forwarded audit stream | standalone | none | none | none |
+| S42 | a deprecated parent in an `extends:` chain | standalone | none | none | none |
+| S43 | The documented `registry.yaml` example starts a registry | standalone | none | none | OIDC IdP |
+| S44 | The web UI on a directly reachable `oidc-jwt` registry | standalone | none | none | OIDC IdP |
+| S45 | The runbook's read-only write set matches what the registry rejects | standard | none | pgvector | severable Postgres, S3 |
 
 ---
 
@@ -3727,3 +3736,301 @@ sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, version, deprecated from mani
    alone changes nothing on the read.
 
 **Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+
+---
+
+## S43: The documented `registry.yaml` example starts a registry
+
+**Goal.** Validate that the `identity_provider` block of the §13.12
+`registry.yaml` example names a configuration the registry accepts at startup,
+and that the two configurations it replaces are still refused.
+
+**Covers.** The §13.12 config-file example, the `oidc-jwt` required key pair
+(§6.3.3), and the startup refusals `config.identity_provider_unverified` and
+`config.oidc_jwt_audience_unset`.
+
+**Why by hand.** `TestReadYAMLConfig_SpecExampleNestedBlock`
+(`internal/serverboot/backend_config_test.go`) and
+`TestRegistryConfig_SpecExampleNestedInterpolation`
+(`test/e2e/registry_config_format_test.go`) assert that the example parses and
+reaches the resolved config. Neither starts a registry on it, so both stay
+green against an example that parses and then refuses to boot. That is the
+state the example was in until the §13.12 correction, and the same text had
+already been copied into the Helm chart's `values.yaml`, where a default
+`helm install` could not start.
+
+**Prerequisites.**
+
+- An OIDC IdP whose discovery document is reachable from this host over `https`
+  at `<issuer>/.well-known/openid-configuration`. The IdP S36 names under its
+  prerequisites is sufficient; no client registration and no token are needed,
+  because this scenario asserts startup rather than verification.
+- When no IdP is reachable, skip the scenario and record the skip. §6.3.3 fails
+  startup when the discovery document or JWKS is unreachable, so an unreachable
+  issuer produces a refusal that looks like the failures the negative controls
+  below are testing for and would score a false pass.
+
+**A note on the example's issuer.** The example reads
+`issuer: https://acme.okta.com/oauth2/default`, which resolves to nothing. The
+block therefore cannot be pasted verbatim and started by anyone, and the steps
+below substitute `$ISSUER`. What is under test is the set of keys the block
+names, which is what the defect was about; the placeholder hostname is not.
+
+**Steps.**
+
+1. Run the isolation block, then name the IdP and the registry's own endpoint.
+
+   ```bash
+   export ISSUER="https://<your-idp>/oauth2/default"   # no trailing slash
+   export AUD="http://127.0.0.1:8150"
+   curl -fsS "$ISSUER/.well-known/openid-configuration" > /dev/null && echo "issuer reachable"
+   ```
+
+   **Expect.** `issuer reachable`. When the `curl` fails, stop and record the
+   skip rather than continuing.
+
+2. Write the §13.12 `identity_provider` block with the issuer substituted.
+
+   ```bash
+   cat > "$WORK/registry.yaml" <<YAML
+   registry:
+     identity_provider:
+       type: oidc-jwt
+       issuer: $ISSUER
+       audience: $AUD
+   YAML
+   ```
+
+3. Start the registry on that config and record the PID.
+
+   ```bash
+   podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" \
+     --bind 127.0.0.1:8150 > "$WORK/srv.log" 2>&1 &
+   export SRV=$!
+   sleep 3
+   curl -fsS http://127.0.0.1:8150/healthz && echo && cat "$WORK/srv.log"
+   ```
+
+   **Expect.** `/healthz` answers and the log carries no
+   `config.identity_provider_unverified`, `config.oidc_jwt_audience_unset`, or
+   `config.invalid_issuer_scheme`. A registry that exited leaves `curl` failing
+   and the reason on the last line of `$WORK/srv.log`.
+
+4. Confirm the provider is the one under test rather than an absent one.
+
+   ```bash
+   podium config show --server --config "$WORK/registry.yaml" | grep -E "identity_provider|oauth_audience"
+   ```
+
+   **Expect.** `identity_provider.type` reads `oidc-jwt`, `identity_provider.issuer`
+   reads `$ISSUER`, and `oauth_audience` reads `$AUD`. A registry that started
+   with no provider at all would satisfy step 3 and fail here.
+
+5. **Negative control, the configuration §13.12 used to carry.** Stop the
+   server, then start one on the pre-correction block.
+
+   ```bash
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   cat > "$WORK/old.yaml" <<YAML
+   registry:
+     identity_provider:
+       type: oauth-device-code
+       audience: $AUD
+       authorization_endpoint: $ISSUER
+   YAML
+   podium serve --standalone --no-embeddings --config "$WORK/old.yaml" \
+     --bind 127.0.0.1:8151 > "$WORK/old.log" 2>&1
+   echo "exit=$?"; tail -2 "$WORK/old.log"
+   ```
+
+   **Expect.** A non-zero exit and `config.identity_provider_unverified`. A run
+   where this configuration also starts has the guard switched off, and step 3's
+   success then establishes nothing; record the failure rather than the success.
+
+6. **Negative control, the edit a reader makes when changing the type alone.**
+
+   ```bash
+   cat > "$WORK/half.yaml" <<YAML
+   registry:
+     identity_provider:
+       type: oidc-jwt
+       audience: $AUD
+       authorization_endpoint: $ISSUER
+   YAML
+   podium serve --standalone --no-embeddings --config "$WORK/half.yaml" \
+     --bind 127.0.0.1:8152 > "$WORK/half.log" 2>&1
+   echo "exit=$?"; tail -2 "$WORK/half.log"
+   ```
+
+   **Expect.** A non-zero exit naming the unset issuer. `authorization_endpoint`
+   is read for the device-code flow and `oidc-jwt` reads `issuer`, so renaming
+   the type and keeping the endpoint key yields a registry that still does not
+   start. This is the trap a reader is most likely to reproduce.
+
+**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+
+---
+
+## S44: The web UI on a directly reachable `oidc-jwt` registry
+
+**Goal.** Validate that the web UI served by a directly reachable `oidc-jwt`
+registry runs no acquisition flow of its own, resolves identity from what the
+request carries, and therefore shows a browser only the public artifacts.
+
+**Covers.** The §13.11 web-UI authentication paragraph, `oidc-jwt` on a
+directly reachable registry (§6.3.3), and §4.6 visibility for an anonymous
+caller.
+
+**Why by hand.** The assertion is what a person sees in the artifact list. No
+Go test reads a browser rendering, which is why the previous §13.11 text could
+claim the UI ran a device-code flow with an in-browser verification handoff and
+no test contradicted it.
+
+**Prerequisites.** The same reachable IdP as S43, plus one valid access token
+it issued, for the negative control in step 5. When no IdP is reachable, skip
+and record the skip.
+
+**Steps.**
+
+1. Run the isolation block and export `ISSUER` and `AUD` as in S43, binding
+   `127.0.0.1:8153`.
+2. Build a registry with one public layer and one restricted layer, giving the
+   restricted artifact a name that cannot be confused with the public one.
+
+   ```bash
+   mkdir -p "$WORK/pub/handbook" "$WORK/priv/salary-bands"
+   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type context --description "Salary bands" --force "$WORK/priv/salary-bands"
+   ```
+
+   Write a `registry.yaml` carrying the S43 `identity_provider` block plus a
+   `public: true` layer over `$WORK/pub` and a `users:`-restricted layer over
+   `$WORK/priv`.
+
+3. Start the registry with the UI enabled and record the PID.
+
+   ```bash
+   podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" \
+     --web-ui --bind 127.0.0.1:8153 > "$WORK/srv.log" 2>&1 &
+   export SRV=$!
+   sleep 3
+   ```
+
+4. Confirm the identity provider is switched on before asserting what the UI
+   hides.
+
+   ```bash
+   curl -fsS http://127.0.0.1:8153/healthz
+   podium config show --server --config "$WORK/registry.yaml" | grep identity_provider
+   ```
+
+   **Expect.** `/healthz` does not report `mode: public`, and the provider reads
+   `oidc-jwt`. A registry in public mode shows every artifact to everyone and
+   would make step 6 pass for the wrong reason.
+
+5. **Negative control.** Confirm the restricted artifact exists and is served to
+   an authenticated caller.
+
+   ```bash
+   curl -fsS -H "Authorization: Bearer $TOKEN" \
+     "http://127.0.0.1:8153/v1/load_artifact?id=<restricted-id>" | head -c 200
+   ```
+
+   **Expect.** The restricted artifact comes back. Without this step an empty or
+   mis-registered restricted layer produces the same screen in step 6 and the
+   scenario passes on nothing.
+
+6. Open `http://127.0.0.1:8153/ui/` in a browser. Send no credential: no
+   gateway in front, no header, no prior `podium login`.
+
+   **Expect.** The UI loads and lists the public artifact. The restricted
+   artifact does not appear. The UI reports no authentication error and shows no
+   login prompt, verification URL, or device code, because from the registry's
+   side nothing failed: the request carried no bearer value and resolved as
+   anonymous.
+
+7. Confirm the browser is not merely being served a cached or stale list.
+
+   ```bash
+   curl -fsS "http://127.0.0.1:8153/v1/load_artifact?id=<restricted-id>" -o /dev/null -w '%{http_code}\n'
+   ```
+
+   **Expect.** The same anonymous treatment the UI received, read as the error
+   code in the body rather than as the status class. A mistyped id returns 404
+   and would satisfy a check written for "a 4xx" while testing nothing.
+
+**Known gap this records.** A directly reachable UI showing only public
+artifacts is current behavior rather than a defect. The shipped SPA attaches no
+credential: its only network call is a bare same-origin `fetch` with no headers.
+In-browser authentication is deferred to its own proposal, and this scenario
+pins what the spec now says so a later change to the UI has to move that text
+with it.
+
+**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+
+---
+
+## S45: The runbook's read-only write set matches what the registry rejects
+
+**Goal.** Validate that the read-only-mode write set an operator reads in
+`deploy/runbook.md` and `docs/reference/http-api.md` enumerates what the running
+registry actually rejects, and that it names no endpoint the registry does not
+serve.
+
+**Covers.** §13.2.1 read-only mode, the `registry.read_only` error code, and the
+two shipped restatements of the write set.
+
+**Why by hand.** An operator reads the runbook during a database outage and
+works from its list. The value is that the list matches the running registry.
+Until the §13.2.1 correction the list named `podium login`-driven token issuance
+against a session table, sending a reader looking for a credential-issuing
+endpoint that has never existed, and no test compared the list to the routes the
+registry registers.
+
+**Prerequisites.** The S21 standard-deployment stack with a severable Postgres
+primary. When it is unavailable, skip and record the skip.
+
+**Relationship to S21.** S21 already brings a registry to read-only mode. Run
+these steps as an extension of S21 rather than rebuilding the stack, and fold
+them into S21 permanently if its setup already reaches this state.
+
+**Steps.**
+
+1. Follow S21 until the registry has fallen back to read-only mode against the
+   replica.
+2. Read the write set from the two shipped documents rather than from memory.
+
+   ```bash
+   grep -n "read-only" -A4 docs/reference/http-api.md | grep -i "ingest webhooks"
+   grep -n "Impact" -A4 deploy/runbook.md | grep -i "ingest webhooks"
+   ```
+
+   **Expect.** Both enumerate ingest webhooks, layer admin operations, freeze
+   toggles, admin grants, and tenant management. Neither names token issuance,
+   a login endpoint, or a session table.
+
+3. For each enumerated endpoint, issue the request and read the error code from
+   the body rather than the status class.
+
+   **Expect.** Each returns `registry.read_only`.
+
+4. Confirm the struck clause named an endpoint that does not exist.
+
+   ```bash
+   for p in /v1/login /v1/auth/token /v1/token; do
+     printf '%s ' "$p"
+     curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:<port>$p"
+   done
+   ```
+
+   **Expect.** 404 on each, because the registry registers no auth, login, or
+   token route. This is what made the struck clause wrong rather than merely
+   stale: an operator could not have exercised the write path it described even
+   when the registry was healthy.
+
+5. Confirm the read path still serves, so step 3's rejections are read-only mode
+   rather than a registry that is simply down.
+
+   **Expect.** `load_artifact` and `search_artifacts` answer from the replica.
+
+**Cleanup.** As S21.
