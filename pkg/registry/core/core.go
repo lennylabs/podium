@@ -1707,12 +1707,10 @@ func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRe
 // re-serializes the merged frontmatter so every consumer that reads the
 // served frontmatter, and not only the indexed Sensitivity record field,
 // observes the merged result. The merged record keeps the child's identity
-// (id, version, content hash, signature, layer, body) and surfaces the
-// merged Type, Sensitivity, Deprecated, and ReplacedBy back onto the row for
-// merged audit_redact directive back onto the row as well. Description, Tags,
-// and SearchVisibility on the returned
-// record are chain[0]'s untouched values and are merged onto nothing, because
-// no consumer reads them there.
+// (id, version, content hash, signature, layer, and body), and it surfaces the
+// merged Type, Sensitivity, Deprecated, ReplacedBy, and audit_redact directive
+// back onto the row. Description, Tags, and SearchVisibility are left at
+// chain[0]'s values, because no consumer reads them from this record.
 // spec: §4.6 field-semantics table.
 func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	if len(chain) == 0 {
