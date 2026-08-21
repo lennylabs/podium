@@ -67,9 +67,8 @@ type MergedBlock struct {
 // authored blocks in parent-first order so a key the child also sets with a
 // non-empty value keeps the child's value. And it applies the §4.6
 // hidden-parent strip to the result, returning ErrUnhidableParent when the
-// block resolves an extends value, when a key restored from a chain member
-// above the leaf references a chain parent, or when the block cannot be read
-// back at all.
+// block resolves an extends value, when any part of the assembled block
+// references a chain parent, or when the block cannot be read back at all.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
@@ -94,28 +93,21 @@ func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, erro
 		return nil, err
 	}
 
-	restored := undeclaredKeysOf(chain)
-	// Spec: §4.6 hidden parents. The test covers what the merge introduces: a
-	// key restored from a chain member above the leaf carries that member's
-	// text to a requester who may not be able to see it. The leaf's own block
-	// is excluded because the requester already receives it verbatim as
-	// raw_frontmatter and through the search descriptor, so refusing it would
-	// cost the load without concealing anything, and the declared fields are
-	// excluded because §4.6's merge semantics already fix their merged values.
-	refs := chainRefs(a, id, chain)
-	for _, key := range restored {
-		if !key.inherited {
-			continue
-		}
-		if namesRef(key.name, refs) || namesAny(key.value, refs) {
-			return nil, ErrUnhidableParent
-		}
-	}
-
-	for _, key := range restored {
+	for _, key := range undeclaredKeysOf(chain) {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
 			key.value)
+	}
+
+	// Spec: §4.6 hidden parents. The parent's existence and ID are not
+	// surfaced to the requester, so the test runs over the assembled block as a
+	// whole, under any key and at any nesting depth. Declared and restored keys
+	// are held to the same rule: a value inherited under §4.6's omitted-field
+	// rule discloses the parent it came from whichever half of the block
+	// carries it, and how a value was merged does not decide whether it names
+	// an ancestor.
+	if namesAny(root, chainRefs(a, id, chain)) {
+		return nil, ErrUnhidableParent
 	}
 
 	out, err := yaml.Marshal(root)
@@ -165,15 +157,10 @@ func mappingOf(src []byte) (*yaml.Node, []byte, error) {
 	return doc.Content[0], body, nil
 }
 
-// namedNode pairs a restored key with the node holding its value, and records
-// whether the block that contributed the value sits above the leaf in the
-// chain. The §4.6 disclosure test reads that flag: an inherited value is text
-// the merge carries out of a member the requester may not be able to see, and
-// a leaf-authored value is the requester's own artifact.
+// namedNode pairs a restored key with the node holding its value.
 type namedNode struct {
-	name      string
-	value     *yaml.Node
-	inherited bool
+	name  string
+	value *yaml.Node
 }
 
 // undeclaredKeysOf collects the frontmatter keys Artifact does not declare
@@ -192,8 +179,7 @@ type namedNode struct {
 func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 	seen := map[string]int{}
 	out := []namedNode{}
-	for at, block := range chain {
-		inherited := at < len(chain)-1
+	for _, block := range chain {
 		m, _, err := mappingOf(block.Frontmatter)
 		if err != nil {
 			continue
@@ -209,11 +195,10 @@ func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 					continue
 				}
 				out[prev].value = value
-				out[prev].inherited = inherited
 				continue
 			}
 			seen[name] = len(out)
-			out = append(out, namedNode{name: name, value: value, inherited: inherited})
+			out = append(out, namedNode{name: name, value: value})
 		}
 	}
 	return out
@@ -248,8 +233,7 @@ func addParentRef(refs map[string]bool, ref string) {
 // less the served artifact's own ID.
 //
 // Spec: §4.6 hidden parents. Every ID in the set is a parent the requester may
-// be unable to see, and no value the merge carries out of one references any of
-// them.
+// be unable to see, and the served block names none of them.
 //
 // The served artifact's own ID is excluded because §4.6 introduces extends as
 // the resolution for two layers contributing one canonical ID, so a same-ID
@@ -297,24 +281,33 @@ func namesRef(s string, refs map[string]bool) bool {
 	return false
 }
 
-// refersTo reports whether s is a reference to the artifact id names: the
-// canonical ID on its own, the ID under a version pin, or a path below it.
+// refersTo reports whether s names the artifact id names, anywhere in the
+// string: the canonical ID on its own, the ID under a version pin, or a path
+// below it.
 //
-// The ID has to open the string and end at a boundary an artifact reference
-// uses, so "shared/parent", "shared/parent@2.0.0", and
-// "shared/parent/CHARTER.md" reference the parent while "shared/parenthetical"
-// and "shared/parent-legacy" name their own artifacts. A value that merely
-// contains the ID somewhere inside it, such as a prose sentence or an
-// unrelated path, is not a reference, and §4.6's omitted-field rule leaves it
-// inheritable.
+// Spec: §4.6 hidden parents scopes its guarantee to the parent's existence and
+// ID, so a prose value that quotes the ID discloses it as plainly as a bare
+// reference does and the search runs at every offset. What decides the match
+// is the boundary at its end: an occurrence has to stop where an artifact
+// reference stops, so "see shared/parent@1.x for details" names the parent
+// while "shared/parent-legacy" and "docs/shared/parent.md" name their own
+// artifacts and stay inheritable.
+//
+// id is never empty: addParentRef records a reference only under a non-empty
+// canonical ID, so the set the callers pass holds none.
 func refersTo(s, id string) bool {
-	if !strings.HasPrefix(s, id) {
-		return false
+	for at := 0; at+len(id) <= len(s); {
+		i := strings.Index(s[at:], id)
+		if i < 0 {
+			return false
+		}
+		end := at + i + len(id)
+		if end == len(s) || s[end] == '@' || s[end] == '/' {
+			return true
+		}
+		at += i + 1
 	}
-	if len(s) == len(id) {
-		return true
-	}
-	return s[len(id)] == '@' || s[len(id)] == '/'
+	return false
 }
 
 // hidesParent reports whether a frontmatter header reads back as a mapping

@@ -181,6 +181,7 @@ func TestExtendsFrontmatter_InheritedKeyReferencingTheParentFailsClosed(t *testi
 		"the parent's id":       "shared/parent",
 		"a pinned reference":    "shared/parent@2.0.0",
 		"path below the parent": "shared/parent/CHARTER.md",
+		"prose quoting the id":  "see shared/parent@1.x for details",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -193,16 +194,15 @@ func TestExtendsFrontmatter_InheritedKeyReferencingTheParentFailsClosed(t *testi
 	}
 }
 
-// Spec: §4.6 omitted fields — the inherited value has to reference the parent
-// for the disclosure test to fire. An artifact whose ID begins with the
-// parent's, a path that spells the ID further along, and prose that quotes the
-// reference are all inherited rather than costing the child its load.
+// Spec: §4.6 omitted fields — the inherited value has to name the parent for
+// the disclosure test to fire. An artifact whose ID begins with the parent's
+// and a path that spells the ID without stopping where a reference stops are
+// both inherited rather than costing the child its load.
 func TestExtendsFrontmatter_ValueNamingAnotherArtifactIsServed(t *testing.T) {
 	t.Parallel()
 	for name, value := range map[string]string{
 		"longer identifier":      "shared/parent-legacy",
 		"id under a longer path": "docs/shared/parent.md",
-		"prose quoting the id":   "see shared/parent@1.x for details",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -220,58 +220,31 @@ func TestExtendsFrontmatter_ValueNamingAnotherArtifactIsServed(t *testing.T) {
 	}
 }
 
-// Spec: §4.6, §2.2 — the child's own block already reaches the requester
-// through `raw_frontmatter` and through the search descriptor, so a key the
-// child authored naming the parent is served on the load path too. Refusing it
-// would conceal nothing and would make the two surfaces disagree about the
-// child's own text.
-func TestExtendsFrontmatter_ChildAuthoredKeyNamingTheParentIsServed(t *testing.T) {
+// Spec: §4.6 hidden parents — the guarantee covers the served block rather
+// than the origin of the value that names the parent, so a key the child itself
+// authored fails the load on the same terms as an inherited one. The merged
+// block is what pkg/sync feeds to the harness adapters, so a parent ID left in
+// it reaches the materialized files.
+func TestExtendsFrontmatter_ChildAuthoredKeyNamingTheParentFailsClosed(t *testing.T) {
 	t.Parallel()
-	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n"
-	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-		"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n"
-	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
-
-	loaded, err := reg.LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
-	if err != nil {
-		t.Fatalf("LoadArtifact: %v", err)
-	}
-	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
-	if err != nil {
-		t.Fatalf("SearchArtifacts: %v", err)
-	}
-	fromLoad := decodeServedMapping(t, loaded.Frontmatter)
-	fromSearch := decodeServedMapping(t, []byte(findResult(t, res, "finance/child").Frontmatter))
-	if fromLoad["x_base"] != "shared/parent" {
-		t.Errorf("load_artifact serves x_base = %v, want %q\n%s",
-			fromLoad["x_base"], "shared/parent", loaded.Frontmatter)
-	}
-	if fromLoad["x_base"] != fromSearch["x_base"] {
-		t.Errorf("load_artifact serves x_base = %v, search_artifacts serves %v",
-			fromLoad["x_base"], fromSearch["x_base"])
-	}
+	got, err := emfLoad(t,
+		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
+			"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n")
+	assertFailsClosed(t, got, err)
 }
 
-// Spec: §4.6, §4.4 — a declared field takes its merged value from §4.6's merge
-// semantics, which the disclosure test leaves alone. A child deprecated in
-// favour of the artifact it extends is served the `replaced_by` pointer the
-// typed serialization has always emitted.
-func TestExtendsFrontmatter_DeclaredFieldNamingTheParentIsServed(t *testing.T) {
+// Spec: §4.6 hidden parents, §4.4 — the disclosure test runs over the
+// assembled block, so a declared field is held to the same rule as a restored
+// key. A child deprecated in favour of the artifact it extends would disclose
+// that artifact's ID through `replaced_by`, and the load fails closed instead.
+func TestExtendsFrontmatter_DeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
 	t.Parallel()
 	got, err := emfLoad(t,
 		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
 		"---\ntype: agent\nversion: 2.0.0\ndescription: child\ndeprecated: true\n"+
 			"replaced_by: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n")
-	if err != nil {
-		t.Fatalf("LoadArtifact: %v", err)
-	}
-	served := decodeServedMapping(t, got.Frontmatter)
-	if served["replaced_by"] != "shared/parent" {
-		t.Errorf("replaced_by = %v, want %q\n%s", served["replaced_by"], "shared/parent", got.Frontmatter)
-	}
-	if _, named := served["extends"]; named {
-		t.Errorf("the served frontmatter still names the hidden parent:\n%s", got.Frontmatter)
-	}
+	assertFailsClosed(t, got, err)
 }
 
 // Spec: §4.6 hidden parents — a child can author frontmatter whose anchor
