@@ -59,22 +59,21 @@ type MergedBlock struct {
 // both extends resolvers call, so the server mode and the filesystem-registry
 // mode serve identical bytes for the same artifact (§11, §2.2).
 //
-// artifactID is the canonical ID of the artifact being served, and chain holds
-// its ancestry parent first, the leaf last.
+// chain holds the artifact's ancestry parent first, the leaf last.
 //
 // It does two things the typed serialization alone cannot. It restores the
 // frontmatter keys Artifact does not declare, taking them from the chain's
-// authored blocks in parent-first order so a key the child also sets keeps the
-// child's value. And it applies the §4.6 hidden-parent strip to the result,
-// returning ErrUnhidableParent when the block resolves an extends value, when
-// it carries a chain parent's ID under any other key, or when it cannot be
-// read back at all.
+// authored blocks in parent-first order so a key the child also sets with a
+// non-empty value keeps the child's value. And it applies the §4.6
+// hidden-parent strip to the result, returning ErrUnhidableParent when the
+// block resolves an extends value, when it names a chain parent's ID under any
+// other key, or when it cannot be read back at all.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
 // most-restrictive value for sensitivity are not what a last-writer-wins
 // overlay over authored text would produce.
-func SerializeMerged(a *Artifact, artifactID string, chain ...MergedBlock) ([]byte, error) {
+func SerializeMerged(a *Artifact, chain ...MergedBlock) ([]byte, error) {
 	stripped := *a
 	stripped.Extends = ""
 	typed, err := SerializeArtifact(&stripped)
@@ -109,11 +108,6 @@ func SerializeMerged(a *Artifact, artifactID string, chain ...MergedBlock) ([]by
 	// The merged artifact carries the leaf's reference, which a chain whose
 	// leaf resolved it through a merge key never spells out at the top level.
 	addParentRef(refs, a.Extends)
-	// Spec: §4.6 same-ID overlay. A child may extend its own canonical ID, and
-	// the parent is then the row below it in layer order. Its ID is the ID the
-	// requester asked for, so there is no hidden parent to withhold and the
-	// disclosure test must not fire on the artifact's own identity.
-	delete(refs, parentID(artifactID))
 
 	for _, key := range undeclaredKeysOf(chain) {
 		root.Content = append(root.Content,
@@ -155,8 +149,13 @@ type namedNode struct {
 }
 
 // undeclaredKeysOf collects the frontmatter keys Artifact does not declare
-// from the chain's authored blocks, parent first, so a later block's value for
-// the same key wins. chain's last member is the leaf.
+// from the chain's authored blocks, parent first, so a later block's non-empty
+// value for the same key wins. chain's last member is the leaf.
+//
+// Spec: §4.6 omitted fields. A child that omits a key, or sets it to an empty
+// scalar, inherits the parent's value, which is what MergeExtends applies to
+// every declared field. The restored keys follow the same rule, so the two
+// halves of a merged block agree on what an empty child value means.
 //
 // The three skip arms below are not reachable behind either extends resolver.
 // Both feed blocks a parser has already accepted: the server mode passes the
@@ -191,6 +190,9 @@ func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 			// and cost the child a load it gets today.
 			value := resolveAliases(m.Content[i+1], map[*yaml.Node]bool{})
 			if prev, ok := seen[name]; ok {
+				if isEmptyScalar(value) {
+					continue
+				}
 				out[prev].value = value
 				continue
 			}
@@ -199,6 +201,14 @@ func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 		}
 	}
 	return out
+}
+
+// isEmptyScalar reports whether n carries no value, which covers both spellings
+// of an empty frontmatter entry: `x_owner:` decodes as a null scalar and
+// `x_owner: ""` as an empty string. A mapping or a list that holds no entries
+// is a value the child authored and is not empty in this sense.
+func isEmptyScalar(n *yaml.Node) bool {
+	return n != nil && n.Kind == yaml.ScalarNode && n.Value == ""
 }
 
 // resolveAliases returns a copy of n with every alias replaced by the value it
@@ -231,16 +241,16 @@ func resolveAliases(n *yaml.Node, visiting map[*yaml.Node]bool) *yaml.Node {
 }
 
 // parentID reduces an artifact reference to its canonical ID by dropping the
-// version pin. An authored value can spell a parent's ID with any pin, so both
-// sides of the §4.6 comparison are reduced this way before they are matched.
+// version pin. §4.6's guarantee covers the parent's ID, so the pin an extends
+// entry happens to carry does not decide what the disclosure test looks for.
 func parentID(ref string) string {
 	id, _, _ := strings.Cut(ref, "@")
 	return id
 }
 
 // addParentRef records an extends reference under its canonical ID. namesAny
-// reduces each candidate string the same way, so a restored key naming the
-// parent under a pin the extends entry does not carry still matches.
+// looks for that ID as a token, so a value naming the parent under a pin the
+// extends entry does not carry still matches.
 func addParentRef(refs map[string]bool, ref string) {
 	if id := parentID(ref); id != "" {
 		refs[id] = true
@@ -274,20 +284,20 @@ func hidesParent(header []byte, refs map[string]bool) bool {
 	return !namesAny(resolved, refs)
 }
 
-// namesAny reports whether any string within v is one of refs, comparing
-// canonical IDs so the pin a value carries does not decide the outcome. It is
-// the whole §4.6 disclosure test on the assembled block, and it applies to
-// every restored key regardless of which chain member authored it, so one
-// definition of naming the parent governs the served bytes.
+// namesAny reports whether any string within v names one of refs. It is the
+// whole §4.6 disclosure test on the assembled block, and it applies to every
+// key regardless of which chain member authored it, so one definition of
+// naming the parent governs the served bytes.
 //
-// The test is on a value that is the reference. A value that quotes the ID
-// inside longer text carries no artifact reference, and §4.6's omitted-field
-// rule makes an extension type's key inheritable, so refusing such a value
-// would cost the child the whole load over prose.
+// A string names a reference when it spells the canonical ID as a token, so
+// the ID discloses the hidden parent whether it stands alone, carries a pin,
+// or sits inside longer text. §4.6's guarantee is that no served byte names
+// the parent, and prose quoting the ID discloses the parent as plainly as a
+// bare reference does.
 func namesAny(v any, refs map[string]bool) bool {
 	switch t := v.(type) {
 	case string:
-		return refs[parentID(t)]
+		return mentionsRef(t, refs)
 	case []any:
 		for _, e := range t {
 			if namesAny(e, refs) {
@@ -296,7 +306,7 @@ func namesAny(v any, refs map[string]bool) bool {
 		}
 	case map[string]any:
 		for k, e := range t {
-			if refs[parentID(k)] || namesAny(e, refs) {
+			if mentionsRef(k, refs) || namesAny(e, refs) {
 				return true
 			}
 		}
@@ -306,6 +316,51 @@ func namesAny(v any, refs map[string]bool) bool {
 				return true
 			}
 		}
+	}
+	return false
+}
+
+// mentionsRef reports whether s spells one of refs as a whole token.
+func mentionsRef(s string, refs map[string]bool) bool {
+	for id := range refs {
+		if containsToken(s, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsToken reports whether id occurs in s bounded on both sides by a byte
+// that cannot continue an identifier. A match inside a longer identifier is not
+// a mention, because "shared/parenthetical" and "shared/parent-legacy" name
+// something other than "shared/parent". Everything else bounds the token,
+// including the pin separator and the path separator, so both
+// "see shared/parent@1.x for details" and "docs/shared/parent" name the parent.
+func containsToken(s, id string) bool {
+	for at := 0; at+len(id) <= len(s); {
+		i := strings.Index(s[at:], id)
+		if i < 0 {
+			return false
+		}
+		i += at
+		before := i == 0 || !identByte(s[i-1])
+		after := i+len(id) == len(s) || !identByte(s[i+len(id)])
+		if before && after {
+			return true
+		}
+		at = i + 1
+	}
+	return false
+}
+
+// identByte reports whether b can continue an identifier, which is what bounds
+// a token in containsToken.
+func identByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	case b == '-', b == '_', b == '.':
+		return true
 	}
 	return false
 }
