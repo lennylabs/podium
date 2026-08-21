@@ -241,6 +241,51 @@ func TestExtendsFrontmatter_ChildKeyMatchesTheSearchDescriptor(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 same-ID overlay — a child may extend its own canonical ID, and
+// the parent is then the row below it in layer order. The parent's ID is the ID
+// the requester asked for, so the hidden-parent test has nothing to withhold
+// and must not fire on the artifact's own identity. An inherited key holding
+// that ID is served rather than costing the requester the load.
+func TestExtendsFrontmatter_SameIDOverlayServesAnInheritedSelfReference(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	for _, in := range []struct{ layerID, body string }{
+		{"L1", "---\ntype: agent\nversion: 1.0.0\ndescription: base\n" +
+			"x_owner: shared/base\n---\n\nbase body\n"},
+		{"L2", "---\ntype: agent\nversion: 2.0.0\ndescription: overlay\n" +
+			"extends: shared/base@1.x\n---\n\noverlay body\n"},
+	} {
+		res, err := ingest.Ingest(context.Background(), st, ingest.Request{
+			TenantID: "t", LayerID: in.layerID,
+			Files: fstest.MapFS{"shared/base/ARTIFACT.md": &fstest.MapFile{Data: []byte(in.body)}},
+		})
+		if err != nil {
+			t.Fatalf("ingest %s: %v", in.layerID, err)
+		}
+		if res.Accepted != 1 {
+			t.Fatalf("ingest %s not accepted: %+v", in.layerID, res.Rejected)
+		}
+	}
+	reg := core.New(st, "t", []layer.Layer{
+		{ID: "L1", Visibility: layer.Visibility{Public: true}, Precedence: 1},
+		{ID: "L2", Visibility: layer.Visibility{Public: true}, Precedence: 2},
+	})
+	got, err := reg.LoadArtifact(context.Background(), publicID, "shared/base", core.LoadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	served := decodeServedMapping(t, got.Frontmatter)
+	if served["x_owner"] != "shared/base" {
+		t.Errorf("x_owner = %v, want %q\n%s", served["x_owner"], "shared/base", got.Frontmatter)
+	}
+	if _, named := served["extends"]; named {
+		t.Errorf("the served frontmatter still resolves an extends value:\n%s", got.Frontmatter)
+	}
+}
+
 // Spec: §4.6 — a child that declares no undeclared key is served the typed
 // serialization unchanged, so the shared helper does not perturb the common
 // case. This is the arm that would break if the restore step ran
