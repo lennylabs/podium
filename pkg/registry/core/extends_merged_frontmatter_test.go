@@ -138,10 +138,11 @@ func TestExtendsFrontmatter_MergeKeyReferenceFailsClosed(t *testing.T) {
 }
 
 // Spec: §4.6 hidden parents — an anchored extends value carries the parent's
-// ID to every alias into it. The typed serialization reproduces neither the
-// anchor nor its value, so the restored sibling key is left aliasing an anchor
-// the block no longer defines and the assembled block does not read back as a
-// mapping. The load fails closed with `registry.invalid_argument`.
+// ID to every alias into it, and the sibling key holding that alias is an
+// undeclared key the serializer restores. §4.6 scopes its guarantee to the
+// parent's existence and ID, so a served block naming the parent under `note:`
+// discloses what the section forbids. The load fails closed with
+// `registry.invalid_argument` instead.
 //
 // This is the second half of the input class the change deliberately loses.
 // The closed round-trip served these children a clean block by dropping every
@@ -155,16 +156,37 @@ func TestExtendsFrontmatter_AnchoredReferenceFailsClosed(t *testing.T) {
 	assertFailsClosed(t, got, err)
 }
 
-// Spec: §4.6 hidden parents — a restored key can alias an anchor declared on a
-// key the typed serialization rewrites, which leaves the assembled block
-// undecodable rather than parent-free. An undecodable block cannot be checked
-// for the parent's ID, so the load fails closed instead of serving it.
-func TestExtendsFrontmatter_UndecodableMergedBlockFailsClosed(t *testing.T) {
+// Spec: §4.6 hidden parents — the refusal is scoped to a block that names the
+// parent or cannot be read back, and an alias into an anchor on a declared key
+// is neither. The serializer resolves the alias against the block that
+// declared the anchor, so the child keeps the load it gets today and the key
+// arrives carrying the anchored value.
+func TestExtendsFrontmatter_AliasIntoADeclaredKeyIsServed(t *testing.T) {
 	t.Parallel()
 	got, err := emfLoad(t,
 		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
 		"---\ntype: agent\nversion: 2.0.0\ndescription: &d child\n"+
 			"x_note: *d\nextends: shared/parent@1.x\n---\n\nchild body\n")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	served := decodeServedMapping(t, got.Frontmatter)
+	if served["x_note"] != "child" {
+		t.Errorf("x_note = %v, want %q\n%s", served["x_note"], "child", got.Frontmatter)
+	}
+}
+
+// Spec: §4.6 hidden parents — a child can author frontmatter whose anchor
+// contains itself, which ingest accepts because it never decodes a key
+// manifest.Artifact does not declare. The assembled block carrying that key
+// does not read back as a mapping, so it cannot be checked for the parent's
+// ID, and the load fails closed rather than serving what it could not verify.
+func TestExtendsFrontmatter_UndecodableMergedBlockFailsClosed(t *testing.T) {
+	t.Parallel()
+	got, err := emfLoad(t,
+		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
+			"x_self: &s\n  k: *s\nextends: shared/parent@1.x\n---\n\nchild body\n")
 	assertFailsClosed(t, got, err)
 }
 
