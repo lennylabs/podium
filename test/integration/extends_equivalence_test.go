@@ -42,7 +42,7 @@ func writeExtendsRegistry(t *testing.T) string {
 
 	write("base/shared/anchor/ARTIFACT.md",
 		"---\ntype: context\nversion: 1.0.0\ndescription: the anchor context\n"+
-			"tags: [anchor]\nsensitivity: low\nx_charter: platform/charter.md\n---\n\nanchor prose\n")
+			"tags: [anchor]\nsensitivity: low\nx_charter: shared/anchor/CHARTER.md\n---\n\nanchor prose\n")
 	write("base/shared/base/ARTIFACT.md",
 		"---\ntype: context\nversion: 1.0.0\ndescription: the base context\n"+
 			"tags: [shared]\nsensitivity: low\nx_review_board: platform\n"+
@@ -124,8 +124,11 @@ func TestSyncEquivalence_ExtendsChildMatchesAcrossModes(t *testing.T) {
 			}
 			// team/derived sits two links below shared/anchor, so the
 			// grandparent's inherited key pins the deeper chain both
-			// resolvers have to restore identically.
-			if content := soleMaterializedEntry(t, fsTree, "team/derived"); !strings.Contains(content, "x_charter: platform/charter.md") {
+			// resolvers have to restore identically. Its value is a path
+			// below the grandparent's ID rather than a reference to it, so
+			// §4.6's omitted-field rule carries it through both modes
+			// instead of the hidden-parent test refusing the load.
+			if content := soleMaterializedEntry(t, fsTree, "team/derived"); !strings.Contains(content, "x_charter: shared/anchor/CHARTER.md") {
 				t.Errorf("team/derived: merged frontmatter lost the grandparent-inherited key:\n%s", content)
 			}
 
@@ -161,7 +164,7 @@ func TestSyncEquivalence_UnhidableParentFailsBothModes(t *testing.T) {
 	// the parent the requester may be unable to see.
 	write("shared/base/ARTIFACT.md",
 		"---\ntype: context\nversion: 1.0.0\ndescription: the base context\n"+
-			"x_charter: shared/base/CHARTER.md\n---\n\nbase prose\n")
+			"x_base: shared/base\n---\n\nbase prose\n")
 	write("team/derived/ARTIFACT.md",
 		"---\ntype: context\nversion: 2.0.0\ndescription: the derived context\n"+
 			"extends: shared/base@1.x\n---\n\nderived prose\n")

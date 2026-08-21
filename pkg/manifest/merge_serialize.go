@@ -67,9 +67,8 @@ type MergedBlock struct {
 // authored blocks in parent-first order so a key the child also sets with a
 // non-empty value keeps the child's value. And it applies the §4.6
 // hidden-parent strip to the result, returning ErrUnhidableParent when the
-// block resolves an extends value, when a value the merge brought in from an
-// ancestor references a chain parent, or when the block cannot be read back at
-// all.
+// block resolves an extends value, when any value in it references a chain
+// parent, or when the block cannot be read back at all.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
@@ -102,11 +101,8 @@ func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, erro
 
 	// Spec: §4.6 hidden parents. The parent's existence and ID are not
 	// surfaced to the requester, so the test runs over the assembled block
-	// under any key and at any nesting depth. It is scoped to what the merge
-	// introduced: a value the leaf authored reaches the requester through
-	// raw_frontmatter and through the search descriptor whatever this helper
-	// does, so refusing the load over it conceals nothing and costs the child
-	// its read.
+	// under any key and at any nesting depth, whichever chain member authored
+	// the value.
 	if namesAny(root, disclosureOf(a, id, chain)) {
 		return nil, ErrUnhidableParent
 	}
@@ -231,16 +227,14 @@ func addParentRef(refs map[string]bool, ref string) {
 }
 
 // disclosure is what a served scalar is tested against under §4.6's
-// hidden-parent guarantee: the chain's parent IDs, the served artifact's own
-// canonical ID, and the scalars the leaf authored.
+// hidden-parent guarantee: the chain's parent IDs and the served artifact's own
+// canonical ID.
 type disclosure struct {
 	// refs holds the canonical ID of every extends reference in the chain,
 	// including a same-ID overlay's own.
 	refs map[string]bool
 	// self is the served artifact's canonical ID.
 	self string
-	// authored holds every scalar the leaf's own block spells out.
-	authored map[string]bool
 }
 
 // disclosureOf builds the test SerializeMerged applies to the assembled block.
@@ -248,66 +242,32 @@ type disclosure struct {
 // Spec: §4.6 hidden parents. Every ID in refs is a parent the requester may be
 // unable to see, and the served block names none of them.
 func disclosureOf(a *Artifact, id string, chain []MergedBlock) disclosure {
-	d := disclosure{refs: map[string]bool{}, self: parentID(id), authored: map[string]bool{}}
+	d := disclosure{refs: map[string]bool{}, self: parentID(id)}
 	for _, block := range chain {
 		addParentRef(d.refs, block.Extends)
 	}
 	// The merged artifact carries the leaf's reference, which a chain whose
 	// leaf resolved it through a merge key never spells out at the top level.
 	addParentRef(d.refs, a.Extends)
-	if len(chain) > 0 {
-		collectScalars(chain[len(chain)-1].Frontmatter, d.authored)
-	}
 	return d
 }
 
-// discloses reports whether serving s would surface a parent §4.6 hides.
+// discloses reports whether serving s would surface a parent §4.6 hides. A
+// scalar discloses a parent when the scalar is a reference to it: the canonical
+// ID on its own, or that ID under a version pin. Which chain member authored
+// the value does not enter into it, because §4.6 constrains the block the
+// registry serves rather than the provenance of the text inside it.
 //
-// Two values are exempt. A scalar the leaf authored is served on the same
-// terms the same response's raw_frontmatter and the search descriptor already
-// serve it, so the merge surfaces nothing by carrying it. And a scalar that is
-// exactly the served artifact's canonical ID names the artifact the requester
-// asked for and was answered with, which is the parent of a same-ID overlay.
-// The exemption is that value alone: a pinned or nested reference to the
-// lower-precedence row discloses that a second row for the ID exists, which
-// §4.6 puts alongside the ID in its guarantee.
+// One value is exempt. A scalar that is exactly the served artifact's canonical
+// ID names the artifact the requester asked for and was answered with, which is
+// the parent of a same-ID overlay. The exemption is that value alone: a pinned
+// reference to the lower-precedence row discloses that a second row for the ID
+// exists, which §4.6 puts alongside the ID in its guarantee.
 func (d disclosure) discloses(s string) bool {
-	if s == d.self || d.authored[s] {
+	if s == d.self {
 		return false
 	}
-	for id := range d.refs {
-		if refersTo(s, id) {
-			return true
-		}
-	}
-	return false
-}
-
-// collectScalars records every scalar value reachable from src's frontmatter
-// header, keys included, into out. A block that does not read back as a
-// mapping contributes nothing, so a leaf whose own block cannot be parsed
-// earns no exemption.
-func collectScalars(src []byte, out map[string]bool) {
-	root, _, err := mappingOf(src)
-	if err != nil {
-		return
-	}
-	var walk func(n *yaml.Node)
-	walk = func(n *yaml.Node) {
-		// Not reachable: mappingOf returns a node the decoder produced, and a
-		// decoded node holds no nil child. The guard is kept so a caller that
-		// builds a tree by hand gets no exemption rather than a panic.
-		if n == nil {
-			return
-		}
-		if n.Kind == yaml.ScalarNode {
-			out[n.Value] = true
-		}
-		for _, c := range n.Content {
-			walk(c)
-		}
-	}
-	walk(root)
+	return d.refs[parentID(s)]
 }
 
 // namesAny reports whether any scalar reachable from n discloses a parent. It
@@ -330,67 +290,6 @@ func namesAny(n *yaml.Node, d disclosure) bool {
 		}
 	}
 	return false
-}
-
-// refersTo reports whether s names the artifact id names, anywhere in the
-// string: the canonical ID on its own, the ID under a version pin, or a path
-// below it.
-//
-// Spec: §4.6 hidden parents scopes its guarantee to the parent's existence and
-// ID, so a prose value that quotes the ID discloses it as plainly as a bare
-// reference does and the search runs at every offset. What decides a match is
-// the boundary at both ends of an occurrence. An occurrence has to start where
-// a reference starts, so "team/shared/parent@2.0.0" and "docs/shared/parent"
-// are the artifacts they name and stay inheritable. And it has to stop where
-// an identifier stops rather than only where a reference stops, so both "see
-// shared/parent for details" and "see shared/parent@1.x for details" name the
-// parent while "shared/parent-legacy" and "shared/parenthetical" name their
-// own artifacts.
-//
-// id is never empty: addParentRef records a reference only under a non-empty
-// canonical ID, so the set the callers pass holds none.
-func refersTo(s, id string) bool {
-	for at := 0; at+len(id) <= len(s); {
-		i := strings.Index(s[at:], id)
-		if i < 0 {
-			return false
-		}
-		start, end := at+i, at+i+len(id)
-		if !continuesLeft(s, start) && !continuesRight(s, end) {
-			return true
-		}
-		at += i + 1
-	}
-	return false
-}
-
-// continuesLeft reports whether the character before start makes the
-// occurrence part of a longer reference, which is what a preceding identifier
-// character, path separator, pin, or dotted segment says.
-func continuesLeft(s string, start int) bool {
-	if start == 0 {
-		return false
-	}
-	c := s[start-1]
-	return identByte(c) || c == '/' || c == '.' || c == '@'
-}
-
-// continuesRight reports whether the character after end continues the
-// identifier the occurrence ends, which is the only thing that makes the
-// occurrence a different artifact's ID. A '/' or an '@' continues a reference
-// to this artifact rather than to another one, and every other character ends
-// the occurrence.
-func continuesRight(s string, end int) bool {
-	return end != len(s) && identByte(s[end])
-}
-
-// identByte reports whether c can continue an artifact ID segment.
-func identByte(c byte) bool {
-	switch {
-	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-		return true
-	}
-	return c == '-' || c == '_'
 }
 
 // hidesParent reports whether a frontmatter header reads back as a mapping
