@@ -5,7 +5,6 @@ import (
 	"errors"
 	"reflect"
 	"strings"
-	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -66,32 +65,30 @@ type MergedBlock struct {
 // It does two things the typed serialization alone cannot. It restores the
 // frontmatter keys Artifact does not declare, taking them from the chain's
 // authored blocks in parent-first order so a key the child also sets with a
-// non-empty value keeps the child's value. And it holds the assembled block to
-// §4.6's hidden-parent guarantee, returning ErrUnhidableParent when the block
-// hands the requester a chain parent's ID under any key, when it still
-// resolves an extends value, or when any block involved cannot be read back at
-// all.
+// non-empty value keeps the child's value. And it holds what it assembles to
+// §4.6's hidden-parent guarantee, returning ErrUnhidableParent when a restored
+// key stands as a reference to a chain parent, when the block still resolves an
+// extends value, or when any block involved cannot be read back at all.
 //
 // Every key §4.6's omitted-field rule makes inheritable reaches the served
 // block or the read fails. A key is never silently dropped, because a consumer
 // cannot tell an inherited-as-nothing key from one the chain never set.
 //
-// The disclosure test runs over the whole assembled mapping, so a declared
-// field carries a parent's ID no more than a restored key does. §4.6 scopes
-// its guarantee to the parent's existence and ID reaching the requester and
-// draws no distinction between the keys Artifact declares and the keys an
-// extension type contributes. The typed serialization stays authoritative for
-// what a declared field's value is, because only it carries §4.6's merge
-// semantics: a union for a list field and the most-restrictive value for
-// sensitivity are not what a last-writer-wins overlay over authored text would
-// produce.
+// The disclosure test covers the keys this helper adds. The declared fields are
+// the typed serialization's, and §4.6's own merge table decides their values, so
+// a description or a replaced_by pointer that quotes an ID is the merge
+// semantics working rather than a leak this helper introduces. The test is also
+// bounded to a value that stands as an artifact reference: a scalar equal to a
+// chain parent's ID once its version pin and the whitespace and slashes around
+// it are removed. A value that merely contains those characters, such as a path below
+// the parent or a sentence quoting it, names no artifact the next read resolves
+// and stays inheritable, which is what keeps the omitted-field rule working for
+// ordinary extension keys.
 //
-// The origin of a value does not enter into it. §4.6 states its guarantee about
-// the block the registry serves, so a value the leaf authored fails the read on
-// the same terms as one the merge restored from an ancestor. Serving a
-// leaf-authored spelling on the grounds that the same bytes reach the requester
-// elsewhere would make this helper's guarantee depend on another surface's
-// disclosure.
+// The origin of a restored value does not enter into it. §4.6 states its
+// guarantee about the block the registry serves, so a reference the leaf
+// authored fails the read on the same terms as one the merge restored from an
+// ancestor.
 func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, error) {
 	stripped := *a
 	stripped.Extends = ""
@@ -115,19 +112,19 @@ func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, erro
 	if err != nil {
 		return nil, err
 	}
+	// Spec: §4.6 hidden parents. The parent's existence and ID are not
+	// surfaced to the requester, so a restored key that references a chain
+	// parent fails the read at whatever nesting depth and under whichever key
+	// the reference sits, whoever authored it. The body that follows the block
+	// is the leaf's own prose and is out of the block this section constrains.
+	parents := parentsOf(a, id, chain)
 	for _, key := range undeclaredKeysOf(authored) {
+		if parents.discloses(key.name) || parents.names(key.value) {
+			return nil, ErrUnhidableParent
+		}
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
 			uncommented(key.value))
-	}
-
-	// Spec: §4.6 hidden parents. The parent's existence and ID are not
-	// surfaced to the requester, so an assembled value that hands over a chain
-	// parent's ID fails the read at whatever nesting depth and under whichever
-	// key it sits, whoever authored it. The body that follows the block is the
-	// leaf's own prose and is out of the block this section constrains.
-	if parentsOf(a, id, chain).names(root) {
-		return nil, ErrUnhidableParent
 	}
 
 	out, err := yaml.Marshal(root)
@@ -232,9 +229,10 @@ func uncommented(n *yaml.Node) *yaml.Node {
 // value for the same key wins. The last entry is the leaf's.
 //
 // Spec: §4.6 omitted fields. A child that omits a key, or sets it to an empty
-// scalar, inherits the parent's value, which is what MergeExtends applies to
-// every declared field. The restored keys follow the same rule, so the two
-// halves of a merged block agree on what an empty child value means.
+// value, inherits the parent's value, and the section states that this holds
+// for every frontmatter field. MergeExtends applies the same rule to every
+// declared field, so the two halves of a merged block agree on what an empty
+// child value means.
 //
 // A chain member that stored no frontmatter at all holds no key to inherit and
 // contributes none.
@@ -252,7 +250,7 @@ func undeclaredKeysOf(authored []*yaml.Node) []namedNode {
 			}
 			value := m.Content[i+1]
 			if prev, ok := seen[name]; ok {
-				if isEmptyScalar(value) {
+				if isEmptyValue(value) {
 					continue
 				}
 				out[prev].value = value
@@ -265,12 +263,27 @@ func undeclaredKeysOf(authored []*yaml.Node) []namedNode {
 	return out
 }
 
-// isEmptyScalar reports whether n carries no value, which covers both spellings
-// of an empty frontmatter entry: `x_owner:` decodes as a null scalar and
-// `x_owner: ""` as an empty string. A mapping or a list that holds no entries
-// is a value the child authored and is not empty in this sense.
-func isEmptyScalar(n *yaml.Node) bool {
-	return n != nil && n.Kind == yaml.ScalarNode && n.Value == ""
+// isEmptyValue reports whether n carries nothing a requester can read.
+//
+// Spec: §4.6 omitted fields. The null tag rather than the raw text decides an
+// empty scalar, because yaml.v3 decodes `x_owner:` to an empty value while
+// `x_owner: null` and `x_owner: ~` keep their spelling as the node's value.
+// ParseArtifact reduces all of them to a declared field's zero value, so
+// testing the tag is what keeps the restored keys agreeing with MergeExtends.
+// An empty list or mapping is empty on the same terms, because MergeExtends
+// inherits a parent's list whenever the child's holds no element.
+//
+// n is the value node of a decoded mapping entry, which the decoder never
+// leaves nil, so the switch needs no nil guard.
+func isEmptyValue(n *yaml.Node) bool {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		return n.Value == "" || n.Tag == "!!null"
+	case yaml.SequenceNode, yaml.MappingNode:
+		return len(n.Content) == 0
+	default:
+		return false
+	}
 }
 
 // canonicalID reduces an artifact reference to its canonical ID by dropping the
@@ -309,30 +322,17 @@ func (p parentIDs) add(ref, own string) {
 	}
 }
 
-// separates reports whether r ends an artifact reference. The characters a
-// reference itself can hold are letters, digits, and the path, pin, and word
-// punctuation an ID or a filename below it carries, so everything else is
-// prose around it.
-func separates(r rune) bool {
-	if unicode.IsLetter(r) || unicode.IsDigit(r) {
-		return false
-	}
-	return !strings.ContainsRune("/-_@.~", r)
-}
-
 // discloses reports whether serving s would surface a parent §4.6 hides.
 //
-// Spec: §4.6 hidden parents. The guarantee is about the parent's existence and
-// ID reaching the requester, so the test is whether a chain parent's ID stands
-// as a reference anywhere in the value rather than whether the whole value is
-// that reference. It fires on the ID with or without a version pin, on the
-// path spellings of it that carry leading or trailing slashes, on a path below
-// it such as shared/parent/CHARTER.md, which names the parent's directory as
-// squarely as the bare ID does, and on a sentence that quotes it. A value in
-// which the ID appears only as part of a longer identifier or a longer path,
-// such as shared/parent-legacy or docs/shared/parent.md, names a different
-// artifact and stays inheritable, which is what keeps §4.6's omitted-field rule
-// working.
+// Spec: §4.6 hidden parents. The test is whether the value stands as an
+// artifact reference to a chain parent, so s is a disclosure when it equals a
+// parent's ID once its version pin and its surrounding whitespace and slashes
+// are removed. A value that only contains those characters names a different
+// artifact or none at all: shared/parent-legacy and docs/shared/parent.md are
+// other IDs, shared/parent/CHARTER.md is a path the registry resolves nothing
+// from, and a sentence quoting the ID is prose an extension key carries. All of
+// them stay inheritable, which is what keeps §4.6's omitted-field rule working
+// for the keys an extension type contributes.
 //
 // A same-ID overlay is the exception. §4.6's collision rule lets the
 // higher-precedence artifact extend its own canonical ID, and that ID is the one
@@ -341,44 +341,33 @@ func separates(r rune) bool {
 // tells them a second row for the ID exists, which is the parent's existence,
 // so a pinned reference to it still fails the read.
 func (p parentIDs) discloses(s string) bool {
-	for _, token := range strings.FieldsFunc(s, separates) {
-		ref, _, pinned := strings.Cut(token, "@")
-		if p.disclosesRef(strings.Trim(ref, "/."), pinned) {
-			return true
-		}
-	}
-	return false
+	ref, _, pinned := strings.Cut(strings.TrimSpace(s), "@")
+	own, named := p[strings.Trim(ref, "/")]
+	return named && (!own || pinned)
 }
 
-// disclosesRef reports whether one reference, already reduced to its canonical
-// spelling, hands the requester a chain parent's ID.
-func (p parentIDs) disclosesRef(ref string, pinned bool) bool {
-	for id, own := range p {
-		if ref != id && !strings.HasPrefix(ref, id+"/") {
-			continue
-		}
-		if !own || pinned {
-			return true
-		}
-	}
-	return false
-}
-
-// names reports whether any scalar reachable from n discloses a parent. It
-// walks the whole subtree, so an ID nested in a list or a mapping, or standing
-// as a key, is found on the same terms as a top-level scalar. It does not
-// follow an alias, whose target is either a node this walk reaches anyway or
-// one the assembled block cannot resolve, which the read-back below catches.
+// names reports whether any node reachable from n discloses a parent. It walks
+// the whole subtree, so an ID nested in a list or a mapping, or standing as a
+// key, is found on the same terms as a top-level scalar.
+//
+// An anchor name and an alias name are tested beside the values, because
+// yaml.Marshal re-emits both and either is author-controlled text that would
+// otherwise spell a parent's ID into the served block. An alias is not followed:
+// its target is either a node this walk reaches anyway or one the assembled
+// block cannot resolve, which the read-back catches.
 //
 // Spec: §4.6 hidden parents.
 func (p parentIDs) names(n *yaml.Node) bool {
-	// Not reachable: the caller passes a node the decoder produced or one the
-	// assembler built, and neither holds a nil child. The guard is kept
-	// because the alternative to returning here is a panic on the §4.6 path.
+	// Not reachable: the caller passes a node the decoder produced, which
+	// holds no nil child. The guard is kept because the alternative to
+	// returning here is a panic on the §4.6 path.
 	if n == nil {
 		return false
 	}
-	if n.Kind == yaml.ScalarNode && p.discloses(n.Value) {
+	if p.discloses(n.Anchor) {
+		return true
+	}
+	if (n.Kind == yaml.ScalarNode || n.Kind == yaml.AliasNode) && p.discloses(n.Value) {
 		return true
 	}
 	for _, c := range n.Content {
@@ -413,10 +402,7 @@ func hidesParent(header []byte) bool {
 //
 // It shares hidesParent with SerializeMerged and applies no parent-ID test,
 // because proposal 0009 settled the search descriptor on the node-level strip
-// of the record's own block and this repair does not reopen it. A child whose
-// own block spells a chain parent's ID under some other key is therefore served
-// a descriptor by the search path while the load path refuses it, which is the
-// descriptor's question rather than this helper's. Spec: §4.6.
+// of the record's own block and this repair does not reopen it. Spec: §4.6.
 //
 // The guard is scoped to what the parser resolves rather than to the literal
 // top-level key. ParseArtifact resolves YAML merge keys, so a child can carry
