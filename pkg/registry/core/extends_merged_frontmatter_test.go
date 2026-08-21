@@ -120,10 +120,8 @@ func TestExtendsFrontmatter_ChildWinsOnASharedUndeclaredKey(t *testing.T) {
 // Spec: §4.6 hidden parents — the guarantee covers the parent's ID under any
 // key, and under any key the parser resolves back into an `extends` value. A
 // child whose reference arrives through a YAML merge key keeps an operative
-// `extends` inside the mapping it merges in. That mapping spells the parent's
-// ID, so the disclosure test refuses it, and the merge key aliasing it would
-// otherwise restore an operative `extends` into the assembled block, which the
-// read-back refuses in turn. The load fails closed with
+// `extends` inside the mapping it merges in. Restoring that mapping would put an
+// extends entry back into the served block, so the load fails closed with
 // `registry.invalid_argument`.
 //
 // This removes a load that succeeded before the change: the closed round-trip
@@ -170,14 +168,14 @@ func TestExtendsFrontmatter_AliasIntoADeclaredKeyFailsClosed(t *testing.T) {
 	assertFailsClosed(t, got, err)
 }
 
-// parentNamingValues are the spellings that hand the requester the parent's ID
-// together with the evidence that the artifact exists.
+// parentNamingValues are the spellings that resolve to the hidden parent's
+// reference, which is what hands the requester its ID together with the
+// evidence that the artifact exists.
 var parentNamingValues = map[string]string{
-	"the parent's id":             "shared/parent",
-	"a pinned reference":          "shared/parent@2.0.0",
-	"a path below the parent":     "shared/parent/CHARTER.md",
-	"prose quoting the id":        "see shared/parent for details",
-	"the id at the end of a line": "owner is shared/parent.",
+	"the parent's id":          "shared/parent",
+	"a pinned reference":       "shared/parent@2.0.0",
+	"a rooted spelling":        "/shared/parent",
+	"a doubly rooted spelling": "//shared/parent",
 }
 
 // Spec: §4.6 hidden parents — a value the child inherits that spells the
@@ -198,11 +196,12 @@ func TestExtendsFrontmatter_InheritedValuesSpellingTheParentFailClosed(t *testin
 	}
 }
 
-// Spec: §4.6 hidden parents — §4.6 constrains the block the registry serves and
-// says nothing about which member of the chain wrote the text in it, so a value
-// the child itself authored that spells the parent's ID fails the load on the
-// same terms as an inherited one.
-func TestExtendsFrontmatter_ChildAuthoredValuesNamingTheParentFailClosed(t *testing.T) {
+// Spec: §4.6 hidden parents, §2.2 — the child's own frontmatter is what
+// search_artifacts already serves this requester verbatim, so a value the child
+// itself authored that spells its parent's ID discloses nothing further and is
+// served. Refusing it would make load_artifact reject an artifact
+// search_artifacts still describes.
+func TestExtendsFrontmatter_ChildAuthoredValuesNamingTheParentAreServed(t *testing.T) {
 	t.Parallel()
 	for name, value := range parentNamingValues {
 		t.Run(name, func(t *testing.T) {
@@ -211,22 +210,34 @@ func TestExtendsFrontmatter_ChildAuthoredValuesNamingTheParentFailClosed(t *test
 				"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
 				"---\ntype: agent\nversion: 2.0.0\ndescription: child\nx_base: '"+value+"'\n"+
 					"extends: shared/parent@1.x\n---\n\nchild body\n")
-			assertFailsClosed(t, got, err)
+			if err != nil {
+				t.Fatalf("LoadArtifact: %v", err)
+			}
+			if served := decodeServedMapping(t, got.Frontmatter); served["x_base"] != value {
+				t.Errorf("x_base = %v, want %q\n%s", served["x_base"], value, got.Frontmatter)
+			}
+			if strings.Contains(string(got.Frontmatter), "extends:") {
+				t.Errorf("the served frontmatter still names the hidden parent:\n%s", got.Frontmatter)
+			}
 		})
 	}
 }
 
-// Spec: §4.6 omitted fields — the disclosure test fires where the parent's ID
-// sits at an identifier boundary, so an artifact whose ID continues past the
-// parent's and one that ends with the parent's are inherited rather than
-// dropped. That is what keeps the omitted-field rule working for ordinary
-// extension keys.
+// Spec: §4.6 omitted fields — the disclosure test fires on a value that resolves
+// to the parent's reference, so an artifact whose ID continues past the
+// parent's, a path below the parent, and a sentence quoting the ID are all
+// inherited rather than dropped. That is what keeps the omitted-field rule
+// working for ordinary extension keys, and what keeps one authored sentence
+// from ending every read in the registry.
 func TestExtendsFrontmatter_ValueNamingAnotherArtifactIsServed(t *testing.T) {
 	t.Parallel()
 	for name, value := range map[string]string{
 		"longer identifier":             "shared/parent-legacy",
 		"id under a longer path":        "docs/shared/parent.md",
 		"id as a trailing path segment": "team/shared/parent@2.0.0",
+		"a path below the parent":       "shared/parent/CHARTER.md",
+		"prose quoting the id":          "see shared/parent for details",
+		"the id at the end of a line":   "owner is shared/parent.",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -244,28 +255,38 @@ func TestExtendsFrontmatter_ValueNamingAnotherArtifactIsServed(t *testing.T) {
 	}
 }
 
-// Spec: §4.4, §4.6 hidden parents — the declared fields are part of the served
-// block, so the §4.6 test covers them too. A child deprecated in favour of the
-// artifact it extends points at that artifact, and an inherited description that
-// quotes the parent's ID carries it into a field the child never authored, so
-// both fail the load rather than handing the requester the hidden ID.
-func TestExtendsFrontmatter_DeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
+// Spec: §4.4, §4.6 — the typed serialization owns the declared fields and
+// carries the §4.6 merge semantics for them, and the same fields already reach
+// this requester on the search path, so the restored-key disclosure test leaves
+// them alone. A child deprecated in favour of the artifact it extends is served
+// its pointer, and a child that inherits a description quoting the parent's ID
+// is served that description.
+func TestExtendsFrontmatter_DeclaredFieldNamingTheParentIsServed(t *testing.T) {
 	t.Parallel()
-	for name, in := range map[string]struct{ parent, child string }{
+	for name, in := range map[string]struct {
+		parent, child, key, want string
+	}{
 		"the child's own replaced_by pointer": {
 			"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
 			"---\ntype: agent\nversion: 2.0.0\ndescription: child\ndeprecated: true\n" +
 				"replaced_by: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
+			"replaced_by", "shared/parent",
 		},
 		"a description inherited from the parent": {
 			"---\ntype: agent\nversion: 1.0.0\ndescription: the shared/parent baseline\n---\n\nparent body\n",
 			"---\ntype: agent\nversion: 2.0.0\nextends: shared/parent@1.x\n---\n\nchild body\n",
+			"description", "the shared/parent baseline",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			got, err := emfLoad(t, in.parent, in.child)
-			assertFailsClosed(t, got, err)
+			if err != nil {
+				t.Fatalf("LoadArtifact: %v", err)
+			}
+			if served := decodeServedMapping(t, got.Frontmatter); served[in.key] != in.want {
+				t.Errorf("%s = %v, want %q\n%s", in.key, served[in.key], in.want, got.Frontmatter)
+			}
 		})
 	}
 }
@@ -306,17 +327,18 @@ func assertFailsClosed(t *testing.T, got *core.LoadArtifactResult, err error) {
 // frontmatter key the manifest.Artifact struct does not declare. The
 // comparison holds for a key the child itself authored, which is what the
 // search descriptor serves; a key the child inherits reaches the load path
-// through the merge and the search path through the indexed columns.
-// A value that names the parent has no comparison to make: the load path
-// refuses the artifact outright under §4.6, so the surfaces have nothing to
-// disagree about. A value that merely resembles the parent's ID is compared
-// here, because that is where the two paths could still diverge.
+// through the merge and the search path through the indexed columns. A key
+// whose value names the parent is compared here too, because the search
+// descriptor serves the child's own block whatever it says, so a load path that
+// refused the value would put the two surfaces back into disagreement.
 func TestExtendsFrontmatter_ChildKeyMatchesTheSearchDescriptor(t *testing.T) {
 	t.Parallel()
 	for name, key := range map[string]struct{ name, value string }{
 		"an ordinary key":               {"x_runbook", "ops/pay.md"},
 		"a key naming another artifact": {"x_base", "shared/parent-legacy"},
 		"a key naming a longer path":    {"x_docs", "docs/shared/parent.md"},
+		"a key naming the parent":       {"x_base", "shared/parent"},
+		"a key pinning the parent":      {"x_base", "shared/parent@1.x"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -385,6 +407,7 @@ func TestExtendsFrontmatter_SameIDOverlayHidesOnlyTheLowerRowsExtras(t *testing.
 		"a path below its own id":             {"x_owner: shared/base/README.md\n", true},
 		"a pinned reference to the lower row": {"x_owner: shared/base@1.0.0\n", false},
 		"a nested extends entry":              {"base_ref:\n  extends: shared/base@1.0.0\n", false},
+		"an unpinned nested extends entry":    {"base_ref:\n  extends: shared/base\n", false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

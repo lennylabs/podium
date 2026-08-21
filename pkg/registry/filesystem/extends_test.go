@@ -331,12 +331,12 @@ func TestWalk_ResolveExtendsFailsOnAnInheritedKeyNamingTheGrandparent(t *testing
 	}
 }
 
-// Spec: §4.6 hidden parents, §11 — §4.6 constrains the merged block the
-// registry serves and says nothing about which member of the chain wrote the
-// text in it, so a key the child authored that names its own parent fails the
-// walk exactly as an inherited one does. The server mode refuses the same
-// artifact, so the two deployment modes materialize the same tree (§11, §2.2).
-func TestWalk_ResolveExtendsFailsOnTheChildsOwnKeyNamingItsParent(t *testing.T) {
+// Spec: §4.6 hidden parents, §11 — a key the child authored that names its own
+// parent is the child's own text, which every surface serving the child's block
+// already carries, so the merged block keeps it and the walk succeeds. The
+// server mode serves the same artifact, so the two deployment modes materialize
+// the same tree (§11, §2.2).
+func TestWalk_ResolveExtendsServesTheChildsOwnKeyNamingItsParent(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
@@ -355,12 +355,28 @@ func TestWalk_ResolveExtendsFailsOnTheChildsOwnKeyNamingItsParent(t *testing.T) 
 		t.Fatalf("Open: %v", err)
 	}
 	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
-	if !errors.Is(err, manifest.ErrUnhidableParent) {
-		t.Fatalf("Walk err = %v, want ErrUnhidableParent", err)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
 	}
-	if got != nil {
-		t.Errorf("a failed walk returned records: %v", idsOf(got))
+	child := recordByID(t, got, "team/child")
+	if !strings.Contains(string(child.ArtifactBytes), "x_base: shared/parent") {
+		t.Errorf("the merged block dropped the child's own key:\n%s", child.ArtifactBytes)
 	}
+	if strings.Contains(string(child.ArtifactBytes), "extends:") {
+		t.Errorf("the merged block still names the hidden parent:\n%s", child.ArtifactBytes)
+	}
+}
+
+// recordByID returns the walked record with the given canonical ID.
+func recordByID(t *testing.T, got []ArtifactRecord, id string) ArtifactRecord {
+	t.Helper()
+	for _, r := range got {
+		if r.ID == id {
+			return r
+		}
+	}
+	t.Fatalf("walk returned no record for %q: %v", id, idsOf(got))
+	return ArtifactRecord{}
 }
 
 // Spec: §4.6 hidden parents, §11 — a child whose extends reference is carried
