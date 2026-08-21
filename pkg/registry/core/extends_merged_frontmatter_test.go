@@ -198,6 +198,46 @@ func TestExtendsFrontmatter_KeyReferencingTheParentFailsClosed(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 hidden parents — the guarantee covers the parent's existence and
+// ID rather than values that are reference-shaped, so a key whose value spells
+// the parent's ID inside a longer path discloses the parent as plainly as a
+// bare reference. The load fails closed with `registry.invalid_argument`.
+func TestExtendsFrontmatter_PathNamingTheParentFailsClosed(t *testing.T) {
+	t.Parallel()
+	for name, value := range map[string]string{
+		"path below the parent":  "shared/parent/CHARTER.md",
+		"id under a longer path": "docs/shared/parent.md",
+		"prose quoting the id":   "see shared/parent@1.x for details",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			got, err := emfLoad(t,
+				"---\ntype: agent\nversion: 1.0.0\ndescription: parent\nx_charter: "+value+"\n---\n\nparent body\n",
+				"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
+					"extends: shared/parent@1.x\n---\n\nchild body\n")
+			assertFailsClosed(t, got, err)
+		})
+	}
+}
+
+// Spec: §4.6 omitted fields — the parent's ID has to appear as a token for the
+// disclosure test to fire, so an inherited value naming a different artifact
+// whose ID begins with the parent's is served rather than costing the child its
+// load.
+func TestExtendsFrontmatter_ValueNamingAnotherArtifactIsServed(t *testing.T) {
+	t.Parallel()
+	got, err := emfLoad(t,
+		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\nx_base: shared/parent-legacy\n---\n\nparent body\n",
+		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
+			"extends: shared/parent@1.x\n---\n\nchild body\n")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	if served := decodeServedMapping(t, got.Frontmatter); served["x_base"] != "shared/parent-legacy" {
+		t.Errorf("x_base = %v, want %q\n%s", served["x_base"], "shared/parent-legacy", got.Frontmatter)
+	}
+}
+
 // Spec: §4.6 hidden parents — the guarantee covers the block the requester is
 // served rather than the restored keys alone, so a declared field that
 // legitimately holds an artifact reference discloses the parent no more than an

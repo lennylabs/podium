@@ -68,7 +68,7 @@ type MergedBlock struct {
 // non-empty value keeps the child's value. And it applies the §4.6
 // hidden-parent strip to the result, returning ErrUnhidableParent when the
 // block resolves an extends value, when the assembled block names a chain
-// parent under any key, or when the block cannot be read back at all.
+// parent's ID under any key, or when the block cannot be read back at all.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
@@ -104,7 +104,7 @@ func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, erro
 	// serialization emitted the value, a restored key carried it, or the key
 	// itself is named for the parent, so the test runs once over the assembled
 	// mapping rather than over the restored values alone.
-	if referencesAny(root, chainRefs(a, id, chain)) {
+	if namesAny(root, chainRefs(a, id, chain)) {
 		return nil, ErrUnhidableParent
 	}
 
@@ -218,9 +218,9 @@ func parentID(ref string) string {
 	return id
 }
 
-// addParentRef records an extends reference under its canonical ID.
-// referencesAny compares a value's canonical ID against that set, so a value
-// naming the parent under a pin the extends entry does not carry still matches.
+// addParentRef records an extends reference under its canonical ID. namesAny
+// looks for that ID as a token, so a value naming the parent under a pin the
+// extends entry does not carry still matches.
 func addParentRef(refs map[string]bool, ref string) {
 	if id := parentID(ref); id != "" {
 		refs[id] = true
@@ -231,7 +231,7 @@ func addParentRef(refs map[string]bool, ref string) {
 // less the served artifact's own ID.
 //
 // Spec: §4.6 hidden parents. Every ID in the set is a parent the requester may
-// be unable to see, and the served block carries none of them under any key.
+// be unable to see, and no served byte names any of them.
 //
 // The served artifact's own ID is excluded because §4.6 introduces extends as
 // the resolution for two layers contributing one canonical ID, so a same-ID
@@ -250,23 +250,75 @@ func chainRefs(a *Artifact, id string, chain []MergedBlock) map[string]bool {
 	return refs
 }
 
-// referencesAny reports whether any scalar within n is a reference to one of
-// refs. A scalar references a parent when its canonical ID, which is the value
-// with any version pin dropped, is one of the IDs the chain names. The test is
-// a reference test rather than a text search: an ordinary sentence or a path
-// that happens to contain the ID is the value §4.6's omitted-field rule makes
-// inheritable, and refusing it would cost the child the whole load.
-func referencesAny(n *yaml.Node, refs map[string]bool) bool {
+// namesAny reports whether any scalar within n names one of refs. It walks
+// every node of the assembled mapping, so a key name is tested on the same
+// terms as a value.
+//
+// A scalar names a parent when it spells the parent's canonical ID as a token,
+// so the ID discloses the hidden parent whether it stands alone, carries a
+// version pin, sits under a longer path, or is quoted in prose. §4.6 scopes its
+// guarantee to the parent's existence and ID rather than to values that are
+// reference-shaped, and `x_charter: shared/parent/CHARTER.md` discloses the
+// parent as plainly as a bare reference does.
+func namesAny(n *yaml.Node, refs map[string]bool) bool {
 	if n == nil {
 		return false
 	}
-	if n.Kind == yaml.ScalarNode && refs[parentID(n.Value)] {
+	if n.Kind == yaml.ScalarNode && mentionsRef(n.Value, refs) {
 		return true
 	}
 	for _, c := range n.Content {
-		if referencesAny(c, refs) {
+		if namesAny(c, refs) {
 			return true
 		}
+	}
+	return false
+}
+
+// mentionsRef reports whether s spells one of refs as a whole token.
+func mentionsRef(s string, refs map[string]bool) bool {
+	for id := range refs {
+		if containsToken(s, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsToken reports whether id occurs in s bounded on both sides by a byte
+// that cannot continue an identifier. A match inside a longer identifier names
+// something else: "shared/parenthetical" and "shared/parent-legacy" are their
+// own artifacts and stay inheritable. Every other byte bounds the token,
+// including the pin separator, the path separator, and the dot that opens a
+// file extension, so "see shared/parent@1.x for details", "docs/shared/parent",
+// and "docs/shared/parent.md" all name the parent and fail the load closed.
+func containsToken(s, id string) bool {
+	for at := 0; at+len(id) <= len(s); {
+		i := strings.Index(s[at:], id)
+		if i < 0 {
+			return false
+		}
+		i += at
+		before := i == 0 || !identByte(s[i-1])
+		after := i+len(id) == len(s) || !identByte(s[i+len(id)])
+		if before && after {
+			return true
+		}
+		at = i + 1
+	}
+	return false
+}
+
+// identByte reports whether b can continue an identifier, which is what bounds
+// a token in containsToken. A dot is excluded: an artifact ID is built from
+// path segments, so a dot after one opens a file extension and the string is a
+// path to the parent rather than the ID of another artifact.
+func identByte(b byte) bool {
+	switch {
+	case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+		return true
+	case b == '-', b == '_':
+		return true
 	}
 	return false
 }

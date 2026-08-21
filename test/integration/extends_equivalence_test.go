@@ -138,6 +138,62 @@ func TestSyncEquivalence_ExtendsChildMatchesAcrossModes(t *testing.T) {
 	}
 }
 
+// Spec: §11 (filesystem ↔ server equivalence) / §2.2 (shared library), §4.6
+// hidden parents — a child whose merged frontmatter cannot be rewritten into
+// one that names no parent ends the sync in both modes. The filesystem resolver
+// fails the walk with manifest.ErrUnhidableParent and the server mode fails the
+// load with registry.invalid_argument, which `pkg/sync` reports without
+// materializing anything, so neither mode writes a tree the other refuses.
+func TestSyncEquivalence_UnhidableParentFailsBothModes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	write := func(rel, body string) {
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", rel, err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	// The parent authors a key holding its own canonical ID, which the child
+	// inherits under §4.6's omitted-field rule, so the merged block would name
+	// the parent the requester may be unable to see.
+	write("shared/base/ARTIFACT.md",
+		"---\ntype: context\nversion: 1.0.0\ndescription: the base context\n"+
+			"x_charter: shared/base/CHARTER.md\n---\n\nbase prose\n")
+	write("team/derived/ARTIFACT.md",
+		"---\ntype: context\nversion: 2.0.0\ndescription: the derived context\n"+
+			"extends: shared/base@1.x\n---\n\nderived prose\n")
+	write("team/other/ARTIFACT.md",
+		"---\ntype: context\nversion: 1.0.0\ndescription: an unrelated context\n---\n\nother prose\n")
+
+	fsTarget := t.TempDir()
+	if _, err := sync.Run(sync.Options{RegistryPath: dir, Target: fsTarget}); err == nil {
+		t.Fatalf("filesystem sync.Run succeeded on a child that cannot hide its parent:\n%v", materializedTree(t, fsTarget))
+	}
+
+	srv, err := server.NewFromFilesystem(dir)
+	if err != nil {
+		t.Fatalf("NewFromFilesystem: %v", err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	srvTarget := t.TempDir()
+	if _, err := sync.Run(sync.Options{RegistryPath: ts.URL, Target: srvTarget}); err == nil {
+		t.Fatalf("server sync.Run succeeded on a child that cannot hide its parent:\n%v", materializedTree(t, srvTarget))
+	}
+
+	for name, target := range map[string]string{"filesystem": fsTarget, "server": srvTarget} {
+		for path, content := range materializedTree(t, target) {
+			if strings.Contains(content, "shared/base") {
+				t.Errorf("%s mode materialized %s naming the hidden parent:\n%s", name, path, content)
+			}
+		}
+	}
+}
+
 // soleMaterializedEntry returns the content of the single materialized path
 // containing want, failing when the tree holds no such path or more than one.
 // The target path of an artifact depends on the adapter, so the assertion

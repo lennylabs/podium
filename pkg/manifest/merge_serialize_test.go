@@ -293,19 +293,41 @@ func TestSerializeMerged_DeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents. A value that is not a reference to the parent is
-// served whichever block authored it. The disclosure test compares canonical
-// IDs, so a longer identifier, a path below the parent, and prose that quotes
-// the reference are all values §4.6's omitted-field rule makes inheritable, and
-// refusing them would cost the child the whole load.
-func TestSerializeMerged_ValuesThatAreNotReferencesAreServed(t *testing.T) {
+// Spec: §4.6 hidden parents. §4.6 scopes its guarantee to the parent's
+// existence and ID rather than to values that are reference-shaped, so a value
+// spelling the ID inside longer text discloses the parent as plainly as a bare
+// reference and fails the load closed whichever block authored it.
+func TestSerializeMerged_ValueSpellingTheParentIDFailsClosed(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"path below the parent":       "shared/parent/CHARTER.md",
+		"id under a longer path":      "docs/shared/parent.md",
+		"prose quoting the reference": "see shared/parent@1.x for details",
+	}
+	for name, value := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			forEachOrigin(t, value, func(t *testing.T, chain []manifest.MergedBlock) {
+				out, err := serializeChild(chain)
+				if !errors.Is(err, manifest.ErrUnhidableParent) {
+					t.Fatalf("err = %v, want ErrUnhidableParent", err)
+				}
+				if out != nil {
+					t.Errorf("a block that names the parent must not be returned: %s", out)
+				}
+			})
+		})
+	}
+}
+
+// Spec: §4.6 hidden parents. The ID has to appear as a token, so a longer
+// identifier that merely begins with it names a different artifact and stays
+// inheritable under §4.6's omitted-field rule.
+func TestSerializeMerged_ValuesNamingAnotherArtifactAreServed(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
 		"longer word":                       "shared/parent-legacy",
 		"identifier continuing past the id": "shared/parenthetical",
-		"path below the parent":             "shared/parent/README.md",
-		"prose quoting the reference":       "see shared/parent@1.x for details",
-		"id under a longer path":            "docs/shared/parent",
 	}
 	for name, value := range cases {
 		t.Run(name, func(t *testing.T) {
