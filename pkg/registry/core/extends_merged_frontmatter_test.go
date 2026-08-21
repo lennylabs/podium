@@ -154,18 +154,22 @@ func TestExtendsFrontmatter_AnchoredReferenceFailsClosed(t *testing.T) {
 	assertFailsClosed(t, got, err)
 }
 
-// Spec: §4.6 hidden parents — the typed serialization re-emits a declared key
-// without the anchor it carried, so a restored key that aliases that anchor
-// strands and the assembled block is not readable YAML. It is the same input
-// class as the anchored extends value, and the load fails closed rather than
-// serving a block whose contents were never verified.
-func TestExtendsFrontmatter_AliasIntoADeclaredKeyFailsClosed(t *testing.T) {
+// Spec: §4.6 omitted fields — the typed serialization re-emits a declared key
+// without the anchor it carried, so a restored key that aliases that anchor has
+// no target left in the assembled block. The merge expands the alias into the
+// value it points at, so the key is inherited and the anchor costs no load.
+func TestExtendsFrontmatter_AliasIntoADeclaredKeyIsExpanded(t *testing.T) {
 	t.Parallel()
 	got, err := emfLoad(t,
 		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
 		"---\ntype: agent\nversion: 2.0.0\ndescription: &d child\n"+
 			"x_note: *d\nextends: shared/parent@1.x\n---\n\nchild body\n")
-	assertFailsClosed(t, got, err)
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	if served := decodeServedMapping(t, got.Frontmatter); served["x_note"] != "child" {
+		t.Errorf("x_note = %v, want %q\n%s", served["x_note"], "child", got.Frontmatter)
+	}
 }
 
 // parentNamingValues are the spellings under which a restored key stands as a
@@ -200,22 +204,19 @@ func TestExtendsFrontmatter_InheritedValuesSpellingTheParentFailClosed(t *testin
 	}
 }
 
-// Spec: §4.6 hidden parents — the guarantee covers the block the registry
-// serves and says nothing about who wrote a value, so a key the child authored
-// itself fails the load on the same terms as one it inherits. The child's own
-// bytes still reach this requester as `raw_frontmatter` and through the search
-// descriptor, which are separate surfaces with their own §4.6 questions and are
-// out of scope for the merged block.
-func TestExtendsFrontmatter_ChildAuthoredValuesSpellingTheParentFailClosed(t *testing.T) {
+// Spec: §4.6 hidden parents, §2.2 — a key the child authored itself is served,
+// under every spelling of the parent's ID, and it is served with the value
+// `search_artifacts` serves for the same artifact. The child's own bytes reach
+// this requester as `raw_frontmatter` and through the search descriptor, so
+// refusing the merged block would cost the read without changing what the
+// requester learns, and it would put the load path back into the disagreement
+// with the search path that restoring these keys removes.
+func TestExtendsFrontmatter_ChildAuthoredValuesSpellingTheParentAreServed(t *testing.T) {
 	t.Parallel()
 	for name, value := range parentNamingValues {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			got, err := emfLoad(t,
-				"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
-				"---\ntype: agent\nversion: 2.0.0\ndescription: child\nx_base: '"+value+"'\n"+
-					"extends: shared/parent@1.x\n---\n\nchild body\n")
-			assertFailsClosed(t, got, err)
+			assertLoadMatchesSearch(t, "x_base", value)
 		})
 	}
 }
@@ -252,22 +253,22 @@ func TestExtendsFrontmatter_ValueNamingAnotherArtifactIsServed(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents — the guarantee covers the block the registry
-// serves, so a declared field is held to it like a restored key. §4.6's own
-// merge table carries artifact references down a chain: `delegates_to` and
-// `external_resources` append the parent's entries onto the child's, and
-// `replaced_by` is the child's or the parent's. Each of those hands the parent's
-// canonical ID to a requester who cannot see the parent's layer, so the load
-// fails closed with `registry.invalid_argument`.
-func TestExtendsFrontmatter_DeclaredFieldsNamingTheParentFailClosed(t *testing.T) {
+// Spec: §4.6 field semantics — the typed serialization is authoritative for
+// every declared key, because only it carries the merge table. `delegates_to`
+// and `external_resources` append the parent's entries onto the child's, and
+// `replaced_by` takes the child's value, so each of those rows can put the
+// parent's canonical ID on a declared field. The table fixes the outcome, and
+// the served block carries what the merge produced.
+func TestExtendsFrontmatter_DeclaredFieldsFollowTheMergeTable(t *testing.T) {
 	t.Parallel()
-	for name, tc := range map[string]struct{ parentKeys, childKeys string }{
+	for name, tc := range map[string]struct{ parentKeys, childKeys, want string }{
 		"a deprecation pointer the child wrote": {
-			"", "deprecated: true\nreplaced_by: shared/parent\n"},
+			"", "deprecated: true\nreplaced_by: shared/parent\n", "replaced_by"},
 		"a delegates_to entry the child inherits": {
-			"delegates_to: [shared/parent]\n", ""},
+			"delegates_to: [shared/parent]\n", "", "delegates_to"},
 		"an external resource the child inherits": {
-			"external_resources:\n  - path: shared/parent\n    url: https://acme.example/parent\n", ""},
+			"external_resources:\n  - path: shared/parent\n    url: https://acme.example/parent\n",
+			"", "external_resources"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -276,7 +277,15 @@ func TestExtendsFrontmatter_DeclaredFieldsNamingTheParentFailClosed(t *testing.T
 					"---\n\nparent body\n",
 				"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+tc.childKeys+
 					"extends: shared/parent@1.x\n---\n\nchild body\n")
-			assertFailsClosed(t, got, err)
+			if err != nil {
+				t.Fatalf("LoadArtifact: %v", err)
+			}
+			if served := decodeServedMapping(t, got.Frontmatter); served[tc.want] == nil {
+				t.Errorf("the served block dropped %s:\n%s", tc.want, got.Frontmatter)
+			}
+			if strings.Contains(string(got.Frontmatter), "extends:") {
+				t.Errorf("the served frontmatter still names the hidden parent:\n%s", got.Frontmatter)
+			}
 		})
 	}
 }
@@ -333,16 +342,13 @@ func assertFailsClosed(t *testing.T, got *core.LoadArtifactResult, err error) {
 
 // Spec: §4.6, §2.2 — load_artifact and search_artifacts serve the same
 // artifact through two paths, and defect 3 was the two disagreeing about a
-// frontmatter key the manifest.Artifact struct does not declare. The
-// comparison holds for a key the child itself authored, which is what the
-// search descriptor serves; a key the child inherits reaches the load path
-// through the merge and the search path through the indexed columns. The cases
-// run values the load path's §4.6 disclosure test inspects and admits,
-// including two that carry the parent's ID without standing as a reference to
-// it, so the comparison exercises the predicate rather than avoiding it. The one
-// class the two paths still answer differently is a child-authored value that is
-// a reference to the hidden parent, which §4.6 requires the merged block to
-// refuse.
+// frontmatter key the manifest.Artifact struct does not declare. The comparison
+// holds for a key the child itself authored, which is what the search
+// descriptor serves; a key the child inherits reaches the load path through the
+// merge and the search path through the indexed columns. The cases run values
+// the load path's §4.6 disclosure test inspects and admits, including several
+// that carry the parent's ID without standing as a reference to it, so the
+// comparison exercises the predicate rather than avoiding it.
 func TestExtendsFrontmatter_ChildKeyMatchesTheSearchDescriptor(t *testing.T) {
 	t.Parallel()
 	for name, key := range map[string]struct{ name, value string }{
@@ -354,31 +360,41 @@ func TestExtendsFrontmatter_ChildKeyMatchesTheSearchDescriptor(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n"
-			child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-				key.name + ": " + key.value + "\nextends: shared/parent@1.x\n---\n\nchild body\n"
-			reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
-
-			loaded, err := reg.LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
-			if err != nil {
-				t.Fatalf("LoadArtifact: %v", err)
-			}
-			res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
-			if err != nil {
-				t.Fatalf("SearchArtifacts: %v", err)
-			}
-			descriptor := findResult(t, res, "finance/child")
-
-			fromLoad := decodeServedMapping(t, loaded.Frontmatter)
-			fromSearch := decodeServedMapping(t, []byte(descriptor.Frontmatter))
-			if fromSearch[key.name] != key.value {
-				t.Fatalf("the search descriptor dropped the child's own key: %q", descriptor.Frontmatter)
-			}
-			if fromLoad[key.name] != fromSearch[key.name] {
-				t.Errorf("load_artifact serves %s = %v, search_artifacts serves %v",
-					key.name, fromLoad[key.name], fromSearch[key.name])
-			}
+			assertLoadMatchesSearch(t, key.name, key.value)
 		})
+	}
+}
+
+// assertLoadMatchesSearch ingests a child that authors key with value and
+// requires that load_artifact and search_artifacts serve the same value for it.
+// The value is authored as a quoted scalar so a spelling carrying a slash or a
+// version pin still authors one scalar.
+func assertLoadMatchesSearch(t *testing.T, key, value string) {
+	t.Helper()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+		key + ": '" + strings.ReplaceAll(value, "'", "''") + "'\n" +
+		"extends: shared/parent@1.x\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	loaded, err := reg.LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	descriptor := findResult(t, res, "finance/child")
+
+	fromLoad := decodeServedMapping(t, loaded.Frontmatter)
+	fromSearch := decodeServedMapping(t, []byte(descriptor.Frontmatter))
+	if fromSearch[key] != value {
+		t.Fatalf("the search descriptor dropped the child's own key: %q", descriptor.Frontmatter)
+	}
+	if fromLoad[key] != fromSearch[key] {
+		t.Errorf("load_artifact serves %s = %v, search_artifacts serves %v",
+			key, fromLoad[key], fromSearch[key])
 	}
 }
 
@@ -433,26 +449,22 @@ func TestExtendsFrontmatter_EmptyChildCollectionWins(t *testing.T) {
 
 // Spec: §4.6 hidden parents, §4.6 collisions — a child may extend its own
 // canonical ID, and the parent is then the row below it in layer order, in a
-// layer the requester may not be able to see. The ID is the one the requester
-// supplied to read the artifact, so an inherited key that spells it discloses
-// nothing and the overlay loads. A pin on it names a version the requester was
-// not served, which reports that a second row exists, so that spelling fails the
-// load like any other chain parent. A nested extends entry follows the same
-// rule, because ParseArtifact resolves the top-level entry and the block's merge
-// keys, so a nested one is inherited text rather than a reference the next read
-// acts on.
-func TestExtendsFrontmatter_SameIDOverlayHidesOnlyTheLowerRowsExtras(t *testing.T) {
+// layer the requester may not be able to see. That row is a chain parent like
+// any other, so an inherited key standing as a reference to it fails the load
+// with `registry.invalid_argument`, whatever the spelling and at whatever depth
+// the reference sits. A value that carries the ID without standing as a
+// reference to it stays inheritable.
+func TestExtendsFrontmatter_SameIDOverlayHidesTheRowBelow(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
 		key    string
 		keys   string
 		served bool
 	}{
-		"the bare canonical id":               {"x_owner", "x_owner: shared/base\n", true},
+		"the bare canonical id":               {"x_owner", "x_owner: shared/base\n", false},
 		"a path below its own id":             {"x_owner", "x_owner: shared/base/README.md\n", true},
 		"a pinned reference to the lower row": {"x_owner", "x_owner: shared/base@1.0.0\n", false},
 		"a nested extends entry":              {"base_ref", "base_ref:\n  extends: shared/base@1.0.0\n", false},
-		"an unpinned nested extends entry":    {"base_ref", "base_ref:\n  extends: shared/base\n", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

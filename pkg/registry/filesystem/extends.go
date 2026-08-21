@@ -67,7 +67,7 @@ func resolveExtends(deduped, all []ArtifactRecord) error {
 		// identical bytes for the same artifact (§11). The helper restores the
 		// frontmatter keys manifest.Artifact does not declare, which a typed
 		// round-trip drops.
-		bytes, serr := manifest.SerializeMerged(merged, rec.ID, authoredChain(rec, idx, deduped, effective, layered)...)
+		bytes, serr := manifest.SerializeMerged(merged, authoredChain(rec, idx, deduped, effective, layered)...)
 		if serr != nil {
 			return fmt.Errorf("extends: re-serialize %q: %w", rec.ID, serr)
 		}
