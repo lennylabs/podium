@@ -331,11 +331,11 @@ func TestWalk_ResolveExtendsFailsOnAnInheritedKeyNamingTheGrandparent(t *testing
 	}
 }
 
-// Spec: §4.6 hidden parents, §11 — §4.6 states the guarantee about the block
-// the registry serves, so a key naming the parent fails the walk whether the
-// child or an ancestor authored it. The server mode refuses the same child, so
-// neither deployment mode materializes a tree the other refuses (§11, §2.2).
-func TestWalk_ResolveExtendsFailsOnTheChildsOwnKeyNamingItsParent(t *testing.T) {
+// Spec: §4.6 hidden parents, §11 — a key the child authored itself is served,
+// because the child's own bytes reach the same consumer verbatim through every
+// other read of the record. The server mode serves the same child, so neither
+// deployment mode materializes a tree the other refuses (§11, §2.2).
+func TestWalk_ResolveExtendsServesTheChildsOwnKeyNamingItsParent(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	testharness.WriteTree(t, root,
@@ -354,11 +354,15 @@ func TestWalk_ResolveExtendsFailsOnTheChildsOwnKeyNamingItsParent(t *testing.T) 
 		t.Fatalf("Open: %v", err)
 	}
 	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
-	if !errors.Is(err, manifest.ErrUnhidableParent) {
-		t.Fatalf("Walk err = %v, want ErrUnhidableParent", err)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
 	}
-	if got != nil {
-		t.Errorf("a failed walk returned records: %v", idsOf(got))
+	merged := string(recByID(t, got, "team/child").ArtifactBytes)
+	if !strings.Contains(merged, "x_base: shared/parent") {
+		t.Errorf("the merged block dropped the child's own key:\n%s", merged)
+	}
+	if strings.Contains(merged, "extends:") {
+		t.Errorf("the merged block still names the parent under extends:\n%s", merged)
 	}
 }
 

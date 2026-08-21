@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"strings"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 )
@@ -66,30 +67,31 @@ type MergedBlock struct {
 // frontmatter keys Artifact does not declare, taking them from the chain's
 // authored blocks in parent-first order so a key the child also sets with a
 // non-empty value keeps the child's value. And it holds the assembled block to
-// §4.6's hidden-parent guarantee, returning ErrUnhidableParent when a restored
-// key resolves to a chain parent's reference under its own name or anywhere
-// inside its value, when the assembled block still resolves an extends value,
-// or when any block involved cannot be read back at all.
+// §4.6's hidden-parent guarantee, returning ErrUnhidableParent when the block
+// hands the requester a chain parent's ID under any key, when it still
+// resolves an extends value, or when any block involved cannot be read back at
+// all.
 //
 // Every key §4.6's omitted-field rule makes inheritable reaches the served
 // block or the read fails. A key is never silently dropped, because a consumer
 // cannot tell an inherited-as-nothing key from one the chain never set.
 //
-// The disclosure test is a property of the served block and does not depend on
-// which member of the chain authored the value. It runs over the restored keys
-// rather than over the declared fields, which the typed serialization owns and
-// which carry §4.6's merge semantics the restore step cannot reproduce.
+// The disclosure test runs over the whole assembled mapping, so a declared
+// field carries a parent's ID no more than a restored key does. §4.6 scopes
+// its guarantee to the parent's existence and ID reaching the requester and
+// draws no distinction between the keys Artifact declares and the keys an
+// extension type contributes. The typed serialization stays authoritative for
+// what a declared field's value is, because only it carries §4.6's merge
+// semantics: a union for a list field and the most-restrictive value for
+// sensitivity are not what a last-writer-wins overlay over authored text would
+// produce.
 //
-// It fires on a value that resolves to a parent's reference rather than on one
-// that merely mentions the ID, which is what keeps a single authored sentence
-// from taking the whole registry down: pkg/sync aborts on the first record a
-// resolver refuses, so a test that fired on prose would let one parent's
-// sentence stop every artifact from materializing.
-//
-// The typed serialization stays authoritative for every declared key, because
-// only it carries the §4.6 merge semantics: a union for a list field and the
-// most-restrictive value for sensitivity are not what a last-writer-wins
-// overlay over authored text would produce.
+// A scalar the leaf itself authored is exempt. Those bytes reach the requester
+// verbatim as the served raw frontmatter and as the search descriptor, which
+// this repair leaves alone, so refusing the read over one of them discloses
+// nothing less and costs the artifact its load, putting load_artifact and
+// search_artifacts back into the disagreement this helper exists to end (§2.2).
+// The refusal is therefore scoped to what the merge itself brings in.
 func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, error) {
 	stripped := *a
 	stripped.Extends = ""
@@ -109,23 +111,23 @@ func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, erro
 		return nil, err
 	}
 
-	restored, err := undeclaredKeysOf(chain)
+	authored, err := chainMappings(chain)
 	if err != nil {
 		return nil, err
 	}
-	for _, key := range restored {
+	for _, key := range undeclaredKeysOf(authored) {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
 			uncommented(key.value))
 	}
 
 	// Spec: §4.6 hidden parents. The parent's existence and ID are not
-	// surfaced to the requester, so a restored key that resolves to a chain
-	// parent's reference fails the read at whatever nesting depth it sits and
-	// whichever member of the chain authored it. The body that follows the
-	// block is the leaf's own prose and is out of the block this section
-	// constrains.
-	if parentsOf(a, id, chain).namesRestored(restored) {
+	// surfaced to the requester, so an assembled value that hands over a chain
+	// parent's ID fails the read at whatever nesting depth and under whichever
+	// key it sits, unless the leaf authored that value itself. The body that
+	// follows the block is the leaf's own prose and is out of the block this
+	// section constrains.
+	if parentsOf(a, id, chain).names(root, leafScalarsOf(authored)) {
 		return nil, ErrUnhidableParent
 	}
 
@@ -176,6 +178,30 @@ func mappingOf(src []byte) (*yaml.Node, []byte, error) {
 	return doc.Content[0], body, nil
 }
 
+// chainMappings decodes each chain member's authored block into the mapping
+// node it holds, in chain order, with a nil entry for a member that stored no
+// frontmatter at all. Decoding once here is what lets the restore step and the
+// §4.6 disclosure test read the same nodes.
+//
+// A member that stored a block which does not read back as a mapping fails the
+// read, because the keys that block holds can be neither checked against
+// §4.6's hidden-parent rule nor inherited, and serving the merge without them
+// would drop keys §4.6 makes inheritable.
+func chainMappings(chain []MergedBlock) ([]*yaml.Node, error) {
+	out := make([]*yaml.Node, len(chain))
+	for i, block := range chain {
+		if len(block.Frontmatter) == 0 {
+			continue
+		}
+		m, _, err := mappingOf(block.Frontmatter)
+		if err != nil {
+			return nil, err
+		}
+		out[i] = m
+	}
+	return out, nil
+}
+
 // namedNode pairs a restored key with the node holding its value.
 type namedNode struct {
 	name  string
@@ -203,8 +229,8 @@ func uncommented(n *yaml.Node) *yaml.Node {
 }
 
 // undeclaredKeysOf collects the frontmatter keys Artifact does not declare
-// from the chain's authored blocks, parent first, so a later block's non-empty
-// value for the same key wins. chain's last member is the leaf.
+// from the chain's decoded blocks, parent first, so a later block's non-empty
+// value for the same key wins. The last entry is the leaf's.
 //
 // Spec: §4.6 omitted fields. A child that omits a key, or sets it to an empty
 // scalar, inherits the parent's value, which is what MergeExtends applies to
@@ -212,20 +238,13 @@ func uncommented(n *yaml.Node) *yaml.Node {
 // halves of a merged block agree on what an empty child value means.
 //
 // A chain member that stored no frontmatter at all holds no key to inherit and
-// contributes none. A member that stored a block which does not read back as a
-// mapping fails the read instead, because the keys that block holds can be
-// neither checked against §4.6's hidden-parent rule nor inherited, and serving
-// the merge without them would drop keys §4.6 makes inheritable.
-func undeclaredKeysOf(chain []MergedBlock) ([]namedNode, error) {
+// contributes none.
+func undeclaredKeysOf(authored []*yaml.Node) []namedNode {
 	seen := map[string]int{}
 	out := []namedNode{}
-	for _, block := range chain {
-		if len(block.Frontmatter) == 0 {
+	for _, m := range authored {
+		if m == nil {
 			continue
-		}
-		m, _, err := mappingOf(block.Frontmatter)
-		if err != nil {
-			return nil, err
 		}
 		for i := 0; i+1 < len(m.Content); i += 2 {
 			name := m.Content[i].Value
@@ -244,7 +263,33 @@ func undeclaredKeysOf(chain []MergedBlock) ([]namedNode, error) {
 			out = append(out, namedNode{name: name, value: value})
 		}
 	}
-	return out, nil
+	return out
+}
+
+// leafScalarsOf collects every scalar the chain's leaf authored in its own
+// block, which is the set the §4.6 disclosure test exempts. A chain with no
+// leaf block exempts nothing.
+func leafScalarsOf(authored []*yaml.Node) map[string]bool {
+	out := map[string]bool{}
+	if len(authored) == 0 {
+		return out
+	}
+	collectScalars(authored[len(authored)-1], out)
+	return out
+}
+
+// collectScalars records every scalar reachable from n. n is nil for a chain
+// member that stored no frontmatter, and a decoded node holds no nil child.
+func collectScalars(n *yaml.Node, out map[string]bool) {
+	if n == nil {
+		return
+	}
+	if n.Kind == yaml.ScalarNode {
+		out[n.Value] = true
+	}
+	for _, c := range n.Content {
+		collectScalars(c, out)
+	}
 }
 
 // isEmptyScalar reports whether n carries no value, which covers both spellings
@@ -291,18 +336,30 @@ func (p parentIDs) add(ref, own string) {
 	}
 }
 
+// separates reports whether r ends an artifact reference. The characters a
+// reference itself can hold are letters, digits, and the path, pin, and word
+// punctuation an ID or a filename below it carries, so everything else is
+// prose around it.
+func separates(r rune) bool {
+	if unicode.IsLetter(r) || unicode.IsDigit(r) {
+		return false
+	}
+	return !strings.ContainsRune("/-_@.~", r)
+}
+
 // discloses reports whether serving s would surface a parent §4.6 hides.
 //
 // Spec: §4.6 hidden parents. The guarantee is about the parent's existence and
-// ID reaching the requester, and the value that hands over both is one that
-// resolves to the parent's reference: the ID itself, with or without a version
-// pin, and with or without the leading slashes a path spelling of it carries.
-// A value that merely contains the ID, such as a path below the parent
-// (shared/parent/CHARTER.md) or a sentence quoting it, is not a reference and
-// stays inheritable, which is what keeps §4.6's omitted-field rule working. The
-// registry has no way to tell an author's sentence from a disclosure, and
-// pkg/sync aborts on the first record a resolver refuses, so a test over prose
-// buys nothing and costs every artifact in the registry its materialization.
+// ID reaching the requester, so the test is whether a chain parent's ID stands
+// as a reference anywhere in the value rather than whether the whole value is
+// that reference. It fires on the ID with or without a version pin, on the
+// path spellings of it that carry leading or trailing slashes, on a path below
+// it such as shared/parent/CHARTER.md, which names the parent's directory as
+// squarely as the bare ID does, and on a sentence that quotes it. A value in
+// which the ID appears only as part of a longer identifier or a longer path,
+// such as shared/parent-legacy or docs/shared/parent.md, names a different
+// artifact and stays inheritable, which is what keeps §4.6's omitted-field rule
+// working.
 //
 // A same-ID overlay is the exception. §4.6's collision rule lets the
 // higher-precedence artifact extend its own canonical ID, and that ID is the one
@@ -311,45 +368,49 @@ func (p parentIDs) add(ref, own string) {
 // tells them a second row for the ID exists, which is the parent's existence,
 // so a pinned reference to it still fails the read.
 func (p parentIDs) discloses(s string) bool {
-	ref, _, pinned := strings.Cut(strings.TrimSpace(s), "@")
-	own, named := p[strings.Trim(ref, "/")]
-	if !named {
-		return false
-	}
-	return !own || pinned
-}
-
-// namesRestored reports whether any restored key discloses a chain parent,
-// under its own name or anywhere inside its value. Spec: §4.6 hidden parents.
-// The guarantee is a property of the served block, so which member of the chain
-// authored the value does not enter into it.
-func (p parentIDs) namesRestored(keys []namedNode) bool {
-	for _, key := range keys {
-		if p.discloses(key.name) || p.namesAny(key.value) {
+	for _, token := range strings.FieldsFunc(s, separates) {
+		ref, _, pinned := strings.Cut(token, "@")
+		if p.disclosesRef(strings.Trim(ref, "/."), pinned) {
 			return true
 		}
 	}
 	return false
 }
 
-// namesAny reports whether any scalar reachable from n discloses a parent. It
-// walks the whole subtree, so an ID nested in a list or a mapping, or used as a
-// key inside a restored value, is found on the same terms as a top-level
-// scalar. It does not follow an alias, whose target is either a node this walk
-// reaches anyway or one the assembled block cannot resolve, which the read-back
-// below catches.
-func (p parentIDs) namesAny(n *yaml.Node) bool {
-	// Not reachable: the caller passes a node the decoder produced, and a
-	// decoded node holds no nil child. The guard is kept because the
-	// alternative to returning here is a panic on the §4.6 path.
+// disclosesRef reports whether one reference, already reduced to its canonical
+// spelling, hands the requester a chain parent's ID.
+func (p parentIDs) disclosesRef(ref string, pinned bool) bool {
+	for id, own := range p {
+		if ref != id && !strings.HasPrefix(ref, id+"/") {
+			continue
+		}
+		if !own || pinned {
+			return true
+		}
+	}
+	return false
+}
+
+// names reports whether any scalar reachable from n discloses a parent, taking
+// the scalars in authored as already disclosed. It walks the whole subtree, so
+// an ID nested in a list or a mapping, or standing as a key, is found on the
+// same terms as a top-level scalar. It does not follow an alias, whose target
+// is either a node this walk reaches anyway or one the assembled block cannot
+// resolve, which the read-back below catches.
+//
+// Spec: §4.6 hidden parents.
+func (p parentIDs) names(n *yaml.Node, authored map[string]bool) bool {
+	// Not reachable: the caller passes a node the decoder produced or one the
+	// assembler built, and neither holds a nil child. The guard is kept
+	// because the alternative to returning here is a panic on the §4.6 path.
 	if n == nil {
 		return false
 	}
-	if n.Kind == yaml.ScalarNode && p.discloses(n.Value) {
+	if n.Kind == yaml.ScalarNode && !authored[n.Value] && p.discloses(n.Value) {
 		return true
 	}
 	for _, c := range n.Content {
-		if p.namesAny(c) {
+		if p.names(c, authored) {
 			return true
 		}
 	}
@@ -380,7 +441,10 @@ func hidesParent(header []byte) bool {
 //
 // It shares hidesParent with SerializeMerged and applies no parent-ID test,
 // because proposal 0009 settled the search descriptor on the node-level strip
-// of the record's own block and this repair does not reopen it. Spec: §4.6.
+// of the record's own block and this repair does not reopen it. The two paths
+// still agree on every key the child authored, because SerializeMerged exempts
+// the leaf's own scalars from its disclosure test for that reason (§2.2).
+// Spec: §4.6.
 //
 // The guard is scoped to what the parser resolves rather than to the literal
 // top-level key. ParseArtifact resolves YAML merge keys, so a child can carry
