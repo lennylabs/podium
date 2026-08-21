@@ -1,7 +1,7 @@
 # Proposal 0012: §13 stops offering `oauth-device-code` as a registry provider
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-08-21). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 10 adversarial review rounds (8 findings fixed); "Resolved in adversarial review" records what each pass changed.
+- Status: Implemented (2026-08-21). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 10 adversarial review rounds (8 findings fixed); "Resolved in adversarial review" records what each pass changed.
 - Date: 2026-08-20
 
 This document records a spec-internal contradiction and the edits that resolve it, so a review run stages them rather than rediscovering the analysis.
@@ -47,20 +47,20 @@ This document records a spec-internal contradiction and the edits that resolve i
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §13's identity-provider paragraph (`spec/13-deployment.md:468`) names the registry-process providers and the MCP-server providers separately, and keeps the `injected-session-token` half of the current claim true, with the staged text in "The edits".
+- [x] **S1 · spec** — SPEC-1. §13's identity-provider paragraph (`spec/13-deployment.md:468`) names the registry-process providers and the MCP-server providers separately, and keeps the `injected-session-token` half of the current claim true, with the staged text in "The edits".
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §13's `registry.yaml` example (`spec/13-deployment.md:551`) carries an `identity_provider` block of `type: oidc-jwt`, `issuer`, and `audience`, with the staged text in "The edits".
+- [x] **S2 · spec** — SPEC-2. §13's `registry.yaml` example (`spec/13-deployment.md:551`) carries an `identity_provider` block of `type: oidc-jwt`, `issuer`, and `audience`, with the staged text in "The edits".
       Levels: —. Depends on: —
-- [ ] **S3 · spec** — SPEC-3. §13.2.1's read-only-mode write set (`spec/13-deployment.md:41`) drops the `podium login` token-issuance clause, with the staged text in "The edits".
+- [x] **S3 · spec** — SPEC-3. §13.2.1's read-only-mode write set (`spec/13-deployment.md:41`) drops the `podium login` token-issuance clause, with the staged text in "The edits".
       Levels: —. Depends on: —
-- [ ] **DOC1 · docs** — DOC-1. The two shipped restatements of the §13.2.1 write set drop the same clause S3 strikes: the write-endpoint list in `docs/reference/http-api.md:633` and the read-only-mode impact paragraph in `deploy/runbook.md:18-19`, with the staged text in "The edits".
+- [x] **DOC1 · docs** — DOC-1. The two shipped restatements of the §13.2.1 write set drop the same clause S3 strikes: the write-endpoint list in `docs/reference/http-api.md:633` and the read-only-mode impact paragraph in `deploy/runbook.md:18-19`, with the staged text in "The edits".
       Levels: —. Depends on: S3
-- [ ] **T1 · test** — TEST-1. `TestReadYAMLConfig_SpecExampleNestedBlock` (`internal/serverboot/backend_config_test.go`), `TestRegistryConfig_SpecExampleNestedInterpolation` (`test/e2e/registry_config_format_test.go`), and the `yamlIdentityCfg` comment (`internal/serverboot/yaml_config.go:79-81`) follow the corrected example, with the staged content in "Testing".
+- [x] **T1 · test** — TEST-1. `TestReadYAMLConfig_SpecExampleNestedBlock` (`internal/serverboot/backend_config_test.go`), `TestRegistryConfig_SpecExampleNestedInterpolation` (`test/e2e/registry_config_format_test.go`), and the `yamlIdentityCfg` comment (`internal/serverboot/yaml_config.go:79-81`) follow the corrected example, with the staged content in "Testing".
       Levels: unit, e2e. Depends on: S2
-- [ ] **S4 · spec** — SPEC-4. §13's web-UI paragraph (`spec/13-deployment.md:170`) states that a standard deployment which selects `oidc-jwt` verifies the token a CLI, an SDK, or another API client acquired through the device-code flow, that the web UI runs no acquisition flow of its own and resolves identity from what the request carries, and that the retained gateway sentence applies to the gateway-fronted deployment, and it drops the false contrast implying that a standard deployment outside `oidc-jwt` and `trusted-headers` has another authenticated path, with the staged text in "The edits".
+- [x] **S4 · spec** — SPEC-4. §13's web-UI paragraph (`spec/13-deployment.md:170`) states that a standard deployment which selects `oidc-jwt` verifies the token a CLI, an SDK, or another API client acquired through the device-code flow, that the web UI runs no acquisition flow of its own and resolves identity from what the request carries, and that the retained gateway sentence applies to the gateway-fronted deployment, and it drops the false contrast implying that a standard deployment outside `oidc-jwt` and `trusted-headers` has another authenticated path, with the staged text in "The edits".
       Interleave: this spec step is sequenced after the DOC1 and T1 steps because those consume S3 and S2 rather than S4, so nothing earlier in the sequence reads text S4 stages.
       Levels: —. Depends on: S1, S2, S3
-- [ ] **DOC2 · docs** — DOC-2. The shipped restatement of the line 170 gateway sentence, the web-UI paragraph in `docs/deployment/gateway-delegated-identity.md:107`, takes the same predicate narrowing S4 applies, with the staged text in "The edits".
+- [x] **DOC2 · docs** — DOC-2. The shipped restatement of the line 170 gateway sentence, the web-UI paragraph in `docs/deployment/gateway-delegated-identity.md:107`, takes the same predicate narrowing S4 applies, with the staged text in "The edits".
       Levels: —. Depends on: S4
 
 ## The contradiction
