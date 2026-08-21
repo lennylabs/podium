@@ -1513,7 +1513,7 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			}
 			return nil, fmt.Errorf("%w: artifact %s", ErrNotFound, artifactID)
 		}
-		res, err := r.assembleResult(ctx, rec)
+		res, served, err := r.assembleResult(ctx, rec)
 		if err == nil {
 			// §8.2 manifest-declared redaction + §4.7.5 read-event context:
 			// record the resolved version/content_hash/layer and carry the
@@ -1535,9 +1535,8 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			// The served record rather than the stored one: for an extends
 			// child the two differ, and §4.6 makes audit_redact inheritable,
 			// so reading the leaf's own frontmatter would drop a directive
-			// the child inherits. served falls back to rec for a record with
-			// no extends chain, where the two are the same bytes.
-			served := servedRecord(rec, res)
+			// the child inherits. assembleResult returns rec itself for a
+			// record with no extends chain, where the two are the same bytes.
 			redactKeys := served.AuditRedact
 			if len(redactKeys) == 0 && len(served.Frontmatter) > 0 {
 				if a, perr := manifest.ParseArtifact(served.Frontmatter); perr == nil {
@@ -1649,17 +1648,23 @@ func (r *Registry) recordSessionPin(session, id, ver string) {
 // When the record declares ExtendsPin, the parent is loaded
 // (privilege-bypassing the visibility filter — hidden-parent semantics
 // per §4.6) and field-merged. Cycle detection prevents infinite loops.
-func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord) (*LoadArtifactResult, error) {
+// It also returns the record the caller was served, which is rec for a
+// record with no chain and the merged record otherwise. The §8.2 read
+// emitter needs the merged frontmatter and the merged audit_redact
+// directive, and LoadArtifactResult is a client-facing type that carries
+// neither the directive nor any internal field, so the record travels
+// beside the result rather than widening the wire contract.
+func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord) (*LoadArtifactResult, store.ManifestRecord, error) {
 	if rec.ExtendsPin == "" {
-		return withDeprecationWarning(resultFromRecord(rec)), nil
+		return withDeprecationWarning(resultFromRecord(rec)), rec, nil
 	}
 	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
 	if err != nil {
-		return nil, err
+		return nil, store.ManifestRecord{}, err
 	}
 	merged, err := mergeChain(chain)
 	if err != nil {
-		return nil, err
+		return nil, store.ManifestRecord{}, err
 	}
 	result := resultFromRecord(merged)
 	// This branch runs only for an extends artifact, and mergeChain always
@@ -1671,7 +1676,7 @@ func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord)
 	// was computed over rather than skipping it.
 	result.Merged = true
 	result.RawFrontmatter = append([]byte(nil), rec.Frontmatter...)
-	return withDeprecationWarning(result), nil
+	return withDeprecationWarning(result), merged, nil
 }
 
 // resolveExtendsChain returns the chain of records starting at rec and
@@ -1708,9 +1713,9 @@ func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRe
 // served frontmatter, and not only the indexed Sensitivity record field,
 // observes the merged result. The merged record keeps the child's identity
 // (id, version, content hash, signature, layer, and body), and it surfaces the
-// merged Type, Sensitivity, Deprecated, and ReplacedBy back onto the row. Every
-// other merged field, including the audit_redact directive, reaches its
-// consumers through the re-serialized frontmatter alone.
+// merged Type, Sensitivity, Deprecated, ReplacedBy, and AuditRedact back onto
+// the row. Every other merged field reaches its consumers through the
+// re-serialized frontmatter alone.
 // spec: §4.6 field-semantics table.
 func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	if len(chain) == 0 {
@@ -1758,17 +1763,18 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	// Surface the merged structured fields onto the returned record. Each one
 	// has a consumer that reads it from this record: resultFromRecord copies
 	// Type, Sensitivity, Deprecated, and ReplacedBy onto the result, and
-	// withDeprecationWarning reads the last two. Description, Tags,
-	// SearchVisibility, and the inherited audit_redact directive are
-	// deliberately absent. LoadArtifactResult declares no such fields, the
+	// withDeprecationWarning reads the last two. AuditRedact is inheritable
+	// under §4.6 and manifest.MergeExtends folds it child-wins, so the record
+	// carries the resolved key set the §8.2 read emitter reads off the record
+	// assembleResult returns. Description, Tags, and SearchVisibility are
+	// deliberately absent: LoadArtifactResult declares no such fields, and the
 	// search path reads the stored columns the ingest fold writes rather than
-	// this record, and the §8.2 read emitter reads the directive out of the
-	// re-serialized frontmatter below (servedRecord), so an assignment here
-	// would be unread.
+	// this record, so an assignment here would be unread.
 	out.Type = string(merged.Type)
 	out.Sensitivity = string(merged.Sensitivity)
 	out.Deprecated = merged.Deprecated
 	out.ReplacedBy = merged.ReplacedBy
+	out.AuditRedact = append([]string(nil), merged.AuditRedact...)
 	// Serialize through the chain's authored blocks so an extension type's
 	// own frontmatter keys survive, and strip the extends reference so the
 	// hidden parent is not surfaced (§4.6). A merged block that names a chain
@@ -1794,23 +1800,6 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	}
 	out.Frontmatter = fm
 	return out, nil
-}
-
-// servedRecord returns the record the caller was served, which for an extends
-// child is the merged one rather than the stored leaf. The §8.2 read emitter
-// needs the merged frontmatter and the merged audit_redact directive, and
-// LoadArtifactResult carries the merged frontmatter but not the directive, so
-// the two are recombined here rather than by widening the client-facing type.
-func servedRecord(rec store.ManifestRecord, res *LoadArtifactResult) store.ManifestRecord {
-	if res == nil || rec.ExtendsPin == "" {
-		return rec
-	}
-	out := rec
-	out.Frontmatter = res.Frontmatter
-	if a, err := manifest.ParseArtifact(res.Frontmatter); err == nil && a != nil {
-		out.AuditRedact = append([]string(nil), a.AuditRedact...)
-	}
-	return out
 }
 
 // parsedArtifact decodes a record's stored frontmatter into a
