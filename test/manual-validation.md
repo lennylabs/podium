@@ -3286,6 +3286,13 @@ resolvers are distinct implementations of the same merge: repairing one alone
 makes the modes disagree, and the disagreement is in materialized bytes rather
 than in an error.
 
+**Watch out for.** A filesystem-source `podium sync` does not lint, so a
+fixture a server refuses still materializes here. A skill's `SKILL.md` `name`
+must be lowercase and must equal its parent directory (`lint.invalid_name`,
+`lint.skill_md_compliance`), and a fixture that breaks either one passes the
+first half of this scenario and then kills the server in the second half with
+`ingest.lint_failed` before it binds.
+
 **Steps.**
 
 1. Run the isolation block.
@@ -3303,7 +3310,7 @@ x_review_board: platform
 EOF
 cat > "$WORK/reg/shared/base/SKILL.md" <<'EOF'
 ---
-name: Base Skill
+name: base
 description: the base skill
 ---
 
@@ -3319,7 +3326,7 @@ x_runbook: ops/derived.md
 EOF
 cat > "$WORK/reg/team/derived/SKILL.md" <<'EOF'
 ---
-name: Derived Skill
+name: derived
 description: the derived skill
 ---
 
@@ -3336,8 +3343,11 @@ find "$WORK/fs-target" -type f | sed "s|$WORK/fs-target/||" | sort
 ```
 
    **Expect.** Both artifacts materialize. The derived skill's `SKILL.md`
-   carries `derived skill body` and its own `name`, because a skill's body and
-   identity come from `SKILL.md` and follow the child rather than the parent.
+   carries `derived skill body` and its own `description`, because a skill's
+   body and identity come from `SKILL.md` and follow the child rather than the
+   parent. A skill's `name` is forced to equal its directory by
+   `lint.skill_md_compliance`, so the child-versus-parent distinction lives in
+   the description and the body rather than in the name.
 
 4. Materialize the same registry through a server and compare byte for byte.
 
@@ -3348,13 +3358,18 @@ SRV=$!
 curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8141/healthz
 mkdir -p "$WORK/srv-target"
 podium sync --registry http://127.0.0.1:8141 --target "$WORK/srv-target" --harness none
-diff -r "$WORK/fs-target" "$WORK/srv-target" && echo "IDENTICAL"
+find "$WORK/fs-target" -name ARTIFACT.md | wc -l   # must be 2, not 0
+diff -r -x sync.lock "$WORK/fs-target" "$WORK/srv-target" && echo "IDENTICAL"
 ```
 
-   **Expect.** `IDENTICAL`, ignoring the lock file if `diff` reports it (its
-   target path and provenance legitimately differ between the two consumers).
-   Any difference in an `ARTIFACT.md` or `SKILL.md` is the §11 equivalence
-   break that repairing one resolver alone produces.
+   **Expect.** A non-zero count, then `IDENTICAL`. The count runs first
+   because an empty tree compared against an empty tree also reports no
+   differences, which scores as a pass while proving nothing. The lock file is
+   excluded rather than tolerated: its `target` and `last_synced_at` differ by
+   construction between two consumers, and its `content_hash` is computed from
+   different inputs in the two modes. Any difference in an `ARTIFACT.md` or
+   `SKILL.md` is the §11 equivalence break that repairing one resolver alone
+   produces.
 
 5. Repeat the comparison for a harness that writes a native layout, so the
    parity covers adapter output rather than the neutral copy alone.
@@ -3363,9 +3378,285 @@ diff -r "$WORK/fs-target" "$WORK/srv-target" && echo "IDENTICAL"
 mkdir -p "$WORK/fs-cc" "$WORK/srv-cc"
 podium sync --registry "$WORK/reg" --target "$WORK/fs-cc" --harness claude-code
 podium sync --registry http://127.0.0.1:8141 --target "$WORK/srv-cc" --harness claude-code
-diff -r "$WORK/fs-cc" "$WORK/srv-cc" && echo "IDENTICAL"
+find "$WORK/fs-cc" -name '*.md' | wc -l   # must be non-zero
+diff -r -x sync.lock "$WORK/fs-cc" "$WORK/srv-cc" && echo "IDENTICAL"
 ```
 
-   **Expect.** `IDENTICAL`, with the same lock-file caveat.
+   **Expect.** A non-zero count, then `IDENTICAL`, with the lock excluded for
+   the same reason.
+
+**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+
+---
+
+## S41: inherited `audit_redact` over a forwarded audit stream
+
+**Goal.** Validate that an inherited redaction directive is applied before the
+event leaves the process, by reading what a receiver actually receives rather
+than what the local log file holds.
+
+**Covers.** §8.2 manifest-declared redaction, §8.3 audit sink selection, §4.6
+inheritance.
+
+**Why by hand.** Redaction that is applied only on the way to the local file
+still leaks to an aggregator, and the two paths are different sinks: a
+filesystem `PODIUM_AUDIT_LOG_PATH` selects a file sink, an `http(s)` value
+selects an endpoint sink. A scenario that greps the local log cannot tell the
+two apart, and the aggregator is the copy that leaves the operator's machine.
+
+**Steps.**
+
+1. Run the isolation block, then start a receiver that records every forwarded
+   body verbatim.
+
+```bash
+cat > "$WORK/sink.py" <<'EOF'
+import http.server, sys
+OUT = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("content-length", 0))
+        open(OUT, "ab").write(self.rfile.read(n) + b"\n")
+        self.send_response(204); self.end_headers()
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", 8901), H).serve_forever()
+EOF
+python3 "$WORK/sink.py" "$WORK/forwarded.jsonl" &
+SINK=$!
+sleep 1
+```
+
+2. Build a parent carrying the sensitive field and the directive, and a child
+   that declares neither.
+
+```bash
+mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
+cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: the base context
+sensitivity: medium
+x_account: GB29-NWBK-0000
+audit_redact: [x_account]
+---
+
+base prose
+EOF
+cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 2.0.0
+extends: shared/base@1.x
+---
+EOF
+```
+
+3. Serve with the audit stream pointed at the receiver rather than at a file,
+   then read the child.
+
+```bash
+PODIUM_AUDIT_LOG_PATH="http://127.0.0.1:8901/ingest" \
+podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+  --bind 127.0.0.1:8142 > "$WORK/srv.log" 2>&1 &
+SRV=$!
+curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8142/healthz
+curl -s -o /dev/null "http://127.0.0.1:8142/v1/load_artifact?id=team/derived"
+sleep 2
+wc -l < "$WORK/forwarded.jsonl"
+```
+
+   **Expect.** At least one forwarded line. Zero lines means the endpoint sink
+   was not selected and every later step is vacuous, so check `$WORK/srv.log`
+   for the sink it chose before reading anything into the result.
+
+4. Read what the receiver got.
+
+```bash
+grep -c "GB29-NWBK-0000" "$WORK/forwarded.jsonl" || true
+python3 - "$WORK/forwarded.jsonl" <<'PY'
+import json, sys
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        continue
+    if ev.get("target") == "team/derived":
+        print(json.dumps(ev.get("context", {}), indent=2))
+PY
+```
+
+   **Expect.** Zero occurrences of the raw account value in the forwarded
+   stream, and the child's event carrying `"x_account": "[redacted]"` in its
+   context. The raw value appearing here is a leak to the aggregator even when
+   the local file is clean.
+
+5. Confirm the directive reached the event by inheritance rather than by the
+   field being absent. A missing field and a redacted field are different
+   outcomes, and only one of them is redaction working.
+
+```bash
+python3 - "$WORK/forwarded.jsonl" <<'PY'
+import json, sys
+seen = False
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        continue
+    if ev.get("target") == "team/derived" and "x_account" in ev.get("context", {}):
+        seen = True
+print("x_account present in the child's event context:", seen)
+PY
+```
+
+   **Expect.** `True`. `False` means the field never reached the event at all,
+   so the scenario proves nothing about redaction: the inherited directive
+   would look identical to a directive that was never applied.
+
+**Cleanup.** Stop the server and the receiver by their recorded PIDs, then
+remove `$WORK`.
+
+```bash
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+kill "$SINK" 2>/dev/null; wait "$SINK" 2>/dev/null
+rm -rf "$WORK"
+```
+
+---
+
+## S42: a deprecated parent in an `extends:` chain
+
+**Goal.** Validate what happens to a child whose parent is deprecated, across
+the four orderings that differ: an explicit pin onto a deprecated version, a
+range that can avoid one, a line with no live version left, and a parent
+deprecated after the child was already stored.
+
+**Covers.** §4.6 inheritance, §4.7.6 pin resolution, §4.7.4 deprecation.
+
+**Why by hand.** Deprecation is per-version and a pin is frozen at the child's
+ingest, so which ordering produced a state is invisible from the state itself.
+The refusal also lands at ingest for some orderings and at read for others,
+and a scenario that only publishes a deprecated parent first never reaches the
+ordering an operator actually hits, which is deprecating a parent that already
+has children.
+
+**Steps.**
+
+1. Run the isolation block, serve an empty registry, and register one layer.
+
+```bash
+mkdir -p "$WORK/reg"
+podium serve --standalone --no-embeddings --bind 127.0.0.1:8143 > "$WORK/srv.log" 2>&1 &
+SRV=$!
+curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8143/healthz
+export PODIUM_REGISTRY=http://127.0.0.1:8143
+podium layer register --registry "$PODIUM_REGISTRY" --id reg --local "$WORK/reg" --public
+```
+
+2. Publish a live parent and a child pinned to it by range, then reingest.
+
+```bash
+mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
+cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: base v1
+---
+
+base prose
+EOF
+cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: shared/base@1.x
+---
+EOF
+podium layer reingest --registry "$PODIUM_REGISTRY" reg
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" | python3 -c "import json,sys;d=json.load(sys.stdin);print('deprecated=',d.get('deprecated'));print('desc in fm:', 'base v1' in d.get('frontmatter',''))"
+```
+
+   **Expect.** The child loads, inherits `base v1`, and is not deprecated.
+
+3. Deprecate the parent line by publishing a new version carrying the flag.
+   This is the only way to deprecate: the flag is per-version and there is no
+   in-place toggle.
+
+```bash
+mkdir -p "$WORK/reg/shared/base-v2"
+cat > "$WORK/reg/shared/base-v2/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.1.0
+description: base v1.1 deprecated
+deprecated: true
+---
+
+base prose
+EOF
+mv "$WORK/reg/shared/base-v2/ARTIFACT.md" "$WORK/reg/shared/base/ARTIFACT-v2.md" 2>/dev/null || true
+rmdir "$WORK/reg/shared/base-v2" 2>/dev/null || true
+```
+
+   **IMPLEMENTOR'S NOTE.** A registry directory holds one `ARTIFACT.md` per
+   artifact, so publishing a second version of the same id means replacing the
+   file rather than adding one beside it. Replace `shared/base/ARTIFACT.md`
+   with the `1.1.0` content above, reingest, and confirm both versions are
+   stored before continuing. If the layout cannot hold two versions of one id,
+   record that and drive the rest of the scenario against a registry that can.
+
+4. Reingest the child unchanged and read its pin.
+
+```bash
+podium layer reingest --registry "$PODIUM_REGISTRY" reg
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" | python3 -c "import json,sys;d=json.load(sys.stdin);print('deprecated=',d.get('deprecated'));print(d.get('frontmatter',''))"
+```
+
+   **Expect.** The child still resolves to a non-deprecated parent version and
+   is not itself reported deprecated. A range reference selects the most
+   recently ingested non-deprecated version, so deprecating a newer version
+   does not drag an existing child into deprecation.
+
+5. Publish a second child that pins the deprecated version explicitly.
+
+```bash
+mkdir -p "$WORK/reg/team/pinned"
+cat > "$WORK/reg/team/pinned/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: shared/base@1.1.0
+---
+EOF
+podium layer reingest --registry "$PODIUM_REGISTRY" reg 2>&1 | tail -5
+grep -iE "rejected|invalid_artifact|deprecat" "$WORK/srv.log" | tail -5
+```
+
+   **Expect.** The pinned child is rejected with `ingest.invalid_artifact`, and
+   the reason names deprecation rather than reporting the parent as absent. An
+   author who names a deprecated version explicitly is told so; a message
+   claiming the parent was never published is a defect.
+
+6. Check the read-versus-search disposition for any child that does inherit
+   the flag. A child stored before a deprecation rule existed can still carry
+   an inherited `deprecated`, and the two surfaces are known to disagree.
+
+```bash
+podium search --registry "$PODIUM_REGISTRY" "base" || true
+```
+
+   **Expect.** Record what search returns for each child. `load_artifact`
+   reports an inherited `deprecated: true` while the default search filter
+   reads the stored column and does not exclude the child; that divergence is
+   an accepted deferral rather than a defect, and this step exists to keep it
+   visible rather than to fail on it.
 
 **Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
