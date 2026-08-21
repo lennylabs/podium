@@ -54,10 +54,17 @@ func SerializeMerged(a *Artifact, authored ...[]byte) ([]byte, error) {
 	stripped := *a
 	stripped.Extends = ""
 	typed, err := SerializeArtifact(&stripped)
+	// Not reachable: Artifact holds no channel, function, or cyclic field, so
+	// marshalling it cannot fail. The arm is kept so a later field that can
+	// fail surfaces as an error rather than as a truncated block.
 	if err != nil {
 		return nil, err
 	}
 
+	// The next three failures are all failures to read back what the line
+	// above just wrote, so none of them is reachable from a valid Artifact.
+	// They are kept because the alternative to failing closed is serving a
+	// block whose contents were never verified.
 	header, body, err := SplitFrontmatter(typed)
 	if err != nil {
 		return nil, err
@@ -78,6 +85,10 @@ func SerializeMerged(a *Artifact, authored ...[]byte) ([]byte, error) {
 	}
 
 	out, err := yaml.Marshal(root)
+	// Not reachable: every node in root came out of the decoder, and an
+	// unresolved alias among the restored keys marshals back to its alias
+	// form rather than failing here. It is caught by the hidesParent check
+	// below, which cannot read the block back.
 	if err != nil {
 		return nil, err
 	}

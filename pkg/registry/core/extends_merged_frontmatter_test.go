@@ -7,7 +7,10 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
@@ -62,15 +65,36 @@ func TestExtendsFrontmatter_UndeclaredKeysSurviveTheMerge(t *testing.T) {
 		t.Fatalf("LoadArtifact: %v", err)
 	}
 	fm := string(got.Frontmatter)
-	if !strings.Contains(fm, "x_runbook") {
-		t.Errorf("the child's own undeclared key was dropped:\n%s", fm)
-	}
-	if !strings.Contains(fm, "x_review_board") {
-		t.Errorf("the parent's undeclared key was not inherited:\n%s", fm)
+	// Read the block back as a mapping and compare values. A key restored
+	// with an empty or wrong value would satisfy a substring match on the key
+	// name while leaving the §4.6 inheritance unpinned.
+	served := decodeServedMapping(t, got.Frontmatter)
+	for key, want := range map[string]string{
+		"x_runbook":      "ops/pay.md",
+		"x_review_board": "platform",
+	} {
+		if served[key] != want {
+			t.Errorf("%s = %v, want %q\n%s", key, served[key], want, fm)
+		}
 	}
 	if strings.Contains(fm, "extends:") {
 		t.Errorf("the served frontmatter still names the hidden parent:\n%s", fm)
 	}
+}
+
+// decodeServedMapping reads a served frontmatter block back as a YAML mapping,
+// which is how a consumer reads it.
+func decodeServedMapping(t *testing.T, served []byte) map[string]any {
+	t.Helper()
+	fm, _, err := manifest.SplitFrontmatter(served)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v\n%s", err, served)
+	}
+	var got map[string]any
+	if err := yaml.Unmarshal(fm, &got); err != nil {
+		t.Fatalf("decode served frontmatter: %v\n%s", err, fm)
+	}
+	return got
 }
 
 // Spec: §4.6 — a key both sides declare takes the child's value, so restoring
@@ -106,15 +130,92 @@ func TestExtendsFrontmatter_ChildWinsOnASharedUndeclaredKey(t *testing.T) {
 // keys §4.6 makes inheritable.
 func TestExtendsFrontmatter_MergeKeyReferenceFailsClosed(t *testing.T) {
 	t.Parallel()
-	_, err := emfLoad(t,
+	got, err := emfLoad(t,
 		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
 		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
 			"base: &b\n  extends: shared/parent@1.x\n<<: *b\n---\n\nchild body\n")
+	assertFailsClosed(t, got, err)
+}
+
+// Spec: §4.6 hidden parents — an anchored extends value carries the parent's
+// ID to every alias into it. The typed serialization reproduces neither the
+// anchor nor its value, so the restored sibling key is left aliasing an anchor
+// the block no longer defines and the assembled block does not read back as a
+// mapping. The load fails closed with `registry.invalid_argument`.
+//
+// This is the second half of the input class the change deliberately loses.
+// The closed round-trip served these children a clean block by dropping every
+// undeclared key, so the pre-change success is not the baseline.
+func TestExtendsFrontmatter_AnchoredReferenceFailsClosed(t *testing.T) {
+	t.Parallel()
+	got, err := emfLoad(t,
+		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
+			"extends: &p shared/parent@1.x\nnote: *p\n---\n\nchild body\n")
+	assertFailsClosed(t, got, err)
+}
+
+// Spec: §4.6 hidden parents — a restored key can alias an anchor declared on a
+// key the typed serialization rewrites, which leaves the assembled block
+// undecodable rather than parent-free. An undecodable block cannot be checked
+// for the parent's ID, so the load fails closed instead of serving it.
+func TestExtendsFrontmatter_UndecodableMergedBlockFailsClosed(t *testing.T) {
+	t.Parallel()
+	got, err := emfLoad(t,
+		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		"---\ntype: agent\nversion: 2.0.0\ndescription: &d child\n"+
+			"x_note: *d\nextends: shared/parent@1.x\n---\n\nchild body\n")
+	assertFailsClosed(t, got, err)
+}
+
+// assertFailsClosed requires that the load returned no result, that the error
+// maps to `registry.invalid_argument`, and that no served byte names the
+// parent. Serving an empty frontmatter would also be a failure: the requester
+// would take a block that hides the parent by hiding the artifact.
+func assertFailsClosed(t *testing.T, got *core.LoadArtifactResult, err error) {
+	t.Helper()
 	if err == nil {
-		t.Fatal("a child whose extends arrives through a merge key must not be served")
+		t.Fatal("a child whose merged frontmatter cannot be rewritten must not be served")
 	}
 	if !errors.Is(err, core.ErrInvalidArgument) {
 		t.Errorf("error = %v, want ErrInvalidArgument so the caller maps it to registry.invalid_argument", err)
+	}
+	if got != nil {
+		t.Fatalf("a failed load returned a result: %+v", got)
+	}
+}
+
+// Spec: §4.6, §2.2 — load_artifact and search_artifacts serve the same
+// artifact through two paths, and defect 3 was the two disagreeing about a
+// frontmatter key the manifest.Artifact struct does not declare. The
+// comparison holds for a key the child itself authored, which is what the
+// search descriptor serves; a key the child inherits reaches the load path
+// through the merge and the search path through the indexed columns.
+func TestExtendsFrontmatter_ChildKeyMatchesTheSearchDescriptor(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+		"x_runbook: ops/pay.md\nextends: shared/parent@1.x\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	loaded, err := reg.LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	descriptor := findResult(t, res, "finance/child")
+
+	fromLoad := decodeServedMapping(t, loaded.Frontmatter)
+	fromSearch := decodeServedMapping(t, []byte(descriptor.Frontmatter))
+	if fromSearch["x_runbook"] != "ops/pay.md" {
+		t.Fatalf("the search descriptor dropped the child's own key: %q", descriptor.Frontmatter)
+	}
+	if fromLoad["x_runbook"] != fromSearch["x_runbook"] {
+		t.Errorf("load_artifact serves x_runbook = %v, search_artifacts serves %v",
+			fromLoad["x_runbook"], fromSearch["x_runbook"])
 	}
 }
 
