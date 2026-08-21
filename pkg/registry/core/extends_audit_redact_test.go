@@ -55,14 +55,24 @@ func hasKey(keys []string, want string) bool {
 	return false
 }
 
-// redactKeysFor returns the RedactKeys of the load event for target.
-func redactKeysFor(events []core.AuditEvent, target string) []string {
-	for _, e := range events {
+// loadEventFor returns the artifact.loaded event for target, or nil when the
+// load emitted none.
+func loadEventFor(events []core.AuditEvent, target string) *core.AuditEvent {
+	for i, e := range events {
 		if e.Target == target && e.Type == "artifact.loaded" {
-			return e.RedactKeys
+			return &events[i]
 		}
 	}
 	return nil
+}
+
+// redactKeysFor returns the RedactKeys of the load event for target.
+func redactKeysFor(events []core.AuditEvent, target string) []string {
+	e := loadEventFor(events, target)
+	if e == nil {
+		return nil
+	}
+	return e.RedactKeys
 }
 
 // Spec: §8.2 — the read event carries the manifest's audit_redact key set so
@@ -100,8 +110,15 @@ func TestExtendsAuditRedact_InheritedDirectiveReachesTheReadEvent(t *testing.T) 
 }
 
 // Spec: §4.6 — a child that declares its own audit_redact keeps it. The
-// directive is a scalar-list field the child owns, so inheriting must not
-// replace what the child declared.
+// directive is a scalar-list field the child owns, so the child's declaration
+// replaces the parent's rather than being unioned with it.
+//
+// The negative half is the load-bearing one. Asserting only that the child's
+// own key survives passes against a merge that serves the union of the two
+// directives, which is the fidelity regression the inherited-directive repair
+// can introduce. The parent declares audit_redact: [x_parent_key] and carries
+// x_parent_key, so a union would put that name in the key set and its value in
+// the event context.
 func TestExtendsAuditRedact_ChildOwnDirectiveIsKept(t *testing.T) {
 	t.Parallel()
 	events := earLoad(t,
@@ -110,9 +127,18 @@ func TestExtendsAuditRedact_ChildOwnDirectiveIsKept(t *testing.T) {
 		"---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
 			"audit_redact: [x_child_key]\nx_child_key: c\nextends: shared/parent@1.x\n---\n\nchild body\n")
 
-	keys := redactKeysFor(events, "finance/child")
-	if !hasKey(keys, "x_child_key") {
-		t.Errorf("RedactKeys = %v, want the child's own x_child_key", keys)
+	ev := loadEventFor(events, "finance/child")
+	if ev == nil {
+		t.Fatalf("no artifact.loaded event for finance/child: %+v", events)
+	}
+	if !hasKey(ev.RedactKeys, "x_child_key") {
+		t.Errorf("RedactKeys = %v, want the child's own x_child_key", ev.RedactKeys)
+	}
+	if hasKey(ev.RedactKeys, "x_parent_key") {
+		t.Errorf("RedactKeys = %v, want the parent's x_parent_key replaced by the child's directive", ev.RedactKeys)
+	}
+	if _, ok := ev.Context["x_parent_key"]; ok {
+		t.Errorf("event context carries the parent's x_parent_key the child's directive does not name: %v", ev.Context)
 	}
 }
 
