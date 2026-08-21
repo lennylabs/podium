@@ -237,9 +237,9 @@ func addParentRef(refs map[string]bool, ref string) {
 // can spell the parent's ID out. Decoding into a map resolves merge keys and
 // aliases, and rejects a block whose anchors do not resolve.
 //
-// refs is empty for a caller with no chain to check against, which is the
-// search path: FrontmatterHidingParent rewrites one authored block, where the
-// only reference is the extends entry it removes.
+// refs holds the canonical IDs the chain names. Both callers collect it from
+// the blocks they are rewriting, so the load path and the search path apply
+// one definition of what naming the parent means.
 func hidesParent(header []byte, refs map[string]bool) bool {
 	var resolved map[string]any
 	if err := yaml.Unmarshal(header, &resolved); err != nil {
@@ -256,7 +256,7 @@ func hidesParent(header []byte, refs map[string]bool) bool {
 func namesAny(v any, refs map[string]bool) bool {
 	switch t := v.(type) {
 	case string:
-		return refs[parentID(t)]
+		return scalarNamesAny(t, refs)
 	case []any:
 		for _, e := range t {
 			if namesAny(e, refs) {
@@ -265,7 +265,7 @@ func namesAny(v any, refs map[string]bool) bool {
 		}
 	case map[string]any:
 		for k, e := range t {
-			if refs[parentID(k)] || namesAny(e, refs) {
+			if scalarNamesAny(k, refs) || namesAny(e, refs) {
 				return true
 			}
 		}
@@ -279,14 +279,62 @@ func namesAny(v any, refs map[string]bool) bool {
 	return false
 }
 
+// scalarNamesAny reports whether s names one of refs. A restored key is copied
+// out of a chain block a requester may not be able to see, so the check covers
+// a value that embeds the ID as well as one that is the reference: a path under
+// the parent's directory and a sentence quoting the reference both disclose the
+// parent's ID, which is what §4.6 scopes its guarantee to.
+func scalarNamesAny(s string, refs map[string]bool) bool {
+	if refs[parentID(s)] {
+		return true
+	}
+	for id := range refs {
+		if embedsID(s, id) {
+			return true
+		}
+	}
+	return false
+}
+
+// embedsID reports whether s contains id at token boundaries, so
+// "shared/parent/README.md" and "see shared/parent@1.x" match while
+// "shared/parenthetical" does not.
+func embedsID(s, id string) bool {
+	for at := 0; ; {
+		i := strings.Index(s[at:], id)
+		if i < 0 {
+			return false
+		}
+		i += at
+		before := i == 0 || !isIDRune(rune(s[i-1]))
+		end := i + len(id)
+		after := end == len(s) || !isIDRune(rune(s[end]))
+		if before && after {
+			return true
+		}
+		at = i + 1
+	}
+}
+
+// isIDRune reports whether c can continue an artifact ID's final path segment.
+// A separator such as "/", "@", or a space ends the segment, so an occurrence
+// followed by one is the ID rather than a longer word.
+func isIDRune(c rune) bool {
+	return c == '_' || c == '-' || c == '.' ||
+		(c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+}
+
 // FrontmatterHidingParent returns src's frontmatter block with the extends
 // entry removed, or the empty string when the result would still name the
 // parent. It rewrites one authored block and merges nothing, which is what the
 // search descriptor needs: the descriptor serves the child's own frontmatter
 // and the merge has already been applied to the indexed columns.
 //
-// It shares hidesParent with SerializeMerged so the load path and the search
-// path apply one definition of what hiding the parent means. Spec: §4.6.
+// It collects the parent's ID from the entry it removes and shares hidesParent
+// with SerializeMerged, so the load path and the search path apply one
+// definition of what hiding the parent means: a sibling key that spells the
+// parent's ID out fails the descriptor closed exactly as it fails the load.
+// Spec: §4.6.
 //
 // The guard is scoped to what the parser resolves rather than to the literal
 // top-level key. ParseArtifact resolves YAML merge keys, so a child can carry
@@ -308,8 +356,10 @@ func FrontmatterHidingParent(src []byte) string {
 	}
 	root := doc.Content[0]
 	kept := make([]*yaml.Node, 0, len(root.Content))
+	refs := map[string]bool{}
 	for i := 0; i+1 < len(root.Content); i += 2 {
 		if root.Content[i].Value == "extends" {
+			addParentRef(refs, resolveAliases(root.Content[i+1], map[*yaml.Node]bool{}).Value)
 			continue
 		}
 		kept = append(kept, root.Content[i], root.Content[i+1])
@@ -321,7 +371,7 @@ func FrontmatterHidingParent(src []byte) string {
 		// the alternative to failing closed here is emitting the parent.
 		return ""
 	}
-	if !hidesParent(out, nil) {
+	if !hidesParent(out, refs) {
 		return ""
 	}
 	return "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"

@@ -661,6 +661,29 @@ func TestSearchArtifacts_DescriptorHidesParentAnchoredValue(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 hidden parents — the descriptor applies the same parent-ID test
+// the load path applies, so a sibling key that spells the parent's ID out fails
+// the descriptor closed rather than disclosing the hidden parent.
+func TestSearchArtifacts_DescriptorHidesParentNamedByASiblingKey(t *testing.T) {
+	t.Parallel()
+	parent := "---\ntype: agent\nversion: 1.0.0\ndescription: parent desc\n---\n\nparent body\n"
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child desc\n" +
+		"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n"
+	reg, _ := ingestPair(t, "shared/parent/ARTIFACT.md", parent, "finance/child/ARTIFACT.md", child)
+
+	res, err := reg.SearchArtifacts(context.Background(), publicID, core.SearchArtifactsOptions{})
+	if err != nil {
+		t.Fatalf("SearchArtifacts: %v", err)
+	}
+	got := findResult(t, res, "finance/child")
+	if got.Frontmatter != "" {
+		t.Errorf("Frontmatter = %q, want empty (fail closed)", got.Frontmatter)
+	}
+	if strings.Contains(got.Description, "shared/parent") {
+		t.Errorf("descriptor leaks the parent ID: %+v", got)
+	}
+}
+
 // Spec: §7.6.1 — a load_domain notable entry carries {id, type, summary,
 // source, folded_from}. For an extends child the entry carries neither a
 // frontmatter block nor a sensitivity label, and its summary is the §4.6

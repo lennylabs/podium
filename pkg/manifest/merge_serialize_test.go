@@ -132,6 +132,19 @@ func TestSerializeMerged_RestoredParentIDFailsClosed(t *testing.T) {
 		"pinned id against an unpinned extends": {"shared/parent", []string{
 			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
 				"x_base: shared/parent@1.0.0\nextends: shared/parent\n---\n\nchild body\n"}},
+		// A restored key comes out of a chain block the requester may not be
+		// able to see, so a parent-authored value that embeds the ID discloses
+		// it as much as one that is the reference.
+		"parent-authored path under the parent's id": {"shared/parent@1.x", []string{
+			"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n" +
+				"x_refs: [shared/parent/README.md]\n---\n\nparent body\n",
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"extends: shared/parent@1.x\n---\n\nchild body\n"}},
+		"parent-authored prose quoting the reference": {"shared/parent@1.x", []string{
+			"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n" +
+				"x_docs: see shared/parent@1.x for details\n---\n\nparent body\n",
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"extends: shared/parent@1.x\n---\n\nchild body\n"}},
 		// A chain member above the leaf carries its reference through an
 		// alias, so the parent's ID reaches the served block only under the
 		// anchor-defining sibling key.
@@ -160,6 +173,44 @@ func TestSerializeMerged_RestoredParentIDFailsClosed(t *testing.T) {
 				t.Errorf("a block that names the parent must not be returned: %s", out)
 			}
 		})
+	}
+}
+
+// The parent-ID test matches at token boundaries, so a value whose text merely
+// starts with the parent's ID as part of a longer word is served. Refusing it
+// would cost the child a load over a string that names no artifact.
+func TestSerializeMerged_LongerWordDoesNotNameTheParent(t *testing.T) {
+	t.Parallel()
+	child := []byte("---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+		"x_note: shared/parenthetical\nextends: shared/parent@1.x\n---\n\nchild body\n")
+
+	out, err := manifest.SerializeMerged(&manifest.Artifact{
+		Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
+		Extends: "shared/parent@1.x", Body: "child body",
+	}, child)
+	if err != nil {
+		t.Fatalf("SerializeMerged: %v", err)
+	}
+	fm, _, err := manifest.SplitFrontmatter(out)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	if got := decodeMapping(t, fm); got["x_note"] != "shared/parenthetical" {
+		t.Errorf("x_note = %v, want %q\n%s", got["x_note"], "shared/parenthetical", fm)
+	}
+}
+
+// FrontmatterHidingParent applies the same parent-ID test the load path
+// applies, so the search descriptor and the served record agree on a child
+// whose sibling key spells the parent's ID out. Spec: §4.6 hidden parents. The
+// served-surface claim is pinned in pkg/registry/core/extends_test.go.
+func TestFrontmatterHidingParent_SiblingKeyNamingTheParentFailsClosed(t *testing.T) {
+	t.Parallel()
+	child := []byte("---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+		"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n")
+
+	if got := manifest.FrontmatterHidingParent(child); got != "" {
+		t.Errorf("FrontmatterHidingParent = %q, want empty (fail closed)", got)
 	}
 }
 
