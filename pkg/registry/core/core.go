@@ -1705,11 +1705,14 @@ func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRe
 // table. It parses each record's stored frontmatter into a
 // manifest.Artifact, applies manifest.MergeExtends across the chain, and
 // re-serializes the merged frontmatter so every consumer that reads the
-// served frontmatter (not only the indexed Description/Tags/Sensitivity
-// record fields) observes the merged result. The merged record keeps the
-// child's identity (id, version, content hash, layer, body) and surfaces
-// the merged scalar fields back onto the record for callers that read
-// them directly. spec: §4.6 field-semantics table.
+// served frontmatter, and not only the indexed Sensitivity record field,
+// observes the merged result. The merged record keeps the child's identity
+// (id, version, content hash, signature, layer, body) and surfaces the
+// merged Type, Sensitivity, Deprecated, ReplacedBy, and AuditRedact back
+// onto the row for the callers that read them. Description, Tags, and
+// SearchVisibility on the returned record are chain[0]'s untouched values
+// and are merged onto nothing, because no consumer reads them there.
+// spec: §4.6 field-semantics table.
 func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	if len(chain) == 0 {
 		return store.ManifestRecord{}, nil
