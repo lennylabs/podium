@@ -1733,13 +1733,12 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 		out.Layer = c.Layer
 		out.IngestedAt = c.IngestedAt
 		out.ExtendsPin = c.ExtendsPin
-		// The body takes the child's; the parent's prose is not
-		// concatenated — extends inherits structured fields, not the
-		// markdown body. The assignment is unconditional, matching
+		// The body takes the child's, and the parent's prose is never
+		// concatenated. The assignment is unconditional, matching
 		// manifest.MergeExtends and the filesystem resolver: guarding on a
 		// non-empty child body served the parent's prose to a child that
-		// authored none, and reached a requester who may hold no access to
-		// the parent's layer.
+		// authored none, and made the record disagree with the body inside
+		// its own merged frontmatter.
 		out.Body = c.Body
 		// Bundled resources belong to the concrete package: the child's
 		// own files ship, not the hidden parent's (§4.6). The leaf record

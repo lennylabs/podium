@@ -86,13 +86,14 @@ func TestExtends_ServedSignatureVerifiesAgainstServedContentHash(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 — extends inherits structured frontmatter fields and not the
-// markdown body, which manifest.MergeExtends implements by taking the child's
-// body unconditionally. The served record guarded that carry-over on a
-// non-empty body, so a child that authored no prose was served the root
-// parent's, and the record disagreed with the body inside its own merged
-// frontmatter. The parent's prose also reaches a requester who may hold no
-// access to the parent's layer, which is what §4.6 hidden parents forbids.
+// manifest.MergeExtends assigns the child's body unconditionally
+// (pkg/manifest/merge.go), the filesystem resolver folds through it, and
+// docs/authoring/extends.md states that the child's prose replaces the
+// parent's. The served record guarded that carry-over on a non-empty body, so
+// a child that authored no prose was served the root parent's, and the record
+// disagreed with the body inside its own merged frontmatter. No spec section
+// states which body an extends child serves, so this test cites no spec
+// section.
 func TestExtends_EmptyChildBodyDoesNotServeTheParentProse(t *testing.T) {
 	t.Parallel()
 	st := esrIngest(t,
