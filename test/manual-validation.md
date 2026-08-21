@@ -68,6 +68,19 @@ repeat.
 - Scenarios that need live infrastructure name it under Prerequisites. When the
   infrastructure or credentials are absent, the scenario is skipped rather than
   forced. Record the skip and the reason.
+- A fenced block nested under a numbered step is indented to sit inside that
+  step. The indentation is markdown structure and is not part of the command:
+  strip it before running a heredoc, or the document's leading spaces land
+  inside the here-document and a YAML body becomes invalid.
+- Read an HTTP scenario's error code rather than its status class. A mistyped
+  route returns 404, which satisfies a check written for "a 4xx" while carrying
+  none of the behavior the step is testing.
+- Stop a scenario's server by the PID the scenario recorded. A pattern kill on
+  the process name reaches servers another scenario or another session started.
+- A scenario whose subject is a security control states, before the assertion,
+  how the run confirms the control is switched on, and carries a negative
+  control showing the check fails when it should. A control that is silently
+  off produces the same green result as one that passes.
 
 ### Cleanup
 
@@ -2770,3 +2783,947 @@ FS farm is available.
 **Cleanup.** Stop any server still running and `rm -rf "$WORK"`. Keep
 `test/fixtures/adfs-openid-configuration.redacted.json`, which lives in the
 repository rather than in `$WORK`.
+
+---
+
+## S37: `extends:` merged manifest, hidden parent, and inherited redaction
+
+**Goal.** Validate by hand what a consumer is served for an artifact that
+declares `extends:`, across the four surfaces the merge reaches: the signature,
+the body, the frontmatter an extension type authors, and the audit stream.
+
+**Covers.** §4.6 field semantics and hidden parents, §4.7.9 signatures, §8.2
+manifest-declared redaction, §11 filesystem-versus-server equivalence.
+
+**Why by hand.** Each behavior below shipped broken at least once, and in every
+case the automated suite passed: the assertions checked a substring rather than
+a value, or the case skipped on the platform it was run on. Reading the served
+bytes directly is what these steps are for.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Build a registry holding a parent and a child that inherits from it. The
+   parent carries a frontmatter key `manifest.Artifact` does not declare, a
+   comment naming itself, and a redaction directive. The child authors no
+   prose, declares its own undeclared key, and declares neither a description
+   nor a directive of its own.
+
+   ```bash
+   mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
+   cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
+   ---
+   type: context
+   version: 1.0.0
+   description: the base context
+   sensitivity: medium
+   # authored by the shared/base owners
+   x_review_board: platform
+   x_account: GB29-NWBK-0000
+   audit_redact: [x_account]
+   ---
+
+   base prose
+   EOF
+   cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
+   ---
+   type: context
+   version: 2.0.0
+   extends: shared/base@1.x
+   x_runbook: ops/derived.md
+   ---
+   EOF
+   ```
+
+3. Serve the registry and read the child back.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8137 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8137/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8137
+   curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" | tee "$WORK/child.json" | python3 -m json.tool
+   ```
+
+   **Expect.** The response's `frontmatter` carries the child's `x_runbook`
+   **and** the parent's `x_review_board: platform`, because §4.6's omitted-field
+   rule makes an extension type's own fields inheritable. It carries the
+   inherited `description: the base context`.
+
+4. Check the hidden-parent guarantee (§4.6) on the served bytes, not on the
+   parsed fields. The parent's ID must not appear anywhere in the served
+   frontmatter, including inside a YAML comment the parent authored.
+
+   ```bash
+   python3 - "$WORK/child.json" <<'PY'
+   import json, sys
+   fm = json.load(open(sys.argv[1])).get("frontmatter", "")
+   for probe in ("shared/base", "extends", "authored by the shared/base owners"):
+       print(("LEAK  " if probe in fm else "ok    ") + probe)
+   print(fm)
+   PY
+   ```
+
+   **Expect.** Three `ok` lines. A `LEAK` on the comment probe is the §4.6
+   violation a value-only check does not catch: a restored node carries its
+   author's comments and the serializer re-emits them unless it clears them.
+
+   The probe reads the `frontmatter` field alone, deliberately. The same
+   response also carries `raw_frontmatter`, which is the child's authored
+   pre-merge block and does contain `extends: shared/base@1.x`. That is the
+   sanctioned exception: a consumer reproduces the §4.7.6 content hash from it
+   when `manifest_merged` is true, so it carries the reference by design. Every
+   other served string is covered by the probe.
+
+5. Check the body. The child authored no prose, so it must be served none
+   rather than the parent's.
+
+   ```bash
+   python3 -c "import json;d=json.load(open('$WORK/child.json'));print(repr(d.get('manifest_body','')))"
+   ```
+
+   **Expect.** An empty or whitespace-only string. `'base prose'` means the
+   body carry-over is guarded on a non-empty child body again.
+
+6. Check that search resolves the inherited description. The ingest fold
+   writes the merged value to the indexed columns, so the child is findable by
+   a description it never authored.
+
+   ```bash
+   podium search --registry "$PODIUM_REGISTRY" "base context"
+   ```
+
+   **Expect.** The child is listed under the inherited description. A result
+   whose description is empty means the ingest fold did not run.
+
+   The two surfaces agree on the descriptor columns and deliberately do not
+   agree on the embedded `frontmatter` string: a search descriptor serves the
+   child's authored block with `extends:` removed and merges nothing, which
+   avoids a chain walk per result. Do not read a difference in that field as a
+   defect here.
+
+7. Check the §8.2 inherited redaction in the audit stream.
+
+   ```bash
+   grep -c "GB29-NWBK-0000" "$PODIUM_AUDIT_LOG_PATH" || true
+   grep -o '"x_account":"[^"]*"' "$PODIUM_AUDIT_LOG_PATH" | tail -2
+   ```
+
+   **Expect.** Zero occurrences of the raw account value, and the child's
+   `artifact.loaded` event carrying `"x_account": "[redacted]"` in its
+   `context`. The directive is applied by substituting the value in place
+   rather than by emitting a key list, so the masked entry is the observable.
+   The child declares no directive of its own, so a directive that reaches the
+   event at all is the inherited one.
+
+8. Check the fail-closed arm. A child whose `extends` arrives through a YAML
+   merge key keeps an operative reference inside the mapping it merges in, and
+   the served block would name the parent, so the read is refused rather than
+   served.
+
+   ```bash
+   mkdir -p "$WORK/reg/team/aliased"
+   cat > "$WORK/reg/team/aliased/ARTIFACT.md" <<'EOF'
+   ---
+   type: context
+   version: 1.0.0
+   description: aliased child
+   base: &b
+     extends: shared/base@1.x
+   <<: *b
+   ---
+
+   aliased body
+   EOF
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8138 > "$WORK/srv2.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8138/healthz
+   curl -s -o "$WORK/aliased.json" -w '%{http_code}\n' \
+     "http://127.0.0.1:8138/v1/load_artifact?id=team/aliased"
+   cat "$WORK/aliased.json"
+   ```
+
+   **Expect.** A 400 carrying `registry.invalid_argument`. A 200 whose
+   frontmatter names `shared/base` is the leak this arm exists to prevent; a
+   200 with the key silently dropped is also wrong, because a consumer cannot
+   tell an inherited-as-nothing key from one the chain never set. Check the
+   error code rather than the status class alone: a wrong URL also returns a
+   4xx, so a status-only check passes against a route that does not exist.
+
+   The refusal is at the read. Ingest accepts the artifact, so it stays
+   listed by search and by `/v1/catalog` under its authored description, and
+   the refusal arrives when a consumer loads it. Its search descriptor carries
+   no frontmatter, so nothing leaks through discovery.
+
+**Cleanup.** Stop the server and `rm -rf "$WORK"`.
+
+---
+
+## S38: `extends:` child under a signing registry
+
+**Goal.** Validate that a signing registry serves an `extends:` child a
+signature that verifies against the bytes it serves, and that a consumer
+enforcing verification loads it.
+
+**Covers.** §4.7.9 signatures, §4.6 merge, §6.6 materialization verification.
+
+**Why by hand.** No test in the tree paired signing with `extends:` before
+2026-08-20, so the suite was green while the two were mutually exclusive: the
+merged record carried the root parent's envelope against the child's own
+content hash, so verification could not succeed.
+
+**Watch out for.** Two commands look like they exercise this and do not.
+`PODIUM_SIGNATURE_PROVIDER` is read by `podium sign`, `podium verify`, and
+`podium-mcp`; `podium serve` does not read it, and enables ingest signing only
+through `--sign registry-key`. And `podium sync` runs no signature check at
+all, so `PODIUM_VERIFY_SIGNATURES` in front of it is a no-op that accepts an
+invalid value silently. A scenario built on either one passes whether or not
+the defect is present.
+
+**Steps.**
+
+1. Run the isolation block, then add the signing-key override. Without it
+   `--sign registry-key` writes into the operator's real `~/.podium`.
+
+```bash
+export PODIUM_SIGN_KEY_PATH="$WORK/registry-signing.key"
+```
+
+2. Build a parent and an inheriting child at a sensitivity that requires
+   verification. Strip the leading indentation before running the heredocs.
+
+```bash
+mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
+cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: the base context
+sensitivity: medium
+---
+
+base prose
+EOF
+cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 2.0.0
+description: the derived context
+sensitivity: medium
+extends: shared/base@1.x
+---
+
+derived prose
+EOF
+```
+
+3. Serve with ingest signing on, and confirm it is actually on before reading
+   anything into the result.
+
+```bash
+podium serve --standalone --no-embeddings --sign registry-key \
+  --layer-path "$WORK/reg" --bind 127.0.0.1:8139 > "$WORK/srv.log" 2>&1 &
+SRV=$!
+curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8139/healthz
+export PODIUM_REGISTRY=http://127.0.0.1:8139
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" > "$WORK/child.json"
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=shared/base" > "$WORK/parent.json"
+python3 - "$WORK/child.json" "$WORK/parent.json" <<'PY'
+import json, sys
+c, p = (json.load(open(a)) for a in sys.argv[1:3])
+print("child  sig empty:", not c.get("signature"))
+print("parent sig empty:", not p.get("signature"))
+print("same envelope:", c.get("signature") == p.get("signature"))
+print("child hash:", c.get("content_hash"))
+print("parent hash:", p.get("content_hash"))
+PY
+```
+
+   **Expect.** Neither signature is empty, the two envelopes differ, and the
+   two content hashes differ. An empty signature means signing never turned on
+   and every later step is vacuous. An identical envelope across a child and
+   its parent is the defect itself.
+
+4. Load the child through the path that enforces verification. `podium-mcp`
+   is the consumer that raises `materialize.signature_invalid`, and it is
+   driven by a JSON-RPC request on stdin rather than by a flag.
+
+```bash
+PUBKEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
+REQ='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"team/derived"}}}'
+echo "$REQ" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_MATERIALIZE_DIR="$WORK/mat" \
+  PODIUM_VERIFY_SIGNATURES=always \
+  PODIUM_SIGNATURE_PROVIDER=registry-managed \
+  PODIUM_SIGNATURE_VERIFY_KEY="$PUBKEY" \
+  podium-mcp
+```
+
+   **Expect.** A JSON-RPC result whose `structuredContent.content_hash` is the
+   child's own hash from step 3, and whose `manifest_body` is `derived prose` with its trailing newline.
+   An error naming `materialize.signature_invalid` means the served signature
+   does not cover the served content hash, which is the defect this scenario
+   pins.
+
+5. Negative control on the key. Without it the scenario cannot tell "verified"
+   from "never checked", which is how its first version passed against the
+   defect it was written for.
+
+```bash
+BOGUS="$(head -c 32 /dev/urandom | base64)"
+echo "$REQ" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_MATERIALIZE_DIR="$WORK/mat2" \
+  PODIUM_VERIFY_SIGNATURES=always \
+  PODIUM_SIGNATURE_PROVIDER=registry-managed \
+  PODIUM_SIGNATURE_VERIFY_KEY="$BOGUS" \
+  podium-mcp
+```
+
+   **Expect.** An error carrying `signature_invalid: signature does not
+   verify`. A success here means verification is not running, so step 4's pass
+   proves nothing.
+
+6. Control on the non-extends path, so a pass in step 4 is attributable to the
+   merge rather than to verification being lenient for everything.
+
+```bash
+PARENT_REQ='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"shared/base"}}}'
+echo "$PARENT_REQ" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_MATERIALIZE_DIR="$WORK/mat3" \
+  PODIUM_VERIFY_SIGNATURES=always \
+  PODIUM_SIGNATURE_PROVIDER=registry-managed \
+  PODIUM_SIGNATURE_VERIFY_KEY="$PUBKEY" \
+  podium-mcp
+```
+
+   **Expect.** The parent loads and reports its own content hash, which differs
+   from the child's. The parent declares no `extends:`, so it exercises the
+   unmerged path.
+
+**Cleanup.** Stop the server by the PID this scenario recorded, and remove the
+work directory. Do not pattern-kill by process name: another scenario or
+another session may be running its own server.
+
+```bash
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+rm -rf "$WORK"
+```
+
+---
+
+## S39: same-ID `extends:` overlay and a three-level chain
+
+**Goal.** Validate the two chain shapes the single parent-child case does not
+reach: a child that overlays its own canonical ID from a lower-precedence
+layer, and a chain deep enough that an inherited key travels two hops.
+
+**Covers.** §4.6 field semantics, the §4.6 same-ID overlay exception, hidden
+parents over a multi-hop chain.
+
+**Why by hand.** The same-ID overlay is the case where the parent's ID and the
+child's ID are equal, so a hidden-parent check written over "the parent's ID
+must not appear" collides with the artifact's own identity. That collision took
+the longest of any part of this work to settle, and the resolution is that the
+check runs on inherited values rather than on the leaf's own. A three-level
+chain is the shape where a middle member's contribution can be dropped without
+either end looking wrong.
+
+**Steps.**
+
+1. Run the isolation block. `--layer-path` names a single registry root, so a
+   multi-layer scenario registers each layer instead.
+
+2. Build a base layer and an overlay layer that extends the same canonical ID.
+
+```bash
+mkdir -p "$WORK/base/greet" "$WORK/team/greet"
+cat > "$WORK/base/greet/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: base greet
+x_owner: platform
+---
+
+base prose
+EOF
+cat > "$WORK/team/greet/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 2.0.0
+extends: greet
+x_runbook: ops/greet.md
+---
+EOF
+```
+
+3. Serve, register both layers with `team` at higher precedence, and read the
+   overlay back.
+
+```bash
+podium serve --standalone --no-embeddings --bind 127.0.0.1:8140 > "$WORK/srv.log" 2>&1 &
+SRV=$!
+curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8140/healthz
+export PODIUM_REGISTRY=http://127.0.0.1:8140
+podium layer register --registry "$PODIUM_REGISTRY" --id base --local "$WORK/base" --public
+podium layer register --registry "$PODIUM_REGISTRY" --id team --local "$WORK/team" --public
+podium layer reingest --registry "$PODIUM_REGISTRY" base
+podium layer reingest --registry "$PODIUM_REGISTRY" team
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=greet" | tee "$WORK/greet.json" | python3 -m json.tool
+```
+
+   **Expect.** A 200. The served frontmatter carries the overlay's own
+   `x_runbook`, the base layer's inherited `x_owner: platform`, and the
+   inherited `description: base greet`. The served `version` is the overlay's
+   `2.0.0`.
+
+   A `registry.invalid_argument` refusal here is the collision this scenario
+   exists to catch: the artifact's own ID equals its parent's, so a
+   hidden-parent check that runs over the leaf's own keys refuses a legitimate
+   overlay.
+
+4. Confirm the overlay is still served, rather than being refused or emptied.
+
+```bash
+python3 - "$WORK/greet.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+fm = d.get("frontmatter", "")
+for probe in ("x_runbook", "x_owner", "base greet"):
+    print(("ok    " if probe in fm else "MISS  ") + probe)
+print("version:", d.get("version"))
+PY
+```
+
+   **Expect.** Three `ok` lines and version `2.0.0`. A `MISS` on `x_owner` is
+   the inherited-key drop; a `MISS` on `x_runbook` is the leaf's own key being
+   dropped, which is the more serious of the two.
+
+5. Build a three-level chain in one layer and read the leaf.
+
+```bash
+mkdir -p "$WORK/deep/a" "$WORK/deep/b" "$WORK/deep/c"
+cat > "$WORK/deep/a/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: grandparent
+x_grandparent: gp-value
+---
+
+gp prose
+EOF
+cat > "$WORK/deep/b/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: a@1.x
+x_middle: mid-value
+---
+EOF
+cat > "$WORK/deep/c/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: b@1.x
+x_leaf: leaf-value
+---
+EOF
+podium layer register --registry "$PODIUM_REGISTRY" --id deep --local "$WORK/deep" --public
+podium layer reingest --registry "$PODIUM_REGISTRY" deep
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=c" | tee "$WORK/c.json" | python3 -m json.tool
+```
+
+   **Expect.** The leaf carries `x_leaf`, the middle's `x_middle`, the
+   grandparent's `x_grandparent`, and the inherited `description: grandparent`.
+   A missing `x_grandparent` with `x_middle` present means the fold stops after
+   one hop.
+
+   The leaf's `manifest_body` is empty. A body is never inherited, at any depth:
+   `extends:` folds frontmatter and the child's prose replaces the parent's
+   rather than being concatenated with it. `gp prose` appearing here is a body
+   carried across two hops, which is the same defect as carrying it across one.
+
+```bash
+python3 -c "import json;print(repr(json.load(open('$WORK/c.json')).get('manifest_body','')))"
+```
+
+   **Expect.** An empty or whitespace-only string.
+
+6. Check the hidden-parent guarantee over the whole chain, not just the
+   immediate parent.
+
+```bash
+python3 - "$WORK/c.json" <<'PY'
+import json, sys
+fm = json.load(open(sys.argv[1])).get("frontmatter", "")
+for probe in ("extends", "a@1.x", "b@1.x"):
+    print(("LEAK  " if probe in fm else "ok    ") + probe)
+PY
+```
+
+   **Expect.** Three `ok` lines. A `LEAK` on `a@1.x` means the check covers the
+   immediate parent only and lets an ancestor through.
+
+**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+
+---
+
+## S40: `extends:` for a skill, and filesystem-versus-server parity
+
+**Goal.** Validate the artifact type whose prose does not live in
+`ARTIFACT.md`, and validate that the two registry modes materialize the same
+bytes for the same `extends:` child.
+
+**Covers.** §4.3.4 skills, §4.6 merge, §11 filesystem-versus-server
+equivalence, §2.2 shared library.
+
+**Why by hand.** A skill stores its body in `SKILL.md` and its frontmatter in
+`ARTIFACT.md`, so the body rule reads differently for it than for every other
+type, and the two sources differ by construction. Separately, the two extends
+resolvers are distinct implementations of the same merge: repairing one alone
+makes the modes disagree, and the disagreement is in materialized bytes rather
+than in an error.
+
+**Watch out for.** A filesystem-source `podium sync` does not lint, so a
+fixture a server refuses still materializes here. A skill's `SKILL.md` `name`
+must be lowercase and must equal its parent directory (`lint.invalid_name`,
+`lint.skill_md_compliance`), and a fixture that breaks either one passes the
+first half of this scenario and then kills the server in the second half with
+`ingest.lint_failed` before it binds.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Build a skill parent and a skill child that authors no `SKILL.md` body.
+
+```bash
+mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
+cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
+---
+type: skill
+version: 1.0.0
+x_review_board: platform
+---
+EOF
+cat > "$WORK/reg/shared/base/SKILL.md" <<'EOF'
+---
+name: base
+description: the base skill
+---
+
+base skill body
+EOF
+cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
+---
+type: skill
+version: 2.0.0
+extends: shared/base@1.x
+x_runbook: ops/derived.md
+---
+EOF
+cat > "$WORK/reg/team/derived/SKILL.md" <<'EOF'
+---
+name: derived
+description: the derived skill
+---
+
+derived skill body
+EOF
+```
+
+3. Materialize through the filesystem source.
+
+```bash
+mkdir -p "$WORK/fs-target"
+podium sync --registry "$WORK/reg" --target "$WORK/fs-target" --harness none
+find "$WORK/fs-target" -type f | sed "s|$WORK/fs-target/||" | sort
+```
+
+   **Expect.** Both artifacts materialize. The derived skill's `SKILL.md`
+   carries `derived skill body` and its own `description`, because a skill's
+   body and identity come from `SKILL.md` and follow the child rather than the
+   parent. A skill's `name` is forced to equal its directory by
+   `lint.skill_md_compliance`, so the child-versus-parent distinction lives in
+   the description and the body rather than in the name.
+
+4. Materialize the same registry through a server and compare byte for byte.
+
+```bash
+podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+  --bind 127.0.0.1:8141 > "$WORK/srv.log" 2>&1 &
+SRV=$!
+curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8141/healthz
+mkdir -p "$WORK/srv-target"
+podium sync --registry http://127.0.0.1:8141 --target "$WORK/srv-target" --harness none
+find "$WORK/fs-target" -name ARTIFACT.md | wc -l   # must be 2, not 0
+diff -r -x sync.lock "$WORK/fs-target" "$WORK/srv-target" && echo "IDENTICAL"
+```
+
+   **Expect.** A non-zero count, then `IDENTICAL`. The count runs first
+   because an empty tree compared against an empty tree also reports no
+   differences, which scores as a pass while proving nothing. The lock file is
+   excluded rather than tolerated: its `target` and `last_synced_at` differ by
+   construction between two consumers, and its `content_hash` is computed from
+   different inputs in the two modes. Any difference in an `ARTIFACT.md` or
+   `SKILL.md` is the §11 equivalence break that repairing one resolver alone
+   produces.
+
+5. Repeat the comparison for a harness that writes a native layout, so the
+   parity covers adapter output rather than the neutral copy alone.
+
+```bash
+mkdir -p "$WORK/fs-cc" "$WORK/srv-cc"
+podium sync --registry "$WORK/reg" --target "$WORK/fs-cc" --harness claude-code
+podium sync --registry http://127.0.0.1:8141 --target "$WORK/srv-cc" --harness claude-code
+find "$WORK/fs-cc" -name '*.md' | wc -l   # must be non-zero
+diff -r -x sync.lock "$WORK/fs-cc" "$WORK/srv-cc" && echo "IDENTICAL"
+```
+
+   **Expect.** A non-zero count, then `IDENTICAL`, with the lock excluded for
+   the same reason.
+
+**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+
+---
+
+## S41: inherited `audit_redact` over a forwarded audit stream
+
+**Goal.** Validate that an inherited redaction directive is applied before the
+event leaves the process, by reading what a receiver actually receives rather
+than what the local log file holds.
+
+**Covers.** §8.2 manifest-declared redaction, §8.3 audit sink selection, §4.6
+inheritance.
+
+**Why by hand.** Redaction that is applied only on the way to the local file
+still leaks to an aggregator, and the two paths are different sinks: a
+filesystem `PODIUM_AUDIT_LOG_PATH` selects a file sink, an `http(s)` value
+selects an endpoint sink. A scenario that greps the local log cannot tell the
+two apart, and the aggregator is the copy that leaves the operator's machine.
+
+**Steps.**
+
+1. Run the isolation block, then start a receiver that records every forwarded
+   body verbatim.
+
+```bash
+cat > "$WORK/sink.py" <<'EOF'
+import http.server, sys
+OUT = sys.argv[1]
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        n = int(self.headers.get("content-length", 0))
+        open(OUT, "ab").write(self.rfile.read(n) + b"\n")
+        self.send_response(204); self.end_headers()
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", 8901), H).serve_forever()
+EOF
+python3 "$WORK/sink.py" "$WORK/forwarded.jsonl" &
+SINK=$!
+sleep 1
+```
+
+2. Build a parent carrying the sensitive field and the directive, and a child
+   that declares neither.
+
+```bash
+mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
+cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: the base context
+sensitivity: medium
+x_account: GB29-NWBK-0000
+audit_redact: [x_account]
+---
+
+base prose
+EOF
+cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 2.0.0
+extends: shared/base@1.x
+---
+EOF
+```
+
+3. Serve with the audit stream pointed at the receiver rather than at a file,
+   then read the child.
+
+```bash
+PODIUM_AUDIT_LOG_PATH="http://127.0.0.1:8901/ingest" \
+podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+  --bind 127.0.0.1:8142 > "$WORK/srv.log" 2>&1 &
+SRV=$!
+curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8142/healthz
+curl -s -o /dev/null "http://127.0.0.1:8142/v1/load_artifact?id=team/derived"
+sleep 2
+wc -l < "$WORK/forwarded.jsonl"
+```
+
+   **Expect.** At least one forwarded line. Zero lines means the endpoint sink
+   was not selected and every later step is vacuous, so check `$WORK/srv.log`
+   for the sink it chose before reading anything into the result.
+
+4. Read what the receiver got.
+
+```bash
+grep -c "GB29-NWBK-0000" "$WORK/forwarded.jsonl" || true
+python3 - "$WORK/forwarded.jsonl" <<'PY'
+import json, sys
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        continue
+    if ev.get("target") == "team/derived":
+        print(json.dumps(ev.get("context", {}), indent=2))
+PY
+```
+
+   **Expect.** Zero occurrences of the raw account value in the forwarded
+   stream, and the child's event carrying `"x_account": "[redacted]"` in its
+   context. The raw value appearing here is a leak to the aggregator even when
+   the local file is clean.
+
+5. Confirm the directive reached the event by inheritance rather than by the
+   field being absent. A missing field and a redacted field are different
+   outcomes, and only one of them is redaction working.
+
+```bash
+python3 - "$WORK/forwarded.jsonl" <<'PY'
+import json, sys
+seen = False
+for line in open(sys.argv[1]):
+    line = line.strip()
+    if not line:
+        continue
+    try:
+        ev = json.loads(line)
+    except ValueError:
+        continue
+    if ev.get("target") == "team/derived" and "x_account" in ev.get("context", {}):
+        seen = True
+print("x_account present in the child's event context:", seen)
+PY
+```
+
+   **Expect.** `True`. `False` means the field never reached the event at all,
+   so the scenario proves nothing about redaction: the inherited directive
+   would look identical to a directive that was never applied.
+
+**Cleanup.** Stop the server and the receiver by their recorded PIDs, then
+remove `$WORK`.
+
+```bash
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+kill "$SINK" 2>/dev/null; wait "$SINK" 2>/dev/null
+rm -rf "$WORK"
+```
+
+---
+
+## S42: a deprecated parent in an `extends:` chain
+
+**Goal.** Validate what happens to a child whose parent is deprecated, across
+the orderings that differ: a range reference that can avoid a deprecated
+version, an explicit pin onto one, a line with no live version left, and a
+parent deprecated after the child was already stored.
+
+**Covers.** §4.6 inheritance, §4.7.6 pin resolution, §4.7.4 deprecation, §4.7
+immutability.
+
+**Why by hand.** Deprecation is per-version and a pin is frozen at the child's
+ingest, so which ordering produced a state is invisible from the state itself.
+The refusal also lands at ingest for some orderings and at read for others.
+
+**Layout, before you start.** Both walkers key on the literal filename
+`ARTIFACT.md`, and an artifact's id is its directory path relative to the layer
+root. A registry directory therefore holds exactly one `(id, version)` at a
+time, and any other file in it is captured as a bundled resource rather than as
+a second version. Multiple versions of one id live only in the store,
+accumulated across successive reingests of the same directory. Publishing a new
+version means overwriting `ARTIFACT.md` in place and reingesting, not adding a
+file beside it: a second file changes the artifact's content hash while its
+version stays the same, which ingest refuses with
+`ingest.immutable_violation`.
+
+There is no deprecation verb. A version's `deprecated` flag is part of its
+frontmatter and therefore part of its content hash, so a stored version cannot
+be deprecated in place; the same refusal applies.
+
+**Steps.**
+
+1. Run the isolation block, serve an empty registry, and register one layer.
+
+```bash
+mkdir -p "$WORK/reg"
+podium serve --standalone --no-embeddings --bind 127.0.0.1:8143 > "$WORK/srv.log" 2>&1 &
+SRV=$!
+curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8143/healthz
+export PODIUM_REGISTRY=http://127.0.0.1:8143
+podium layer register --registry "$PODIUM_REGISTRY" --id reg --local "$WORK/reg" --public
+```
+
+2. Publish a live parent and a child that references it by range.
+
+```bash
+mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
+cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: base v1
+---
+
+base prose
+EOF
+cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: shared/base@1.x
+---
+EOF
+podium layer reingest --registry "$PODIUM_REGISTRY" reg
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" | python3 -c "import json,sys;d=json.load(sys.stdin);print('deprecated=',d.get('deprecated'));print('inherits base v1:', 'base v1' in d.get('frontmatter',''))"
+```
+
+   **Expect.** The child loads and inherits `base v1`. Its `deprecated` is
+   absent or `false`; the field is omitted rather than emitted as `false`, so
+   read the absence as the negative rather than looking for the word.
+
+3. Deprecate the line by publishing a newer version, which means overwriting
+   the same file. Confirm both versions are stored before continuing: no HTTP
+   route lists versions, so read the store.
+
+```bash
+cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.1.0
+description: base v1.1 deprecated
+deprecated: true
+---
+
+base prose
+EOF
+podium layer reingest --registry "$PODIUM_REGISTRY" reg
+sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, version, deprecated from manifests order by artifact_id, version;"
+```
+
+   **Expect.** Two rows for `shared/base`: `1.0.0` with `0`, and `1.1.0` with
+   `1`. One row means the overwrite did not land as a new version and every
+   later step runs against the wrong registry.
+
+4. Ingest a **fresh** range child while the deprecated version is already
+   stored. A child already stored is idempotent on reingest and its pin is
+   frozen, so re-reading it tests nothing about the selection rule.
+
+```bash
+mkdir -p "$WORK/reg/team/ranged"
+cat > "$WORK/reg/team/ranged/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: shared/base@1.x
+---
+EOF
+podium layer reingest --registry "$PODIUM_REGISTRY" reg
+sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, extends_pin from manifests where extends_pin != '';"
+```
+
+   **Expect.** `team/ranged` pins `shared/base@1.0.0`, the live version, not
+   the newer deprecated `1.1.0`. The range skipped the deprecated candidate.
+   `team/derived` still pins `1.0.0` from its original ingest.
+
+5. Pin a deprecated version explicitly. Read the reingest output: the rejection
+   is printed by the CLI on stdout and never reaches the server log, and a grep
+   of the server log matches unrelated boot lines whether or not the rejection
+   happened.
+
+```bash
+mkdir -p "$WORK/reg/team/pinned"
+cat > "$WORK/reg/team/pinned/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: shared/base@1.1.0
+---
+EOF
+podium layer reingest --registry "$PODIUM_REGISTRY" reg 2>&1 | grep -iE "rejected|conflict" || echo "NO REJECTION LINE"
+```
+
+   **Expect.** A line naming `team/pinned`, `ingest.invalid_artifact`, and
+   deprecation, for example `extends: parent version shared/base@1.1.0 is
+   deprecated`. A message claiming the parent was never published is a defect:
+   the author named a stored version explicitly and is entitled to be told why
+   it was refused.
+
+   Note that `podium layer reingest` exits `0` here, because other artifacts in
+   the layer were accepted. Assert on the output rather than on the exit
+   status.
+
+6. Exhaust a line: a parent whose only version is deprecated.
+
+```bash
+mkdir -p "$WORK/reg/shared/dead" "$WORK/reg/team/orphaned"
+cat > "$WORK/reg/shared/dead/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: dead line
+deprecated: true
+---
+
+dead prose
+EOF
+cat > "$WORK/reg/team/orphaned/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: shared/dead@1.x
+---
+EOF
+podium layer reingest --registry "$PODIUM_REGISTRY" reg 2>&1 | grep -iE "rejected|conflict" || echo "NO REJECTION LINE"
+```
+
+   **Expect.** `team/orphaned` refused with `ingest.invalid_artifact` and a
+   reason naming that every stored version of the parent is deprecated. A
+   range with no live candidate refuses rather than falling back to a
+   deprecated one.
+
+7. Record the read-versus-search disposition for a child that inherits the
+   flag. **This state is not reachable on a current build**, and the step
+   exists to keep the accepted deferral visible rather than to produce it.
+
+   A child can inherit `deprecated: true` only by pinning a deprecated version,
+   which steps 5 and 6 show is refused at ingest, and a stored version cannot
+   be deprecated in place because the flag is part of its content hash. So the
+   only artifacts in this state are ones stored before those ingest rules
+   existed.
+
+   When you need to observe the deferral, reconstruct it out of band in the
+   throwaway store, which is not a product path:
+
+```bash
+sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, version, deprecated from manifests where artifact_id like 'shared/%';"
+```
+
+   **Expect.** Record what you see. The known disposition is that
+   `load_artifact` reports an inherited `deprecated: true` with its deprecation
+   warning while the default `search_artifacts` filter reads the child's own
+   stored column and does not exclude it. That divergence is an accepted
+   deferral rather than a defect. Note also that the read path parses each
+   record's stored frontmatter rather than its column, so flipping the column
+   alone changes nothing on the read.
+
+**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.

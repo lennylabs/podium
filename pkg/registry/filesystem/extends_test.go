@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -244,4 +245,154 @@ func contains(xs []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// recordOf builds a walked record from an authored manifest.
+func recordOf(t *testing.T, id, src string) ArtifactRecord {
+	t.Helper()
+	a, err := manifest.ParseArtifact([]byte(src))
+	if err != nil {
+		t.Fatalf("ParseArtifact(%s): %v", id, err)
+	}
+	return ArtifactRecord{ID: id, Artifact: a, ArtifactBytes: []byte(src)}
+}
+
+// Spec: §4.6 hidden parents / §11 — the chain the hidden-parent test checks
+// comes from each record's parsed manifest, so a child inheriting a key that
+// names the grandparent fails closed whichever record this resolver reached
+// first. Read back out of the record bytes, the grandparent's ID would go
+// missing once the middle record had been rewritten in place, and the
+// filesystem mode would serve a block the server mode refuses.
+func TestResolveExtends_GrandparentIDFailsClosedInAnyProcessingOrder(t *testing.T) {
+	t.Parallel()
+	gp := recordOf(t, "shared/gp",
+		"---\ntype: context\nversion: 1.0.0\ndescription: grandparent\n---\n\ngp body\n")
+	parent := recordOf(t, "shared/parent",
+		"---\ntype: context\nversion: 1.0.0\ndescription: parent\n"+
+			"x_base: shared/gp\nextends: shared/gp\n---\n\nparent body\n")
+	child := recordOf(t, "team/child",
+		"---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent\n---\n\nchild body\n")
+	other := recordOf(t, "team/other",
+		"---\ntype: context\nversion: 1.0.0\ndescription: unrelated\n---\n\nother body\n")
+
+	for name, order := range map[string][]ArtifactRecord{
+		"parent before child": {gp, parent, child, other},
+		"child before parent": {other, child, parent, gp},
+	} {
+		order := order
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			deduped := append([]ArtifactRecord(nil), order...)
+			err := resolveExtends(deduped, append([]ArtifactRecord(nil), order...))
+			if !errors.Is(err, manifest.ErrUnhidableParent) {
+				t.Fatalf("resolveExtends err = %v, want ErrUnhidableParent", err)
+			}
+		})
+	}
+}
+
+// Spec: §4.6 hidden parents, §11 — the walk a consumer drives fails closed
+// when a child inherits a key naming the hidden grandparent, because serving
+// the key would name the grandparent and dropping it would serve an inheritable
+// key as nothing. The server mode refuses the same child, so neither deployment
+// mode materializes a tree the other refuses (§11, §2.2).
+func TestWalk_ResolveExtendsFailsOnAnInheritedKeyNamingTheGrandparent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    "shared/gp/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: grandparent\n---\n\ngp body\n",
+		},
+		testharness.WriteTreeOption{
+			Path: "shared/parent/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\n" +
+				"x_base: shared/gp\nextends: shared/gp\n---\n\nparent body\n",
+		},
+		testharness.WriteTreeOption{
+			Path:    "team/child/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent\n---\n\nchild body\n",
+		},
+		testharness.WriteTreeOption{
+			Path:    "team/other/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: unrelated\n---\n\nother body\n",
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
+	if !errors.Is(err, manifest.ErrUnhidableParent) {
+		t.Fatalf("Walk err = %v, want ErrUnhidableParent", err)
+	}
+	if got != nil {
+		t.Errorf("a failed walk returned records: %v", idsOf(got))
+	}
+}
+
+// Spec: §4.6 hidden parents, §11 — §4.6 hides the parent's ID under every key
+// of the merged block, whoever authored it, so a key the child wrote itself
+// naming its parent ends the walk with the sentinel the server mode reports as
+// registry.invalid_argument. These are the bytes pkg/sync materializes, where
+// neither the search descriptor nor raw_frontmatter exists. The server mode
+// refuses the same child, so neither deployment mode materializes a tree the
+// other refuses (§11, §2.2).
+func TestWalk_ResolveExtendsFailsClosedOnTheChildsOwnKeyNamingItsParent(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    "shared/parent/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		},
+		testharness.WriteTreeOption{
+			Path: "team/child/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 2.0.0\ndescription: child\n" +
+				"x_base: shared/parent\nextends: shared/parent\n---\n\nchild body\n",
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
+	if !errors.Is(err, manifest.ErrUnhidableParent) {
+		t.Fatalf("Walk err = %v, want ErrUnhidableParent", err)
+	}
+	if got != nil {
+		t.Errorf("a failed walk returned records: %v", idsOf(got))
+	}
+}
+
+// Spec: §4.6 hidden parents, §11 — a child whose extends reference is carried
+// by an anchor holds that reference under a second key, which the merge expands
+// into the parent's ID. The walk ends with the sentinel the server mode reports
+// as registry.invalid_argument,
+// so neither mode materializes a tree the other refuses (§11, §2.2).
+func TestWalk_ResolveExtendsFailsClosedOnAnAnchoredReference(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    "shared/parent/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		},
+		testharness.WriteTreeOption{
+			Path: "team/child/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 2.0.0\ndescription: child\n" +
+				"extends: &p shared/parent\nnote: *p\n---\n\nchild body\n",
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
+	if !errors.Is(err, manifest.ErrUnhidableParent) {
+		t.Fatalf("Walk err = %v, want ErrUnhidableParent", err)
+	}
+	if got != nil {
+		t.Errorf("a failed walk returned records: %v", idsOf(got))
+	}
 }

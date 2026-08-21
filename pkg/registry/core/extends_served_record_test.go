@@ -19,13 +19,22 @@ import (
 // helper takes both and keeps each test to what it asserts.
 func esrIngest(t *testing.T, parent, child string, signer ingest.SignerFunc) *store.Memory {
 	t.Helper()
+	return esrIngestFiles(t,
+		fstest.MapFS{"shared/parent/ARTIFACT.md": &fstest.MapFile{Data: []byte(parent)}},
+		fstest.MapFS{"finance/child/ARTIFACT.md": &fstest.MapFile{Data: []byte(child)}},
+		signer)
+}
+
+// esrIngestFiles is the multi-file form. A skill authors its prose in SKILL.md
+// beside ARTIFACT.md, so the skill case needs two files per artifact.
+func esrIngestFiles(t *testing.T, parent, child fstest.MapFS, signer ingest.SignerFunc) *store.Memory {
+	t.Helper()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
-		TenantID: "t", LayerID: "L1", Signer: signer,
-		Files: fstest.MapFS{"shared/parent/ARTIFACT.md": &fstest.MapFile{Data: []byte(parent)}},
+		TenantID: "t", LayerID: "L1", Signer: signer, Files: parent,
 	})
 	if err != nil {
 		t.Fatalf("ingest parent: %v", err)
@@ -34,8 +43,7 @@ func esrIngest(t *testing.T, parent, child string, signer ingest.SignerFunc) *st
 		t.Fatalf("parent not accepted: %+v", res.Rejected)
 	}
 	res, err = ingest.Ingest(context.Background(), st, ingest.Request{
-		TenantID: "t", LayerID: "L2", Signer: signer,
-		Files: fstest.MapFS{"finance/child/ARTIFACT.md": &fstest.MapFile{Data: []byte(child)}},
+		TenantID: "t", LayerID: "L2", Signer: signer, Files: child,
 	})
 	if err != nil {
 		t.Fatalf("ingest child: %v", err)
@@ -44,6 +52,30 @@ func esrIngest(t *testing.T, parent, child string, signer ingest.SignerFunc) *st
 		t.Fatalf("child not accepted: %+v", res.Rejected)
 	}
 	return st
+}
+
+// esrProseBelowFrontmatter returns whatever a served frontmatter block carries
+// after its closing delimiter. A record whose prose lives in ARTIFACT.md
+// serves that prose in both Frontmatter and ManifestBody, so an assertion that
+// the body is empty has to cover the frontmatter's copy of it too.
+func esrProseBelowFrontmatter(t *testing.T, b []byte) string {
+	t.Helper()
+	const delim = "---"
+	s := string(b)
+	if !strings.HasPrefix(s, delim+"\n") {
+		t.Fatalf("served frontmatter does not open with a %q delimiter:\n%s", delim, s)
+	}
+	rest := s[len(delim)+1:]
+	i := strings.Index(rest, "\n"+delim)
+	if i < 0 {
+		t.Fatalf("served frontmatter has no closing %q delimiter:\n%s", delim, s)
+	}
+	after := rest[i+1+len(delim):]
+	nl := strings.Index(after, "\n")
+	if nl < 0 {
+		return ""
+	}
+	return after[nl+1:]
 }
 
 func esrRegistry(st *store.Memory) *core.Registry {
@@ -86,13 +118,17 @@ func TestExtends_ServedSignatureVerifiesAgainstServedContentHash(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 — extends inherits structured frontmatter fields and not the
-// markdown body, which manifest.MergeExtends implements by taking the child's
-// body unconditionally. The served record guarded that carry-over on a
-// non-empty body, so a child that authored no prose was served the root
-// parent's, and the record disagreed with the body inside its own merged
-// frontmatter. The parent's prose also reaches a requester who may hold no
-// access to the parent's layer, which is what §4.6 hidden parents forbids.
+// manifest.MergeExtends assigns the child's body unconditionally
+// (pkg/manifest/merge.go), the filesystem resolver folds through it, and
+// docs/authoring/extends.md states that the child's prose replaces the
+// parent's. The served record guarded that carry-over on a non-empty body, so
+// a child that authored no prose was served the root parent's. For a type
+// whose prose lives in ARTIFACT.md, as this fixture's type: agent does, that
+// also left the record's Body disagreeing with the body inside its own merged
+// frontmatter. For type: skill the two sources differ by construction, because
+// ingest stores the SKILL.md body on the record's Body and the ARTIFACT.md
+// bytes as its Frontmatter. No spec section states which body an extends child
+// serves, so this test cites no spec section.
 func TestExtends_EmptyChildBodyDoesNotServeTheParentProse(t *testing.T) {
 	t.Parallel()
 	st := esrIngest(t,
@@ -109,5 +145,75 @@ func TestExtends_EmptyChildBodyDoesNotServeTheParentProse(t *testing.T) {
 	}
 	if strings.Contains(string(got.Frontmatter), "secret parent prose") {
 		t.Errorf("the merged frontmatter carries the parent's body:\n%s", got.Frontmatter)
+	}
+	// The positive form: a served body of any origin fails, so a truncated or
+	// otherwise parent-derived body cannot pass the absence checks above.
+	if body := strings.TrimSpace(got.ManifestBody); body != "" {
+		t.Errorf("the child authored no prose, so the served body must be empty; got:\n%s", body)
+	}
+	if prose := strings.TrimSpace(esrProseBelowFrontmatter(t, got.Frontmatter)); prose != "" {
+		t.Errorf("the merged frontmatter carries prose below its block:\n%s", prose)
+	}
+}
+
+// The paired arm: a child that authors its own prose is served that prose.
+// Dropping the guard must not turn into dropping the body, so the two cases
+// move together. Like the case above this pins manifest.MergeExtends
+// (pkg/manifest/merge.go) and docs/authoring/extends.md rather than a spec
+// section, because no section states which body an extends child serves.
+func TestExtends_NonEmptyChildBodyIsServedOverTheParentProse(t *testing.T) {
+	t.Parallel()
+	st := esrIngest(t,
+		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nsecret parent prose\n",
+		"---\ntype: agent\nversion: 2.0.0\ndescription: child\nextends: shared/parent@1.x\n---\n\nchild prose\n",
+		nil)
+
+	got, err := esrRegistry(st).LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	if strings.TrimSpace(got.ManifestBody) != "child prose" {
+		t.Errorf("served body = %q, want the child's authored prose", got.ManifestBody)
+	}
+	if strings.Contains(got.ManifestBody, "secret parent prose") {
+		t.Errorf("the served body carries the parent's prose:\n%s", got.ManifestBody)
+	}
+	if prose := strings.TrimSpace(esrProseBelowFrontmatter(t, got.Frontmatter)); prose != "child prose" {
+		t.Errorf("merged frontmatter prose = %q, want the child's authored prose", prose)
+	}
+}
+
+// The skill arm. A skill's prose lives in SKILL.md, which ingest stores on the
+// record's Body while the ARTIFACT.md bytes become its Frontmatter
+// (pkg/registry/ingest/ingest.go), so the two sources differ by construction
+// and this case asserts nothing about the frontmatter's prose. What the served
+// record owes a skill child whose SKILL.md carries no prose is its own empty
+// body rather than the root parent's SKILL.md prose.
+func TestExtends_EmptySkillChildBodyDoesNotServeTheParentProse(t *testing.T) {
+	t.Parallel()
+	st := esrIngestFiles(t,
+		fstest.MapFS{
+			"shared/parent/ARTIFACT.md": &fstest.MapFile{Data: []byte(
+				"---\ntype: skill\nversion: 1.0.0\n---\n")},
+			"shared/parent/SKILL.md": &fstest.MapFile{Data: []byte(
+				"---\nname: parent\ndescription: The parent skill.\n---\n\nsecret parent prose\n")},
+		},
+		fstest.MapFS{
+			"finance/child/ARTIFACT.md": &fstest.MapFile{Data: []byte(
+				"---\ntype: skill\nversion: 2.0.0\nextends: shared/parent@1.x\n---\n")},
+			"finance/child/SKILL.md": &fstest.MapFile{Data: []byte(
+				"---\nname: child\ndescription: The child skill.\n---\n")},
+		},
+		nil)
+
+	got, err := esrRegistry(st).LoadArtifact(context.Background(), publicID, "finance/child", core.LoadArtifactOptions{})
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	if strings.Contains(got.ManifestBody, "secret parent prose") {
+		t.Errorf("the skill child was served the parent's SKILL.md body:\n%s", got.ManifestBody)
+	}
+	if body := strings.TrimSpace(got.ManifestBody); body != "" {
+		t.Errorf("the skill child authored no prose, so the served body must be empty; got:\n%s", body)
 	}
 }
