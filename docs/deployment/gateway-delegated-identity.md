@@ -104,7 +104,7 @@ Enabling either provider changes the resolved default layer visibility. On a reg
 
 ## Web UI
 
-Under either provider the web UI is served by the same registry process behind the same gateway and carries no device-code flow of its own. The gateway authenticates the request and the registry resolves the caller's identity, exactly as for any other API request, so the UI inherits the request's resolved identity. A non-loopback web-UI bind under `trusted-headers` is also subject to the provider's bind restriction.
+Under either provider the web UI is served by the same registry process and carries no device-code flow of its own. Where a gateway fronts the registry, the gateway authenticates the request and the registry resolves the caller's identity from the forwarded token or the injected headers, exactly as for any other API request, so the UI inherits the request's resolved identity. Where the registry is directly reachable under `oidc-jwt`, the registry verifies the token the caller presents itself, and a browser request that carries no token resolves as anonymous and sees public visibility only. A non-loopback web-UI bind under `trusted-headers` is also subject to the provider's bind restriction.
 
 ## Startup guards
 
