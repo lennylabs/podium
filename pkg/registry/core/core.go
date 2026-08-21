@@ -1737,8 +1737,13 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 		// concatenated. The assignment is unconditional, matching
 		// manifest.MergeExtends and the filesystem resolver: guarding on a
 		// non-empty child body served the parent's prose to a child that
-		// authored none, and made the record disagree with the body inside
-		// its own merged frontmatter.
+		// authored none. For a type whose prose lives in ARTIFACT.md that
+		// also left the record's Body disagreeing with the body inside its
+		// own merged frontmatter. For type: skill the two sources differ by
+		// construction, because ingest stores the SKILL.md body on Body and
+		// the ARTIFACT.md bytes as Frontmatter, so dropping the guard serves
+		// a skill child its own empty SKILL.md body in place of the parent's
+		// prose.
 		out.Body = c.Body
 		// Bundled resources belong to the concrete package: the child's
 		// own files ship, not the hidden parent's (§4.6). The leaf record

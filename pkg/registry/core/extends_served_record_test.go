@@ -90,10 +90,13 @@ func TestExtends_ServedSignatureVerifiesAgainstServedContentHash(t *testing.T) {
 // (pkg/manifest/merge.go), the filesystem resolver folds through it, and
 // docs/authoring/extends.md states that the child's prose replaces the
 // parent's. The served record guarded that carry-over on a non-empty body, so
-// a child that authored no prose was served the root parent's, and the record
-// disagreed with the body inside its own merged frontmatter. No spec section
-// states which body an extends child serves, so this test cites no spec
-// section.
+// a child that authored no prose was served the root parent's. For a type
+// whose prose lives in ARTIFACT.md, as this fixture's type: agent does, that
+// also left the record's Body disagreeing with the body inside its own merged
+// frontmatter. For type: skill the two sources differ by construction, because
+// ingest stores the SKILL.md body on the record's Body and the ARTIFACT.md
+// bytes as its Frontmatter. No spec section states which body an extends child
+// serves, so this test cites no spec section.
 func TestExtends_EmptyChildBodyDoesNotServeTheParentProse(t *testing.T) {
 	t.Parallel()
 	st := esrIngest(t,
