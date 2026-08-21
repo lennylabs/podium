@@ -229,12 +229,12 @@ func TestSerializeMerged_InheritedKeyNamingTheParentFailsClosed(t *testing.T) {
 	}
 }
 
-// Spec: §4.4, §4.6. A declared field the leaf authored itself is served, on the
-// same terms as an extension key the leaf authored: those bytes reach the
-// requester through the search descriptor and the raw frontmatter whatever this
-// helper does. A child deprecated in favour of the artifact it extends is
-// served its pointer.
-func TestSerializeMerged_LeafAuthoredDeclaredFieldNamingTheParentIsServed(t *testing.T) {
+// Spec: §4.4, §4.6 hidden parents. §4.6 states its guarantee about the block
+// the registry serves and says nothing about who authored a value, so a
+// declared field the leaf wrote itself fails the read like an inherited one. A
+// child deprecated in favour of the artifact it extends is that case: the
+// pointer hands the requester the ID §4.6 hides.
+func TestSerializeMerged_LeafAuthoredDeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
 	t.Parallel()
 	out, err := manifest.SerializeMerged(&manifest.Artifact{
 		Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
@@ -245,20 +245,7 @@ func TestSerializeMerged_LeafAuthoredDeclaredFieldNamingTheParentIsServed(t *tes
 		block("---\ntype: agent\nversion: 2.0.0\ndescription: child\ndeprecated: true\n"+
 			"replaced_by: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
 			"shared/parent@1.x"))
-	if err != nil {
-		t.Fatalf("SerializeMerged: %v", err)
-	}
-	fm, _, err := manifest.SplitFrontmatter(out)
-	if err != nil {
-		t.Fatalf("SplitFrontmatter: %v", err)
-	}
-	got := decodeMapping(t, fm)
-	if got["replaced_by"] != "shared/parent" {
-		t.Errorf("replaced_by = %v, want %q\n%s", got["replaced_by"], "shared/parent", fm)
-	}
-	if _, named := got["extends"]; named {
-		t.Errorf("the merged block still names the parent under extends:\n%s", fm)
-	}
+	assertUnhidable(t, out, err)
 }
 
 // Spec: §4.6 hidden parents. The disclosure test covers the declared fields as
@@ -381,12 +368,13 @@ var parentNamingValues = map[string]string{
 	"the id inside a list":     "bases: shared/other, shared/parent",
 }
 
-// Spec: §4.6 hidden parents. An inherited value that hands the requester the
-// parent's ID fails the merge under every spelling of that ID, at whatever
-// depth it sits. Dropping the key instead would serve a key §4.6 makes
-// inheritable as nothing, which no consumer can tell from a key the chain never
-// set.
-func TestSerializeMerged_InheritedValuesSpellingTheParentFailClosed(t *testing.T) {
+// Spec: §4.6 hidden parents. A value that hands the requester the parent's ID
+// fails the merge under every spelling of that ID, at whatever depth it sits,
+// and from either origin: §4.6 constrains the block the registry serves and
+// draws no line between the value the leaf wrote and the value the merge
+// restored. Dropping the key instead would serve a key §4.6 makes inheritable
+// as nothing, which no consumer can tell from a key the chain never set.
+func TestSerializeMerged_ValuesSpellingTheParentFailClosed(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{"a nested extends entry": "x_meta:\n  inner:\n    extends: shared/parent\n"}
 	for name, value := range parentNamingValues {
@@ -395,38 +383,10 @@ func TestSerializeMerged_InheritedValuesSpellingTheParentFailClosed(t *testing.T
 	for name, keys := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			out, err := serializeChild(inheritedChain(keys))
-			assertUnhidable(t, out, err)
-		})
-	}
-}
-
-// Spec: §4.6 hidden parents, §2.2. A value the leaf authored itself is served,
-// because the leaf's own block reaches the same requester verbatim as the
-// served raw frontmatter and as the search descriptor, which strips the extends
-// entry and preserves every sibling key. Refusing the read over one of those
-// bytes would disclose nothing less and would put load_artifact and
-// search_artifacts back into the disagreement this helper exists to end.
-func TestSerializeMerged_LeafAuthoredValuesSpellingTheParentAreServed(t *testing.T) {
-	t.Parallel()
-	for name, value := range parentNamingValues {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			out, err := serializeChild(leafChain(noteKeys(value)))
-			if err != nil {
-				t.Fatalf("SerializeMerged: %v", err)
-			}
-			fm, _, err := manifest.SplitFrontmatter(out)
-			if err != nil {
-				t.Fatalf("SplitFrontmatter: %v", err)
-			}
-			got := decodeMapping(t, fm)
-			if got["x_note"] != value {
-				t.Errorf("x_note = %v, want %q\n%s", got["x_note"], value, fm)
-			}
-			if _, named := got["extends"]; named {
-				t.Errorf("the merged block still names the parent under extends:\n%s", fm)
-			}
+			forEachOriginKeys(t, keys, func(t *testing.T, chain []manifest.MergedBlock) {
+				out, err := serializeChild(chain)
+				assertUnhidable(t, out, err)
+			})
 		})
 	}
 }
@@ -528,12 +488,12 @@ func TestSerializeMerged_EmptyChainBlockContributesNoKeys(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents. A chain that contributes no leaf block exempts no
-// value, so the disclosure test runs over the whole assembled block. Both
-// spellings of that reach the helper: a caller that passes no chain at all, and
-// a leaf whose record stored no frontmatter, which is what a store record built
-// outside ingest holds.
-func TestSerializeMerged_NoLeafBlockExemptsNothing(t *testing.T) {
+// Spec: §4.6 hidden parents. The disclosure test reads the extends reference
+// the merged artifact itself carries, so a chain that contributes no leaf block
+// is checked like any other. Both spellings of that reach the helper: a caller
+// that passes no chain at all, and a leaf whose record stored no frontmatter,
+// which is what a store record built outside ingest holds.
+func TestSerializeMerged_ChainWithoutALeafBlockIsStillTested(t *testing.T) {
 	t.Parallel()
 	for name, chain := range map[string][]manifest.MergedBlock{
 		"no chain at all":         nil,
