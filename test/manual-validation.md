@@ -137,8 +137,8 @@ rm -rf "$WORK"
 | S40 | `extends:` for a skill, and filesystem-versus-server parity | solo then standalone | none | none | none |
 | S41 | inherited `audit_redact` over a forwarded audit stream | standalone | none | none | none |
 | S42 | a deprecated parent in an `extends:` chain | standalone | none | none | none |
-| S43 | The documented `registry.yaml` example starts a registry | standalone | none | none | OIDC IdP |
-| S44 | The web UI on a directly reachable `oidc-jwt` registry | standalone | none | none | OIDC IdP |
+| S43 | The documented `registry.yaml` example starts a registry | standalone | none | none | any public https OIDC issuer |
+| S44 | The web UI on a directly reachable `oidc-jwt` registry | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S45 | The runbook's read-only write set matches what the registry rejects | standard | none | pgvector | severable Postgres, S3 |
 
 ---
@@ -3747,7 +3747,7 @@ and that the two configurations it replaces are still refused.
 
 **Covers.** The §13.12 config-file example, the `oidc-jwt` required key pair
 (§6.3.3), and the startup refusals `config.identity_provider_unverified` and
-`config.oidc_jwt_audience_unset`.
+`config.invalid_issuer_scheme`.
 
 **Why by hand.** `TestReadYAMLConfig_SpecExampleNestedBlock`
 (`internal/serverboot/backend_config_test.go`) and
@@ -3759,16 +3759,18 @@ state the example was in until the §13.12 correction, and the same text had
 already been copied into the Helm chart's `values.yaml`, where a default
 `helm install` could not start.
 
-**Prerequisites.**
+**Prerequisites.** Network access to any `https` OIDC issuer that publishes a
+discovery document. No account, no tenant, no client registration, and no token
+are needed: the scenario asserts that the registry starts, and startup fetches
+the discovery document and the JWKS without validating any token. A public
+issuer therefore serves, and `https://accounts.google.com` and
+`https://login.microsoftonline.com/common/v2.0` both work. Run the scenario
+against one of those unless a tenant of your own is already configured.
 
-- An OIDC IdP whose discovery document is reachable from this host over `https`
-  at `<issuer>/.well-known/openid-configuration`. The IdP S36 names under its
-  prerequisites is sufficient; no client registration and no token are needed,
-  because this scenario asserts startup rather than verification.
-- When no IdP is reachable, skip the scenario and record the skip. §6.3.3 fails
-  startup when the discovery document or JWKS is unreachable, so an unreachable
-  issuer produces a refusal that looks like the failures the negative controls
-  below are testing for and would score a false pass.
+Skip only when the host has no outbound network access at all. §6.3.3 fails
+startup when the discovery document or the JWKS is unreachable, so an
+unreachable issuer produces a refusal that resembles the failures the negative
+controls are testing for and would score a false pass.
 
 **A note on the example's issuer.** The example reads
 `issuer: https://acme.okta.com/oauth2/default`, which resolves to nothing. The
@@ -3781,7 +3783,7 @@ names, which is what the defect was about; the placeholder hostname is not.
 1. Run the isolation block, then name the IdP and the registry's own endpoint.
 
    ```bash
-   export ISSUER="https://<your-idp>/oauth2/default"   # no trailing slash
+   export ISSUER="https://accounts.google.com"   # any https issuer; no trailing slash
    export AUD="http://127.0.0.1:8150"
    curl -fsS "$ISSUER/.well-known/openid-configuration" > /dev/null && echo "issuer reachable"
    ```
@@ -3819,12 +3821,23 @@ names, which is what the defect was about; the placeholder hostname is not.
 4. Confirm the provider is the one under test rather than an absent one.
 
    ```bash
-   podium config show --server --config "$WORK/registry.yaml" | grep -E "identity_provider|oauth_audience"
+   PODIUM_CONFIG_FILE="$WORK/registry.yaml" podium config show --server | grep -E "identity_provider|oauth_audience"
    ```
 
-   **Expect.** `identity_provider.type` reads `oidc-jwt`, `identity_provider.issuer`
+   `config show` takes the config path from `PODIUM_CONFIG_FILE` and defines no
+   `--config` flag, which `serve` does. Passing `--config` here exits 1 with
+   `flag provided but not defined: -config` before printing anything.
+
+   **Expect.** `identity_provider` reads `oidc-jwt`, `identity_provider.issuer`
    reads `$ISSUER`, and `oauth_audience` reads `$AUD`. A registry that started
-   with no provider at all would satisfy step 3 and fail here.
+   with no provider at all would satisfy step 3 and fail here. The type key
+   prints as `identity_provider` rather than `identity_provider.type`, so a
+   literal grep for the latter finds nothing.
+
+   The provenance column reads `default` for `oauth_audience` even when the
+   value comes from the config file, while `identity_provider` and
+   `identity_provider.issuer` on the same run read `registry.yaml`. The value
+   itself does track the file. Read the value rather than the provenance.
 
 5. **Negative control, the configuration §13.12 used to carry.** Stop the
    server, then start one on the pre-correction block.
@@ -3862,10 +3875,14 @@ names, which is what the defect was about; the placeholder hostname is not.
    echo "exit=$?"; tail -2 "$WORK/half.log"
    ```
 
-   **Expect.** A non-zero exit naming the unset issuer. `authorization_endpoint`
-   is read for the device-code flow and `oidc-jwt` reads `issuer`, so renaming
-   the type and keeping the endpoint key yields a registry that still does not
-   start. This is the trap a reader is most likely to reproduce.
+   **Expect.** A non-zero exit with `config.invalid_issuer_scheme`, reporting
+   that `PODIUM_OAUTH_ISSUER` must be an `https` URL and quoting the empty value
+   it got. The code is the same one step 3 lists among the failures whose
+   absence proves success, because an unset issuer and a non-`https` issuer
+   share it. `authorization_endpoint` is read for the device-code flow and
+   `oidc-jwt` reads `issuer`, so renaming the type and keeping the endpoint key
+   yields a registry that still does not start. This is the trap a reader is
+   most likely to reproduce.
 
 **Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
 
@@ -3886,14 +3903,108 @@ Go test reads a browser rendering, which is why the previous §13.11 text could
 claim the UI ran a device-code flow with an in-browser verification handoff and
 no test contradicted it.
 
-**Prerequisites.** The same reachable IdP as S43, plus one valid access token
-it issued, for the negative control in step 5. When no IdP is reachable, skip
-and record the skip.
+**Prerequisites.** A local Keycloak serving an `https` issuer the host trusts,
+and one access token it issued for the negative control in step 5.
+
+The registry fetches the OIDC discovery document and the JWKS at startup, so
+the issuer has to be reachable and its certificate has to verify. Two failures
+follow from that and are worth knowing before setting up, because each produces
+a refusal that looks like the scenario failing rather than the IdP being
+misconfigured:
+
+- An `http` issuer is refused with `config.invalid_issuer_scheme` (§6.3.3).
+  Keycloak's `start-dev` listens on `http://0.0.0.0:8080` and its discovery
+  document reports an `http` issuer, so a plain `start-dev` container cannot
+  serve this scenario.
+- An `https` issuer whose certificate the host does not trust is refused with
+  `oidc-jwt: issuer ... is unreachable at startup` wrapping
+  `x509: certificate signed by unknown authority`. A self-signed certificate
+  reaches this, so the certificate has to come from a CA in the host trust
+  store. The registry reads no custom CA bundle and has no verification-skip
+  switch.
+
+1. Install `mkcert` and add its CA to the host trust store. This modifies the
+   machine's trust store and prompts for an administrator password.
+
+   ```bash
+   brew install mkcert && mkcert -install
+   ```
+
+2. Issue a certificate for the loopback names Keycloak will serve.
+
+   ```bash
+   export KCERT="$(mktemp -d)"
+   mkcert -cert-file "$KCERT/cert.pem" -key-file "$KCERT/key.pem" localhost 127.0.0.1
+   ```
+
+3. Start Keycloak with that certificate, publishing the `https` port.
+
+   ```bash
+   docker run -d --name kc-podium \
+     -p 127.0.0.1:8443:8443 \
+     -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+     -v "$KCERT:/certs:ro" \
+     quay.io/keycloak/keycloak:26.7.2 start-dev \
+     --https-certificate-file=/certs/cert.pem \
+     --https-certificate-key-file=/certs/key.pem
+   ```
+
+   Confirm it is up and reporting an `https` issuer before going further:
+
+   ```bash
+   curl -fsS https://127.0.0.1:8443/realms/master/.well-known/openid-configuration \
+     | python3 -c "import json,sys; print(json.load(sys.stdin)['issuer'])"
+   ```
+
+   **Expect.** `https://127.0.0.1:8443/realms/master`, fetched without `-k`. A
+   `curl` that needs `-k` means the trust store step did not take, and the
+   registry will refuse the issuer for the same reason.
+
+4. Export the issuer for the steps below, and mint an access token for step 5's
+   negative control. The `master` realm's `admin-cli` client accepts a direct
+   password grant, so no client registration is needed.
+
+   ```bash
+   export ISSUER="https://127.0.0.1:8443/realms/master"
+   export TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
+     -d grant_type=password -d client_id=admin-cli \
+     -d username=admin -d password=admin \
+     | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
+   ```
+
+   The subject this token carries is what the restricted layer's `users:` filter
+   must name in step 2. Read it rather than assuming:
+
+   ```bash
+   python3 - <<'PY'
+   import base64, json, os
+   p = os.environ["TOKEN"].split(".")[1]
+   p += "=" * (-len(p) % 4)
+   c = json.loads(base64.urlsafe_b64decode(p))
+   print("sub:", c.get("sub"), "| aud:", c.get("aud"), "| preferred_username:", c.get("preferred_username"))
+   PY
+   ```
+
+   **Expect.** A subject value and an `aud`. Set `PODIUM_OAUTH_AUDIENCE` (the
+   `audience:` key in step 2's config) to that `aud`, because §6.3.3 verifies the
+   `aud` claim on every token and a mismatch rejects the token in step 5 for a
+   reason unrelated to what this scenario tests.
+
+**Teardown for the IdP.** `docker rm -f kc-podium` and `rm -rf "$KCERT"`. The
+`mkcert` CA stays in the trust store until removed with `mkcert -uninstall`.
 
 **Steps.**
 
-1. Run the isolation block and export `ISSUER` and `AUD` as in S43, binding
+1. Run the isolation block. `ISSUER`, `TOKEN`, and the token's subject come from
+   the Prerequisites above and are already exported. Set the audience to the
+   `aud` the token carries, which the Prerequisites printed, and bind
    `127.0.0.1:8153`.
+
+   ```bash
+   export AUD="<the aud value the token carries>"
+   export SUBJECT="<the sub value the token carries>"
+   ```
+
 2. Build a registry with one public layer and one restricted layer, giving the
    restricted artifact a name that cannot be confused with the public one.
 
@@ -3901,11 +4012,27 @@ and record the skip.
    mkdir -p "$WORK/pub/handbook" "$WORK/priv/salary-bands"
    podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
    podium artifact scaffold --type context --description "Salary bands" --force "$WORK/priv/salary-bands"
+   cat > "$WORK/registry.yaml" <<YAML
+   registry:
+     identity_provider:
+       type: oidc-jwt
+       issuer: $ISSUER
+       audience: $AUD
+     layers:
+       - id: public-handbook
+         source: { local: { path: $WORK/pub } }
+         visibility: { public: true }
+       - id: private-comp
+         source: { local: { path: $WORK/priv } }
+         visibility: { users: [$SUBJECT] }
+   YAML
    ```
 
-   Write a `registry.yaml` carrying the S43 `identity_provider` block plus a
-   `public: true` layer over `$WORK/pub` and a `users:`-restricted layer over
-   `$WORK/priv`.
+   The `users:` value is the token's subject rather than a username, because
+   §6.3.3 keys `users:` visibility on the claim the registry reads as the
+   subject. Naming the login name here leaves the restricted layer invisible to
+   the very token step 5 uses, and step 5 then fails for a reason unrelated to
+   what this scenario tests.
 
 3. Start the registry with the UI enabled and record the PID.
 
