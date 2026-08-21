@@ -67,27 +67,24 @@ type MergedBlock struct {
 // authored blocks in parent-first order so a key the child also sets with a
 // non-empty value keeps the child's value. And it holds the assembled block to
 // §4.6's hidden-parent guarantee, returning ErrUnhidableParent when a restored
-// key the leaf inherits resolves to a chain parent's reference, when the block
-// resolves an extends value at any depth, or when it cannot be read back at
-// all.
+// key resolves to a chain parent's reference under its own name or anywhere
+// inside its value, when the assembled block still resolves an extends value,
+// or when any block involved cannot be read back at all.
 //
 // Every key §4.6's omitted-field rule makes inheritable reaches the served
 // block or the read fails. A key is never silently dropped, because a consumer
 // cannot tell an inherited-as-nothing key from one the chain never set.
 //
-// The disclosure test is scoped in two ways, and both are what keeps a single
-// authored string from taking the whole registry down: pkg/sync aborts on the
-// first record a resolver refuses, so a test that fires on prose would let one
-// parent's sentence stop every artifact from materializing.
+// The disclosure test is a property of the served block and does not depend on
+// which member of the chain authored the value. It runs over the restored keys
+// rather than over the declared fields, which the typed serialization owns and
+// which carry §4.6's merge semantics the restore step cannot reproduce.
 //
-// It runs over the restored keys rather than over the declared fields, which
-// the typed serialization owns and already serves to this requester on the
-// search path. And it runs over the keys the leaf inherits rather than the ones
-// the leaf authored: the leaf's own block is what the search descriptor and
-// raw_frontmatter already serve verbatim, so a value the leaf wrote surfaces
-// nothing about the parent that the requester cannot already read, and refusing
-// it would make load_artifact and search_artifacts disagree again about a key
-// the child authored.
+// It fires on a value that resolves to a parent's reference rather than on one
+// that merely mentions the ID, which is what keeps a single authored sentence
+// from taking the whole registry down: pkg/sync aborts on the first record a
+// resolver refuses, so a test that fired on prose would let one parent's
+// sentence stop every artifact from materializing.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
@@ -112,26 +109,23 @@ func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, erro
 		return nil, err
 	}
 
-	restored := undeclaredKeysOf(chain)
+	restored, err := undeclaredKeysOf(chain)
+	if err != nil {
+		return nil, err
+	}
 	for _, key := range restored {
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
 			uncommented(key.value))
 	}
 
-	// Spec: §4.6 hidden parents. An extends entry inside a restored key is
-	// operative on the next read of the block and reports the parent's
-	// existence outright, so the read fails wherever one sits, at any depth and
-	// whichever member of the chain wrote it.
-	if restoresExtends(restored) {
-		return nil, ErrUnhidableParent
-	}
 	// Spec: §4.6 hidden parents. The parent's existence and ID are not
-	// surfaced to the requester, so an inherited key that resolves to a chain
-	// parent's reference fails the read at whatever nesting depth it sits. The
-	// body that follows the block is the leaf's own prose and is out of the
-	// block this section constrains.
-	if parentsOf(a, id, chain).namesInherited(restored) {
+	// surfaced to the requester, so a restored key that resolves to a chain
+	// parent's reference fails the read at whatever nesting depth it sits and
+	// whichever member of the chain authored it. The body that follows the
+	// block is the leaf's own prose and is out of the block this section
+	// constrains.
+	if parentsOf(a, id, chain).namesRestored(restored) {
 		return nil, ErrUnhidableParent
 	}
 
@@ -182,15 +176,10 @@ func mappingOf(src []byte) (*yaml.Node, []byte, error) {
 	return doc.Content[0], body, nil
 }
 
-// namedNode pairs a restored key with the node holding its value, and records
-// whether the value came from a block the leaf did not author. §4.6's
-// hidden-parent test applies to the inherited ones, because those are the
-// values the merge hands the requester and the only ones the leaf's own served
-// block does not already carry.
+// namedNode pairs a restored key with the node holding its value.
 type namedNode struct {
-	name      string
-	value     *yaml.Node
-	inherited bool
+	name  string
+	value *yaml.Node
 }
 
 // uncommented clears the YAML comments on n and everything below it, and
@@ -222,20 +211,21 @@ func uncommented(n *yaml.Node) *yaml.Node {
 // every declared field. The restored keys follow the same rule, so the two
 // halves of a merged block agree on what an empty child value means.
 //
-// A block that does not read back as a mapping contributes no keys. Neither
-// extends resolver reaches that arm, because both feed blocks a parser has
-// already accepted, and a caller that passes an unparsed block gets the typed
-// serialization rather than a panic on a nil node.
-func undeclaredKeysOf(chain []MergedBlock) []namedNode {
+// A chain member that stored no frontmatter at all holds no key to inherit and
+// contributes none. A member that stored a block which does not read back as a
+// mapping fails the read instead, because the keys that block holds can be
+// neither checked against §4.6's hidden-parent rule nor inherited, and serving
+// the merge without them would drop keys §4.6 makes inheritable.
+func undeclaredKeysOf(chain []MergedBlock) ([]namedNode, error) {
 	seen := map[string]int{}
 	out := []namedNode{}
-	for at, block := range chain {
-		// The leaf is the chain's last member, so every earlier block
-		// contributes a value the leaf inherits.
-		inherited := at != len(chain)-1
+	for _, block := range chain {
+		if len(block.Frontmatter) == 0 {
+			continue
+		}
 		m, _, err := mappingOf(block.Frontmatter)
 		if err != nil {
-			continue
+			return nil, err
 		}
 		for i := 0; i+1 < len(m.Content); i += 2 {
 			name := m.Content[i].Value
@@ -247,14 +237,14 @@ func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 				if isEmptyScalar(value) {
 					continue
 				}
-				out[prev].value, out[prev].inherited = value, inherited
+				out[prev].value = value
 				continue
 			}
 			seen[name] = len(out)
-			out = append(out, namedNode{name: name, value: value, inherited: inherited})
+			out = append(out, namedNode{name: name, value: value})
 		}
 	}
-	return out
+	return out, nil
 }
 
 // isEmptyScalar reports whether n carries no value, which covers both spellings
@@ -329,50 +319,13 @@ func (p parentIDs) discloses(s string) bool {
 	return !own || pinned
 }
 
-// namesInherited reports whether any key the leaf inherits discloses a chain
-// parent, under its own name or anywhere inside its value.
-func (p parentIDs) namesInherited(keys []namedNode) bool {
+// namesRestored reports whether any restored key discloses a chain parent,
+// under its own name or anywhere inside its value. Spec: §4.6 hidden parents.
+// The guarantee is a property of the served block, so which member of the chain
+// authored the value does not enter into it.
+func (p parentIDs) namesRestored(keys []namedNode) bool {
 	for _, key := range keys {
-		if !key.inherited {
-			continue
-		}
 		if p.discloses(key.name) || p.namesAny(key.value) {
-			return true
-		}
-	}
-	return false
-}
-
-// restoresExtends reports whether any restored key carries an extends entry
-// inside its value. Spec: §4.6 hidden parents. An entry there is both a
-// statement that the parent exists and a reference the next parse of the block
-// acts on, so it fails the read whichever member of the chain wrote it, which
-// is what refuses the mapping a YAML merge key aliases without having to
-// resolve the merge key first.
-//
-// The declared fields are left to the typed serialization, which writes no
-// top-level extends because the caller cleared it and cannot write a nested one
-// a requester would read as a reference.
-func restoresExtends(keys []namedNode) bool {
-	for _, key := range keys {
-		if resolvesExtends(key.value) {
-			return true
-		}
-	}
-	return false
-}
-
-// resolvesExtends reports whether an extends entry sits anywhere in n.
-func resolvesExtends(n *yaml.Node) bool {
-	if n.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(n.Content); i += 2 {
-			if n.Content[i].Value == "extends" {
-				return true
-			}
-		}
-	}
-	for _, c := range n.Content {
-		if resolvesExtends(c) {
 			return true
 		}
 	}

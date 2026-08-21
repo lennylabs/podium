@@ -149,29 +149,36 @@ func TestSerializeMerged_UnrewritableBlockFailsClosed(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents. An extends entry inside a restored key is
-// operative on the next parse of the served block, so it fails the merge at
-// whatever depth it sits, from either origin, and whether or not the reference
-// it carries names a chain parent.
-func TestSerializeMerged_RestoredExtendsEntryFailsClosed(t *testing.T) {
+// Spec: §4.6 hidden parents. A nested extends entry naming a chain parent fails
+// the merge from either origin, because the value resolves to the parent's
+// reference like any other restored value.
+func TestSerializeMerged_NestedExtendsNamingTheParentFailsClosed(t *testing.T) {
 	t.Parallel()
-	const nested = "x_meta:\n  inner:\n    extends: other/base\n"
-	for name, chain := range map[string][]manifest.MergedBlock{
-		"the leaf authored it": {block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
-			nested+"extends: shared/parent@1.x\n---\n\nchild body\n", "shared/parent@1.x")},
-		"restored from the parent": {
-			block("---\ntype: agent\nversion: 1.0.0\ndescription: parent\n"+nested+
-				"---\n\nparent body\n", ""),
-			block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
-				"extends: shared/parent@1.x\n---\n\nchild body\n", "shared/parent@1.x"),
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+	forEachOriginKeys(t, "x_meta:\n  inner:\n    extends: shared/parent\n",
+		func(t *testing.T, chain []manifest.MergedBlock) {
 			out, err := serializeChild(chain)
 			assertUnhidable(t, out, err)
 		})
-	}
+}
+
+// Spec: §4.6 omitted fields. An extension key that happens to nest its own
+// extends entry names no chain parent and resolves nothing on the next parse of
+// the served block, because ParseArtifact reads the top-level entry and the
+// merge keys the block resolves. It is an inheritable key and is served, so one
+// extension type's vocabulary does not end every read in the registry.
+func TestSerializeMerged_NestedExtendsNamingAnotherArtifactIsServed(t *testing.T) {
+	t.Parallel()
+	forEachOriginKeys(t, "x_meta:\n  inner:\n    extends: other/base\n",
+		func(t *testing.T, chain []manifest.MergedBlock) {
+			out, err := serializeChild(chain)
+			if err != nil {
+				t.Fatalf("SerializeMerged: %v", err)
+			}
+			assertNamesNoParent(t, out, "shared/parent")
+			if !strings.Contains(string(out), "other/base") {
+				t.Errorf("the merged block dropped the inheritable key:\n%s", out)
+			}
+		})
 }
 
 // Spec: §4.6 hidden parents. A key restored from an ancestor whose name or
@@ -300,17 +307,18 @@ func TestSerializeMerged_SameIDOverlayHidesOnlyTheLowerRowsExtras(t *testing.T) 
 	overlay := "---\ntype: agent\nversion: 2.0.0\ndescription: overlay\n" +
 		"extends: shared/base@1.x\n---\n\noverlay body\n"
 	for name, tc := range map[string]struct {
+		key    string
 		keys   string
 		served bool
 	}{
-		"the bare canonical id":         {"x_owner: shared/base\n", true},
-		"a path below its own id":       {"x_owner: shared/base/README.md\n", true},
-		"prose quoting its own id":      {"x_owner: see shared/base for details\n", true},
-		"a pinned reference":            {"x_owner: shared/base@1.0.0\n", false},
-		"a pin inside a nested value":   {"x_owner:\n  ref: shared/base@1.0.0\n", false},
-		"a nested extends entry":        {"base_ref:\n  extends: shared/base@1.0.0\n", false},
-		"an unpinned nested extends":    {"base_ref:\n  extends: shared/base\n", false},
-		"a nested extends naming no id": {"base_ref:\n  extends:\n", false},
+		"the bare canonical id":         {"x_owner", "x_owner: shared/base\n", true},
+		"a path below its own id":       {"x_owner", "x_owner: shared/base/README.md\n", true},
+		"prose quoting its own id":      {"x_owner", "x_owner: see shared/base for details\n", true},
+		"a pinned reference":            {"x_owner", "x_owner: shared/base@1.0.0\n", false},
+		"a pin inside a nested value":   {"x_owner", "x_owner:\n  ref: shared/base@1.0.0\n", false},
+		"a nested extends entry":        {"base_ref", "base_ref:\n  extends: shared/base@1.0.0\n", false},
+		"an unpinned nested extends":    {"base_ref", "base_ref:\n  extends: shared/base\n", true},
+		"a nested extends naming no id": {"base_ref", "base_ref:\n  extends:\n", true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -330,7 +338,7 @@ func TestSerializeMerged_SameIDOverlayHidesOnlyTheLowerRowsExtras(t *testing.T) 
 			if err != nil {
 				t.Fatalf("SplitFrontmatter: %v", err)
 			}
-			if got := decodeMapping(t, fm); got["x_owner"] == nil {
+			if got := decodeMapping(t, fm); got[tc.key] == nil {
 				t.Errorf("the overlay lost the key it inherits from the row below:\n%s", fm)
 			}
 		})
@@ -387,46 +395,20 @@ var parentNamingValues = map[string]string{
 	"surrounding whitespace":   "  shared/parent  ",
 }
 
-// Spec: §4.6 hidden parents. A value the leaf inherits that resolves to the
-// parent's reference fails the merge under every spelling of that reference.
-// Dropping the key instead would serve a key §4.6 makes inheritable as nothing.
-func TestSerializeMerged_InheritedValuesSpellingTheParentFailClosed(t *testing.T) {
+// Spec: §4.6 hidden parents. A restored value that resolves to the parent's
+// reference fails the merge under every spelling of that reference, whichever
+// member of the chain authored it. §4.6 states the guarantee about the block the
+// registry serves, so the origin of the value does not enter into it, and
+// dropping the key instead would serve a key §4.6 makes inheritable as nothing.
+func TestSerializeMerged_ValuesSpellingTheParentFailClosed(t *testing.T) {
 	t.Parallel()
 	for name, value := range parentNamingValues {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			out, err := serializeChild(inheritedChain(value))
-			assertUnhidable(t, out, err)
-		})
-	}
-}
-
-// Spec: §4.6 hidden parents, §2.2. The leaf's own frontmatter is what the
-// search descriptor serves verbatim, so a key the leaf authored that names its
-// parent discloses nothing the requester cannot already read, and refusing it
-// would put load_artifact and search_artifacts back into disagreement over a
-// key the child wrote. The served-surface half of the claim is pinned in
-// pkg/registry/core/extends_merged_frontmatter_test.go.
-func TestSerializeMerged_LeafAuthoredValuesNamingTheParentAreServed(t *testing.T) {
-	t.Parallel()
-	for name, value := range parentNamingValues {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			out, err := serializeChild(leafChain(value))
-			if err != nil {
-				t.Fatalf("SerializeMerged: %v", err)
-			}
-			fm, _, err := manifest.SplitFrontmatter(out)
-			if err != nil {
-				t.Fatalf("SplitFrontmatter: %v", err)
-			}
-			got := decodeMapping(t, fm)
-			if got["x_note"] != value {
-				t.Errorf("x_note = %v, want %q\n%s", got["x_note"], value, fm)
-			}
-			if _, named := got["extends"]; named {
-				t.Errorf("the merged block still names the parent under extends:\n%s", fm)
-			}
+			forEachOriginKeys(t, noteKeys(value), func(t *testing.T, chain []manifest.MergedBlock) {
+				out, err := serializeChild(chain)
+				assertUnhidable(t, out, err)
+			})
 		})
 	}
 }
@@ -476,16 +458,19 @@ func assertUnhidable(t *testing.T, out []byte, err error) {
 	}
 }
 
-// A chain block the helper cannot read back as a mapping contributes no keys,
-// and the merged artifact is still served through the typed serialization.
-// Neither extends resolver reaches this arm, because both pass blocks a parser
-// has already accepted.
-func TestSerializeMerged_UnreadableChainBlockContributesNoKeys(t *testing.T) {
+// Spec: §4.6 omitted fields. A chain block the helper cannot read back as a
+// mapping holds keys that can be neither checked against §4.6's hidden-parent
+// rule nor inherited, so the merge fails rather than serving a block that
+// silently lost them. Neither extends resolver is expected to reach this arm,
+// because both pass blocks a parser has already accepted, and the filesystem
+// resolver additionally passes blocks it has rewritten itself.
+func TestSerializeMerged_UnreadableChainBlockFailsClosed(t *testing.T) {
 	t.Parallel()
 	for name, authored := range map[string]string{
 		"no frontmatter delimiters": "parent body\n",
 		"header that is not YAML":   "---\n\tx: [\n---\n\nparent body\n",
 		"header that is a sequence": "---\n- one\n- two\n---\n\nparent body\n",
+		"header that is a scalar":   "---\njust a string\n---\n\nparent body\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -493,17 +478,35 @@ func TestSerializeMerged_UnreadableChainBlockContributesNoKeys(t *testing.T) {
 				"extends: shared/parent@1.x\n---\n\nchild body\n"
 			out, err := serializeChild([]manifest.MergedBlock{
 				block(authored, ""), block(child, "shared/parent@1.x")})
-			if err != nil {
-				t.Fatalf("SerializeMerged: %v", err)
+			if err == nil {
+				t.Fatalf("a chain block that cannot be read back must fail the merge:\n%s", out)
 			}
-			fm, _, err := manifest.SplitFrontmatter(out)
-			if err != nil {
-				t.Fatalf("SplitFrontmatter: %v", err)
-			}
-			if got := decodeMapping(t, fm); got["description"] != "child" {
-				t.Errorf("description = %v, want %q\n%s", got["description"], "child", fm)
+			if out != nil {
+				t.Errorf("a block that could not be verified must not be returned:\n%s", out)
 			}
 		})
+	}
+}
+
+// Spec: §4.6 omitted fields. A chain member whose record stored no frontmatter
+// at all holds no key to inherit, so it contributes none and the merge proceeds.
+// A store record built outside ingest, such as the pinned extends parent the
+// §8.4 retention test writes, is the case that reaches this arm.
+func TestSerializeMerged_EmptyChainBlockContributesNoKeys(t *testing.T) {
+	t.Parallel()
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+		"x_owner: finance\nextends: shared/parent@1.x\n---\n\nchild body\n"
+	out, err := serializeChild([]manifest.MergedBlock{
+		{Extends: ""}, block(child, "shared/parent@1.x")})
+	if err != nil {
+		t.Fatalf("SerializeMerged: %v", err)
+	}
+	fm, _, err := manifest.SplitFrontmatter(out)
+	if err != nil {
+		t.Fatalf("SplitFrontmatter: %v", err)
+	}
+	if got := decodeMapping(t, fm); got["x_owner"] != "finance" {
+		t.Errorf("x_owner = %v, want %q\n%s", got["x_owner"], "finance", fm)
 	}
 }
 
@@ -531,9 +534,17 @@ func assertNamesNoParent(t *testing.T, out []byte, hidden string) {
 // origin, so every case it runs is checked on both.
 func forEachOrigin(t *testing.T, value string, check func(*testing.T, []manifest.MergedBlock)) {
 	t.Helper()
+	forEachOriginKeys(t, "x_note: "+yamlScalar(value)+"\n", check)
+}
+
+// forEachOriginKeys runs check over the two chains that put the authored keys
+// block on the leaf and on the parent. The disclosure test is a property of the
+// served block, so every case runs from both origins.
+func forEachOriginKeys(t *testing.T, keys string, check func(*testing.T, []manifest.MergedBlock)) {
+	t.Helper()
 	for origin, chain := range map[string][]manifest.MergedBlock{
-		"leaf authored the key":    leafChain(value),
-		"restored from the parent": inheritedChain(value),
+		"leaf authored the key":    leafChain(keys),
+		"restored from the parent": inheritedChain(keys),
 	} {
 		t.Run(origin, func(t *testing.T) {
 			t.Parallel()
@@ -542,22 +553,28 @@ func forEachOrigin(t *testing.T, value string, check func(*testing.T, []manifest
 	}
 }
 
-// leafChain puts value on x_note in the leaf's own block.
-func leafChain(value string) []manifest.MergedBlock {
+// leafChain puts the authored keys in the leaf's own block.
+func leafChain(keys string) []manifest.MergedBlock {
 	return []manifest.MergedBlock{block("---\ntype: agent\nversion: 2.0.0\n"+
-		"description: child\nx_note: "+yamlScalar(value)+"\nextends: shared/parent@1.x\n"+
+		"description: child\n"+keys+"extends: shared/parent@1.x\n"+
 		"---\n\nchild body\n", "shared/parent@1.x")}
 }
 
-// inheritedChain puts value on x_note in the parent's block, which the leaf
+// inheritedChain puts the authored keys in the parent's block, which the leaf
 // inherits under §4.6's omitted-field rule.
-func inheritedChain(value string) []manifest.MergedBlock {
+func inheritedChain(keys string) []manifest.MergedBlock {
 	return []manifest.MergedBlock{
 		block("---\ntype: agent\nversion: 1.0.0\ndescription: parent\n"+
-			"x_note: "+yamlScalar(value)+"\n---\n\nparent body\n", ""),
+			keys+"---\n\nparent body\n", ""),
 		block("---\ntype: agent\nversion: 2.0.0\ndescription: child\n"+
 			"extends: shared/parent@1.x\n---\n\nchild body\n", "shared/parent@1.x"),
 	}
+}
+
+// noteKeys authors x_note with value, quoted so a case carrying a comma, a
+// quote, or a leading indicator still authors one scalar.
+func noteKeys(value string) string {
+	return "x_note: " + yamlScalar(value) + "\n"
 }
 
 // yamlScalar quotes value so a case that carries a comma, a quote, or a
