@@ -39,7 +39,8 @@ func TestReadYAMLConfig_SpecExampleNestedBlock(t *testing.T) {
 		"PODIUM_REGISTRY_STORE", "PODIUM_OBJECT_STORE", "PODIUM_VECTOR_BACKEND",
 		"PODIUM_S3_REGION", "PODIUM_S3_BUCKET", "PODIUM_PINECONE_API_KEY",
 		"PODIUM_PINECONE_INDEX", "PODIUM_PINECONE_NAMESPACE", "PODIUM_IDENTITY_PROVIDER",
-		"PODIUM_OAUTH_AUDIENCE", "PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", "PODIUM_PUBLIC_URL",
+		"PODIUM_OAUTH_AUDIENCE", "PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", "PODIUM_OAUTH_ISSUER",
+		"PODIUM_PUBLIC_URL",
 	} {
 		t.Setenv(k, "")
 	}
@@ -63,9 +64,9 @@ func TestReadYAMLConfig_SpecExampleNestedBlock(t *testing.T) {
     namespace: tenant-acme
     inference_model: multilingual-e5-large
   identity_provider:
-    type: oauth-device-code
+    type: oidc-jwt
+    issuer: https://acme.okta.com/oauth2/default
     audience: https://podium.acme.com
-    authorization_endpoint: https://acme.okta.com/oauth2/default
   discovery:
     notable_count: 9
 `)
@@ -108,9 +109,9 @@ func TestReadYAMLConfig_SpecExampleNestedBlock(t *testing.T) {
 	if c.vectorInferenceModel != "multilingual-e5-large" {
 		t.Errorf("vectorInferenceModel = %q, want multilingual-e5-large", c.vectorInferenceModel)
 	}
-	if c.identityProvider != "oauth-device-code" || c.oauthAudience != "https://podium.acme.com" ||
-		c.oauthAuthorizationEndpoint != "https://acme.okta.com/oauth2/default" {
-		t.Errorf("identity = {%q aud=%q authz=%q}", c.identityProvider, c.oauthAudience, c.oauthAuthorizationEndpoint)
+	if c.identityProvider != "oidc-jwt" || c.oauthIssuer != "https://acme.okta.com/oauth2/default" ||
+		c.oauthAudience != "https://podium.acme.com" {
+		t.Errorf("identity = {%q issuer=%q aud=%q}", c.identityProvider, c.oauthIssuer, c.oauthAudience)
 	}
 	// the discovery block under registry: still reaches the defaults.
 	if c.discoveryDefaults().NotableCount != 9 {

@@ -39,7 +39,8 @@ func TestRegistryConfig_SpecExampleNestedInterpolation(t *testing.T) {
 		"    index: acme-prod\n" +
 		"    namespace: ${PODIUM_TEST_NS}\n" +
 		"  identity_provider:\n" +
-		"    type: oauth-device-code\n" +
+		"    type: oidc-jwt\n" +
+		"    issuer: https://acme.okta.com/oauth2/default\n" +
 		"    audience: https://podium.acme.com\n"
 	if err := os.WriteFile(cfgFile, []byte(body), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
@@ -56,6 +57,7 @@ func TestRegistryConfig_SpecExampleNestedInterpolation(t *testing.T) {
 		"PODIUM_REGISTRY_STORE=", "PODIUM_OBJECT_STORE=", "PODIUM_VECTOR_BACKEND=",
 		"PODIUM_S3_BUCKET=", "PODIUM_S3_REGION=", "PODIUM_PINECONE_INDEX=",
 		"PODIUM_PINECONE_NAMESPACE=", "PODIUM_IDENTITY_PROVIDER=", "PODIUM_OAUTH_AUDIENCE=",
+		"PODIUM_OAUTH_ISSUER=",
 	}
 	// spec §7.7: the backend selectors are §13.12 server settings,
 	// surfaced by `config show --server`.
@@ -65,15 +67,16 @@ func TestRegistryConfig_SpecExampleNestedInterpolation(t *testing.T) {
 	}
 	out := res.Stdout
 	for _, want := range []string{
-		"postgres",                // store.type
-		"acme-podium",             // object_store.bucket
-		"us-west-2",               // object_store.region
-		"pinecone",                // vector_backend.type
-		"acme-prod",               // vector_backend.index
-		"tenant-acme",             // namespace, ${PODIUM_TEST_NS} interpolated
-		"oauth-device-code",       // identity_provider.type
-		"https://podium.acme.com", // identity_provider.audience
-		"registry.yaml",           // source attribution
+		"postgres",                             // store.type
+		"acme-podium",                          // object_store.bucket
+		"us-west-2",                            // object_store.region
+		"pinecone",                             // vector_backend.type
+		"acme-prod",                            // vector_backend.index
+		"tenant-acme",                          // namespace, ${PODIUM_TEST_NS} interpolated
+		"oidc-jwt",                             // identity_provider.type
+		"https://acme.okta.com/oauth2/default", // identity_provider.issuer
+		"https://podium.acme.com",              // identity_provider.audience
+		"registry.yaml",                        // source attribution
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("config show output missing %q:\n%s", want, out)

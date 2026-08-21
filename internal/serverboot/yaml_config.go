@@ -76,9 +76,9 @@ type yamlTenant struct {
 	ExposeScopePreview *bool `yaml:"expose_scope_preview,omitempty"`
 }
 
-// yamlIdentityCfg mirrors the §13.12 `identity_provider:` mapping. The spec
-// example models it as an object with type / audience / authorization_endpoint
-// , so a scalar would no longer unmarshal here.
+// yamlIdentityCfg mirrors the §13.12 `identity_provider:` mapping. The block is
+// an object keyed by `type` plus the provider-specific keys below, so a scalar
+// does not unmarshal here.
 type yamlIdentityCfg struct {
 	Type                  string `yaml:"type,omitempty"`
 	Audience              string `yaml:"audience,omitempty"`
