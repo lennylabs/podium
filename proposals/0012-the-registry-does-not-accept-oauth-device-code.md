@@ -1,7 +1,7 @@
 # Proposal 0012: §13 stops offering `oauth-device-code` as a registry provider
 
 - Issue: (to be filed)
-- Status: Implemented (2026-08-21). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 10 adversarial review rounds (8 findings fixed); "Resolved in adversarial review" records what each pass changed. The "Manual validation" section was written after the implementation landed, so its scenarios are staged for `test/manual-validation.md` and have not been run.
+- Status: Implemented (2026-08-21). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 10 adversarial review rounds (8 findings fixed); "Resolved in adversarial review" records what each pass changed.
 - Date: 2026-08-20
 
 This document records a spec-internal contradiction and the edits that resolve it, so a review run stages them rather than rediscovering the analysis.
@@ -219,54 +219,6 @@ S2 moves text that the tests below mirror verbatim, so T1 moves them with it. Bo
 - `internal/serverboot/yaml_config.go:79-81`: the `yamlIdentityCfg` comment states the keys the parser accepts rather than restating the spec example's block, which is what makes it go stale whenever the example moves.
 
 `authorization_endpoint` parse coverage is unaffected and stays where it already lives, in `TestReadYAMLConfig_IdentityProviderKeysRoundTrip` (`internal/serverboot/yaml_config_test.go:188-200`), which asserts every documented `identity_provider` key independently of the example.
-
-## Manual validation
-
-This section was added after the implementation landed, so the scenarios below were not executed during the run that applied the edits. They are staged for `test/manual-validation.md` and their numbers are assigned when they land there. Each states the surface a human reads directly and the wrong output it would catch.
-
-The change alters what an operator observes in three ways: a `registry.yaml` example an operator copies, an operator runbook consulted during a database outage, and what a browser sees when it loads the web UI. The first two are documents rather than code, and the third is a rendering no Go test reads.
-
-**MV1: the documented `registry.yaml` example starts a registry.**
-
-*Covers.* The §13.12 example, the `oidc-jwt` required key pair, and the failure the corrected example replaces.
-
-*Why by hand.* `TestReadYAMLConfig_SpecExampleNestedBlock` and `TestRegistryConfig_SpecExampleNestedInterpolation` assert that the example parses and reaches the resolved config. Neither starts a registry on it, so both would stay green against an example that parses and then refuses to boot, which is the exact state the pre-fix example was in for as long as it stood.
-
-*Substitution, and why it is not a shortcut.* The example's `issuer` is `https://acme.okta.com/oauth2/default`, which resolves to nothing. §6.3.3 states that the registry fails to start when the discovery document or JWKS is unreachable, so the block cannot be pasted verbatim and started by anyone. The scenario keeps the block's structure and substitutes a reachable issuer, using the IdP that S36 already requires under its prerequisites, and skips when no IdP is available rather than forcing it. What is under test is the key structure, which is what the defect was about; the placeholder hostname is not.
-
-*Steps.* Run the isolation block. Write `$WORK/registry.yaml` containing the §13.12 `identity_provider` block with the issuer substituted and the audience set to the registry's own endpoint. Start `podium serve --config "$WORK/registry.yaml"` on a loopback port and record the PID.
-
-**Expect.** The registry reaches ready and `podium status` reports it. It does not exit with `config.identity_provider_unverified`, `config.oidc_jwt_audience_unset`, or `config.invalid_issuer_scheme`.
-
-*Negative control.* Repeat with the pre-fix block, `type: oauth-device-code` with `audience` and `authorization_endpoint`. **Expect** startup to fail with `config.identity_provider_unverified`. A run where both blocks start has an identity provider switched off somewhere and proves nothing; record the failure rather than the success.
-
-*Second negative control.* Repeat with `type: oidc-jwt` carrying `authorization_endpoint` in place of `issuer`, which is the edit a reader makes when they change the type alone. **Expect** startup to fail on the unset issuer. This is the trap the Summary names, and it is the one a reader is most likely to reproduce.
-
-**MV2: the web UI on a directly reachable `oidc-jwt` registry shows public artifacts only.**
-
-*Covers.* The claim S4 newly states, that the web UI runs no acquisition flow and resolves identity from what the request carries.
-
-*Why by hand.* This is a browser rendering. The assertion is what a person sees in the artifact list, and no Go test reads that. The prior spec text claimed the UI ran a device-code flow with an in-browser verification handoff, and no test contradicted it for as long as it stood, because no test looks at the UI at all.
-
-*Steps.* Start a registry under `oidc-jwt` with `--web-ui`, carrying one public layer and one `users:`-restricted layer holding a distinctly named artifact. Confirm the provider is active before asserting anything: `podium status` reports the identity provider rather than public mode. Open `/ui/` in a browser directly, with no gateway in front and no credential.
-
-**Expect.** The UI loads and lists the public artifact. The restricted artifact does not appear, and the UI reports no authentication error, because from the registry's side nothing failed: the request carried no bearer value and resolved as anonymous.
-
-*Negative control.* Confirm the restricted artifact exists and is reachable to an authenticated caller, by requesting it over the API with a valid token. Without this, an empty restricted layer produces the same screen and the scenario passes on nothing.
-
-*Records a known gap.* The absent artifact is current behavior rather than a defect this proposal introduces, and the deferred in-browser-authentication proposal is what would change it. The scenario pins what the spec now says so a later change to the UI has to move this text with it.
-
-**MV3: the runbook's read-only write set matches what the registry rejects.**
-
-*Covers.* S3 and DOC1, the enumeration in `deploy/runbook.md` and `docs/reference/http-api.md`.
-
-*Why by hand.* An operator reads the runbook during a database outage and works from its list. The value is that the list matches the running registry, and the struck clause sent a reader looking for a credential-issuing endpoint that has never existed.
-
-*Steps.* Bring a registry to read-only mode as S21 already does. For each endpoint the runbook now enumerates, issue the request and read the error code rather than the status class. Then request a login or token path under `/v1/`.
-
-**Expect.** Each enumerated endpoint returns `registry.read_only`. The login or token path returns 404, because the registry registers no such route, which is what makes the struck clause wrong rather than merely stale.
-
-*Overlap with S21.* S21 covers read-only fallback and may already assert several of these endpoints. Fold MV3 into S21 as an additional step rather than adding a scenario, if S21's setup already reaches this state.
 
 ## Non-goals
 
