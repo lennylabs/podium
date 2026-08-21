@@ -3048,58 +3048,58 @@ PY
    and every later step is vacuous. An identical envelope across a child and
    its parent is the defect itself.
 
-4. Verify the child's signature against the child's own content hash, using
-   the registry's public key. This is the assertion the scenario exists for.
-
-```bash
-python3 - "$WORK/child.json" "$PODIUM_SIGN_KEY_PATH" <<'PY'
-import base64, binascii, json, sys
-d = json.load(open(sys.argv[1]))
-pub = next(l.split(":", 1)[1].strip() for l in open(sys.argv[2])
-           if l.strip().startswith("public:"))
-env = json.loads(base64.b64decode(d["signature"]))  # or read the envelope's fields
-print("content_hash:", d["content_hash"])
-print("envelope keys:", sorted(env) if isinstance(env, dict) else type(env))
-print("public key:", pub)
-PY
-podium verify --registry "$PODIUM_REGISTRY" team/derived ; echo "verify exit=$?"
-```
-
-   **Expect.** `podium verify` reports the child's signature as valid. The
-   python step prints the envelope for inspection; when its shape does not
-   match, read `pkg/sign/registry_managed.go` for the current scheme rather
-   than guessing, and record what you found.
-
-5. Load the child through the path that actually enforces verification.
-   `podium-mcp` is the consumer that raises `materialize.signature_invalid`.
+4. Load the child through the path that enforces verification. `podium-mcp`
+   is the consumer that raises `materialize.signature_invalid`, and it is
+   driven by a JSON-RPC request on stdin rather than by a flag.
 
 ```bash
 PUBKEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
-PODIUM_VERIFY_SIGNATURES=always \
-PODIUM_SIGNATURE_PROVIDER=registry-managed \
-PODIUM_SIGNATURE_VERIFY_KEY="$PUBKEY" \
-  podium-mcp --registry "$PODIUM_REGISTRY" --load-artifact team/derived
-echo "exit=$?"
+REQ='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"team/derived"}}}'
+echo "$REQ" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_MATERIALIZE_DIR="$WORK/mat" \
+  PODIUM_VERIFY_SIGNATURES=always \
+  PODIUM_SIGNATURE_PROVIDER=registry-managed \
+  PODIUM_SIGNATURE_VERIFY_KEY="$PUBKEY" \
+  podium-mcp
 ```
 
-   **Expect.** The child loads and reports its own `content_hash`. An abort
-   naming `materialize.signature_invalid` means the served signature does not
-   cover the served content hash, which is the defect this scenario pins.
+   **Expect.** A JSON-RPC result whose `structuredContent.content_hash` is the
+   child's own hash from step 3, and whose `manifest_body` is `derived prose` with its trailing newline.
+   An error naming `materialize.signature_invalid` means the served signature
+   does not cover the served content hash, which is the defect this scenario
+   pins.
 
-6. Negative control. Without this the scenario cannot tell "verified" from
-   "never checked", which is how its first version passed against the defect.
+5. Negative control on the key. Without it the scenario cannot tell "verified"
+   from "never checked", which is how its first version passed against the
+   defect it was written for.
 
 ```bash
 BOGUS="$(head -c 32 /dev/urandom | base64)"
-PODIUM_VERIFY_SIGNATURES=always \
-PODIUM_SIGNATURE_PROVIDER=registry-managed \
-PODIUM_SIGNATURE_VERIFY_KEY="$BOGUS" \
-  podium-mcp --registry "$PODIUM_REGISTRY" --load-artifact team/derived
-echo "exit=$?"
+echo "$REQ" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_MATERIALIZE_DIR="$WORK/mat2" \
+  PODIUM_VERIFY_SIGNATURES=always \
+  PODIUM_SIGNATURE_PROVIDER=registry-managed \
+  PODIUM_SIGNATURE_VERIFY_KEY="$BOGUS" \
+  podium-mcp
 ```
 
-   **Expect.** A failure naming `materialize.signature_invalid`. A success here
-   means verification is not running, so step 5's pass proves nothing.
+   **Expect.** An error carrying `signature_invalid: signature does not
+   verify`. A success here means verification is not running, so step 4's pass
+   proves nothing.
+
+6. Control on the non-extends path, so a pass in step 4 is attributable to the
+   merge rather than to verification being lenient for everything.
+
+```bash
+PARENT_REQ='{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"shared/base"}}}'
+echo "$PARENT_REQ" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_MATERIALIZE_DIR="$WORK/mat3" \
+  PODIUM_VERIFY_SIGNATURES=always \
+  PODIUM_SIGNATURE_PROVIDER=registry-managed \
+  PODIUM_SIGNATURE_VERIFY_KEY="$PUBKEY" \
+  podium-mcp
+```
+
+   **Expect.** The parent loads and reports its own content hash, which differs
+   from the child's. The parent declares no `extends:`, so it exercises the
+   unmerged path.
 
 **Cleanup.** Stop the server by the PID this scenario recorded, and remove the
 work directory. Do not pattern-kill by process name: another scenario or
@@ -3109,3 +3109,263 @@ another session may be running its own server.
 kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
 rm -rf "$WORK"
 ```
+
+---
+
+## S39: same-ID `extends:` overlay and a three-level chain
+
+**Goal.** Validate the two chain shapes the single parent-child case does not
+reach: a child that overlays its own canonical ID from a lower-precedence
+layer, and a chain deep enough that an inherited key travels two hops.
+
+**Covers.** §4.6 field semantics, the §4.6 same-ID overlay exception, hidden
+parents over a multi-hop chain.
+
+**Why by hand.** The same-ID overlay is the case where the parent's ID and the
+child's ID are equal, so a hidden-parent check written over "the parent's ID
+must not appear" collides with the artifact's own identity. That collision took
+the longest of any part of this work to settle, and the resolution is that the
+check runs on inherited values rather than on the leaf's own. A three-level
+chain is the shape where a middle member's contribution can be dropped without
+either end looking wrong.
+
+**Steps.**
+
+1. Run the isolation block. `--layer-path` names a single registry root, so a
+   multi-layer scenario registers each layer instead.
+
+2. Build a base layer and an overlay layer that extends the same canonical ID.
+
+```bash
+mkdir -p "$WORK/base/greet" "$WORK/team/greet"
+cat > "$WORK/base/greet/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: base greet
+x_owner: platform
+---
+
+base prose
+EOF
+cat > "$WORK/team/greet/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 2.0.0
+extends: greet
+x_runbook: ops/greet.md
+---
+EOF
+```
+
+3. Serve, register both layers with `team` at higher precedence, and read the
+   overlay back.
+
+```bash
+podium serve --standalone --no-embeddings --bind 127.0.0.1:8140 > "$WORK/srv.log" 2>&1 &
+SRV=$!
+curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8140/healthz
+export PODIUM_REGISTRY=http://127.0.0.1:8140
+podium layer register --registry "$PODIUM_REGISTRY" --id base --local "$WORK/base" --public
+podium layer register --registry "$PODIUM_REGISTRY" --id team --local "$WORK/team" --public
+podium layer reingest --registry "$PODIUM_REGISTRY" base
+podium layer reingest --registry "$PODIUM_REGISTRY" team
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=greet" | tee "$WORK/greet.json" | python3 -m json.tool
+```
+
+   **Expect.** A 200. The served frontmatter carries the overlay's own
+   `x_runbook`, the base layer's inherited `x_owner: platform`, and the
+   inherited `description: base greet`. The served `version` is the overlay's
+   `2.0.0`.
+
+   A `registry.invalid_argument` refusal here is the collision this scenario
+   exists to catch: the artifact's own ID equals its parent's, so a
+   hidden-parent check that runs over the leaf's own keys refuses a legitimate
+   overlay.
+
+4. Confirm the overlay is still served, rather than being refused or emptied.
+
+```bash
+python3 - "$WORK/greet.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+fm = d.get("frontmatter", "")
+for probe in ("x_runbook", "x_owner", "base greet"):
+    print(("ok    " if probe in fm else "MISS  ") + probe)
+print("version:", d.get("version"))
+PY
+```
+
+   **Expect.** Three `ok` lines and version `2.0.0`. A `MISS` on `x_owner` is
+   the inherited-key drop; a `MISS` on `x_runbook` is the leaf's own key being
+   dropped, which is the more serious of the two.
+
+5. Build a three-level chain in one layer and read the leaf.
+
+```bash
+mkdir -p "$WORK/deep/a" "$WORK/deep/b" "$WORK/deep/c"
+cat > "$WORK/deep/a/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: grandparent
+x_grandparent: gp-value
+---
+
+gp prose
+EOF
+cat > "$WORK/deep/b/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: a@1.x
+x_middle: mid-value
+---
+EOF
+cat > "$WORK/deep/c/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: b@1.x
+x_leaf: leaf-value
+---
+EOF
+podium layer register --registry "$PODIUM_REGISTRY" --id deep --local "$WORK/deep" --public
+podium layer reingest --registry "$PODIUM_REGISTRY" deep
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=c" | tee "$WORK/c.json" | python3 -m json.tool
+```
+
+   **Expect.** The leaf carries `x_leaf`, the middle's `x_middle`, the
+   grandparent's `x_grandparent`, and the inherited `description: grandparent`.
+   A missing `x_grandparent` with `x_middle` present means the fold stops after
+   one hop.
+
+   The leaf's `manifest_body` is empty. A body is never inherited, at any depth:
+   `extends:` folds frontmatter and the child's prose replaces the parent's
+   rather than being concatenated with it. `gp prose` appearing here is a body
+   carried across two hops, which is the same defect as carrying it across one.
+
+```bash
+python3 -c "import json;print(repr(json.load(open('$WORK/c.json')).get('manifest_body','')))"
+```
+
+   **Expect.** An empty or whitespace-only string.
+
+6. Check the hidden-parent guarantee over the whole chain, not just the
+   immediate parent.
+
+```bash
+python3 - "$WORK/c.json" <<'PY'
+import json, sys
+fm = json.load(open(sys.argv[1])).get("frontmatter", "")
+for probe in ("extends", "a@1.x", "b@1.x"):
+    print(("LEAK  " if probe in fm else "ok    ") + probe)
+PY
+```
+
+   **Expect.** Three `ok` lines. A `LEAK` on `a@1.x` means the check covers the
+   immediate parent only and lets an ancestor through.
+
+**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+
+---
+
+## S40: `extends:` for a skill, and filesystem-versus-server parity
+
+**Goal.** Validate the artifact type whose prose does not live in
+`ARTIFACT.md`, and validate that the two registry modes materialize the same
+bytes for the same `extends:` child.
+
+**Covers.** §4.3.4 skills, §4.6 merge, §11 filesystem-versus-server
+equivalence, §2.2 shared library.
+
+**Why by hand.** A skill stores its body in `SKILL.md` and its frontmatter in
+`ARTIFACT.md`, so the body rule reads differently for it than for every other
+type, and the two sources differ by construction. Separately, the two extends
+resolvers are distinct implementations of the same merge: repairing one alone
+makes the modes disagree, and the disagreement is in materialized bytes rather
+than in an error.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Build a skill parent and a skill child that authors no `SKILL.md` body.
+
+```bash
+mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
+cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
+---
+type: skill
+version: 1.0.0
+x_review_board: platform
+---
+EOF
+cat > "$WORK/reg/shared/base/SKILL.md" <<'EOF'
+---
+name: Base Skill
+description: the base skill
+---
+
+base skill body
+EOF
+cat > "$WORK/reg/team/derived/ARTIFACT.md" <<'EOF'
+---
+type: skill
+version: 2.0.0
+extends: shared/base@1.x
+x_runbook: ops/derived.md
+---
+EOF
+cat > "$WORK/reg/team/derived/SKILL.md" <<'EOF'
+---
+name: Derived Skill
+description: the derived skill
+---
+
+derived skill body
+EOF
+```
+
+3. Materialize through the filesystem source.
+
+```bash
+mkdir -p "$WORK/fs-target"
+podium sync --registry "$WORK/reg" --target "$WORK/fs-target" --harness none
+find "$WORK/fs-target" -type f | sed "s|$WORK/fs-target/||" | sort
+```
+
+   **Expect.** Both artifacts materialize. The derived skill's `SKILL.md`
+   carries `derived skill body` and its own `name`, because a skill's body and
+   identity come from `SKILL.md` and follow the child rather than the parent.
+
+4. Materialize the same registry through a server and compare byte for byte.
+
+```bash
+podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+  --bind 127.0.0.1:8141 > "$WORK/srv.log" 2>&1 &
+SRV=$!
+curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8141/healthz
+mkdir -p "$WORK/srv-target"
+podium sync --registry http://127.0.0.1:8141 --target "$WORK/srv-target" --harness none
+diff -r "$WORK/fs-target" "$WORK/srv-target" && echo "IDENTICAL"
+```
+
+   **Expect.** `IDENTICAL`, ignoring the lock file if `diff` reports it (its
+   target path and provenance legitimately differ between the two consumers).
+   Any difference in an `ARTIFACT.md` or `SKILL.md` is the §11 equivalence
+   break that repairing one resolver alone produces.
+
+5. Repeat the comparison for a harness that writes a native layout, so the
+   parity covers adapter output rather than the neutral copy alone.
+
+```bash
+mkdir -p "$WORK/fs-cc" "$WORK/srv-cc"
+podium sync --registry "$WORK/reg" --target "$WORK/fs-cc" --harness claude-code
+podium sync --registry http://127.0.0.1:8141 --target "$WORK/srv-cc" --harness claude-code
+diff -r "$WORK/fs-cc" "$WORK/srv-cc" && echo "IDENTICAL"
+```
+
+   **Expect.** `IDENTICAL`, with the same lock-file caveat.
+
+**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
