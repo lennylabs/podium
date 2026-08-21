@@ -1709,9 +1709,8 @@ func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRe
 // observes the merged result. The merged record keeps the child's identity
 // (id, version, content hash, signature, layer, body) and surfaces the
 // merged Type, Sensitivity, Deprecated, and ReplacedBy back onto the row for
-// the callers that read them. The merged audit_redact directive travels in
-// the re-serialized frontmatter instead, which servedRecord re-parses for the
-// §8.2 read emitter. Description, Tags, and SearchVisibility on the returned
+// merged audit_redact directive back onto the row as well. Description, Tags,
+// and SearchVisibility on the returned
 // record are chain[0]'s untouched values and are merged onto nothing, because
 // no consumer reads them there.
 // spec: §4.6 field-semantics table.
@@ -1758,21 +1757,21 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 		// extends a parent still ships its own authored SKILL.md.
 		out.SkillRaw = c.SkillRaw
 	}
-	// Surface the merged structured fields the served result reads. Every
-	// field here has a consumer: resultFromRecord copies Type, Sensitivity,
-	// Deprecated, and ReplacedBy, and withDeprecationWarning reads the last
-	// two. Description, Tags, and SearchVisibility are deliberately absent,
-	// because LoadArtifactResult declares no such fields; the search path
-	// reads the stored columns the ingest fold writes rather than this
-	// record. AuditRedact is absent for the same reason. §4.6 makes
-	// audit_redact inheritable and manifest.MergeExtends folds it, but the
-	// folded directive reaches the §8.2 read emitter through the re-serialized
-	// frontmatter below, which servedRecord re-parses; resultFromRecord copies
-	// no AuditRedact, so a value set here would be observed by nothing.
+	// Surface the merged structured fields onto the returned record.
+	// resultFromRecord copies Type, Sensitivity, Deprecated, and ReplacedBy,
+	// and withDeprecationWarning reads the last two. AuditRedact is inheritable
+	// per §4.6 and manifest.MergeExtends folds it, so the merged record carries
+	// the resolved key set the §8.2 read emitter needs; because
+	// LoadArtifactResult declares no such field, servedRecord recombines it
+	// from the re-serialized frontmatter below. Description, Tags, and
+	// SearchVisibility are deliberately absent, because LoadArtifactResult
+	// declares no such fields either and the search path reads the stored
+	// columns the ingest fold writes rather than this record.
 	out.Type = string(merged.Type)
 	out.Sensitivity = string(merged.Sensitivity)
 	out.Deprecated = merged.Deprecated
 	out.ReplacedBy = merged.ReplacedBy
+	out.AuditRedact = append([]string(nil), merged.AuditRedact...)
 	// Serialize through the chain's authored blocks so an extension type's
 	// own frontmatter keys survive, and strip the extends reference so the
 	// hidden parent is not surfaced (§4.6). A merged block that names a chain
