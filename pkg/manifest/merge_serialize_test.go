@@ -99,30 +99,60 @@ func TestSerializeMerged_RestoredAliasResolvesToItsTarget(t *testing.T) {
 }
 
 // A restored key that carries a chain parent's ID is refused whether the ID
-// arrives through an alias or is spelled out, and whether it carries the
-// authored pin or not.
+// arrives through an alias or is spelled out, and whatever pin either side
+// carries. §4.6's guarantee covers the parent's ID, so the pin the child
+// happened to type does not decide whether the ID is served.
 func TestSerializeMerged_RestoredParentIDFailsClosed(t *testing.T) {
 	t.Parallel()
-	for name, child := range map[string]string{
-		"alias to the anchored extends": "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-			"extends: &p shared/parent@1.x\nnote: *p\n---\n\nchild body\n",
-		"literal id under another key": "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-			"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
-		"merge key restoring extends": "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-			"base: &b\n  extends: shared/parent@1.x\n<<: *b\n---\n\nchild body\n",
-		"id inside a restored list": "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-			"x_bases: [shared/other, shared/parent]\nextends: shared/parent@1.x\n---\n\nchild body\n",
-		"id inside a restored mapping": "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-			"x_meta:\n  base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
-		"id under a non-string key": "---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
-			"x_meta:\n  1: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n",
-	} {
+	cases := map[string]struct {
+		extends  string
+		authored []string
+	}{
+		"alias to the anchored extends": {"shared/parent@1.x", []string{
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"extends: &p shared/parent@1.x\nnote: *p\n---\n\nchild body\n"}},
+		"literal id under another key": {"shared/parent@1.x", []string{
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"x_base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n"}},
+		"merge key restoring extends": {"shared/parent@1.x", []string{
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"base: &b\n  extends: shared/parent@1.x\n<<: *b\n---\n\nchild body\n"}},
+		"id inside a restored list": {"shared/parent@1.x", []string{
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"x_bases: [shared/other, shared/parent]\nextends: shared/parent@1.x\n---\n\nchild body\n"}},
+		"id inside a restored mapping": {"shared/parent@1.x", []string{
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"x_meta:\n  base: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n"}},
+		"id under a non-string key": {"shared/parent@1.x", []string{
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"x_meta:\n  1: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n"}},
+		"id under a pin the extends entry does not carry": {"shared/parent@1.x", []string{
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"x_base: shared/parent@2.0.0\nextends: shared/parent@1.x\n---\n\nchild body\n"}},
+		"pinned id against an unpinned extends": {"shared/parent", []string{
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"x_base: shared/parent@1.0.0\nextends: shared/parent\n---\n\nchild body\n"}},
+		// A chain member above the leaf carries its reference through an
+		// alias, so the parent's ID reaches the served block only under the
+		// anchor-defining sibling key.
+		"anchored extends on a non-leaf block": {"shared/parent@1.0.0", []string{
+			"---\ntype: agent\nversion: 1.0.0\ndescription: grandparent\n---\n\ngp body\n",
+			"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n" +
+				"x_ref: &g shared/gp@1.0.0\nextends: *g\n---\n\nparent body\n",
+			"---\ntype: agent\nversion: 2.0.0\ndescription: child\n" +
+				"extends: shared/parent@1.0.0\n---\n\nchild body\n"}},
+	}
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
+			authored := make([][]byte, 0, len(tc.authored))
+			for _, raw := range tc.authored {
+				authored = append(authored, []byte(raw))
+			}
 			out, err := manifest.SerializeMerged(&manifest.Artifact{
 				Type: manifest.TypeAgent, Version: "2.0.0", Description: "child",
-				Extends: "shared/parent@1.x", Body: "child body",
-			}, []byte(child))
+				Extends: tc.extends, Body: "child body",
+			}, authored...)
 			if !errors.Is(err, manifest.ErrUnhidableParent) {
 				t.Fatalf("err = %v, want ErrUnhidableParent", err)
 			}

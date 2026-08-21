@@ -152,7 +152,12 @@ func undeclaredKeysOf(authored [][]byte) ([]namedNode, map[string]bool) {
 		for i := 0; i+1 < len(m.Content); i += 2 {
 			name := m.Content[i].Value
 			if name == "extends" {
-				addParentRef(refs, m.Content[i+1].Value)
+				// Resolve before recording: a chain member above the leaf can
+				// carry its reference through an alias, whose node Value is the
+				// anchor name rather than the parent's ID. Recording the anchor
+				// name would leave the anchor-defining sibling key free to
+				// restore that parent's ID into the served block.
+				addParentRef(refs, resolveAliases(m.Content[i+1], map[*yaml.Node]bool{}).Value)
 				continue
 			}
 			if declaredKeys[name] {
@@ -204,14 +209,19 @@ func resolveAliases(n *yaml.Node, visiting map[*yaml.Node]bool) *yaml.Node {
 	return &cp
 }
 
-// addParentRef records an extends reference and its pin-stripped canonical ID,
-// which are the two spellings of a parent's ID a served block can carry.
+// parentID reduces an artifact reference to its canonical ID by dropping the
+// version pin. An authored value can spell a parent's ID with any pin, so both
+// sides of the §4.6 comparison are reduced this way before they are matched.
+func parentID(ref string) string {
+	id, _, _ := strings.Cut(ref, "@")
+	return id
+}
+
+// addParentRef records an extends reference under its canonical ID. namesAny
+// reduces each candidate string the same way, so a restored key naming the
+// parent under a pin the extends entry does not carry still matches.
 func addParentRef(refs map[string]bool, ref string) {
-	if ref == "" {
-		return
-	}
-	refs[ref] = true
-	if id, _, found := strings.Cut(ref, "@"); found && id != "" {
+	if id := parentID(ref); id != "" {
 		refs[id] = true
 	}
 }
@@ -241,11 +251,12 @@ func hidesParent(header []byte, refs map[string]bool) bool {
 	return !namesAny(resolved, refs)
 }
 
-// namesAny reports whether any string within v equals one of refs.
+// namesAny reports whether any string within v names one of refs, comparing
+// canonical IDs so the pin a value carries does not decide the outcome.
 func namesAny(v any, refs map[string]bool) bool {
 	switch t := v.(type) {
 	case string:
-		return refs[t]
+		return refs[parentID(t)]
 	case []any:
 		for _, e := range t {
 			if namesAny(e, refs) {
@@ -254,7 +265,7 @@ func namesAny(v any, refs map[string]bool) bool {
 		}
 	case map[string]any:
 		for k, e := range t {
-			if refs[k] || namesAny(e, refs) {
+			if refs[parentID(k)] || namesAny(e, refs) {
 				return true
 			}
 		}
