@@ -38,7 +38,7 @@ Coverage for: Postgres failover, object-storage outage, IdP outage, full-disk on
 
 ### 13.2.1 Read-Only Mode
 
-When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to **read-only mode**: read endpoints (`load_domain`, `search_domains`, `search_artifacts`, `load_artifact`, `load_artifacts`) continue to serve from the replica; every `/v1` catalog and administrative endpoint that mutates registry state is rejected with the structured error `registry.read_only`. Ingest webhooks, layer admin operations, freeze toggles, admin grants, tenant management, and `podium login`-driven token issuance against the local IdP-mediated session table are named examples and do not bound the rule. The §6.3.1 SCIM 2.0 receiver at `/scim/v2/` is outside this write set; its writes are not gated by read-only mode. Each endpoint's own section states its classification, as §7.3.3 does for the tenant-management endpoints and §4.7 does for the catalog re-embed.
+When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to **read-only mode**: read endpoints (`load_domain`, `search_domains`, `search_artifacts`, `load_artifact`, `load_artifacts`) continue to serve from the replica; every `/v1` catalog and administrative endpoint that mutates registry state is rejected with the structured error `registry.read_only`. Ingest webhooks, layer admin operations, freeze toggles, admin grants, and tenant management are named examples and do not bound the rule. The §6.3.1 SCIM 2.0 receiver at `/scim/v2/` is outside this write set; its writes are not gated by read-only mode. Each endpoint's own section states its classification, as §7.3.3 does for the tenant-management endpoints and §4.7 does for the catalog re-embed.
 
 A health-state machine governs the transition. The registry probes the primary every 5 s and flips to read-only after three consecutive failures (tunable via `PODIUM_READONLY_PROBE_INTERVAL` and `PODIUM_READONLY_PROBE_FAILURES`). It flips back automatically after three consecutive probe successes once the primary is reachable again.
 
@@ -167,7 +167,7 @@ If `multi_layer: true` is set but the safety check fails (manifest files are pre
 - **Artifact viewer**: manifest body rendered as markdown, frontmatter as a property table, links to extending or dependent artifacts.
 - **Layer panel**: list registered layers with their source, visibility, and `last_ingested_at`. Admins can register, reingest, and unregister layers from the UI; users can manage their own user-defined layers (cap per §7.3.1). The UI is a thin client over the same `podium layer …` HTTP endpoints.
 
-Authentication: in standalone deployments without an identity provider, the UI is open on the bind address (default `127.0.0.1`, which is not network-exposed). In standard deployments the UI uses the same OAuth device-code flow as the CLI, with the verification URL handoff handled in-browser. Under `oidc-jwt` or `trusted-headers` (§6.3.3) the UI is served by the same registry process behind the same gateway and carries no device-code flow of its own: the gateway authenticates the request and the registry resolves the caller's identity from the forwarded token or the injected headers, exactly as for any other API request, so the UI inherits the request's resolved identity. A non-loopback web-UI bind under `trusted-headers` is also subject to the provider's bind restriction, so it requires `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind` in addition to `--web-ui-allow-public-bind`.
+Authentication: in standalone deployments without an identity provider, the UI is open on the bind address (default `127.0.0.1`, which is not network-exposed). A standard deployment that authenticates its own callers with `oidc-jwt` (§6.3.3) verifies the IdP-signed token that a CLI, an SDK, or another API client acquired through the device-code flow; acquisition happens in the client and verification happens in the registry. The web UI runs no acquisition flow of its own and resolves identity solely from what the request carries, so a UI request that reaches the registry directly carries no credential, resolves as anonymous, and sees public visibility only, unless a gateway forwards the token or injects the identity headers. Where a gateway fronts the registry under `oidc-jwt` or `trusted-headers` (§6.3.3), the UI is served by the same registry process behind the same gateway: the gateway authenticates the request and the registry resolves the caller's identity from the forwarded token or the injected headers, exactly as for any other API request, so the UI inherits the request's resolved identity. Where the registry is directly reachable under `oidc-jwt`, it verifies the IdP-signed token the caller presents itself. A non-loopback web-UI bind under `trusted-headers` is also subject to the provider's bind restriction, so it requires `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind` in addition to `--web-ui-allow-public-bind`.
 
 Behind a flag: opt-in via `--web-ui` so headless deployments (CI runners, managed runtimes) don't pay the binary-size or attack-surface cost when they don't need it. The binary refuses to bind the UI to a non-loopback address unless `--web-ui-allow-public-bind` is also passed _and_ an identity provider is configured, preventing accidental exposure of an unauthenticated UI.
 
@@ -465,7 +465,7 @@ Selected via `PODIUM_EMBEDDING_PROVIDER` (`openai` | `voyage` | `cohere` | `olla
 
 ### Identity provider
 
-Identity-provider selection and per-provider config are documented in §6.3 (`PODIUM_IDENTITY_PROVIDER`, `PODIUM_OAUTH_AUDIENCE`, `PODIUM_SESSION_TOKEN_*`, etc.). `oauth-device-code` and `injected-session-token` apply on both the registry and the MCP server. `oidc-jwt` and `trusted-headers` are registry-process values that the MCP server's `PODIUM_IDENTITY_PROVIDER` does not admit (§6.3, §6.3.3).
+Identity-provider selection and per-provider config are documented in §6.3 (`PODIUM_IDENTITY_PROVIDER`, `PODIUM_OAUTH_AUDIENCE`, `PODIUM_SESSION_TOKEN_*`, etc.). `injected-session-token` applies on both the registry and the MCP server. `oauth-device-code` is an MCP-server value, and the registry refuses it at startup with `config.identity_provider_unverified`. `oidc-jwt` and `trusted-headers` are registry-process values that the MCP server's `PODIUM_IDENTITY_PROVIDER` does not admit (§6.3, §6.3.3).
 
 The gateway-delegated providers (§6.3.3) and the `injected-session-token` provider (§6.3.2) introduce the following registry-process variables. `oidc-jwt` also reuses `PODIUM_OAUTH_AUDIENCE` (§6.3) for the `aud` claim, which it requires.
 
@@ -548,9 +548,9 @@ registry:
   #   model: text-embedding-3-large
 
   identity_provider:
-    type: oauth-device-code
+    type: oidc-jwt
+    issuer: https://acme.okta.com/oauth2/default
     audience: https://podium.acme.com
-    authorization_endpoint: https://acme.okta.com/oauth2/default
 
   discovery:
     max_depth: 3
