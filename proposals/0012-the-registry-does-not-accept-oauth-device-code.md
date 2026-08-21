@@ -1,7 +1,7 @@
 # Proposal 0012: §13 stops offering `oauth-device-code` as a registry provider
 
 - Issue: (to be filed)
-- Status: Verified (2026-08-21). Converged after 10 adversarial review rounds (8 findings fixed); awaiting sign-off. "Resolved in adversarial review" records what each pass changed.
+- Status: Approved (2026-08-21). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 10 adversarial review rounds (8 findings fixed); "Resolved in adversarial review" records what each pass changed.
 - Date: 2026-08-20
 
 This document records a spec-internal contradiction and the edits that resolve it, so a review run stages them rather than rediscovering the analysis.
