@@ -89,21 +89,21 @@ func TestSerializeMerged_EmptyChildValueInheritsTheParents(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 omitted fields. §4.6's omitted-field rule holds for every
-// frontmatter field, and MergeExtends applies it to a declared collection by
-// inheriting the parent's value whenever the child's is zero-length. A restored
-// key follows the same rule, so the two halves of one served block do not read
-// the same authored spelling two ways.
-func TestSerializeMerged_EmptyChildCollectionInheritsTheParents(t *testing.T) {
+// Spec: §4.6 omitted fields. §4.6 inherits the parent's value for a key the
+// child omits or sets to an empty scalar, and gives every other field the
+// child's value. A zero-length sequence or mapping is a value the child
+// declared, so it is served and an inherited extension collection can be
+// cleared.
+func TestSerializeMerged_EmptyChildCollectionWins(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
 		parentKeys string
 		authored   string
 		want       any
 	}{
-		"an empty list": {"x_owner: [platform]", "x_owner: []", []any{"platform"}},
+		"an empty list": {"x_owner: [platform]", "x_owner: []", []any{}},
 		"an empty mapping": {"x_owner:\n  team: platform", "x_owner: {}",
-			map[string]any{"team": "platform"}},
+			map[string]any{}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

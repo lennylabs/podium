@@ -266,11 +266,8 @@ func expand(n *yaml.Node, open map[*yaml.Node]bool) (*yaml.Node, error) {
 // value for the same key wins. The last block is the leaf's.
 //
 // Spec: §4.6 omitted fields. A child that omits a key, or sets it to an empty
-// value, inherits the parent's value, and the section states that this holds
-// for every frontmatter field. MergeExtends applies the same rule to every
-// declared field, including the list fields it inherits whenever the child's
-// list is empty, so the two halves of a merged block agree on what an empty
-// child value means.
+// scalar, inherits the parent's value, and every other field takes the child's
+// value, including the extension-type fields a TypeProvider does not declare.
 //
 // A chain member that stored no frontmatter at all holds no key to inherit and
 // contributes none.
@@ -302,17 +299,17 @@ func undeclaredKeysOf(authored []*yaml.Node) []namedNode {
 }
 
 // isEmptyValue reports whether n is a value §4.6 treats as an omitted field: an
-// empty scalar, a zero-length sequence, or a zero-length mapping.
+// empty scalar.
 //
 // Spec: §4.6 omitted fields. The section names a child that "omits a
-// frontmatter field, or sets an empty scalar", and states that the rule holds
-// for every frontmatter field. MergeExtends carries it to a declared collection
-// by inheriting the parent's value whenever the child's is zero-length, on
-// target_harnesses, audit_redact, and lint_suppress, because a decoded Go slice
-// does not distinguish an authored `[]` from an omitted key. Holding a restored
-// key to that same reading is what keeps one served block under one rule: a
-// child that empties a collection inherits the parent's value whether or not
-// Artifact happens to declare the key.
+// frontmatter field, or sets an empty scalar", and gives every other field the
+// child's value, naming the extension-type fields a TypeProvider does not
+// declare. A zero-length sequence or mapping is a value the child declared, so
+// it wins over the ancestor's and the child can clear an inherited extension
+// list. MergeExtends inherits a declared collection whenever the child's is
+// zero-length, but that follows from a decoded Go slice not distinguishing an
+// authored `[]` from an absent key rather than from §4.6, and the restored keys
+// hold yaml.Node values that carry the distinction.
 //
 // The null tag rather than the raw text decides an empty scalar, because
 // yaml.v3 decodes `x_owner:` to an empty value while `x_owner: null` and
@@ -324,14 +321,7 @@ func undeclaredKeysOf(authored []*yaml.Node) []namedNode {
 // leaves nil, so the test needs no nil guard. An alias node holds whatever its
 // anchor does and is a value the child set, so it is not empty here.
 func isEmptyValue(n *yaml.Node) bool {
-	switch n.Kind {
-	case yaml.ScalarNode:
-		return n.Value == "" || n.Tag == "!!null"
-	case yaml.SequenceNode, yaml.MappingNode:
-		return len(n.Content) == 0
-	default:
-		return false
-	}
+	return n.Kind == yaml.ScalarNode && (n.Value == "" || n.Tag == "!!null")
 }
 
 // canonicalID reduces an artifact reference to its canonical ID by dropping the

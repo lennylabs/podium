@@ -463,12 +463,12 @@ func TestExtendsFrontmatter_EmptyChildValueInheritsTheParents(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 omitted fields — §4.6's omitted-field rule holds for every
-// frontmatter field, and manifest.MergeExtends applies it to a declared list by
-// inheriting the parent's value whenever the child's is empty. A restored key
-// follows the same rule, so one served block applies one rule to an empty child
-// collection whether or not manifest.Artifact declares the key.
-func TestExtendsFrontmatter_EmptyChildCollectionInheritsTheParents(t *testing.T) {
+// Spec: §4.6 omitted fields — §4.6 inherits the parent's value for a key the
+// child omits or sets to an empty scalar, and gives every other field the
+// child's value, naming the extension-type fields a TypeProvider does not
+// declare. A child that authors an empty list has declared a value, so the
+// served block carries the empty list and the child can clear what it inherits.
+func TestExtendsFrontmatter_EmptyChildCollectionWins(t *testing.T) {
 	t.Parallel()
 	got, err := emfLoad(t,
 		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\nx_owner: [platform]\n---\n\nparent body\n",
@@ -479,8 +479,8 @@ func TestExtendsFrontmatter_EmptyChildCollectionInheritsTheParents(t *testing.T)
 	}
 	served := decodeServedMapping(t, got.Frontmatter)
 	owner, ok := served["x_owner"].([]any)
-	if !ok || len(owner) != 1 || owner[0] != "platform" {
-		t.Errorf("x_owner = %#v, want the parent's [platform]\n%s", served["x_owner"], got.Frontmatter)
+	if !ok || len(owner) != 0 {
+		t.Errorf("x_owner = %#v, want the child's empty list\n%s", served["x_owner"], got.Frontmatter)
 	}
 }
 
