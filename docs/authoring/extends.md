@@ -156,6 +156,14 @@ When a child manifest declares `extends: <parent>` and the requesting identity c
 
 This preserves layer privacy across the inheritance chain. A team-shared layer can `extends:` an org-internal layer that the team can see; a contractor with access to the team layer (but not the org layer) sees the merged result without learning about the org layer's contents.
 
+### What the registry refuses to serve
+
+The registry enforces the guarantee on the merged manifest itself. It removes the child's `extends:` reference and then checks the assembled block for the parent's canonical ID. When a key or a value in the block stands as a reference to a chain parent, or the block cannot be rewritten at all, the read fails with `registry.invalid_argument` and no manifest is served.
+
+The check applies to what the child authored and to what it inherited on the same terms, and it covers the extension-type keys the merge restores as well as the fields in the merge table above. It is bounded to a scalar that resolves to a chain parent's ID once the version pin is removed. A value that merely mentions the parent, such as a description quoting it or a path below it, resolves to no artifact and is served unchanged. An overlay of the same canonical ID is exempt, because the requester asked for that ID.
+
+`extends:` must therefore be a literal top-level key holding a plain scalar. A reference carried by a YAML merge key (`<<: *base`) or by an anchored mapping is refused on the read path, because removing the reference from such a block either strands the alias that pointed at it or leaves a sibling key that resolves back to the parent's ID.
+
 ---
 
 ## Examples
