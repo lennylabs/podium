@@ -3534,18 +3534,31 @@ rm -rf "$WORK"
 ## S42: a deprecated parent in an `extends:` chain
 
 **Goal.** Validate what happens to a child whose parent is deprecated, across
-the four orderings that differ: an explicit pin onto a deprecated version, a
-range that can avoid one, a line with no live version left, and a parent
-deprecated after the child was already stored.
+the orderings that differ: a range reference that can avoid a deprecated
+version, an explicit pin onto one, a line with no live version left, and a
+parent deprecated after the child was already stored.
 
-**Covers.** §4.6 inheritance, §4.7.6 pin resolution, §4.7.4 deprecation.
+**Covers.** §4.6 inheritance, §4.7.6 pin resolution, §4.7.4 deprecation, §4.7
+immutability.
 
 **Why by hand.** Deprecation is per-version and a pin is frozen at the child's
 ingest, so which ordering produced a state is invisible from the state itself.
-The refusal also lands at ingest for some orderings and at read for others,
-and a scenario that only publishes a deprecated parent first never reaches the
-ordering an operator actually hits, which is deprecating a parent that already
-has children.
+The refusal also lands at ingest for some orderings and at read for others.
+
+**Layout, before you start.** Both walkers key on the literal filename
+`ARTIFACT.md`, and an artifact's id is its directory path relative to the layer
+root. A registry directory therefore holds exactly one `(id, version)` at a
+time, and any other file in it is captured as a bundled resource rather than as
+a second version. Multiple versions of one id live only in the store,
+accumulated across successive reingests of the same directory. Publishing a new
+version means overwriting `ARTIFACT.md` in place and reingesting, not adding a
+file beside it: a second file changes the artifact's content hash while its
+version stays the same, which ingest refuses with
+`ingest.immutable_violation`.
+
+There is no deprecation verb. A version's `deprecated` flag is part of its
+frontmatter and therefore part of its content hash, so a stored version cannot
+be deprecated in place; the same refusal applies.
 
 **Steps.**
 
@@ -3560,7 +3573,7 @@ export PODIUM_REGISTRY=http://127.0.0.1:8143
 podium layer register --registry "$PODIUM_REGISTRY" --id reg --local "$WORK/reg" --public
 ```
 
-2. Publish a live parent and a child pinned to it by range, then reingest.
+2. Publish a live parent and a child that references it by range.
 
 ```bash
 mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
@@ -3581,18 +3594,19 @@ extends: shared/base@1.x
 ---
 EOF
 podium layer reingest --registry "$PODIUM_REGISTRY" reg
-curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" | python3 -c "import json,sys;d=json.load(sys.stdin);print('deprecated=',d.get('deprecated'));print('desc in fm:', 'base v1' in d.get('frontmatter',''))"
+curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" | python3 -c "import json,sys;d=json.load(sys.stdin);print('deprecated=',d.get('deprecated'));print('inherits base v1:', 'base v1' in d.get('frontmatter',''))"
 ```
 
-   **Expect.** The child loads, inherits `base v1`, and is not deprecated.
+   **Expect.** The child loads and inherits `base v1`. Its `deprecated` is
+   absent or `false`; the field is omitted rather than emitted as `false`, so
+   read the absence as the negative rather than looking for the word.
 
-3. Deprecate the parent line by publishing a new version carrying the flag.
-   This is the only way to deprecate: the flag is per-version and there is no
-   in-place toggle.
+3. Deprecate the line by publishing a newer version, which means overwriting
+   the same file. Confirm both versions are stored before continuing: no HTTP
+   route lists versions, so read the store.
 
 ```bash
-mkdir -p "$WORK/reg/shared/base-v2"
-cat > "$WORK/reg/shared/base-v2/ARTIFACT.md" <<'EOF'
+cat > "$WORK/reg/shared/base/ARTIFACT.md" <<'EOF'
 ---
 type: context
 version: 1.1.0
@@ -3602,30 +3616,39 @@ deprecated: true
 
 base prose
 EOF
-mv "$WORK/reg/shared/base-v2/ARTIFACT.md" "$WORK/reg/shared/base/ARTIFACT-v2.md" 2>/dev/null || true
-rmdir "$WORK/reg/shared/base-v2" 2>/dev/null || true
+podium layer reingest --registry "$PODIUM_REGISTRY" reg
+sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, version, deprecated from manifests order by artifact_id, version;"
 ```
 
-   **IMPLEMENTOR'S NOTE.** A registry directory holds one `ARTIFACT.md` per
-   artifact, so publishing a second version of the same id means replacing the
-   file rather than adding one beside it. Replace `shared/base/ARTIFACT.md`
-   with the `1.1.0` content above, reingest, and confirm both versions are
-   stored before continuing. If the layout cannot hold two versions of one id,
-   record that and drive the rest of the scenario against a registry that can.
+   **Expect.** Two rows for `shared/base`: `1.0.0` with `0`, and `1.1.0` with
+   `1`. One row means the overwrite did not land as a new version and every
+   later step runs against the wrong registry.
 
-4. Reingest the child unchanged and read its pin.
+4. Ingest a **fresh** range child while the deprecated version is already
+   stored. A child already stored is idempotent on reingest and its pin is
+   frozen, so re-reading it tests nothing about the selection rule.
 
 ```bash
+mkdir -p "$WORK/reg/team/ranged"
+cat > "$WORK/reg/team/ranged/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: shared/base@1.x
+---
+EOF
 podium layer reingest --registry "$PODIUM_REGISTRY" reg
-curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" | python3 -c "import json,sys;d=json.load(sys.stdin);print('deprecated=',d.get('deprecated'));print(d.get('frontmatter',''))"
+sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, extends_pin from manifests where extends_pin != '';"
 ```
 
-   **Expect.** The child still resolves to a non-deprecated parent version and
-   is not itself reported deprecated. A range reference selects the most
-   recently ingested non-deprecated version, so deprecating a newer version
-   does not drag an existing child into deprecation.
+   **Expect.** `team/ranged` pins `shared/base@1.0.0`, the live version, not
+   the newer deprecated `1.1.0`. The range skipped the deprecated candidate.
+   `team/derived` still pins `1.0.0` from its original ingest.
 
-5. Publish a second child that pins the deprecated version explicitly.
+5. Pin a deprecated version explicitly. Read the reingest output: the rejection
+   is printed by the CLI on stdout and never reaches the server log, and a grep
+   of the server log matches unrelated boot lines whether or not the rejection
+   happened.
 
 ```bash
 mkdir -p "$WORK/reg/team/pinned"
@@ -3636,27 +3659,71 @@ version: 1.0.0
 extends: shared/base@1.1.0
 ---
 EOF
-podium layer reingest --registry "$PODIUM_REGISTRY" reg 2>&1 | tail -5
-grep -iE "rejected|invalid_artifact|deprecat" "$WORK/srv.log" | tail -5
+podium layer reingest --registry "$PODIUM_REGISTRY" reg 2>&1 | grep -iE "rejected|conflict" || echo "NO REJECTION LINE"
 ```
 
-   **Expect.** The pinned child is rejected with `ingest.invalid_artifact`, and
-   the reason names deprecation rather than reporting the parent as absent. An
-   author who names a deprecated version explicitly is told so; a message
-   claiming the parent was never published is a defect.
+   **Expect.** A line naming `team/pinned`, `ingest.invalid_artifact`, and
+   deprecation, for example `extends: parent version shared/base@1.1.0 is
+   deprecated`. A message claiming the parent was never published is a defect:
+   the author named a stored version explicitly and is entitled to be told why
+   it was refused.
 
-6. Check the read-versus-search disposition for any child that does inherit
-   the flag. A child stored before a deprecation rule existed can still carry
-   an inherited `deprecated`, and the two surfaces are known to disagree.
+   Note that `podium layer reingest` exits `0` here, because other artifacts in
+   the layer were accepted. Assert on the output rather than on the exit
+   status.
+
+6. Exhaust a line: a parent whose only version is deprecated.
 
 ```bash
-podium search --registry "$PODIUM_REGISTRY" "base" || true
+mkdir -p "$WORK/reg/shared/dead" "$WORK/reg/team/orphaned"
+cat > "$WORK/reg/shared/dead/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+description: dead line
+deprecated: true
+---
+
+dead prose
+EOF
+cat > "$WORK/reg/team/orphaned/ARTIFACT.md" <<'EOF'
+---
+type: context
+version: 1.0.0
+extends: shared/dead@1.x
+---
+EOF
+podium layer reingest --registry "$PODIUM_REGISTRY" reg 2>&1 | grep -iE "rejected|conflict" || echo "NO REJECTION LINE"
 ```
 
-   **Expect.** Record what search returns for each child. `load_artifact`
-   reports an inherited `deprecated: true` while the default search filter
-   reads the stored column and does not exclude the child; that divergence is
-   an accepted deferral rather than a defect, and this step exists to keep it
-   visible rather than to fail on it.
+   **Expect.** `team/orphaned` refused with `ingest.invalid_artifact` and a
+   reason naming that every stored version of the parent is deprecated. A
+   range with no live candidate refuses rather than falling back to a
+   deprecated one.
+
+7. Record the read-versus-search disposition for a child that inherits the
+   flag. **This state is not reachable on a current build**, and the step
+   exists to keep the accepted deferral visible rather than to produce it.
+
+   A child can inherit `deprecated: true` only by pinning a deprecated version,
+   which steps 5 and 6 show is refused at ingest, and a stored version cannot
+   be deprecated in place because the flag is part of its content hash. So the
+   only artifacts in this state are ones stored before those ingest rules
+   existed.
+
+   When you need to observe the deferral, reconstruct it out of band in the
+   throwaway store, which is not a product path:
+
+```bash
+sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, version, deprecated from manifests where artifact_id like 'shared/%';"
+```
+
+   **Expect.** Record what you see. The known disposition is that
+   `load_artifact` reports an inherited `deprecated: true` with its deprecation
+   warning while the default `search_artifacts` filter reads the child's own
+   stored column and does not exclude it. That divergence is an accepted
+   deferral rather than a defect. Note also that the read path parses each
+   record's stored frontmatter rather than its column, so flipping the column
+   alone changes nothing on the read.
 
 **Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
