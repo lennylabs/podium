@@ -1708,9 +1708,9 @@ func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRe
 // served frontmatter, and not only the indexed Sensitivity record field,
 // observes the merged result. The merged record keeps the child's identity
 // (id, version, content hash, signature, layer, and body), and it surfaces the
-// merged Type, Sensitivity, Deprecated, ReplacedBy, and audit_redact directive
-// back onto the row. Description, Tags, and SearchVisibility are left at
-// chain[0]'s values, because no consumer reads them from this record.
+// merged Type, Sensitivity, Deprecated, and ReplacedBy back onto the row. Every
+// other merged field, including the audit_redact directive, reaches its
+// consumers through the re-serialized frontmatter alone.
 // spec: §4.6 field-semantics table.
 func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	if len(chain) == 0 {
@@ -1755,21 +1755,20 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 		// extends a parent still ships its own authored SKILL.md.
 		out.SkillRaw = c.SkillRaw
 	}
-	// Surface the merged structured fields onto the returned record.
-	// resultFromRecord copies Type, Sensitivity, Deprecated, and ReplacedBy,
-	// and withDeprecationWarning reads the last two. AuditRedact is inheritable
-	// per §4.6 and manifest.MergeExtends folds it, so the merged record carries
-	// the resolved key set the §8.2 read emitter needs; because
-	// LoadArtifactResult declares no such field, servedRecord recombines it
-	// from the re-serialized frontmatter below. Description, Tags, and
-	// SearchVisibility are deliberately absent, because LoadArtifactResult
-	// declares no such fields either and the search path reads the stored
-	// columns the ingest fold writes rather than this record.
+	// Surface the merged structured fields onto the returned record. Each one
+	// has a consumer that reads it from this record: resultFromRecord copies
+	// Type, Sensitivity, Deprecated, and ReplacedBy onto the result, and
+	// withDeprecationWarning reads the last two. Description, Tags,
+	// SearchVisibility, and the inherited audit_redact directive are
+	// deliberately absent. LoadArtifactResult declares no such fields, the
+	// search path reads the stored columns the ingest fold writes rather than
+	// this record, and the §8.2 read emitter reads the directive out of the
+	// re-serialized frontmatter below (servedRecord), so an assignment here
+	// would be unread.
 	out.Type = string(merged.Type)
 	out.Sensitivity = string(merged.Sensitivity)
 	out.Deprecated = merged.Deprecated
 	out.ReplacedBy = merged.ReplacedBy
-	out.AuditRedact = append([]string(nil), merged.AuditRedact...)
 	// Serialize through the chain's authored blocks so an extension type's
 	// own frontmatter keys survive, and strip the extends reference so the
 	// hidden parent is not surfaced (§4.6). A merged block that names a chain
