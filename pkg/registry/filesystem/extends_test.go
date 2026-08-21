@@ -1,7 +1,6 @@
 package filesystem
 
 import (
-	"errors"
 	"strings"
 	"testing"
 
@@ -263,6 +262,10 @@ func recordOf(t *testing.T, id, src string) ArtifactRecord {
 // first. Read back out of the record bytes, the grandparent's ID would
 // go missing once the middle record had been rewritten in place, and the
 // filesystem mode would serve a block the server mode refuses.
+//
+// The refusal is confined to the records it names. The server mode fails the
+// load of one artifact and serves the rest, so the walk drops the refused
+// records and keeps every other one (§11, §2.2).
 func TestResolveExtends_GrandparentIDRefusedInAnyProcessingOrder(t *testing.T) {
 	t.Parallel()
 	gp := recordOf(t, "shared/gp",
@@ -272,26 +275,46 @@ func TestResolveExtends_GrandparentIDRefusedInAnyProcessingOrder(t *testing.T) {
 			"x_base: shared/gp\nextends: shared/gp\n---\n\nparent body\n")
 	child := recordOf(t, "team/child",
 		"---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent\n---\n\nchild body\n")
+	other := recordOf(t, "team/other",
+		"---\ntype: context\nversion: 1.0.0\ndescription: unrelated\n---\n\nother body\n")
 
 	for name, order := range map[string][]ArtifactRecord{
-		"parent before child": {gp, parent, child},
-		"child before parent": {child, parent, gp},
+		"parent before child": {gp, parent, child, other},
+		"child before parent": {other, child, parent, gp},
 	} {
 		order := order
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			deduped := append([]ArtifactRecord(nil), order...)
-			err := resolveExtends(deduped, append([]ArtifactRecord(nil), order...))
-			if !errors.Is(err, manifest.ErrUnhidableParent) {
-				t.Fatalf("err = %v, want ErrUnhidableParent", err)
+			kept, err := resolveExtends(deduped, append([]ArtifactRecord(nil), order...))
+			if err != nil {
+				t.Fatalf("resolveExtends: %v", err)
+			}
+			got := map[string]bool{}
+			for _, rec := range kept {
+				got[rec.ID] = true
+			}
+			// The parent inherits nothing but authors the key naming its own
+			// parent, so it is refused on the same rule as the child.
+			for _, id := range []string{"team/child", "shared/parent"} {
+				if got[id] {
+					t.Errorf("%q names a hidden parent and must not be served: %v", id, idsOf(kept))
+				}
+			}
+			for _, id := range []string{"shared/gp", "team/other"} {
+				if !got[id] {
+					t.Errorf("the walk dropped %q, which names no hidden parent: %v", id, idsOf(kept))
+				}
 			}
 		})
 	}
 }
 
-// Spec: §4.6 hidden parents — the walk a consumer drives fails rather than
-// materializing a merged block that names the hidden grandparent under an
-// inherited key.
+// Spec: §4.6 hidden parents, §11 — the walk a consumer drives materializes no
+// merged block that names the hidden grandparent under an inherited key, and it
+// loses exactly the artifacts the server mode fails to load. Every sibling the
+// refusal does not name still walks, so the two deployment modes serve the same
+// set for the same input.
 func TestWalk_ResolveExtendsRefusesAChildNamingItsGrandparent(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -309,16 +332,32 @@ func TestWalk_ResolveExtendsRefusesAChildNamingItsGrandparent(t *testing.T) {
 			Path:    "team/child/ARTIFACT.md",
 			Content: "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: shared/parent\n---\n\nchild body\n",
 		},
+		testharness.WriteTreeOption{
+			Path:    "team/other/ARTIFACT.md",
+			Content: "---\ntype: context\nversion: 1.0.0\ndescription: unrelated\n---\n\nother body\n",
+		},
 	)
 	reg, err := Open(root)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
 	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
-	if !errors.Is(err, manifest.ErrUnhidableParent) {
-		t.Fatalf("Walk err = %v, want ErrUnhidableParent", err)
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
 	}
-	if got != nil {
-		t.Errorf("a walk that cannot hide the parent must return no records: %v", idsOf(got))
+	served := map[string]bool{}
+	for _, rec := range got {
+		served[rec.ID] = true
+		if strings.Contains(string(rec.ArtifactBytes), "shared/gp") && rec.ID != "shared/gp" {
+			t.Errorf("%q was materialized naming the hidden grandparent:\n%s", rec.ID, rec.ArtifactBytes)
+		}
+	}
+	if served["team/child"] || served["shared/parent"] {
+		t.Errorf("a record that cannot hide the parent was walked: %v", idsOf(got))
+	}
+	for _, id := range []string{"shared/gp", "team/other"} {
+		if !served[id] {
+			t.Errorf("the walk dropped %q, which names no hidden parent: %v", id, idsOf(got))
+		}
 	}
 }

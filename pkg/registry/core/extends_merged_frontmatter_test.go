@@ -198,6 +198,19 @@ func TestExtendsFrontmatter_KeyReferencingTheParentFailsClosed(t *testing.T) {
 	}
 }
 
+// Spec: §4.6 hidden parents — the guarantee covers the block the requester is
+// served rather than the restored keys alone, so a declared field that
+// legitimately holds an artifact reference discloses the parent no more than an
+// undeclared key does. The load fails closed with `registry.invalid_argument`.
+func TestExtendsFrontmatter_DeclaredFieldNamingTheParentFailsClosed(t *testing.T) {
+	t.Parallel()
+	got, err := emfLoad(t,
+		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\n---\n\nparent body\n",
+		"---\ntype: agent\nversion: 2.0.0\ndescription: child\ndeprecated: true\n"+
+			"replaced_by: shared/parent\nextends: shared/parent@1.x\n---\n\nchild body\n")
+	assertFailsClosed(t, got, err)
+}
+
 // Spec: §4.6 hidden parents — a child can author frontmatter whose anchor
 // contains itself, which ingest accepts because it never decodes a key
 // manifest.Artifact does not declare. The assembled block carrying that key
@@ -283,11 +296,11 @@ func TestExtendsFrontmatter_EmptyChildValueInheritsTheParents(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents — a child may extend its own canonical ID, and the
-// parent is then the row below it in layer order. That row is a chain parent
-// like any other, so an inherited key holding its ID takes the same disclosure
-// test and the load fails closed with `registry.invalid_argument`.
-func TestExtendsFrontmatter_SameIDOverlayFailsClosed(t *testing.T) {
+// Spec: §4.6 omitted fields — a child may extend its own canonical ID, and the
+// parent is then the row below it in layer order. The requester asked for that
+// ID and is answered with it, so the hidden-parent test has nothing to conceal
+// there and the overlay inherits the base's key holding that ID.
+func TestExtendsFrontmatter_SameIDOverlayInheritsAKeyNamingItsOwnID(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
@@ -315,7 +328,16 @@ func TestExtendsFrontmatter_SameIDOverlayFailsClosed(t *testing.T) {
 		{ID: "L2", Visibility: layer.Visibility{Public: true}, Precedence: 2},
 	})
 	got, err := reg.LoadArtifact(context.Background(), publicID, "shared/base", core.LoadArtifactOptions{})
-	assertFailsClosed(t, got, err)
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	served := decodeServedMapping(t, got.Frontmatter)
+	if served["x_owner"] != "shared/base" {
+		t.Errorf("x_owner = %v, want %q\n%s", served["x_owner"], "shared/base", got.Frontmatter)
+	}
+	if _, named := served["extends"]; named {
+		t.Errorf("the served frontmatter still names the hidden parent:\n%s", got.Frontmatter)
+	}
 }
 
 // Spec: §4.6 — a child that declares no undeclared key is served the typed

@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,7 +27,11 @@ import (
 // all is the full pre-dedup record set in layer order (low to high
 // precedence), which is the only place the lower-precedence same-ID parents
 // survive after dedup.
-func resolveExtends(deduped, all []ArtifactRecord) error {
+//
+// It returns the records the walk keeps. A record whose merged frontmatter
+// cannot be rewritten into one that names no parent is dropped, and the rest of
+// the walk continues.
+func resolveExtends(deduped, all []ArtifactRecord) ([]ArtifactRecord, error) {
 	// effective maps a canonical ID to its highest-precedence record, used to
 	// resolve a different-ID parent reference.
 	effective := make(map[string]int, len(deduped))
@@ -40,6 +45,7 @@ func resolveExtends(deduped, all []ArtifactRecord) error {
 		layered[r.ID] = append(layered[r.ID], r)
 	}
 
+	dropped := map[int]bool{}
 	for i := range deduped {
 		rec := deduped[i]
 		if rec.Artifact == nil || rec.Artifact.Extends == "" {
@@ -49,7 +55,7 @@ func resolveExtends(deduped, all []ArtifactRecord) error {
 		idx := len(layered[rec.ID]) - 1
 		merged, err := mergeRecord(rec, idx, deduped, effective, layered, map[string]bool{})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		out := rec
 		out.Artifact = merged
@@ -59,14 +65,33 @@ func resolveExtends(deduped, all []ArtifactRecord) error {
 		// identical bytes for the same artifact (§11). The helper restores the
 		// frontmatter keys manifest.Artifact does not declare, which a typed
 		// round-trip drops.
-		bytes, serr := manifest.SerializeMerged(merged, authoredChain(rec, idx, deduped, effective, layered)...)
+		bytes, serr := manifest.SerializeMerged(merged, rec.ID, authoredChain(rec, idx, deduped, effective, layered)...)
+		if errors.Is(serr, manifest.ErrUnhidableParent) {
+			// Spec: §4.6 hidden parents, §11. The server mode fails the load of
+			// this one artifact and serves every other one, so the walk drops
+			// this record and keeps going. Failing the whole walk would leave
+			// the filesystem mode materializing nothing where the server mode
+			// loses a single artifact, which is the divergence §11 and §2.2
+			// pin.
+			dropped[i] = true
+			continue
+		}
 		if serr != nil {
-			return fmt.Errorf("extends: re-serialize %q: %w", rec.ID, serr)
+			return nil, fmt.Errorf("extends: re-serialize %q: %w", rec.ID, serr)
 		}
 		out.ArtifactBytes = bytes
 		deduped[i] = out
 	}
-	return nil
+	if len(dropped) == 0 {
+		return deduped, nil
+	}
+	kept := make([]ArtifactRecord, 0, len(deduped)-len(dropped))
+	for i, rec := range deduped {
+		if !dropped[i] {
+			kept = append(kept, rec)
+		}
+	}
+	return kept, nil
 }
 
 // mergeRecord returns the merged Artifact for rec, whose own slot in its

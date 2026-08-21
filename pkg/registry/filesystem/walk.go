@@ -81,9 +81,11 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	// equivalent output for the same artifact directory. Callers that want
 	// raw layer records (lint, conformance) leave ResolveExtends false.
 	if opts.ResolveExtends {
-		if err := resolveExtends(deduped, all); err != nil {
+		resolved, err := resolveExtends(deduped, all)
+		if err != nil {
 			return nil, err
 		}
+		deduped = resolved
 	}
 	return deduped, nil
 }

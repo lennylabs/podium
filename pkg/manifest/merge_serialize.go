@@ -59,21 +59,22 @@ type MergedBlock struct {
 // both extends resolvers call, so the server mode and the filesystem-registry
 // mode serve identical bytes for the same artifact (§11, §2.2).
 //
-// chain holds the artifact's ancestry parent first, the leaf last.
+// id is the served artifact's own canonical ID, and chain holds its ancestry
+// parent first, the leaf last.
 //
 // It does two things the typed serialization alone cannot. It restores the
 // frontmatter keys Artifact does not declare, taking them from the chain's
 // authored blocks in parent-first order so a key the child also sets with a
 // non-empty value keeps the child's value. And it applies the §4.6
 // hidden-parent strip to the result, returning ErrUnhidableParent when the
-// block resolves an extends value, when any restored key references a chain
-// parent, or when the block cannot be read back at all.
+// block resolves an extends value, when the assembled block names a chain
+// parent under any key, or when the block cannot be read back at all.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
 // most-restrictive value for sensitivity are not what a last-writer-wins
 // overlay over authored text would produce.
-func SerializeMerged(a *Artifact, chain ...MergedBlock) ([]byte, error) {
+func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, error) {
 	stripped := *a
 	stripped.Extends = ""
 	typed, err := SerializeArtifact(&stripped)
@@ -92,18 +93,19 @@ func SerializeMerged(a *Artifact, chain ...MergedBlock) ([]byte, error) {
 		return nil, err
 	}
 
-	refs := chainRefs(a, chain)
 	for _, key := range undeclaredKeysOf(chain) {
-		// Spec: §4.6 hidden parents. The guarantee covers the parent's ID
-		// under every key, whether the value was authored literally or
-		// produced by resolving an alias or a merge key, so the test runs on
-		// every restored key regardless of which block contributed it.
-		if referencesAny(key.value, refs) {
-			return nil, ErrUnhidableParent
-		}
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
 			key.value)
+	}
+
+	// Spec: §4.6 hidden parents. The guarantee covers the parent's ID under
+	// every key of the block a requester is served, whether the typed
+	// serialization emitted the value, a restored key carried it, or the key
+	// itself is named for the parent, so the test runs once over the assembled
+	// mapping rather than over the restored values alone.
+	if referencesAny(root, chainRefs(a, id, chain)) {
+		return nil, ErrUnhidableParent
 	}
 
 	out, err := yaml.Marshal(root)
@@ -225,11 +227,18 @@ func addParentRef(refs map[string]bool, ref string) {
 	}
 }
 
-// chainRefs returns the canonical IDs the chain's extends references name.
+// chainRefs returns the canonical IDs the chain's extends references name,
+// less the served artifact's own ID.
 //
 // Spec: §4.6 hidden parents. Every ID in the set is a parent the requester may
 // be unable to see, and the served block carries none of them under any key.
-func chainRefs(a *Artifact, chain []MergedBlock) map[string]bool {
+//
+// The served artifact's own ID is excluded because §4.6 introduces extends as
+// the resolution for two layers contributing one canonical ID, so a same-ID
+// overlay's parent is the ID the requester asked for and was answered with.
+// Refusing that ID would cost the overlay the omitted-field inheritance §4.6
+// grants it while concealing nothing the response does not already carry.
+func chainRefs(a *Artifact, id string, chain []MergedBlock) map[string]bool {
 	refs := map[string]bool{}
 	for _, block := range chain {
 		addParentRef(refs, block.Extends)
@@ -237,6 +246,7 @@ func chainRefs(a *Artifact, chain []MergedBlock) map[string]bool {
 	// The merged artifact carries the leaf's reference, which a chain whose
 	// leaf resolved it through a merge key never spells out at the top level.
 	addParentRef(refs, a.Extends)
+	delete(refs, parentID(id))
 	return refs
 }
 
