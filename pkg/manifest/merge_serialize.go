@@ -59,35 +59,34 @@ type MergedBlock struct {
 // both extends resolvers call, so the server mode and the filesystem-registry
 // mode serve identical bytes for the same artifact (§11, §2.2).
 //
-// chain holds the artifact's ancestry, parent first and the leaf last.
+// id is the artifact's own canonical ID, which the requester supplied to read
+// it. chain holds the artifact's ancestry, parent first and the leaf last.
 //
 // It does two things the typed serialization alone cannot. It restores the
 // frontmatter keys Artifact does not declare, taking them from the chain's
 // authored blocks in parent-first order so a key the child also sets with a
 // non-empty value keeps the child's value. And it holds the assembled block to
-// §4.6's hidden-parent guarantee, returning ErrUnhidableParent when a key
-// restored from an ancestor names a chain parent, when the block still resolves
-// an extends value, or when it cannot be read back at all.
+// §4.6's hidden-parent guarantee, returning ErrUnhidableParent when the block
+// names a chain parent under any key, when it still resolves an extends value,
+// or when it cannot be read back at all.
 //
 // Every key §4.6's omitted-field rule makes inheritable reaches the served
 // block or the read fails. A key is never silently dropped, because a consumer
 // cannot tell an inherited-as-nothing key from one the chain never set.
 //
-// The disclosure test is scoped to the keys restored from an ancestor. A value
-// the leaf itself authored is the requester's own artifact's text, which the
-// same response already serves verbatim under raw_frontmatter and which the
-// search descriptor serves too, so testing it would only make load_artifact and
-// search_artifacts disagree about the same artifact again. A declared key
-// reaches the block through the typed serialization, on the same terms as
-// before this helper existed and as the search descriptor serves it, so the
-// §4.4 replaced_by pointer of a child deprecated in favour of the artifact it
-// extends still loads.
+// The disclosure test runs over the whole assembled block, both the declared
+// fields the typed serialization wrote and the restored keys, and it does not
+// ask which member of the chain authored the text. §4.6 constrains what the
+// registry serves, so a leaf that spells its parent's ID under a sibling key
+// discloses exactly what a parent that spells it does. The parent's ID reaching
+// the requester through raw_frontmatter is a separate surface and does not
+// license this one.
 //
 // The typed serialization stays authoritative for every declared key, because
 // only it carries the §4.6 merge semantics: a union for a list field and the
 // most-restrictive value for sensitivity are not what a last-writer-wins
 // overlay over authored text would produce.
-func SerializeMerged(a *Artifact, chain ...MergedBlock) ([]byte, error) {
+func SerializeMerged(a *Artifact, id string, chain ...MergedBlock) ([]byte, error) {
 	stripped := *a
 	stripped.Extends = ""
 	typed, err := SerializeArtifact(&stripped)
@@ -106,18 +105,19 @@ func SerializeMerged(a *Artifact, chain ...MergedBlock) ([]byte, error) {
 		return nil, err
 	}
 
-	// Spec: §4.6 hidden parents. The parent's existence and ID are not
-	// surfaced to the requester, so a key restored from an ancestor is tested
-	// under its own name and at every nesting depth of its value, and the read
-	// fails rather than serving a block that names the parent.
-	parents := parentsOf(a, chain)
 	for _, key := range undeclaredKeysOf(chain) {
-		if !key.fromLeaf && (parents.discloses(key.name) || parents.namesAny(key.value)) {
-			return nil, ErrUnhidableParent
-		}
 		root.Content = append(root.Content,
 			&yaml.Node{Kind: yaml.ScalarNode, Value: key.name},
 			uncommented(key.value))
+	}
+
+	// Spec: §4.6 hidden parents. The parent's existence and ID are not
+	// surfaced to the requester, so every key and every value in the assembled
+	// block is tested at every nesting depth, and the read fails rather than
+	// serving a block that names the parent. The body that follows the block is
+	// the leaf's own prose and is out of the block this section constrains.
+	if parentsOf(a, id, chain).namesAny(root) {
+		return nil, ErrUnhidableParent
 	}
 
 	out, err := yaml.Marshal(root)
@@ -167,14 +167,10 @@ func mappingOf(src []byte) (*yaml.Node, []byte, error) {
 	return doc.Content[0], body, nil
 }
 
-// namedNode pairs a restored key with the node holding its value, and records
-// whether the leaf's own block contributed that value. The §4.6 disclosure test
-// runs on the inherited values only, so the authoring member has to travel with
-// the key.
+// namedNode pairs a restored key with the node holding its value.
 type namedNode struct {
-	name     string
-	value    *yaml.Node
-	fromLeaf bool
+	name  string
+	value *yaml.Node
 }
 
 // uncommented clears the YAML comments on n and everything below it, and
@@ -199,8 +195,7 @@ func uncommented(n *yaml.Node) *yaml.Node {
 
 // undeclaredKeysOf collects the frontmatter keys Artifact does not declare
 // from the chain's authored blocks, parent first, so a later block's non-empty
-// value for the same key wins. chain's last member is the leaf, and each key
-// records whether the leaf contributed the winning value.
+// value for the same key wins. chain's last member is the leaf.
 //
 // Spec: §4.6 omitted fields. A child that omits a key, or sets it to an empty
 // scalar, inherits the parent's value, which is what MergeExtends applies to
@@ -214,8 +209,7 @@ func uncommented(n *yaml.Node) *yaml.Node {
 func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 	seen := map[string]int{}
 	out := []namedNode{}
-	for at, block := range chain {
-		leaf := at == len(chain)-1
+	for _, block := range chain {
 		m, _, err := mappingOf(block.Frontmatter)
 		if err != nil {
 			continue
@@ -231,11 +225,10 @@ func undeclaredKeysOf(chain []MergedBlock) []namedNode {
 					continue
 				}
 				out[prev].value = value
-				out[prev].fromLeaf = leaf
 				continue
 			}
 			seen[name] = len(out)
-			out = append(out, namedNode{name: name, value: value, fromLeaf: leaf})
+			out = append(out, namedNode{name: name, value: value})
 		}
 	}
 	return out
@@ -257,43 +250,53 @@ func canonicalID(ref string) string {
 	return id
 }
 
-// parentIDs is the canonical ID of every extends reference in a chain, which is
-// the set §4.6 hides from a requester who cannot see the layer contributing the
-// parent.
+// parentIDs holds the canonical ID of every extends reference in a chain, which
+// is the set §4.6 hides from a requester who cannot see the layer contributing
+// the parent. Each ID records whether it is the requester's own artifact ID,
+// which a §4.6 same-ID overlay's reference carries.
 type parentIDs map[string]bool
 
 // parentsOf collects the chain's parent IDs, including the reference the merged
 // artifact itself carries. That reference is the one a leaf resolving its
-// extends through a merge key never spells out at the top level.
-func parentsOf(a *Artifact, chain []MergedBlock) parentIDs {
+// extends through a merge key never spells out at the top level. id is the
+// artifact's own canonical ID.
+func parentsOf(a *Artifact, id string, chain []MergedBlock) parentIDs {
+	own := canonicalID(id)
 	p := parentIDs{}
 	for _, block := range chain {
-		p.add(block.Extends)
+		p.add(block.Extends, own)
 	}
-	p.add(a.Extends)
+	p.add(a.Extends, own)
 	return p
 }
 
 // add records a reference under its canonical ID, so a value naming the parent
 // under a pin the extends entry does not carry still matches.
-func (p parentIDs) add(ref string) {
+func (p parentIDs) add(ref, own string) {
 	if id := canonicalID(ref); id != "" {
-		p[id] = true
+		p[id] = id == own
 	}
 }
 
 // discloses reports whether serving s would surface a parent §4.6 hides.
 //
-// Spec: §4.6 hidden parents. The guarantee is about the parent's ID reaching
-// the requester, and a path below the parent or prose quoting the ID hands over
-// that ID together with the evidence that the artifact exists. The test
-// therefore fires wherever the ID appears at an identifier boundary, which
+// Spec: §4.6 hidden parents. The guarantee is about the parent's existence and
+// ID reaching the requester, and a path below the parent or prose quoting the ID
+// hands over that ID together with the evidence that the artifact exists. The
+// test therefore fires wherever the ID appears at an identifier boundary, which
 // leaves a different artifact whose ID starts or ends with the parent's, such as
 // shared/parent-legacy or team/shared/parent, inheritable under §4.6's
 // omitted-field rule.
+//
+// A same-ID overlay is the exception. §4.6's collision rule lets the
+// higher-precedence artifact extend its own canonical ID, and that ID is the one
+// the requester supplied to read the artifact, so spelling it surfaces nothing.
+// A pin on it is a different matter: a version the requester was not served
+// tells them a second row for the ID exists, which is the parent's existence,
+// so a pinned occurrence still fails the read.
 func (p parentIDs) discloses(s string) bool {
-	for id := range p {
-		if mentions(s, id) {
+	for id, own := range p {
+		if mentions(s, id, own) {
 			return true
 		}
 	}
@@ -304,23 +307,31 @@ func (p parentIDs) discloses(s string) bool {
 // starts the string or follows a character that neither continues an identifier
 // nor extends a path leftward, and it ends the string or is followed by a
 // character that does not continue an identifier, so a version pin, a path
-// separator, and surrounding prose all count as boundaries.
+// separator, and surrounding prose all count as boundaries. When own is set, id
+// is the requester's own artifact ID and only an occurrence carrying a version
+// pin counts.
 //
 // id is never empty, because add records a reference only under a non-empty
 // canonical ID.
-func mentions(s, id string) bool {
+func mentions(s, id string, own bool) bool {
 	for from := 0; from+len(id) <= len(s); {
 		at := strings.Index(s[from:], id)
 		if at < 0 {
 			return false
 		}
-		start := from + at
-		if boundedLeft(s, start) && boundedRight(s, start+len(id)) {
+		start, end := from+at, from+at+len(id)
+		if boundedLeft(s, start) && boundedRight(s, end) && (!own || pinned(s, end)) {
 			return true
 		}
 		from = start + 1
 	}
 	return false
+}
+
+// pinned reports whether the occurrence ending at i is followed by a version
+// pin.
+func pinned(s string, i int) bool {
+	return i < len(s) && s[i] == '@'
 }
 
 // boundedLeft reports whether the occurrence starting at i begins an
