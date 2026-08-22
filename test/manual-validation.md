@@ -4117,6 +4117,12 @@ registry registers.
 **Prerequisites.** The S21 standard-deployment stack with a severable Postgres
 primary. When it is unavailable, skip and record the skip.
 
+Read-only mode needs no CLI toggle and none exists. The §13.2.1 probe runs from
+boot whenever `read_only.probe_failures` is above zero, which it is by default
+(three failures, five-second interval), so stopping the metadata store flips the
+mode within roughly the probe interval times the failure count. Only step 5
+needs more than the compose stack provides, and it says so.
+
 **Relationship to S21.** S21 already brings a registry to read-only mode. Run
 these steps as an extension of S21 rather than rebuilding the stack, and fold
 them into S21 permanently if its setup already reaches this state.
@@ -4136,17 +4142,61 @@ them into S21 permanently if its setup already reaches this state.
    toggles, admin grants, and tenant management. Neither names token issuance,
    a login endpoint, or a session table.
 
-3. For each enumerated endpoint, issue the request and read the error code from
-   the body rather than the status class.
+3. Issue each write request and read the error code from the body rather than
+   the status class. `$PORT` is the port S21 bound, `127.0.0.1:8118` unless it
+   was changed.
 
-   **Expect.** Each returns `registry.read_only`.
+   ```bash
+   B="http://127.0.0.1:$PORT"
+   for r in "POST $B/v1/ingest/webhook/probe" \
+            "POST $B/v1/layers" \
+            "POST $B/v1/layers/update" \
+            "POST $B/v1/layers/reorder" \
+            "POST $B/v1/layers/reingest" \
+            "POST $B/v1/layers/restore" \
+            "DELETE $B/v1/layers" \
+            "POST $B/v1/admin/erase" \
+            "POST $B/v1/admin/reembed"; do
+     set -- $r
+     printf '%s %s -> ' "$1" "$2"
+     curl -s -X "$1" "$2" -d '{}' | python3 -c "import json,sys; print(json.load(sys.stdin).get('code','(no code)'))" 2>/dev/null || echo "(unparseable)"
+   done
+   ```
+
+   **Expect.** Every line reads `registry.read_only`, returned as HTTP 503.
+
+   `/v1/admin/erase` and `/v1/admin/reembed` are rejected but appear in neither
+   shipped document's list. That is consistent with §13.2.1, which says the
+   named five "do not bound the rule", and it means the documents describe less
+   than the registry enforces. Record it rather than treating it as a failure.
+
+   **Two of the five named categories cannot reach `registry.read_only` on this
+   setup, and a run that records them as failures is wrong.** `POST
+   /v1/admin/grants` returns `403 auth.forbidden` because `requireAdmin` runs
+   before `rejectIfReadOnly` (`pkg/registry/server/admin.go:22-33`), and with no
+   identity provider configured no caller is an admin. `POST
+   /v1/admin/tenants` returns `404 registry.tenant_management_unavailable`
+   because `tenantAdminGate` runs first
+   (`pkg/registry/server/tenants.go:138-143`). Both responses are identical to
+   their healthy-registry baseline, so this step establishes nothing about them.
+   Demonstrating either needs a registry with a real identity provider and an
+   authenticated admin, which S21 does not set up. Take the baseline first and
+   compare, rather than reading a 403 or a 404 as a read-only rejection.
+
+   **Freeze toggles are not asserted here.** The §13.2.1 list names them and no
+   freeze endpoint exists: freeze windows are config-file-only
+   (`internal/serverboot/yaml_config.go:404`), enforced during ingest, and
+   bypassed with `podium layer reingest --break-glass`. Whether the spec sentence
+   or the product is wrong is an open question recorded outside this document,
+   so this step asserts nothing about them. Add the assertion when that is
+   settled.
 
 4. Confirm the struck clause named an endpoint that does not exist.
 
    ```bash
    for p in /v1/login /v1/auth/token /v1/token; do
      printf '%s ' "$p"
-     curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:<port>$p"
+     curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:$PORT$p"
    done
    ```
 
@@ -4158,6 +4208,38 @@ them into S21 permanently if its setup already reaches this state.
 5. Confirm the read path still serves, so step 3's rejections are read-only mode
    rather than a registry that is simply down.
 
-   **Expect.** `load_artifact` and `search_artifacts` answer from the replica.
+   ```bash
+   curl -s -o /dev/null -w 'search %{http_code}\n' "$B/v1/search_artifacts?q=test"
+   curl -s -o /dev/null -w 'load   %{http_code}\n' "$B/v1/load_artifact?id=<an-ingested-id>"
+   ```
+
+   **Expect, and only on a primary-plus-replica deployment.** Both answer 200
+   from the replica, and the read responses carry `X-Podium-Read-Only: true`.
+
+   **This step needs a topology the S21 prerequisites do not provide.** The
+   compose stack runs a single Postgres with no replica, so severing the primary
+   takes the read path down with the write path: every read returns `500
+   registry.unavailable` wrapping `connect: connection refused`. On that stack
+   the step is unobservable and is skipped rather than recorded as a failure.
+   Run it only against a deployment that has a replica the registry can read
+   from, and record the skip and the reason otherwise. Steps 1 to 4 are
+   unaffected and stand on their own.
+
+6. Check the runbook's detection signal against the running registry, since a
+   detection step that misfires is worth as much as a wrong endpoint list.
+
+   ```bash
+   curl -s "$B/healthz"; echo
+   curl -s "$B/readyz";  echo
+   ```
+
+   **Expect.** `/healthz` reports `{"mode":"read_only"}`.
+
+   On a single-Postgres stack `/readyz` reports
+   `{"mode":"not_ready","replication_lag_seconds":0}` rather than the
+   `read_only` the runbook's detection step names, because the readiness probe
+   fails against the severed store. An operator following the runbook on that
+   topology misses the signal. On a replica-backed deployment the store probe
+   passes and the runbook is right. Record which topology produced the reading.
 
 **Cleanup.** As S21.
