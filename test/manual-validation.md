@@ -3949,9 +3949,12 @@ misconfigured:
      --https-certificate-key-file=/certs/key.pem
    ```
 
-   Confirm it is up and reporting an `https` issuer before going further:
+   Wait for it to answer and confirm it reports an `https` issuer before going
+   further. Keycloak takes several seconds to start, so poll rather than
+   assuming:
 
    ```bash
+   until curl -fsS -o /dev/null https://127.0.0.1:8443/realms/master/.well-known/openid-configuration 2>/dev/null; do sleep 2; done
    curl -fsS https://127.0.0.1:8443/realms/master/.well-known/openid-configuration \
      | python3 -c "import json,sys; print(json.load(sys.stdin)['issuer'])"
    ```
@@ -3960,49 +3963,74 @@ misconfigured:
    `curl` that needs `-k` means the trust store step did not take, and the
    registry will refuse the issuer for the same reason.
 
-4. Export the issuer for the steps below, and mint an access token for step 5's
-   negative control. The `master` realm's `admin-cli` client accepts a direct
-   password grant, so no client registration is needed.
+4. Register a client that issues a full access token. The built-in `admin-cli`
+   client is not usable here: Keycloak 26 issues it a *lightweight* access token
+   carrying only `exp, iat, jti, iss, typ, azp, sid, scope`, with no `sub` and no
+   `aud` and a sixty-second lifetime. `pkg/identity/oidc_jwt.go` requires an
+   audience and a subject, so that token cannot authenticate at all, and it would
+   expire between here and step 5.
+
+   ```bash
+   KC="docker exec kc-podium /opt/keycloak/bin/kcadm.sh"
+   $KC config credentials --server http://localhost:8080 --realm master --user admin --password admin
+   $KC create clients -r master \
+     -s clientId=podium -s enabled=true -s publicClient=true \
+     -s directAccessGrantsEnabled=true -s standardFlowEnabled=false \
+     -s 'attributes."client.use.lightweight.access.token.enabled"=false' \
+     -s 'attributes."access.token.lifespan"=1800'
+   CID=$($KC get clients -r master -q clientId=podium --fields id --format csv --noquotes)
+   $KC create clients/$CID/protocol-mappers/models -r master \
+     -s name=podium-aud -s protocol=openid-connect -s protocolMapper=oidc-audience-mapper \
+     -s 'config."included.client.audience"=podium' -s 'config."access.token.claim"=true'
+   ```
+
+   `kcadm` targets `http://localhost:8080` from inside the container on purpose.
+   `--server https://localhost:8443` fails with "Console is not active, but
+   truststore password is required", and pointing its truststore at the PEM fails
+   with "Failed to load truststore" because it expects a Java keystore. The
+   registry still reaches Keycloak over `https`; only this admin CLI uses the
+   container-local `http` port.
+
+5. Mint the access token for step 5's negative control, and read the claims the
+   later steps depend on.
 
    ```bash
    export ISSUER="https://127.0.0.1:8443/realms/master"
    export TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
-     -d grant_type=password -d client_id=admin-cli \
+     -d grant_type=password -d client_id=podium \
      -d username=admin -d password=admin \
      | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
-   ```
-
-   The subject this token carries is what the restricted layer's `users:` filter
-   must name in step 2. Read it rather than assuming:
-
-   ```bash
    python3 - <<'PY'
    import base64, json, os
    p = os.environ["TOKEN"].split(".")[1]
    p += "=" * (-len(p) % 4)
    c = json.loads(base64.urlsafe_b64decode(p))
-   print("sub:", c.get("sub"), "| aud:", c.get("aud"), "| preferred_username:", c.get("preferred_username"))
+   print("sub:", c.get("sub"), "| aud:", c.get("aud"))
    PY
    ```
 
-   **Expect.** A subject value and an `aud`. Set `PODIUM_OAUTH_AUDIENCE` (the
-   `audience:` key in step 2's config) to that `aud`, because §6.3.3 verifies the
-   `aud` claim on every token and a mismatch rejects the token in step 5 for a
-   reason unrelated to what this scenario tests.
+   **Expect.** A `sub` value, and an `aud` that includes `podium`. An empty `sub`
+   or a missing `aud` means the client registration in prerequisite 4 did not
+   take, and steps 5 to 7 cannot run.
+
+   `aud` is a JSON array, typically `['podium', 'master-realm', 'account']`. Take
+   the `podium` element alone for the audience the registry is configured with:
+   §6.3.3 verifies the `aud` claim on every token, and a mismatch rejects the
+   token in step 5 for a reason unrelated to what this scenario tests.
 
 **Teardown for the IdP.** `docker rm -f kc-podium` and `rm -rf "$KCERT"`. The
 `mkcert` CA stays in the trust store until removed with `mkcert -uninstall`.
 
 **Steps.**
 
-1. Run the isolation block. `ISSUER`, `TOKEN`, and the token's subject come from
-   the Prerequisites above and are already exported. Set the audience to the
-   `aud` the token carries, which the Prerequisites printed, and bind
-   `127.0.0.1:8153`.
+1. Run the isolation block. `ISSUER` and `TOKEN` come from the Prerequisites
+   above and are already exported. Set the audience and the subject from the
+   claims prerequisite 5 printed, and bind `127.0.0.1:8153`.
 
    ```bash
-   export AUD="<the aud value the token carries>"
-   export SUBJECT="<the sub value the token carries>"
+   export AUD="podium"                                  # the podium element of the aud array
+   export SUBJECT="<the sub value prerequisite 5 printed>"
+   export RESTRICTED_ID="salary-bands"                  # used by steps 5 and 7
    ```
 
 2. Build a registry with one public layer and one restricted layer, giving the
@@ -4047,48 +4075,79 @@ misconfigured:
    hides.
 
    ```bash
-   curl -fsS http://127.0.0.1:8153/healthz
-   podium config show --server --config "$WORK/registry.yaml" | grep identity_provider
+   curl -fsS http://127.0.0.1:8153/healthz; echo
+   grep 'identity provider' "$WORK/srv.log"
+   PODIUM_CONFIG_FILE="$WORK/registry.yaml" podium config show --server | grep '^identity_provider '
    ```
 
-   **Expect.** `/healthz` does not report `mode: public`, and the provider reads
-   `oidc-jwt`. A registry in public mode shows every artifact to everyone and
-   would make step 6 pass for the wrong reason.
+   **Expect.** `/healthz` reports `{"mode":"ready"}` rather than `mode: public`,
+   the log line reads `identity provider: oidc-jwt (verifying forwarded tokens
+   against accepted issuers $ISSUER)`, and `config show` prints `oidc-jwt`. A
+   registry in public mode shows every artifact to everyone and would make step 6
+   pass for the wrong reason.
+
+   `config show` takes its path from `PODIUM_CONFIG_FILE` and defines no
+   `--config` flag, which `serve` does; passing `--config` exits 1 with `flag
+   provided but not defined: -config`. The variable is `PODIUM_CONFIG_FILE` and
+   not `PODIUM_CONFIG`: the shorter name is read by nothing, and using it prints
+   the table with every value blank, which reads like a broken registry rather
+   than a mistyped variable.
 
 5. **Negative control.** Confirm the restricted artifact exists and is served to
    an authenticated caller.
 
    ```bash
    curl -fsS -H "Authorization: Bearer $TOKEN" \
-     "http://127.0.0.1:8153/v1/load_artifact?id=<restricted-id>" | head -c 200
+     "http://127.0.0.1:8153/v1/load_artifact?id=$RESTRICTED_ID" | head -c 200; echo
    ```
 
    **Expect.** The restricted artifact comes back. Without this step an empty or
-   mis-registered restricted layer produces the same screen in step 6 and the
-   scenario passes on nothing.
+   mis-registered restricted layer produces the same result in step 6 and the
+   scenario passes on nothing. This step is also what gives step 7 its meaning.
 
-6. Open `http://127.0.0.1:8153/ui/` in a browser. Send no credential: no
-   gateway in front, no header, no prior `podium login`.
-
-   **Expect.** The UI loads and lists the public artifact. The restricted
-   artifact does not appear. The UI reports no authentication error and shows no
-   login prompt, verification URL, or device code, because from the registry's
-   side nothing failed: the request carried no bearer value and resolved as
-   anonymous.
-
-7. Confirm the browser is not merely being served a cached or stale list.
+6. Load the UI with no credential: no gateway in front, no header, no prior
+   `podium login`. Open `http://127.0.0.1:8153/ui/` in a browser to see what a
+   person sees, and issue the same call the page makes so the result is
+   machine-checkable. The SPA fetches `/v1/load_domain` on load
+   (`web/app.js:37`, through the bare `fetch` at `web/app.js:12`).
 
    ```bash
-   curl -fsS "http://127.0.0.1:8153/v1/load_artifact?id=<restricted-id>" -o /dev/null -w '%{http_code}\n'
+   curl -sS "http://127.0.0.1:8153/v1/load_domain?path="; echo
+   curl -sS "http://127.0.0.1:8153/v1/search_artifacts?query=salary"; echo
    ```
 
-   **Expect.** The same anonymous treatment the UI received, read as the error
-   code in the body rather than as the status class. A mistyped id returns 404
-   and would satisfy a check written for "a 4xx" while testing nothing.
+   **Expect.** HTTP 200. The `notable` list carries the public artifact and not
+   the restricted one, and the search for the restricted artifact's name reports
+   `total_matched: 0`. In the browser the page lists the public artifact only,
+   reports no authentication error, and shows no login prompt, verification URL,
+   or device code, because from the registry's side nothing failed: the request
+   carried no bearer value and resolved as anonymous.
+
+7. Confirm the restricted artifact is invisible rather than merely absent from a
+   list, by requesting it directly with no credential.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8153/v1/load_artifact?id=$RESTRICTED_ID" -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** `registry.not_found` at HTTP 404. Invisibility is served as
+   not-found rather than as a forbidden code, so an anonymous caller learns
+   nothing about whether the artifact exists.
+
+   Do not pass `-f` or `-o /dev/null` here. `-f` makes curl exit 22 on a 4xx
+   before printing, and `-o /dev/null` discards the body this step exists to
+   read.
+
+   Reading the error code does not by itself distinguish this from a typo: a
+   mistyped id returns the same `registry.not_found`. What makes this step
+   meaningful is step 5, where the same id returned the artifact in full to the
+   authenticated caller. Run step 5 first and compare the two.
 
 **Known gap this records.** A directly reachable UI showing only public
 artifacts is current behavior rather than a defect. The shipped SPA attaches no
-credential: its only network call is a bare same-origin `fetch` with no headers.
+credential: every network call it makes goes through one bare same-origin
+`fetch` with no headers (`web/app.js:12`), used by its three call sites,
+`/v1/load_domain`, `/v1/search_artifacts`, and `/v1/load_artifact`.
 In-browser authentication is deferred to its own proposal, and this scenario
 pins what the spec now says so a later change to the UI has to move that text
 with it.
