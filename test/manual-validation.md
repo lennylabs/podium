@@ -131,6 +131,15 @@ rm -rf "$WORK"
 | S34 | Marketplace publishing through a `kind: marketplace` sync target | solo | none | none | local git |
 | S35 | Webhook receiver hardening: admin gate and SSRF policy | standalone | none | none | none |
 | S36 | Successful oidc-jwt verification against a live IdP | standalone | none | none | OIDC IdP (AD FS for the split-issuer steps) |
+| S37 | `extends:` merged manifest, hidden parent, and inherited redaction | standalone | none | none | none |
+| S38 | `extends:` child under a signing registry | standalone | none | none | none |
+| S39 | same-ID `extends:` overlay and a three-level chain | standalone | none | none | none |
+| S40 | `extends:` for a skill, and filesystem-versus-server parity | solo then standalone | none | none | none |
+| S41 | inherited `audit_redact` over a forwarded audit stream | standalone | none | none | none |
+| S42 | a deprecated parent in an `extends:` chain | standalone | none | none | none |
+| S43 | The documented `registry.yaml` example starts a registry | standalone | none | none | any public https OIDC issuer |
+| S44 | The web UI on a directly reachable `oidc-jwt` registry | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S45 | The runbook's read-only write set matches what the registry rejects | standard | none | pgvector | severable Postgres, S3 |
 
 ---
 
@@ -3727,3 +3736,569 @@ sqlite3 "$PODIUM_SQLITE_PATH" "select artifact_id, version, deprecated from mani
    alone changes nothing on the read.
 
 **Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+
+---
+
+## S43: The documented `registry.yaml` example starts a registry
+
+**Goal.** Validate that the `identity_provider` block of the §13.12
+`registry.yaml` example names a configuration the registry accepts at startup,
+and that the two configurations it replaces are still refused.
+
+**Covers.** The §13.12 config-file example, the `oidc-jwt` required key pair
+(§6.3.3), and the startup refusals `config.identity_provider_unverified` and
+`config.invalid_issuer_scheme`.
+
+**Why by hand.** `TestReadYAMLConfig_SpecExampleNestedBlock`
+(`internal/serverboot/backend_config_test.go`) and
+`TestRegistryConfig_SpecExampleNestedInterpolation`
+(`test/e2e/registry_config_format_test.go`) assert that the example parses and
+reaches the resolved config. Neither starts a registry on it, so both stay
+green against an example that parses and then refuses to boot. That is the
+state the example was in until the §13.12 correction, and the same text had
+already been copied into the Helm chart's `values.yaml`, where a default
+`helm install` could not start.
+
+**Prerequisites.** Network access to any `https` OIDC issuer that publishes a
+discovery document. No account, no tenant, no client registration, and no token
+are needed: the scenario asserts that the registry starts, and startup fetches
+the discovery document and the JWKS without validating any token. A public
+issuer therefore serves, and `https://accounts.google.com` and
+`https://login.microsoftonline.com/common/v2.0` both work. Run the scenario
+against one of those unless a tenant of your own is already configured.
+
+Skip only when the host has no outbound network access at all. §6.3.3 fails
+startup when the discovery document or the JWKS is unreachable, so an
+unreachable issuer produces a refusal that resembles the failures the negative
+controls are testing for and would score a false pass.
+
+**A note on the example's issuer.** The example reads
+`issuer: https://acme.okta.com/oauth2/default`, which resolves to nothing. The
+block therefore cannot be pasted verbatim and started by anyone, and the steps
+below substitute `$ISSUER`. What is under test is the set of keys the block
+names, which is what the defect was about; the placeholder hostname is not.
+
+**Steps.**
+
+1. Run the isolation block, then name the IdP and the registry's own endpoint.
+
+   ```bash
+   export ISSUER="https://accounts.google.com"   # any https issuer; no trailing slash
+   export AUD="http://127.0.0.1:8150"
+   curl -fsS "$ISSUER/.well-known/openid-configuration" > /dev/null && echo "issuer reachable"
+   ```
+
+   **Expect.** `issuer reachable`. When the `curl` fails, stop and record the
+   skip rather than continuing.
+
+2. Write the §13.12 `identity_provider` block with the issuer substituted.
+
+   ```bash
+   cat > "$WORK/registry.yaml" <<YAML
+   registry:
+     identity_provider:
+       type: oidc-jwt
+       issuer: $ISSUER
+       audience: $AUD
+   YAML
+   ```
+
+3. Start the registry on that config and record the PID.
+
+   ```bash
+   podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" \
+     --bind 127.0.0.1:8150 > "$WORK/srv.log" 2>&1 &
+   export SRV=$!
+   sleep 3
+   curl -fsS http://127.0.0.1:8150/healthz && echo && cat "$WORK/srv.log"
+   ```
+
+   **Expect.** `/healthz` answers and the log carries no
+   `config.identity_provider_unverified`, `config.oidc_jwt_audience_unset`, or
+   `config.invalid_issuer_scheme`. A registry that exited leaves `curl` failing
+   and the reason on the last line of `$WORK/srv.log`.
+
+4. Confirm the provider is the one under test rather than an absent one.
+
+   ```bash
+   PODIUM_CONFIG_FILE="$WORK/registry.yaml" podium config show --server | grep -E "identity_provider|oauth_audience"
+   ```
+
+   `config show` takes the config path from `PODIUM_CONFIG_FILE` and defines no
+   `--config` flag, which `serve` does. Passing `--config` here exits 1 with
+   `flag provided but not defined: -config` before printing anything.
+
+   **Expect.** `identity_provider` reads `oidc-jwt`, `identity_provider.issuer`
+   reads `$ISSUER`, and `oauth_audience` reads `$AUD`. A registry that started
+   with no provider at all would satisfy step 3 and fail here. The type key
+   prints as `identity_provider` rather than `identity_provider.type`, so a
+   literal grep for the latter finds nothing.
+
+   The provenance column reads `default` for `oauth_audience` even when the
+   value comes from the config file, while `identity_provider` and
+   `identity_provider.issuer` on the same run read `registry.yaml`. The value
+   itself does track the file. Read the value rather than the provenance.
+
+5. **Negative control, the configuration §13.12 used to carry.** Stop the
+   server, then start one on the pre-correction block.
+
+   ```bash
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   cat > "$WORK/old.yaml" <<YAML
+   registry:
+     identity_provider:
+       type: oauth-device-code
+       audience: $AUD
+       authorization_endpoint: $ISSUER
+   YAML
+   podium serve --standalone --no-embeddings --config "$WORK/old.yaml" \
+     --bind 127.0.0.1:8151 > "$WORK/old.log" 2>&1
+   echo "exit=$?"; tail -2 "$WORK/old.log"
+   ```
+
+   **Expect.** A non-zero exit and `config.identity_provider_unverified`. A run
+   where this configuration also starts has the guard switched off, and step 3's
+   success then establishes nothing; record the failure rather than the success.
+
+6. **Negative control, the edit a reader makes when changing the type alone.**
+
+   ```bash
+   cat > "$WORK/half.yaml" <<YAML
+   registry:
+     identity_provider:
+       type: oidc-jwt
+       audience: $AUD
+       authorization_endpoint: $ISSUER
+   YAML
+   podium serve --standalone --no-embeddings --config "$WORK/half.yaml" \
+     --bind 127.0.0.1:8152 > "$WORK/half.log" 2>&1
+   echo "exit=$?"; tail -2 "$WORK/half.log"
+   ```
+
+   **Expect.** A non-zero exit with `config.invalid_issuer_scheme`, reporting
+   that `PODIUM_OAUTH_ISSUER` must be an `https` URL and quoting the empty value
+   it got. The code is the same one step 3 lists among the failures whose
+   absence proves success, because an unset issuer and a non-`https` issuer
+   share it. `authorization_endpoint` is read for the device-code flow and
+   `oidc-jwt` reads `issuer`, so renaming the type and keeping the endpoint key
+   yields a registry that still does not start. This is the trap a reader is
+   most likely to reproduce.
+
+**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+
+---
+
+## S44: The web UI on a directly reachable `oidc-jwt` registry
+
+**Goal.** Validate that the web UI served by a directly reachable `oidc-jwt`
+registry runs no acquisition flow of its own, resolves identity from what the
+request carries, and therefore shows a browser only the public artifacts.
+
+**Covers.** The §13.11 web-UI authentication paragraph, `oidc-jwt` on a
+directly reachable registry (§6.3.3), and §4.6 visibility for an anonymous
+caller.
+
+**Why by hand.** The assertion is what a person sees in the artifact list. No
+Go test reads a browser rendering, which is why the previous §13.11 text could
+claim the UI ran a device-code flow with an in-browser verification handoff and
+no test contradicted it.
+
+**Prerequisites.** A local Keycloak serving an `https` issuer the host trusts,
+and one access token it issued for the negative control in step 5.
+
+The registry fetches the OIDC discovery document and the JWKS at startup, so
+the issuer has to be reachable and its certificate has to verify. Two failures
+follow from that and are worth knowing before setting up, because each produces
+a refusal that looks like the scenario failing rather than the IdP being
+misconfigured:
+
+- An `http` issuer is refused with `config.invalid_issuer_scheme` (§6.3.3).
+  Keycloak's `start-dev` listens on `http://0.0.0.0:8080` and its discovery
+  document reports an `http` issuer, so a plain `start-dev` container cannot
+  serve this scenario.
+- An `https` issuer whose certificate the host does not trust is refused with
+  `oidc-jwt: issuer ... is unreachable at startup` wrapping
+  `x509: certificate signed by unknown authority`. A self-signed certificate
+  reaches this, so the certificate has to come from a CA in the host trust
+  store. The registry reads no custom CA bundle and has no verification-skip
+  switch.
+
+1. Install `mkcert` and add its CA to the host trust store. This modifies the
+   machine's trust store and prompts for an administrator password.
+
+   ```bash
+   brew install mkcert && mkcert -install
+   ```
+
+2. Issue a certificate for the loopback names Keycloak will serve.
+
+   ```bash
+   export KCERT="$(mktemp -d)"
+   mkcert -cert-file "$KCERT/cert.pem" -key-file "$KCERT/key.pem" localhost 127.0.0.1
+   ```
+
+3. Start Keycloak with that certificate, publishing the `https` port.
+
+   ```bash
+   docker run -d --name kc-podium \
+     -p 127.0.0.1:8443:8443 \
+     -e KC_BOOTSTRAP_ADMIN_USERNAME=admin -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+     -v "$KCERT:/certs:ro" \
+     quay.io/keycloak/keycloak:26.7.2 start-dev \
+     --https-certificate-file=/certs/cert.pem \
+     --https-certificate-key-file=/certs/key.pem
+   ```
+
+   Wait for it to answer and confirm it reports an `https` issuer before going
+   further. Keycloak takes several seconds to start, so poll rather than
+   assuming:
+
+   ```bash
+   until curl -fsS -o /dev/null https://127.0.0.1:8443/realms/master/.well-known/openid-configuration 2>/dev/null; do sleep 2; done
+   curl -fsS https://127.0.0.1:8443/realms/master/.well-known/openid-configuration \
+     | python3 -c "import json,sys; print(json.load(sys.stdin)['issuer'])"
+   ```
+
+   **Expect.** `https://127.0.0.1:8443/realms/master`, fetched without `-k`. A
+   `curl` that needs `-k` means the trust store step did not take, and the
+   registry will refuse the issuer for the same reason.
+
+4. Register a client that issues a full access token. The built-in `admin-cli`
+   client is not usable here: Keycloak 26 issues it a *lightweight* access token
+   carrying only `exp, iat, jti, iss, typ, azp, sid, scope`, with no `sub` and no
+   `aud` and a sixty-second lifetime. `pkg/identity/oidc_jwt.go` requires an
+   audience and a subject, so that token cannot authenticate at all, and it would
+   expire between here and step 5.
+
+   ```bash
+   KC="docker exec kc-podium /opt/keycloak/bin/kcadm.sh"
+   $KC config credentials --server http://localhost:8080 --realm master --user admin --password admin
+   $KC create clients -r master \
+     -s clientId=podium -s enabled=true -s publicClient=true \
+     -s directAccessGrantsEnabled=true -s standardFlowEnabled=false \
+     -s 'attributes."client.use.lightweight.access.token.enabled"=false' \
+     -s 'attributes."access.token.lifespan"=1800'
+   CID=$($KC get clients -r master -q clientId=podium --fields id --format csv --noquotes)
+   $KC create clients/$CID/protocol-mappers/models -r master \
+     -s name=podium-aud -s protocol=openid-connect -s protocolMapper=oidc-audience-mapper \
+     -s 'config."included.client.audience"=podium' -s 'config."access.token.claim"=true'
+   ```
+
+   `kcadm` targets `http://localhost:8080` from inside the container on purpose.
+   `--server https://localhost:8443` fails with "Console is not active, but
+   truststore password is required", and pointing its truststore at the PEM fails
+   with "Failed to load truststore" because it expects a Java keystore. The
+   registry still reaches Keycloak over `https`; only this admin CLI uses the
+   container-local `http` port.
+
+5. Mint the access token for step 5's negative control, and read the claims the
+   later steps depend on.
+
+   ```bash
+   export ISSUER="https://127.0.0.1:8443/realms/master"
+   export TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
+     -d grant_type=password -d client_id=podium \
+     -d username=admin -d password=admin \
+     | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
+   python3 - <<'PY'
+   import base64, json, os
+   p = os.environ["TOKEN"].split(".")[1]
+   p += "=" * (-len(p) % 4)
+   c = json.loads(base64.urlsafe_b64decode(p))
+   print("sub:", c.get("sub"), "| aud:", c.get("aud"))
+   PY
+   ```
+
+   **Expect.** A `sub` value, and an `aud` that includes `podium`. An empty `sub`
+   or a missing `aud` means the client registration in prerequisite 4 did not
+   take, and steps 5 to 7 cannot run.
+
+   `aud` is a JSON array, typically `['podium', 'master-realm', 'account']`. Take
+   the `podium` element alone for the audience the registry is configured with:
+   §6.3.3 verifies the `aud` claim on every token, and a mismatch rejects the
+   token in step 5 for a reason unrelated to what this scenario tests.
+
+**Teardown for the IdP.** `docker rm -f kc-podium` and `rm -rf "$KCERT"`. The
+`mkcert` CA stays in the trust store until removed with `mkcert -uninstall`.
+
+**Steps.**
+
+1. Run the isolation block. `ISSUER` and `TOKEN` come from the Prerequisites
+   above and are already exported. Set the audience and the subject from the
+   claims prerequisite 5 printed, and bind `127.0.0.1:8153`.
+
+   ```bash
+   export AUD="podium"                                  # the podium element of the aud array
+   export SUBJECT="<the sub value prerequisite 5 printed>"
+   export RESTRICTED_ID="salary-bands"                  # used by steps 5 and 7
+   ```
+
+2. Build a registry with one public layer and one restricted layer, giving the
+   restricted artifact a name that cannot be confused with the public one.
+
+   ```bash
+   mkdir -p "$WORK/pub/handbook" "$WORK/priv/salary-bands"
+   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type context --description "Salary bands" --force "$WORK/priv/salary-bands"
+   cat > "$WORK/registry.yaml" <<YAML
+   registry:
+     identity_provider:
+       type: oidc-jwt
+       issuer: $ISSUER
+       audience: $AUD
+     layers:
+       - id: public-handbook
+         source: { local: { path: $WORK/pub } }
+         visibility: { public: true }
+       - id: private-comp
+         source: { local: { path: $WORK/priv } }
+         visibility: { users: [$SUBJECT] }
+   YAML
+   ```
+
+   The `users:` value is the token's subject rather than a username, because
+   §6.3.3 keys `users:` visibility on the claim the registry reads as the
+   subject. Naming the login name here leaves the restricted layer invisible to
+   the very token step 5 uses, and step 5 then fails for a reason unrelated to
+   what this scenario tests.
+
+3. Start the registry with the UI enabled and record the PID.
+
+   ```bash
+   podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" \
+     --web-ui --bind 127.0.0.1:8153 > "$WORK/srv.log" 2>&1 &
+   export SRV=$!
+   sleep 3
+   ```
+
+4. Confirm the identity provider is switched on before asserting what the UI
+   hides.
+
+   ```bash
+   curl -fsS http://127.0.0.1:8153/healthz; echo
+   grep 'identity provider' "$WORK/srv.log"
+   PODIUM_CONFIG_FILE="$WORK/registry.yaml" podium config show --server | grep '^identity_provider '
+   ```
+
+   **Expect.** `/healthz` reports `{"mode":"ready"}` rather than `mode: public`,
+   the log line reads `identity provider: oidc-jwt (verifying forwarded tokens
+   against accepted issuers $ISSUER)`, and `config show` prints `oidc-jwt`. A
+   registry in public mode shows every artifact to everyone and would make step 6
+   pass for the wrong reason.
+
+   `config show` takes its path from `PODIUM_CONFIG_FILE` and defines no
+   `--config` flag, which `serve` does; passing `--config` exits 1 with `flag
+   provided but not defined: -config`. The variable is `PODIUM_CONFIG_FILE` and
+   not `PODIUM_CONFIG`: the shorter name is read by nothing, and using it prints
+   the table with every value blank, which reads like a broken registry rather
+   than a mistyped variable.
+
+5. **Negative control.** Confirm the restricted artifact exists and is served to
+   an authenticated caller.
+
+   ```bash
+   curl -fsS -H "Authorization: Bearer $TOKEN" \
+     "http://127.0.0.1:8153/v1/load_artifact?id=$RESTRICTED_ID" | head -c 200; echo
+   ```
+
+   **Expect.** The restricted artifact comes back. Without this step an empty or
+   mis-registered restricted layer produces the same result in step 6 and the
+   scenario passes on nothing. This step is also what gives step 7 its meaning.
+
+6. Load the UI with no credential: no gateway in front, no header, no prior
+   `podium login`. Open `http://127.0.0.1:8153/ui/` in a browser to see what a
+   person sees, and issue the same call the page makes so the result is
+   machine-checkable. The SPA fetches `/v1/load_domain` on load
+   (`web/app.js:37`, through the bare `fetch` at `web/app.js:12`).
+
+   ```bash
+   curl -sS "http://127.0.0.1:8153/v1/load_domain?path="; echo
+   curl -sS "http://127.0.0.1:8153/v1/search_artifacts?query=salary"; echo
+   ```
+
+   **Expect.** HTTP 200. The `notable` list carries the public artifact and not
+   the restricted one, and the search for the restricted artifact's name reports
+   `total_matched: 0`. In the browser the page lists the public artifact only,
+   reports no authentication error, and shows no login prompt, verification URL,
+   or device code, because from the registry's side nothing failed: the request
+   carried no bearer value and resolved as anonymous.
+
+7. Confirm the restricted artifact is invisible rather than merely absent from a
+   list, by requesting it directly with no credential.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8153/v1/load_artifact?id=$RESTRICTED_ID" -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** `registry.not_found` at HTTP 404. Invisibility is served as
+   not-found rather than as a forbidden code, so an anonymous caller learns
+   nothing about whether the artifact exists.
+
+   Do not pass `-f` or `-o /dev/null` here. `-f` makes curl exit 22 on a 4xx
+   before printing, and `-o /dev/null` discards the body this step exists to
+   read.
+
+   Reading the error code does not by itself distinguish this from a typo: a
+   mistyped id returns the same `registry.not_found`. What makes this step
+   meaningful is step 5, where the same id returned the artifact in full to the
+   authenticated caller. Run step 5 first and compare the two.
+
+**Known gap this records.** A directly reachable UI showing only public
+artifacts is current behavior rather than a defect. The shipped SPA attaches no
+credential: every network call it makes goes through one bare same-origin
+`fetch` with no headers (`web/app.js:12`), used by its three call sites,
+`/v1/load_domain`, `/v1/search_artifacts`, and `/v1/load_artifact`.
+In-browser authentication is deferred to its own proposal, and this scenario
+pins what the spec now says so a later change to the UI has to move that text
+with it.
+
+**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+
+---
+
+## S45: The runbook's read-only write set matches what the registry rejects
+
+**Goal.** Validate that the read-only-mode write set an operator reads in
+`deploy/runbook.md` and `docs/reference/http-api.md` enumerates what the running
+registry actually rejects, and that it names no endpoint the registry does not
+serve.
+
+**Covers.** §13.2.1 read-only mode, the `registry.read_only` error code, and the
+two shipped restatements of the write set.
+
+**Why by hand.** An operator reads the runbook during a database outage and
+works from its list. The value is that the list matches the running registry.
+Until the §13.2.1 correction the list named `podium login`-driven token issuance
+against a session table, sending a reader looking for a credential-issuing
+endpoint that has never existed, and no test compared the list to the routes the
+registry registers.
+
+**Prerequisites.** The S21 standard-deployment stack with a severable Postgres
+primary. When it is unavailable, skip and record the skip.
+
+Read-only mode needs no CLI toggle and none exists. The §13.2.1 probe runs from
+boot whenever `read_only.probe_failures` is above zero, which it is by default
+(three failures, five-second interval), so stopping the metadata store flips the
+mode within roughly the probe interval times the failure count. Only step 5
+needs more than the compose stack provides, and it says so.
+
+**Relationship to S21.** S21 already brings a registry to read-only mode. Run
+these steps as an extension of S21 rather than rebuilding the stack, and fold
+them into S21 permanently if its setup already reaches this state.
+
+**Steps.**
+
+1. Follow S21 until the registry has fallen back to read-only mode against the
+   replica.
+2. Read the write set from the two shipped documents rather than from memory.
+
+   ```bash
+   grep -n "read-only" -A4 docs/reference/http-api.md | grep -i "ingest webhooks"
+   grep -n "Impact" -A4 deploy/runbook.md | grep -i "ingest webhooks"
+   ```
+
+   **Expect.** Both enumerate ingest webhooks, layer admin operations, freeze
+   toggles, admin grants, and tenant management. Neither names token issuance,
+   a login endpoint, or a session table.
+
+3. Issue each write request and read the error code from the body rather than
+   the status class. `$PORT` is the port S21 bound, `127.0.0.1:8118` unless it
+   was changed.
+
+   ```bash
+   B="http://127.0.0.1:$PORT"
+   for r in "POST $B/v1/ingest/webhook/probe" \
+            "POST $B/v1/layers" \
+            "POST $B/v1/layers/update" \
+            "POST $B/v1/layers/reorder" \
+            "POST $B/v1/layers/reingest" \
+            "POST $B/v1/layers/restore" \
+            "DELETE $B/v1/layers" \
+            "POST $B/v1/admin/erase" \
+            "POST $B/v1/admin/reembed"; do
+     set -- $r
+     printf '%s %s -> ' "$1" "$2"
+     curl -s -X "$1" "$2" -d '{}' | python3 -c "import json,sys; print(json.load(sys.stdin).get('code','(no code)'))" 2>/dev/null || echo "(unparseable)"
+   done
+   ```
+
+   **Expect.** Every line reads `registry.read_only`, returned as HTTP 503.
+
+   `/v1/admin/erase` and `/v1/admin/reembed` are rejected but appear in neither
+   shipped document's list. That is consistent with §13.2.1, which says the
+   named five "do not bound the rule", and it means the documents describe less
+   than the registry enforces. Record it rather than treating it as a failure.
+
+   **Two of the five named categories cannot reach `registry.read_only` on this
+   setup, and a run that records them as failures is wrong.** `POST
+   /v1/admin/grants` returns `403 auth.forbidden` because `requireAdmin` runs
+   before `rejectIfReadOnly` (`pkg/registry/server/admin.go:22-33`), and with no
+   identity provider configured no caller is an admin. `POST
+   /v1/admin/tenants` returns `404 registry.tenant_management_unavailable`
+   because `tenantAdminGate` runs first
+   (`pkg/registry/server/tenants.go:138-143`). Both responses are identical to
+   their healthy-registry baseline, so this step establishes nothing about them.
+   Demonstrating either needs a registry with a real identity provider and an
+   authenticated admin, which S21 does not set up. Take the baseline first and
+   compare, rather than reading a 403 or a 404 as a read-only rejection.
+
+   **Freeze toggles are not asserted here.** The §13.2.1 list names them and no
+   freeze endpoint exists: freeze windows are config-file-only
+   (`internal/serverboot/yaml_config.go:404`), enforced during ingest, and
+   bypassed with `podium layer reingest --break-glass`. Whether the spec sentence
+   or the product is wrong is an open question recorded outside this document,
+   so this step asserts nothing about them. Add the assertion when that is
+   settled.
+
+4. Confirm the struck clause named an endpoint that does not exist.
+
+   ```bash
+   for p in /v1/login /v1/auth/token /v1/token; do
+     printf '%s ' "$p"
+     curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:$PORT$p"
+   done
+   ```
+
+   **Expect.** 404 on each, because the registry registers no auth, login, or
+   token route. This is what made the struck clause wrong rather than merely
+   stale: an operator could not have exercised the write path it described even
+   when the registry was healthy.
+
+5. Confirm the read path still serves, so step 3's rejections are read-only mode
+   rather than a registry that is simply down.
+
+   ```bash
+   curl -s -o /dev/null -w 'search %{http_code}\n' "$B/v1/search_artifacts?q=test"
+   curl -s -o /dev/null -w 'load   %{http_code}\n' "$B/v1/load_artifact?id=<an-ingested-id>"
+   ```
+
+   **Expect, and only on a primary-plus-replica deployment.** Both answer 200
+   from the replica, and the read responses carry `X-Podium-Read-Only: true`.
+
+   **This step needs a topology the S21 prerequisites do not provide.** The
+   compose stack runs a single Postgres with no replica, so severing the primary
+   takes the read path down with the write path: every read returns `500
+   registry.unavailable` wrapping `connect: connection refused`. On that stack
+   the step is unobservable and is skipped rather than recorded as a failure.
+   Run it only against a deployment that has a replica the registry can read
+   from, and record the skip and the reason otherwise. Steps 1 to 4 are
+   unaffected and stand on their own.
+
+6. Check the runbook's detection signal against the running registry, since a
+   detection step that misfires is worth as much as a wrong endpoint list.
+
+   ```bash
+   curl -s "$B/healthz"; echo
+   curl -s "$B/readyz";  echo
+   ```
+
+   **Expect.** `/healthz` reports `{"mode":"read_only"}`.
+
+   On a single-Postgres stack `/readyz` reports
+   `{"mode":"not_ready","replication_lag_seconds":0}` rather than the
+   `read_only` the runbook's detection step names, because the readiness probe
+   fails against the severed store. An operator following the runbook on that
+   topology misses the signal. On a replica-backed deployment the store probe
+   passes and the runbook is right. Record which topology produced the reading.
+
+**Cleanup.** As S21.

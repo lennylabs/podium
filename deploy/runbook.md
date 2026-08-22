@@ -16,8 +16,7 @@ Per spec §13.2.1.
 
 **Impact.** Read endpoints serve from the replica. Write endpoints
 (ingest webhooks, layer admin operations, freeze toggles, admin
-grants, podium login local IdP-mediated tokens) reject with
-`registry.read_only`.
+grants, and tenant management) reject with `registry.read_only`.
 
 **Mitigation.**
 1. Confirm the Postgres primary is unreachable; check infrastructure
