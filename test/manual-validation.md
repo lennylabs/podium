@@ -4407,11 +4407,20 @@ rather than trying to avoid them.
      --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin
    ```
 
-   The secret is not optional and cannot be omitted. `--set existingSecret=""`
-   renders `secretRef` with an empty name and the API server rejects the whole
-   manifest with `Deployment.apps "podium-podium" is invalid:
-   spec.template.spec.containers[0].envFrom[0].secretRef.name: Required value`,
-   because the `envFrom` block carries no guard on the value being set.
+   The secret is required by this configuration rather than by the chart.
+   `--set existingSecret=""` drops the `envFrom` block, which a deployment that
+   needs no secret depends on. Confirm that path still renders a manifest the
+   API server accepts, because it once rendered `secretRef` with an empty name
+   and was rejected outright:
+
+   ```bash
+   helm template t deploy/helm/podium --set existingSecret="" \
+     | kubectl apply --dry-run=server -f -
+   ```
+
+   **Expect.** Both objects report `created (server dry run)`. A failure naming
+   `envFrom[0].secretRef.name: Required value` means the guard on the block has
+   been lost.
 
 5. Install the chart and wait for the pod.
 
@@ -4426,11 +4435,23 @@ rather than trying to avoid them.
    `config.identityProvider.type` is emptied because the chart's `oidc-jwt`
    default needs a reachable `https` issuer, which this cluster does not have.
    An empty provider selects none, and the registry serves every caller as
-   anonymous. Do not reach for `PODIUM_PUBLIC_MODE=true` instead: public mode
-   binds loopback unless `--allow-public-bind` is passed, the chart renders
-   `PODIUM_BIND=0.0.0.0:8080` for the kubelet's probes, and the combination fails
-   at startup with `config.public_bind_refused`. The chart exposes no value for
-   the override.
+   anonymous.
+
+   Public mode is the other way to reach an open registry, and it requires both
+   of its values. It binds loopback unless the bind is explicitly allowed, and
+   the chart renders `PODIUM_BIND=0.0.0.0:8080` so the kubelet can reach the
+   probes, so `config.publicMode` alone fails at startup with
+   `config.public_bind_refused`. Setting both starts the pod and logs
+   `mode=public` under the public-mode banner:
+
+   ```bash
+   helm upgrade podium deploy/helm/podium --set replicaCount=1 \
+     --set config.identityProvider.type="" \
+     --set config.publicMode=true --set config.allowPublicBind=true
+   ```
+
+   Public mode and an identity provider are mutually exclusive; setting both
+   fails with `config.public_mode_with_idp`.
 
    **Expect.** The pod reports `1/1 Running` with `0` restarts within roughly
    twenty seconds, and its log ends `podium-server listening on 0.0.0.0:8080`. A
