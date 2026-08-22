@@ -43,10 +43,33 @@ config:
   # and is refused here at startup with `config.identity_provider_unverified`
   # (§6.3.3). Supply the issuer, audience, and any provider secret through the
   # secret named in existingSecret, which reaches the pod via envFrom.
+  #
+  # Set type to "" to select no identity provider. The registry then resolves
+  # every caller as anonymous and applies no per-layer visibility, which suits
+  # an evaluation cluster and not a shared one.
+  #
+  # issuer is the oidc-jwt key. authorization_endpoint belongs to the
+  # device-code flow and is read under no provider this chart can select, so
+  # naming it here would produce a registry that does not start (§6.3.3).
+  # Both default to empty and render only when set, so an operator who supplies
+  # PODIUM_OAUTH_ISSUER or PODIUM_OAUTH_AUDIENCE through the secret keeps that
+  # value. A non-empty default here would win instead: a container's env entry
+  # overrides the same key arriving through envFrom, so a placeholder left in
+  # this file would silently replace a correct secret-supplied endpoint.
   identityProvider:
     type: oidc-jwt
-    audience: "https://podium.example.com"
-    authorizationEndpoint: ""
+    audience: ""
+    issuer: ""
+
+  # Public mode bypasses authentication and the visibility model (§13.10). It
+  # binds loopback unless the bind is explicitly allowed, and this chart renders
+  # a 0.0.0.0 bind so the kubelet can reach the probes, so enabling public mode
+  # without allowPublicBind fails at startup with `config.public_bind_refused`.
+  # Setting both records the operator's decision to serve an open registry on a
+  # cluster-reachable address. Public mode is mutually exclusive with an
+  # identity provider: setting both fails with `config.public_mode_with_idp`.
+  publicMode: false
+  allowPublicBind: false
 
   # The §13.12 / §4.5.5 discovery block is config-file-only: it has no
   # environment variable, and this chart configures the registry through env.
@@ -70,14 +93,10 @@ service:
   type: ClusterIP
   port: 8080
 
-ingress:
-  enabled: false
-  className: ""
-  annotations: {}
-  hosts: []
-
-serviceMonitor:
-  enabled: false  # set true when running prometheus-operator
+# An ingress and a prometheus-operator ServiceMonitor were declared here and no
+# template rendered either, so setting them did nothing. They are removed rather
+# than left as switches that report success and change nothing. Route to the
+# Service with an ingress of your own, and scrape /metrics directly.
 
 podSecurityContext:
   runAsUser: 65534

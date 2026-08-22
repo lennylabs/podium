@@ -25,9 +25,11 @@ spec:
           ports:
             - containerPort: 8080
               name: http
+          {{- if .Values.existingSecret }}
           envFrom:
             - secretRef:
                 name: {{ .Values.existingSecret }}
+          {{- end }}
           env:
             # The kubelet probes the pod over the cluster network, so the
             # registry must listen on all interfaces rather than on its
@@ -45,6 +47,26 @@ spec:
               value: {{ .Values.config.embeddingProvider.type | quote }}
             - name: PODIUM_IDENTITY_PROVIDER
               value: {{ .Values.config.identityProvider.type | quote }}
+            {{- if .Values.config.identityProvider.issuer }}
+            - name: PODIUM_OAUTH_ISSUER
+              value: {{ .Values.config.identityProvider.issuer | quote }}
+            {{- end }}
+            {{- if .Values.config.identityProvider.audience }}
+            - name: PODIUM_OAUTH_AUDIENCE
+              value: {{ .Values.config.identityProvider.audience | quote }}
+            {{- end }}
+            # Public mode and its bind override travel together. The bind above
+            # is 0.0.0.0 so the kubelet can reach the probes, and public mode
+            # refuses a non-loopback bind on its own, so a chart that offered
+            # only the first of these could not express public mode at all.
+            {{- if .Values.config.publicMode }}
+            - name: PODIUM_PUBLIC_MODE
+              value: "true"
+            {{- end }}
+            {{- if .Values.config.allowPublicBind }}
+            - name: PODIUM_ALLOW_PUBLIC_BIND
+              value: "true"
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

@@ -140,6 +140,7 @@ rm -rf "$WORK"
 | S43 | The documented `registry.yaml` example starts a registry | standalone | none | none | any public https OIDC issuer |
 | S44 | The web UI on a directly reachable `oidc-jwt` registry | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S45 | The runbook's read-only write set matches what the registry rejects | standard | none | pgvector | severable Postgres, S3 |
+| S46 | Install the Helm chart into a cluster | standard (Kubernetes) | none | none | kind, helm, kubectl, Docker |
 
 ---
 
@@ -4302,3 +4303,205 @@ them into S21 permanently if its setup already reaches this state.
    passes and the runbook is right. Record which topology produced the reading.
 
 **Cleanup.** As S21.
+
+---
+
+## S46: Install the Helm chart into a cluster
+
+**Goal.** Validate that `deploy/helm/podium` installs into a running cluster and
+produces a pod that passes its probes and serves the API, and that the identity
+provider the chart once defaulted to is still refused at the deployment level.
+
+**Covers.** The §13.1 standard topology as the chart expresses it, the chart's
+probe configuration, and `config.identity_provider_unverified` (§6.3.3) reached
+through a `helm install` rather than through a local process.
+
+**Why by hand.** `test/chart/chart_test.go` reads `values.yaml` and the template
+files with `os.ReadFile` and `yaml.Unmarshal`. It never invokes `helm`, so
+nothing renders the chart and nothing installs it. It pins that the values are
+internally consistent, which is what the three simultaneous defects that
+prompted it needed. It cannot see a chart that renders valid YAML and still
+produces a pod that never becomes ready: a probe path that does not answer, a
+manifest the API server rejects, a container that cannot write where its
+configuration points, or an image reference that does not resolve. Each of those
+appears only when a cluster runs the chart.
+
+**Prerequisites.** `helm`, `kubectl`, `kind`, and a working Docker daemon. When
+any is absent, skip and record the skip.
+
+The chart's `appVersion` is `0.0.0-dev`, so the image it references is not
+published anywhere and has to be built locally and loaded into the cluster. That
+is a property of the development chart rather than a defect.
+
+**The stock defaults are a production topology, not a self-contained one.** A
+bare `helm install` with no overrides renders `PODIUM_REGISTRY_STORE=postgres`,
+`PODIUM_OBJECT_STORE=s3`, and `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, and takes the
+DSN, the bucket, and the issuer from the secret named by `existingSecret`. There
+is no dependency-free configuration to fall back on: the chart declares no
+volumes, so `sqlite` and the `filesystem` object store have nowhere to write. A
+pod configured that way starts, fails to open its database under the distroless
+image's read-only root, and crash-loops with `mkdir /nonexistent: read-only file
+system` followed by `open store: ping sqlite: unable to open database file`. The
+scenario therefore stands up Postgres and an S3-compatible store in the cluster
+rather than trying to avoid them.
+
+**Steps.**
+
+1. Build the image the chart references and create the cluster.
+
+   ```bash
+   cd "$(git rev-parse --show-toplevel)"
+   docker build -t ghcr.io/lennylabs/podium:0.0.0-dev .
+   kind create cluster --name podium-s46
+   kubectl wait --for=condition=Ready node --all --timeout=180s
+   kind load docker-image ghcr.io/lennylabs/podium:0.0.0-dev --name podium-s46
+   ```
+
+   **Expect.** The build succeeds, the node reports `Ready`, and `kind load`
+   reports the image loading onto the node. Skipping the load leaves the pod in
+   `ErrImagePull`, because `0.0.0-dev` resolves to nothing in any registry.
+
+2. Deploy the chart's dependencies into the cluster: Postgres for the metadata
+   store and MinIO for object storage. Both run without persistence, which is
+   sufficient here because the scenario asserts installation rather than
+   durability.
+
+   ```bash
+   kubectl create deployment pg --image=pgvector/pgvector:pg16
+   kubectl set env deployment/pg POSTGRES_USER=podium POSTGRES_PASSWORD=podium \
+     POSTGRES_DB=podium PGDATA=/tmp/pgdata
+   kubectl expose deployment pg --port=5432
+   kubectl create deployment minio --image=minio/minio:RELEASE.2024-10-29T16-01-48Z -- \
+     minio server /data
+   kubectl set env deployment/minio MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin
+   kubectl expose deployment minio --port=9000
+   kubectl wait --for=condition=available --timeout=240s deployment/pg deployment/minio
+   ```
+
+   `PGDATA` is redirected to `/tmp` because the image's default data directory
+   is not writable in this configuration.
+
+   **Expect.** Both deployments report `condition met`.
+
+3. Create the bucket the registry expects.
+
+   ```bash
+   kubectl run mc --image=minio/mc:RELEASE.2024-10-29T15-34-59Z --restart=Never --rm -i \
+     --quiet --command -- sh -c \
+     "mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null && mc mb -p m/podium"
+   ```
+
+   **Expect.** `Bucket created successfully`.
+
+4. Create the secret the chart's `existingSecret` names. The chart injects it
+   with `envFrom`, so every key becomes an environment variable in the pod, and
+   this is the only way to set a `PODIUM_*` variable the templates do not render.
+
+   ```bash
+   kubectl create secret generic podium-secrets \
+     --from-literal=PODIUM_POSTGRES_DSN="postgres://podium:podium@pg:5432/podium?sslmode=disable" \
+     --from-literal=PODIUM_S3_BUCKET=podium \
+     --from-literal=PODIUM_S3_ENDPOINT="http://minio:9000" \
+     --from-literal=PODIUM_S3_REGION=us-east-1 \
+     --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
+     --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin
+   ```
+
+   The secret is required by this configuration rather than by the chart.
+   `--set existingSecret=""` drops the `envFrom` block, which a deployment that
+   needs no secret depends on. Confirm that path still renders a manifest the
+   API server accepts, because it once rendered `secretRef` with an empty name
+   and was rejected outright:
+
+   ```bash
+   helm template t deploy/helm/podium --set existingSecret="" \
+     | kubectl apply --dry-run=server -f -
+   ```
+
+   **Expect.** Both objects report `created (server dry run)`. A failure naming
+   `envFrom[0].secretRef.name: Required value` means the guard on the block has
+   been lost.
+
+5. Install the chart and wait for the pod.
+
+   ```bash
+   helm install podium deploy/helm/podium \
+     --set replicaCount=1 \
+     --set config.identityProvider.type=""
+   kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=podium --timeout=180s
+   kubectl get pods -l app.kubernetes.io/name=podium
+   ```
+
+   `config.identityProvider.type` is emptied because the chart's `oidc-jwt`
+   default needs a reachable `https` issuer, which this cluster does not have.
+   An empty provider selects none, and the registry serves every caller as
+   anonymous.
+
+   Public mode is the other way to reach an open registry, and it requires both
+   of its values. It binds loopback unless the bind is explicitly allowed, and
+   the chart renders `PODIUM_BIND=0.0.0.0:8080` so the kubelet can reach the
+   probes, so `config.publicMode` alone fails at startup with
+   `config.public_bind_refused`. Setting both starts the pod and logs
+   `mode=public` under the public-mode banner:
+
+   ```bash
+   helm upgrade podium deploy/helm/podium --set replicaCount=1 \
+     --set config.identityProvider.type="" \
+     --set config.publicMode=true --set config.allowPublicBind=true
+   ```
+
+   Public mode and an identity provider are mutually exclusive; setting both
+   fails with `config.public_mode_with_idp`.
+
+   **Expect.** The pod reports `1/1 Running` with `0` restarts within roughly
+   twenty seconds, and its log ends `podium-server listening on 0.0.0.0:8080`. A
+   pod stuck at `0/1` with a rising restart count is the failure this scenario
+   exists to catch; read `kubectl logs` for the reason rather than the pod
+   status.
+
+6. Confirm the registry serves through the Service rather than only inside the
+   pod, which is what the probes and the Service selector together establish.
+
+   ```bash
+   kubectl port-forward svc/podium-podium 18080:8080 >/dev/null 2>&1 &
+   PF=$!; sleep 4
+   curl -sS http://127.0.0.1:18080/healthz
+   curl -sS http://127.0.0.1:18080/readyz
+   curl -sS -o /dev/null -w 'load_domain %{http_code}\n' "http://127.0.0.1:18080/v1/load_domain?path="
+   kill $PF
+   ```
+
+   **Expect.** `/healthz` reports `{"mode": "ready"}`, `/readyz` reports
+   `{"mode": "ready", "replication_lag_seconds": 0}`, and `load_domain` answers
+   `200`. These are the two paths the chart's liveness and readiness probes use,
+   so a pod that is `Ready` and a `/healthz` that does not answer would mean the
+   probes are pointed somewhere else.
+
+7. **Negative control.** Re-install with the identity provider the chart once
+   defaulted to and confirm the deployment refuses it.
+
+   ```bash
+   helm upgrade podium deploy/helm/podium \
+     --set replicaCount=1 \
+     --set config.identityProvider.type=oauth-device-code
+   sleep 20
+   kubectl get pods -l app.kubernetes.io/name=podium
+   kubectl logs -l app.kubernetes.io/name=podium --tail=3
+   ```
+
+   **Expect.** The new pod reaches `CrashLoopBackOff` and its log carries
+   `config.identity_provider_unverified`, naming `injected-session-token`,
+   `oidc-jwt`, and `trusted-headers` as the providers the registry verifies. This
+   is the defect that made a default `helm install` unable to start before the
+   chart's `values.yaml` was corrected, reproduced at the deployment level rather
+   than asserted against a file. A run where this pod becomes `Ready` means the
+   startup guard is not doing its job, and step 5's success then establishes
+   nothing.
+
+**Cleanup.**
+
+```bash
+helm uninstall podium
+kind delete cluster --name podium-s46
+docker rmi ghcr.io/lennylabs/podium:0.0.0-dev
+```
