@@ -217,8 +217,10 @@ sites and testing sections after sign-off.
 - [ ] **U1 · code** — UI-1. The UI surfaces built against `web/DESIGN.md`,
       including the sanitized markdown rendering path and its sanitizer cases.
       Levels: unit, e2e. Depends on: B1, C1, C2, G1
-- [ ] **D1 · docs** — DOC-1. Every shipped mirror named in "The edit sites", and
-      every row of the credential-location table whose Staged by column names D1.
+- [ ] **D1 · docs** — DOC-1. Every shipped mirror named in "The edit sites",
+      every row of the credential-location table whose Staged by column names D1,
+      and every documentation row of the affected table in "The third-credential
+      sweep". The sweep's unaffected table is left untouched.
       Levels: —. Depends on: S1, S2, S3, S4, S6, S7
 - [ ] **T1 · test** — TEST-1. The manual scenarios, including the S44 rewrite,
       the S44 stack restaging (its Keycloak client registration, its
@@ -754,6 +756,58 @@ whole acquisition set is kept off it rather than split by sensitivity. The
 `docs/reference/cli.md` synopsis and flag-table rows below therefore cover the
 enablement boolean and the transaction TTL only, and the §13.10 key list is where
 every new key, flagged or not, is documented.
+
+### The third-credential sweep
+
+The registry today accepts two credentials, and §6.3.3 and its mirrors state
+that in prose rather than in one enumeration. This proposal adds a third, so
+every sentence written against the closed pair is falsified or narrowed. Four
+consecutive review rounds each found one such site, one round at a time, because
+there was no list to check against. This is that list.
+
+**The rule that generates it.** A site is affected when it states what the
+registry accepts as a credential, what a request lacking a Bearer token resolves
+to, or that a client sends no credential of its own. A site is unaffected when
+it describes how one provider's own mechanism works, which stays true because
+neither provider changes.
+
+Every candidate is recorded below with its disposition, including the unaffected
+ones. Recording those explicitly is the point: an unmarked site reads as an
+omission to the next reviewer, and re-finding it costs a round.
+
+**Affected, and staged.**
+
+| Site | What the third credential falsifies |
+|:--|:--|
+| `spec/06-mcp-server.md:92` | scopes both registry-process providers to "a deployment that runs the registry behind a gateway"; the browser session is authenticated on a directly reachable registry |
+| `spec/06-mcp-server.md:96` | "A header value without the prefix carries no token, so the request is anonymous" — a request with no Bearer and a valid session cookie is authenticated |
+| `spec/06-mcp-server.md:64` | the closed two-source enumeration for the per-request tenant, already staged under §6.3.1 |
+| `docs/deployment/gateway-delegated-identity.md:11` | "a Podium client behind the gateway sends no credential of its own" |
+| `docs/deployment/gateway-delegated-identity.md:58` | "A request carrying no token is anonymous and sees public visibility only", the docs mirror of `:96` |
+| `docs/deployment/gateway-delegated-identity.md:97` | the tenant-routing mirror of `:64`, already staged |
+| `docs/deployment/gateway-delegated-identity.md:107` | the web-UI paragraph, already staged |
+| `docs/deployment/oidc/index.md:47` | "In that arrangement the Podium client sends no credential of its own" |
+| `docs/deployment/oidc/index.md:67` | the tenant-axis mirror, already staged |
+| `docs/reference/error-codes.md:57` | `auth.untrusted_token` scoped to "A gateway-forwarded `oidc-jwt` token" |
+| `docs/reference/error-codes.md:59` | `auth.token_expired` scoped to the forwarded or injected JWT |
+| `spec/13-deployment.md:170` | the §13.10 sentence, already staged as S1 |
+
+**Unaffected, and deliberately not edited.** Each describes one provider's own
+mechanism, which this proposal does not change.
+
+| Site | Why it stays |
+|:--|:--|
+| `spec/06-mcp-server.md:108` | how `trusted-headers` reads its injected headers |
+| `spec/13-deployment.md:475` | the `PODIUM_OAUTH_TOKEN_HEADER` row, which describes header parsing |
+| `docs/deployment/gateway-delegated-identity.md:33`, `:45` | the same header-parsing contract in a comment and a config row |
+| `docs/deployment/gateway-delegated-identity.md:50`, `:82` | what the gateway is responsible for under each provider |
+
+**IMPLEMENTOR'S CHOICE:** the wording each affected site takes. Any answer
+narrows the falsified claim to the credential it was written about rather than
+deleting it, keeps the two existing credentials' behaviour unchanged, and leaves
+every site in the unaffected table untouched. A sweep that widens an unaffected
+site is a defect, because it asserts a change to a provider this proposal does
+not touch.
 
 ### The edit sites
 
