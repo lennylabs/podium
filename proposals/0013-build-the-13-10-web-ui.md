@@ -189,8 +189,10 @@ sites and testing sections after sign-off.
       The rule's other `spec/` sites belong to S1 and S3,
       which own them. The `auth.forbidden` broadening is S6's.
       Levels: —. Depends on: S3, S4, S6
-- [ ] **G1 · docs** — DESIGN-1. The `web/DESIGN.md` corrections in "The design
-      handout".
+- [ ] **G1 · docs** — DESIGN-1. The `web/DESIGN.md` sourcing rule stated in "The
+      design handout", applied across the brief, together with the design content
+      that section keeps: the posture-keyed rendering rules, the sign-in control
+      table, and the remaining design instructions it enumerates.
       Levels: —. Depends on: —
 - [ ] **C1 · code** — CODE-1. The layer-write authorization rule under "The
       layer-ownership defect", implemented on the layer write handlers with the
@@ -763,9 +765,8 @@ to a shipped surface this proposal does not otherwise touch.
 
 Two consequences follow for the UI. The catalog read is the panel's expiry
 signal. A write's `403` `auth.forbidden` carries no expiry information and is not
-an ownership decision. G1 lands both in the design brief, whose session-expiry
-transition names the transition without naming the signal
-(`web/DESIGN.md:163-164`).
+an ownership decision. G1 lands both in the design brief, whose identity-states
+block names a session expiring mid-use as a transition without naming the signal.
 
 The rule adds no error code and re-scopes no envelope. `auth.token_expired` and
 `auth.untrusted_token` already cover the case as §6.3.3 states them, and their
@@ -2213,147 +2214,121 @@ domain depth to render at once, whether to expose the relevance score, how to
 treat the sensitivity label, and how to distinguish an empty domain from a
 filtered one without disclosing that hidden artifacts exist.
 
-**The brief itself is corrected first (G1).** The brief is wrong about the API
-the design pass would be designing against, so a design produced from it would be
-wrong in the same way, and it is missing the surface this proposal's
-authentication route creates. The brief is corrected before the design pass reads
-it.
+**The brief adopts a sourcing rule first (G1).** The brief was written from the
+Go response structs and restated an API it does not own, so it carried field
+names, field types, status codes, endpoint paths, and response bodies in its own
+words. Three consecutive review rounds each found one more of those statements
+wrong about the wire, which is what an open-ended audit of a restated contract
+produces. Correcting the statements one at a time leaves the next one to be found
+later, so the deliverable is the sourcing rule rather than a list of corrected
+sentences.
 
-**Which claims the correction reaches.** The design pass relies on every claim the
-brief makes about what an endpoint returns and about what a caller sees on a given
-deployment. A claim is reached when the authority that settles it contradicts it,
-when that authority settles it only under conditions the brief leaves unstated,
-or when the design pass needs the claim and the brief carries none. A claim that
-holds against its authority on every response and every deployment stands as
-written. The design questions the brief names above are not claims about the API,
-and G1 does not reach them.
+**The rule.** `web/DESIGN.md` states design intent in its own words: which
+surfaces exist, what a reader is trying to do, which states a screen has to
+handle, and what makes a treatment right or wrong. It states no field name, field
+type, status code, endpoint path, or response body of its own. For each of those
+it names the authority that owns the fact and leaves the fact there, and the
+design pass reads the cited source for any field it renders or gates on. The
+brief carries a short passage near the top stating the rule and why it holds: a
+brief that restates a surface it does not control goes stale as soon as that
+surface changes, and review cannot keep it right, because nothing mechanical
+checks prose against a response struct.
 
-**The authority fixes the correction.** Every claim in reach answers to the wire
-contract, to the visibility and deployment semantics, or to a surface this
-proposal adds, and which of those it answers to determines the form the
-correction takes.
+**Which authority a citation names.** The Go source is what runs and takes
+precedence, meaning the response structs under `pkg/registry/server/` and
+`pkg/store/`. `docs/reference/http-api.md` is the client-facing reference and is
+cited where it carries the field. The spec under `spec/` is cited for required
+behaviour, for visibility and deployment semantics, and for the §13.10 surface
+requirements themselves. The reference carries `frontmatter` on a search result
+(`docs/reference/http-api.md:120`), and it carries neither the `load_artifact`
+response's `frontmatter` nor the layer surface: it documents no `GET /v1/layers`
+response body (`:296-300`) and its register example elides every key past the
+first two (`:290`), so the cited source for a layer's fields is
+`store.LayerConfig` (`pkg/store/store.go:258`), which the register response
+embeds under `layer` (`LayerRegisterResponse`,
+`pkg/registry/server/layers.go:328-332`) and the list response returns under
+`layers` (`pkg/registry/server/layers.go:762-777`). Where the Go source and a
+document disagree, the brief cites the Go source, which is what the UI receives,
+and records that the disagreement exists rather than choosing between them. The
+layer response is such a case: `store.LayerConfig` carries no JSON tags on its
+identifying fields, so the wire keys are in Go casing while
+`docs/reference/http-api.md:288` shows snake_case. That divergence is a repository
+defect and is not settled in the brief.
 
-- **A claim the wire contract settles is replaced by a citation.** The brief owns
-  no wire fact: it states no field name, type, wire key, or status code of its
-  own. It cites `docs/reference/http-api.md` where the reference carries the
-  field, and it cites the response struct where the reference does not. The design
-  pass reads the cited source for any field it renders or gates on. This is what
-  corrects the field-level errors the brief carries today, which are the layer
-  list's field inventory (`web/DESIGN.md:126-129`) and the type of `frontmatter`,
-  without leaving the brief a second copy of the wire contract to drift from. The
-  reference carries `frontmatter` on a search result at
-  `docs/reference/http-api.md:120`, already correct on the shipped page. It
-  carries neither the `load_artifact` response's `frontmatter` nor the layer
-  surface: it documents no `GET /v1/layers` response body (`:296-300`) and its
-  register example elides every key past the first two (`:290`), so the cited
-  source for a layer's fields is `store.LayerConfig` (`pkg/store/store.go:258`),
-  which the register response embeds under `layer` (`LayerRegisterResponse`,
-  `pkg/registry/server/layers.go:328-332`) and the list response returns under
-  `layers` (`pkg/registry/server/layers.go:762-777`).
+A surface this proposal creates has no shipped authority yet, so the rule names
+the block of this proposal that is its single statement, and the brief cites that
+block until the code lands. The posture read's field names are owned by "The
+posture read", and the browser-session routes, their methods, and the refusals
+they produce are owned by "The browser session". Where the brief keys a rendering
+rule on one of those, it names the owning block rather than restating the field,
+the method, or the status.
 
-  **IMPLEMENTOR'S CHOICE:** which layer fields the brief names. `web/DESIGN.md`
-  names no field, type, or wire key of its own and cites the response struct for
-  the layer surface, so the design pass reads that struct for any field it renders
-  or gates on, including that field's marshalled key. A field name appearing in
-  this proposal or in the brief is illustrative rather than contractual. Nothing
-  mechanical catches a brief that restates a field, because the brief has no
-  compiler or test behind it.
+**What the rule leaves behind.** A field name appearing in this proposal or in
+the brief's prose is illustrative rather than contractual. Nothing mechanical
+catches a brief that restates a field, because the brief has no compiler or test
+behind it, so the rule is enforced by reading the brief for restated wire facts
+rather than by tooling.
 
-- **A claim the visibility and deployment semantics settle is rewritten onto the
-  signal the page reads.** What a caller sees is settled by the §4.6 visibility
-  predicate and by the deployment's identity posture, and a brief sentence that
-  states one deployment's outcome unconditionally reads to the design pass as
-  universal. The correction rewrites the claim in the vocabulary of the signal the
-  page actually has. Where the claim keys on the deployment, that signal is the
-  posture read, and the rewritten claim names the fields the read returns
-  (`identity_provider_configured`, `public_mode`, `browser_auth.enabled`, and
-  `subject`). Where no field the read returns distinguishes an arm, the rewritten
-  claim takes the catalog response as the signal for that arm, which is the source
-  the expiry-signal rule under "The browser session" already uses. A claim of this
-  kind that another section of this proposal owns as a rule is rewritten to name
-  that rule and to carry no condition the rule does not state, which is how
-  `web/DESIGN.md:20-22` is scoped: everything the UI displays comes from the
-  endpoints an SDK would call, filtered by the caller's identity, holds of the
-  catalog endpoints and is false of `GET /v1/layers`, so the layer-panel section
-  (`web/DESIGN.md:120-147`) states that the layer list arrives unfiltered and that
-  the panel's role split is presentation over it, naming the unfiltered-list rule
-  under "The layer-ownership defect".
-
-- **A claim a surface this proposal adds settles is added to the brief section
-  that owns the surface.** The brief predates the browser session, so a claim
-  about its routes, its cookies, its posture read, or its refusals is either
-  absent from the brief or written against a §13.10 that ran no acquisition flow.
-  The correction adds the claim to the brief section that owns the surface it
-  appears on, in the brief's own vocabulary, carrying no status, code, condition,
-  resolver, or surface the owning rule in this proposal does not state. A clause
-  in the brief and absent from the owning rule is a defect in the brief. The
-  session expiring mid-use, which `web/DESIGN.md:163-164` names as a transition
-  without naming the signal the panel receives, gains the expiry-signal rule under
-  "The browser session" on those terms, and that rule remains the rule's owner.
+**What the rule does not reach.** The design questions the brief names above are
+not claims about the API, and the rule does not touch them. Neither does design
+content the brief legitimately owns. The entries below are that content, and each
+is a deliverable of G1 in its own right. Every other entry the earlier
+per-statement correction list carried described a sentence the rule removes, and
+those entries are withdrawn.
 
 **G1 is the single statement of the posture-keyed rendering rules.** The
-panel-visibility rule, the catalog-scope rule, and the sign-in control table are
-each stated once here, in the vocabulary the posture read returns, so that no
-other site translates a prose scoping into a field test. Every other site in this
-proposal names a rule and cites G1, and states no condition, field, or value the
-statement here does not carry.
+catalog-scope rule and the sign-in control table are each stated once here, in
+the vocabulary the posture read returns, so that no other site translates a prose
+scoping into a field test. Every other site in this proposal names a rule and
+cites G1, and states no condition, field, or value the statement here does not
+carry.
 
-- **The panel-visibility rule.** `web/DESIGN.md:145-147` ends the role split with
-  "an anonymous caller sees no panel at all". On a registry that configures no
-  identity provider every caller is unauthenticated, so under that rule the panel
-  renders for nobody exactly where the server admits every layer write. The
-  deployment carve-out under "The layer-ownership defect" states when the gate is
-  live and what follows where it is not. The sentence is rewritten to key on the
-  posture read's `identity_provider_configured`, and that single flag is
-  sufficient for the reason the carve-out gives: when the read reports it true, a
-  caller for whom the read returns no `subject` sees no panel; when the read
-  reports it false, the panel renders with the full set of write operations for
-  every caller, because the server admits them there. The administrator arm of the
-  role split stays a server decision the page does not predict: the panel renders
-  its write operations and presents the not-permitted state on a `403`
-  `auth.forbidden`, because no response reports the caller's admin role. This is
-  also what corrects `web/DESIGN.md:153-154`, which says the UI has three identity
-  states and "cannot always tell them apart from the client side": the anonymous
-  and authenticated states are distinguished by whether the read returns a
-  `subject`, and the administrator state is not reported at all.
+Panel visibility is not among them. The brief's earlier role split withheld the
+panel from an anonymous caller, which renders the panel for nobody on a registry
+that configures no identity provider, exactly where the server admits every layer
+write. The brief no longer carries that rule. It states instead that hiding the
+panel from an unauthenticated caller is a design choice constrained by the
+standalone deployment, where nobody authenticates and the panel is the point, and
+it names the choice among the open questions the design pass answers. The
+administrator arm stays a server decision the page does not predict, because no
+response reports the caller's admin role, so the panel renders its write
+operations and presents whatever refusal the write receives.
 
-- **The catalog-scope rule.** `web/DESIGN.md:156-158` describes the anonymous
-  state as one in which "The catalog renders, filtered to public artifacts". On a
-  registry that configures no identity provider, and in public mode, the
-  visibility evaluator short-circuits to true for every layer
-  (`pkg/layer/composer.go:53`, `:65`, `spec/04-artifact-model.md:615`,
-  `spec/13-deployment.md:33`), so the anonymous view is the full catalog rather
-  than a public subset. One further deployment class has no anonymous view at all:
-  under `injected-session-token`, which is a registry-process provider a web-UI
-  registry can run (`spec/13-deployment.md:468`), the meta-tool identity
-  middleware verifies before the handler runs and an absent token is a
-  verification failure, so every catalog call from a browser holding no
-  runtime-signed token returns `401` `auth.untrusted_runtime`
-  (`pkg/registry/server/identity_verify.go:44-52`, `:118`,
-  `pkg/identity/runtime.go:137-138`). Those two booleans do not distinguish it
-  from the `oidc-jwt` and `trusted-headers` case, and the response the read
-  returns carries no provider name, so the rule takes the refusal as an arm rather
-  than gaining a posture field. The sentence is rewritten to key on the posture
-  read's `identity_provider_configured` and `public_mode`, and on whether the
-  catalog read answers: where a catalog read is refused with `401`, there is no
-  anonymous view and the page renders the refused state rather than an empty or a
-  filtered catalog, and where a caller who had a `subject` sees that refusal it is
-  the expiry transition the expiry-signal rule names; where the catalog read
-  answers, the anonymous view is the public subset when the read reports
-  `identity_provider_configured` true and `public_mode` false, and is the whole
-  catalog on every other combination of the two.
+- **The catalog-scope rule.** The brief describes the anonymous state as one in
+  which the catalog renders filtered to public artifacts. On a registry that
+  configures no identity provider, and in public mode, the visibility evaluator
+  short-circuits to true for every layer (`pkg/layer/composer.go:53`, `:65`,
+  `spec/04-artifact-model.md:615`, `spec/13-deployment.md:33`), so the anonymous
+  view is the full catalog rather than a public subset. One further deployment
+  class has no anonymous view at all: under `injected-session-token`, which is a
+  registry-process provider a web-UI registry can run
+  (`spec/13-deployment.md:468`), the meta-tool identity middleware verifies before
+  the handler runs and an absent token is a verification failure, so every catalog
+  call from a browser holding no runtime-signed token returns `401`
+  `auth.untrusted_runtime` (`pkg/registry/server/identity_verify.go:44-52`,
+  `:118`, `pkg/identity/runtime.go:137-138`). Those two booleans do not
+  distinguish it from the `oidc-jwt` and `trusted-headers` case, and the response
+  the read returns carries no provider name, so the rule takes the refusal as an
+  arm rather than gaining a posture field. The statement is rewritten to key on
+  the posture read's `identity_provider_configured` and `public_mode`, and on
+  whether the catalog read answers: where a catalog read is refused with `401`,
+  there is no anonymous view and the page renders the refused state rather than an
+  empty or a filtered catalog, and where a caller who had a `subject` sees that
+  refusal it is the expiry transition the expiry-signal rule names; where the
+  catalog read answers, the anonymous view is the public subset when the read
+  reports `identity_provider_configured` true and `public_mode` false, and is the
+  whole catalog on every other combination of the two.
 
-- **The sign-in control rule.** The brief has no authentication affordance.
-  `web/DESIGN.md:163-164` names signing in and signing out as transitions, and it
-  was written while §13.10 said the UI "runs no acquisition flow of its own", so
-  nothing in the brief's surfaces (`web/DESIGN.md:48`), in "What the design pass
-  should produce" (`:194-200`), or in "Out of scope" (`:187-192`) gives the design
-  pass a control a human clicks. With the brief unamended and the implementor
-  barred from designing the UI, U1 would have no source for the surface the new
-  sign-in manual scenario requires a human to use. The brief's state-matrix
-  section gains it, as a control in the application shell rather than as another
-  entry in the surface list, so the surface list and its heading stand. The table
-  below is the sign-in control rule, keyed on the posture read's
+- **The sign-in control rule.** The brief has no authentication affordance. It
+  names signing in and signing out as transitions, and it was written while §13.10
+  said the UI "runs no acquisition flow of its own", so nothing in its surface
+  list, in "What the design pass should produce", or in "Out of scope" gives the
+  design pass a control a human clicks. With the brief unamended and the
+  implementor barred from designing the UI, U1 would have no source for the
+  surface the new sign-in manual scenario requires a human to use. The brief's
+  state-matrix section gains it, as a control in the application shell rather than
+  as another entry in the surface list, so the surface list and its heading stand.
+  The table below is the sign-in control rule, keyed on the posture read's
   `browser_auth.enabled` and `subject`.
 
   | `browser_auth.enabled` | `subject` | Control rendered |
@@ -2381,19 +2356,38 @@ statement here does not carry.
   under `trusted-headers` cannot be enabled at all. Clearing a Podium cookie would
   not end the gateway's own session there.
 
-**Corrections the rule above does not reach.** Each is a design instruction
-rather than a claim about the API, so each is named here.
+  This rule is also what corrects the brief's identity-states preamble, which
+  says the UI cannot always tell its identity states apart from the client side.
+  The anonymous and the authenticated state are distinguished by whether the
+  posture read resolves a subject for the caller, and the administrator state is
+  not reported at all.
+
+**The remaining design instructions.** Each is a design instruction rather than a
+claim about the API, so the sourcing rule leaves each standing and G1 lands it.
+
+- **The panel's role split is presentation over an unfiltered list.** The layer
+  section states that the layer list arrives unscoped and that the role split is
+  presentation over it, naming the unfiltered-list rule under "The layer-ownership
+  defect" and carrying no condition that rule does not state.
+
+- **The session-expiry signal.** The brief names a session expiring mid-use as a
+  transition without naming the signal the panel receives. It gains the
+  expiry-signal rule under "The browser session" on that section's terms: the
+  catalog read is the panel's expiry signal, and a write's `403` `auth.forbidden`
+  carries no expiry information and is not an ownership decision. That rule
+  remains the owner, and the brief states no condition, resolver, or surface it
+  does not carry.
 
 - **A layer that matches on more than one visibility axis.** Visibility is a union
   of the independent fields `Public`, `Organization`, `Groups`, and `Users`
   (`pkg/store/store.go:270-273`), and "Multiple fields combine as a union; a
   caller sees the layer if any condition matches"
   (`spec/04-artifact-model.md:611`), which is why the §4.6 matrix enumerates every
-  non-empty subset (`tools/matrix/matrices.go:124-140`). Replacing the brief's
-  restated field list with a citation leaves the design pass without a display
-  treatment, so the layer-panel section states one for a layer that matches on
-  more than one axis, because a single-valued label cannot render a layer that is
-  both public and group-scoped.
+  non-empty subset (`tools/matrix/matrices.go:124-140`). Citing the struct instead
+  of restating the field list leaves the design pass without a display treatment,
+  so the layer-panel section states one for a layer that matches on more than one
+  axis, because a single-valued label cannot render a layer that is both public
+  and group-scoped.
 
 - **A response with no frontmatter pairs to render.** The brief gives the design
   pass a treatment for it, covering every response the API returns with no pairs.
