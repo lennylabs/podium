@@ -23,85 +23,75 @@ sites and testing sections after sign-off.
   `oidc-jwt` verifier reads a token from. It adds no new credential kind and no
   server-side session state. Because the cookie is `HttpOnly` and no shipped
   response echoes the caller, it also adds one unauthenticated read,
-  `GET /v1/ui/session`, which reports whether an identity provider is
-  configured, whether public mode is engaged, whether the browser flow is
-  enabled and at which paths, and the subject the request resolves to. That read
-  is what the UI's sign-in control and its rendering rules key on. "The browser
-  session" below specifies both.
-- The layer write handlers gain owner-or-admin authorization. §7 states an owner
-  rule today only for reingest and reorder, S6 adds one to §7.3.1 for
-  `register`, `unregister`, `update`, and `restore`, and the code implements it
-  for none of them. Today any caller can delete or rewrite another user's
+  `GET /v1/ui/session`, which reports the deployment's posture and the caller's
+  own resolved subject. That read is what the UI's sign-in control and its
+  rendering rules key on. "The browser session" below specifies both, and "The
+  posture read" there states the body.
+- The layer write handlers gain owner-or-admin authorization, stated once as the
+  layer-write authorization rule under "The layer-ownership defect" and staged
+  into §7.3.1 by S6. Today any caller can delete or rewrite another user's
   user-defined layer, and a re-registration under an existing layer's ID
-  overwrites it without any owner comparison.
+  overwrites it without any owner comparison. §7 states an owner rule today only
+  for reingest and reorder, and the code implements it for neither.
 - The built React bundle is committed to the tree so `go build` and `go install`
   keep working from a clean clone with only a Go toolchain, with a CI check that
   rebuilding produces no diff.
-- The §6.10 catalog gains two codes. `auth.csrf_invalid` (`403`) covers a
-  state-changing request the same-origin gate refuses and a callback whose
-  pre-authorization cookie does not validate. `auth.exchange_failed` (`502`)
-  covers a callback whose code exchange the IdP answered and refused, which is
-  permanent for that request and therefore outside the retryable
-  `registry.unavailable`. "The CSRF position" below is the single statement of
-  the gate predicate, including which routes it excludes and why.
-  `auth.forbidden` is broadened by S6.
-  `auth.token_expired` and `auth.untrusted_token` keep their scopes. A session
-  cookie carries a token the registry itself obtained rather than one a gateway
-  forwarded, so the shipped text that describes either code as reporting a
-  forwarded token is restated. The credential-location rule under "The browser
+- The §6.10 catalog gains `auth.csrf_invalid` and `auth.exchange_failed`.
+  `auth.csrf_invalid` (`403`) is the one code for the §6.3.4 browser-origin
+  gate's refusal and for the callback transaction's, in the scope "The CSRF
+  position" states. `auth.exchange_failed` (`502`) covers a callback whose code
+  exchange fails, in the scope the exchange-failure rule under "The browser
+  session" states. "The CSRF position"
+  below is the single statement of the gate predicate, including the evidence it
+  reads, which routes it excludes, and why, and of what `auth.csrf_invalid`
+  covers. `auth.forbidden` is broadened by S6. `auth.token_expired` and
+  `auth.untrusted_token` keep their scopes and gain no replacement code; a
+  session cookie carries a token the registry itself obtained rather than one a
+  gateway forwarded, so what changes on them is the shipped text that assumes a
+  gateway forwarded the token, as the unchanged-scope statement under "The
+  browser session" states. The credential-location rule under "The browser
   session" is the single statement of which text that is.
 
 **Fixed decisions.**
 
-- **Authentication is registry-mediated, and the registry stores nothing.** No
-  credential is reachable from JavaScript. The alternative of a browser-held
-  token under a pure-SPA flow is withdrawn: this proposal newly renders
-  author-controlled markdown on the same origin, and a token reachable from
-  JavaScript on that origin is the combination the chosen route removes. The
+- **Authentication is registry-mediated, and the registry keeps no session
+  state.** No credential is reachable from JavaScript. The alternative of a
+  browser-held token under a pure-SPA flow is withdrawn: this proposal newly
+  renders author-controlled markdown on the same origin, and a token reachable
+  from JavaScript on that origin is the combination the chosen route removes. The
   cookie carries the credential §6.3.3 already accepts rather than one the
-  registry mints, so there is no session record, no session lifetime to choose,
-  no session key to manage, and no cross-replica state. Revocation before the
-  token's own `exp` is not offered, which is the property every credential the
-  registry accepts today already has.
+  registry mints. The no-session-state rule under "The browser session" is the
+  single statement of what that leaves the registry holding, and "Revocation is
+  expiry" under the same section is the single statement of the session's
+  revocation and renewal model.
 - **The layer-ownership gap is closed here rather than filed separately**, because
   the layer panel is the surface that exposes those operations to a browser and
   a panel must not present per-owner scoping as server-enforced while the server
   fails open.
-- **The build output is committed.** `go build ./...` and `go install` work from
-  a clean clone with no Node toolchain, which is a property the project has today
-  and would otherwise lose. The staleness risk this creates is closed by the
-  rebuild-is-clean CI check, which is part of the deliverable rather than a
-  follow-up.
+- **The build output is committed.** The bundle is committed rather than
+  generated at release, so a clean clone keeps building with only a Go toolchain,
+  which is a property the project has today and would otherwise lose. "Build and
+  embedding" states the committed-bundle constraints. The staleness risk the
+  commitment creates is closed by the rebuild-is-clean CI check, which is part of
+  the deliverable rather than a follow-up.
 - **The UI gains no privileged access.** It is a client of the HTTP API and
   reads the catalog and the layer list through the same endpoints an SDK would,
-  as §13.10 states. The posture read it adds is unauthenticated and carries no
-  privilege, and it exists because the browser can observe neither the
-  deployment's identity posture nor its own resolved subject.
+  as §13.10 states. The one read it adds is `GET /v1/ui/session`, and "The
+  posture read" under "The browser session" is the single statement of what that
+  read requires, what it discloses, and what it adds.
 - **The implementor does not design the UI.** `web/DESIGN.md` is the design
   brief; a design pass against it produces the layouts and the state treatments.
 - **The browser flow is one enablement key with one guard and one mount site.**
-  `PODIUM_WEB_UI_AUTH` is not a `PODIUM_IDENTITY_PROVIDER` value, so the
-  registry's accepted provider values stay as §13.12 records them
-  (`spec/13-deployment.md:468`). Enabling it requires `PODIUM_WEB_UI` on,
-  `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, public mode off, and the acquisition
-  options §6.3.4 marks required; every other combination fails startup with
-  `config.web_ui_auth_unconfigured` from `StartupConfig.Validate`
-  (`pkg/registry/server/config_validate.go:87`). The existing public-mode
-  exclusion cannot cover this, because it is keyed on
-  `PODIUM_IDENTITY_PROVIDER` alone (`spec/13-deployment.md:484`,
-  `pkg/registry/server/config_validate.go:88-91`) and reads no web-UI key. The
-  shipped web-UI guard does read two of them,
-  `PODIUM_WEB_UI` and `PODIUM_WEB_UI_ALLOW_PUBLIC_BIND`, and already requires a
-  configured identity provider
-  (`pkg/registry/server/config_validate.go:103-108`), so it is the in-file
-  precedent C3's conjunct extends. It does not cover browser-flow enablement
-  either: it fires only on a non-loopback bind, and it accepts any provider
-  value rather than `oidc-jwt`. No shipped guard reads a browser-flow key.
-  Because the guard makes the web UI a precondition rather than a
-  second enablement axis, "browser flow on, web UI off" is a startup refusal
-  rather than an unregistered route, and the routes mount on one validated
-  field inside the block that already mounts `/ui/`
-  (`internal/serverboot/serverboot.go:1229`).
+  The key is `--web-ui-auth` / `PODIUM_WEB_UI_AUTH`, the guard is
+  `StartupConfig.Validate` (`pkg/registry/server/config_validate.go:87`), and the
+  mount is a nested check inside the block that already serves `/ui/`
+  (`internal/serverboot/serverboot.go:1229`). The startup guard under "The
+  browser session" is the single statement of the conjuncts the guard requires,
+  the `config.web_ui_auth_unconfigured` refusal it emits, its ordering against
+  the shipped public-mode exclusion, and why no shipped guard covers the
+  combination. The mount predicate stated under "The browser session" is
+  the single statement of what the guard's web-UI conjunct buys at the route
+  mount. This bullet adds nothing to either.
 - Artifacts stay authored in git. The UI is a reader and a layer manager.
 
 **Watch out for.**
@@ -113,40 +103,40 @@ sites and testing sections after sign-off.
   §13.10 blesses put in a browser's hands. The prior review of this proposal
   never produced a finding on it across eight rounds while treating it as
   acknowledged prose, which is how a known gap stays open. "The CSRF position"
-  below is the single statement of the gate predicate.
+  below is the single statement of the gate predicate, and the gate reads the
+  request rather than the credential.
 - **Closing the ownership gap changes the authorization behavior of every layer
   write handler**, including the ones the panel does not call. It does not change
-  the behavior of a registry that authenticates no caller: the gate is live only
-  when an identity provider is configured and public mode is off, which is the
-  same deployment-keyed short-circuit the admin gate already takes
-  (`internal/serverboot/serverboot.go:1209-1215`). On a live gate an
-  unauthenticated caller is refused like any non-owner.
+  the behavior of a registry that authenticates no caller, and it refuses a
+  caller who resolves no subject wherever the gate is live. The deployment
+  carve-out under "The layer-ownership defect" states when the gate is live and
+  what follows where it is not, and the permissive `NewLayerEndpoint` defaults
+  stated in the same section are why
   `test/integration/reingest_pipeline_test.go:87` posts to reingest with no
-  credential and keeps passing, because `NewLayerEndpoint` installs a permissive
-  default `authAdmin` (`pkg/registry/server/layers.go:174`) and its layer is
-  admin-defined, so the admin path authorizes the request. The surface that
+  credential and keeps passing. The surface that
   regresses is a user-defined layer driven by a non-owner identity on a registry
   that has an identity provider, and that case has no test today.
 - **The key-placement rule is stated once**, under "Where configuration keys go".
   It is easy to restate divergently, because §6.3, §13.10, and §13.12 each look
   like the right home and only one of them is.
-- **`GET /v1/layers` is unfiltered.** The panel's role split is presentation over
-  a list the server does not scope, so a design that implies otherwise
-  misrepresents it. The server-side gate this proposal adds is on writes.
-- **An expired session reads differently on the two surfaces.** The meta-tool
-  routes return `401` `auth.token_expired`, and the layer endpoints return `403`
-  `auth.forbidden`, because they resolve the caller through a resolver that
-  discards the verification error
-  (`internal/serverboot/identity_verify.go:55-63`). The panel takes the catalog
-  read as its expiry signal. "The browser session" states it and G1 corrects the
-  design brief to match.
-- **No authentication route writes registry state.** Sign-in sets a cookie, the
-  callback exchanges a code with the IdP and sets cookies, and sign-out clears
-  the cookies the cookie table names it as clearing. None of the three mutates
-  the store, and neither does the posture read, so each of them sits outside the
-  §13.2.1 write set under that section's existing rule, with no carve-out and no
-  precedent invoked. A read-only registry serves them unchanged, so an
-  operator sees no authentication outage during a primary outage.
+- **`GET /v1/layers` is unfiltered.** The unfiltered-list rule under "The
+  layer-ownership defect" is the single statement of what the read does and what
+  follows from it. G1's correction to the design brief and the Non-goals
+  exclusion both rest on it.
+- **An unverifiable session reports a different result on each surface.** The
+  expiry-signal rule under "The browser session" is the single statement of what
+  each surface returns, and G1 lands it in the design brief. The hazard is that a
+  design or a panel built on one expiry signal reads a layer write's `403` as an
+  ownership decision and never learns that the session ended.
+- **The read-only classification is stated once**, under "The browser session".
+  Sign-in, the callback, sign-out, and the posture read all sit outside the
+  §13.2.1 write set, and a read-only registry serves each of them unchanged, so
+  an operator sees no authentication outage during a primary outage. It is easy
+  to restate divergently, because each edit site looks like the place to derive
+  the classification for itself, and a derivation that keys on reads rather than
+  on mutation reaches the right answer from a premise §13.2.1 does not require.
+  That none of these surfaces writes registry state is a conjunct of the
+  no-session-state rule under the same section.
 
 ## Implementation checklist
 
@@ -160,20 +150,22 @@ sites and testing sections after sign-off.
       with its pointer from the §6.3 introduction.
       Levels: —. Depends on: S1
 - [ ] **S3 · spec** — SPEC-3. §6.3.3's second accepted location for the
-      `oidc-jwt` credential, its header-wins precedence rule, the narrowed
-      no-token-is-anonymous sentence at `spec/06-mcp-server.md:96`, the restated
-      opening clause and sends-no-credential sentence at
-      `spec/06-mcp-server.md:92`, and the §2.2 restatement of that clause at
-      `spec/02-architecture.md:101`. Each is a site the credential-location rule
-      under "The browser session" moves, and this step owns the `spec/` half of
-      §6.3.3 and §2.2.
+      `oidc-jwt` credential, the header-wins precedence rule under "The browser
+      session" stated there in spec voice, the narrowed no-token-is-anonymous
+      sentence at `spec/06-mcp-server.md:96`, and the `spec/` half of the set the
+      `spec/06-mcp-server.md:92` row under "The browser session" names, meaning
+      the restated opening clause and sends-no-credential sentence at
+      `spec/06-mcp-server.md:92` and the §2.2 mirror at
+      `spec/02-architecture.md:101`. The code, documentation, and test halves of
+      that set land under C2, D1, and T1.
       Levels: —. Depends on: S2
 - [ ] **S4 · spec** — SPEC-4. §7's sign-in, callback, and sign-out routes with
       their methods, their paths,
-      their cookies, their mount predicate, and their §13.2.1 classification,
-      which leaves §13.2.1's own text unchanged, and the posture read
-      `GET /v1/ui/session` with its body, its unauthenticated status, its
-      web-UI mount predicate, and the same classification.
+      their cookies, and their mount predicate, and the posture read
+      `GET /v1/ui/session` with its body, its unauthenticated status, and its
+      web-UI mount predicate, together with the one §13.2.1 classification
+      covering all of them, per the read-only classification under "The browser
+      session", which leaves §13.2.1's own text unchanged.
       Levels: —. Depends on: S2
 - [ ] **S5 · spec** — SPEC-5. §11's verification entry for the UI, covering the
       surface-by-obligation matrix below.
@@ -200,16 +192,14 @@ sites and testing sections after sign-off.
 - [ ] **G1 · docs** — DESIGN-1. The `web/DESIGN.md` corrections in "The design
       handout".
       Levels: —. Depends on: —
-- [ ] **C1 · code** — CODE-1. Owner authorization on the layer write handlers,
-      with its `403` tests, its no-identity-provider case, and the
-      `registry.unavailable` refusal on a `register` whose existence lookup
-      fails.
+- [ ] **C1 · code** — CODE-1. The layer-write authorization rule under "The
+      layer-ownership defect", implemented on the layer write handlers with the
+      tests "Testing" enumerates.
       Levels: unit, integration, e2e. Depends on: S6, S7
 - [ ] **C2 · code** — CODE-2. The browser-flow configuration surface, meaning the
-      `Config` and `StartupConfig` fields for the enablement boolean, the
-      transaction TTL, and the acquisition values, the `--web-ui-auth` and
-      `--web-ui-auth-transaction-ttl` flags on `podium serve`,
-      and the `PODIUM_*` reads beside
+      `Config` and `StartupConfig` fields for every key the key-placement rule
+      under "Where configuration keys go" lists, the `podium serve` flags that
+      rule places, and the `PODIUM_*` reads beside
       `internal/serverboot/serverboot.go:1826-1827`; the sign-in, callback, and
       sign-out routes and
       their two cookies; the posture read `GET /v1/ui/session` and its mount on
@@ -221,9 +211,10 @@ sites and testing sections after sign-off.
       `auth.csrf_invalid` and `auth.exchange_failed` entries in
       `errorCodeRegistry`, and the Go comments, doc comments, and emitted strings
       that the credential-location rule under "The browser session" moves,
-      together with `test/e2e/auth_oidc_jwt_test.go:202` whenever the restated
-      boot log line breaks the `accepted issuers ` adjacency that assertion
-      requires. That
+      including the `oidc-jwt` startup log line, which C2 restates under the
+      boot-log adjacency constraint in "restated remediation and message
+      strings"; `test/e2e/auth_oidc_jwt_test.go` joins C2's write set only if
+      that restatement breaks the constraint. That
       set spans `pkg/registry/server`, `internal/serverboot`, and
       `pkg/identity`, and the rule together with its recorded command is what
       determines it; none of the `pkg/identity` edits changes behavior or a
@@ -232,27 +223,28 @@ sites and testing sections after sign-off.
       origin.
       Levels: unit, integration, e2e. Depends on: S1, S2, S3, S4, S7
 - [ ] **C3 · code** — CODE-3. The web-UI authentication configuration guard in
-      `StartupConfig.Validate`, including its web-UI, `oidc-jwt`, public-mode,
-      acquisition-value, and redirect-URI conjuncts, over the fields C2 adds;
-      the bind-guard rationale restatements in the same file
+      `StartupConfig.Validate`, implementing the startup guard under "The browser
+      session" over the fields C2 adds, appended after the shipped public-mode
+      exclusion so the ordering that statement records holds; the bind-guard
+      rationale restatements in the same file
       (`pkg/registry/server/config_validate.go:29` and `:99-101`), which the
-      §13.10 bind-guard edit site names; and the nested route mount at
-      `internal/serverboot/serverboot.go:1229`.
+      §13.10 bind-guard edit site names; and the route mount at
+      `internal/serverboot/serverboot.go:1229`, per the mount predicate stated
+      under "The browser session".
       Levels: unit, e2e. Depends on: S1, C2
 - [ ] **B1 · code** — BUILD-1. The React toolchain, the committed bundle, the
       `go:embed` change, `web/web_test.go`, the served-bundle end-to-end
-      assertion, the rebuild-is-clean CI check, and the mechanical
-      `dangerouslySetInnerHTML` check over the web UI's source tree in the same
-      CI job.
+      assertion, the rebuild-is-clean CI check, and the
+      `dangerouslySetInnerHTML` check under "Rendering untrusted content".
       Levels: unit, e2e. Depends on: —
 - [ ] **U1 · code** — UI-1. The UI surfaces built against `web/DESIGN.md`,
       including the sanitized markdown rendering path and its sanitizer cases,
       the posture read on load together with the sign-in and sign-out
       affordances G1's sign-in control table gates on it and the rest of the
       posture-keyed rendering rules G1 states,
-      and the client half of the CSRF gate, meaning the `X-Podium-CSRF` header
-      read from the `__Host-podium_csrf` cookie on every state-changing call the
-      panel issues, where the mechanism C2 lands carries a request-side value.
+      and the client half of the CSRF gate as the wire contract under "The
+      CSRF position" states it, which is a deliverable only where the mechanism
+      C2 lands carries a request-side value.
       Levels: unit, e2e. Depends on: B1, C1, C2, G1
 - [ ] **D1 · docs** — DOC-1. Every shipped mirror named in "The edit sites" and
       every site under `docs/` that the credential-location rule under "The
@@ -334,34 +326,66 @@ admin-defined layer ID converts it into bob's user-defined layer with visibility
 The only owner comparisons in the file are the §7.3.1 cap count (`:680`) and the
 §8.5 erase filter (`:419`). Neither authorizes a write against the caller.
 
-**What lands.** An owner-or-admin gate on `register`, `unregister`, `update`,
-`restore`, `reorder`, and `reingest`, each returning `403` `auth.forbidden`, with
-tests asserting the refusal. On `reingest`, which today runs no authorization at
-all (`pkg/registry/server/layers.go:946-991`), the gate runs after the layer is
-loaded, which is what supplies the owner to compare against, and before
-`runIngestAndRespond`, so a refused caller triggers neither a Git fetch nor the
-break-glass freeze bypass. The owner arm of the gate reads the stored `Owner`
-only where the stored layer is user-defined. Against an admin-defined layer the
-rule collapses to admin-only. That collapse is a rule S6 introduces rather than
-one §7 states today: the manual-reingest trigger row reads "(admin or layer
-owner)" with no layer-class qualifier
-(`spec/07-external-integration.md:65`), so as written it admits an
-admin-defined layer's stored non-admin owner, and S6 restates its parenthetical
-the way `:87` already scopes reorder. The §0 quickstart carries the same
-unqualified rule for the same operation over an admin-defined layer
-(`spec/00-quickstart.md:46-47`), so S6 restates that comment as well; the
-§7.3.1 edit site states both restatements. The qualifier carries weight rather
-than restating the obvious: an admin-defined layer carries a stored `Owner` as
-well, assigned from the request body on the admin-defined branch of `register`
-(`pkg/registry/server/layers.go:659`) and patchable on the same branch of
-`update` (`:547-549`, `docs/reference/http-api.md:329`), so an owner arm written
-without the qualifier would admit whichever non-admin subject that field names.
-On `register` the gate is conditional on the request naming an existing layer in
-the tenant. The §7.3.1 edit site states the arms of that rule, and this section
-adds nothing to them.
+**What lands.** This paragraph, together with the paragraphs that follow it in
+this section through the deployment carve-out below, is the single statement of
+the layer-write authorization rule, covering the gated operations, every arm of
+the rule, the code each refusal returns, where in each handler the gate runs, and
+the conditions under which it is live. Every other site in this proposal cites
+the rule by name and states only what is local to that site, including the §7.3.1
+edit site that stages its spec text.
 
-The existence lookup covers soft-deleted layers, and that is load-bearing rather
-than incidental. `PutLayerConfig` upserts on `(tenant_id, id)` and writes
+`register`, `unregister`, `update`, `restore`, `reorder`, and `reingest` are
+gated. On a stored layer that is user-defined, the operation is authorized to
+that layer's stored `Owner` or to a tenant admin holding the §4.7.2 admin grant.
+On a stored layer that is admin-defined, the operation is authorized to a tenant
+admin alone, whatever that layer's stored `Owner` field names. The qualifier on
+the owner arm carries weight: an admin-defined layer's `Owner` is assigned from
+the request body on the admin-defined branch of `register`
+(`pkg/registry/server/layers.go:659`) and patched on the admin-defined branch of
+`update` (`:547-549`, `docs/reference/http-api.md:329`), so it is a
+caller-supplied field and names no authorized subject. On `register` the gate is
+conditional on the request's ID naming a layer that already exists in the tenant,
+and the arm taken is decided by the stored layer's class and stored owner rather
+than by anything in the request body. A `register` whose ID names no stored layer
+is admitted for any authenticated caller. A layer that is soft-deleted and still
+inside its §8.4 recovery window (`spec/08-audit-and-observability.md:52`) is a
+layer that exists for this rule, so a `register` under its ID is authorized
+against its stored owner and its user-defined flag on the same terms, and the
+recovery window is not a window in which an ID can be taken over.
+
+A caller authorized by neither arm is refused with `403` `auth.forbidden`,
+whether that caller resolves a different subject or resolves none at all, and the
+refusal is `403` rather than `404`. The comparison runs against the verified
+subject rather than against a client-supplied field, and the admin path stays
+able to act on any layer in the tenant. A `register` whose existence lookup fails
+is refused with `500` `registry.unavailable` and writes nothing, because a store
+failure establishes neither that no layer holds the ID nor who owns the layer
+that does. The staged §7.3.1 sentence names no code for that refusal, because
+§6.10 carries no prose entry for `registry.unavailable` even though the code sits
+on the §6.10 matrix axis (`tools/matrix/matrices.go:109`); the code is stated
+here, documented at `docs/reference/error-codes.md:158` as `500`, and asserted by
+C1's tests.
+
+Where the gate runs inside each handler is part of the rule. On `reingest`, which
+today runs no authorization at all (`pkg/registry/server/layers.go:946-991`), the
+gate runs after the layer is loaded, which is what supplies the owner to compare
+against, and before `runIngestAndRespond`, so a refused caller triggers neither a
+Git fetch nor the break-glass freeze bypass. On `register` the existence lookup
+and the owner comparison both run ahead of the `req.UserDefined` short-circuit at
+`pkg/registry/server/layers.go:610-611`, so a request body that asserts
+`user_defined` cannot skip the gate the way it skips `authAdmin` today.
+
+The admin-defined collapse is a rule S6 introduces rather than one §7 states
+today. The manual-reingest trigger row reads "(admin or layer owner)" with no
+layer-class qualifier (`spec/07-external-integration.md:65`), so as written it
+admits an admin-defined layer's stored non-admin owner, and S6 restates its
+parenthetical the way `:87` already scopes reorder. The §0 quickstart carries the
+same unqualified rule for the same operation over an admin-defined layer
+(`spec/00-quickstart.md:46-47`), so S6 restates that comment as well. The §7.3.1
+edit site stages both restatements.
+
+The recovery-window arm of the rule is load-bearing rather than incidental.
+`PutLayerConfig` upserts on `(tenant_id, id)` and writes
 `deleted_at` from the config it is given, so a registration under a tombstoned
 layer's ID occupies that key and clears the tombstone
 (`pkg/store/postgres.go:1195`, `:1213`, `pkg/store/sqlite.go:750`,
@@ -372,28 +396,24 @@ would therefore take the names-no-stored-layer arm for the whole §8.4 recovery
 window (`spec/08-audit-and-observability.md:52`), and bob re-registering alice's
 unregistered layer ID would become its owner, clear the tombstone, and leave
 alice's `restore` answering `404` "no recoverable layer" with her artifacts still
-tombstoned. That is the takeover the gate exists to close, in the window where it
-is unrecoverable. No shipped handler determines existence over both sets:
+tombstoned. That is the takeover the rule closes, in the window where it is
+unrecoverable. No shipped handler determines existence over both sets:
 `restore` reads a tombstoned layer's `Owner` and `UserDefined` through a
 `ListDeletedLayerConfigs` scan alone (`pkg/registry/server/layers.go:799-816`),
 because its target is tombstoned by definition.
 
 **IMPLEMENTOR'S CHOICE:** the store call sequence that implements the existence
-lookup on `register`. Any answer determines existence over both live layers and
-soft-deleted layers still inside the §8.4 recovery window
-(`spec/08-audit-and-observability.md:52`); a call that errors refuses the
-registration with `500` `registry.unavailable` and writes nothing, because a
-store failure establishes neither that no layer holds the ID nor who owns the
-layer that does, following the idiom `unregister` and `reingest` already use for
-the same discrimination (`pkg/registry/server/layers.go:847-855`) and `restore`'s
-scan arm (`:802-806`) rather than `update`'s collapse of every `GetLayerConfig`
-failure into `404` (`:487-491`), which is safe there only because not-found
-refuses on `update` and admits on `register`; the lookup and the owner comparison
-both run ahead of the `req.UserDefined` short-circuit at
-`pkg/registry/server/layers.go:610-611`, so a request body that asserts
-`user_defined` cannot skip the gate the way it skips `authAdmin` today; and the
-arms the lookup feeds are exactly those the §7.3.1 edit site states, so an arm
-that site does not carry is a defect in the implementation.
+lookup on `register`. Any answer satisfies the layer-write authorization rule
+above and adds nothing to it: it determines existence over both live layers and
+soft-deleted layers still inside the §8.4 recovery window, it treats a failed
+call as the refusal the rule states rather than as evidence that the ID is
+unused, and it runs where the rule places it. The idiom to follow is the one
+`unregister` and `reingest` already use for the same discrimination
+(`pkg/registry/server/layers.go:847-855`) together with `restore`'s scan arm
+(`:802-806`), rather than `update`'s collapse of every `GetLayerConfig` failure
+into `404` (`:487-491`), which is safe there only because not-found refuses on
+`update` and admits on `register`. An arm the rule above does not carry is a
+defect in the implementation.
 
 **IMPLEMENTOR'S CHOICE:** whether the gate needs an atomicity guarantee beyond
 what `PutLayerConfig` gives today, for two registrations racing under the same ID
@@ -402,43 +422,123 @@ section, and if it is that the shipped upsert's behavior is accepted unchanged,
 that answer is recorded here as a decision with its reason, so a later reviewer
 does not rediscover it as a further arm of the lookup.
 
-The gate is live whenever an identity provider is configured and public mode is
-off. On a registry that authenticates no caller, which is the default standalone
-and public-mode posture and the posture §13.10's own web UI targets, the write is
-admitted. That is the same deployment-keyed short-circuit the admin gate already
-takes (`internal/serverboot/serverboot.go:1213`), and it is stated the way §4
-states the parallel carve-out for the re-embed endpoint: "Configuring an identity
-provider makes the gate live, whether or not the registry verifies callers
-itself" (`spec/04-artifact-model.md:760`). On a live gate a caller who resolves no
-subject is refused with `403` `auth.forbidden` like any non-owner, which matters
-because §6.3.3 makes a request anonymous rather than rejected while the issuer
-JWKS is unreachable (`spec/06-mcp-server.md:98`). The carve-out is what keeps
-§13's statement that "the layer-management and erase endpoints admit any request"
+**The deployment carve-out.** This paragraph is the single statement of when the
+owner gate is live and of what follows where it is not. Every other site in this
+proposal cites it by name and states only what is local to that site.
+
+The gate is live only where an identity provider is configured and public mode is
+off. The condition is read from the registry's configuration rather than from the
+request, so it holds identically for every caller and for every layer write
+handler, including the ones the panel does not call. It is the same short-circuit
+the admin gate already takes (`internal/serverboot/serverboot.go:1213`). No
+registry starts with both an identity provider and public mode set, because
+§6.3.3 makes `oidc-jwt` and `trusted-headers` mutually exclusive with public mode
+and refuses that startup with `config.public_mode_with_idp`
+(`spec/06-mcp-server.md:96`), and those are the registry-process providers. A
+running registry that reports a configured identity provider therefore has public
+mode off, which is what lets a surface holding only that one flag decide the
+gate's state.
+
+On a registry that authenticates no caller, which is the default standalone and
+public-mode posture and the posture §13.10's own web UI targets
+(`spec/13-deployment.md:170`), every layer write is admitted and closing the
+ownership gap changes nothing. That is what keeps §13's statement that "the
+layer-management and erase endpoints admit any request"
 (`spec/13-deployment.md:33`) true, keeps standalone and standard behaving
 identically on the same handler, and keeps a layer registered with
 `podium layer register --user-defined --owner alice` manageable by the local
 operator. That invocation is the one that produces a user-defined layer with a
-stored owner on a registry that authenticates no caller: the CLI sends `owner`
-only inside the `--user-defined` branch (`cmd/podium/layer.go:224-227`), and the
-handler falls back to the request body's `owner` when no authenticated identity
-resolves (`pkg/registry/server/layers.go:643-646`,
-`docs/reference/cli.md:423`).
+stored owner on such a registry: the CLI sends `owner` only inside the
+`--user-defined` branch (`cmd/podium/layer.go:224-227`), and the handler falls
+back to the request body's `owner` when no authenticated identity resolves
+(`pkg/registry/server/layers.go:643-646`, `docs/reference/cli.md:423`). The erase
+endpoint reaches the same short-circuit through the same admin hook, which is why
+§13 states the two endpoints together and why no restatement of this carve-out
+claims it is specific to layer writes.
 
-`test/integration/reingest_pipeline_test.go:87` keeps passing unchanged. It
-builds the endpoint with the bare `NewLayerEndpoint`, whose default `authAdmin`
-returns nil for every caller (`pkg/registry/server/layers.go:174`), and its layer
-is admin-defined, so the admin path authorizes the request.
+Where the gate is live, a caller who resolves no subject is refused with `403`
+`auth.forbidden` like any non-owner. That arm matters because §6.3.3 makes a
+request anonymous rather than rejected while the issuer JWKS is unreachable
+(`spec/06-mcp-server.md:98`), so a caller resolving no subject is a routine
+runtime state on a registry that authenticates callers.
+
+The spec renders the carve-out the way §4 already renders the parallel carve-out
+for the re-embed endpoint: "Configuring an identity provider makes the gate live,
+whether or not the registry verifies callers itself"
+(`spec/04-artifact-model.md:760`). §4 qualifies its own exclusivity with "does
+not extend to the other admin-gated endpoints, whose posture is defined in §4.7.2
+and §7.3.2", and the layer write gate is neither admin-only nor specified in
+either section, so that spec sentence stands as written and only unqualified
+restatements of it move.
+
+**The bare constructor's permissive defaults.** This paragraph is the single
+statement of what an endpoint built with the bare `NewLayerEndpoint` authorizes,
+and every other site cites it by name. `NewLayerEndpoint` installs a default
+`authAdmin` that returns nil for every caller and a default identity resolver
+that returns `layer.Identity{IsPublic: true}`, which resolves no subject
+(`pkg/registry/server/layers.go:174-175`). Such an endpoint therefore admits
+every request on the admin arm of the gate this section adds, whatever the
+layer's kind, and names no owner. The construction is test-only. A deployment
+wires `pkg/registry/core.AdminAuthorize` into `authAdmin`
+(`pkg/registry/server/layers.go:1156`) and the serverboot resolver into the
+identity hook, so the permissive default is never the posture a registry serves.
+Two consequences follow. `test/integration/reingest_pipeline_test.go:87` posts to
+reingest with no credential and keeps passing unchanged once the gate lands,
+because the default `authAdmin` admits its caller on the admin arm and that arm
+acts on any layer in the tenant; the layer the test registers is admin-defined,
+which is a property of the fixture rather than a condition of the pass. A test
+that asserts a refusal overrides both defaults, installing a denying
+`WithAdminAuth` and a `WithIdentityResolver` that resolves a non-owner or no
+subject, because overriding one leaves the other default admitting the request.
+The surface that regresses is a user-defined layer driven by a non-owner identity
+on a registry that has an identity provider, and that case has no test today.
 
 **IMPLEMENTOR'S CHOICE:** whether the owner comparison reads the caller's subject
 through the same helper the cap count uses or through the request-identity
-accessor the admin gate uses. Any answer compares against the verified subject
-rather than a client-supplied field, returns `403` `auth.forbidden` rather than
-`404`, and leaves the admin path able to act on any layer in the tenant.
+accessor the admin gate uses. Any answer satisfies the layer-write authorization
+rule above and adds nothing to it.
+
+**The unfiltered-list rule.** This paragraph is the single statement of what the
+layer surface's read does and what follows from it. Every other site in this
+proposal names the rule, cites it here, and states no condition, caller, or value
+the statement here does not carry.
+
+`GET /v1/layers` runs no authorization function and evaluates no visibility or
+owner predicate. The `GET` arm dispatches straight to the list handler
+(`pkg/registry/server/layers.go:336-343`), which reads the endpoint's single
+tenant and returns every layer config stored under it (`:762-777`), so the tenant
+is the only scoping the list carries. `GET /v1/layers?deleted=true` returns that
+tenant's soft-deleted layers on the same terms (`:763-770`). The response body
+carries the layer configs alone and echoes no caller, so it reports neither who
+asked nor that anything was withheld. An anonymous caller, an authenticated
+non-owner, an admin, and a caller whose credential fails verification each
+receive the same list, because the list handler consults no identity and the
+layer endpoint resolves the caller through a resolver that discards the
+verification error and returns the anonymous-public identity
+(`internal/serverboot/identity_verify.go:55-63`).
+
+The catalog endpoints behind `load_domain`, `search_artifacts`, and
+`load_artifact` are the contrast. Each evaluates the §4.6 visibility predicate
+against the resolved caller, and that predicate admits every layer in public mode
+and on a registry that configures no identity provider
+(`pkg/layer/composer.go:65`, `spec/04-artifact-model.md:615`,
+`spec/13-deployment.md:33`). The layer list evaluates no predicate on any
+deployment.
+
+The gate C1 adds is on the write handlers this section names, and it changes no
+read: an expired or untrusted credential changes a write's disposition and leaves
+the list read as it is. This proposal adds no server-side filtering to the read,
+which the Non-goals section records as an exclusion. The panel's role split is
+therefore presentation over a list the server hands it whole, and a design brief,
+a documentation page, or a site in this proposal that describes the layer list as
+scoped to the caller states something false and is corrected rather than
+accommodated. G1 corrects the one such sentence in `web/DESIGN.md`.
 
 ## The browser session
 
-The registry mints no credential and keeps no session record. The session cookie
-carries the token §6.3.3 already accepts.
+The session cookie carries the token §6.3.3 already accepts. What that leaves the
+registry holding is the no-session-state rule below, which is the single
+statement of it.
 
 This section is the single statement of the pre-authorization transaction
 contract: the HTTP method each route answers on, what the sign-in redirect
@@ -447,31 +547,39 @@ order, what each outcome sets and clears, and which code each refusal returns.
 Every other site in this proposal cites the contract by name and states only
 what is local to that site.
 
-**The route methods.** Sign-in and the callback answer on `GET`. Each is a
-top-level navigation, which is what makes `SameSite=Lax` deliver
-`__Host-podium_auth` on the identity provider's redirect back to the callback,
-and neither can carry a request-side CSRF value a page set, which is why "The
-CSRF position" excludes both by name as well as by method. Sign-out answers on
-`POST`. It is a non-navigation call the page issues, which is what lets it carry
-the `X-Podium-CSRF` header where the landed mechanism requires one, and `POST`
-is what puts it inside the §6.3.4 gate under that section's method predicate.
-The methods are fixed here rather than left to the implementor because the mux
-registration, the `docs/reference/http-api.md` Authentication section, the §7
+**The route methods.** This paragraph is the single statement of the HTTP method
+each authentication route answers on. Every other site in this proposal cites it
+by name and states only what is local to that site.
+
+Sign-in and the callback answer on `GET`. Each is a top-level navigation, and a
+`SameSite=Lax` cookie is delivered on a cross-site request only when that request
+is a top-level navigation with a safe method, which is what makes
+`__Host-podium_auth` reach the callback on the identity provider's redirect back.
+Neither route can carry a request-side CSRF value a page set, which is why "The
+CSRF position" excludes both by name as well as by method.
+
+Sign-out answers on `POST`. It is a non-navigation call the page issues, which is
+what lets it carry the `X-Podium-CSRF` header where the landed mechanism carries
+a request-side value, and a top-level navigation could not. `POST` is also what
+places sign-out inside the §6.3.4 gate under that section's method predicate, so
+the gate reads sign-out as state-changing.
+
+The methods are fixed here rather than left to the implementor, because the mux
+registration, the Authentication section of `docs/reference/http-api.md`, the §7
 entry, the S45 step-4 rewrite, and the new sign-in scenario all have to spell
-them identically, and because the sign-out method decides whether the §6.3.4
-gate covers sign-out at all.
+them identically, and because the sign-out method decides whether the §6.3.4 gate
+covers sign-out at all.
 
 **What the cookie holds.** The callback exchanges the authorization code
 server-side for an access token whose `aud` is `PODIUM_OAUTH_AUDIENCE`, which is
 the token a device-code CLI also presents, and returns it in the
-`__Host-podium_session` cookie. The registry keeps no session record, mints no
-session identifier, and holds no session key. This adds no credential to §6.3.3:
-the cookie carries the same IdP-signed JWT the `oidc-jwt` provider already
-verifies on every request (`spec/06-mcp-server.md:96-100`), which is why the
-access token is what the cookie carries rather than the ID token. A deployment
-whose IdP issues opaque access tokens cannot use the browser flow, which is the
-constraint the shipped `oidc-jwt` path already imposes on a gateway-forwarded
-token.
+`__Host-podium_session` cookie. The cookie therefore adds no credential to
+§6.3.3, per the no-session-state rule below: it carries the same IdP-signed JWT
+the `oidc-jwt` provider already verifies on every request
+(`spec/06-mcp-server.md:96-100`), which is why the access token is what the
+cookie carries rather than the ID token. A deployment whose IdP issues opaque
+access tokens cannot use the browser flow, which is the constraint the shipped
+`oidc-jwt` path already imposes on a gateway-forwarded token.
 
 **The cookie table.** The browser flow sets the cookies below and no others. This
 table is the single statement of the cookie contract. Every other site in this
@@ -480,19 +588,18 @@ proposal cites it by name and states only what is local to that site.
 | Cookie | Prefix | `HttpOnly` | `Secure` | `Path` | `SameSite` | `Max-Age` | Set by | Cleared by |
 |:--|:--|:--|:--|:--|:--|:--|:--|:--|
 | `__Host-podium_session` | `__Host-` | yes | yes | `/` | `Lax` | absent | the callback | sign-out |
-| `__Host-podium_auth` | `__Host-` | yes | yes | `/` | `Lax` | the configured transaction TTL | sign-in | the callback, on every outcome; sign-out |
-| `__Host-podium_csrf`, present only where the chosen mechanism carries a request-side value | `__Host-` | no | yes | `/` | `Lax` | absent | the callback | sign-out |
+| `__Host-podium_auth` | `__Host-` | yes | yes | `/` | `Lax` | the configured transaction TTL | sign-in | the callback; sign-out |
+| `__Host-podium_csrf`, present only where the mechanism C2 lands carries a request-side value per the wire contract under "The CSRF position" | `__Host-` | no | yes | `/` | `Lax` | absent | the callback | sign-out |
 
 The `__Host-` prefix is the browser-enforced binding control: it forbids a
 `Domain` attribute and forces `Secure` and `Path=/`, so no sibling host can plant
 any of these cookies, and it is why none of them needs a server-side signing key.
 The prefix places no constraint on `HttpOnly`, so the page-readable CSRF row
 keeps that anti-planting property while the page reads the value. `Secure` is
-unconditional, so the browser flow requires the registry to be reached over an
-`https` origin, whether directly or through the gateway that terminates TLS
-(`spec/06-mcp-server.md:112`), or over a loopback address. That is a property of
-the registry's own origin rather than of the issuer URL, so the startup guard
-below carries it as its own conjunct. `SameSite=Lax` rather than `Strict` is
+unconditional on every row, including the page-readable CSRF row. What that
+requires of the registry's browser-facing origin is stated by the redirect-URI
+conjunct under "The browser session", which the startup guard enforces.
+`SameSite=Lax` rather than `Strict` is
 forced by `__Host-podium_auth`, which has to survive the IdP's cross-site
 redirect back to the callback.
 
@@ -500,10 +607,9 @@ redirect back to the callback.
   `nonce`, and the PKCE `code_verifier` the sign-in route mints. Its `Max-Age`
   bounds the sign-in window at 10 minutes by default, tunable by
   `--web-ui-auth-transaction-ttl` / `PODIUM_WEB_UI_AUTH_TRANSACTION_TTL` per the
-  key-placement rule under "Where configuration keys go". The callback clears it
-  on every outcome, success or refusal, which is what makes the transaction
-  single-use, and sign-out clears it as well so a sign-out mid-transaction leaves
-  no cookie behind.
+  key-placement rule under "Where configuration keys go". When and how the
+  callback and sign-out clear it is stated under "The callback order and
+  outcomes".
 - `__Host-podium_session` holds the access token. Its lifetime is bounded
   server-side by the token's own `exp`, set by the IdP, so the registry chooses
   no second lifetime and the row carries no `Max-Age`. `__Host-podium_csrf`
@@ -527,19 +633,37 @@ verifier. The `nonce` travels in the authorization request because an ID token
 carries a `nonce` claim only when the request sent one, which is what makes the
 callback's binding check reachable.
 
-**The callback order.** The callback reads `__Host-podium_auth` and compares the
-returned `state` against it before inspecting anything else in the query, so a
-callback whose `state` is absent or unequal is refused whatever else that query
-carries. It then branches: a query carrying the IdP's `error` parameter runs no
-exchange, and a query carrying a `code` is exchanged server-side at
-`PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT` with the `code_verifier` the cookie holds
-and the configured client credential. The `nonce` of the ID token that exchange
-returns is compared against the cookie's `nonce` after the exchange, because the
-ID token does not exist until the token endpoint answers. On success the callback
-returns the access token in `__Host-podium_session`. It clears
-`__Host-podium_auth` on every outcome, and "What happens when it does not fire"
-below states what each outcome sets and clears and which code each refusal
-returns.
+**The callback order and outcomes.** The callback reads `__Host-podium_auth` and
+compares the returned `state` against it before inspecting anything else in the
+query, so a callback whose `state` is absent or unequal is refused whatever else
+that query carries. It then branches: a query carrying the IdP's `error`
+parameter runs no exchange, and a query carrying a `code` is exchanged
+server-side at `PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT` with the `code_verifier` the
+cookie holds and the configured client credential. The `nonce` of the ID token
+that exchange returns is compared against the cookie's `nonce` after the
+exchange, because the ID token does not exist until the token endpoint answers.
+
+This paragraph is the single statement of what the callback sets and clears on
+each outcome. Every other site in this proposal cites it by name and states only
+what is local to that site. On success the callback returns the access token in
+`__Host-podium_session`. On every outcome the response carries an explicit
+clearing `Set-Cookie` for `__Host-podium_auth`: on success, on the `403`
+`auth.csrf_invalid` refusal, on the `502` `auth.exchange_failed` refusal, on the
+transient `registry.unavailable` refusal, and on the declined-consent redirect
+that takes no error code. Leaving the cookie to reach its `Max-Age` does not
+satisfy this, because that `Max-Age` is the operator-tunable transaction TTL and
+an uncleared cookie stays replayable for the rest of that window. The clearing is
+what makes the transaction single-use: the `state`, the `nonce`, and the PKCE
+`code_verifier` are each usable for one callback, a replayed or misdelivered
+callback finds no cookie and is refused, and the recovery from every refusal is
+re-running sign-in rather than reloading the callback URL. On every outcome other
+than success the callback sets no session cookie and emits no `Set-Cookie` for
+`__Host-podium_session` at all, so a session cookie the browser already holds is
+neither replaced nor cleared. Sign-out is the only route that clears
+`__Host-podium_session`, and it clears `__Host-podium_auth` as well so that a
+sign-out mid-transaction leaves no cookie behind; the cookie table's clearing
+column carries both. Which code each refusal returns is stated under "What
+happens when it does not fire" below.
 
 Neither value is signed or encrypted by the registry, because each is either
 compared against something the IdP returns (`state` against the callback query
@@ -552,43 +676,137 @@ Tampering breaks only the tamperer's own flow.
 parameter, passed the browser-flow enablement field at its one production call
 site (`internal/serverboot/serverboot.go:1135`); the `internal/serverboot` tests
 that construct the function directly pass `false` and keep their current
-behavior. When the configured token header
-carries no bearer credential and that parameter is true, the raw token is read
-from `__Host-podium_session`. Everything after that is unchanged:
-`verifier.Verify`, the §6.3.1 `IdpGroupMapping`, the `ErrKeySetUnavailable`
-fail-closed-to-anonymous arm, and the `layer.Identity` construction. That one
+behavior. That parameter carries the enablement condition of the header-wins
+precedence rule below, and that rule decides when the raw token is read from
+`__Host-podium_session`. This site states no second version of it. Everything
+after that read is unchanged: `verifier.Verify`, the §6.3.1 `IdpGroupMapping`,
+the `ErrKeySetUnavailable` fail-closed-to-anonymous arm, and the `layer.Identity`
+construction. The function's doc comment
+(`internal/serverboot/identity_verify.go:193-200`) restates the shipped §6.3.3
+rule as "A request carrying no token is anonymous and sees public visibility
+only", which the second accepted location falsifies as worded, so C2 restates it
+from the anonymity rule below in the same edit that adds the parameter. That one
 function is installed as the server's identity verifier
 (`internal/serverboot/serverboot.go:1136`, `pkg/registry/server/server.go:202`),
 reused as the §7.3.1 layer endpoint's resolver (`:1198`, `:1207`), read by the
 admin-gate closure (`:1208-1216`), and read by the tenant router (`:1170`), so
-one edit reaches every consumer and there is no second resolution site. The
-consumers differ in what they do with a verification error rather than in how
-they resolve one: the meta-tool identity middleware maps the error to a status
-and a §6.10 code (`pkg/registry/server/identity_verify.go:39-55`, `:87-94`),
-while `layerIdentityResolver` discards it and returns the anonymous-public
-caller (`internal/serverboot/identity_verify.go:55-63`), because
-`WithIdentityResolver` carries no error channel
-(`pkg/registry/server/layers.go:187`). "What happens when it does not fire"
-states what each surface returns.
+one edit reaches every consumer and there is no second resolution site.
 
-**Precedence is branch order.** The configured token header is read first, and
-the cookie only when that header carries none. The two are never merged. A
-gateway that authenticated the request is the authority in that deployment, and
-a registry-set cookie must not override it. Both paths verify through the same
-`OIDCVerifier`, so the resolved subject is JWKS-verified either way.
+**The expiry-signal rule.** This block is the single statement of what an
+unverifiable session reports on each surface. Every other site cites it and
+restates none of it.
+
+The consumers differ in what they do with a verification error rather than in how
+they resolve one, and the difference belongs to the consumer rather than to the
+credential or to the deployment.
+
+- The meta-tool identity middleware maps the error to a status and a §6.10 code
+  (`pkg/registry/server/identity_verify.go:39-55`, `:87-94`). A token past its
+  `exp` returns `401` `auth.token_expired`, and one that fails signature, `iss`,
+  or `aud` returns `401` `auth.untrusted_token`. The routes it wraps are the
+  paths the boot mux hands to the catch-all
+  (`internal/serverboot/serverboot.go:1239`,
+  `pkg/registry/server/server.go:429`), and the catalog reads the panel issues
+  are among them.
+- The §7.3.1 layer endpoints are mounted ahead of that catch-all
+  (`internal/serverboot/serverboot.go:1220-1221`) and resolve the caller through
+  `layerIdentityResolver`, which discards the error and returns the
+  anonymous-public caller (`internal/serverboot/identity_verify.go:55-63`),
+  because `WithIdentityResolver` carries no error channel
+  (`pkg/registry/server/layers.go:187`). A write the C1 owner gate covers is
+  refused with `403` `auth.forbidden`, and the layer read answers as the
+  unfiltered-list rule under "The layer-ownership defect" states, so it reports
+  nothing about the verification failure.
+- The posture read resolves through that same `layerIdentity`
+  (`internal/serverboot/serverboot.go:1198`), so it answers `200` and omits
+  `subject`.
+- While the JWKS is unreachable, verification returns `ErrKeySetUnavailable` and
+  the shipped arm resolves anonymous with no error at all
+  (`internal/serverboot/identity_verify.go:207-212`), so the meta-tool route
+  answers anonymously as well and no surface reports expiry.
+
+The rule carries no deployment qualifier, because every registry that can hold a
+session cookie has the owner gate live: the C3 guard admits the browser flow only
+on an `oidc-jwt` registry with public mode off, and the gate short-circuits only
+on public mode or no identity provider
+(`internal/serverboot/serverboot.go:1209-1215`). It also carries no credential
+qualifier: the discard predates the browser flow and governs every credential the
+layer endpoint accepts, so a gateway-forwarded header token past its `exp` reads
+exactly the same way.
+
+This proposal leaves `layerIdentityResolver` as it is. Surfacing the error there
+would re-code the refusal a gateway-forwarded caller receives, which is a change
+to a shipped surface this proposal does not otherwise touch.
+
+Two consequences follow for the UI. The catalog read is the panel's expiry
+signal. A write's `403` `auth.forbidden` carries no expiry information and is not
+an ownership decision. G1 lands both in the design brief, whose session-expiry
+transition names the transition without naming the signal
+(`web/DESIGN.md:163-164`).
+
+The rule adds no error code and re-scopes no envelope. `auth.token_expired` and
+`auth.untrusted_token` already cover the case as §6.3.3 states them, and their
+gateway-assuming text is restated under the credential-location rule, which
+decides every site and names the step that owns it.
+
+**The header-wins precedence rule.** This paragraph is the single statement of
+how the registry chooses between the two accepted locations of the `oidc-jwt`
+credential. Every other site in this proposal cites it by name and states only
+what is local to that site. The registry reads the configured token header first,
+and a bearer credential found there decides the request's identity. It reads
+`__Host-podium_session` only when both of two conditions hold: the configured
+token header carries no bearer credential, meaning the header is absent, its
+value is empty, or its value does not begin with the `Bearer` prefix that §6.3.3
+requires (`spec/06-mcp-server.md:96`), and the browser flow is enabled on that
+registry. A registry with the browser flow disabled reads no cookie at all. The
+two locations are never merged, and no request draws part of its
+identity from each. A gateway that authenticated the request is the authority in
+that deployment, and a registry-set cookie must not displace a gateway-forwarded
+identity. The cookie carries the same credential the header carries, so both
+locations verify through the same `OIDCVerifier` against the issuer JWKS for the
+same `aud`, the resolved subject is JWKS-verified either way, and this rule adds
+no verification step and no refusal. Where this precedence leaves a request with
+no credential in either location, the anonymity rule below states what the
+request resolves as.
+
+**The anonymity rule.** This paragraph is the single statement of when a request
+resolves anonymous under `oidc-jwt`. Every other site in this proposal cites it
+by name and states only what is local to that site. Under `oidc-jwt` a request
+whose configured token header carries no bearer credential is anonymous rather
+than rejected, and it sees public visibility only (§4.6). An omitted header, a
+header value without the case-insensitively matched `Bearer ` prefix, and a
+`Bearer ` value that trims to empty are one condition and not three
+(`internal/serverboot/identity_verify.go:181-191`). Where the browser flow is
+enabled, such a request is anonymous only when it also presents no valid
+`__Host-podium_session` cookie, meaning a cookie whose token verifies under
+§6.3.3 against the issuer JWKS for the same `aud`; the configured token header is
+still read first, per the header-wins precedence rule above. Where the flow is
+disabled the sentence applies as written. The conjunct is required rather than
+decorative, because the cookie branch is gated on the browser-flow enablement
+field alone, so a registry that boots with the flow disabled reads no cookie and
+a stale `__Host-podium_session` sent to it resolves anonymous. Enablement is the
+only condition that branch carries. The §13.10 guard already requires `oidc-jwt`,
+the web UI, and public mode off before the flow can be enabled
+(`pkg/registry/server/config_validate.go:87`), so a `trusted-headers` or an
+`injected-session-token` registry reads no cookie, and no site states the
+provider and the enablement as two conditions. The separate `trusted-headers`
+anonymity rule at `spec/06-mcp-server.md:108` is a different rule and is
+unchanged. The conjunct is a necessary condition rather than a definition of
+anonymity: a cookie that fails verification does not resolve anonymous on the
+routes the meta-tool identity middleware wraps, where the middleware returns the
+§6.10 code, and the expiry-signal rule above states what each consumer does with
+that error. §6.3.3's fail-closed rule is untouched and applies in either accepted
+location, so while the issuer JWKS is unreachable the request is anonymous
+whether its token arrived in the header or in the cookie.
 
 **Sign-out** clears every cookie whose row in the cookie table names sign-out as
 its clearer, and there is nothing else to clear.
 
-**Enablement, guard, and mount.** `--web-ui-auth` / `PODIUM_WEB_UI_AUTH` is one
-boolean. The acquisition values are `PODIUM_WEB_UI_OAUTH_CLIENT_ID`,
-`PODIUM_WEB_UI_OAUTH_CLIENT_SECRET`, `PODIUM_WEB_UI_REDIRECT_URI`,
-`PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT`, and
-`PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT`.
-`--web-ui-auth-transaction-ttl` /
-`PODIUM_WEB_UI_AUTH_TRANSACTION_TTL` carries the sign-in window. All are startup
-configuration, read once beside
-`internal/serverboot/serverboot.go:1826-1827` and never changed at runtime.
+**Enablement, guard, and mount.** The browser flow's configuration keys, their
+flag or environment forms, and their startup-read semantics are fixed by the
+key-placement rule under "Where configuration keys go", and this section states
+no second version of them. `PODIUM_WEB_UI_AUTH` is the key the guard and the
+mount below both read.
 
 `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` and
 `PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT` are the IdP URLs the flow calls: the
@@ -610,87 +828,219 @@ browser flow. Configuring the two
 endpoints explicitly is also the shipped pattern for the device-code client,
 which takes `--issuer` / `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` and `--token-url`
 / `PODIUM_OAUTH_TOKEN_URL` (`docs/reference/cli.md:112-113`,
-`cmd/podium/login.go:35`). `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` itself is the
-device-code endpoint, read by the CLI and the MCP bridge
-(`cmd/podium/login.go:35`, `cmd/podium-mcp/main.go:277`) and carried on §6.3's
-`oauth-device-code` options list (`spec/06-mcp-server.md:42`). The browser flow
-does not read it, and the guard does not accept it in place of
-`PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT`, so an operator who sets only the
-device-code key gets a startup refusal naming the key the flow needs rather than
-a redirect to nowhere.
+`cmd/podium/login.go:35`).
+
+**The device-code key.** `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` is the
+device-authorization endpoint of the §6.3 `oauth-device-code` flow. It is a
+consumer-side acquisition option, carried on that provider's `Options:` list
+(`spec/06-mcp-server.md:42`) and read by `podium login` as the default for
+`--issuer` (`cmd/podium/login.go:35`), by the MCP bridge
+(`cmd/podium-mcp/main.go:277`), and by both SDKs
+(`sdks/podium-py/podium/client.py:810`, `sdks/podium-ts/src/index.ts:895`). This
+paragraph is the single statement of what the browser flow does with that key,
+and every other site in this proposal cites the device-code-key rule by name and
+states only what is local to that site.
+
+The browser flow does not read it. The authorization endpoint the sign-in route
+redirects to is `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT`, which is the only
+key the flow reads for that purpose. `StartupConfig.Validate` does not accept the
+device-code key in place of it: with `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` set
+and `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` empty, the
+authorization-endpoint conjunct fails and startup fails with
+`config.web_ui_auth_unconfigured` naming the key the flow needs, so an operator
+who sets only the device-code key gets a startup refusal rather than a redirect
+to nowhere. The rule therefore has a startup half and a runtime half, and the
+testing plan pins one at each: the Guard case pins the refusal, and the Routes
+case pins the endpoint the sign-in redirect carries.
+
+**The startup guard.** The paragraphs below are the single statement of the
+browser flow's startup guard. Every other site in this proposal cites this guard
+by name and states only what is local to that site.
 
 `StartupConfig.Validate` (`pkg/registry/server/config_validate.go:87`) requires,
-when the flow is enabled, that the web UI is on, the identity provider is
-`oidc-jwt`, public mode is off, every acquisition value is non-empty, and
-`PODIUM_WEB_UI_REDIRECT_URI` is an `https` URL or a loopback `http` URL, and
-otherwise fails startup with `config.web_ui_auth_unconfigured` naming the failed
-conjunct. The public-mode conjunct runs after the shipped public-mode exclusion
-rather than ahead of it, so a registry configured for public mode with
-`oidc-jwt` keeps failing with `config.public_mode_with_idp` as it does today
-(`pkg/registry/server/config_validate.go:87-90`); the combination the new guard
-refuses is public mode with no identity provider, and there it is the `oidc-jwt`
-conjunct that fails. The redirect-URI conjunct is the secure-origin requirement the `__Host-`
-prefix imposes: a browser neither stores nor returns a `Secure` cookie on a
-non-secure origin, so a registry reached over plain `http` on a non-loopback
-address would set the pre-authorization cookie, receive no cookie back on the
-callback, and refuse every sign-in with `403` `auth.csrf_invalid` and no
-diagnosis. The shipped `oidc-jwt` issuer guard
-(`internal/serverboot/identity_verify.go:268`) does not cover this, because it
-constrains `PODIUM_OAUTH_ISSUER`, which is the IdP's discovery URL rather than
-the origin the browser reaches. The routes mount inside the existing
-`if cfg.webUI` block
-(`internal/serverboot/serverboot.go:1229`) under a nested enablement check. The
-nesting is the web-UI conjunct; the `oidc-jwt` conjunct is not restated at the
-mount, because `validate()` runs before the wiring and no booted process can
-falsify it.
+when `PODIUM_WEB_UI_AUTH` is on, that `PODIUM_WEB_UI` is on, that
+`PODIUM_IDENTITY_PROVIDER` is `oidc-jwt`, that public mode is off, that every
+acquisition value is non-empty, and that `PODIUM_WEB_UI_REDIRECT_URI` satisfies
+the redirect-URI conjunct below. Those conjuncts are the whole guard. A
+configuration that enables the flow and fails one of them fails startup with
+`config.web_ui_auth_unconfigured` naming the failed conjunct. A configuration
+that enables no browser flow reaches no conjunct and starts, which includes the
+shipped web-UI-only configuration, meaning `--web-ui` alone
+(`cmd/podium/serve.go:38`, `internal/serverboot/serverboot.go:1826`).
 
-**The posture read.** `GET /v1/ui/session` is an unauthenticated read that
-reports the deployment posture and the caller's own resolved subject. The UI
-needs both and can observe neither: the session cookie is `HttpOnly`, so the
-page cannot tell whether it holds one; `GET /v1/layers` is unfiltered and echoes
-no caller (`pkg/registry/server/layers.go:770-777`); the catalog responses carry
-no caller identity; `/healthz` reports the §13.2.1 mode banner alone
+`PODIUM_WEB_UI_AUTH` is a key of its own rather than a `PODIUM_IDENTITY_PROVIDER`
+value, so the registry's accepted provider values stay as §13.12 records them
+(`spec/13-deployment.md:468`), and no shipped guard covers the combination. The
+public-mode exclusion is keyed on `PODIUM_IDENTITY_PROVIDER` alone
+(`spec/13-deployment.md:484`, `pkg/registry/server/config_validate.go:88-91`) and
+reads no web-UI key. The web-UI bind guard does read `PODIUM_WEB_UI` and
+`PODIUM_WEB_UI_ALLOW_PUBLIC_BIND` and already requires a configured identity
+provider, and it constrains the bind address rather than the flow's
+configuration.
+
+The acquisition values are the rows the key-placement rule marks as carrying a
+variable and no flag, and §6.3.4 marks the same set required, additional to the
+issuer and audience `oidc-jwt` already requires (`spec/06-mcp-server.md:106`).
+The device-code key above states what the guard does with
+`PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`.
+
+**The redirect-URI conjunct.** This paragraph is the single statement of the
+secure-origin requirement. Every other site in this proposal cites it by name and
+states only what is local to that site. `PODIUM_WEB_UI_REDIRECT_URI` is an
+`https` URL or an `http` URL whose host is a loopback address, and a value that
+is neither fails startup with `config.web_ui_auth_unconfigured` naming this
+conjunct. The requirement follows from the cookie contract: every row of the
+cookie table carries the `__Host-` prefix, the prefix forces `Secure`
+unconditionally, including on the page-readable CSRF row, and a browser neither
+stores nor returns a `Secure` cookie on a non-secure origin. A loopback `http`
+address is admitted because a browser treats it as a secure context and stores
+and returns a `Secure` cookie set there.
+
+The conjunct constrains the registry's own browser-facing origin, which the
+redirect URI names because the callback is a registry route. An `https` redirect
+URI is satisfied whether the registry is reached over TLS directly or through a
+gateway that terminates TLS and forwards plain HTTP to the registry's listener
+(`spec/06-mcp-server.md:112`), so the gateway-fronted deployment §13.10 describes
+passes the conjunct on a non-loopback plain-HTTP bind. The guard reads the
+configured value rather than the deployment property because the registry cannot
+observe its own browser-facing scheme: it builds a plain `http.Server` and calls
+`ListenAndServe` (`internal/serverboot/serverboot.go:1444`), the `Host` header
+carries no scheme, and nothing in the tree reads `X-Forwarded-Proto`. The
+redirect URI is the one browser-facing origin startup configuration carries.
+
+Nothing already in the tree implies the conjunct. The shipped `oidc-jwt` issuer
+guard (`internal/serverboot/identity_verify.go:268`) constrains
+`PODIUM_OAUTH_ISSUER`, which is the IdP's discovery URL rather than the origin
+the browser reaches, and it admits a loopback issuer. §13.10's web-UI bind guard
+admits a non-loopback bind once `--web-ui-allow-public-bind` and an identity
+provider are set (`spec/13-deployment.md:172`), and §6.3.3 blesses a directly
+reachable `oidc-jwt` registry (`spec/06-mcp-server.md:106`), which is a registry
+serving plain HTTP.
+
+Absent the conjunct, a deployment configured with a plain `http` non-loopback
+redirect URI would set the pre-authorization cookie, receive no cookie back on
+the callback, and refuse every sign-in with `403` `auth.csrf_invalid` and no
+diagnosis.
+
+**The guard's ordering.** This paragraph is the single statement of how the
+browser-flow guard orders against the shipped public-mode exclusion, and every
+other site cites it instead of restating it. The shipped exclusion is the first
+check `Validate` runs (`pkg/registry/server/config_validate.go:87-90`), and the
+browser-flow guard runs after it rather than ahead of it, so the shipped check's
+predicate, its error, and its message are unchanged and a registry configured for
+public mode with `oidc-jwt` keeps failing with `config.public_mode_with_idp` as
+it does today. The browser-flow guard therefore reaches its public-mode conjunct
+only in a configuration where no identity provider is configured, and in that
+configuration the `oidc-jwt` conjunct is the one that fails and the one the error
+names. No configuration reaches `config.web_ui_auth_unconfigured` naming the
+public-mode conjunct. The guard carries the public-mode conjunct even so, because
+it states the full set of conditions the flow requires and the shipped exclusion
+is keyed on `PODIUM_IDENTITY_PROVIDER` alone (`spec/13-deployment.md:484`), so
+that exclusion does not fire on the new enablement key.
+
+**The mount is stated here and nowhere else.** The authentication routes are
+registered inside the existing `if cfg.webUI` block that already mounts `/ui/`
+(`internal/serverboot/serverboot.go:1229`), under one nested check on the
+enablement field C2 adds. The enclosing block supplies the web-UI conjunct, so
+the mount adds exactly one condition, and no other conjunct of the guard is
+restated there: `validate()` runs before the wiring, and no booted process can
+falsify the `oidc-jwt`, public-mode, acquisition-value, or redirect-URI
+conjuncts. Making the web UI a conjunct of the guard rather than a second
+enablement axis is what collapses the mount onto that one field: a registry that
+enables the flow without the UI does not boot, so "browser flow on, web UI off"
+is a startup refusal rather than an unregistered route, and no configuration
+leaves the routes absent for a reason the guard has not already stated. The
+predicate reads startup configuration alone, set once at boot from the flags and
+`PODIUM_*` variables and never changed at runtime, so a registry that boots
+without the flow never acquires the routes and one that boots with it never loses
+them. The posture read `GET /v1/ui/session` is registered in the same block
+beside `/ui/` but outside the nested check, gated on the web UI alone, because a
+registry serving the UI with no browser flow is the deployment whose page has to
+learn not to offer sign-in. Every path this predicate registers is mounted from
+the boot mux, and the handlers' package home is the choice recorded under
+"IMPLEMENTOR'S CHOICE (package home)". A path the predicate leaves unregistered
+falls through to the catch-all and is answered as any unregistered path is
+answered on that deployment; "The status an unregistered path receives" records
+the disposition per surface.
+
+**The posture read.** `GET /v1/ui/session` reports the deployment's identity
+posture and the caller's own resolved subject. This paragraph is the single
+statement of what the read requires, what it discloses, and what it adds. Every
+other site in this proposal cites it by name and states only what is local to
+that site.
+
+The read requires no credential and refuses no request for lack of one. A request
+that does carry one has it verified only so the response can report `subject`,
+through the same `layerIdentity` resolver the layer endpoint uses
+(`internal/serverboot/serverboot.go:1198`).
+
+The read carries no privilege. It discloses the deployment's identity
+configuration and the requesting caller's own subject, and it discloses no
+artifact, layer, tenant, or other caller's data, so the UI gains no privileged
+access through it. Every other call the UI makes is the call an SDK would make
+against the same endpoint, which is §13.10's own account of the UI: it "talks to
+the registry's HTTP API as any other consumer would"
+(`spec/13-deployment.md:163`).
+
+The read adds no surface beyond itself. It adds no credential, cookie, error
+code, SPI method, or store method, and it changes no existing endpoint. Its
+handler reads no store and writes none, so it sits outside the §13.2.1 write set
+under the read-only classification below. It is mounted on the web UI alone
+rather than on the browser flow, and "Where it mounts" below states that predicate and
+what a registry serving no UI answers instead.
+
+The read exists because the browser can observe neither of the two things it
+reports. The session cookie is `HttpOnly`, so the page cannot tell whether it
+holds one; `GET /v1/layers` reports neither the caller nor any scoping under the
+unfiltered-list rule, so it separates no posture
+(`pkg/registry/server/layers.go:770-777`); the catalog responses carry no caller
+identity; `/healthz` reports the §13.2.1 mode banner alone
 (`pkg/registry/server/server.go:656-673`); and `/v1/quota` reports tenant,
 limits, and usage alone (`pkg/registry/server/quota.go:9-26`). Without the read
 the UI has no source for whether to offer sign-in, and each rendering rule G1
 states would key on server configuration the browser cannot see.
 
-- **The body.** `identity_provider_configured` and `public_mode` are booleans.
-  `browser_auth` is an object carrying `enabled`, and, when `enabled` is true,
-  `sign_in_path` and `sign_out_path`, which are the paths the mux registers, so
-  no authentication route path is spelled inside the bundle. `subject` is the
-  verified subject of the request that asked, present only when one resolves.
-  The response carries no other field, and in particular no issuer, client
-  identifier, endpoint, or other configuration value.
+- **The body.** This bullet is the single statement of the response body. Every
+  other site in this proposal cites it by name and states only what is local to
+  that site, and states no field, condition, or value the statement here does not
+  carry. The body reports the deployment's posture and the caller's own resolved
+  subject, and it reports nothing about any other caller.
+  `identity_provider_configured` and `public_mode` are booleans:
+  `identity_provider_configured` reports whether an identity provider is
+  configured and never names which one, and `public_mode` reports whether public
+  mode is engaged. `browser_auth` is an object carrying `enabled`, which reports
+  whether the browser flow is enabled on this deployment, and, when `enabled` is
+  true, `sign_in_path` and `sign_out_path`, which are the paths the mux
+  registers, so no authentication route path is spelled inside the bundle. When
+  `enabled` is false both path fields are absent, because the flow's routes are
+  not registered on that deployment and there is no registered path to report.
+  `subject` is the verified subject of the request that asked, present only when
+  one resolves and absent otherwise; the bullet below states which requests
+  resolve one. The response carries no other field, and in particular no issuer,
+  client identifier, endpoint, or other configuration value. These field names
+  are the vocabulary the posture-keyed rendering rules are written in, which G1
+  states.
 - **The state it reads, and where that state is set.**
   `identity_provider_configured` and `public_mode` read the shipped
   `identityProvider` and `publicMode` fields, and `browser_auth` reads the
   enablement field C2 adds. Each is set once at boot from
   the flags and `PODIUM_*` variables (`internal/serverboot/serverboot.go:1826`)
   and never changed at runtime, and the browser-flow fields are the ones the C3
-  guard validates before the wiring runs. `subject` reads the per-request identity that
-  `layerIdentity` resolves (`internal/serverboot/serverboot.go:1198`), which is
-  the resolver the layer endpoint already uses and which returns the
-  anonymous-public caller when verification fails, so an expired or untrusted
-  session cookie reports no subject and the panel's expiry signal stays the
-  catalog read. Nothing sets or clears state on this path: the handler reads no
-  store and writes none, so §13.2.1 leaves it outside the write set for the same
-  reason the authentication routes sit outside it, and a read-only registry
-  serves it unchanged.
-- **Where it mounts.** Inside the `if cfg.webUI` block beside `/ui/`
-  (`internal/serverboot/serverboot.go:1229`), gated on the web UI alone rather
-  than on the browser flow, because a registry serving the UI with no browser
-  flow is exactly the deployment whose page has to learn not to offer sign-in.
-  A registry started without `--web-ui` serves no UI, and the path is never
-  registered, so a request for it falls through to the catch-all and is answered
-  as any unregistered path is on that deployment, per "What happens when it does
-  not fire" below. The S45 stack configures no identity provider, so what it
-  sees is `404`.
-- **Its callers.** The UI, on load. No CLI, SDK, or MCP caller reads it, it
-  changes no existing endpoint, and it adds no credential, cookie, error code,
-  SPI method, or store method. It is an unauthenticated read, so the UI gains no
-  privileged access and every other call it makes is still the call an SDK would
-  make.
+  guard validates before the wiring runs. `subject` reads the per-request
+  identity that `layerIdentity` resolves
+  (`internal/serverboot/serverboot.go:1198`), which is the resolver the layer
+  endpoint already uses, so what this read reports for an unverifiable session is
+  the arm the expiry-signal rule above gives it. Nothing sets or clears state on
+  this path: the handler reads no store and writes none, which is what places it
+  outside the §13.2.1 write set under the read-only classification below.
+- **Where it mounts.** Per the mount predicate stated under "Enablement, guard,
+  and mount", which registers it beside `/ui/` on the web UI alone. A registry
+  started without `--web-ui` serves no UI, and the path is never registered, so a
+  request for it is answered as any path the registry does not register is
+  answered on that deployment, per "The status an unregistered path receives"
+  below. The S45 stack configures no identity provider, so on that stack the read
+  answers `404`.
+- **Its callers.** The UI, on load. No CLI, SDK, or MCP caller reads it.
 - **What happens when it does not fire.** When the read fails or answers `404`,
   the UI renders its anonymous presentation: no sign-in control, no sign-out
   control, and the layer panel rendered with its write operations, where a
@@ -699,35 +1049,110 @@ states would key on server configuration the browser cannot see.
   end-to-end case under C2 asserts the body on a registry with the flow disabled
   and on one with it enabled.
 
-**No shared state, and that is a requirement rather than a saving.** §13.1's
-reference topology is a "Stateless front-end: 3+ replicas behind a load balancer"
-(`spec/13-deployment.md:5`). A store-backed pre-authorization transaction forces
-the sign-in and the callback onto the same replica or onto a shared write; the
-cookie travels with the browser, so any replica serves the callback. Nothing in
-this proposal adds a `store.Store` method (`pkg/store/store.go:345`), a table in
-`Memory`, `Postgres`, or `SQLite`, an `additiveColumns` row
-(`pkg/store/schema_migrate.go:47`), a `pkg/store/storetest` conformance case, a
-retention sweep, or a §9.1 `RegistryStore` row.
+**The no-session-state rule.** Every other site in this proposal cites this rule
+by name and states only what is local to it. The registry keeps no session state,
+which is the following conjuncts.
 
-**Revocation is expiry.** Sign-out clears the cookies, so the browser stops
-presenting the credential, and the token stays valid at the IdP until it expires.
-That is the model §6.3.3 already states for the credential the registry verifies:
-the verification paragraph checks the signature, `iss`, `aud`, and the
-`exp`/`nbf` window and consults no revocation list
-(`spec/06-mcp-server.md:98`). The registry operates no revocation list for a
-forwarded token today and gains none here. There is no silent refresh: an expired
-session re-runs the sign-in redirect, which completes without a prompt while the
-IdP session is live.
+- The registry mints no credential that authenticates a request.
+  `__Host-podium_session` carries the access token the IdP issued, which is the
+  credential §6.3.3 already accepts, so the browser flow adds no credential to
+  that section. The values the registry does mint are the `state`, the `nonce`,
+  and the PKCE `code_verifier` the sign-in route puts in `__Host-podium_auth`,
+  and the request-side CSRF value the callback sets where the chosen mechanism
+  carries one. None of them authenticates any request: each is compared against
+  something the IdP returns, or is echoed back by the page that read it.
+- The registry keeps no session record, mints no session identifier, and holds no
+  session key. The `__Host-` prefix is the browser-enforced binding control the
+  cookie table names, which is why no cookie in this flow needs a server-side
+  signing key.
+- The registry chooses no lifetime for the session. The token's own `exp`, set by
+  the IdP, bounds it server-side, and the session row of the cookie table carries
+  no `Max-Age` for that reason. The one lifetime the registry chooses is the
+  pre-authorization transaction TTL, which bounds the sign-in window and holds no
+  session.
+- No state is shared across replicas. §13.1's reference topology is a "Stateless
+  front-end: 3+ replicas behind a load balancer" (`spec/13-deployment.md:5`). A
+  store-backed pre-authorization transaction would force the sign-in and the
+  callback onto the same replica or onto a shared write. The cookie travels with
+  the browser, so any replica serves the callback.
+- No authentication route and no posture read mutates registry state. What each
+  of them does instead, and how §13.2.1 classifies it, is the read-only
+  classification below.
+- This proposal adds no persistence surface. It adds no `store.Store` method
+  (`pkg/store/store.go:345`), no table in `Memory`, `Postgres`, or `SQLite`, no
+  `additiveColumns` row (`pkg/store/schema_migrate.go:47`), no
+  `pkg/store/storetest` conformance case, no retention sweep, no §9.1
+  `RegistryStore` row, and no §13.1 topology component.
 
-**Why there is no session store.** The only thing a stored record would buy is
-revocation before `exp`, which the registry offers for no credential today. Both
-`oidc-jwt` and `injected-session-token` tokens are valid until they expire, with
-no revocation list. Adding it for the browser credential alone would make it the
-one revocable credential, with no spec basis, at the cost of a `store.Store`
-method set across `pkg/store/memory.go`, `sqlite.go`, `postgres.go`,
-`schema_migrate.go`, and the `pkg/store/storetest` conformance suite, a §9.1
-`RegistryStore` row on a mirrored surface, a §13.1 topology component, and a
-read-only classification for two more routes.
+The rule is a requirement of the reference topology and also the outcome of
+costing the alternative. The only thing a stored session record would buy is
+revocation before `exp`, which "Revocation is expiry" below states the registry
+offers for no credential it accepts. Adding a record for the browser credential
+alone would make it the one revocable credential the registry serves, with no
+spec basis, at the cost of every item in the last conjunct above and a §13.2.1
+read-only classification for whichever routes wrote it.
+
+**The read-only classification.** This paragraph is the single statement of how
+§13.2.1 classifies the surfaces this proposal adds. Every other site in this
+proposal cites it by name and states only what is local to that site.
+
+Sign-in, the callback, sign-out, and the posture read mutate no registry state.
+Sign-in sets the pre-authorization cookie, the callback exchanges the code with
+the IdP and sets the cookies the cookie table above names it as setting, sign-out
+clears the cookies that table names it as clearing, and the posture read answers
+from configuration fields set at boot and from the per-request resolved identity.
+None of them reads registry state either. §13.2.1's rule keys on mutation
+(`spec/13-deployment.md:41`), so it is the absence of mutation that places each
+of them outside the write set. Nothing here joins that set, and the section's
+named examples, meaning ingest webhooks, layer admin operations, freeze toggles,
+admin grants, and tenant management, stay as they stand.
+
+That rule is per-endpoint and per-mutation, and §13.2.1 says each endpoint's own
+section states its classification. §7's entry therefore carries one
+classification covering sign-in, the callback, sign-out, and the posture read
+together, rather than one for the authentication routes and a second for the
+posture read. This is an application of the section's existing rule, so §13.2.1's
+own text gains nothing, no carve-out is written, and the §6.3.1 SCIM-receiver
+precedent is not invoked.
+
+The posture read is not an authentication route. It mounts on the web UI alone
+rather than on the browser flow, so a site whose subject is the authentication
+routes covers sign-in, the callback, and sign-out, and a site whose subject
+reaches the posture read names it as well.
+
+A read-only registry serves each of these surfaces exactly as it serves it
+otherwise, on every deployment that mounts it, and none of them returns
+`registry.read_only`. A Postgres primary outage therefore causes no
+authentication outage: an operator signs in, signs out, and keeps reading the
+catalog on an established session while the registry serves from the replica. The
+Read-only case under C2 pins this.
+
+**Revocation is expiry.** This paragraph is the single statement of the session's
+revocation and renewal model. Every other site in this proposal cites it by name
+and states only what is local to that site.
+
+The browser flow offers no revocation before the token's own `exp`. Sign-out
+clears the cookies whose rows in the cookie table name it as their clearer, so
+the browser stops presenting the credential, and the token stays valid at the IdP
+until it expires. That is the model §6.3.3 already states for the credential the
+registry verifies: the verification paragraph checks the signature, `iss`, `aud`,
+and the `exp`/`nbf` window and consults no revocation list
+(`spec/06-mcp-server.md:98`), and `OIDCVerifier.Verify` implements those checks
+and no others (`pkg/identity/oidc_jwt.go:183`). The registry consults no
+revocation list for that token in either accepted location under the
+credential-location rule, and it gains none here.
+
+Both token-carrying providers the registry accepts, `oidc-jwt` and
+`injected-session-token`, are valid until they expire. The third verified
+provider, `trusted-headers` (`internal/serverboot/identity_verify.go:89`),
+carries no token and no `exp`, because the gateway withdraws identity by ceasing
+to inject the identity headers. A stored session record would therefore make the
+browser credential revocable before `exp` while every other credential the
+registry accepts stays valid until it expires, and the spec gives no basis for
+that difference.
+
+There is no silent refresh. An expired session re-runs the sign-in redirect,
+which completes without a prompt while the IdP session is live.
 
 **What happens when it does not fire.** With the flow disabled the three paths
 are never registered, so a request for one of them reaches the catch-all
@@ -736,132 +1161,213 @@ handler rather than by an authentication route, and `oidcJWTVerifier` ignores
 the cookie, so a stale cookie resolves anonymous-public rather than
 authenticating anyone.
 
-The status that request receives is the deployment's rather than the route's,
-and this paragraph is the single statement of it. The meta-tool identity
-middleware runs ahead of the inner mux (`pkg/registry/server/server.go:429`,
+**The status an unregistered path receives.** This paragraph is the single
+statement of the status a request for a path the registry does not register
+receives, and every other site in this proposal cites it by name and states only
+what is local to that site. The status is the deployment's rather than the
+route's. The meta-tool identity middleware runs ahead of the inner mux
+(`pkg/registry/server/server.go:429`,
 `pkg/registry/server/identity_verify.go:44-51`) and exempts only `/healthz`,
-`/readyz`, and `/scim/` (`:73-80`). Where the configured verifier refuses the
-request, the middleware answers before any path is matched: under
-`injected-session-token` a request carrying no runtime-signed token fails
-verification (`internal/serverboot/identity_verify.go:27-29`,
+`/readyz`, and `/scim/` (`:73-80`), so identity verification runs before route
+matching on every other path, including the three authentication routes, `/ui/`,
+and the posture read. Where the configured verifier refuses the request, the
+middleware answers before any path is matched: under `injected-session-token` a
+request carrying no runtime-signed token fails verification
+(`internal/serverboot/identity_verify.go:27-29`,
 `pkg/identity/runtime.go:137-138`) and the middleware returns `401`
 `auth.untrusted_runtime` (`pkg/registry/server/identity_verify.go:118-119`), and
 under `oidc-jwt` a request carrying an invalid bearer token returns `401`
-`auth.untrusted_token`. Where no verifier refuses the request, which is a
-registry that configures no identity provider and an `oidc-jwt` registry whose
+`auth.untrusted_token`. The response is `404` only where no verifier refuses the
+request, and that is four configurations: a registry that configures no identity
+provider, where no verification middleware is installed at all
+(`pkg/registry/server/identity_verify.go:40-41`); an `oidc-jwt` registry whose
 request carries no bearer credential
-(`internal/serverboot/identity_verify.go:204-205`), the response is `404`. The
-unmounted route is unreachable under every one of those dispositions, so the
-mount predicate holds either way, and every site in this proposal that asserts
-`404` on an unmounted authentication route names the stack it runs on and that
-stack configures no identity provider.
+(`internal/serverboot/identity_verify.go:204-205`); an `oidc-jwt` registry whose
+key set is unavailable, which §6.3.3 fails closed to the anonymous caller rather
+than to a rejection (`internal/serverboot/identity_verify.go:209-213`); and a
+`trusted-headers` registry, whose verifier returns no error for any request
+(`internal/serverboot/identity_verify.go:234-236`). The §13.10 guard requires
+`oidc-jwt` for the browser flow, so every `trusted-headers` and every
+`injected-session-token` registry is one whose authentication routes are
+unregistered. The unmounted route is unreachable under all of these
+dispositions, so the mount predicate holds whichever one applies. Every site in
+this proposal that asserts a status on a path the registry does not register
+names the stack it runs on and the identity configuration of that stack.
 
-With the flow enabled, the callback's own refusals are the following. A callback
+With the flow enabled, the callback's own refusals are the following, and each
+sets and clears the cookies "The callback order and outcomes" states. A callback
 whose `__Host-podium_auth` cookie is absent, expired, or does not match the
 returned `state`, and a callback whose exchanged ID token carries a `nonce` other
-than the one that cookie holds, are each refused with `403` `auth.csrf_invalid`,
-set no session cookie, and clear the pre-authorization cookie. The `nonce`
+than the one that cookie holds, are each refused with `403` `auth.csrf_invalid`
+in the scope "The CSRF position" states. The `nonce`
 comparison is a separate check from the `state` comparison: `state` binds the
 callback to the browser that started the transaction, and `nonce` binds the ID
-token to that same transaction. A callback whose `__Host-podium_auth` cookie and
-`state` validate but whose query carries the IdP's `error` parameter rather than
-a `code`, which is what the authorization endpoint returns when the user declines
-the consent prompt or the IdP refuses the authorization request, runs no
-exchange: it clears the pre-authorization cookie, sets no session cookie, and
-returns the browser to the web UI root at `/ui/` without establishing or
-replacing a session. It leaves any `__Host-podium_session` cookie the browser
-already holds intact, which the cookie table's clearing column already states,
-so a cancelled first sign-in lands at `/ui/` anonymous and a cancelled
-re-sign-in lands there still signed in under the earlier session. Re-running
-sign-in is the recovery for that condition, so it takes no error code and in
-particular not `auth.exchange_failed`, whose `retryable: false` envelope and
-client-credential remediation would report a user decision as an operator
-misconfiguration and would emit a `5xx` on the most common outcome of a sign-in
-attempt. The `state` comparison runs first, so an error redirect that carries no
-matching pre-authorization cookie is refused with `403` `auth.csrf_invalid` like
-any other callback that fails that comparison. A cookie carrying an expired
-token is refused with `401` `auth.token_expired`, and one failing signature,
-`iss`, or `aud` with `401` `auth.untrusted_token`, both from the shipped verifier
-path, on the routes the meta-tool identity middleware wraps, which are the paths
-the boot mux hands to the catch-all
-(`internal/serverboot/serverboot.go:1239`, `pkg/registry/server/server.go:429`).
-The §7.3.1 layer endpoints are mounted ahead of that catch-all
-(`internal/serverboot/serverboot.go:1220-1221`) and resolve the caller through
-`layerIdentityResolver`, which discards the verification error and returns the
-anonymous-public caller (`internal/serverboot/identity_verify.go:55-63`), so a
-layer write carrying an expired or untrusted session cookie resolves no subject
-and is refused with `403` `auth.forbidden` by the owner gate C1 adds, while
-`GET /v1/layers` still returns the unfiltered list. This proposal leaves that
-resolver as it is. Its discard predates the browser flow and governs every
-credential the layer endpoint accepts, so surfacing the error there would re-code
-the refusal a gateway-forwarded caller receives as well, which is a change to a
-shipped surface this proposal does not otherwise touch. The panel therefore
-learns that a session has expired from a catalog read, which returns `401`
-`auth.token_expired`, rather than from a write, and G1 corrects the brief's
-session-expiry transition to state that. While the JWKS is unreachable the
-request is anonymous. An IdP the registry
-cannot reach for the code exchange, or one that answers the token endpoint with a
-`5xx`, is a transient failure against a dependency the registry called, so it is
-refused with `registry.unavailable`, whose shipped scope and retryable framing
-cover exactly that case (`pkg/registry/server/error_envelope.go:26`,
-`docs/reference/error-codes.md:158`). An IdP that reaches the registry and
-refuses the exchange with an OAuth error such as `invalid_grant`, or refuses it
-because `PODIUM_WEB_UI_OAUTH_CLIENT_SECRET` is wrong, is a permanent failure for
-that request, so `registry.unavailable` is not available to it: every retry fails
+token to that same transaction.
+
+A callback whose `__Host-podium_auth` cookie and `state` validate but whose query
+carries the IdP's `error` parameter rather than a `code`, which is what the
+authorization endpoint returns when the user declines the consent prompt or the
+IdP refuses the authorization request, runs no exchange and returns the browser
+to the web UI root at `/ui/` without establishing or replacing a session. A
+cancelled first sign-in therefore lands at `/ui/` anonymous, and a cancelled
+re-sign-in lands there still signed in under the earlier session that "The
+callback order and outcomes" leaves intact. Re-running sign-in is the recovery
+for that condition, so it takes no error code and in particular not
+`auth.exchange_failed`, whose `retryable: false` envelope and client-credential
+remediation would report a user decision as an operator misconfiguration and
+would emit a `5xx` on the most common outcome of a sign-in attempt. The `state`
+comparison runs first, so an error redirect that carries no matching
+pre-authorization cookie is refused with `403` `auth.csrf_invalid` like any other
+callback that fails that comparison.
+
+A session cookie the verifier refuses, whether for `exp`, for signature, `iss`,
+or `aud`, or because the key set is unavailable, is answered on every surface by
+the expiry-signal rule under "The browser session", and this section adds
+nothing to it.
+
+**The exchange-failure rule.** This paragraph is the single statement of how the
+callback's code exchange fails and which code each failure returns. Every other
+site in this proposal cites this rule by name and states only what is local to
+it. The discriminator is whether the IdP refused the exchange at the OAuth
+protocol level. An IdP the registry cannot reach for the code exchange, and one
+whose token endpoint answers with a `5xx`, are both transient failures against a
+dependency the registry called, so each is refused with `500`
+`registry.unavailable`, whose shipped scope and `retryable: true` envelope cover
+exactly that case (`pkg/registry/server/error_envelope.go:26`,
+`docs/reference/error-codes.md:158`), and neither re-scopes that entry. An IdP
+the registry reaches, whose token endpoint answers the exchange and refuses it
+with an OAuth error such as `invalid_grant`, or refuses it because
+`PODIUM_WEB_UI_OAUTH_CLIENT_SECRET` is wrong, is a permanent failure for that
+request, so `registry.unavailable` is not available to it: every retry fails
 identically and the `retryable: true` envelope names no useful action. It is
-refused with `502` `auth.exchange_failed`, which S7 stages as a non-retryable
-code. On every one of these outcomes the callback sets no session cookie
-and still emits the clearing `Set-Cookie` for `__Host-podium_auth`. No error code
-is added beyond `auth.csrf_invalid` and `auth.exchange_failed`, and no shipped
-envelope entry is re-scoped.
+refused with `502` `auth.exchange_failed`, which S7 stages as a new non-retryable
+code whose envelope carries `retryable: false` and a `suggested_action` naming
+the client credential and the registered redirect URI as what an operator checks.
+A callback whose query carries the IdP's `error` parameter rather than a `code`
+runs no exchange and reaches neither arm, so it takes no error code, as the
+declined-consent outcome above states. What the callback sets and clears on each
+of these outcomes is stated under "The callback order and outcomes" above. No
+error code is added beyond `auth.csrf_invalid` and `auth.exchange_failed`, and no
+shipped envelope entry is re-scoped.
 
-**What the mechanism does not change.** The credential is unchanged, so §6.3.1
-tenant selection keeps reading the verified `org_id` claim,
-`auth.tenant_unknown` keeps populating `details.token_org_id`,
-`auth.token_expired` and `auth.untrusted_token` keep their scopes as
-authentication failures on the same credential, and §6.3.3's
-anonymous-while-JWKS-unreachable rule keeps applying. No error code is re-scoped
-and none is added. What moves is text: every shipped sentence that says this
-credential arrives forwarded by a gateway is false for one of its two accepted
-locations, or names a remediation a browser cannot perform. The rule below is
-the single statement of which text that is.
+**What the mechanism does not change.** The credential is unchanged, so §6.3.3's
+anonymous-while-JWKS-unreachable rule keeps applying. The rule immediately below
+states what the mechanism does to tenant derivation, and the one after it states
+what it does to `auth.token_expired` and `auth.untrusted_token`. What moves is
+text: every shipped sentence that says this credential arrives forwarded by a
+gateway is false for one of its two accepted locations, or names a remediation a
+browser cannot perform. The credential-location rule below is the single
+statement of which text that is.
 
-**The credential-location rule.** Every other site in this proposal cites this
-rule by name and states only what is local to it. A site is restated when a
-request whose token arrives in `__Host-podium_session` reaches it and the text is
-then false or names an action a browser cannot take. A site scoped to the header
-location or to the gateway deployment stands as written, because the browser flow
-removes neither and the header-wins precedence rule keeps the gateway account
-true where it is labelled as such. A site that documents the verification
-configuration itself, meaning the issuer key, its code mirror, and the audience
-startup guard, also stands, because the registry verifies the same `iss` and
-`aud` claims on the token in either accepted location. A site that states the
-scope or the emitted text of an `auth.*` error code moves even when it names
-those same claims, because the code's scope is what the amendment widens. A site
-that states how the registry derives a request's tenant also stands, because the
-cookie carries the same token and the tenant still comes from that token's
-verified `org_id` claim.
+**The tenant-derivation rule.** This paragraph is the single statement of what
+the browser flow does to tenant derivation, and every other site in this proposal
+cites it by name rather than restating any part of it. The flow adds no
+credential. A `__Host-podium_session` cookie carries the same IdP-signed token
+the configured token header would carry, and the registry verifies it against the
+same issuer JWKS for the same audience, so the token's claims are identical in
+either accepted location. Derivation reads the token's claims rather than the
+request's transport, so the accepted location does not enter it: §6.3.1
+per-request tenant selection (`spec/06-mcp-server.md:64`) keeps selecting a
+request's tenant from the verified `org_id` claim, and the sentences that restate
+it, `spec/06-mcp-server.md:94` and the derivation clause at `:98`, keep describing
+what the registry does. Every site that states how the registry derives a
+request's tenant therefore stands unedited. Widening such a site is a defect of
+the applied change, and a more serious one than widening any other standing site,
+because the tenant selector bounds §4.7 isolation. `auth.tenant_unknown` keeps
+its scope and keeps populating `details.token_org_id`, because a token that
+arrives in the cookie and whose `org_id` resolves to no provisioned tenant is the
+failure the shipped entry already describes (`spec/06-mcp-server.md:378`,
+`docs/reference/error-codes.md:58`), neither of which names the credential's
+location.
 
-Four sites are worked through below, one for each restatement pattern the rule
+**The unchanged-scope statement.** This paragraph is the single statement of what
+the browser session does to `auth.token_expired` and `auth.untrusted_token`.
+Every other site in this proposal cites it by name and states only what is local
+to it. Both codes are authentication failures on the same credential, so both
+keep their scopes, neither §6.10 entry is re-scoped, no shipped envelope entry is
+re-scoped (`pkg/registry/server/error_envelope.go:67-72`), and no error code is
+added beyond `auth.csrf_invalid` and `auth.exchange_failed`. A browser session
+presents an `oidc-jwt` token, and §6.10 already scopes `auth.token_expired`
+(`spec/06-mcp-server.md:355-364`) to an expired token and `auth.untrusted_token`
+(`:366-376`) to one that fails signature, `iss`, or `aud` verification, which is
+the verification §6.3.3 specifies and the §6.9 failure-mode table restates at
+`:329`. The cookie reaches both codes through the shipped verifier path rather
+than a new one: `oidcJWTVerifier` calls `verifier.Verify` and returns the error
+(`internal/serverboot/identity_verify.go:201-215`), and `writeIdentityError` maps
+that error to the two codes (`pkg/registry/server/identity_verify.go:88-100`).
+That path is also why the change inventory reaches `pkg/identity`, which declares
+the error the amended `:366` defines. What changes on the two entries is their
+text, because a session cookie carries a token the registry itself obtained
+through the §6.3.4 exchange rather than one a gateway forwarded, and a directly
+reachable `oidc-jwt` registry has no gateway at all. The moved text is, for each
+code, whichever of its scope sentence, its §6.9 row, its `suggested_action`, and
+its canonical `message` the credential-location rule reaches;
+`auth.token_expired`'s canonical `message` (`spec/06-mcp-server.md:360`) is
+provider-neutral and stands. The credential-location rule decides every one of
+those sites and names the step that owns it, and S7 stages the `spec/` text it
+moves for these two codes.
+
+**The credential-location rule.** This paragraph is the single statement of which
+shipped text the second accepted credential location moves and which text stands.
+Every other site in this proposal cites it by name and states only what is local
+to that site.
+
+A site moves when a registry running the browser flow receives a request whose
+token arrives in `__Host-podium_session` and the site's text is then false, is
+narrowed to less than what the registry accepts, or names an action a browser
+cannot take. The categories that produce that condition are a site stating what
+the registry accepts as a credential, how a caller obtains that credential, what
+a request carrying no bearer credential in the configured token header resolves
+to, or that a client sends no credential of its own. A site stating the scope or
+the emitted text of an `auth.*` error code moves as well, even where the claims
+it names are verified identically in either location, because the sentence
+describes the credential by the single location it was written about while the
+code covers both. The codes keep their scopes: the verifier path, the failures it
+reports, and the §6.10 entries for `auth.token_expired` and
+`auth.untrusted_token` are unchanged, and what moves is the scope sentence, the
+remediation, and the emitted message. `spec/06-mcp-server.md:386` and its mirror
+`pkg/registry/server/error_envelope.go:74` are the single named exception to that
+clause, for the reason recorded below, and the rule names no other.
+
+A site stands when its own words already limit it to the configured token header
+or to a gateway-fronted deployment, because the browser flow removes neither and
+the header-wins precedence rule keeps the gateway account true where the text is
+labelled as such. A site that presents that arrangement as the only one a
+provider serves is not so limited and moves. A site stands when it describes how
+one provider's own mechanism works. A site stands when it documents the
+verification configuration, meaning the issuer key, its code mirror, and the
+audience startup guard, because the registry verifies the same `iss` and `aud`
+claims on the token in either accepted location. A site stands when it states how
+the registry derives a request's tenant, for the reason the tenant-derivation
+rule above gives.
+
+The rule reaches prose, Go comments and doc comments, and emitted strings alike,
+across the corpus the command below searches. A restatement narrows the falsified
+claim to the location it was written about rather than deleting it, keeps the two
+existing credentials' behavior unchanged, and leaves every standing site
+untouched. Widening a standing site is a defect, because it asserts a change this
+proposal does not make. The rule produces no inventory of affected sites and this
+document fixes no moved set. The moved set is every hit of the command below to
+which the rule applies, dispositioned at implementation time, and the applied
+change is complete when re-running the command and applying the rule leaves no
+hit undispositioned.
+
+Sites are worked through below, one for each restatement pattern the rule
 produces, so a disposition can be checked against an example. They illustrate the
 rule rather than bound it.
 
 | Site | What it says today | Staged by |
 |:--|:--|:--|
-| `spec/06-mcp-server.md:92` (the opening clause and the sends-no-credential sentence) | both providers are "registry-process identity providers for a deployment that runs the registry behind a gateway that has already authenticated the caller", which is false for a directly reachable `oidc-jwt` registry running the browser flow, and the same line closes "A Podium client behind such a gateway sends no credential of its own", whose antecedent the restatement removes for `oidc-jwt`. It is the authoring source of the `pkg/identity/registry.go:69-70` comment and of `docs/deployment/gateway-delegated-identity.md:11`, so the three move together. Restated so `oidc-jwt` is described as a registry-process provider for a deployment where the registry verifies the caller's token itself, whether a gateway forwarded it or the registry obtained it through the §6.3.4 exchange, with `trusted-headers` alone keeping the fronting-gateway requirement and the sends-no-credential sentence scoped to a client behind a gateway under either provider. `:94`, on tenant derivation, stands | S3 |
+| `spec/06-mcp-server.md:92` (the opening clause and the sends-no-credential sentence) | This row is the single statement of that line's disposition and of the set that moves with it. Every other site names this row and adds only what is local to it. The line opens by calling both providers "registry-process identity providers for a deployment that runs the registry behind a gateway that has already authenticated the caller", which is false for a directly reachable `oidc-jwt` registry running the browser flow. The clause is restated per provider: `oidc-jwt` is a registry-process provider for a deployment where the registry verifies the caller's token itself, whether a gateway forwarded it or the registry obtained it through the §6.3.4 exchange, and `trusted-headers` alone keeps the fronting-gateway requirement. The split follows the shipped text, which already separates the two predicates: `:108` makes the gateway the source of truth for `trusted-headers` and `:112` records that `oidc-jwt` "verifies every token regardless of the network path, carries no bind restriction". Dropping the gateway predicate from both providers would assert a change to `trusted-headers` this proposal does not make. The same line closes "A Podium client behind such a gateway sends no credential of its own", and the restatement leaves "such a gateway" without an `oidc-jwt` antecedent, so that sentence is scoped in the same edit to a client behind a gateway under either provider. The clause's mirrors move with it in the applied change, each under the step that owns its tree: the §2.2 component-map bullet (`spec/02-architecture.md:101`) under S3 with `:92` itself, the `pkg/identity/registry.go:69-70` comment under C2, `docs/deployment/gateway-delegated-identity.md:9` and `:11` under D1, where `:9` carries the gateway-fronted framing and `:11` the sends-no-credential sentence whose antecedent `:9` sets, and the `test/manual-validation.md:2482-2484` preamble under T1. Landing one without the rest leaves the applied tree describing `oidc-jwt` as gateway-scoped at the site left behind, which is the defect the co-movement exists to prevent. This row's edit is scoped to `:92` and does not reach the adjacent `:94`, which stands per the tenant-derivation rule | S3, with C2, D1, and T1 |
 | `spec/06-mcp-server.md:366` | `auth.untrusted_token`'s scope: "a forwarded `oidc-jwt` token". The sentence states the code's scope rather than one provider's verification path, so it moves even though the claims it names are verified identically in either location | S7 |
 | `docs/deployment/integrations.md:85` | a closed acquisition enumeration for the directly reachable arrangement the browser flow runs in: "Callers obtain that token by completing the CLI's device-code flow". Restated so a CLI, an SDK, or another API client obtains the token through the device-code flow and, on a registry that enables the browser flow, a browser obtains it through the §6.3.4 exchange, which the registry returns in `__Host-podium_session` | D1 |
-| `docs/deployment/progressive-adoption.md:57` | the no-token-is-anonymous rule, scoped to the provider: "Under `oidc-jwt` a request carrying no token is anonymous rather than rejected, so it resolves to public visibility only". Narrowed with the same browser-flow conjunct the `spec/06-mcp-server.md:96` authoring source gains: under `oidc-jwt` a request carrying no bearer credential in the configured token header is anonymous, and where the browser flow is enabled it is anonymous only when it also presents no valid `__Host-podium_session` cookie. The conjunct is required rather than decorative, because a registry with the flow disabled reads no cookie, so a stale `__Host-podium_session` sent to it resolves anonymous | D1 |
+| `docs/deployment/progressive-adoption.md:57` | the no-token-is-anonymous rule, scoped to the provider: "Under `oidc-jwt` a request carrying no token is anonymous rather than rejected, so it resolves to public visibility only". It is narrowed to the anonymity rule above, rendered in the page's voice, which scopes the predicate to the configured token header and adds the browser-flow conjunct while keeping the visibility clause. The row's local point is that the narrowing leaves the surrounding exit criterion true: an unauthenticated caller still sees an empty catalog once no layer is public | D1 |
 
-**IMPLEMENTOR'S CHOICE:** which sites the sweep moves. The moved set is every hit
-of the recorded command below to which the rule above applies, determined at
-implementation time rather than fixed here. A site describing one provider's own
-mechanism, the verification configuration, or tenant derivation stands. A site
-stating the scope or the emitted text of an `auth.*` code moves. Widening a
-standing site is a defect, because it asserts a change this proposal does not
-make, and a widened tenant-derivation site is worse still, because the tenant
-selector bounds §4.7 isolation. The applied change is complete when re-running
-the command and applying the rule leaves no hit undispositioned.
+**IMPLEMENTOR'S CHOICE:** which sites the sweep moves. Any answer is the set the
+credential-location rule above selects from the hits of the command below. The
+rule states the test, the categories that stand, the defect a widened site
+introduces, and the criterion for a complete application, and this blank adds
+nothing to it.
 
 The sweep is reproduced rather than re-derived. It is the hits of
 
@@ -890,14 +1396,15 @@ rule's error-code clause, and the rule names no other. That
 or forward a token whose org_id claim names an existing tenant." Unlike
 `auth.token_expired`'s remediation it does not enumerate a path per provider, and
 its first clause names the action every deployment takes, so a browser session is
-not left without one. The entry's scope and its `details.token_org_id` field stay
-accurate for a session-authenticated request, so §6.10's `auth.tenant_unknown`
-and this string are both untouched.
+not left without one. The entry's scope and its `details.token_org_id` field are
+covered by the tenant-derivation rule, so §6.10's `auth.tenant_unknown` and this
+string are both untouched.
 
-**IMPLEMENTOR'S CHOICE:** none of the above. The package home is
-`pkg/registry/server`, alongside the layer endpoint it resembles, mounted from the
-boot mux beside `/ui/` (`internal/serverboot/serverboot.go:1229`). The route paths
-remain the choice recorded under "The edit sites".
+**IMPLEMENTOR'S CHOICE (package home):** none of the above. The package home is
+`pkg/registry/server`, alongside the layer endpoint it resembles. Where and under
+what condition the boot mux registers the handlers is the mount predicate stated
+under "The browser session". The route paths remain the choice recorded
+under "The edit sites".
 
 ## The spec amendment
 
@@ -938,15 +1445,47 @@ and `PODIUM_RUNTIME_KEYS_PATH` carry an environment read and no flag at all and
 are recorded in §13.12 as "Environment only; no config-file key"
 (`spec/13-deployment.md:479-480`).
 
-The enablement boolean and the transaction TTL carry a flag and a `PODIUM_*`
-variable, following `PODIUM_WEB_UI`. The acquisition values, enumerated under
-"Enablement, guard, and mount", are environment-only with no flag, following
-`PODIUM_TRUSTED_PROXY_SECRET`: one of them is a client credential, and a
-credential passed on the command line is readable from the process table, so the
-whole acquisition set is kept off it rather than split by sensitivity. The
-`docs/reference/cli.md` synopsis and flag-table rows below therefore cover the
-enablement boolean and the transaction TTL only, and the §13.10 key list is where
-every new key, flagged or not, is documented.
+**The key-placement rule.** The table below is the single statement of which
+browser-flow configuration key carries a `podium serve` flag and which is
+environment-only, and every other site cites it rather than restating any part of
+it.
+
+| Key | Forms | What it carries |
+|:--|:--|:--|
+| `--web-ui-auth` / `PODIUM_WEB_UI_AUTH` | flag and variable | one boolean, which enables the browser flow |
+| `--web-ui-auth-transaction-ttl` / `PODIUM_WEB_UI_AUTH_TRANSACTION_TTL` | flag and variable | the sign-in window, carried as `__Host-podium_auth`'s `Max-Age` by the cookie table under "The browser session" |
+| `PODIUM_WEB_UI_OAUTH_CLIENT_ID` | variable | the OAuth client identifier the sign-in redirect sends |
+| `PODIUM_WEB_UI_OAUTH_CLIENT_SECRET` | variable | the client credential the callback's token request sends |
+| `PODIUM_WEB_UI_REDIRECT_URI` | variable | the callback URL the IdP returns the browser to |
+| `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` | variable | the IdP endpoint the sign-in route redirects to |
+| `PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT` | variable | the IdP endpoint the callback exchanges the code at |
+
+The rows carrying a variable and no flag are the acquisition values, and a site
+that names the acquisition set names those rows.
+
+The enablement boolean and the transaction TTL carry both forms, following
+`PODIUM_WEB_UI` (`cmd/podium/serve.go:38-39`,
+`internal/serverboot/serverboot.go:1826-1827`). The acquisition values carry a
+variable and no flag, following `PODIUM_TRUSTED_PROXY_SECRET`: one of them is a
+client credential, and a credential passed on the command line is readable from
+the process table, so the whole acquisition set is kept off it rather than split
+by sensitivity.
+
+A flag and its variable are one value read once. `podium serve` writes a flag it
+parsed into the matching variable before the boot read
+(`cmd/podium/serve.go:65-72`), and `LoadConfig` reads the variable beside
+`internal/serverboot/serverboot.go:1826-1827`. A flag that is set therefore
+overrides the variable, and a flag that is not set leaves the variable's value,
+which is the precedence `docs/reference/cli.md:139` states for every shipped
+`podium serve` flag. Every key in the table is startup configuration, read at boot
+and never changed at runtime, so a guard or a mount predicate that reads one reads
+a value the process cannot change afterwards.
+
+The documentation surfaces follow from the table. The `docs/reference/cli.md`
+synopsis and flag table carry the enablement boolean and the transaction TTL
+alone, the `docs/reference/cli.md` environment-variable table carries the
+acquisition values, and the §13.10 key list documents every key in the table,
+flagged or not.
 
 ### The second-location sweep
 
@@ -959,24 +1498,15 @@ Successive review rounds each found one such site, one round at a time, because
 the disposition was argued per site rather than decided by a rule.
 
 **The rule.** The credential-location rule under "The browser session" decides
-every site, and this section states no second version of it. A site is affected
-when it states what the registry accepts as a credential, how a caller obtains
-that credential, what a request lacking a Bearer token resolves to, or that a
-client sends no credential of its own. A site is unaffected when it describes how
-one provider's own mechanism works, the verification configuration, or how the
-registry derives a request's tenant, none of which change.
+every site, and this section states no version of it. The reproducing command and
+the worked examples sit beside the rule there. The reason no list of affected
+sites appears here is local history: every round of review that read such a list
+found one more site the list had missed or misplaced, while the rule and the
+command stood unchallenged.
 
-The sweep produces no inventory of affected sites. The rule is stated once, with
-the reproducing command beside it and four worked examples. A list here would be
-a projection of that rule onto the corpus, and a projection drifts from the rule
-that generates it: each round of review that read such a list found one more site
-the list had missed or misplaced, while the rule and the command stood
-unchallenged.
-
-**IMPLEMENTOR'S CHOICE:** the wording each affected site takes. Any answer
-narrows the falsified claim to the location it was written about rather than
-deleting it, keeps the two existing credentials' behaviour unchanged, and leaves
-every site the rule leaves standing untouched.
+**IMPLEMENTOR'S CHOICE:** the wording each affected site takes. The
+credential-location rule under "The browser session" states what any wording
+holds to.
 
 ### The edit sites
 
@@ -1001,77 +1531,49 @@ every site the rule leaves standing untouched.
   The guard's predicate, its error, and its message are unchanged; what moves is
   the rationale each site states.
 - **§13.10** — the web-UI configuration keys, per the rule above, and the
-  configuration guard, stated beside the bind-guard sentence. The guard is that
-  enabling the browser flow requires `PODIUM_WEB_UI` on,
-  `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, public mode off, and the acquisition
-  options §6.3.4 marks required, which are the OAuth client identifier, the
-  client credential the server-side exchange presents, the redirect URI
-  registered with the IdP, and the IdP's authorization and token endpoints,
-  additional to the issuer and audience `oidc-jwt`
-  already requires (`spec/06-mcp-server.md:106`). §6.3.4's `Options:` list names
-  the same set, and states that the device-code option
-  `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` (`spec/06-mcp-server.md:42`) is not read
-  by the browser flow. It also requires that redirect
-  URI to be an `https` URL or a loopback `http` URL, because the session cookies
-  carry the `__Host-` prefix and therefore `Secure`, and a browser neither stores
-  nor returns a `Secure` cookie on a non-secure origin. That conjunct is about
-  the origin the browser reaches rather than the issuer URL the `oidc-jwt` scheme
-  guard already constrains. The new guard runs after the shipped public-mode
-  exclusion, so public mode combined with `oidc-jwt` keeps failing with
-  `config.public_mode_with_idp`, which the existing check emits first
-  (`pkg/registry/server/config_validate.go:87-90`), and the browser-flow guard
-  reaches the public-mode conjunct only where no identity provider is
-  configured, in which case the `oidc-jwt` conjunct is the one it names.
-  §13.10's bind guard does not imply the redirect-URI conjunct: it admits
-  a non-loopback bind once `--web-ui-allow-public-bind` and an identity provider
-  are set (`spec/13-deployment.md:172`), and §6.3.3 blesses a directly reachable
-  `oidc-jwt` registry (`spec/06-mcp-server.md:106`), which is a registry serving
-  plain HTTP. Every other combination fails
-  startup with `config.web_ui_auth_unconfigured`, naming the condition that
-  failed. Making the web UI a conjunct of the guard rather than a second
-  enablement axis is what lets the routes mount on one validated field: a
-  registry that enables the flow without the UI does not boot, so no
-  configuration leaves the routes absent for a reason the guard has not already
-  stated. The provider and public-mode conjuncts are stated here because the
-  shipped exclusion is keyed on `PODIUM_IDENTITY_PROVIDER` alone
-  (`spec/13-deployment.md:484`) and does not fire on a new enablement key. The
-  guard reads only startup configuration, which is set once at boot from the
-  flags and `PODIUM_*` variables and never changed at runtime, and its code
-  mirror is `StartupConfig.Validate` (`pkg/registry/server/config_validate.go:87`),
-  which C3 extends with the enablement and acquisition fields alongside the
-  existing `WebUI` and `WebUIAllowPublicBind` fields (`:67-72`).
+  configuration guard, stated beside the bind-guard sentence. The staged sentence
+  states the guard as the startup guard under "The browser session" states it,
+  carrying each conjunct and the `config.web_ui_auth_unconfigured` refusal that
+  names the failed conjunct, in spec voice and with no clause added or dropped.
+  §13.10 also states the guard's ordering against the shipped public-mode
+  exclusion, and against which conjunct a public-mode configuration fails, in the
+  terms fixed under "The browser session". This bullet adds nothing to
+  that statement.
+  What is local to this site is the placement and §6.3.4's half of it: §6.3.4's
+  `Options:` list names the same acquisition set the guard requires, and is the
+  spec home of the device-code-key rule under "The browser session", stating both
+  of its halves, that the browser flow does not read
+  `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` (`spec/06-mcp-server.md:42`) and that the
+  guard does not accept it in place of
+  `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT`, so the two sections carry one
+  list between them.
+  §13.10 requires that redirect URI to be an `https` URL or a loopback `http`
+  URL, per the redirect-URI conjunct under "The browser session", which
+  is the single statement of the rule and of its reason. §13.10 states the rule
+  and the reason in its own prose, because spec text cites no proposal, and it
+  states them beside the bind-guard sentence together with the bind-guard
+  non-implication that paragraph gives, because a reader of §13.10 meets the bind
+  guard first.
+  The web-UI conjunct is carried in this guard because the mount predicate stated
+  under "The browser session" depends on it. The guard's code mirror is
+  `StartupConfig.Validate` (`pkg/registry/server/config_validate.go:87`), which
+  C3 extends with the enablement and acquisition fields alongside the existing
+  `WebUI` and `WebUIAllowPublicBind` fields (`:67-72`).
 - **§6.3, a new §6.3.4** stating the browser acquisition flow, placed after
   §6.3.3, which ends at `spec/06-mcp-server.md:114` immediately before §6.4 at
   `:116`, with a pointer from the §6.3 introduction at `:40`. It is not a fourth
   sub-bullet under the `oauth-device-code` bullet's list (`:44-47`), which is
-  scoped to the device-code flow. §6.3.4 is also the spec home of the CSRF
-  predicate below: it defines a state-changing request as one whose HTTP method
-  is other than `GET`, `HEAD`, or `OPTIONS`, and it states that a state-changing request, other than the
-  sign-in and callback routes, that carries cross-site browser-origin evidence is
-  refused with `403` `auth.csrf_invalid` before the handler runs, whatever
-  credential authenticated it, and it names that evidence as a `Sec-Fetch-Site`
-  header whose value is other than `same-origin` or `none` or an `Origin` header
-  whose host and port differ from the host and port the request's own `Host`
-  header names. It states that the scheme is not compared, because the `Host`
-  header carries no scheme and §6.3.3 already records that the registry serves
-  HTTP while TLS terminates upstream (`spec/06-mcp-server.md:112`), so a
-  registry behind a gateway cannot observe the browser-facing scheme; "The CSRF
-  position" carries the same predicate and the reason the omission is safe. It
-  states that the predicate is scoped by the evidence rather than by the
-  credential, because §13.10 serves the UI behind a fronting gateway that
-  converts the browser's own session into the configured token header
-  (`spec/13-deployment.md:170`), so a credential-scoped gate would leave that
-  deployment's panel writes forgeable. It states that a state-changing request
-  carrying no such evidence is admitted, which is what a CLI, an SDK, or any
-  other non-browser client sends. It states that the predicate names no
-  deployment, so it applies whether or not the browser flow is enabled. It states
-  the two routes'
-  exclusion and its reason in the same place: each is a top-level navigation that
-  carries no same-origin proof and may carry a session cookie from an earlier
-  sign-in, and each is bound instead by the single-use `state`, `nonce`, and PKCE
-  verifier in the pre-authorization cookie. Without a spec home the requirement
-  would live only in this proposal, and the test that pins it would have no
-  section to cite.
+  scoped to the device-code flow. §6.3.4 is also the spec home of the gate
+  predicate "The CSRF position" states. It carries that predicate in full and in
+  the same terms: what counts as state-changing, what counts as cross-site
+  browser-origin evidence, the refusal and its code, the omitted scheme term and
+  its reason, the evidence scoping rather than credential scoping, the admitted
+  no-evidence case, the deployment independence, sign-out's place inside the
+  gate, and the sign-in and callback exclusion with its reason. It states no
+  conjunct that section does not carry and drops none that it does, so a
+  divergence between the two is a defect in this edit site. Without a spec home
+  the requirement would live only in this proposal, and the test that pins it
+  would have no section to cite.
 - **§6.3.3 (`spec/06-mcp-server.md:92-112`)** — today it enumerates two accepted
   credentials, the gateway-forwarded `Bearer <token>` under `oidc-jwt` (`:96`)
   and the injected `X-Podium-User-*` headers under `trusted-headers` (`:108`).
@@ -1081,48 +1583,38 @@ every site the rule leaves standing untouched.
   the `__Host-podium_session` cookie instead of the configured token header, and
   is verified identically against the issuer JWKS for the same `aud`. Because it
   is the same credential, the section adds no verification rule and no new
-  refusal. It states the precedence: the configured token header is read first
-  and the cookie only when that header carries no bearer credential, so a
-  registry-set cookie cannot displace a gateway-forwarded identity, and the two
-  are never merged. The `oidc-jwt` paragraph closes with an unqualified
-  anonymity rule, "A header value without the prefix carries no token, so the
-  request is anonymous and sees public visibility only (§4.6)"
-  (`spec/06-mcp-server.md:96`), which names the same state the precedence rule
-  hands to the cookie, so that sentence narrows with the amendment rather than
-  standing unchanged: where the browser flow is enabled, a request whose
-  configured token header carries no bearer credential is anonymous only when it
-  also presents no valid `__Host-podium_session` cookie, and elsewhere the
-  sentence applies as written. This is the same narrowing the mirror table stages
-  on `docs/deployment/gateway-delegated-identity.md:58`, which restates this
-  rule, so the authoring source and its shipped mirror move together. The
-  section's opening paragraph carries the same assumption. Its first clause
-  (`spec/06-mcp-server.md:92`) describes both providers as serving a deployment
-  that runs the registry behind a gateway, which is false for a directly
-  reachable `oidc-jwt` registry running the browser flow, so S3 restates it under
-  the credential-location rule in "The browser session", which works that site
-  through as an example. The same
-  line closes "A Podium client behind such a gateway sends no credential of its
-  own", whose "such a gateway" the restatement leaves without an `oidc-jwt`
-  antecedent, so S3 scopes that sentence to a client behind a gateway under
-  either provider in the same edit. The `pkg/identity/registry.go:69-70` comment
-  C2 moves and the `docs/deployment/gateway-delegated-identity.md:11` sentence D1
-  moves are that line's code and documentation mirrors, and the three land
-  together. `:94` stands as written, because the
-  amendment adds no credential and changes no tenant derivation: the cookie
-  carries the same IdP-signed token and the registry still reads the
-  organization from that token's verified `org_id` claim. `:92` and `:96` are
-  the only sentences in `:92-112` that this amendment touches, and the separate
-  `trusted-headers` anonymity rule at `:108` stands unchanged for the reason the
-  next sentence gives. A
-  `trusted-headers` or `injected-session-token` registry reads no cookie, because
-  the browser flow cannot be enabled under either and the cookie branch is gated
-  on the same enablement field. "The browser session" above states the mechanism.
+  refusal. It states the header-wins precedence rule under "The browser session"
+  in spec voice, and states no condition that rule does not carry, so §6.3.3
+  becomes the spec home of the rule. The `oidc-jwt` paragraph closes with an
+  unqualified anonymity rule, "A header value without the prefix carries no
+  token, so the request is anonymous and sees public visibility only (§4.6)"
+  (`spec/06-mcp-server.md:96`), which names the state that rule hands to the
+  cookie, so that sentence narrows to the anonymity rule under "The browser
+  session", rendered in the section's voice, rather than standing unchanged. This
+  is the same narrowing the mirror table stages on
+  `docs/deployment/gateway-delegated-identity.md:58`, which restates this rule,
+  and the same page's web-UI account at `:105-107` restates it for a directly
+  reachable registry, so the authoring source and both shipped mirrors move
+  together and carry identical conjuncts.
+  The section's opening paragraph carries the same assumption. The
+  `spec/06-mcp-server.md:92` row of the worked-example table under "The browser
+  session" states that line's disposition and names every mirror that moves with
+  it, and S3 owns the `spec/` half of that set, meaning the `:92` restatement
+  here and the §2.2 bullet below. `:92` and `:96` are the only sentences in
+  `:92-112` that this amendment touches. `:94` stands as written, per the
+  tenant-derivation rule under "The browser session". The separate
+  `trusted-headers` anonymity rule at `:108` stands unchanged, because the cookie
+  branch cannot run under that provider; the anonymity rule under "The browser
+  session" states why.
 - **§2.2 (`spec/02-architecture.md:101`)** — the component map's
-  `IdentityProvider` bullet restates the §6.3.3 clause above as "Registry-process
-  built-ins for a gateway-fronted deployment: `oidc-jwt` and `trusted-headers`".
-  S3 restates it in the same edit as its authoring source, so the applied spec
-  does not describe `oidc-jwt` as gateway-scoped in §2.2 while §6.3.3 says
-  otherwise. The bullet's client-side built-ins and its `IdentityProvider`
+  `IdentityProvider` bullet mirrors the §6.3.3 opening clause as
+  "Registry-process built-ins for a gateway-fronted deployment: `oidc-jwt` and
+  `trusted-headers`", stating one gateway predicate over both providers. S3
+  restates it in the same edit as its authoring source, on the disposition the
+  `spec/06-mcp-server.md:92` row under "The browser session" states, so the
+  bullet carries the predicate per provider and the applied spec does not
+  describe `oidc-jwt` as gateway-scoped in §2.2 while §6.3.3 says otherwise. The
+  bullet's client-side built-ins and its `IdentityProvider`
   description are unchanged, and no §9.1 SPI row moves, because the browser flow
   adds no provider value.
 - **§7** — the sign-in, callback, and sign-out routes and the posture read,
@@ -1136,79 +1628,68 @@ every site the rule leaves standing untouched.
   does not carry, so a clause present here and absent there is a defect in this
   edit site rather than an extension of the contract. The cookie
   attributes and lifetimes are the ones the cookie table under "The browser
-  session" gives each row. None of the
-  three reads or writes registry state, so §13.2.1 classifies all three outside
-  the write set and a read-only registry serves them unchanged. The section
-  states that sign-in and the callback are outside the §6.3.4 same-origin gate,
-  for the reason §6.3.4 gives, that a callback presenting a session cookie from
-  an earlier sign-in completes and replaces that cookie rather than being
-  refused, and that a sign-in presenting one starts a fresh transaction rather
-  than being refused. It states
-  that sign-out clears the cookies on every request that carries one and
-  passes the §6.3.4 same-origin check, and that a sign-out failing that check is
-  refused before the handler runs and clears nothing; that is the same predicate
-  "The CSRF position" states, and the two sites carry it identically so a forged
-  cross-origin sign-out cannot log an operator out.
-  The section also states the mount predicate: the three routes are registered
-  only where the browser flow is enabled, which the §13.10 guard already makes
-  imply the web UI, `oidc-jwt`, public mode off, and the acquisition options, so
-  a registry that boots with the flow disabled serves none of them and a request
-  for one of those paths is answered as any path the registry does not register
-  is answered on that deployment. The staged sentence fixes no status code,
-  because the identity verification §6.3.3 configures runs ahead of route
-  matching and a deployment whose provider refuses an unverifiable request
-  answers that refusal first; "What happens when it does not fire" under "The
-  browser session" records the dispositions. The
-  routes are registered inside the block that already mounts `/ui/`
-  (`internal/serverboot/serverboot.go:1229`), so the deployment predicate is
-  written once. The predicate reads startup configuration that is set at boot and
-  not changed at runtime, so a registry that boots without the flow never
-  acquires the routes and one that boots with it never loses them. This keeps a
+  session" gives each row.
+  The section states that sign-in and the callback are outside the §6.3.4
+  browser-origin gate, for the reason §6.3.4 gives, and records the two
+  consequences that are visible at these routes: a callback presenting a session
+  cookie from an earlier sign-in completes and replaces that cookie rather than
+  being refused, and a sign-in presenting one starts a fresh transaction rather
+  than being refused.
+  It states that sign-out clears the cookies the cookie table names it as
+  clearing on every request it serves, and that a sign-out the §6.3.4
+  browser-origin gate refuses is refused before the handler runs and clears
+  nothing, so a forged cross-origin sign-out cannot log an operator out. The
+  gate's predicate is §6.3.4's and this entry restates none of it.
+  The section also states the mount predicate in spec terms: the authentication
+  routes are registered only where the browser flow is enabled, which the startup
+  guard under "The browser session" states in full, including what enablement
+  implies about the rest of the configuration, so a registry that boots with the
+  flow disabled serves none of them and a request for one of those paths is
+  answered as any path the registry does not register is answered on that
+  deployment. The staged sentence therefore fixes no status code: the status
+  belongs to the deployment rather than to the route, per "The status an
+  unregistered path receives" under "The browser session", which §7 does not
+  restate. The wiring that satisfies the staged sentence is the mount predicate
+  stated under "The browser session", which also places the posture read
+  `GET /v1/ui/session` this same §7 entry states. This keeps a
   deployment that wants no browser flow, including the shipped web-UI-only
   configuration, free of the routes.
-  The same §7 entry states the posture read `GET /v1/ui/session`, which "The
-  browser session" specifies: its body, its unauthenticated status, its mount on
-  the web UI alone rather than on the browser flow, and that it reads and writes
-  no registry state, so §13.2.1 leaves it outside the write set beside the three
-  authentication routes. It is stated here rather than in §13.10 because it is an
+  The same §7 entry states the posture read `GET /v1/ui/session`. Its body is the
+  body "The posture read" states, and the §7 text carries no field, condition, or
+  value that statement does not. "The browser session" gives the rest: its
+  unauthenticated status and its mount on the web UI alone rather than on the
+  browser flow. It is stated here rather than in §13.10 because it is an
   HTTP endpoint and §7 is where the registry's endpoints are specified, and it
   carries no acquisition option, so the key-placement rule does not reach it.
+  The entry states the §13.2.1 classification once, in a single sentence covering
+  sign-in, the callback, sign-out, and the posture read, as the read-only
+  classification under "The browser session" gives it. §13.2.1 delegates the
+  classification to each endpoint's own section, and §7 is that section for all of
+  them, so two sentences here would be two §7 statements answering one question.
 - **§7.3.1 (`spec/07-external-integration.md:95`), with the reingest trigger row
   at `:65` and the quickstart reingest comment at `spec/00-quickstart.md:46`** —
   the user-defined-layer
   paragraph states no owner rule for the write handlers; the only per-handler
   statements are the reorder comment at `:87` and the reingest row at `:65`.
-  This edit site is the single statement of the layer-write authorization rule,
-  including every arm of it and the conditions under which it is live. Every
-  other site in this proposal cites it by name and states only what is local to
-  that site. It
-  gains the general rule: `unregister`, `update`, `restore`,
-  `reorder`, and `reingest` on a user-defined layer, and a `register` whose ID
-  names a user-defined layer that already exists in the tenant, are authorized to
-  that layer's owner or to a tenant admin. The same operations against an
-  admin-defined layer, including a `register` whose ID names one, are authorized
-  to a tenant admin alone, whatever that layer's stored `owner` field names,
-  because that field is set from the request body on the admin-defined branch of
-  `register` and patched on the admin-defined branch of `update`
-  (`pkg/registry/server/layers.go:659`, `:547-549`) and therefore names no
-  authorized subject. A caller authorized by neither arm is refused with
-  `403` `auth.forbidden`, whether that caller resolves a different subject or
-  none at all. A layer that is soft-deleted and still inside its §8.4 recovery
-  window is a layer that exists for this rule: a `register` under its ID is
-  authorized against its stored owner and its user-defined flag on the same
-  terms, so the recovery window is not a window in which its ID can be taken
-  over. A registry that cannot determine whether the ID names an existing layer
-  refuses the request rather than treating the ID as unused, so a degraded store
-  denies the registration rather than admitting it. The staged sentence names no
-  error code, because §6.10 carries no prose entry for `registry.unavailable`
-  even though the code is on the §6.10 matrix axis
-  (`tools/matrix/matrices.go:109`); the code the refusal returns is stated in
-  "The layer-ownership defect" and asserted by C1's tests.
-  The rule is live only where an identity provider is configured and public
-  mode is off, so a registry that authenticates no caller keeps admitting the
-  request, per `spec/13-deployment.md:33`. The sentence follows the wording §4
-  already uses for the parallel re-embed carve-out
-  (`spec/04-artifact-model.md:760`). This is the spec basis
+  The paragraph gains the layer-write authorization rule under "The
+  layer-ownership defect", which is the single statement of that rule and of
+  every arm of it. The staged sentence says what the rule says and nothing the
+  rule does not carry, so a clause present here and absent there is a defect in
+  this edit site rather than an extension of the rule. Two conjuncts of the rule
+  have no spec surface and stay out of the staged sentence: the `500`
+  `registry.unavailable` refusal on a failed existence lookup, because §6.10
+  carries no prose entry for that code even though it sits on the §6.10 matrix
+  axis (`tools/matrix/matrices.go:109`), and where in each handler the gate runs.
+  Both are stated in the rule and asserted by C1's tests.
+  The staged sentence also carries the liveness condition, rendered the way §4
+  renders the parallel re-embed carve-out (`spec/04-artifact-model.md:760`): the
+  rule is live only where an identity provider is configured and public mode is
+  off, so a registry that authenticates no caller keeps admitting the request
+  (`spec/13-deployment.md:33`). The deployment carve-out under "The
+  layer-ownership defect" is the statement this sentence renders, and it carries
+  the code citations and the boot-wiring evidence that spec prose does not. A
+  clause the carve-out carries and this sentence does not is a rendering choice
+  for spec prose rather than a narrowing of the rule. This is the spec basis
   C1 implements, and it is why C1 depends on S6.
   The reingest trigger row at `:65` is restated in the same edit, because it
   reads "(admin or layer owner)" for every layer class and would otherwise admit
@@ -1228,44 +1709,34 @@ every site the rule leaves standing untouched.
   the example reingests is admin-defined.
 - **§7 errors (`spec/07-external-integration.md:97`)** — the closing error
   enumeration scopes `auth.forbidden` to "admin-only operations attempted by a
-  non-admin". After S6 the code also reports a caller who is neither an admin nor
-  the owner of the user-defined layer being mutated, which is expressly not an
-  admin-only operation (`docs/reference/cli.md:440`), so the sentence is
-  broadened.
-- **§6.10 and §6.9** — two new codes. `auth.csrf_invalid` covers a state-changing
-  request the §6.3.4 gate refuses and a callback whose pre-authorization cookie
-  does not validate, refused with `403`. The entry defers to §6.3.4 for the
-  predicate rather than restating it, and §6.3.4 states the predicate "The CSRF
-  position" states. No existing code covers it: `auth.forbidden` reports an
-  authorization decision about the caller, and this refusal is about the request.
+  non-admin". After S6 the code also reports a caller the layer-write
+  authorization rule under "The layer-ownership defect" refuses, which on a
+  user-defined layer is expressly not an admin-only operation
+  (`docs/reference/cli.md:440`), so the sentence is broadened to name what that
+  rule refuses and nothing further.
+- **§6.10 and §6.9** — the new codes. The `auth.csrf_invalid` entry names both
+  refusals it covers and their `403`, in the scope "The CSRF position" states,
+  and defers to §6.3.4 for each predicate rather than restating either, since S7
+  stages §6.3.4 as the home of the browser acquisition flow and of the gate
+  predicate alike.
   `auth.exchange_failed` covers a callback whose code exchange the IdP answered
   and refused, refused with `502` and carrying `retryable: false`, with a
   `suggested_action` naming the client credential and the registered redirect URI
-  as what an operator checks. It is separate from `registry.unavailable`, whose
-  envelope carries `retryable: true` (`pkg/registry/server/error_envelope.go:26`)
-  and whose remediation names a retry that fails identically every time. Both
+  as what an operator checks. The entry defers to the exchange-failure rule under
+  "The browser session" for the boundary against `registry.unavailable` rather
+  than restating it, and the staged §6.10 text states what that rule states.
+  `registry.unavailable` is unedited by this amendment. Both
   codes take a §6.9 row, an entry in the
   `errorCodeRegistry` at `pkg/registry/server/error_envelope.go:24`, a row in the
   `auth.*` table of `docs/reference/error-codes.md`, and a cell on the §6.10 axis
   in `tools/matrix/matrices.go:78-115`.
-  `auth.token_expired` (`:355-364`) and `auth.untrusted_token` (`:366-376`) keep
-  their scopes, because a browser session presents an `oidc-jwt` token and the
-  two entries already cover an expired one and one that fails signature, `iss`,
-  or `aud`. Neither is re-scoped and no code is added. The cookie reaches them
-  through the shipped verifier path rather than a new one: `oidcJWTVerifier`
-  calls `verifier.Verify` and returns the error
-  (`internal/serverboot/identity_verify.go:201-215`), which `writeIdentityError`
-  maps to the two codes (`pkg/registry/server/identity_verify.go:88-100`). That
-  path is also why the inventory reaches `pkg/identity`, which declares the error
-  the amended `:366` defines. What moves on each entry is the text that assumes a
-  gateway forwarded the token, because the cookie carries a token the registry
-  itself obtained through the §6.3.4 exchange and a directly reachable `oidc-jwt`
-  registry has no gateway at all. S7 stages the `spec/` text the
-  credential-location rule under "The browser session" moves for these two codes;
-  `auth.token_expired`'s canonical `message` (`spec/06-mcp-server.md:360`) is
-  provider-neutral and is not among it. That rule also records why
-  `auth.tenant_unknown` (`spec/06-mcp-server.md:378-388`) and its mirror
-  `pkg/registry/server/error_envelope.go:73-75` stand unedited.
+  `auth.token_expired` (`:355-364`) and `auth.untrusted_token` (`:366-376`) are
+  amended in place rather than re-scoped. The unchanged-scope statement under
+  "The browser session" is the single statement of what changes on them and of
+  what does not, and S7 stages the `spec/` text the credential-location rule
+  moves for these two entries, including the §6.9 row at `:329`. That rule also
+  records why `auth.tenant_unknown` (`spec/06-mcp-server.md:378-388`) and its
+  mirror `pkg/registry/server/error_envelope.go:73-75` stand unedited.
   The §6.10 axis in `tools/matrix/matrices.go:78-115`
   is hand-maintained rather than derived from `spec/` or from the envelope
   registry, which is why `auth.tenant_unknown` and `auth.untrusted_token` are
@@ -1275,29 +1746,25 @@ every site the rule leaves standing untouched.
   `// Matrix: §6.10 (auth.exchange_failed)` annotations on the tests
   load-bearing; without them an annotation names no cell and the gate stays green
   whether or not the test exists.
-- **§13.2.1 (`spec/13-deployment.md:41`)** — the section's rule is per-endpoint
-  and per-mutation, and it says each endpoint's own section states its
-  classification, so §7's entry states one covering every route this proposal
-  adds: sign-in, the callback, sign-out, and the posture read all read and write
-  no registry state, so each is
-  outside the write set and a read-only registry serves them unchanged. This is
-  an application of the section's existing rule rather than a carve-out, so
-  §13.2.1's own text gains nothing and the SCIM-receiver precedent is not
-  invoked.
+- **§13.2.1 (`spec/13-deployment.md:41`)** — no edit. The read-only
+  classification under "The browser session" derives the classification from this
+  section's existing per-endpoint, per-mutation rule and lands it in §7's entry,
+  so this section's text stands as written.
 - **§11** — the verification entry, covering the matrix below.
 
 **IMPLEMENTOR'S CHOICE:** the path of each authentication route. The method is
-not part of this blank: "The browser session" fixes sign-in and the callback on
-`GET` and sign-out on `POST`. Any answer
+not part of this blank, because the route methods under "The browser session" fix
+it. Any answer
 places the paths under the existing `/v1/` prefix, uses one path per route, and
 appears identically in the §7 entry, in the Authentication section of
 `docs/reference/http-api.md`, in the mux registration, in the S45 step-4
 rewrite, and in the new sign-in scenario, so every path those scenarios probe
-matches the mux. The posture read's `sign_in_path` and `sign_out_path` carry the
-same values at runtime, which is where the UI reads them, so the bundle spells
-no authentication route path. The posture read's own path is `/v1/ui/session`
-and is not part of this blank, because the UI has to request it before it has
-read anything.
+matches the mux. The posture read reports the same values at runtime in
+`sign_in_path` and `sign_out_path`, which is where the UI reads them, so the
+bundle spells no authentication route path; "The posture read" states those
+fields and when they are present. The posture read's own path is
+`/v1/ui/session` and is not part of this blank, because the UI has to request it
+before it has read anything.
 
 **Shipped documentation mirrors.** Each restates spec text this amendment
 changes, so each moves with it.
@@ -1305,18 +1772,18 @@ changes, so each moves with it.
 | Mirror | What it restates |
 |:--|:--|
 | `docs/deployment/gateway-delegated-identity.md:105-107` | the §13.10 web-UI account; 0012 recorded this page as this proposal's obligation |
-| `docs/deployment/gateway-delegated-identity.md:58` | §6.3.3's "a request carrying no token is anonymous" rule, inside the page's `## oidc-jwt` section. It is restated with the same browser-flow conjunct the `spec/06-mcp-server.md:96` authoring source gains: a request carrying no token in the configured header is anonymous, and where the browser flow is enabled it is anonymous only when it also presents no valid `__Host-podium_session` cookie. The conjunct keeps the sentence true for the gateway-fronted deployment this page describes, which enables no browser flow and reads no cookie, and it matches the rewritten `:107` on the same page |
+| `docs/deployment/gateway-delegated-identity.md:58` | §6.3.3's anonymity rule, "A request carrying no token is anonymous and sees public visibility only", inside the page's `## oidc-jwt` section. It is restated from the anonymity rule under "The browser session", in the page's voice and with the same conjuncts the amended `spec/06-mcp-server.md:96` carries, which keeps it true for the gateway-fronted deployment this page describes, where no browser flow is enabled and no cookie is read. The rest of the paragraph stands: the `auth.untrusted_token` and `auth.token_expired` sentence ahead of it, and the JWKS fail-closed sentence after it. The page's web-UI account at `:105-107` restates the same rule for a directly reachable registry, so the two rewrites on this page carry identical conjuncts and give one request one answer |
 | `docs/reference/error-codes.md:57` | `auth.untrusted_token`, restated under the credential-location rule so the row and its remediation match the amended `spec/06-mcp-server.md:366` and `:374` |
 | `docs/reference/error-codes.md:59` | `auth.token_expired`, whose scope sentence stands and whose remediation clause is restated under the same rule |
-| `docs/reference/error-codes.md:60` | `auth.forbidden`'s "When" text, "An admin-only operation attempted by a non-admin caller", is restated as owner-or-admin, parallel to `docs/reference/cli.md:440` below: a layer write on a user-defined layer attempted by a caller who is neither the owner nor an admin joins the admin-only case the entry already names. The `auth.*` table also gains the `auth.csrf_invalid` and `auth.exchange_failed` rows |
+| `docs/reference/error-codes.md:60` | `auth.forbidden`'s "When" text, "An admin-only operation attempted by a non-admin caller", is a shipped restatement of the §7 enumeration at `spec/07-external-integration.md:97` and moves with it, parallel to `docs/reference/cli.md:440` below. It is restated to name what the layer-write authorization rule under "The layer-ownership defect" refuses, saying what that rule says and no more. The `auth.*` table also gains the `auth.csrf_invalid` and `auth.exchange_failed` rows |
 | `docs/reference/error-codes.md:69` | the bind guard's `config.web_ui_public_bind_refused`, which the amended §13.10 bind-guard sentence restates; the `config.*` table also gains a `config.web_ui_auth_unconfigured` row stating the browser-flow guard's predicate |
-| `docs/reference/http-api.md:13-27` | the Authentication section: the header table, and the account of the accepted registry-process credentials at `:21-27`, which gains the browser session under `oidc-jwt` and the CSRF requirement every state-changing request carries, other than the sign-in and callback routes, together with the `X-Podium-CSRF` header and `__Host-podium_csrf` cookie where the landed mechanism carries a request-side value. It states the predicate and the sign-in and callback exclusion as §6.3.4 states them, which is the predicate "The CSRF position" states, and scopes neither of its own accord. It is also the new home of the authentication routes, each documented by the method and path the route methods under "The browser session" and the path blank above fix, and of the posture read `GET /v1/ui/session`, whose body, unauthenticated status, and web-UI mount predicate it states as "The browser session" gives them; there is no route list there today |
-| `docs/reference/cli.md:131-138` | the `podium serve` synopsis, a closed usage line carrying `--web-ui` and `--web-ui-allow-public-bind`, which gains a token for `--web-ui-auth` and one for `--web-ui-auth-transaction-ttl` and none for the environment-only acquisition values, per the key-placement rule |
-| `docs/reference/cli.md:142-155` | the `podium serve` flag table, which gains a row for each of those two flags naming its `PODIUM_*` override, and whose `--web-ui-allow-public-bind` row (`:155`) is restated from the amended §13.10 bind-guard sentence |
-| `docs/reference/cli.md:747` | the environment-variable table row that pairs `PODIUM_OAUTH_AUDIENCE` with `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` as "OAuth provider config", which gains the environment-only browser-flow acquisition keys and states that the device-code endpoint is not one of them |
-| `docs/reference/http-api.md:265-346` | the Layer management section, whose entries state the pre-S6 authorization rule: `:329` says a user-defined-layer update "still answers `200 OK`", `:320` gives the reorder rule as admin-only on an admin-defined layer, `:286` documents register's `201 Created` with no refusal, and unregister, restore, and reingest document no authorization at all, while every other gated route in the reference does (`:538`). The section gains one statement at its head, and the amended §7.3.1 is what that statement says. `:329`'s `200 OK` clause is scoped to the owner, `:320` is restated so the admin-defined sentence no longer reads as the whole rule, and `:286`'s register entry and the unregister, restore, and reingest entries carry the authorization they document none of today. This page names the error codes the refusals return where the staged spec text does not, because it is a code-level reference and `docs/reference/error-codes.md:158` already carries the generic `registry.unavailable` row.<br><br>**IMPLEMENTOR'S CHOICE:** the wording of the head statement. Any answer says what the amended §7.3.1 says and nothing the §7.3.1 edit site does not carry, rendered in the reference page's voice with the codes named; a clause present here and absent there is a defect in this row rather than an extension of the rule |
-| `docs/reference/http-api.md:457` | the Reembed entry's closing sentence, "The exception is specific to re-embed." It is true of the page as it ships, because the Layer management section documents no authorization today, and the head statement the row above adds is what makes it false: after S6 the layer write endpoints carry the same deployment-keyed carve-out on the same page. This row is a page-internal reconciliation rather than a mirror moving with its source, because the authoring sentence at `spec/04-artifact-model.md:760` qualifies its exclusivity with "does not extend to the other admin-gated endpoints, whose posture is defined in §4.7.2 and §7.3.2" and the layer write gate is neither admin-only nor specified in either of those sections, so the spec sentence stands as written and only the unqualified shipped restatement moves. The first sentence of the paragraph stands. The closing sentence is restated to record that the layer write endpoints admit a request on the same registries for the reason the Layer management head statement gives. The restatement makes no exclusivity claim, because the erase endpoint documented at `:459-465` takes the same short-circuit through the shared admin hook (`internal/serverboot/serverboot.go:1213`) and §13 states the two together: "the layer-management and erase endpoints admit any request" (`spec/13-deployment.md:33`) |
-| `docs/reference/cli.md:440` | the `podium layer reorder` entry, which states "Reordering a user-defined layer requires no admin role" as the complete rule; it is restated as owner-or-admin with the same deployment carve-out |
+| `docs/reference/http-api.md:13-27` | the Authentication section: the header table, and the account of the accepted registry-process credentials at `:21-27`, which gains the browser session under `oidc-jwt`, together with the header and cookie names the wire contract under "The CSRF position" fixes and the request-side-value condition that contract states. It states the §6.3.4 browser-origin gate and the sign-in and callback exclusion as §6.3.4 states them, which is the predicate "The CSRF position" states, and scopes nothing of its own accord. In particular it does not describe a CSRF requirement every state-changing request carries: a request carrying no browser-origin evidence and no CSRF cookie is admitted, which is what the CLI and the SDKs send. It is also the new home of the authentication routes, each documented by the method and path the route methods under "The browser session" and the path blank above fix, and of the posture read `GET /v1/ui/session`, whose body it states as "The posture read" states it, carrying no field, condition, or value that statement does not carry, and whose unauthenticated status and web-UI mount predicate it states as "The browser session" gives them; there is no route list there today |
+| `docs/reference/cli.md:131-138` | the `podium serve` synopsis, a closed usage line carrying `--web-ui` and `--web-ui-allow-public-bind`. It gains a token for each flag the key-placement rule under "Where configuration keys go" places on `podium serve`, and none for the keys that rule makes environment-only |
+| `docs/reference/cli.md:142-155` | the `podium serve` flag table, which gains a row for each flag the key-placement rule places, written in the shipped table's voice as overriding the matching `PODIUM_*` variable, and whose `--web-ui-allow-public-bind` row (`:155`) is restated from the amended §13.10 bind-guard sentence |
+| `docs/reference/cli.md:747` | the environment-variable table row that pairs `PODIUM_OAUTH_AUDIENCE` with `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` under one "OAuth provider config" label, which is what makes the two key sets read as one. It gains the environment-only browser-flow acquisition keys, per the key-placement rule, and states the device-code-key rule under "The browser session" as the amended §6.3.4 states it, scoping it no further of its own accord |
+| `docs/reference/http-api.md:265-346` | the Layer management section, whose entries state the pre-S6 authorization rule: `:329` says a user-defined-layer update "still answers `200 OK`", `:320` gives the reorder rule as admin-only on an admin-defined layer, `:286` documents register's `201 Created` with no refusal, and unregister, restore, and reingest document no authorization at all, while every other gated route in the reference does (`:538`). The section gains one statement at its head, and the layer-write authorization rule under "The layer-ownership defect" is what that statement says. `:329`'s `200 OK` clause is scoped to the owner, `:320` is restated so the admin-defined sentence no longer reads as the whole rule, and `:286`'s register entry and the unregister, restore, and reingest entries carry the authorization they document none of today. This page names the error codes the refusals return where the staged spec text does not, because it is a code-level reference and `docs/reference/error-codes.md:158` already carries the generic `registry.unavailable` row.<br><br>**IMPLEMENTOR'S CHOICE:** the wording of the head statement. Any answer says what that rule says and nothing it does not carry, rendered in the reference page's voice with the codes named; a clause present here and absent there is a defect in this row rather than an extension of the rule |
+| `docs/reference/http-api.md:457` | the Reembed entry's closing sentence, "The exception is specific to re-embed." It is true of the page as it ships, because the Layer management section documents no authorization today, and the head statement the row above adds is what makes it false: after S6 the layer write endpoints carry the deployment carve-out stated under "The layer-ownership defect". This row is a page-internal reconciliation rather than a mirror moving with its source, because the authoring sentence at `spec/04-artifact-model.md:760` qualifies its exclusivity with "does not extend to the other admin-gated endpoints, whose posture is defined in §4.7.2 and §7.3.2" and the layer write gate is neither admin-only nor specified in either of those sections, so the spec sentence stands as written and only the unqualified shipped restatement moves. The first sentence of the paragraph stands. The closing sentence is restated to record that the layer write endpoints admit a request on the same registries for the reason the Layer management head statement gives, and the restatement makes no exclusivity claim, because the erase endpoint documented at `:459-465` is covered by the same carve-out |
+| `docs/reference/cli.md:440` | the `podium layer reorder` entry, whose "Reordering a user-defined layer requires no admin role" gives the pre-S6 rule as complete. Its user-defined sentence is restated from the layer-write authorization rule under "The layer-ownership defect", keeping the layer-class scope the entry already carries on its admin-defined sentence, and carrying the rule's liveness condition. It states nothing that rule does not carry |
 | `docs/reference/http-api.md:290` | the register-response example, which prints snake_case keys for a response emitting Go field names |
 
 ## The CSRF position
@@ -1329,9 +1796,11 @@ The position is specified here rather than left to the implementor, because the
 prior review treated it as acknowledged prose for eight rounds and never
 produced a finding on it.
 
-This section is the single statement of the gate predicate, including which
-routes it excludes and why. Every other site in this proposal cites it by name
-and states only what is local to that site.
+This section is the single statement of the gate predicate, including the
+evidence it reads, which routes it excludes, and why. Every other site in this
+proposal cites it by name and states only what is local to that site. §6.3.4 is
+its spec home and carries it in the applied spec, so a conjunct present here and
+absent there is a defect in that edit site rather than a narrowing of the gate.
 
 **The gate is scoped by the evidence the request carries rather than by which
 credential authenticated it.** The session cookie is not the only credential a
@@ -1350,18 +1819,20 @@ takes no preflight. A gate scoped to the session cookie would therefore leave
 the panel's own writes forgeable on the deployment §13.10 blesses, which is why
 the predicate below reads the request rather than the credential.
 
-- A request is state-changing for this gate when its HTTP method is other than
+- **What counts as state-changing.** A request is state-changing for this gate
+  when its HTTP method is other than
   `GET`, `HEAD`, or `OPTIONS`. The predicate is the method rather than the
   handler's effect, because the gate runs before the handler and has nothing
   else to read, and because the safe methods are the ones a browser issues as an
-  ordinary navigation or subresource load. Sign-out answers on `POST` per the
-  route methods under "The browser session", so it is state-changing by this
-  predicate and the gate covers it; sign-in and the callback answer on `GET`, so
-  the method predicate leaves them outside the gate as well as the named
-  exclusion below.
-- Every state-changing request, other than the sign-in and callback routes, that
+  ordinary navigation or subresource load. Applied to the routes this proposal
+  adds, whose methods the route methods under "The browser session" fix, the
+  predicate covers sign-out and leaves sign-in and the callback outside the gate,
+  which the named exclusion below states as well.
+- **The refusal.** Every state-changing request, other than the sign-in and
+  callback routes, that
   carries cross-site browser-origin evidence is refused before the handler runs
   with `403` `auth.csrf_invalid`, whatever credential authenticated it.
+- **What counts as cross-site evidence.**
   Browser-origin evidence is cross-site when the request carries a
   `Sec-Fetch-Site` header whose value is other than `same-origin` or `none`, or
   an `Origin` header whose host and port differ from the host and port the
@@ -1378,16 +1849,18 @@ the predicate below reads the request rather than the credential.
   `Origin: https://registry.acme.com` to a registry whose own request scheme is
   `http` (`spec/13-deployment.md:5`, `:170`). Omitting the scheme term admits a
   downgrade origin such as `http://<host>` as same-origin, which costs this gate
-  nothing: every session cookie carries `Secure` per the cookie table, so a
-  browser presents no session credential on a non-secure origin, and the C3
-  redirect-URI conjunct already requires an `https` or loopback origin.
+  nothing: the redirect-URI conjunct under "The browser session" leaves
+  a browser no session credential to present on such an origin.
   Comparing against `Host` is what keeps the gate free of a new configuration
   key for the registry's public origin. OD-9 records the deployment that
   comparison does not serve, a gateway that rewrites `Host` to an upstream
   service name.
-- A state-changing request carrying neither header carries no such evidence and
+- **What is admitted.** A state-changing request carrying neither header carries
+  no such evidence and
   is admitted, which is what a CLI, an SDK, or any other non-browser client
-  sends. A gate that swept them in would break every non-browser writer on a
+  sends. This gate is triggered by evidence and never requires a proof of same
+  origin, so a request that proves nothing is admitted rather than refused. A
+  gate that swept those requests in would break every non-browser writer on a
   registry that enables the browser flow. That admitted case is the gate's
   residual: a browser that sent neither header would be indistinguishable from a
   non-browser client. Every browser that can reach a `/ui/` deployment sends
@@ -1396,7 +1869,7 @@ the predicate below reads the request rather than the credential.
   residual is closed for a session-authenticated write as well. The Testing
   section pins the refusal, the header-authenticated cross-site refusal, and both
   admitting halves.
-- The gate is not conditional on the browser flow. It reads the request rather
+- **The gate is not conditional on the browser flow.** It reads the request rather
   than the deployment, so it runs on every state-changing request the registry
   serves, including on a registry that enables no browser flow and on one that
   serves no web UI. A second enablement axis would leave the gateway-fronted
@@ -1406,8 +1879,16 @@ the predicate below reads the request rather than the credential.
   evidence. §6.3.4 is where the predicate is stated because the browser flow is
   what makes a browser-borne credential reachable in the first place; the
   predicate itself names no deployment.
-- Sign-in and the callback are outside the gate, and the exclusion is stated by
-  name rather than left to follow from their `GET` method, so that an
+- **Sign-out is inside the gate.** The gate's coverage of sign-out is
+  load-bearing, because a forged sign-out is a denial of service against a
+  signed-in operator. A sign-out refused for CSRF returns `403`
+  `auth.csrf_invalid` before the handler runs and clears no cookie. Read-only
+  mode does not enter into it: sign-out is outside the §13.2.1 write set, per the
+  read-only classification under "The browser session", so the CSRF refusal is
+  the only refusal on this path.
+- **Sign-in and the callback are outside the gate.** They answer on `GET`, so the
+  method predicate leaves them outside it, and the exclusion is also stated by
+  name so that an
   implementation that widens the method predicate does not silently pull them
   in. Each is a top-level navigation that carries no
   request-side value a page could have set, and a browser that already holds
@@ -1415,57 +1896,86 @@ the predicate below reads the request rather than the credential.
   under an unqualified predicate every re-sign-in would be refused with
   `auth.csrf_invalid`, no session would ever be established for that browser, and
   no recovery would remain, since re-running sign-in is the only recovery an
-  expired session has. What binds both routes is the single-use pre-authorization
-  transaction, whose contract under "The browser session" refuses exactly the
-  forged and replayed callbacks a same-origin check would. A forced cross-origin
-  sign-in can do no more than
+  expired session has. A callback presenting a session cookie from an earlier
+  sign-in therefore completes and replaces that cookie, and a sign-in presenting
+  one starts a fresh transaction. What binds both routes is the single-use
+  pre-authorization transaction carrying `state`, `nonce`, and the PKCE verifier
+  in `__Host-podium_auth`, whose contract under "The browser session" refuses
+  exactly the forged and replayed callbacks a same-origin check would. A forced
+  cross-origin sign-in can do no more than
   replace the victim's own `__Host-podium_auth` cookie with a transaction the
   registry mints for that same browser, which the victim's own IdP session then
   completes, so the transaction the attacker started is not one the attacker can
   finish in the victim's browser.
-- The cookies are the ones the cookie table under "The browser session" lists,
-  and a CSRF mechanism that carries its own cookie takes that table's CSRF row.
+- **Cookies.** The gate adds no cookie outside the cookie table under "The
+  browser session", and a CSRF mechanism that carries its own request-side value
+  takes that table's CSRF row.
   `SameSite` is a defense in depth here rather than the control, which is why the
-  same-origin proof required above does not rest on it. Dropping the `__Host-`
+  evidence check above does not rest on it. Dropping the `__Host-`
   prefix from the CSRF row would let any host under the registry's registrable
   domain plant that cookie with a `Domain` attribute and then forge a
   state-changing request that echoes the planted value, which the session cookie
   would authenticate.
-- The pre-authorization transaction refuses a replayed or misdelivered callback
-  with the same `403` `auth.csrf_invalid`, as its contract under "The browser
-  session" states. It is the same control on the same axis, which is why it
-  reuses the code rather than adding a second one.
-- A request whose session cookie carries a token past its `exp` is refused with
-  `401` `auth.token_expired`, and one whose token fails signature, `iss`, or
-  `aud` with `401` `auth.untrusted_token`, both by the shipped verifier path, on
-  the routes that path wraps. A layer write carrying such a cookie resolves
-  anonymous instead and is refused `403` `auth.forbidden`, for the reason "The
-  browser session" gives.
-  Both codes already cover the case as §6.3.3 states them, so neither is
-  re-scoped and no code is added. Their gateway-assuming text is restated under
-  the credential-location rule in "The browser session", which decides every site
-  and names the step that owns it.
-- Sign-out answers on `POST` and is therefore state-changing by the method
-  predicate above, so it carries the same protection, because a forged sign-out
-  is a denial of service against a signed-in operator. A sign-out refused for
-  CSRF returns `403` `auth.csrf_invalid` and clears no cookie.
-  Read-only mode does not enter into it: no authentication route is in the
-  §13.2.1 write set, so a read-only registry serves sign-out exactly as it serves
-  it otherwise.
+- **This bullet is the single statement of what `auth.csrf_invalid` covers.** The
+  code is added to the §6.10 catalog by this proposal, it answers `403`, and it
+  covers two refusals on one axis. The first is a state-changing request the
+  §6.3.4 browser-origin gate above refuses, which the registry answers before the
+  handler runs and whatever credential authenticated the request. The second is a
+  callback the single-use pre-authorization transaction refuses, on any of the
+  conditions its contract under "The browser session" fixes, which are a
+  `__Host-podium_auth` cookie that is absent, expired, or carries a `state` other
+  than the returned one, and an exchanged ID token whose `nonce` differs from the
+  one that cookie holds. Those conditions, the order they are evaluated in, and
+  the cookies each refusal sets and clears are stated there and are not restated
+  here. The two refusals are disjoint by route, because sign-in and the callback
+  are outside the gate for the reason the exclusion bullet above gives, so the
+  transaction is what refuses a forged, replayed, or misdelivered callback. It is
+  the same control on the same axis, so the callback reuses this code and no
+  second code is added for it. No shipped code covers either refusal, because
+  `auth.forbidden` reports an authorization decision about the caller and both of
+  these refusals are about the request. The §6.10 entry names both refusals and
+  defers to §6.3.4 for each predicate rather than restating either, which S7
+  stages as the home of the browser acquisition flow and of the gate predicate
+  alike, and §6.3.4 carries the predicate this section states.
+- A session cookie the verifier refuses is answered by the expiry-signal rule
+  under "The browser session", which this section does not restate. What is local
+  to the CSRF position is that the rule adds no error code and re-scopes no
+  envelope, so the codes this section introduces remain `auth.csrf_invalid` and
+  `auth.exchange_failed` alone, and the unchanged-scope statement under "The
+  browser session" is what `auth.token_expired` and `auth.untrusted_token` do and
+  do not gain.
 
-**The wire contract, where the mechanism carries a request-side value.** The
-names are fixed here rather than left open, because the UI and the server both
-have to spell them and a test asserts them. The value is the
-`__Host-podium_csrf` cookie, which the callback sets alongside the session
-cookie and sign-out clears, and the request echoes it in the `X-Podium-CSRF`
-header. The server compares the header against the cookie and refuses a
-session-authenticated request whose header is absent or unequal, and requires no
-header of a request that carries no CSRF cookie, which is what a CLI, an SDK,
-and a gateway-fronted browser request all send. U1 owns the client half: every
-state-changing call the panel issues sends that header, read from that cookie. A
-mechanism that carries no request-side value, meaning the browser-origin
-evidence check alone, sets no cookie and requires no header, and the cookie
-table's CSRF row is then absent. When the client half is missing while the server half is present,
+**The wire contract, where the mechanism carries a request-side value.** This
+paragraph is the single statement of the wire contract, covering both its server
+half and its client half. Every other site in this proposal cites it by name and
+states only what is local to that site. The names are fixed here rather than left
+open, because the UI, the server, the shipped documentation, and the tests all
+have to spell them identically. The request-side value is carried by the
+`__Host-podium_csrf` cookie, whose attributes, the route that sets it, and the
+route that clears it are the cookie table's CSRF row under "The browser session".
+That row carries no `HttpOnly`, which is what lets the panel read the value, and
+its `__Host-` prefix is what closes the sibling-host forgery in which a host
+under the registry's registrable domain plants the cookie and echoes the planted
+value; a stateless double submit carries nothing a server-side comparison could
+distinguish from a value the registry issued. Every state-changing call the panel
+issues echoes that cookie's value in the `X-Podium-CSRF` header, including the
+panel's own sign-out `POST`, which the method predicate above makes
+state-changing. The server compares the header against the cookie and refuses a
+state-changing request that the `__Host-podium_session` cookie authenticates and
+whose header is absent or unequal, before the handler runs, with `403`
+`auth.csrf_invalid`. The requirement is keyed to authentication by the session
+cookie rather than to the presence of the CSRF cookie, which decides two cases
+the keying would otherwise answer differently: a request the session cookie does
+not authenticate carries no header requirement, which is what a CLI, an SDK, and
+a gateway-fronted browser request all send, and a browser holding a live session
+cookie and no CSRF cookie is refused, which is the outcome both rows' absent
+`Max-Age` exists to prevent. Where this half lands it also closes the gate's
+residual for a session-authenticated write, because such a write is refused
+whether or not it carries browser-origin evidence. U1 owns the client half and C2
+owns the server half. A mechanism that carries no request-side value, meaning the
+browser-origin evidence check alone, sets no cookie and requires no header, and
+the cookie table's CSRF row is then absent. When the client half is missing while
+the server half is present,
 every panel write returns `403` `auth.csrf_invalid` in the browser while every
 server-driven case still passes, which is why the U1 Surfaces bullet in the
 Testing section drives a state-changing call from the panel itself and asserts
@@ -1487,19 +1997,39 @@ and the UI now renders them rather than showing them as preformatted text. That
 turns author-controlled content into markup on the registry's own origin, which
 is the origin the session cookie is scoped to.
 
-- Rendered markdown is sanitized, and the sanitizer runs on the rendered output
-  rather than on the source, so a construct that survives the markdown renderer
-  cannot bypass it.
-- Frontmatter is rendered as a property table with values escaped as text. It is
-  not markdown and is not rendered as such.
-- The web UI's own source tree carries no `dangerouslySetInnerHTML` outside the
-  single sanitized rendering path, checked mechanically rather than by review.
-  B1 owns that check, because B1 owns the CI lane, and it runs in the same CI job
-  as the rebuild-is-clean check so a tree that reintroduces the attribute fails
-  before review. The controls above are pinned by the sanitizer cases in the
-  Testing section.
-  The check is scoped to that tree rather than to the repository, because
-  `site/` already uses the attribute in several components
+**The sanitization rule.** This rule is the single statement of how the UI
+renders an untrusted artifact body: what is sanitized, what the sanitizer takes
+as its input, where it is applied, which URL schemes survive it, and what falls
+outside it. Every other site in this proposal cites it by name and states only
+what is local to that site.
+
+The UI renders an artifact body through one rendering path in the web UI's own
+source tree, and that path sanitizes what it renders. The sanitizer runs on the
+rendered output rather than on the markdown source, so a markdown construct that
+the renderer emits as raw HTML is neutralized rather than carried through, and a
+construct that survives the markdown renderer cannot bypass the sanitizer. No
+executable node and no event-handler attribute survives sanitization. The
+sanitizer carries an allowlist that admits no URL scheme other than `http`,
+`https`, and `mailto` on any attribute it keeps, so a URL bearing any other
+scheme, including `javascript:` and `data:`, does not survive on a link or on any
+other attribute. That rendering path is the one the `dangerouslySetInnerHTML`
+check scopes, so a second path cannot render an artifact body outside this rule.
+Frontmatter does not reach this path. It is rendered as a property table with
+values escaped as text, and it is not markdown and is not rendered as such.
+
+- **The `dangerouslySetInnerHTML` check.** This bullet is the single statement of
+  that check. Every other site in this proposal cites it by name and states only
+  what is local to that site. A mechanical check reports every occurrence of
+  `dangerouslySetInnerHTML` in the web UI's own source tree. The single sanitized
+  rendering path carries the one permitted occurrence, because React admits
+  already-sanitized markup only through that attribute and the rendering path
+  above is the place this proposal puts it, and the check fails on every other
+  occurrence. The check is mechanical rather than a review obligation, and it
+  runs in the CI job that also runs the rebuild-is-clean check, so a tree that
+  adds an occurrence outside the rendering path fails that job before review. B1
+  owns the check, because B1 owns the CI lane. The check is scoped to the web
+  UI's tree rather than to the repository, because
+  `site/` already uses the attribute
   (`site/src/components/content/Tabs.tsx:78`,
   `site/src/components/layout/Lockup.tsx:31` and `:38`,
   `site/src/build/render.ts:132`). The documentation site renders build-time
@@ -1508,11 +2038,10 @@ is the origin the session cookie is scoped to.
   repository-wide check would fail on the current tree before any web-UI code
   exists, and would then be deleted or silently rescoped.
 
-**IMPLEMENTOR'S CHOICE:** which sanitizer the rendering path uses. Any answer
-runs on the rendered output rather than on the markdown source, is applied at the
-single rendering path the `dangerouslySetInnerHTML` check scopes, and carries an
-allowlist that admits no URL scheme other than `http`, `https`, and `mailto` on
-any attribute it keeps.
+**IMPLEMENTOR'S CHOICE:** which sanitizer implementation the rendering path uses.
+Any answer satisfies the sanitization rule above in full and the Testing
+section's sanitizer cases verbatim, and states no scheme, attribute, or path
+condition the rule does not carry.
 
 ## Build and embedding
 
@@ -1520,26 +2049,66 @@ The React bundle is committed to the tree.
 
 `go:embed` is a compile-time directive: `web/web.go:12` names the files, and a
 missing path is a build error rather than a runtime one. Today the three source
-files are committed, so `go build ./...` works on a clean clone with only a Go
-toolchain. Generating the bundle at release instead would break that, and with
-it `make build` (`Makefile:316`), the `go` CI job, which carries `setup-go` and
-no Node (`.github/workflows/test.yml:22`), the release cross-compile matrix
-(`.github/workflows/release.yml:298`), and `go install` from source entirely.
+files are committed, so a clean clone builds with only a Go toolchain.
+Generating the bundle at release instead would break the Go-only build stated by
+the committed-bundle constraints below, on every path those constraints name.
 
 `site/` is not a precedent for the alternative. Its `dist/` is gitignored, but
 site output is published rather than embedded, so nothing in `go build` depends
 on it.
 
-What lands:
+**The committed-bundle constraints.** This block is the single statement of what
+the committed bundle must satisfy. Every other site in this proposal cites it by
+name and restates none of its content.
+
+- **Go-only build.** A clean clone builds with only a Go toolchain present.
+  `go build ./...`, `go install` from source, `make build` (`Makefile:316`), the
+  `go` CI job, which carries `actions/setup-go` and installs no other toolchain
+  (`.github/workflows/test.yml:22`), and the release cross-compile matrix
+  (`.github/workflows/release.yml:298`) all succeed with no Node toolchain and no
+  other non-Go tool installed. `go:embed` is resolved at compile time
+  (`web/web.go:12`), so a bundle generated at release rather than committed is a
+  build error in every one of those paths.
+- **Served root.** `web/web.go`'s embed directive names the built bundle, and
+  `web.Assets()` returns a file system rooted at the served bundle, through
+  `fs.Sub` when the bundler emits into a subdirectory.
+  `internal/serverboot/serverboot.go:1230` mounts that file system directly at
+  `/ui/`, under the `cfg.webUI` guard at `:1229`, so a bundle whose `index.html`
+  is not at the returned root stops serving the UI and `/ui/` stops returning
+  `index.html`.
+- **Title.** The built `index.html` carries `<title>Podium</title>`, which today
+  comes from `web/index.html:5`. A bundler's scaffolded `index.html` carries the
+  tool's own title, so the title is a constraint on the bundle rather than an
+  incidental property. Three shipped assertions read that literal out of the
+  served or embedded index (`web/web_test.go:19`,
+  `cmd/podium/serve_ui_test.go:51`, `test/e2e/server_flag_behavior_test.go:30`),
+  and holding it leaves all three standing unchanged.
+- **Asset references.** Every asset the built `index.html` references resolves
+  under the `/ui/` mount, and `web.Assets()` serves every referenced path. The UI
+  is served through `http.StripPrefix("/ui/", …)`, and the outer mux routes every
+  other path to the meta-tool handler, which registers no `/assets/` route
+  (`internal/serverboot/serverboot.go:1230`, `:1239`,
+  `pkg/registry/server/server.go:389-419`). A bundle built with the common
+  default public base of `/` emits `<script src="/assets/index-<hash>.js">`, the
+  browser requests `/assets/…`, the outer mux returns `404`, and `/ui/` serves a
+  blank page while the rebuild check and the title assertion both still pass.
+  Today's hand-written SPA avoids this only because its references are relative
+  (`web/index.html:7`, `:18`). Either the bundler's public base is set to `/ui/`
+  or the emitted references are relative.
+- **Deterministic output.** Rebuilding the bundle from unchanged source produces
+  an unchanged working tree, which is what makes the rebuild-is-clean check a
+  stable gate, and the built bundle is the only generated artifact the change
+  adds to the tree.
+
+What lands, in addition to the committed-bundle constraints above:
 
 - The bundle is committed at a path that escapes the bare `dist/` entry at
   `.gitignore:18`, either by negation or by a directory name that does not match
   it.
-- `web/web.go`'s embed directive names the built bundle, and `web.Assets()`
-  returns a file system rooted at the served bundle, through `fs.Sub` when the
-  bundler emits into a subdirectory. `internal/serverboot/serverboot.go:1229`
-  mounts that file system directly at `/ui/`, so a bundle whose `index.html` is
-  not at the returned root stops serving the UI.
+- `web/web.go`'s `go:embed` directive is repointed at the built bundle, and its
+  package and `Assets` doc comments stop describing three hand-written files. The
+  served-root entry in the committed-bundle constraints governs the root
+  `web.Assets()` returns.
 - `web/web_test.go` moves with the directive. Its assertions read
   `index.html`, `app.js`, and `style.css` out of the embedded set by exact name
   at its root (`:13-21`, `:24-32`), and the vanilla `app.js` and `style.css`
@@ -1554,39 +2123,14 @@ What lands:
   (`tools/speccov/main.go:112-113`), and the gate does not invoke it. Many other
   tests across the repository also cite §13.10, so the section does not lose its
   last citation either way.
-- The built `index.html` keeps `<title>Podium</title>`, which today comes from
-  `web/index.html:5`. Three shipped assertions read that literal out of the
-  served or embedded index: `web/web_test.go:19`,
-  `cmd/podium/serve_ui_test.go:51`, and
-  `test/e2e/server_flag_behavior_test.go:30`. A bundler's scaffolded
-  `index.html` carries the tool's own title, so the title is a constraint on the
-  bundle rather than an incidental property, and holding it leaves all three
-  assertions standing unchanged.
-- The bundle's asset references resolve under the `/ui/` mount. The UI is served
-  through `http.StripPrefix("/ui/", …)` and the outer mux routes every other
-  path to the meta-tool handler, which registers no `/assets/` route
-  (`internal/serverboot/serverboot.go:1230`, `:1239`,
-  `pkg/registry/server/server.go:389-419`). A bundle built with the common
-  default public base of `/` emits `<script src="/assets/index-<hash>.js">`, the
-  browser requests `/assets/…`, and the outer mux returns `404`, so `/ui/` serves
-  a blank page while the rebuild check and the title assertion both still pass.
-  Today's hand-written SPA avoids this only because its references are relative
-  (`web/index.html:7`, `:18`). Either the bundler's public base is set to `/ui/`
-  or the emitted references are relative, and `web.Assets()` serves every
-  referenced path.
 - A CI step rebuilds the bundle and fails if the working tree differs, which is
   what makes the committed output trustworthy rather than merely present. This is
   part of the deliverable.
 - A `.gitattributes` entry marks the bundle generated so review diffs collapse.
   The repository has none today.
 
-**IMPLEMENTOR'S CHOICE:** the bundler and the output path. Any answer produces
-deterministic output so the rebuild check is stable, keeps `go build ./...`
-working with no Node toolchain present, leaves `web.Assets()` rooted at the
-served bundle so `/ui/` keeps returning `index.html`, emits that `index.html`
-with `<title>Podium</title>` and with asset references that resolve under the
-`/ui/` mount, and leaves the built bundle the only generated artifact in the
-tree.
+**IMPLEMENTOR'S CHOICE:** the bundler and the output path. Any answer satisfies
+the committed-bundle constraints above.
 
 ## The design handout
 
@@ -1618,13 +2162,14 @@ rendering rule on the deployment names the posture read as the signal, because
 "The browser session" adds it for exactly that purpose and the brief predates it.
 
 This section is the single statement of the posture-keyed rendering rules. The
-panel-visibility rule, the catalog-scope rule, the expiry-signal rule, and the
-sign-in control table are each stated once here, in the vocabulary the posture
-read returns (`identity_provider_configured`, `public_mode`,
-`browser_auth.enabled`, and `subject`), so that no other site translates a prose
-scoping into a field test. Every other site in this proposal names a rule and
-cites G1, and states no condition, field, or value the statement here does not
-carry.
+panel-visibility rule, the catalog-scope rule, and the sign-in control table are
+each stated once here, in the vocabulary the posture read returns
+(`identity_provider_configured`, `public_mode`, `browser_auth.enabled`, and
+`subject`), so that no other site translates a prose scoping into a field test.
+Every other site in this proposal names a rule and cites G1, and states no
+condition, field, or value the statement here does not carry. The expiry-signal
+rule is owned by "The browser session"; what G1 carries is the correction that
+lands it in the brief.
 
 - `web/DESIGN.md:126-129` describes a layer as carrying "a visibility that is one
   of public, organization-wide, group-scoped, or user-scoped". Visibility is a
@@ -1681,23 +2226,23 @@ carry.
   control under "Rendering untrusted content", whose sanitizer case asserts that
   a markup-carrying frontmatter value renders as literal text in that table.
 - `web/DESIGN.md:20-22` states that everything the UI displays comes "from the
-  same endpoints an SDK would call, filtered by the caller's identity". That is
-  true of the catalog endpoints behind `load_domain`, `search_artifacts`, and
-  `load_artifact`, and false of `GET /v1/layers`, which returns every layer
-  config in the tenant to any caller with no visibility or owner predicate
-  (`pkg/registry/server/layers.go:770-777`). The sentence is scoped to the
-  catalog endpoints, and the layer-panel section (`web/DESIGN.md:120-147`) states
-  that the layer list arrives unfiltered and that the panel's role split is
-  presentation over it, which is the same position the Non-goals section takes.
+  same endpoints an SDK would call, filtered by the caller's identity". The
+  sentence is false of `GET /v1/layers` under the unfiltered-list rule. It is
+  scoped to the catalog endpoints, where the registry evaluates the caller
+  against the §4.6 visibility predicate and the catalog-scope rule below states
+  what that predicate admits on each deployment. The layer-panel section
+  (`web/DESIGN.md:120-147`) states that the layer list arrives unfiltered and
+  that the panel's role split is presentation over it, naming the rule and
+  carrying no condition it does not.
 - **The panel-visibility rule.** `web/DESIGN.md:145-147` ends the role split with
   "an anonymous caller sees no
   panel at all". On a registry that configures no identity provider every caller is
   unauthenticated, so under that rule the panel renders for nobody exactly where
-  the server admits every layer write. That is the default standalone and
-  public-mode posture and the posture §13.10's own web UI targets
-  (`spec/13-deployment.md:170`), and it is where the layer writes are admitted
-  (`internal/serverboot/serverboot.go:1209-1215`). The sentence is rewritten to
-  key on the posture read's `identity_provider_configured`, which it names: when
+  the server admits every layer write. The deployment carve-out under "The
+  layer-ownership defect" states when the gate is live and what follows where it
+  is not. The sentence is rewritten to
+  key on the posture read's `identity_provider_configured`, which it names, and
+  that single flag is sufficient for the reason the carve-out gives: when
   the read reports it true, a caller for whom the read returns no `subject` sees
   no panel; when the read reports it false, the panel renders with the full set
   of write operations for every caller, because the server admits them there.
@@ -1724,7 +2269,8 @@ carry.
   from the `oidc-jwt` and `trusted-headers` case, and the response the read
   returns carries no provider name, so the rule takes the refusal as an arm
   rather than gaining a posture field: the page learns from the catalog response,
-  which is the same source the expiry-signal rule below already uses. The
+  which is the same source the expiry-signal rule under "The browser session"
+  already uses. The
   sentence is rewritten to key on the posture read's
   `identity_provider_configured` and `public_mode`, which it names, and on
   whether the catalog read answers: where a catalog read is refused with `401`,
@@ -1734,15 +2280,14 @@ carry.
   the catalog read answers, the anonymous view is the public subset when the
   read reports `identity_provider_configured` true and `public_mode` false, and
   is the whole catalog on every other combination of the two.
-- **The expiry-signal rule.** `web/DESIGN.md:163-164` names "a session expiring
-  mid-use while a page is
+- **The expiry-signal correction.** `web/DESIGN.md:163-164` names "a session
+  expiring mid-use while a page is
   already rendered" as a transition the design handles, without naming the
-  signal the panel receives. The registry gives a different signal per surface: a
-  catalog read returns `401` `auth.token_expired`, and a layer write returns `403`
-  `auth.forbidden` because the layer endpoint's resolver discards the
-  verification error (`internal/serverboot/identity_verify.go:55-63`). The
-  sentence gains that, so the design pass treats the catalog read as the expiry
-  signal and does not read a write's `403` as an ownership decision.
+  signal the panel receives. The sentence gains the expiry-signal rule under "The
+  browser session", written in the brief's own terms: the catalog read is the
+  signal, and a refused write is not an ownership decision. The brief states no
+  status, code, resolver, or surface that the rule does not state, so a clause in
+  the brief and absent from the rule is a defect in the brief.
 - The brief has no authentication affordance. `web/DESIGN.md:163-164` names
   signing in and signing out as transitions, and it was written while §13.10 said
   the UI "runs no acquisition flow of its own", so nothing in the brief's
@@ -1762,18 +2307,17 @@ carry.
   | true | present | sign-out, as a `POST` from the page carrying the same proof the panel's writes carry, after which the page navigates |
   | false | absent or present | neither control |
 
-  Sign-out is a `POST` from the page rather than a navigation because a
-  top-level navigation cannot carry the `X-Podium-CSRF` header where the landed
-  mechanism requires one, and because `POST` is what the §6.3.4 method predicate
-  reads as state-changing. Both conjuncts are required on each of the first two
-  rows,
+  The sign-out row renders a `POST` from the page rather than a link, because
+  that is the method the route methods under "The browser session" fix and a
+  control the human clicks has to issue the request the route answers. Both
+  conjuncts are required on each of the first two rows,
   because the read carries `sign_in_path` and `sign_out_path` only when `enabled`
   is true and each route is registered only where the flow is enabled, so
   rendering a control on any other combination would send the browser to a path
   the mux does not serve, whose response is whatever that deployment answers for
-  an unregistered path rather than anything the page can present. "What happens
-  when it does not fire" under "The browser session" states what that response
-  is. The third row covers the shipped web-UI-only posture, the default
+  an unregistered path rather than anything the page can present. "The status an
+  unregistered path receives" under "The browser session" states what that
+  response is. The third row covers the shipped web-UI-only posture, the default
   standalone one, and the gateway-fronted §13.10 deployment, where a subject does
   resolve: the gateway authenticates the request and the registry resolves the
   caller's identity from the forwarded token or the injected headers
@@ -1806,34 +2350,37 @@ defect in the cell rather than an extension of the rule.
 | Domain browser | anonymous and authenticated views differ | — | unreachable registry | nested and folded entries |
 | Search | filters reach the endpoint | — | no results | score and sensitivity present and absent |
 | Artifact viewer | authenticated sees what anonymous does not | — | not-found for invisible artifact | sanitized markdown, property table, related links; a hostile body and a markup-carrying frontmatter value both render inert |
-| Layer panel | list is unfiltered by the server | owner gate refuses `403`; an owner's same-origin write carrying the session cookie and the required proof succeeds, driven server-side by C2 and issued by the panel's own client code in U1 | `registry.read_only` across the panel; a registration whose existence lookup fails is refused with `registry.unavailable` rather than admitted | one-time secret, destructive confirmation; the panel-visibility rule G1 states |
-| Session | a cookie-carried token resolves the same identity the header does, and the session cookie a successful callback returns resolves the IdP-issued subject rather than anonymous | sign-in and the callback set cookies and write no registry state; sign-out clears them | on a meta-tool route a cookie past the token's `exp` returns `auth.token_expired`; on a layer write the same cookie resolves anonymous and the owner gate returns `auth.forbidden`; a callback whose exchange the IdP answers and refuses returns `auth.exchange_failed`, an unreachable token endpoint returns `registry.unavailable`, and a callback carrying the IdP's `error` parameter rather than a `code` runs no exchange, sets no session cookie, leaves an existing one intact, and returns the browser to `/ui/` | — |
+| Layer panel | the unfiltered-list rule holds: an anonymous caller, a non-owner, and the owner each receive the same list | the layer-write authorization rule under "The layer-ownership defect" is exercised through the panel; an owner's same-origin write carrying the session cookie and the required proof succeeds, driven server-side by C2 and issued by the panel's own client code in U1 | `registry.read_only` across the panel; the panel surfaces each refusal that rule states | one-time secret, destructive confirmation; the panel-visibility rule G1 states |
+| Session | a cookie-carried token resolves the same identity the header does, and the session cookie a successful callback returns resolves the IdP-issued subject rather than anonymous | sign-in and the callback set cookies and write no registry state; sign-out clears them | every surface answer the expiry-signal rule states, asserted against that rule and stating no condition it does not carry; both arms of the exchange-failure rule are observable, an exchange the IdP answers and refuses returning `502` `auth.exchange_failed` and a token endpoint that is unreachable or answers `5xx` returning `500` `registry.unavailable`; and a callback carrying the IdP's `error` parameter rather than a `code` runs no exchange, sets no session cookie, leaves an existing one intact, and returns the browser to `/ui/` | — |
 | Session CSRF | — | every refusal and every admission "The CSRF position" states, driven against each credential the registry accepts and with the browser flow both enabled and disabled | replayed or misdelivered callback refused with `403` `auth.csrf_invalid` | — |
-| Posture read | the body reports the deployment's identity provider, public mode, browser-flow enablement, and route paths, and the caller's own subject when one resolves | — | the read is absent on a registry serving no web UI, and the UI renders its anonymous presentation when the read fails | the control G1's sign-in control table gives for each row, including the disabled-with-a-subject row, which is the gateway-fronted arrangement; the catalog-scope rule G1 states |
+| Posture read | the body "The posture read" states, asserted whole on each deployment posture and with a subject both resolved and unresolved | — | the read is absent on a registry serving no web UI, and the UI renders its anonymous presentation when the read fails | the control G1's sign-in control table gives for each row, including the disabled-with-a-subject row, which is the gateway-fronted arrangement; the catalog-scope rule G1 states |
 | Session cookies | every `Set-Cookie` the flow emits carries the attributes its row in the cookie table gives it | the clearing behavior each row states; a sign-out refused for CSRF clears nothing | — | — |
-| Credential precedence | a token in the configured header wins; the cookie is read only when the header carries none | — | — | — |
+| Credential precedence | the header-wins precedence rule under "The browser session", driven at each branch its statement carries: a bearer credential in the configured token header alongside a session cookie, a configured token header carrying no bearer credential alongside a valid session cookie, and the same request on a registry with the browser flow disabled | — | — | — |
 | Session remediation text | — | — | the `auth.token_expired` and `auth.untrusted_token` envelopes name an action a browser session can take, asserted verbatim rather than for non-emptiness | — |
 
 ## Testing
 
-- **Owner authorization (C1).** On a registry with an identity provider
-  configured, a caller who is neither the owner nor an admin receives `403`
-  `auth.forbidden` from `unregister`, `update`, `restore`, `reorder`, and
-  `reingest` against a `UserDefined: true` layer; a caller who resolves no subject
-  at all receives the same refusal, which is the case §6.3.3 makes reachable by
-  treating a request as anonymous during a JWKS outage; the owner succeeds; an
-  admin succeeds on any
-  layer. A separate case covers `reingest` against an admin-defined layer, where
-  the rule S6 states collapses to admin-only, including for a caller the stored
-  `Owner` field names, and the
-  handler runs no authorization today at all
-  (`pkg/registry/server/layers.go:946-991`): an authenticated non-admin and a
-  caller resolving no subject each receive `403` `auth.forbidden` and no ingest
-  runs, and an admin succeeds. The same case is repeated with a break-glass body,
-  because the gate runs ahead of `runIngestAndRespond`, so a break-glass reingest
-  is refused for the same caller and bypasses no freeze. The refusal cases install a denying `WithAdminAuth` and a non-owner or
-  empty `WithIdentityResolver`, because the bare `NewLayerEndpoint` authorizes
-  every caller as admin (`pkg/registry/server/layers.go:174`).
+- **Owner authorization (C1).** The cases below assert the layer-write
+  authorization rule under "The layer-ownership defect" and assert nothing that
+  rule does not state; a case asserting a clause absent there is a defect in the
+  case rather than an extension of the rule. On a registry with an identity
+  provider configured, a caller who is neither the owner nor an admin, and
+  separately a caller who resolves no subject at all, each receive the refusal
+  the rule states from `unregister`, `update`, `restore`, `reorder`, and
+  `reingest` against a `UserDefined: true` layer; the owner succeeds; an admin
+  succeeds on any layer. The no-subject case is the one §6.3.3 makes reachable by
+  treating a request as anonymous during a JWKS outage. A separate case covers
+  `reingest` against an admin-defined layer, where the rule authorizes a tenant
+  admin alone and the handler runs no authorization today at all
+  (`pkg/registry/server/layers.go:946-991`): an authenticated non-admin, a caller
+  the stored `Owner` field names, and a caller resolving no subject each receive
+  the refusal and no ingest runs, and an admin succeeds. The same case is
+  repeated with a break-glass body, because the rule places the gate ahead of
+  `runIngestAndRespond`, so a break-glass reingest is refused for the same caller
+  and bypasses no freeze. The refusal cases install both overrides the permissive
+  `NewLayerEndpoint` defaults stated under "The layer-ownership defect" require:
+  a denying `WithAdminAuth`, and a `WithIdentityResolver` that resolves a
+  non-owner or no subject.
 - **Registration takeover (C1).** On the same registry, an authenticated
   non-owner who re-registers an existing user-defined layer's ID receives `403`
   `auth.forbidden` and the stored layer's owner, source, and visibility are
@@ -1874,9 +2421,9 @@ defect in the cell rather than an extension of the rule.
   after `authAdmin` leaves this path open while every other listed case passes.
 - **Owner authorization, no identity provider (C1, e2e).** A standalone registry
   unregisters a user-defined layer that was registered with
-  `podium layer register --user-defined --owner alice`, because a registry that
-  configures no identity provider does not make the gate live. The test first
-  reads the stored layer back and asserts its `UserDefined` is true and its
+  `podium layer register --user-defined --owner alice`, which is the admitted
+  case the deployment carve-out under "The layer-ownership defect" describes. The
+  test first reads the stored layer back and asserts its `UserDefined` is true and its
   `Owner` is `alice`, spelled as the list response emits them, because that
   response marshals `store.LayerConfig`, whose fields carry no JSON tags
   (`pkg/store/store.go:267-268`), so the unregister reaches the user-defined branch the carve-out
@@ -1900,38 +2447,36 @@ defect in the cell rather than an extension of the rule.
   meta-tool middleware and the layer endpoint both use
   (`internal/serverboot/serverboot.go:1136`, `:1198`). It does not own what each
   consumer does with the returned error; the bullet below pins that.
-- **Expired session across surfaces (C1 and C2, integration).** On a registry with the
-  browser flow enabled and the owner gate live, a request carrying a session
-  cookie past the token's `exp` returns `401` `auth.token_expired` from a
-  meta-tool route, and the same cookie on a layer write against a layer the
-  cookie's subject owns returns `403` `auth.forbidden`, because
-  `layerIdentityResolver` discards the verification error
-  (`internal/serverboot/identity_verify.go:55-63`). This pins the split "The
-  browser session" states, so a design or a panel built on a single expiry
-  signal fails here rather than in the browser.
+- **Expired session across surfaces (C1 and C2, integration).** On a registry
+  with the browser flow enabled, a request carrying a session cookie past the
+  token's `exp` is driven against each surface the expiry-signal rule names, and
+  each response is asserted against that rule: a meta-tool route, a layer write
+  against a layer the cookie's subject owns, `GET /v1/layers`, and the posture
+  read. A further case runs with the JWKS unreachable and asserts the anonymous
+  arm. This pins the split the rule states, so a design or a panel built on a
+  single expiry signal fails here rather than in the browser.
 - **Routes (C2, integration).** Driven over HTTP against a stub IdP token
   endpoint. The cases below are the ones that name an implementation the
   pre-authorization transaction contract does not by itself exclude; the blank
   at the end of the bullet carries the rest.
   - A callback carrying `?error=access_denied` together with either no
     `__Host-podium_auth` cookie or a cookie whose `state` differs from the
-    `state` query parameter is refused with `403` `auth.csrf_invalid`, sets no
-    session cookie, and emits no `Set-Cookie` for `__Host-podium_session`, so a
-    `__Host-podium_session` cookie the browser already holds survives. The case
-    runs once per condition, and each run asserts the `403` and the untouched
-    session cookie. This is what pins the ordering "The browser session" states,
+    `state` query parameter is refused with `403` `auth.csrf_invalid`. The case
+    runs once per condition, and each run asserts the `403` together with the
+    cookie effects "The callback order and outcomes" states for a refusal. This
+    is what pins the ordering "The browser session" states,
     that the `state` comparison runs before the `error` branch: an
     implementation that inspects `error` first answers the `/ui/` redirect here
     instead, which lets any third party who can make the victim's browser issue
     a request to the callback path with `?error=` destroy the in-flight
     pre-authorization transaction with no refusal.
   - A callback carrying `?error=access_denied` and no `code`, whose
-    `__Host-podium_auth` cookie and `state` both validate, runs no exchange: it
-    clears `__Host-podium_auth`, sets no session cookie, and redirects to `/ui/`.
-    The case runs once with no `__Host-podium_session` cookie present, asserting
-    the redirect and that no `Set-Cookie` for `__Host-podium_session` is emitted,
-    and once with a valid `__Host-podium_session` cookie already present,
-    asserting that its `Set-Cookie` is not reissued, so the prior session
+    `__Host-podium_auth` cookie and `state` both validate, runs no exchange and
+    redirects to `/ui/`.
+    The case runs once with no `__Host-podium_session` cookie present and once
+    with a valid `__Host-podium_session` cookie already present, asserting the
+    redirect in both runs and the cookie effects "The callback order and
+    outcomes" states for this outcome, so the prior session
     survives. Both runs assert the response carries neither `auth.csrf_invalid`
     nor `auth.exchange_failed`. This is the declined-consent outcome the two
     neighboring cases each stop short of: the case above is scoped to the
@@ -1951,9 +2496,9 @@ defect in the cell rather than an extension of the rule.
     issuer whose discovery document names a third, so an implementation that
     reads the device-code key, or derives the endpoint from the discovery
     document, or omits or hardcodes `client_id` or `redirect_uri`, fails here
-    rather than in a browser against a real IdP. This is what pins the runtime
-    half of the §6.3.4 sentence that the device-code option is not read by the
-    browser flow; the Guard bullet pins only the startup refusal.
+    rather than in a browser against a real IdP. This is the runtime half of the
+    device-code-key rule under "The browser session"; the Guard bullet below pins
+    the startup half.
   - The stub token endpoint asserts that the exchange presents the
     `code_verifier` matching the PKCE challenge the sign-in redirect carried, and
     fails the exchange otherwise, so an implementation that stores a verifier and
@@ -1961,9 +2506,10 @@ defect in the cell rather than an extension of the rule.
   - A callback whose exchange the stub answers with an OAuth error such as
     `invalid_grant` is refused with `502` `auth.exchange_failed`, and the
     response envelope carries `retryable: false` and a
-    non-empty `suggested_action`. The refusal discriminates the permanent
-    failure from the transient one, which a single
-    `registry.unavailable` arm would collapse, and the envelope assertion
+    non-empty `suggested_action`. This is the permanent arm of the
+    exchange-failure rule under "The browser session", and a single
+    `registry.unavailable` arm would collapse it into the transient one. The
+    envelope assertion
     discriminates the staged `errorCodeRegistry` entry from its absence, because
     `enrichEnvelope` returns immediately for an unregistered code
     (`pkg/registry/server/error_envelope.go:88-92`) and leaves exactly the body a
@@ -2033,16 +2579,27 @@ defect in the cell rather than an extension of the rule.
   and asserts each `message` verbatim against the amended
   `spec/06-mcp-server.md:371` and its issuerless fallback. Each case carries
   `// Spec: §6.10`. This is the only new test the credential-location rule
-  needs. The other emitted string the rule moves is the boot log line,
-  matched by the substring "accepted issuers" (`test/e2e/auth_oidc_jwt_test.go:202`,
-  `:277`) and quoted verbatim by the S36 and S44 expectations that T1 restages.
-  Every other site the rule moves is a comment or prose that emits nothing, so no
-  test can pin it, and those are held by review against the rule, by the §6.10
-  mirror obligation, and by re-running the recorded command.
-  `test/e2e/auth_oidc_jwt_test.go:202` matches `"accepted issuers "+idp.srv.URL`
-  rather than the bare substring, so a restatement that keeps the phrase but
-  separates it from the joined issuer list fails that assertion; C2 keeps the
-  adjacency, and it owns the assertion if it does not.
+  needs.
+  The other emitted string the rule moves is the `oidc-jwt` startup log line
+  (`internal/serverboot/serverboot.go:1142`), which C2 restates. This paragraph
+  is the single statement of the boot-log adjacency constraint, and every other
+  site cites it by name. The restated line keeps the phrase `accepted issuers `,
+  including its trailing space, immediately followed by the comma-joined
+  accepted-issuer values, whose first element is the configured issuer
+  (`pkg/identity/oidc_jwt.go:279-286`). Two assertions read that line.
+  `test/e2e/auth_oidc_jwt_test.go:202` asserts the concatenation
+  `"accepted issuers "+idp.srv.URL`, so a restatement that keeps the phrase but
+  separates it from the joined list, or that moves the configured issuer out of
+  first position, fails there. `:277` asserts the bare substring
+  `accepted issuers` and the issuer value as independent entries, so it passes
+  under any restatement that keeps the phrase. A restatement that holds the
+  constraint leaves both assertions passing and requires no edit to that file.
+  C2 restates the line, holds the constraint, and owns both assertions and the
+  file edit they require if it does not. The manual expectations that quote the
+  line verbatim are restaged under "Two expectations quote the startup log
+  line". Every other site the rule moves is a comment or prose that emits
+  nothing, so no test can pin it, and those are held by review against the rule,
+  by the §6.10 mirror obligation, and by re-running the recorded command.
 - **Any replica serves the callback (C2, integration).** Sign-in runs against one
   endpoint instance and the callback against a second that shares no state, and
   the exchange completes. This is the property the cookie-carried transaction
@@ -2050,23 +2607,22 @@ defect in the cell rather than an extension of the rule.
   asserted rather than assumed.
 - **Read-only (C2, integration).** With the registry in read-only mode, sign-in,
   the callback, sign-out, and the posture read all behave as they do outside it,
-  and an established
-  session keeps reading. None of them returns `registry.read_only`. This
-  pins the §13.2.1 classification the amended §7 entry states.
-- **CSRF (C2).** A forged state-changing request carrying a valid session cookie
+  an established session keeps reading, and none of them returns
+  `registry.read_only`. This pins the read-only classification under "The browser
+  session", which the amended §7 entry states.
+- **CSRF (C2).** The cases below instantiate the predicate "The CSRF position"
+  states and assert nothing it does not carry. A forged state-changing request
+  carrying a valid session cookie
   and cross-site browser-origin evidence, meaning `Sec-Fetch-Site: cross-site`
   in one case and an `Origin` naming another host in another, is refused before
   the handler runs with `403` `auth.csrf_invalid`. The same two forgeries are
   driven again with the request authenticated by a `Bearer` token in the
   configured token header and no session cookie, and are refused identically.
-  That pair is the gateway-fronted forgery: §13.10 serves the UI behind a
-  gateway that converts the browser's own session into that header
-  (`spec/13-deployment.md:170`), so a gate scoped to the session cookie passes
-  every other case here and admits the forged panel write on the deployment
-  §13.10 blesses. One of that pair runs on a registry with the browser flow
-  disabled, which pins that the gate reads the request rather than the
-  deployment and is not conditional on the flow. Where the chosen mechanism
-  carries a cookie, a request
+  One of that pair runs on a registry with the browser flow
+  disabled. Those two runs are what discriminate the landed gate from a
+  credential-scoped one and from one conditional on the browser flow, which is
+  why the pair and the disabled-flow run are required rather than illustrative.
+  Where the chosen mechanism carries a cookie, a request
   presenting a valid session cookie, a CSRF cookie, and a request value that
   does not match that cookie is refused with the same status and code. The
   sibling-host forgery, in which a host under the registry's registrable domain
@@ -2116,43 +2672,49 @@ defect in the cell rather than an extension of the rule.
   takes remains open. The unrecoverable outcome is the callback's, and the
   Routes case pins it there.
 - **Posture read (C2, integration and e2e).** The integration cases drive
-  `GET /v1/ui/session` with no credential and assert the body per deployment: on
-  a registry that configures no identity provider it reports
-  `identity_provider_configured` false, `browser_auth.enabled` false, and no
-  `subject`; in public mode it reports `public_mode` true; with `oidc-jwt` and
-  the browser flow enabled it reports both booleans and a `browser_auth` whose
-  `sign_in_path` and `sign_out_path` are the paths the mux registers, which is
-  what keeps the UI from spelling a path the mux does not serve; the same request
-  carrying a valid session cookie reports that token's subject, and one carrying
-  a session cookie past the token's `exp` reports none, which is the resolver's
-  fail-closed arm. One end-to-end case asserts through the binary that a registry
+  `GET /v1/ui/session` with no credential against a registry that configures no
+  identity provider, one in public mode, and one under `oidc-jwt` with the
+  browser flow enabled, and assert the whole body on each against "The posture
+  read", including that no field that statement does not carry is present. Two
+  further cases drive the enabled deployment with a valid session cookie and with
+  a session cookie past the token's `exp`, which are the subject-present and
+  subject-absent arms of the same statement, the second being the resolver's
+  fail-closed arm. On the enabled deployment `sign_in_path` and `sign_out_path`
+  are asserted against the paths the mux registers rather than against literals,
+  which is what keeps the UI from spelling a path the mux does not serve. One
+  end-to-end case asserts through the binary that a registry
   started with `--web-ui` and no browser flow answers the read with
   `browser_auth.enabled` false, and that a registry started without `--web-ui`
   answers `404` on the path. Both binaries configure no identity provider, which
-  is what makes `404` the disposition rather than an identity refusal, per "What
-  happens when it does not fire" under "The browser session". Without these an implementation that omits the read
-  passes every other case here while leaving the UI unable to offer sign-in.
-- **Guard (C3, unit + e2e).** A table over each refused
-  conjunct: the flow enabled with the web UI disabled; under `oidc-jwt` with each
+  is the stack fact that fixes the status, per "The status an unregistered path
+  receives" under "The browser session". Without these an implementation that
+  omits the read passes every other case here while leaving the UI unable to
+  offer sign-in.
+- **Guard (C3, unit + e2e).** A table with one refused case per conjunct of the
+  startup guard under "The browser session": the flow enabled with the web UI
+  disabled; under `oidc-jwt` with each
   acquisition value in turn left empty, which is the client identifier, the
   client credential, the redirect URI, the authorization endpoint, and the token
   endpoint; with `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` set and
   `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` empty, which fails on the same
-  conjunct, because the device-code key is not read by the browser flow; with a
+  conjunct as the empty-authorization-endpoint row above, under the
+  device-code-key rule under "The browser session"; with a
   redirect URI that is neither an
-  `https` URL nor a loopback `http` URL; alongside `trusted-headers`; alongside
+  `https` URL nor a loopback `http` URL, which the redirect-URI conjunct under
+  "The browser session" refuses; alongside `trusted-headers`; alongside
   `injected-session-token`; and with no identity provider selected, which is also
   the public-mode-with-no-provider case and fails on the `oidc-jwt` conjunct.
-  Each fails with `config.web_ui_auth_unconfigured` naming the failed conjunct.
+  Each asserts `config.web_ui_auth_unconfigured` naming the failed conjunct.
   One further case pins the ordering rather than the new code: the flow enabled
-  alongside public mode and `oidc-jwt` fails with `config.public_mode_with_idp`,
-  because the shipped exclusion is the first check `Validate` runs
-  (`pkg/registry/server/config_validate.go:87-90`) and the new guard does not
-  displace it, so no configuration reaches
-  `config.web_ui_auth_unconfigured` naming the public-mode conjunct. The
-  accepting cases are the flow enabled with the web UI on,
-  `oidc-jwt`, public mode off, and every acquisition value set, once with an
-  `https` redirect URI and once with a loopback `http` one. The combinations that
+  alongside public mode and `oidc-jwt` fails with `config.public_mode_with_idp`.
+  The ordering it pins is stated by the guard's ordering under "The browser
+  session", and the
+  case exists so that an implementation placing the new guard ahead of the
+  shipped exclusion fails here. The table carries no case in which the guard
+  names the public-mode conjunct, because no configuration produces one. The
+  accepting cases are the flow enabled with every conjunct satisfied, once with
+  an `https` redirect URI and once with a loopback `http` one, which are the two
+  forms that conjunct admits. The combinations that
   enable no browser flow all pass, including the shipped web-UI-only
   configuration, meaning `--web-ui` alone (`cmd/podium/serve.go:38`,
   `internal/serverboot/serverboot.go:1826`). One representative refusal
@@ -2166,8 +2728,8 @@ defect in the cell rather than an extension of the rule.
   `internal/serverboot/serverboot.go:1826`), returns `404` on each authentication route
   path, and a stale `__Host-podium_session` cookie sent to it resolves anonymous
   rather than authenticating. That binary configures no identity provider, which
-  is what makes `404` the disposition rather than an identity refusal, per "What
-  happens when it does not fire" under "The browser session"; the case asserts
+  is the stack fact that fixes the status, per "The status an unregistered path
+  receives" under "The browser session"; the case asserts
   the status on that stack alone and asserts on every stack that no
   authentication route answers. A binary started with the browser flow enabled and
   configured serves the sign-in route, and a binary started the same way with
@@ -2183,12 +2745,12 @@ defect in the cell rather than an extension of the rule.
   `.claude/rules/test-coverage.md` requires for a CLI and boot-path change. The
   shipped `podium serve` flag assertion is a fixed literal list
   (`test/e2e/cli_reference_test.go:261`) and reaches neither new flag. No further
-  mount-predicate case is needed: the configuration
-  that would discriminate a conjunction from a disjunction, the flow enabled with
-  the web UI disabled, is a startup refusal the guard test covers, which is what
-  collapsing the predicate onto one validated field buys. This is the predicate
-  S45 step 4 depends on, and it lives in the boot wiring, so it is asserted
-  through the binary.
+  mount-predicate case is needed: the configuration that would discriminate a
+  conjunction from a disjunction, the flow enabled with the web UI disabled, does
+  not boot, and the guard test covers that refusal. That is what the mount
+  predicate stated under "The browser session" buys. This is the
+  predicate S45 step 4 depends on, and it lives in the boot wiring, so it is
+  asserted through the binary.
 - **Build (B1).** Rebuilding the bundle produces no working-tree diff. `go build
   ./...` succeeds with no Node toolchain present.
 - **Served bundle (B1, e2e).** A binary started with `PODIUM_WEB_UI=true`
@@ -2197,28 +2759,29 @@ defect in the cell rather than an extension of the rule.
   binary. This is the level B1 declares and the one that catches an asset base
   path the mount does not serve, which no file-system read of the embedded set
   can catch.
-- **Sanitization (U1).** An artifact body carrying a `<script>` element, an
-  `<img onerror=…>` attribute, and an `[x](javascript:…)` link renders with no
+- **Sanitization (U1).** These cases verify the sanitization rule under
+  "Rendering untrusted content". An artifact body carrying a `<script>` element,
+  an `<img onerror=…>` attribute, and an `[x](javascript:…)` link renders with no
   executable node and no surviving `javascript:` URL for any of the three. A
-  frontmatter value carrying markup renders as literal text in the property
-  table rather than as an element. A markdown construct the renderer emits as
-  raw HTML is still neutralized, which is the case that pins that the sanitizer
-  runs on the rendered output rather than on the source; a sanitizer wired to the
-  source passes every other case here and fails this one. A link whose scheme is
-  outside the allowlist, such as `data:text/html,…`, renders with no surviving
-  URL, which pins the allowlist the blank under "Rendering untrusted content"
-  constrains. These are the deny
+  markdown construct the renderer emits as raw HTML is still neutralized, which
+  is the case that discriminates a sanitizer wired to the rendered output from
+  one wired to the markdown source; a source-wired sanitizer passes every other
+  case here and fails this one. A link whose scheme is outside the rule's
+  allowlist, such as `data:text/html,…`, renders with no surviving URL. A
+  frontmatter value carrying markup renders as literal text in the property table
+  rather than as an element. These are the deny
   paths of a fail-closed control this change introduces, so they are required
   rather than covered by the Render column's well-formed case.
-- **No unsanitized markup (B1).** The mechanical check over the web UI's own
-  source tree reports no `dangerouslySetInnerHTML` outside the single sanitized
-  rendering path, and it runs in the CI job that also runs the rebuild-is-clean
-  check. A tree that adds a second occurrence fails that job.
+- **No unsanitized markup (B1).** The `dangerouslySetInnerHTML` check under
+  "Rendering untrusted content" is the verification. It runs as a step in the CI
+  job that also runs the rebuild-is-clean check, so this item adds no case to the
+  test suite and the suite asserts nothing about the attribute.
 - **Surfaces (U1).** Per the matrix above, driven through the UI's own API calls
   rather than through the CLI. Where the mechanism C2 lands carries a
   request-side value, the Layer panel Write case is issued by the panel's own
-  client code and asserts that the outgoing request carries `X-Podium-CSRF` read
-  from `__Host-podium_csrf`, so a UI that omits the header fails this case rather
+  client code and asserts that the outgoing request carries the header the wire
+  contract under "The CSRF position" fixes, read from the cookie that contract
+  names, so a UI that omits the header fails this case rather
   than only failing in a browser. This is the client half of the gate, and no
   C2 case reaches it, because every C2 case constructs its own request.
   The Posture read row is driven at this level as well, one case per row of G1's
@@ -2281,8 +2844,8 @@ that request would answer `invalid_client`, `curl -fsS` would exit non-zero, and
 with `kcadm`, which is the only change that prerequisite needs. Step 3's serve invocation
 (`test/manual-validation.md:4069-4070`) gains `PODIUM_WEB_UI_AUTH`, the
 acquisition values including the IdP endpoint keys, and the transaction TTL,
-and its bind stays `127.0.0.1:8153`, which is the loopback `http` origin the
-redirect-URI conjunct admits.
+and its bind stays `127.0.0.1:8153`, which is a loopback `http` origin and is
+admitted by the redirect-URI conjunct under "The browser session".
 
 **S45 step 2's negative clause moves.** Step 2 greps
 `docs/reference/http-api.md` and `deploy/runbook.md` for the read-only write set,
@@ -2290,8 +2853,9 @@ expects both to enumerate ingest webhooks, layer admin operations, freeze
 toggles, admin grants, and tenant management, and expects neither to name "token
 issuance, a login endpoint, or a session table"
 (`test/manual-validation.md:4197-4203`). The write-set enumeration is unaffected:
-none of the three authentication routes writes registry state, so no write joins
-the set and the Expect block's positive list stays complete. The negative clause
+the read-only classification under "The browser session" adds no member to the
+§13.2.1 write set, so no write joins the set and the Expect block's positive list
+stays complete. The negative clause
 is falsified, because the mirror table stages
 `docs/reference/http-api.md:13-27` as the new home of the authentication route
 paths and the sign-in route is a login endpoint, so a human running the step
@@ -2306,34 +2870,29 @@ Step 3's probe loop is left alone. S45 runs on the S21 standard-deployment stack
 Postgres and S3 and enables neither the web UI nor an identity provider
 (`:1441-1443`, `:917`). The authentication routes are not mounted there, so a
 sign-in probe would return `404` rather than the `registry.read_only` the step's
-Expect block asserts. No authentication route is refused in read-only mode on any
-stack, because none of the three is in the §13.2.1 write set; the Read-only test
-under C2 pins that.
+Expect block asserts. A stack that does mount them would not return
+`registry.read_only` either, per the read-only classification under "The browser
+session".
 
 **S45 step 4 moves.** It probes `/v1/login`, `/v1/auth/token`, and `/v1/token`
 and expects 404 "because the registry registers no auth, login, or token route".
 The new routes falsify the stated reason, and an implementor who mounts one of
 the probed paths turns the step into a failure. It is rewritten to probe the
 registry's authentication route paths and to expect `404` on each with the
-reason the mount predicate gives: this stack enables neither the web UI nor the
-browser flow, so the registry registers none of those routes, and it configures
-no identity provider, so nothing refuses the probe ahead of route matching. Both
-conjuncts are stated, because the status a probe of an unregistered path
-receives is the deployment's rather than the route's, per "What happens when it
-does not fire" under "The browser session". It keeps what
+reason the mount predicate and the stack give: this stack enables neither the web
+UI nor the browser flow, so the registry registers none of those routes, and it
+configures no identity provider, so nothing refuses the probe ahead of route
+matching. Both conjuncts are stated, per "The status an unregistered path
+receives" under "The browser session". It keeps what
 stays true: the clause struck by proposal 0012 named a write endpoint the
 registry does not serve.
 
 **Two expectations quote the startup log line.** S36
 (`test/manual-validation.md:2642-2643`) and S44 step 4 (`:4085-4086`) quote the
 `oidc-jwt` startup log line verbatim, and C2 restates that line under the
-credential-location rule in "The browser session". Both expectations are
-restaged to quote the restated line, and T1 carries them.
-The restatement keeps "accepted issuers " immediately followed by the joined
-issuer list, because `test/e2e/auth_oidc_jwt_test.go:202` matches
-`"accepted issuers "+idp.srv.URL` and so requires that adjacency, while `:277`
-matches the bare substring. A restatement that holds the adjacency leaves both
-assertions passing, and C2 owns them if it breaks the adjacency.
+credential-location rule under "The browser session", subject to the boot-log
+adjacency constraint in "restated remediation and message strings". Both
+expectations are restaged to quote the restated line, and T1 carries them.
 
 **S36's §6.3.3 restatement moves with them.** The scenario's preamble
 (`test/manual-validation.md:2482-2484`) restates the §6.3.3 sends-no-credential
@@ -2341,7 +2900,7 @@ sentence without the "behind such a gateway" qualifier its authoring source
 carries, so it reads as a claim about every `oidc-jwt` registry, and it closes
 the acquisition path in the same sentence. S3 restates the source and D1 restates
 the shipped mirrors, so T1 restates this one on the same axis, under the
-credential-location rule in "The browser session". The scenario's own
+credential-location rule under "The browser session". The scenario's own
 device-code steps are unchanged, because S36 runs against a registry with no web
 UI and no browser flow.
 
@@ -2362,16 +2921,18 @@ covers, as S44 already established for the anonymous case.
 - Authoring or editing artifacts through the UI.
 - Any admin surface beyond the layer panel.
 - Changing the catalog and layer endpoints the UI calls, or giving it privileged
-  access. The one endpoint this proposal adds for the UI is the unauthenticated
-  posture read `GET /v1/ui/session`, which reports deployment posture and the
-  caller's own resolved subject and carries no privilege; "The browser session"
-  states why the browser can observe neither otherwise.
-- Server-side filtering of `GET /v1/layers`. The panel's role split is
-  presentation over an unfiltered list; the gate this proposal adds is on writes.
-- A server-side session record, a session table, or a session store. The session
-  is the IdP token in a cookie, and "The browser session" states why.
-- Silent token refresh, and revocation before the token's `exp`. An expired
-  session re-runs the sign-in redirect.
+  access. The UI reads those endpoints as an SDK would, and the only read this
+  proposal adds for it is `GET /v1/ui/session`, which "The posture read" under
+  "The browser session" specifies. The sign-in, callback, and sign-out routes
+  this proposal adds are navigation targets of the browser flow rather than
+  endpoints the UI reads.
+- Server-side filtering of `GET /v1/layers`. The unfiltered-list rule under "The
+  layer-ownership defect" states the read this proposal leaves as it is.
+- A server-side session record, a session table, or a session store. The
+  no-session-state rule under "The browser session" is the single statement of
+  what the registry holds instead and why.
+- Silent token refresh, and revocation before the token's `exp`. "Revocation is
+  expiry" under "The browser session" states the model.
 - The SDK half of the `DeviceCodeRequired` gap, a separate §6.3 client surface.
 - Any behavioral change to `oauth-device-code`, `injected-session-token`, or the
   startup identity guard. The guard's predicate, its refusal, and its error code
@@ -2402,11 +2963,11 @@ defect.
 
 **What the runs changed in the design, rather than in its wording.**
 
-- The registry stores nothing. The draft carried a session store, a §13.1
-  topology entry, shared session state, and cross-replica revocation. The cookie
-  carries the credential §6.3.3 already accepts rather than one the registry
-  mints, so there is no session record, no lifetime to choose, and no new
-  persistence surface.
+- The registry keeps no session state. The draft carried a session store, a
+  §13.1 topology entry, shared session state, and cross-replica revocation. The
+  cookie carries the credential §6.3.3 already accepts rather than one the
+  registry mints, and the no-session-state rule under "The browser session" is
+  the single statement of what that left.
 - The layer-ownership gap moved from a code-only fix into §7.3.1, because §7
   already specifies owner authorization and the defect is that the code does not
   implement it.
@@ -2422,9 +2983,10 @@ defect.
 **What the runs established about themselves, and what remains open.** Both
 introspections converged on one diagnosis: a mechanism stated in several places
 is kept consistent by propagation rather than by having one statement, and the
-seams leak on every pass that touches them. The cookie contract and the
-credential-location rule were each given a single normative statement and went
-quiet afterwards. The remaining duplication is recorded in "Watch out for".
+seams leak on every pass that touches them. The cookie contract, the
+credential-location rule, and the no-session-state rule were each given a single
+normative statement and went quiet afterwards. The remaining duplication is
+recorded in "Watch out for".
 
 ## Relationship to proposal 0012
 
