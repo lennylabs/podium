@@ -499,9 +499,7 @@ covers the deployments that run no browser flow, including the gateway-fronted
 the request; clearing a Podium cookie would not end the gateway's own session
 there. The fourth row is the arm "The posture read" owns: where the read fails
 or is not served the page holds no value for either key, so it renders neither
-control and the layer panel renders its write operations. That arm fires on
-every registry the read is not mounted on, so it is a routine state rather than
-a corner.
+control and the layer panel renders its write operations.
 
 The transitions matter as much as the states: signing in, signing out, and a
 session expiring mid-use while a page is already rendered. The signal for that
