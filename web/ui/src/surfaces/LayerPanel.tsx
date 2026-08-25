@@ -9,16 +9,32 @@
 // and treats the local operator as the administrator, and the panel is the
 // point of that deployment.
 
+import type { ReactNode } from 'react';
 import { useState } from 'react';
 
 import { DeletedLayers } from './DeletedLayers';
 import { RegisterLayerForm } from './RegisterLayerForm';
-import { Badge, EmptyState, ErrorState, Loading } from '../components/primitives';
+import { Badge, Banner, EmptyState, ErrorState, Loading } from '../components/primitives';
 import type { LayerRecord } from '../api';
 import { ApiError, listLayers, reingestLayer, reorderLayers, unregisterLayer } from '../api';
 import { useAsync } from '../useAsync';
 
-export function LayerPanel({ subject }: { subject: string }) {
+/** recoveryDays is the window an unregistered layer stays restorable for
+ * (§8.4). The confirmation states it with the date it runs out, because a
+ * window with no date leaves the reader to work out what it means. */
+const recoveryDays = 30;
+
+export function LayerPanel({
+  subject,
+  readOnly,
+  sessionEnded,
+  recovery,
+}: {
+  subject: string;
+  readOnly: boolean;
+  sessionEnded: boolean;
+  recovery: ReactNode;
+}) {
   const layers = useAsync(() => listOrdered(), []);
   const [registering, setRegistering] = useState(false);
   const [showingDeleted, setShowingDeleted] = useState(false);
@@ -35,9 +51,31 @@ export function LayerPanel({ subject }: { subject: string }) {
   return (
     <section className="surface" aria-label="Layer panel">
       <h1>Layers</h1>
+      {/* The session ended while the page was open. The panel is kept
+          underneath, because the treatment states a transition rather than
+          replacing what the caller was looking at, and the control beside it
+          is whatever the deployment's posture licenses. */}
+      {sessionEnded && (
+        <div className="banner banner-danger" role="alert" data-testid="session-ended">
+          <p className="banner-title">Your session has ended. Sign in again to manage layers.</p>
+          {recovery}
+        </div>
+      )}
+      {/* §13.2.1 marks a read-only registry on its read responses, so the
+          state is presented once here and every write control is unavailable
+          at once rather than each one failing when it is pressed. */}
+      {readOnly && (
+        <Banner tone="danger">
+          <span data-testid="read-only-banner">
+            The registry is temporarily read-only, so no layer can be changed right now. Browsing and search still
+            work.
+          </span>
+        </Banner>
+      )}
       <div className="panel-actions">
         <button
           type="button"
+          disabled={readOnly}
           onClick={() => {
             setRegistering((open) => !open);
           }}
@@ -53,8 +91,8 @@ export function LayerPanel({ subject }: { subject: string }) {
           Recently unregistered
         </button>
       </div>
-      {registering && <RegisterLayerForm onRegistered={layers.reload} />}
-      {showingDeleted && <DeletedLayers onRestored={layers.reload} />}
+      {registering && <RegisterLayerForm onRegistered={layers.reload} readOnly={readOnly} />}
+      {showingDeleted && <DeletedLayers onRestored={layers.reload} readOnly={readOnly} />}
       <p className="label quiet">Precedence: the last row wins</p>
       {rows.length === 0 ? (
         <EmptyState>No layers are registered under this tenant.</EmptyState>
@@ -75,6 +113,7 @@ export function LayerPanel({ subject }: { subject: string }) {
                 key={layer.ID}
                 layer={layer}
                 subject={subject}
+                readOnly={readOnly}
                 onWrite={layers.reload}
                 order={order}
                 index={index}
@@ -98,17 +137,20 @@ async function listOrdered(): Promise<LayerRecord[]> {
 function LayerRow({
   layer,
   subject,
+  readOnly,
   onWrite,
   order,
   index,
 }: {
   layer: LayerRecord;
   subject: string;
+  readOnly: boolean;
   onWrite: () => void;
   order: string[];
   index: number;
 }) {
   const [refusal, setRefusal] = useState<unknown>(null);
+  const [confirming, setConfirming] = useState(false);
 
   // A write the panel sends can come back refused, including on a row the
   // panel presented as this caller's to manage. The refusal is drawn on the
@@ -144,7 +186,7 @@ function LayerRow({
       <td>
         <button
           type="button"
-          disabled={index === order.length - 1}
+          disabled={readOnly || index === order.length - 1}
           onClick={() => {
             attempt(() => reorderLayers(moved(order, index, index + 1)));
           }}
@@ -153,6 +195,7 @@ function LayerRow({
         </button>
         <button
           type="button"
+          disabled={readOnly}
           onClick={() => {
             attempt(() => reingestLayer(layer.ID));
           }}
@@ -161,12 +204,25 @@ function LayerRow({
         </button>
         <button
           type="button"
+          disabled={readOnly}
           onClick={() => {
-            attempt(() => unregisterLayer(layer.ID));
+            setConfirming(true);
           }}
         >
           Unregister
         </button>
+        {confirming && (
+          <UnregisterConfirmation
+            layer={layer}
+            onCancel={() => {
+              setConfirming(false);
+            }}
+            onConfirm={() => {
+              setConfirming(false);
+              attempt(() => unregisterLayer(layer.ID));
+            }}
+          />
+        )}
         {refusal !== null && (
           <p className="row-refusal" role="alert">
             The registry refused that action and nothing changed.{' '}
@@ -176,6 +232,58 @@ function LayerRow({
       </td>
     </tr>
   );
+}
+
+/**
+ * UnregisterConfirmation gates the one write whose effect reaches callers
+ * who never touched this panel. It states both halves of what unregistering
+ * does: the layer's artifacts leave every caller's view at the next sync,
+ * and the layer stays restorable until the recovery window runs out. The
+ * write is issued only once the reader has typed the layer's own ID, so the
+ * action cannot be taken by a single press on the row it sits in.
+ */
+function UnregisterConfirmation({
+  layer,
+  onCancel,
+  onConfirm,
+}: {
+  layer: LayerRecord;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [typed, setTyped] = useState('');
+  return (
+    <div className="confirm" role="dialog" aria-label="Unregister a layer">
+      <p className="banner-title">Unregister {layer.ID}?</p>
+      <p>Its artifacts disappear from every caller&rsquo;s view the next time they sync.</p>
+      <p>
+        The layer is recoverable for {recoveryDays} days, until {erasesOn()}, after which it is erased.
+      </p>
+      <label className="field">
+        <span className="label">Type the layer ID to confirm</span>
+        <input
+          type="text"
+          value={typed}
+          onChange={(event) => {
+            setTyped(event.target.value);
+          }}
+        />
+      </label>
+      <button type="button" disabled={typed !== layer.ID} onClick={onConfirm}>
+        Unregister layer
+      </button>
+      <button type="button" onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+/** erasesOn returns the date the recovery window runs out, as the calendar
+ * date the reader reads rather than as a duration they have to add up. */
+function erasesOn(): string {
+  const at = new Date(Date.now() + recoveryDays * 24 * 60 * 60 * 1000);
+  return at.toISOString().slice(0, 10);
 }
 
 /** moved returns the whole order with one layer at a new position, which is

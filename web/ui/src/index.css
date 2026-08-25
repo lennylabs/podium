@@ -437,3 +437,32 @@ button,
   border: 1px solid var(--b2);
   border-radius: 8px;
 }
+
+.copy-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+
+.copy-field .copy-value {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 6px 10px;
+  overflow-x: auto;
+  background: var(--surf2);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+}
+
+/* The unregister confirmation. It sits in the row it was opened from and
+   carries the two statements plus the typed-ID gate, so it reads as a step
+   between the press and the write rather than as another row control. */
+.confirm {
+  padding: 12px 14px;
+  margin-top: 8px;
+  border: 1px solid var(--danger);
+  border-radius: 10px;
+  background: var(--surf);
+}

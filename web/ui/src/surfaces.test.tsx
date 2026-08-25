@@ -20,6 +20,12 @@ import type { SessionPosture } from './session';
 interface Stub {
   status?: number;
   body?: unknown;
+  /** text is the response for a path that answers with a document rather
+   * than with JSON, which is what the presigned manifest-body URL returns. */
+  text?: string;
+  /** headers are the response headers the page reads, which is where the
+   * §13.2.1 read-only marker arrives. */
+  headers?: Record<string, string>;
 }
 
 interface Recorded {
@@ -49,9 +55,12 @@ function stubRegistry(stubs: Record<string, Stub>): void {
       const stub = stubs[path] ?? { status: 404, body: { code: 'registry.not_found', message: 'no stub' } };
       const status = stub.status ?? 200;
       return Promise.resolve(
-        new Response(JSON.stringify(stub.body ?? {}), {
+        new Response(stub.text ?? JSON.stringify(stub.body ?? {}), {
           status,
-          headers: { 'content-type': 'application/json' },
+          headers: {
+            'content-type': stub.text === undefined ? 'application/json' : 'text/markdown',
+            ...stub.headers,
+          },
         }),
       );
     }),
@@ -66,6 +75,10 @@ function posture(overrides: Partial<SessionPosture> = {}): SessionPosture {
     ...overrides,
   };
 }
+
+/** manifestDoc is what load_artifact returns under its frontmatter field:
+ * the ARTIFACT.md document, delimiter fences and all. */
+const manifestDoc = '---\nname: review\ntags:\n  - security\n---\n';
 
 const emptyDomain = {
   path: '',
@@ -321,7 +334,12 @@ describe('the artifact viewer', () => {
           version: '1.2.0',
           content_hash: 'sha256:abc',
           manifest_body: '# Review\n\nRun the checklist.\n',
-          frontmatter: 'name: review\ntags:\n  - security\n',
+          // The frontmatter field carries the whole ARTIFACT.md document,
+          // fences and prose body included, which is what the endpoint
+          // returns. A viewer that hands the field straight to the YAML
+          // parser reaches the invalid-syntax arm on every real artifact.
+          frontmatter: manifestDoc,
+          skill_raw: `${manifestDoc}\nAuthored skill body.\n`,
           layer: 'platform',
         },
       },
@@ -334,8 +352,68 @@ describe('the artifact viewer', () => {
     const table = screen.getByTestId('frontmatter-table');
     expect(table.textContent).toContain('name');
     expect(table.textContent).toContain('security');
+    expect(screen.queryByText('Invalid syntax')).toBeNull();
+    // The authored skill file is populated on a skill artifact, so the
+    // viewer carries it.
+    expect(screen.getByLabelText('Authored source').textContent).toContain('Authored skill body.');
     const relation = await screen.findByText('platform/review-strict');
     expect(relation.getAttribute('href')).toBe('#/artifact/platform%2Freview-strict');
+  });
+
+  // The presigned channel delivers the canonical manifest document rather
+  // than a body, and the response clears the field that document
+  // duplicates. A viewer that hands the fetched document to the rendering
+  // path renders the frontmatter as markdown, where the fences become rules
+  // and the keys become prose, while the property table reports no pairs.
+  it('reconstitutes a manifest delivered by presigned URL rather than rendering the document', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'platform/review',
+          type: 'context',
+          version: '1.0.0',
+          content_hash: 'sha256:abc',
+          manifest_body: '',
+          frontmatter: '',
+          manifest_body_url: { presigned_url: 'https://objects.acme.com/abc', content_hash: 'sha256:abc', size: 900 },
+        },
+      },
+      'https://objects.acme.com/abc': { text: `${manifestDoc}\n# Review\n\nRun the checklist.\n` },
+      '/v1/dependents': { body: { edges: [] } },
+    });
+    goTo('#/artifact/platform%2Freview');
+    render(<App />);
+    await screen.findByLabelText('Artifact viewer');
+    const rendered = await screen.findByTestId('artifact-body');
+    expect(rendered.querySelector('h1')?.textContent).toBe('Review');
+    expect(rendered.querySelector('hr')).toBeNull();
+    expect(rendered.textContent).not.toContain('name: review');
+    const table = screen.getByTestId('frontmatter-table');
+    expect(table.textContent).toContain('name');
+    expect(table.textContent).toContain('security');
+    expect(screen.queryByText('No frontmatter on this artifact.')).toBeNull();
+  });
+
+  it('carries no authored-source view on an artifact that has none', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'platform/notes',
+          type: 'context',
+          version: '1.0.0',
+          content_hash: 'sha256:abc',
+          manifest_body: 'Body.\n',
+          frontmatter: manifestDoc,
+        },
+      },
+      '/v1/dependents': { body: { edges: [] } },
+    });
+    goTo('#/artifact/platform%2Fnotes');
+    render(<App />);
+    await screen.findByLabelText('Artifact viewer');
+    expect(screen.queryByLabelText('Authored source')).toBeNull();
   });
 
   it('omits the property table where the response yields no frontmatter pairs', async () => {
@@ -467,7 +545,160 @@ describe('the layer panel', () => {
   });
 });
 
+describe('the session-expiry transition', () => {
+  // The catalog read is the expiry signal, and the treatment's control is
+  // bounded by the sign-in control table: on a deployment running the
+  // browser flow it is a navigation to the read's own sign_in_path. The
+  // caller held a subject when the page loaded, which is what makes this the
+  // expiry transition rather than the anonymous refused arm.
+  it('offers the read’s sign-in path where a catalog read is refused mid-session', async () => {
+    stubRegistry({
+      '/v1/ui/session': {
+        body: posture({
+          subject: 'alice@acme.com',
+          browser_auth: { enabled: true, sign_in_path: '/v1/ui/auth/sign-in', sign_out_path: '/v1/ui/auth/sign-out' },
+        }),
+      },
+      '/v1/load_domain': { status: 401, body: { code: 'auth.token_expired', message: 'expired' } },
+    });
+    render(<App />);
+    await screen.findByLabelText('Catalog refused');
+    expect((await screen.findByTestId('expiry-sign-in')).getAttribute('href')).toBe('/v1/ui/auth/sign-in');
+  });
+
+  // The layers route issues no catalog read of its own, so the panel would
+  // receive the ended session on no path at all unless the shell takes one.
+  // The panel is kept underneath the treatment.
+  it('presents the ended session on the layer panel and keeps the panel underneath', async () => {
+    stubRegistry({
+      '/v1/ui/session': {
+        body: posture({
+          subject: 'alice@acme.com',
+          browser_auth: { enabled: true, sign_in_path: '/v1/ui/auth/sign-in', sign_out_path: '/v1/ui/auth/sign-out' },
+        }),
+      },
+      '/v1/load_domain': { status: 401, body: { code: 'auth.token_expired', message: 'expired' } },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    await screen.findByTestId('session-ended');
+    expect((await screen.findByTestId('expiry-sign-in')).getAttribute('href')).toBe('/v1/ui/auth/sign-in');
+    expect(screen.getByText('alice-personal')).toBeTruthy();
+  });
+
+  // The third row of the sign-in control table bounds what the treatment may
+  // offer: a deployment running no browser flow renders no authentication
+  // control, so the treatment states what it offers in its place.
+  it('offers no sign-in control where the deployment runs no browser flow', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/load_domain': { status: 401, body: { code: 'auth.token_expired', message: 'expired' } },
+    });
+    render(<App />);
+    await screen.findByLabelText('Catalog refused');
+    expect(screen.queryByTestId('expiry-sign-in')).toBeNull();
+    expect(screen.getByText(/runs no browser sign-in/)).toBeTruthy();
+  });
+});
+
+describe('read-only mode', () => {
+  // §13.2.1 marks a read-only registry on its read responses, so the panel
+  // presents the state once and makes every write control unavailable at the
+  // same time. A panel that keeps its controls live collects one refusal per
+  // button press instead, which is the presentation the brief forbids.
+  it('presents the state once and makes every write control unavailable', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [adminLayer(), userLayer()] }, headers: { 'X-Podium-Read-Only': 'true' } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    await screen.findByTestId('read-only-banner');
+    for (const name of ['Register layer', 'Reingest', 'Unregister', 'Raise precedence']) {
+      for (const control of screen.getAllByRole('button', { name })) {
+        expect(control.hasAttribute('disabled')).toBe(true);
+      }
+    }
+  });
+
+  it('keeps every write control live where the registry serves writes', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    expect(screen.queryByTestId('read-only-banner')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Reingest' }).hasAttribute('disabled')).toBe(false);
+  });
+});
+
 describe('the layer write flows', () => {
+  // Unregistering removes the layer's artifacts from every caller's view, so
+  // the write is issued only after a confirmation stating both halves of
+  // what it does and only once the layer's own ID has been typed.
+  it('holds the unregister write until the confirmation is completed', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Unregister' }));
+    const dialog = await screen.findByLabelText('Unregister a layer');
+    expect(dialog.textContent).toContain('every caller');
+    expect(dialog.textContent).toContain('recoverable for 30 days');
+    expect(requests.some((r) => r.method === 'DELETE')).toBe(false);
+    const confirm = screen.getByRole('button', { name: 'Unregister layer' });
+    expect(confirm.hasAttribute('disabled')).toBe(true);
+    fireEvent.change(screen.getByLabelText('Type the layer ID to confirm'), { target: { value: 'alice-personal' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Unregister layer' }));
+    await waitFor(() => {
+      expect(requests.some((r) => r.url.startsWith('/v1/layers?') && r.method === 'DELETE')).toBe(true);
+    });
+  });
+
+  // §4.6 defines visibility as independent grants that combine as a union,
+  // and a user-defined layer's visibility is fixed at registration, so an
+  // axis the form does not offer is unreachable from the UI entirely.
+  it('registers a layer on every visibility axis', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layer: { ID: 'alice-personal', SourceType: 'local', Order: 1, UserDefined: true } } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
+    fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'alice-personal' } });
+    fireEvent.click(screen.getByLabelText('Organization'));
+    fireEvent.click(screen.getByLabelText('Groups'));
+    // An axis selected with no member named registers a grant admitting
+    // nobody, so the write is held until each selected axis carries one.
+    expect(screen.getByRole('button', { name: 'Register' }).hasAttribute('disabled')).toBe(true);
+    fireEvent.change(screen.getByLabelText('Group names, separated by commas'), {
+      target: { value: 'secops, appsec' },
+    });
+    fireEvent.click(screen.getByLabelText('Specific users'));
+    fireEvent.change(screen.getByLabelText('User identifiers, separated by commas'), {
+      target: { value: 'carol@acme.com' },
+    });
+    fireEvent.submit(screen.getByLabelText('Register a layer'));
+    await waitFor(() => {
+      expect(requests.some((r) => r.url === '/v1/layers' && r.method === 'POST')).toBe(true);
+    });
+    const sent = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
+    expect(sent.organization).toBe(true);
+    expect(sent.groups).toEqual(['secops', 'appsec']);
+    expect(sent.users).toEqual(['carol@acme.com']);
+  });
+
+
   it('reveals a git layer’s webhook secret once and holds the reveal until it is acknowledged', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
@@ -487,6 +718,10 @@ describe('the layer write flows', () => {
     fireEvent.submit(screen.getByLabelText('Register a layer'));
     await screen.findByLabelText('Webhook secret');
     expect(screen.getByText('whsec-abc')).toBeTruthy();
+    // The secret is served here and nowhere else, so it carries an explicit
+    // copy control rather than leaving the reader to select it. The URL
+    // carries one too.
+    expect(screen.getAllByRole('button', { name: 'Copy' }).length).toBe(2);
     const done = screen.getByRole('button', { name: 'Done' });
     expect(done.hasAttribute('disabled')).toBe(true);
     fireEvent.click(screen.getByLabelText('I have stored the secret.'));

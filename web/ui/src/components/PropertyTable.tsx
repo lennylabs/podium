@@ -3,10 +3,14 @@
 // which React escapes, so a value carrying markup reads as the characters the
 // author wrote.
 
-import { parseFrontmatter } from '../frontmatter';
+import { parseFrontmatter, splitDocument } from '../frontmatter';
 
 export function PropertyTable({ raw }: { raw: string }) {
-  const parsed = parseFrontmatter(raw);
+  // The value the response carries is a whole manifest document on the
+  // load path and a bare block on the search path, so the block is taken
+  // from it before either the parser or the raw view sees it.
+  const block = splitDocument(raw).frontmatter;
+  const parsed = parseFrontmatter(block);
 
   if (parsed.error !== '') {
     return (
@@ -16,7 +20,7 @@ export function PropertyTable({ raw }: { raw: string }) {
           <p className="banner-title">Invalid syntax</p>
           <p>{parsed.error}</p>
         </div>
-        <pre className="mono raw-frontmatter">{raw}</pre>
+        <pre className="mono raw-frontmatter">{block}</pre>
       </section>
     );
   }

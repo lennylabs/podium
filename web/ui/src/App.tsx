@@ -6,9 +6,9 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { Banner, ErrorState, Loading } from './components/primitives';
-import { isIdentityRefusal, signOut } from './api';
+import { isIdentityRefusal, loadDomain, signOut, subscribeReadOnly } from './api';
 import type { SessionPosture } from './session';
-import { authControl, catalogScope, readSession } from './session';
+import { authControl, catalogScope, expiryControl, readSession } from './session';
 import { domainHref, layersHref, searchHref, useRoute } from './route';
 import { DomainBrowser } from './surfaces/DomainBrowser';
 import { SearchSurface } from './surfaces/SearchSurface';
@@ -20,6 +20,36 @@ export function App() {
   const [posture, setPosture] = useState<SessionPosture | null>(null);
   const [postureLoaded, setPostureLoaded] = useState(false);
   const [catalogError, setCatalogError] = useState<unknown>(null);
+  const [readOnly, setReadOnly] = useState(false);
+
+  useEffect(() => subscribeReadOnly(setReadOnly), []);
+
+  // The catalog read is the panel's expiry signal, and the layers route
+  // issues no catalog read of its own, so the shell takes one while that
+  // route is active. A layer write's refusal carries no session information,
+  // so without this read the panel would present each refusal as the only
+  // signal and would never learn that the session ended.
+  useEffect(() => {
+    if (route.name !== 'layers') {
+      return;
+    }
+    let live = true;
+    loadDomain('').then(
+      () => {
+        if (live) {
+          setCatalogError(null);
+        }
+      },
+      (err: unknown) => {
+        if (live) {
+          setCatalogError(err);
+        }
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [route.name]);
 
   useEffect(() => {
     let live = true;
@@ -73,9 +103,16 @@ export function App() {
         </nav>
         <main className="content">
           {refused && route.name !== 'layers' ? (
-            <RefusedCatalog error={catalogError} />
+            <RefusedCatalog error={catalogError} posture={posture} />
           ) : (
-            <Surface route={route} subject={subject} onCatalogOutcome={onCatalogOutcome} />
+            <Surface
+              route={route}
+              subject={subject}
+              posture={posture}
+              readOnly={readOnly}
+              sessionEnded={refused}
+              onCatalogOutcome={onCatalogOutcome}
+            />
           )}
         </main>
       </div>
@@ -86,10 +123,16 @@ export function App() {
 function Surface({
   route,
   subject,
+  posture,
+  readOnly,
+  sessionEnded,
   onCatalogOutcome,
 }: {
   route: ReturnType<typeof useRoute>;
   subject: string;
+  posture: SessionPosture | null;
+  readOnly: boolean;
+  sessionEnded: boolean;
   onCatalogOutcome: (err: unknown) => void;
 }) {
   switch (route.name) {
@@ -98,7 +141,14 @@ function Surface({
     case 'artifact':
       return <ArtifactViewer id={route.id} onError={onCatalogOutcome} />;
     case 'layers':
-      return <LayerPanel subject={subject} />;
+      return (
+        <LayerPanel
+          subject={subject}
+          readOnly={readOnly}
+          sessionEnded={sessionEnded}
+          recovery={<AuthRecovery posture={posture} />}
+        />
+      );
     case 'domain':
       return <DomainBrowser path={route.path} onError={onCatalogOutcome} />;
   }
@@ -110,11 +160,12 @@ function Surface({
  * renders this in place of the catalog rather than an empty or a filtered
  * one. It states that the registry did not serve this catalog to this caller
  * and says nothing about what the catalog holds. */
-function RefusedCatalog({ error }: { error: unknown }) {
+function RefusedCatalog({ error, posture }: { error: unknown; posture: SessionPosture | null }) {
   return (
     <section className="surface" aria-label="Catalog refused">
       <h1>This catalog was not served to you</h1>
       <p>The registry did not verify an identity for this request, so it served no catalog.</p>
+      <AuthRecovery posture={posture} />
       <ErrorState
         error={error}
         onRetry={() => {
@@ -122,6 +173,29 @@ function RefusedCatalog({ error }: { error: unknown }) {
         }}
       />
     </section>
+  );
+}
+
+/** AuthRecovery is the control the refused-catalog arm and the panel's
+ * session-ended treatment offer the caller. What it may be is bounded by the
+ * sign-in control rule's third row: a deployment reporting the browser flow
+ * disabled renders no authentication control on any value of subject, so on
+ * such a deployment this states what the caller has in its place instead of
+ * offering a sign-in the mux does not serve. */
+function AuthRecovery({ posture }: { posture: SessionPosture | null }) {
+  const control = expiryControl(posture);
+  if (control.kind !== 'sign-in') {
+    return (
+      <p className="quiet">
+        This registry runs no browser sign-in. Retry the read once the credential it reads is in place again, or ask
+        the operator who runs it.
+      </p>
+    );
+  }
+  return (
+    <a className="button primary" data-testid="expiry-sign-in" href={control.path}>
+      Sign in
+    </a>
   );
 }
 

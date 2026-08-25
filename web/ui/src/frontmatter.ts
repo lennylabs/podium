@@ -1,7 +1,13 @@
-// Frontmatter arrives as a raw YAML block carried as text, so the client
-// parses it before the viewer can present it as a property table. A block
-// that fails to parse is a state the reader is told about, and a response
-// that yields no pairs at all is a finished document rather than a defect.
+// Frontmatter arrives as text, so the client parses it before the viewer can
+// present it as a property table. A block that fails to parse is a state the
+// reader is told about, and a response that yields no pairs at all is a
+// finished document rather than a defect.
+//
+// What load_artifact returns under its frontmatter field is the whole
+// ARTIFACT.md document, delimiter fences and prose body included, and the
+// presigned manifest-body channel delivers the same document as a fetched
+// file. Both are split here before either half is used, so the parser is
+// handed a YAML mapping and the body is handed to the rendering path.
 
 import { parseDocument } from 'yaml';
 
@@ -21,10 +27,42 @@ export interface ParsedFrontmatter {
   error: string;
 }
 
-/** parseFrontmatter parses a raw YAML frontmatter block into property rows.
- * An empty block yields no rows and no error, which is the state the viewer
- * renders by omitting the table. */
-export function parseFrontmatter(raw: string): ParsedFrontmatter {
+/** SplitDocument is a manifest document separated into the frontmatter block
+ * the property table renders and the body the rendering path renders. */
+export interface SplitDocument {
+  frontmatter: string;
+  body: string;
+}
+
+/** splitDocument separates a manifest document at its delimiter fences. A
+ * document opening with a fence yields the block between the fences and the
+ * prose after the closing one. Text carrying no opening fence is a bare
+ * frontmatter block, which is what a search result returns, so it yields
+ * itself and an empty body. */
+export function splitDocument(text: string): SplitDocument {
+  const opening = /^﻿?---[ \t]*\r?\n/.exec(text);
+  if (opening === null) {
+    return { frontmatter: text, body: '' };
+  }
+  const rest = text.slice(opening[0].length);
+  const closing = /(?:^|\r?\n)---[ \t]*(?:\r?\n|$)/.exec(rest);
+  if (closing === null) {
+    // The document opens a block it never closes. The whole remainder is
+    // the block, so the parser reports the syntax the author wrote rather
+    // than the viewer silently rendering it as prose.
+    return { frontmatter: rest, body: '' };
+  }
+  return {
+    frontmatter: rest.slice(0, closing.index),
+    body: rest.slice(closing.index + closing[0].length),
+  };
+}
+
+/** parseFrontmatter parses a manifest document's frontmatter into property
+ * rows. An empty block yields no rows and no error, which is the state the
+ * viewer renders by omitting the table. */
+export function parseFrontmatter(text: string): ParsedFrontmatter {
+  const raw = splitDocument(text).frontmatter;
   if (raw.trim() === '') {
     return { properties: [], error: '' };
   }

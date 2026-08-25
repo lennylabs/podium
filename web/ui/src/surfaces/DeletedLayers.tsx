@@ -9,7 +9,7 @@ import { EmptyState, ErrorState, Loading } from '../components/primitives';
 import { ApiError, listDeletedLayers, restoreLayer } from '../api';
 import { useAsync } from '../useAsync';
 
-export function DeletedLayers({ onRestored }: { onRestored: () => void }) {
+export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void; readOnly: boolean }) {
   const deleted = useAsync(() => listDeletedLayers(), []);
   const [refusal, setRefusal] = useState<unknown>(null);
 
@@ -32,6 +32,7 @@ export function DeletedLayers({ onRestored }: { onRestored: () => void }) {
               <span className="mono">{layer.ID}</span>
               <button
                 type="button"
+                disabled={readOnly}
                 onClick={() => {
                   restoreLayer(layer.ID).then(
                     () => {

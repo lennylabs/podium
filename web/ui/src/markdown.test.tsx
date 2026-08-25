@@ -57,9 +57,23 @@ describe('the sanitized artifact-body rendering path', () => {
     expect(attributeValues(container).some((value) => value.toLowerCase().includes('javascript:'))).toBe(false);
   });
 
-  it('keeps no data: URL', () => {
-    const container = renderBody('<a href="data:text/html,<b>x</b>">Go</a>\n');
-    expect(attributeValues(container).some((value) => value.toLowerCase().includes('data:'))).toBe(false);
+  // The rule ranges over every attribute the sanitizer keeps rather than
+  // over links alone, so the payload is delivered on a link, on a markdown
+  // image, and on a media element. A sanitizer configured with a URI
+  // allowlist and nothing else keeps the last two, because a data: URL on a
+  // media element's source attribute is admitted by a branch that does not
+  // consult the allowlist.
+  it('keeps no data: URL on a link, on an image, or on a media element', () => {
+    const bodies = [
+      '<a href="data:text/html,<b>x</b>">Go</a>\n',
+      '![x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)\n',
+      '<img src="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=" alt="x">\n',
+      '<video src="data:text/html,x"></video>\n',
+    ];
+    for (const body of bodies) {
+      const container = renderBody(body);
+      expect(attributeValues(container).some((value) => value.toLowerCase().includes('data:'))).toBe(false);
+    }
   });
 
   // The sanitizer takes the rendered output as its input. The payload here

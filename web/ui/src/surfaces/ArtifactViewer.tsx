@@ -4,8 +4,9 @@
 // this one, which §13.10 requires.
 
 import { ArtifactBody } from '../components/ArtifactBody';
-import { Badge, EmptyState, ErrorState, Loading } from '../components/primitives';
+import { Badge, CopyField, EmptyState, ErrorState, Loading } from '../components/primitives';
 import { PropertyTable } from '../components/PropertyTable';
+import { splitDocument } from '../frontmatter';
 import type { LargeResourceLink, LoadArtifactResponse } from '../api';
 import { dependentsOf, loadArtifact } from '../api';
 import { artifactHref } from '../route';
@@ -34,8 +35,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
         {body.sensitivity !== undefined && body.sensitivity !== '' && <Badge tone="quiet">{body.sensitivity}</Badge>}
         {body.layer !== undefined && body.layer !== '' && <Badge tone="quiet">layer {body.layer}</Badge>}
       </div>
-      <ManifestBody artifact={body} />
-      <PropertyTable raw={body.frontmatter} />
+      <ManifestDocument artifact={body} />
       <Relations id={body.id} />
       <Resources artifact={body} />
       <h2>Provenance</h2>
@@ -44,15 +44,23 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   );
 }
 
-/** ManifestBody renders the document. A manifest above the inline cutoff
- * arrives as a presigned URL with the inline body empty, so the viewer has
- * nothing to render until that fetch completes and carries its own loading
- * and failure states, which leave the rest of the page usable. */
-function ManifestBody({ artifact }: { artifact: LoadArtifactResponse }) {
+/** ManifestDocument renders the manifest: its body as a document, its
+ * frontmatter as a property table, and the authored skill file where the
+ * artifact carries one. A manifest above the inline cutoff arrives as a
+ * presigned URL with the inline body empty, so the viewer has nothing to
+ * render until that fetch completes and carries its own loading and failure
+ * states, which leave the rest of the page usable. */
+function ManifestDocument({ artifact }: { artifact: LoadArtifactResponse }) {
   const link = artifact.manifest_body_url;
   const fetched = useAsync(async () => (link === undefined ? '' : fetchText(link)), [link?.presigned_url ?? '']);
   if (link === undefined) {
-    return <ArtifactBody body={artifact.manifest_body} />;
+    return (
+      <Manifest
+        body={artifact.manifest_body}
+        frontmatter={artifact.frontmatter}
+        skillRaw={artifact.skill_raw ?? ''}
+      />
+    );
   }
   if (fetched.loading) {
     return <Loading label="Fetching the artifact." />;
@@ -60,7 +68,48 @@ function ManifestBody({ artifact }: { artifact: LoadArtifactResponse }) {
   if (fetched.error !== null) {
     return <ErrorState error={fetched.error} onRetry={fetched.reload} />;
   }
-  return <ArtifactBody body={fetched.value ?? ''} />;
+  // The presigned channel delivers the canonical manifest document rather
+  // than a body, and the response cleared the field that document
+  // duplicates, so the client reconstitutes both halves from it: the body
+  // reaches the rendering path and the frontmatter block reaches the
+  // property table. The fences reach neither, and the response's own
+  // frontmatter wins where it survived, which is the skill case, where the
+  // fetched document is the authored skill file rather than the manifest.
+  const split = splitDocument(fetched.value ?? '');
+  return (
+    <Manifest
+      body={split.body}
+      frontmatter={artifact.frontmatter === '' ? split.frontmatter : artifact.frontmatter}
+      skillRaw={artifact.skill_raw ?? ''}
+    />
+  );
+}
+
+function Manifest({ body, frontmatter, skillRaw }: { body: string; frontmatter: string; skillRaw: string }) {
+  return (
+    <>
+      <ArtifactBody body={body} />
+      <PropertyTable raw={frontmatter} />
+      <AuthoredSource raw={skillRaw} />
+    </>
+  );
+}
+
+/** AuthoredSource shows the authored skill file byte for byte. A skill
+ * artifact carries one and every other type carries none, and the registry
+ * clears it when the manifest arrives by link, so the section is absent
+ * more often than it is present and it renders nothing at all when it is
+ * absent rather than standing an empty container in the layout. */
+function AuthoredSource({ raw }: { raw: string }) {
+  if (raw === '') {
+    return null;
+  }
+  return (
+    <section aria-label="Authored source">
+      <h2>Authored source</h2>
+      <CopyField label="SKILL.md" value={raw} block />
+    </section>
+  );
 }
 
 async function fetchText(link: LargeResourceLink): Promise<string> {

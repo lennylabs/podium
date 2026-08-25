@@ -50,8 +50,35 @@ interface ErrorEnvelope {
   suggested_action?: string;
 }
 
+// §13.2.1 puts a read-only marker on the registry's responses, so the page
+// can present that state before a write is attempted rather than collecting
+// one refusal per button press. Every response carries it, so the client
+// publishes what the marker said and the shell holds the value.
+const readOnlyHeader = 'X-Podium-Read-Only';
+
+type ReadOnlyListener = (readOnly: boolean) => void;
+
+const readOnlyListeners = new Set<ReadOnlyListener>();
+
+/** subscribeReadOnly registers a listener for the read-only marker and
+ * returns the unsubscribe the caller runs when it goes away. */
+export function subscribeReadOnly(listener: ReadOnlyListener): () => void {
+  readOnlyListeners.add(listener);
+  return () => {
+    readOnlyListeners.delete(listener);
+  };
+}
+
+function publishReadOnly(response: Response): void {
+  const readOnly = response.headers.get(readOnlyHeader) === 'true';
+  for (const listener of readOnlyListeners) {
+    listener(readOnly);
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
+  publishReadOnly(response);
   const text = await response.text();
   if (!response.ok) {
     throw errorFrom(response.status, text);

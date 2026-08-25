@@ -61,6 +61,23 @@ export function authControl(posture: SessionPosture | null): AuthControl {
 }
 
 /**
+ * expiryControl is what a surface offers a caller whose catalog read was
+ * refused. The caller held a subject when the page loaded and holds none
+ * the registry will verify now, so the control that recovers the state is
+ * sign-in rather than the sign-out authControl renders for the same posture.
+ * The sign-in control rule's third row bounds it: a deployment reporting the
+ * browser flow disabled renders no authentication control at all, and the
+ * surface states what it offers in its place.
+ */
+export function expiryControl(posture: SessionPosture | null): AuthControl {
+  if (posture === null || !posture.browser_auth.enabled) {
+    return { kind: 'none' };
+  }
+  const path = posture.browser_auth.sign_in_path;
+  return path === undefined ? { kind: 'none' } : { kind: 'sign-in', path };
+}
+
+/**
  * CatalogScope is the arm of the catalog-scope rule the page renders.
  * "refused" is ordered ahead of the other two: where a catalog read is
  * refused because the caller's identity could not be verified, the caller has

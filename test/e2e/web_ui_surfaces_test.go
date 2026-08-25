@@ -56,11 +56,61 @@ func TestWebUI_ServedBundleCallsResolve(t *testing.T) {
 	}
 }
 
+// Spec: §13.10, §13.2.1 — the served bundle reads the read-only marker off
+// the registry's responses under the name the registry sets, so the layer
+// panel presents the state before a write is attempted. The header name is
+// the whole contract between the two sides, and a rename on either side
+// silently returns the panel to one refusal per button press.
+func TestWebUI_ServedBundleReadsTheReadOnlyMarker(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"my-skill/ARTIFACT.md": smallteamLowArtifact("ui artifact"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_WEB_UI=true"},
+		"serve", "--standalone", "--web-ui", "--layer-path", reg)
+
+	st, index := getRaw(t, srv.BaseURL+"/ui/")
+	if st != 200 {
+		t.Fatalf("GET /ui/ status = %d, want 200\nlog:\n%s", st, srv.log())
+	}
+	found := false
+	for _, script := range bundleScripts(t, srv, string(index)) {
+		if strings.Contains(script, readOnlyHeaderName) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the served bundle reads no %s header; the panel would learn the read-only state one refused write at a time", readOnlyHeaderName)
+	}
+}
+
+// readOnlyHeaderName is the §13.2.1 marker the read-only middleware sets on
+// every response (pkg/registry/server/server.go).
+const readOnlyHeaderName = "X-Podium-Read-Only"
+
 // bundleAPIPaths returns the registry paths the bundle's own client code
 // references, read off the scripts the served index names.
 func bundleAPIPaths(t *testing.T, srv *serverProc, index string) []string {
 	t.Helper()
 	seen := map[string]bool{}
+	for _, script := range bundleScripts(t, srv, index) {
+		for _, m := range bundleAPIPathPattern.FindAllStringSubmatch(script, -1) {
+			seen[m[1]] = true
+		}
+	}
+	paths := make([]string, 0, len(seen))
+	for path := range seen {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	return paths
+}
+
+// bundleScripts returns the bodies of the scripts the served index names,
+// which is where the bundler puts the client code the browser runs.
+func bundleScripts(t *testing.T, srv *serverProc, index string) []string {
+	t.Helper()
+	scripts := []string{}
 	for _, ref := range bundleAssetRefPattern.FindAllStringSubmatch(index, -1) {
 		if !strings.HasSuffix(ref[1], ".js") {
 			continue
@@ -74,16 +124,9 @@ func bundleAPIPaths(t *testing.T, srv *serverProc, index string) []string {
 		if st != 200 {
 			t.Fatalf("GET %s status = %d, want 200\nlog:\n%s", url, st, srv.log())
 		}
-		for _, m := range bundleAPIPathPattern.FindAllStringSubmatch(string(body), -1) {
-			seen[m[1]] = true
-		}
+		scripts = append(scripts, string(body))
 	}
-	paths := make([]string, 0, len(seen))
-	for path := range seen {
-		paths = append(paths, path)
-	}
-	sort.Strings(paths)
-	return paths
+	return scripts
 }
 
 func contains(values []string, want string) bool {
