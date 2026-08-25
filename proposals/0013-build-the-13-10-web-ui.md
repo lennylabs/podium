@@ -167,9 +167,10 @@ sites and testing sections after sign-off.
       sentence at `spec/06-mcp-server.md:96`, and the `spec/` half of the set the
       `spec/06-mcp-server.md:92` row under "The browser session" names, meaning
       the restated opening clause and sends-no-credential sentence at
-      `spec/06-mcp-server.md:92` and the §2.2 mirror at
-      `spec/02-architecture.md:101`. The code, documentation, and test halves of
-      that set land under C2, D1, and T1.
+      `spec/06-mcp-server.md:92`, the §2.2 mirror at
+      `spec/02-architecture.md:101`, and the §13.12 introducing sentence at
+      `spec/13-deployment.md:470`, which names the same providers. The code,
+      documentation, and test halves of that set land under C2, D1, and T1.
       Levels: —. Depends on: S2
 - [ ] **S4 · spec** — SPEC-4. A new §7.3.4, "Browser Authentication Routes",
       stating the sign-in, callback, and sign-out routes with
@@ -1698,7 +1699,7 @@ rule rather than bound it.
 
 | Site | What it says today | Staged by |
 |:--|:--|:--|
-| `spec/06-mcp-server.md:92` (the opening clause and the sends-no-credential sentence) | This row is the single statement of that line's disposition and of the set that moves with it. Every other site names this row and adds only what is local to it. The line opens by calling both providers "registry-process identity providers for a deployment that runs the registry behind a gateway that has already authenticated the caller", which is false for a directly reachable `oidc-jwt` registry running the browser flow. The clause is restated per provider: `oidc-jwt` is a registry-process provider for a deployment where the registry verifies the caller's token itself, whether a gateway forwarded it or the registry obtained it through the §6.3.4 exchange, and `trusted-headers` alone keeps the fronting-gateway requirement. The split follows the shipped text, which already separates the two predicates: `:108` makes the gateway the source of truth for `trusted-headers` and `:112` records that `oidc-jwt` "verifies every token regardless of the network path, carries no bind restriction". Dropping the gateway predicate from both providers would assert a change to `trusted-headers` this proposal does not make. The same line closes "A Podium client behind such a gateway sends no credential of its own", and the restatement leaves "such a gateway" without an `oidc-jwt` antecedent, so that sentence is scoped in the same edit to a client behind a gateway under either provider. The clause's mirrors move with it in the applied change, each under the step that owns its tree: the §2.2 component-map bullet (`spec/02-architecture.md:101`) under S3 with `:92` itself, the `pkg/identity/registry.go:69-70` comment under C2, `docs/deployment/gateway-delegated-identity.md:9` and `:11` under D1, where `:9` carries the gateway-fronted framing and `:11` the sends-no-credential sentence whose antecedent `:9` sets, and the `test/manual-validation.md:2482-2484` preamble under T1. Landing one without the rest leaves the applied tree describing `oidc-jwt` as gateway-scoped at the site left behind, which is the defect the co-movement exists to prevent. This row's edit is scoped to `:92` and does not reach the adjacent `:94`, which stands per the tenant-derivation rule | S3, with C2, D1, and T1 |
+| `spec/06-mcp-server.md:92` (the opening clause and the sends-no-credential sentence) | This row is the single statement of that line's disposition and of the set that moves with it. Every other site names this row and adds only what is local to it. The line opens by calling both providers "registry-process identity providers for a deployment that runs the registry behind a gateway that has already authenticated the caller", which is false for a directly reachable `oidc-jwt` registry running the browser flow. The clause is restated per provider: `oidc-jwt` is a registry-process provider for a deployment where the registry verifies the caller's token itself, whether a gateway forwarded it or the registry obtained it through the §6.3.4 exchange, and `trusted-headers` alone keeps the fronting-gateway requirement. The split follows the shipped text, which already separates the two predicates: `:108` makes the gateway the source of truth for `trusted-headers` and `:112` records that `oidc-jwt` "verifies every token regardless of the network path, carries no bind restriction". Dropping the gateway predicate from both providers would assert a change to `trusted-headers` this proposal does not make. The same line closes "A Podium client behind such a gateway sends no credential of its own", and the restatement leaves "such a gateway" without an `oidc-jwt` antecedent, so that sentence is scoped in the same edit to a client behind a gateway under either provider. The clause's mirrors move with it in the applied change, each under the step that owns its tree: the §2.2 component-map bullet (`spec/02-architecture.md:101`) and the §13.12 introducing sentence (`spec/13-deployment.md:470`) under S3 with `:92` itself, the `pkg/identity/registry.go:69-70` comment under C2, `docs/deployment/gateway-delegated-identity.md:9` and `:11` under D1, where `:9` carries the gateway-fronted framing and `:11` the sends-no-credential sentence whose antecedent `:9` sets, and the `test/manual-validation.md:2482-2484` preamble under T1. Landing one without the rest leaves the applied tree describing `oidc-jwt` as gateway-scoped at the site left behind, which is the defect the co-movement exists to prevent. This row's edit is scoped to `:92` and does not reach the adjacent `:94`, which stands per the tenant-derivation rule | S3, with C2, D1, and T1 |
 | `spec/06-mcp-server.md:366` | `auth.untrusted_token`'s scope: "a forwarded `oidc-jwt` token". The sentence states the code's scope rather than one provider's verification path, so it moves even though the claims it names are verified identically in either location | S7 |
 | `docs/deployment/integrations.md:85` | a closed acquisition enumeration for the directly reachable arrangement the browser flow runs in: "Callers obtain that token by completing the CLI's device-code flow". Restated so a CLI, an SDK, or another API client obtains the token through the device-code flow and, on a registry that enables the browser flow, a browser obtains it through the §6.3.4 exchange, which the registry returns in `__Host-podium_session` | D1 |
 | `docs/deployment/progressive-adoption.md:57` | the no-token-is-anonymous rule, scoped to the provider: "Under `oidc-jwt` a request carrying no token is anonymous rather than rejected, so it resolves to public visibility only". It is narrowed to the anonymity rule above, rendered in the page's voice, which scopes the predicate to the configured token header and adds the browser-flow conjunct while keeping the visibility clause. The row's local point is that the narrowing leaves the surrounding exit criterion true: an unauthenticated caller still sees an empty catalog once no layer is public | D1 |
@@ -1797,12 +1798,17 @@ The **registry-process** keys go in §13.10 beside `PODIUM_WEB_UI`
 documented and the only place `PODIUM_WEB_UI` appears in `spec/`.
 
 They do **not** go in the §13.12 identity table. Its introducing sentence scopes
-it to the registry-process variables the gateway-delegated and
-`injected-session-token` providers introduce (`spec/13-deployment.md:470`), and
-its closing sentence enumerates the `identity_provider:` config-file object
+it to the registry-process variables the §6.3.3 registry-process providers and
+the `injected-session-token` provider introduce (`spec/13-deployment.md:470`),
+and its closing sentence enumerates the `identity_provider:` config-file object
 (`spec/13-deployment.md:482`). A web-UI key is introduced by neither provider, so
 a row there makes the first sentence false and a config-file form makes the
-second false.
+second false. That introducing sentence reads "The gateway-delegated providers"
+today, and it is one of the mirrors the `spec/06-mcp-server.md:92` row under "The
+browser session" moves, so S3 restates it as "The registry-process providers".
+The exclusion holds under either wording, because a web-UI key is introduced by
+no provider at all; the restatement only stops §13.12 from calling `oidc-jwt`
+gateway-delegated once §6.3.3 no longer does.
 
 No new registry-process key has a config-file form. Whether a key also carries a
 `podium serve` flag is a separate choice, because the two shipped patterns
@@ -1957,6 +1963,16 @@ holds to.
   `StartupConfig.Validate` (`pkg/registry/server/config_validate.go:87`), which
   C3 extends with the enablement and acquisition fields alongside the existing
   `WebUI` and `WebUIAllowPublicBind` fields (`:67-72`).
+- **§13.12 (`spec/13-deployment.md:470`)** — the identity table's introducing
+  sentence, which today opens "The gateway-delegated providers (§6.3.3) and the
+  `injected-session-token` provider (§6.3.2) introduce the following
+  registry-process variables." It is a mirror of the §6.3.3 opening clause, so
+  the `spec/06-mcp-server.md:92` row of the worked-example table under "The
+  browser session" states its disposition and S3 restates it in the same edit as
+  its authoring source, opening "The registry-process providers (§6.3.3)". The
+  rest of the sentence and the table stand. The table gains no row: the
+  key-placement rule above states why, and the restatement does not change that
+  answer, because a web-UI key is introduced by no provider under either wording.
 - **§6.3, a new §6.3.4** stating the browser acquisition flow, placed after
   §6.3.3, which ends at `spec/06-mcp-server.md:114` immediately before §6.4 at
   `:116`, with a pointer from the §6.3 introduction at `:40`. It is not a fourth
@@ -2008,7 +2024,7 @@ holds to.
   `spec/06-mcp-server.md:92` row of the worked-example table under "The browser
   session" states that line's disposition and names every mirror that moves with
   it, and S3 owns the `spec/` half of that set, meaning the `:92` restatement
-  here and the §2.2 bullet below. `:92` and `:96` are the only sentences in
+  here, the §2.2 bullet below, and the §13.12 introducing sentence below it. `:92` and `:96` are the only sentences in
   `:92-112` that this amendment touches. `:94` stands as written, per the
   tenant-derivation rule under "The browser session". The separate
   `trusted-headers` anonymity rule at `:108` stands unchanged, because the cookie
