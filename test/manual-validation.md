@@ -3908,13 +3908,13 @@ carries: a browser that presents no credential reads the public artifacts, sees
 neither restricted layer, and is offered the sign-in control the flow's
 enablement puts on the page.
 
-**Covers.** The §13.11 web-UI authentication paragraph, `oidc-jwt` on a
+**Covers.** The §13.10 web-UI authentication paragraph, `oidc-jwt` on a
 directly reachable registry (§6.3.3), the §6.3.4 browser-flow enablement guard,
 the §7.3.4 posture read, and §4.6 visibility for an anonymous caller.
 
 **Why by hand.** The assertion is what a person sees in the artifact list and in
 the page's authentication control. No Go test reads a browser rendering, which is
-why the previous §13.11 text could claim the UI ran a device-code flow with an
+why the previous §13.10 text could claim the UI ran a device-code flow with an
 in-browser verification handoff and no test contradicted it.
 
 **This is the stack the browser-flow scenarios run on.** S47 through S50 take
@@ -4259,8 +4259,12 @@ misconfigured:
    meaningful is step 5, where the same id returned the artifact in full to the
    authenticated caller. Run step 5 first and compare the two.
 
-**Cleanup.** Stop the server by its recorded PID and remove `$WORK`. Leave the
-stack running to continue into S47 through S50, which sign in against it.
+**Cleanup.** The teardown is conditional on whether the run continues. S47
+through S50 sign in against this stack, so when any of them is being run, leave
+the registry running, keep `$WORK`, and keep Keycloak and `$KCERT` in place, and
+let the last of them perform the teardown. When none of them is being run, stop
+the server by its recorded PID, run `rm -rf "$WORK"`, and remove the IdP with
+`docker rm -f kc-podium` and `rm -rf "$KCERT"`.
 
 ---
 
@@ -4364,9 +4368,9 @@ them into S21 permanently if its setup already reaches this state.
    so this step asserts nothing about them. Add the assertion when that is
    settled.
 
-4. Confirm this stack registers none of the registry's authentication routes, so
-   the write set the two documents enumerate is the whole of what an operator
-   can reach here.
+4. Confirm this stack registers neither the registry's authentication routes nor
+   the posture read, so the write set the two documents enumerate is the whole of
+   what an operator can reach here.
 
    ```bash
    for p in /v1/ui/auth/sign-in /v1/ui/auth/callback /v1/ui/auth/sign-out /v1/ui/session; do
@@ -4375,11 +4379,14 @@ them into S21 permanently if its setup already reaches this state.
    done
    ```
 
-   **Expect.** 404 on each. Both conjuncts hold here: this stack enables neither
-   the web UI nor the browser flow, so the registry registers none of the §7.3.4
-   routes, and it configures no identity provider, so nothing refuses the probe
-   ahead of route matching. A stack that does mount them answers each of these
-   paths rather than `registry.read_only`, because none of them is a write.
+   **Expect.** 404 on each, for two different reasons. Sign-in, the callback, and
+   sign-out are mounted only when both conjuncts hold, and neither holds here:
+   this stack enables neither the web UI nor the browser flow. The posture read
+   is mounted on the web UI alone, and the web UI is off, which is what accounts
+   for its 404. This stack also configures no identity provider, so nothing
+   refuses any of the four probes ahead of route matching. A stack that does
+   mount them answers each of these paths rather than `registry.read_only`,
+   because none of them is a write.
 
    The clause proposal 0012 struck named a write endpoint the registry does not
    serve. That is what made it wrong rather than merely stale: an operator could
@@ -4722,7 +4729,8 @@ and record the skip.
    both cookies. The registry holds no session state to clear, so the same
    result follows on any replica.
 
-**Cleanup.** As S44. Leave the stack running to continue into S48.
+**Cleanup.** As S44, on the same terms: leave the stack running when S48 through
+S50 follow, and run S44's teardown only when this is the last scenario executed.
 
 ---
 
@@ -4768,8 +4776,9 @@ to 3 completed and the browser still signed in.
 3. Read what the panel returns.
 
    **Expect.** The panel shows the layer's webhook URL and its HMAC secret, with
-   a copy control on each, and states that the secret is returned here and on a
-   rotation and that the registry stores only a hash of it. The reveal stays on
+   a copy control on each, and states that the secret is returned on registration
+   and on a rotation and is redacted from every other response, so it cannot be
+   read back once this reveal is dismissed. The reveal stays on
    screen until the reader acknowledges it, so a secret is not lost to an
    accidental navigation. Acknowledge it and confirm the panel returns to the
    layer list.
@@ -4803,15 +4812,17 @@ to 3 completed and the browser still signed in.
    registrant, and this request resolves no subject. A `200` here means the
    panel's registration in step 2 established nothing about the session.
 
-**Cleanup.** As S44. Leave the stack running to continue into S49.
+**Cleanup.** As S44, on the same terms: leave the stack running when S49 or S50
+follows, and run S44's teardown only when this is the last scenario executed.
 
 ---
 
 ## S49: Unregister a layer through the panel's confirmation
 
 **Goal.** Validate that the panel's unregister control states what unregistering
-does before it does it, that it holds the write until the reader types the
-layer's own ID, and that the unregistered layer moves into the recoverable list.
+does before it does it, that it holds the write until the reader performs a
+deliberate act distinct from the press on the row, and that the unregistered
+layer moves into the recoverable list.
 
 **Covers.** §7.3.1 unregister through the UI, the §13.10 layer panel's
 confirmation for a write whose effect reaches other callers, and the §8.4
@@ -4828,22 +4839,26 @@ properties of a rendering.
 
 1. In the layer panel, press Unregister on the `own-release` row.
 
-   **Expect.** A confirmation appears rather than the layer disappearing. It
-   names the layer, says its artifacts leave every caller's view at the next
-   sync, and says the layer stays recoverable for the recovery window and names
-   the date it is erased on. The confirm control is disabled.
+   **Expect.** A confirmation appears rather than the layer disappearing, and no
+   write is issued by this press. The confirmation names the layer, says its
+   artifacts leave every caller's effective view at once, and says the layer and
+   its artifacts stay recoverable for the deployment's retention window rather
+   than being erased.
 
-2. Type a value other than the layer's ID into the confirmation field.
+2. Attempt to complete the unregister without performing the confirmation's own
+   act.
 
-   **Expect.** The confirm control stays disabled. This is what keeps the action
-   out of reach of a single press on the row it sits in.
+   **Expect.** The confirm control is unavailable until the reader performs a
+   deliberate act distinct from the press on the row. What that act is comes from
+   the design pass; this step asserts only that one is required and that the
+   write is not issued before it.
 
-3. Type `own-release` and confirm.
+3. Perform the confirmation's act and confirm.
 
    **Expect.** The write is issued, the row leaves the layer list, and the layer
    appears under the recently-unregistered list the panel draws from the
-   tenant's tombstoned layers. Cancelling instead leaves the layer registered
-   and issues no write.
+   tenant's tombstoned layers, where it stays until the retention window lapses.
+   Cancelling instead leaves the layer registered and issues no write.
 
 4. Confirm the registry agrees with the panel.
 
@@ -4855,7 +4870,8 @@ properties of a rendering.
    restorable from the panel's recovery control until the §8.4 window runs out,
    which is what makes this an unregister rather than an erasure.
 
-**Cleanup.** As S44. Leave the stack running to continue into S50.
+**Cleanup.** As S44, on the same terms: leave the stack running when S50 follows,
+and run S44's teardown only when this is the last scenario executed.
 
 ---
 
@@ -4893,7 +4909,8 @@ to register `own-release` and stop before S49, or re-register it.
    whole tenant's layer list. The `own-release` row carries no "yours" marker,
    because bob's subject is not its stored owner.
 
-3. Press Unregister on the `own-release` row, type the layer ID, and confirm.
+3. Press Unregister on the `own-release` row and complete the confirmation as
+   S49 step 3 does.
 
    **Expect.** The layer stays registered. The row reports that the registry
    refused that action and that nothing changed, and it names the code
@@ -4915,5 +4932,6 @@ to register `own-release` and stop before S49, or re-register it.
    **Expect.** The confirmation appears and the write succeeds. Without this
    step a registry refusing every caller would pass step 3 for the wrong reason.
 
-**Cleanup.** As S44, plus `docker rm -f kc-podium` and `rm -rf "$KCERT"` for the
-IdP.
+**Cleanup.** S50 is the last scenario on this stack, so run S44's teardown here:
+stop the server by its recorded PID, run `rm -rf "$WORK"`, and remove the IdP
+with `docker rm -f kc-podium` and `rm -rf "$KCERT"`.
