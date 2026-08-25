@@ -1,7 +1,7 @@
 # Proposal 0013: Build the §13.10 web UI
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-08-24). Signed off by the maintainer for implementation.
+- Status: Implemented (2026-08-24). Signed off by the maintainer for implementation.
   Converged by maintainer decision rather than by a clean sweep: three
   adversarial review runs fixed 121 findings over 43 rounds and none reached a
   clean sweep, and the third was stopped mid-run at the maintainer's direction.
@@ -157,11 +157,11 @@ sites and testing sections after sign-off.
       the sites the credential-location rule under "The browser session" moves,
       and this step owns it.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. A new §6.3.4 stating the browser acquisition flow,
+- [x] **S2 · spec** — SPEC-2. A new §6.3.4 stating the browser acquisition flow,
       with its pointer from the §6.3 introduction. The tests that cite the new
       section are C2's, which stages their `// Spec: §6.3.4` annotations.
       Levels: —. Depends on: S1
-- [ ] **S3 · spec** — SPEC-3. §6.3.3's second accepted location for the
+- [x] **S3 · spec** — SPEC-3. §6.3.3's second accepted location for the
       `oidc-jwt` credential, the header-wins precedence rule under "The browser
       session" stated there in spec voice, the narrowed no-token-is-anonymous
       sentence at `spec/06-mcp-server.md:96`, and the `spec/` half of the set the
@@ -172,7 +172,7 @@ sites and testing sections after sign-off.
       `spec/13-deployment.md:470`, which names the same providers. The code,
       documentation, and test halves of that set land under C2, D1, and T1.
       Levels: —. Depends on: S2
-- [ ] **S4 · spec** — SPEC-4. A new §7.3.4, "Browser Authentication Routes",
+- [x] **S4 · spec** — SPEC-4. A new §7.3.4, "Browser Authentication Routes",
       stating the sign-in, callback, and sign-out routes with
       their methods, their paths,
       their cookies, and their mount predicate, and the posture read
@@ -183,17 +183,17 @@ sites and testing sections after sign-off.
       the new section are C2's, which stages their `// Spec: §7.3.4`
       annotations.
       Levels: —. Depends on: S2
-- [ ] **S5 · spec** — SPEC-5. §11's verification entry for the UI, covering the
+- [x] **S5 · spec** — SPEC-5. §11's verification entry for the UI, covering the
       matrix the generating rule under "Verification matrix" below produces.
       Levels: —. Depends on: S1, S2, S3, S4, S6, S7
-- [ ] **S6 · spec** — SPEC-6. §7.3.1's owner-or-admin authorization for the layer
+- [x] **S6 · spec** — SPEC-6. §7.3.1's owner-or-admin authorization for the layer
       write handlers, the rescoped manual-reingest trigger row at
       `spec/07-external-integration.md:65`, the rescoped quickstart reingest
       comment at `spec/00-quickstart.md:46`, which carries the same unqualified
       rule over an admin-defined layer, and §7's `auth.forbidden` error
       enumeration.
       Levels: —. Depends on: —
-- [ ] **S7 · spec** — SPEC-7. The new `auth.csrf_invalid` and
+- [x] **S7 · spec** — SPEC-7. The new `auth.csrf_invalid` and
       `auth.exchange_failed` §6.10 and §6.9
       entries, their `tools/matrix/matrices.go` axis entries, and the §6.10 and
       §6.9 text that the credential-location rule under "The browser session"
@@ -205,16 +205,16 @@ sites and testing sections after sign-off.
       The rule's other `spec/` sites belong to S1 and S3,
       which own them. The `auth.forbidden` broadening is S6's.
       Levels: —. Depends on: S3, S4, S6
-- [ ] **G1 · docs** — DESIGN-1. The `web/DESIGN.md` sourcing rule stated in "The
+- [x] **G1 · docs** — DESIGN-1. The `web/DESIGN.md` sourcing rule stated in "The
       design handout", applied across the brief, together with the design content
       that section keeps: the posture-keyed rendering rules, the sign-in control
       table, and the remaining design instructions it enumerates.
       Levels: —. Depends on: —
-- [ ] **C1 · code** — CODE-1. The layer-write authorization rule under "The
+- [x] **C1 · code** — CODE-1. The layer-write authorization rule under "The
       layer-ownership defect", implemented on the layer write handlers with the
       tests "Testing" enumerates.
       Levels: unit, integration, e2e. Depends on: S6, S7
-- [ ] **C2 · code** — CODE-2. `identity.AuthCodeFlow` in `pkg/identity`,
+- [x] **C2 · code** — CODE-2. `identity.AuthCodeFlow` in `pkg/identity`,
       carrying the authorization-request and token-request tables under "The
       browser session" and nothing else it puts on the wire, per the package
       split under "The browser session", with the "Authorization-code flow
@@ -257,7 +257,7 @@ sites and testing sections after sign-off.
       `serverboot` and `OIDCVerifier.Verify` receives a raw token with no
       knowledge of its origin.
       Levels: unit, integration, e2e. Depends on: S1, S2, S3, S4, S7
-- [ ] **C3 · code** — CODE-3. The web-UI authentication configuration guard in
+- [x] **C3 · code** — CODE-3. The web-UI authentication configuration guard in
       `StartupConfig.Validate`, implementing the startup guard under "The browser
       session" over the fields C2 adds, appended after the shipped public-mode
       exclusion so the ordering that statement records holds; and the bind-guard
@@ -267,26 +267,26 @@ sites and testing sections after sign-off.
       and C3 a registry can enable the flow with an unvalidated acquisition
       value; C3 is what makes that configuration a startup refusal.
       Levels: unit, e2e. Depends on: S1, C2
-- [ ] **B1 · code** — BUILD-1. The React toolchain, the committed bundle, the
+- [x] **B1 · code** — BUILD-1. The React toolchain, the committed bundle, the
       removal of `web/index.html`, `web/app.js`, and `web/style.css`, which are
       the served bundle today rather than sources, the `go:embed` change,
       `web/web_test.go`, the served-bundle end-to-end assertion, the
       rebuild-is-clean CI check, and the `dangerouslySetInnerHTML` check under
       "Rendering untrusted content".
       Levels: unit, e2e. Depends on: —
-- [ ] **U1 · code** — UI-1. The UI surfaces built against the design pass's
+- [x] **U1 · code** — UI-1. The UI surfaces built against the design pass's
       output in `web/design/`, with `web/DESIGN.md` as the brief behind it,
       including the sanitized markdown rendering path and its sanitizer cases,
       the posture read on load together with the sign-in and sign-out
       affordances G1's sign-in control table gates on it and the rest of the
       posture-keyed rendering rules G1 states.
       Levels: unit, e2e. Depends on: B1, C1, C2, G1
-- [ ] **D1 · docs** — DOC-1. Every shipped mirror named in "The edit sites" and
+- [x] **D1 · docs** — DOC-1. Every shipped mirror named in "The edit sites" and
       every site under `docs/` that the credential-location rule under "The
       browser session" moves, which is the whole documentation half of "The
       second-location sweep". A site the rule leaves standing is left untouched.
       Levels: —. Depends on: S1, S2, S3, S4, S6, S7
-- [ ] **T1 · test** — TEST-1. The manual scenarios, including the S44 rewrite,
+- [x] **T1 · test** — TEST-1. The manual scenarios, including the S44 rewrite,
       the S44 stack restaging (its Keycloak client registration, its
       password-grant token mint, its registry build, and its serve
       invocation), the S45 step-2
