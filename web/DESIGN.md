@@ -363,8 +363,9 @@ any state the CLI can reach is a state the panel must render.
   list as unordered.
 
 Roles differ. An administrator manages every layer in the tenant, which is the
-panel §13.10 describes and the authorization the layer endpoint applies to
-admin-defined layers (`pkg/registry/server/layers.go`). An ordinary user manages
+panel §13.10 describes, because a tenant admin is authorized on both layer
+classes under the layer-write authorization rule stated in "The layer-ownership
+defect" in `proposals/0013-build-the-13-10-web-ui.md`. An ordinary user manages
 their own user-defined layers and is capped at a configurable number of them
 (spec §7.3.1, with the enforced default in `pkg/registry/server/layers.go`). The
 registry refuses a registration past the cap with an error carrying the limit and
@@ -457,15 +458,20 @@ read answers at all.
   verified, that caller has no anonymous view of the catalog, and the page
   renders the refused state rather than an empty catalog or a filtered one.
   Which refusals a catalog read returns when the caller's identity cannot be
-  verified is owned by the expiry-signal rule under "The browser session" in
+  verified is owned by the catalog-scope rule under "The design handout" in
   `proposals/0013-build-the-13-10-web-ui.md`, and the page reads them there
-  rather than from this brief. This arm is ordered ahead of the two below,
-  whether or not the posture read answered, so neither of them applies to such a
-  refusal. Where a caller who had a subject sees that refusal, it is the
-  session-expiry transition that same rule names. A catalog read that fails for
-  any other reason, such as an unavailable registry or a server failure, is
-  outside this rule and takes the surface's own error state under "Per-surface
-  states" below.
+  rather than from this brief. That rule is also where the deployment class this
+  arm exists for is stated: a registry whose identity provider verifies a
+  runtime-signed token refuses every catalog call from a browser that holds
+  none, so a caller who never held a subject reaches this arm as readily as one
+  who did. This arm is ordered ahead of the two below, whether or not the
+  posture read answered, so neither of them applies to such a refusal. Where a
+  caller who had a subject sees that refusal, the transition it marks is the
+  session expiry the expiry-signal rule under "The browser session" in the same
+  proposal names, and that rule owns that transition alone. A catalog read that
+  fails for any other reason, such as an unavailable registry or a server
+  failure, is outside this rule and takes the surface's own error state under
+  "Per-surface states" below.
 - Where the catalog read answers, the anonymous view is the public subset when
   the posture read reports `identity_provider_configured` true and `public_mode`
   false. On every other combination of the two it is the whole catalog.
@@ -516,6 +522,16 @@ the request; clearing a Podium cookie would not end the gateway's own session
 there. The fourth row is the arm "The posture read" owns: where the read fails
 or is not served the page holds no value for either key, so it renders neither
 control and the layer panel renders its write operations.
+
+The control is keyed on a posture read taken when the page loads, so a session
+that ends while the page is already rendered leaves the keys stale. A catalog
+read refused because the caller's identity could not be verified re-keys the
+control: the page issues the posture read again and renders whichever row the
+fresh values select. On the deployments that run the browser flow that read
+resolves no subject once the session has ended, so the control becomes sign-in,
+which is the affordance the refused-catalog treatment needs beside it. The
+re-read is the only mechanism that changes the control after load, and no other
+response re-keys it.
 
 The transitions matter as much as the states: signing in, signing out, and a
 session expiring mid-use while a page is already rendered. The signal for that
