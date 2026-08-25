@@ -385,21 +385,15 @@ layer-write authorization rule stated in the same proposal section: an operation
 on a user-defined layer is authorized to that layer's owner or to a tenant
 admin, an operation on an admin-defined layer is authorized to a tenant admin
 alone, and the rule covers register, unregister, update, restore, reorder, and
-reingest. Register is decided against the layer its ID names rather than against
-what the form posts: a register whose ID names no layer stored in the tenant is
-authorized to a caller the admin arm admits or to a caller who resolves a
-verified subject, and a register whose ID names a layer that is already stored,
-including one that is unregistered and still inside its recovery window, takes
-the per-layer arms above against that stored layer. The panel therefore treats
-creating a layer under an unused ID and re-registering an existing ID as
-different authorization cases, and the recoverable layers its restore surface
-lists are IDs a new registration cannot take over. The rule is live only where
-the deployment both configures an identity provider and does not run in public
-mode, which is the liveness condition that
-rule carries. A registry missing either conjunct admits every one of the panel's
-writes and the role split is presentation there as well, which covers both the
-standalone registry that authenticates no caller and a registry that engages
-public mode. The design consequence is that the panel can now receive a refusal
+reingest. The panel therefore treats creating a layer under an unused ID and
+re-registering an existing ID as different authorization cases, which that rule
+decides, and the recoverable layers its restore surface lists are IDs a new
+registration cannot take over. The rule is live only where the deployment both
+configures an identity provider and does not run in public mode, which is the
+liveness condition that rule carries. A registry missing either conjunct admits
+every one of the panel's writes and the role split is presentation there as
+well, which covers both the standalone registry that authenticates no caller and
+a registry that engages public mode. The design consequence is that the panel can now receive a refusal
 from a write it would otherwise have assumed would succeed, including on a layer
 its own role split presented as the caller's to manage. It presents that refusal
 rather than treating it as a failure of the page.
@@ -517,7 +511,6 @@ owned by "The posture read" in `proposals/0013-build-the-13-10-web-ui.md`.
 | true | absent | sign-in, as a top-level navigation to the sign-in path the read reports |
 | true | present | sign-out, issued as a `POST` from the page carrying the same proof the panel's writes carry, after which the page navigates |
 | false | absent or present | neither control |
-| the read did not answer | not reported | neither control |
 
 Sign-out is issued as a `POST` rather than followed as a link because that is the
 method the route answers, which "The route methods" in the same proposal owns,
@@ -531,9 +524,10 @@ status an unregistered path receives", in the same proposal). The third row
 covers the deployments that run no browser flow, including the gateway-fronted
 §13.10 deployment where a subject does resolve because the gateway authenticated
 the request; clearing a Podium cookie would not end the gateway's own session
-there. The fourth row is the arm "The posture read" owns: where the read fails
-or is not served the page holds no value for either key, so it renders neither
-control and the layer panel renders its write operations.
+there. A read that does not answer leaves the page holding no value for either
+key, so the table decides nothing for that case. It is owned by "The posture
+read" in the same proposal, and the identity-states preamble above states the
+presentation it fixes.
 
 The control is keyed on the posture read the page takes when it loads. A session
 that ends while the page is already rendered is signalled by the catalog read
