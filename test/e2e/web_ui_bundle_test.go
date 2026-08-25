@@ -130,17 +130,21 @@ func themeArm(styles, theme string) string {
 	return ""
 }
 
-// fontFamilies the design fixes. Each one resolves from a font the bundle
-// ships or it resolves from nothing, because the bundle loads no stylesheet
-// from another origin and an air-gapped registry reaches no font host.
+// fontFamilies the design fixes: Space Grotesk for prose and UI, JetBrains
+// Mono for identifiers, and Anton for the wordmark.
 var fontFamilies = []string{"Space Grotesk", "JetBrains Mono", "Anton"}
 
-// Spec: §13.10 — the served bundle names no font family it does not ship.
-// The registry serves the UI from its own origin and a strict deployment
-// reaches no font host, so a family named with no @font-face rule behind it
-// renders as the fallback on every deployment while the type scale was sized
-// against metrics that never load.
-func TestWebUI_ServedBundleNamesNoFontItDoesNotShip(t *testing.T) {
+// fontFacePattern matches one @font-face rule's family name and source URL in
+// the served stylesheet, which the bundler emits with the quotes stripped.
+var fontFacePattern = regexp.MustCompile(`@font-face\{font-family:([^;]+);[^}]*src:url\(([^)]+)\)`)
+
+// Spec: §13.10 — the served bundle ships every font family it names. The
+// registry serves the UI from its own origin and a strict deployment reaches
+// no font host, so a family named with no @font-face rule behind it renders
+// as the fallback on every deployment while the type scale was sized against
+// metrics that never load. Self-hosting is what the design pass names as the
+// remedy, so each family resolves from an asset under the /ui/ mount.
+func TestWebUI_ServedBundleShipsTheFontsItNames(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"my-skill/ARTIFACT.md": smallteamLowArtifact("ui artifact"),
@@ -153,10 +157,28 @@ func TestWebUI_ServedBundleNamesNoFontItDoesNotShip(t *testing.T) {
 		t.Fatalf("GET /ui/ status = %d, want 200\nlog:\n%s", st, srv.log())
 	}
 	styles := strings.Join(bundleStylesheets(t, srv, string(index)), "\n")
-	served := strings.Contains(styles, "@font-face")
+	faces := map[string]string{}
+	for _, rule := range fontFacePattern.FindAllStringSubmatch(styles, -1) {
+		faces[strings.Trim(rule[1], `"' `)] = rule[2]
+	}
 	for _, family := range fontFamilies {
-		if strings.Contains(styles, family) && !served {
+		if !strings.Contains(styles, family) {
+			t.Errorf("the served stylesheet names no %q; the design fixes it as one of the three families", family)
+			continue
+		}
+		src, ok := faces[family]
+		if !ok {
 			t.Errorf("the served stylesheet names %q and carries no @font-face rule; nothing resolves that family", family)
+			continue
+		}
+		url, ok := bundleAssetURL(srv.BaseURL, src)
+		if !ok {
+			t.Errorf("the %q face is sourced from %q, which is rooted outside the /ui/ mount", family, src)
+			continue
+		}
+		if st, _ := getRaw(t, url); st != 200 {
+			t.Errorf("GET %s status = %d, want 200; the %q face resolves from nothing\nlog:\n%s",
+				url, st, family, srv.log())
 		}
 	}
 }

@@ -9,7 +9,7 @@
 // panel renders for a caller who resolves no subject, and the anonymous view
 // under public mode is the whole catalog rather than a filtered one.
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
@@ -93,6 +93,21 @@ function goTo(hash: string): void {
   window.location.hash = hash;
 }
 
+/** lastSearch is the query string of the most recent search the page issued,
+ * which is what a case asserting a filter reads. */
+function lastSearch(): URLSearchParams {
+  const last = requests.filter((r) => r.url.startsWith('/v1/search_artifacts')).at(-1)?.url ?? '';
+  return new URLSearchParams(last.split('?')[1] ?? '');
+}
+
+/** addToken drives the filter row's token entry, which is how a tag, a scope,
+ * and a type the row does not offer as a pill are added. */
+function addToken(label: string, value: string): void {
+  fireEvent.click(screen.getByRole('button', { name: `+ ${label}` }));
+  fireEvent.change(screen.getByLabelText(`Add a ${label} filter`), { target: { value } });
+  fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+}
+
 beforeEach(() => {
   requests.length = 0;
   bodies.length = 0;
@@ -102,6 +117,111 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+});
+
+describe('the application shell', () => {
+  const catalog = {
+    path: '',
+    subdomains: [
+      {
+        path: 'platform',
+        name: 'platform',
+        subdomains: [{ path: 'platform/ci', name: 'ci' }],
+      },
+    ],
+    notable: [],
+  };
+
+  // The shell is one layout on every screen: the nav, the catalog label with
+  // its depth marker, the tree, and the counts footer pinned under it. The
+  // tree is eager to two levels and reads a deeper level when the reader
+  // expands the node it hangs under.
+  it('renders the catalog tree, reads a deeper level on expand, and states the counts', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': { body: catalog },
+      '/v1/search_artifacts': { body: { total_matched: 312 } },
+      '/v1/layers': {
+        body: { layers: [adminLayer(), { ...userLayer(), last_ingested_at: new Date().toISOString() }] },
+      },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText('Catalog');
+    expect(screen.getByTestId('catalog-depth').textContent).toBe('2 levels');
+    // Both eager levels are in the response, so the second one is rendered
+    // from it rather than read again.
+    fireEvent.click(within(tree).getAllByRole('button', { expanded: false })[0]);
+    expect(within(tree).getByText('ci')).toBeTruthy();
+    expect(await screen.findByTestId('catalog-counts')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByTestId('catalog-counts').textContent).toBe('2 layers · 312 artifacts');
+    });
+    expect(screen.getByTestId('catalog-ingest').textContent).toBe('ingested 0m ago');
+    // The level below the eager edge is unknown until the reader asks for
+    // it, and asking is what reads it.
+    fireEvent.click(within(tree).getAllByRole('button', { expanded: false })[0]);
+    await waitFor(() => {
+      expect(requests.some((r) => r.url.includes('path=platform%2Fci'))).toBe(true);
+    });
+  });
+
+  // The wordmark is the mark the design pass fixed, drawn inline beside the
+  // name, so it resolves from the bundle like the rest of the page.
+  it('renders the wordmark as an inline mark beside the name', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': { body: emptyDomain },
+      '/v1/search_artifacts': { body: { total_matched: 0 } },
+      '/v1/layers': { body: { layers: [] } },
+    });
+    render(<App />);
+    const wordmark = await screen.findByLabelText('Podium');
+    expect(wordmark.querySelector('svg')).toBeTruthy();
+    expect(wordmark.textContent).toBe('Podium');
+  });
+
+  // A domain the registry refuses to open stays in the hierarchy and is not
+  // enterable, which is what the reader is owed: the tree lists it and the
+  // link is gone.
+  it('lists a domain whose level the registry refuses and makes it unenterable', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': { body: catalog },
+      '/v1/search_artifacts': { body: { total_matched: 0 } },
+      '/v1/layers': { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText('Catalog');
+    fireEvent.click(within(tree).getAllByRole('button', { expanded: false })[0]);
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': { status: 403, body: { code: 'auth.forbidden', message: 'not permitted' } },
+      '/v1/search_artifacts': { body: { total_matched: 0 } },
+      '/v1/layers': { body: { layers: [] } },
+    });
+    fireEvent.click(within(tree).getAllByRole('button', { expanded: false })[0]);
+    expect(await screen.findByTestId('restricted-domain')).toBeTruthy();
+    expect(within(tree).queryByRole('link', { name: 'ci' })).toBeNull();
+  });
+
+  // The refused arm has no catalog to navigate. The tree and the counts are
+  // emptied rather than left standing with what an earlier read returned,
+  // and the depth marker is kept, because it states a property of this
+  // navigation rather than of the catalog.
+  it('empties the tree and the counts where the catalog read is refused', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture() },
+      '/v1/load_domain': { status: 401, body: { code: 'auth.untrusted_token', message: 'not verified' } },
+      '/v1/search_artifacts': { body: { total_matched: 312 } },
+      '/v1/layers': { body: { layers: [adminLayer()] } },
+    });
+    render(<App />);
+    await screen.findByLabelText('Catalog refused');
+    expect(within(screen.getByLabelText('Catalog')).queryAllByRole('listitem')).toEqual([]);
+    expect(screen.getByTestId('catalog-counts').textContent).toBe('');
+    expect(screen.queryByTestId('catalog-ingest')).toBeNull();
+    expect(screen.getByTestId('catalog-depth').textContent).toBe('2 levels');
+  });
 });
 
 describe('the sign-in control', () => {
@@ -256,8 +376,10 @@ describe('the domain browser', () => {
     });
     goTo('#/domain/platform');
     render(<App />);
-    await screen.findByLabelText('Domain browser');
-    expect(screen.getByText('ci')).toBeTruthy();
+    const browser = await screen.findByLabelText('Domain browser');
+    // The sidebar tree lists the same domain, so the browser's own listing is
+    // read off the surface rather than off the page.
+    expect(within(browser).getByText('ci')).toBeTruthy();
     expect(screen.getByText('platform/deploy')).toBeTruthy();
     expect(screen.getByText('curated')).toBeTruthy();
     expect(screen.getByText('Lifted from sparse subdomains')).toBeTruthy();
@@ -302,9 +424,13 @@ describe('search', () => {
     goTo('#/search/review');
     render(<App />);
     await screen.findByLabelText('Search');
-    fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'skill' } });
-    fireEvent.change(screen.getByLabelText('Scope'), { target: { value: 'platform' } });
-    fireEvent.change(screen.getByLabelText('Tags'), { target: { value: 'review, security' } });
+    // The filter row is pills rather than text boxes: a type is selected from
+    // the offered set, and a scope and a tag are added through the row's
+    // token entry.
+    fireEvent.click(within(screen.getByRole('group', { name: 'Type' })).getByRole('button', { name: 'skill' }));
+    addToken('scope', 'platform');
+    addToken('tag', 'review');
+    addToken('tag', 'security');
     await waitFor(() => {
       const last = requests.filter((r) => r.url.startsWith('/v1/search_artifacts')).at(-1)?.url ?? '';
       const query = new URLSearchParams(last.split('?')[1] ?? '');
@@ -328,7 +454,12 @@ describe('search', () => {
           results: [
             { id: 'platform/review', type: 'skill', score: 8.5, sensitivity: 'internal' },
             { id: 'platform/weaker', type: 'skill', score: 2.1 },
-            { id: 'platform/meaning', type: 'skill', score: 0 },
+            // The registry marshals the score with omitempty, so the zero
+            // score a fused-in vector-only candidate carries never reaches
+            // the wire. The row arrives with no score key at all, which is
+            // what a surface reading the field's presence would render as an
+            // unranked row.
+            { id: 'platform/meaning', type: 'skill' },
           ],
         },
       },
@@ -345,6 +476,26 @@ describe('search', () => {
     expect(indicators.map((el) => el.getAttribute('data-filled'))).toEqual(['4', '1', '0']);
     expect(indicators[2].childElementCount).toBe(0);
     expect(screen.queryByText(/score 8/)).toBeNull();
+  });
+
+  // An active filter carries the control that removes it, which is what
+  // returns the row to the unfiltered read.
+  it('drops a filter from the request when its pill is removed', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/search_artifacts': { body: { total_matched: 0 } },
+    });
+    goTo('#/search/review');
+    render(<App />);
+    await screen.findByLabelText('Search');
+    addToken('tag', 'security');
+    await waitFor(() => {
+      expect(lastSearch().get('tags')).toBe('security');
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Remove the security filter' }));
+    await waitFor(() => {
+      expect(lastSearch().get('tags')).toBeNull();
+    });
   });
 
   it('renders a search that matched nothing as an empty result rather than a failure', async () => {
@@ -428,6 +579,89 @@ describe('the artifact viewer', () => {
     expect(screen.queryByRole('tab', { name: 'Authored source' })).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: /Resources/ }));
     expect(screen.getByLabelText('Resources').textContent).toContain('checklist.md');
+  });
+
+  // Every bundled file is retrievable from its own row: nothing is
+  // previewed, so the row's action is the only path to the file. One binary
+  // file puts the whole inline set into base64, and that row's action carries
+  // the decoded bytes while its size column states the file's own byte count
+  // rather than the length of the encoding.
+  it('gives every resource row a format, a byte size, and a download action', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'platform/review',
+          type: 'context',
+          version: '1.0.0',
+          content_hash: 'sha256:abc',
+          manifest_body: '# Review\n',
+          frontmatter: '',
+          resources: { 'logo.png': 'AAECAw==' },
+          resources_base64: true,
+          large_resources: {
+            'corpus.bin': {
+              presigned_url: 'https://objects.acme.com/corpus',
+              content_hash: 'sha256:def',
+              size: 168000000,
+              content_type: 'application/octet-stream',
+            },
+          },
+        },
+      },
+      '/v1/dependents': { body: { edges: [] } },
+    });
+    goTo('#/artifact/platform%2Freview');
+    render(<App />);
+    await screen.findByLabelText('Artifact viewer');
+    fireEvent.click(screen.getByRole('tab', { name: /Resources/ }));
+    const rows = within(screen.getByLabelText('Resources')).getAllByRole('row').slice(1);
+    const inline = within(rows[0]).getAllByRole('cell').map((cell) => cell.textContent);
+    expect(inline.slice(0, 4)).toEqual(['logo.png', 'png', '4 bytes', 'inline, base64']);
+    const download = within(rows[0]).getByRole('link', { name: 'Download' });
+    expect(download.getAttribute('href')).toBe('data:application/octet-stream;base64,AAECAw==');
+    expect(download.getAttribute('download')).toBe('logo.png');
+    const fetched = within(rows[1]).getAllByRole('cell').map((cell) => cell.textContent);
+    expect(fetched.slice(0, 4)).toEqual([
+      'corpus.bin',
+      'application/octet-stream',
+      '168000000 bytes',
+      'fetched on demand',
+    ]);
+    expect(within(rows[1]).getByRole('link', { name: 'Download' }).getAttribute('href')).toBe(
+      'https://objects.acme.com/corpus',
+    );
+  });
+
+  // The frontmatter panel offers both readings of the block: the property
+  // table and the YAML the author wrote.
+  it('reads a well-formed frontmatter block as a table or as raw YAML', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'platform/review',
+          type: 'context',
+          version: '1.0.0',
+          content_hash: 'sha256:abc',
+          manifest_body: '# Review\n',
+          frontmatter: manifestDoc,
+        },
+      },
+      '/v1/dependents': { body: { edges: [] } },
+    });
+    goTo('#/artifact/platform%2Freview');
+    render(<App />);
+    await screen.findByLabelText('Artifact viewer');
+    fireEvent.click(screen.getByRole('tab', { name: /Frontmatter/ }));
+    expect(screen.getByTestId('frontmatter-table')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Raw YAML' }));
+    expect(screen.queryByTestId('frontmatter-table')).toBeNull();
+    expect(screen.getByTestId('raw-frontmatter').textContent).toContain('name: review');
+    // Nothing marks a line on a block that parsed.
+    expect(screen.queryByTestId('offending-line')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Table' }));
+    expect(screen.getByTestId('frontmatter-table')).toBeTruthy();
   });
 
   // load_artifact defaults to the latest version and takes any other, so a
@@ -569,7 +803,7 @@ describe('the artifact viewer', () => {
           version: '1.0.0',
           content_hash: 'sha256:abc',
           manifest_body: '# Review\n',
-          frontmatter: 'name: [unterminated\n',
+          frontmatter: 'name: review\n\tbad: tab\n',
         },
       },
       '/v1/dependents': { body: { edges: [] } },
@@ -583,6 +817,10 @@ describe('the artifact viewer', () => {
     expect(screen.getByTestId('artifact-body').querySelector('h1')?.textContent).toBe('Review');
     fireEvent.click(screen.getByRole('tab', { name: /Frontmatter/ }));
     expect(screen.getAllByText('Invalid syntax').length).toBeGreaterThan(0);
+    // The banner carries the parser's own position and the raw block below
+    // it marks the line that position names.
+    expect(screen.getAllByText(/line 2, column/).length).toBeGreaterThan(0);
+    expect(screen.getAllByTestId('offending-line')[0].textContent).toContain('bad: tab');
   });
 });
 
@@ -617,6 +855,25 @@ describe('the layer panel', () => {
     await screen.findByLabelText('Layer panel');
     expect(screen.getAllByText('yours').length).toBe(1);
     expect(screen.getByText('admin-defined')).toBeTruthy();
+    // The admin-defined row still shows its stored owner, as the field it
+    // is. It carries no ownership language and none of the marker's
+    // styling, because the write rule authorizes a tenant admin there and
+    // that field names no authorized subject.
+    const stored = screen.getByTestId('stored-owner');
+    expect(stored.textContent).toBe('owner: alice@acme.com');
+    expect(stored.className).not.toContain('badge');
+  });
+
+  it('states an unset stored owner on an admin-defined row rather than omitting the field', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [adminLayer()] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    expect(screen.getByTestId('stored-owner').textContent).toBe('owner: unset');
+    expect(screen.queryByText('yours')).toBeNull();
   });
 
   // A write can come back refused, including on a row the panel presented as

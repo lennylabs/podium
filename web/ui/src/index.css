@@ -10,11 +10,37 @@
    operating system reports dark, which leaves dark surfaces under a
    light-declared color-scheme.
 
-   The families below are the stack the bundle renders in. The design pass
-   fixes Space Grotesk, JetBrains Mono, and Anton, and it records that an
-   air-gapped registry has to self-host them. This bundle ships no font
-   asset and loads no stylesheet from another origin, so naming those
-   families here would name faces no deployment resolves. */
+   The design pass fixes Space Grotesk for prose and UI, JetBrains Mono for
+   identifiers, and Anton for the wordmark, and it names self-hosting as the
+   remedy for a registry that reaches no font host. The three families below
+   are therefore bundled assets served from the /ui/ mount, so an air-gapped
+   deployment resolves every face the type scale was sized against. Each
+   file is the latin subset of the upstream release; web/ui/src/fonts/README.md
+   records the provenance and the licence. */
+
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url('./fonts/space-grotesk.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url('./fonts/jetbrains-mono.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Anton';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/anton.woff2') format('woff2');
+}
 
 :root,
 :root[data-theme='light'] {
@@ -29,6 +55,7 @@
   --b2: #e4e0d2;
   --chip: #eae7d9;
   --acc: #ffa424;
+  --acc-deep: #f2861a;
   --on-acc: #14130f;
   --link: #a8480a;
   --wash: #fff3e2;
@@ -36,8 +63,9 @@
   --danger: #b3341c;
   --danger-bg: #fdeee9;
   --danger-bd: #f0c4b8;
-  --font-ui: system-ui, sans-serif;
-  --font-mono: ui-monospace, monospace;
+  --font-ui: 'Space Grotesk', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-display: 'Anton', var(--font-ui);
   color-scheme: light;
 }
 
@@ -54,6 +82,7 @@
     --b2: #232838;
     --chip: #212739;
     --acc: #ffa424;
+    --acc-deep: #ffa424;
     --link: #ffa424;
     --wash: rgba(255, 164, 36, 0.1);
     --cbd: #4a3a22;
@@ -75,6 +104,7 @@
   --bd: #2b3145;
   --b2: #232838;
   --chip: #212739;
+  --acc-deep: #ffa424;
   --link: #ffa424;
   --wash: rgba(255, 164, 36, 0.1);
   --cbd: #4a3a22;
@@ -130,11 +160,33 @@ h3 {
   border-bottom: 1px solid var(--bd);
 }
 
-/* The design pass fixes Anton for the wordmark. The bundle ships no font
-   asset, so the wordmark renders in the UI stack at its heaviest weight. */
+/* The wordmark is the inline mark beside the Anton lockup the design pass
+   fixed: a filled circle over a bar, then the name in uppercase. */
 .wordmark {
-  font-family: var(--font-ui);
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.wordmark-mark {
+  width: 24px;
+  height: 17px;
+}
+
+.wordmark-mark-disc {
+  fill: var(--acc-deep);
+}
+
+.wordmark-mark-bar {
+  fill: var(--ink);
+}
+
+.wordmark-text {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 400;
   letter-spacing: 0.03em;
   text-transform: uppercase;
 }
@@ -170,8 +222,57 @@ h3 {
   background: var(--chip);
 }
 
-.footer-note {
+/* The catalog section label carries the depth marker at its right. */
+.catalog-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 18px 0 6px;
+}
+
+.catalog-tree,
+.catalog-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 12px;
+}
+
+.catalog-tree {
+  padding-left: 0;
+  overflow-y: auto;
+}
+
+.catalog-node {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.catalog-node > ul {
+  flex-basis: 100%;
+}
+
+.tree-toggle {
+  padding: 0 4px;
+  margin: 0;
+  border: none;
+  background: none;
+  color: var(--faint);
+  line-height: 1;
+}
+
+/* The footer is pinned to the bottom of the sidebar. */
+.sidebar-footer {
   margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--b2);
+  font-size: 10.5px;
+}
+
+.sidebar-footer p {
+  margin: 0;
 }
 
 .content {
@@ -352,9 +453,88 @@ h3 {
   font: inherit;
 }
 
-.filters {
+.search-field {
+  box-sizing: border-box;
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  color: var(--ink);
+  font: inherit;
+}
+
+/* The filter row: the fixed filter set on the left and the result count at
+   the row's right. */
+.filter-row {
   display: flex;
-  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.result-count {
+  margin: 0 0 0 auto;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  margin: 0;
+  border: 1px solid var(--bd);
+  border-radius: 100px;
+  background: var(--surf);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+.pill-active {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--on-acc);
+}
+
+.pill-remove {
+  padding: 0 2px;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.pill-add {
+  border-style: dashed;
+  color: var(--meta);
+}
+
+.pill-entry input {
+  width: 130px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.pill-entry button {
+  padding: 0 6px;
+  margin: 0;
+  border: none;
+  background: none;
+  font-size: 12.5px;
 }
 
 .data-table {
@@ -374,12 +554,52 @@ h3 {
   font-size: 13.5px;
 }
 
+.view-toggle {
+  display: flex;
+  gap: 0;
+  margin: 10px 0;
+}
+
+.toggle {
+  margin: 0;
+  border-radius: 0;
+}
+
+.toggle:first-child {
+  border-radius: 8px 0 0 8px;
+}
+
+.toggle:last-child {
+  border-radius: 0 8px 8px 0;
+}
+
+.toggle-open {
+  background: var(--chip);
+  font-weight: 600;
+}
+
+.raw-line {
+  display: block;
+}
+
+/* The line the parser complained about, marked in the destructive
+   background so the reader is shown the failure rather than only its
+   coordinates. */
+.raw-line-offending {
+  background: var(--danger-bg);
+}
+
 .raw-frontmatter {
   padding: 12px;
   overflow-x: auto;
   background: var(--surf2);
   border: 1px solid var(--bd);
   border-radius: 9px;
+}
+
+.stored-owner {
+  margin-left: 6px;
+  font-size: 11.5px;
 }
 
 .row-refusal {

@@ -341,7 +341,18 @@ function LayerRow({
       <td className="mono">
         {layer.ID}
         {ownedByCaller(layer, subject) && <Badge tone="accent">yours</Badge>}
-        {layer.UserDefined !== true && <Badge tone="quiet">admin-defined</Badge>}
+        {layer.UserDefined !== true && (
+          <>
+            <Badge tone="quiet">admin-defined</Badge>
+            {/* The stored owner of an admin-defined layer is a
+                caller-supplied field naming no authorized subject, so the row
+                states it as the field it is: no ownership language and none
+                of the marker's styling. */}
+            <span className="quiet stored-owner" data-testid="stored-owner">
+              owner: {layer.Owner === undefined || layer.Owner === '' ? 'unset' : layer.Owner}
+            </span>
+          </>
+        )}
       </td>
       <td>
         <SourceCell layer={layer} />

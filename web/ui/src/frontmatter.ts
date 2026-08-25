@@ -25,6 +25,10 @@ export interface ParsedFrontmatter {
   /** error is the parser's complaint, with its position where the parser
    * reports one. Empty when the block parsed. */
   error: string;
+  /** line is the 1-based line of the block the parser complained about,
+   * which the raw view marks. It is zero where the parser reported no
+   * position and on a block that parsed. */
+  line: number;
 }
 
 /** SplitDocument is a manifest document separated into the frontmatter block
@@ -64,21 +68,22 @@ export function splitDocument(text: string): SplitDocument {
 export function parseFrontmatter(text: string): ParsedFrontmatter {
   const raw = splitDocument(text).frontmatter;
   if (raw.trim() === '') {
-    return { properties: [], error: '' };
+    return { properties: [], error: '', line: 0 };
   }
   const doc = parseDocument(raw);
   if (doc.errors.length > 0) {
-    return { properties: [], error: describe(doc.errors[0]) };
+    const failure = doc.errors[0];
+    return { properties: [], error: describe(failure), line: failure.linePos?.[0].line ?? 0 };
   }
   const value: unknown = doc.toJS();
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return { properties: [], error: 'The frontmatter block is not a mapping.' };
+    return { properties: [], error: 'The frontmatter block is not a mapping.', line: 0 };
   }
   const properties = Object.entries(value as Record<string, unknown>).map(([key, entry]) => ({
     key,
     value: stringify(entry),
   }));
-  return { properties, error: '' };
+  return { properties, error: '', line: 0 };
 }
 
 function describe(err: { message: string; linePos?: [{ line: number; col: number }, ...unknown[]] }): string {

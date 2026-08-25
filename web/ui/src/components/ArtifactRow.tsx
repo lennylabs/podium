@@ -24,16 +24,22 @@ function filledBars(score: number, topScore: number): number {
 
 /** Relevance renders the lexical rank as bars rather than as a number, which
  * is what the row has to say about a score whose scale means nothing on its
- * own. A result matched only by vector similarity arrives with a zero score,
- * which is a property of how it matched rather than a weak match, so it draws
- * no bars and carries a label instead. The bar column holds its width on that
- * row so the rows stay aligned. A descriptor carrying no score at all, which
- * is every domain-browser entry, renders nothing. */
-function Relevance({ score, topScore }: { score?: number; topScore: number }) {
-  if (score === undefined) {
+ * own. A result matched only by vector similarity is fused in with a zero
+ * score, which is a property of how it matched rather than a weak match, so
+ * it draws no bars and carries a label instead. The bar column holds its
+ * width on that row so the rows stay aligned.
+ *
+ * The indicator is drawn on a ranked row alone, which is a property of the
+ * surface rather than of the descriptor: the registry marshals the score with
+ * omitempty, so a zero score and an unscored descriptor are indistinguishable
+ * on the wire. A search row therefore reads an absent score as the vector-only
+ * arm, and an unranked listing such as the domain browser draws no indicator
+ * at all. */
+function Relevance({ ranked, score, topScore }: { ranked: boolean; score?: number; topScore: number }) {
+  if (!ranked) {
     return null;
   }
-  const filled = filledBars(score, topScore);
+  const filled = filledBars(score ?? 0, topScore);
   if (filled === 0) {
     return (
       <>
@@ -57,10 +63,19 @@ function Relevance({ score, topScore }: { score?: number; topScore: number }) {
   );
 }
 
-/** ArtifactRow draws one entry. topScore is the strongest score in the result
- * set the entry arrived in, which the relevance indicator ranks against; a
- * listing that carries no scores passes zero and draws no indicator. */
-export function ArtifactRow({ artifact, topScore = 0 }: { artifact: ArtifactDescriptor; topScore?: number }) {
+/** ArtifactRow draws one entry. ranked marks a row that arrived from a ranked
+ * result set, which is what decides whether the row carries a relevance
+ * indicator, and topScore is the strongest score in that set, which the
+ * indicator ranks against. */
+export function ArtifactRow({
+  artifact,
+  ranked = false,
+  topScore = 0,
+}: {
+  artifact: ArtifactDescriptor;
+  ranked?: boolean;
+  topScore?: number;
+}) {
   return (
     <li className="artifact-row">
       <a className="mono artifact-id" href={artifactHref(artifact.id)}>
@@ -77,7 +92,7 @@ export function ArtifactRow({ artifact, topScore = 0 }: { artifact: ArtifactDesc
         {artifact.folded_from !== undefined && artifact.folded_from !== '' && (
           <Badge tone="quiet">from {artifact.folded_from}</Badge>
         )}
-        <Relevance score={artifact.score} topScore={topScore} />
+        <Relevance ranked={ranked} score={artifact.score} topScore={topScore} />
       </div>
       {artifact.description !== undefined && artifact.description !== '' && (
         <p className="artifact-description">{artifact.description}</p>

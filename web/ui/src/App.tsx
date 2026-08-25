@@ -8,14 +8,22 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { Banner, ErrorState, Loading, PageBanner } from './components/primitives';
-import { isIdentityRefusal, loadDomain, signOut, subscribeReadOnly } from './api';
+import type { DomainDescriptor } from './api';
+import { isIdentityRefusal, listLayers, loadDomain, searchArtifacts, signOut, subscribeReadOnly } from './api';
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
 import { domainHref, layersHref, searchHref, useRoute } from './route';
+import { useAsync } from './useAsync';
 import { DomainBrowser } from './surfaces/DomainBrowser';
 import { SearchSurface } from './surfaces/SearchSurface';
 import { ArtifactViewer } from './surfaces/ArtifactViewer';
 import { LayerPanel } from './surfaces/LayerPanel';
+
+/** treeDepth is how many levels of the domain hierarchy the sidebar tree
+ * resolves eagerly. A level below that edge is read when the reader expands
+ * the node it hangs under, so the shell holds the top of the hierarchy
+ * without reading the whole of it. */
+const treeDepth = 2;
 
 export function App() {
   const route = useRoute();
@@ -30,32 +38,25 @@ export function App() {
 
   useEffect(() => subscribeReadOnly(setReadOnly), []);
 
-  // The catalog read is the panel's expiry signal, and the layers route
-  // issues no catalog read of its own, so the shell takes one while that
-  // route is active. A layer write's refusal carries no session information,
-  // so without this read the panel would present each refusal as the only
-  // signal and would never learn that the session ended.
+  // The sidebar tree is the shell's own catalog read, re-issued on each route
+  // the reader enters. On the layers route it is also the panel's expiry
+  // signal: a layer write's refusal carries no session information, so without
+  // a catalog read the panel would present each refusal as the only signal and
+  // would never learn that the session ended.
+  const tree = useAsync(() => loadDomain('', treeDepth), [route.name, catalogNonce]);
   useEffect(() => {
-    if (route.name !== 'layers') {
+    if (route.name !== 'layers' || tree.loading) {
       return;
     }
-    let live = true;
-    loadDomain('').then(
-      () => {
-        if (live) {
-          setCatalogError(null);
-        }
-      },
-      (err: unknown) => {
-        if (live) {
-          setCatalogError(err);
-        }
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [route.name, catalogNonce]);
+    setCatalogError(tree.error);
+  }, [route.name, tree.loading, tree.error]);
+
+  // The footer counts. The layer list carries the layer count and the last
+  // ingest each layer reports, and the catalog's artifact count is the match
+  // count an unfiltered search reports, which the registry takes before it
+  // truncates the result set. Both are read once for the page rather than on
+  // each route, because neither depends on where the reader is.
+  const counts = useAsync(() => readCounts(), [catalogNonce]);
 
   useEffect(() => {
     let live = true;
@@ -136,7 +137,24 @@ export function App() {
               deployment. The nav reads no posture field and predicts no
               outcome the server decides. */}
           <a href={layersHref}>Layers</a>
-          {anonymous && <p className="quiet footer-note">Not signed in</p>}
+          <p className="catalog-label">
+            <span className="label">Catalog</span>
+            {/* The depth marker names how deep the sidebar resolves the tree
+                rather than how deep the catalog runs, which no response
+                reports. It is kept on every arm, including the refused one,
+                because it states a property of this navigation rather than
+                anything about what the catalog holds. */}
+            <span className="label" data-testid="catalog-depth">
+              {treeDepth} levels
+            </span>
+          </p>
+          {/* The refused arm has no catalog to navigate, so the tree and the
+              counts are empty rather than absent. */}
+          <CatalogTree nodes={refused ? [] : (tree.value?.subdomains ?? [])} />
+          <div className="sidebar-footer">
+            <CatalogCounts counts={refused ? null : counts.value} />
+            {anonymous && <p className="quiet">Not signed in</p>}
+          </div>
         </nav>
         <main className="content">
           {/* The expiry transition is rendered over the page the caller was
@@ -176,6 +194,135 @@ function Surface({
     case 'domain':
       return <DomainBrowser path={route.path} onError={onCatalogOutcome} />;
   }
+}
+
+/** CatalogTotals is what the sidebar footer states: how many layers the
+ * tenant carries, how many artifacts its catalog matches, and when a layer
+ * was last ingested. */
+interface CatalogTotals {
+  layers: number;
+  artifacts: number;
+  lastIngest: string;
+}
+
+async function readCounts(): Promise<CatalogTotals> {
+  const [layers, search] = await Promise.all([
+    listLayers(),
+    // The match count is taken before the result set is truncated, so a
+    // search carrying no query and no filter reports the catalog's own
+    // artifact count and one result is enough to ask for.
+    searchArtifacts({ query: '', type: '', scope: '', tags: [] }, 1),
+  ]);
+  return {
+    layers: layers.length,
+    artifacts: search.total_matched,
+    lastIngest: layers.reduce((latest, layer) => {
+      const at = layer.last_ingested_at ?? '';
+      return at > latest ? at : latest;
+    }, ''),
+  };
+}
+
+/** CatalogCounts is the footer pinned to the bottom of the sidebar. It states
+ * what the reads returned and nothing else: a read that has not answered, and
+ * the refused arm, leave it standing with no counts in it rather than
+ * reporting a figure no response carried. */
+function CatalogCounts({ counts }: { counts: CatalogTotals | null }) {
+  if (counts === null) {
+    return <p className="mono quiet" data-testid="catalog-counts" />;
+  }
+  return (
+    <>
+      <p className="mono quiet" data-testid="catalog-counts">
+        {counts.layers} layers · {counts.artifacts} artifacts
+      </p>
+      <p className="mono quiet" data-testid="catalog-ingest">
+        {counts.lastIngest === '' ? 'never ingested' : `ingested ${since(counts.lastIngest, Date.now())}`}
+      </p>
+    </>
+  );
+}
+
+/** since renders an ingest timestamp as the age the footer states. A stamp
+ * the browser cannot parse is reported as the stamp itself, because the
+ * footer states what the response carried rather than a computed age it
+ * could not derive. */
+export function since(stamp: string, now: number): string {
+  const at = Date.parse(stamp);
+  if (Number.isNaN(at)) {
+    return stamp;
+  }
+  const minutes = Math.max(Math.floor((now - at) / 60000), 0);
+  if (minutes < 60) {
+    return `${minutes}m ago`;
+  }
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) {
+    return `${hours}h ago`;
+  }
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** CatalogTree is the sidebar's navigation over the §4.2 domain hierarchy.
+ * The levels the eager read returned are rendered at once and a deeper level
+ * is read when the reader expands the node it hangs under. */
+function CatalogTree({ nodes }: { nodes: DomainDescriptor[] }) {
+  return (
+    <ul className="catalog-tree" aria-label="Catalog">
+      {nodes.map((node) => (
+        <TreeNode key={node.path} node={node} />
+      ))}
+    </ul>
+  );
+}
+
+/** TreeNode is one domain in the sidebar tree. A node whose children came
+ * with the eager read renders them from it, and a node at the read's edge
+ * reads its own level when it is expanded. A read the registry refuses leaves
+ * the domain listed and not enterable, which is what the reader is owed: the
+ * domain is in the hierarchy and this caller cannot open it. */
+function TreeNode({ node }: { node: DomainDescriptor }) {
+  const [open, setOpen] = useState(false);
+  const [loaded, setLoaded] = useState<DomainDescriptor[] | null>(null);
+  const [restricted, setRestricted] = useState(false);
+  const eager = node.subdomains;
+  const children = eager ?? loaded;
+
+  const expand = () => {
+    setOpen((prior) => !prior);
+    if (eager !== undefined || loaded !== null || restricted) {
+      return;
+    }
+    loadDomain(node.path, treeDepth).then(
+      (level) => {
+        setLoaded(level.subdomains);
+      },
+      () => {
+        setRestricted(true);
+      },
+    );
+  };
+
+  return (
+    <li className="catalog-node">
+      <button type="button" className="tree-toggle" aria-expanded={open} onClick={expand}>
+        {open ? '▾' : '▸'}
+      </button>
+      {restricted ? (
+        <>
+          <span className="mono">{node.name}</span>
+          <span className="label" data-testid="restricted-domain">
+            restricted
+          </span>
+        </>
+      ) : (
+        <a className="mono" href={domainHref(node.path)}>
+          {node.name}
+        </a>
+      )}
+      {open && children !== null && children.length > 0 && <CatalogTree nodes={children} />}
+    </li>
+  );
 }
 
 /** SessionEnded is the expiry transition. It is rendered for a caller whose
@@ -283,7 +430,7 @@ function TopBar({ posture }: { posture: SessionPosture | null }) {
   const control = authControl(posture);
   return (
     <header className="topbar">
-      <span className="wordmark">Podium</span>
+      <Wordmark />
       <span className="spacer" />
       {posture?.subject !== undefined && <span className="mono subject">{posture.subject}</span>}
       {control.kind === 'sign-in' && (
@@ -293,6 +440,21 @@ function TopBar({ posture }: { posture: SessionPosture | null }) {
       )}
       {control.kind === 'sign-out' && <SignOutButton path={control.path} />}
     </header>
+  );
+}
+
+/** Wordmark is the mark the design pass fixed, drawn inline: a filled disc
+ * over a bar, beside the name. It ships no image asset, so it resolves from
+ * the bundle like every other part of the page. */
+function Wordmark() {
+  return (
+    <a className="wordmark" href={domainHref('')} aria-label="Podium">
+      <svg className="wordmark-mark" viewBox="4 13 64 46" aria-hidden="true">
+        <circle className="wordmark-mark-disc" cx="36" cy="28" r="15" />
+        <rect className="wordmark-mark-bar" x="4" y="54" width="64" height="5" />
+      </svg>
+      <span className="wordmark-text">Podium</span>
+    </a>
   );
 }
 

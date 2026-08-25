@@ -195,7 +195,7 @@ function Manifest({ artifact, document }: { artifact: LoadArtifactResponse; docu
       </div>
       <div role="tabpanel" id={`panel-${open}`} aria-labelledby={`tab-${open}`}>
         {open === 'rendered' && <ArtifactBody body={body} />}
-        {open === 'frontmatter' && <PropertyTable raw={frontmatter} />}
+        {open === 'frontmatter' && <PropertyTable raw={frontmatter} offerRaw />}
         {open === 'source' && <CopyField label="SKILL.md" value={skillRaw} block />}
         {open === 'resources' && <ResourceTable rows={resources} />}
       </div>
@@ -293,28 +293,67 @@ function Relations({ id }: { id: string }) {
 
 /** ResourceRow is one bundled file. The registry splits them one by one, so a
  * single artifact can carry inline files beside fetched ones, and they are
- * one list distinguished by the delivery column rather than two lists. */
+ * one list distinguished by the delivery column rather than two lists. Every
+ * row is retrievable: nothing is previewed, so the row's own action is the
+ * only path to the file. */
 interface ResourceRow {
   name: string;
+  format: string;
   delivery: string;
   size: number;
   href: string;
 }
 
 function resourceRows(artifact: LoadArtifactResponse): ResourceRow[] {
+  const base64 = artifact.resources_base64 === true;
   const inline = Object.entries(artifact.resources ?? {}).map(([name, value]) => ({
     name,
-    delivery: artifact.resources_base64 === true ? 'inline, base64' : 'inline',
-    size: value.length,
-    href: '',
+    format: formatOf(name),
+    delivery: base64 ? 'inline, base64' : 'inline',
+    // One binary file puts the whole inline set into base64, so the size the
+    // row states is the file's own byte count rather than the length of the
+    // encoding it arrived in.
+    size: base64 ? base64Bytes(value) : new TextEncoder().encode(value).length,
+    href: inlineHref(value, base64),
   }));
   const fetched = Object.entries(artifact.large_resources ?? {}).map(([name, link]) => ({
     name,
+    format: formatOf(name, link.content_type),
     delivery: 'fetched on demand',
     size: link.size,
     href: link.presigned_url,
   }));
   return [...inline, ...fetched];
+}
+
+/** inlineHref is what the row's download action retrieves for a file that
+ * arrived in the response. The bytes are already in the page, so the action
+ * points at a data URL carrying them: it needs no second request and, unlike
+ * an object URL, no revocation once the reader leaves the row. */
+function inlineHref(value: string, base64: boolean): string {
+  if (base64) {
+    return `data:application/octet-stream;base64,${value}`;
+  }
+  return `data:text/plain;charset=utf-8,${encodeURIComponent(value)}`;
+}
+
+/** base64Bytes is how many bytes a base64 string decodes to. It is derived
+ * from the encoding's own arithmetic rather than by decoding, because the row
+ * states a size and has no other use for the bytes. */
+function base64Bytes(value: string): number {
+  const encoded = value.replace(/[\s=]+$/, '');
+  return Math.floor((encoded.length * 3) / 4);
+}
+
+/** formatOf is the row's format column. A fetched file carries the content
+ * type the registry recorded; an inline one carries none, so the file's own
+ * extension is what the row has to state. */
+function formatOf(name: string, contentType?: string): string {
+  if (contentType !== undefined && contentType !== '') {
+    return contentType;
+  }
+  const dot = name.lastIndexOf('.');
+  return dot <= 0 ? 'unknown' : name.slice(dot + 1);
 }
 
 function ResourceTable({ rows }: { rows: ResourceRow[] }) {
@@ -323,16 +362,24 @@ function ResourceTable({ rows }: { rows: ResourceRow[] }) {
       <thead>
         <tr>
           <th>File</th>
-          <th>Delivery</th>
+          <th>Format</th>
           <th>Size</th>
+          <th>Delivery</th>
+          <th>Action</th>
         </tr>
       </thead>
       <tbody>
         {rows.map((row) => (
           <tr key={row.name}>
-            <td className="mono">{row.href === '' ? row.name : <a href={row.href}>{row.name}</a>}</td>
-            <td>{row.delivery}</td>
+            <td className="mono">{row.name}</td>
+            <td className="mono">{row.format}</td>
             <td className="mono">{row.size} bytes</td>
+            <td>{row.delivery}</td>
+            <td>
+              <a href={row.href} download={row.name}>
+                Download
+              </a>
+            </td>
           </tr>
         ))}
       </tbody>
