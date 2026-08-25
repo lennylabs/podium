@@ -407,11 +407,14 @@ export function updateLayer(id: string, patch: LayerUpdate): Promise<LayerSecret
   });
 }
 
-/** reorderLayers re-sequences the layers it names. The composition order
- * decides how an extending artifact merges with its parent, so the panel
- * sends the resulting order rather than a single move. Each layer in the
- * array is authorized on its own under the §7.3.1 layer-write rule, so the
- * caller sends the layers its move reorders and no others. */
+/** reorderLayers re-sequences the layers it names. The endpoint assigns each
+ * named layer an absolute order value taken from its position in the array
+ * rather than swapping two stored values, so the array is the resulting order
+ * of the whole class block rather than a single move. The composition order
+ * decides how an extending artifact merges with its parent, and a request
+ * that named a subset would leave the rows it omitted holding order values
+ * that tie or invert against the ones it rewrote. Each layer in the array is
+ * authorized on its own under the §7.3.1 layer-write rule. */
 export function reorderLayers(order: string[]): Promise<unknown> {
   return request<unknown>(`${paths.layers}/reorder`, {
     ...write,

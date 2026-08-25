@@ -268,6 +268,43 @@ h3 {
   margin: 4px 0;
 }
 
+/* The relevance indicator. The four bars rise left to right, and the
+   container holds its width where a row draws none, so a vector-only match
+   keeps its row aligned with the ranked rows above it. */
+.relevance {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 26px;
+  height: 14px;
+}
+
+.relevance-bar {
+  width: 4px;
+  border-radius: 1px;
+  background: var(--bd);
+}
+
+.relevance-bar:nth-child(1) {
+  height: 8px;
+}
+
+.relevance-bar:nth-child(2) {
+  height: 10px;
+}
+
+.relevance-bar:nth-child(3) {
+  height: 12px;
+}
+
+.relevance-bar:nth-child(4) {
+  height: 14px;
+}
+
+.relevance-bar-filled {
+  background: var(--acc);
+}
+
 .artifact-description {
   margin: 4px 0 0;
   color: var(--sec);

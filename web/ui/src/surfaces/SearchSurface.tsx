@@ -100,6 +100,10 @@ function SearchResults({ search }: { search: Async<SearchResponse> }) {
   if (results.length === 0) {
     return <EmptyState>Nothing matched. Widen the query or clear a filter.</EmptyState>;
   }
+  // A lexical score is comparable only inside the result set it came back in,
+  // so the relevance indicator ranks each row against the strongest score
+  // here rather than against a fixed scale.
+  const topScore = results.reduce((top, artifact) => Math.max(top, artifact.score ?? 0), 0);
   return (
     <>
       {/* The match count is taken before the cap truncates the list, so
@@ -114,7 +118,7 @@ function SearchResults({ search }: { search: Async<SearchResponse> }) {
       )}
       <ul className="artifact-list">
         {results.map((artifact) => (
-          <ArtifactRow key={artifact.id} artifact={artifact} />
+          <ArtifactRow key={artifact.id} artifact={artifact} topScore={topScore} />
         ))}
       </ul>
     </>

@@ -80,6 +80,31 @@ describe('the sanitized artifact-body rendering path', () => {
     }
   });
 
+  // The rule ranges over every scheme rather than over the ones an exploit
+  // is usually written in, and RFC 3986 lets a scheme carry a digit after
+  // its first character. An allowlist that recognizes a relative URL by
+  // spelling out the characters a scheme cannot hold admits a digit-bearing
+  // scheme as if it carried none, so the case drives one that is registered,
+  // one that is not, and one whose payload is a link.
+  it('keeps no URL whose scheme carries a digit', () => {
+    const schemes = ['s3://bucket/key', 'h323:alice@acme.com', 'a1:window.hijacked=1'];
+    for (const url of schemes) {
+      const container = renderBody(`<a href="${url}">Go</a>\n\n[Go](${url})\n`);
+      expect(attributeValues(container).some((value) => value.includes(url.split(':')[0] + ':'))).toBe(false);
+    }
+  });
+
+  // A relative URL carries no scheme, and the allowlist admits it. The
+  // forms a manifest's own links take are a path, a bare filename, a query,
+  // and a fragment, and a value whose leading run cannot open a scheme.
+  it('keeps a relative URL', () => {
+    const relative = ['/docs/a.md', 'sibling.md', './nested/b.md', '?version=2', '#section', '1abc:not-a-scheme'];
+    for (const url of relative) {
+      const container = renderBody(`[Go](${url})\n`);
+      expect(container.querySelector('a')?.getAttribute('href')).toBe(url);
+    }
+  });
+
   // The sanitizer takes the rendered output as its input. The payload here
   // spells no HTML: it is markdown link syntax, which the renderer emits as
   // an anchor carrying the author's URL. A sanitizer wired to the markdown

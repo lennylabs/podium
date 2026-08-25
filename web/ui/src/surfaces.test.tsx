@@ -319,6 +319,7 @@ describe('search', () => {
           total_matched: 143,
           results: [
             { id: 'platform/review', type: 'skill', score: 8.5, sensitivity: 'internal' },
+            { id: 'platform/weaker', type: 'skill', score: 2.1 },
             { id: 'platform/meaning', type: 'skill', score: 0 },
           ],
         },
@@ -326,10 +327,16 @@ describe('search', () => {
     });
     goTo('#/search/review');
     render(<App />);
-    expect((await screen.findByTestId('result-count')).textContent).toBe('Showing 2 of 143');
+    expect((await screen.findByTestId('result-count')).textContent).toBe('Showing 3 of 143');
     expect(screen.getByText('internal')).toBeTruthy();
-    expect(screen.getByText('score 8.50')).toBeTruthy();
     expect(screen.getByText('matched by meaning')).toBeTruthy();
+    // Relevance is drawn as bars ranked against the strongest score in the
+    // set, and no row states a score. The vector-only row draws no bars and
+    // still occupies the column, so the rows stay aligned.
+    const indicators = screen.getAllByTestId('relevance-bars');
+    expect(indicators.map((el) => el.getAttribute('data-filled'))).toEqual(['4', '1', '0']);
+    expect(indicators[2].childElementCount).toBe(0);
+    expect(screen.queryByText(/score 8/)).toBeNull();
   });
 
   it('renders a search that matched nothing as an empty result rather than a failure', async () => {
@@ -1005,12 +1012,13 @@ describe('the layer write flows', () => {
 
   // §4.6 composes every user-defined layer above every admin-defined one
   // whatever the stored order values are, so a move runs inside the moving
-  // layer's own class. The registry authorizes every layer a reorder names
-  // and rewrites every one of their order values, so the request names the
-  // pair the move trades and nothing else: a request naming the rest of the
-  // block would be refused whole on the first row this caller does not own,
-  // and the list read is unfiltered, so rows owned by others are in it.
-  it('sends the pair the move trades and no other layer', async () => {
+  // layer's own class and the request names that class block. The endpoint
+  // rewrites the order value of every layer the request names from that
+  // layer's position in the request, so a request naming the traded pair
+  // alone would stamp the block's first two order values onto the pair and
+  // leave the rest of the block holding stored values that tie or invert
+  // against them.
+  it('sends the resulting order of the moving layer class block', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
       '/v1/layers': {
@@ -1029,7 +1037,12 @@ describe('the layer write flows', () => {
     await waitFor(() => {
       expect(requests.some((r) => r.url === '/v1/layers/reorder' && r.method === 'POST')).toBe(true);
     });
-    expect(bodies.at(-1)).toBe(JSON.stringify({ order: ['alice-scratch', 'alice-personal'] }));
+    // The user-defined block is alice-personal, alice-scratch, bob-personal
+    // in stored order, and the move trades the first two. The whole block is
+    // named, bob-personal included, so its rewritten order value keeps it
+    // below the pair rather than colliding with them; the registry authorizes
+    // each named layer on its own and the panel presents whatever it refuses.
+    expect(bodies.at(-1)).toBe(JSON.stringify({ order: ['alice-scratch', 'alice-personal', 'bob-personal'] }));
   });
 
   // The reingest call runs the whole pipeline inside the request and answers

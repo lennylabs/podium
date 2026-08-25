@@ -126,12 +126,38 @@ async function listOrdered(): Promise<LayerRecord[]> {
 
 /** blockOf returns the contiguous run of rows a layer shares its class with,
  * which is the run a reorder may move it inside. A move across the class
- * boundary changes no composition order, so the block bounds where the
- * control can take a row. It does not bound what the request names: the
- * registry authorizes every layer the request names, so the request names the
- * pair the move trades and no others. */
+ * boundary changes no composition order, because §4.6 composes every
+ * user-defined layer above every admin-defined one whatever the stored order
+ * values are, so the block bounds both where the control can take a row and
+ * what the request names. */
 function blockOf(rows: LayerRecord[], layer: LayerRecord): LayerRecord[] {
   return rows.filter((row) => (row.UserDefined === true) === (layer.UserDefined === true));
+}
+
+/** raisedOrder returns the block's resulting order after a row trades places
+ * with the row below it, or null where the row is already at the winning end.
+ *
+ * The reorder endpoint assigns each layer the request names an absolute order
+ * value taken from its position in the request rather than swapping two
+ * stored values. A request naming the traded pair alone therefore stamps the
+ * block's first two order values onto that pair and leaves every other row of
+ * the block holding the value it already had, which ties or inverts rows the
+ * move was not meant to touch. The request names the whole block so the
+ * endpoint's positional assignment reproduces the order the panel displayed.
+ *
+ * Every layer the request names is authorized on its own under the §7.3.1
+ * layer-write rule, and the list read is unfiltered, so a block holding a
+ * layer this caller may not write has its move refused whole. The panel
+ * presents that refusal on the row rather than predicting it. */
+function raisedOrder(block: LayerRecord[], layer: LayerRecord): string[] | null {
+  const index = block.findIndex((row) => row.ID === layer.ID);
+  if (index < 0 || index + 1 >= block.length) {
+    return null;
+  }
+  const order = block.map((row) => row.ID);
+  order[index] = block[index + 1].ID;
+  order[index + 1] = layer.ID;
+  return order;
 }
 
 function LayerRow({
@@ -147,13 +173,11 @@ function LayerRow({
   onWrite: () => void;
   block: LayerRecord[];
 }) {
-  const index = block.findIndex((row) => row.ID === layer.ID);
-  // Raising precedence trades places with the next row of the same class, and
-  // that pair is the whole reorder. Each layer a reorder names is authorized
-  // on its own and has its order value rewritten, so naming the rest of the
-  // block would ask for a write against layers the move leaves where they
-  // are and would be refused whole on the first one this caller does not own.
-  const above = block[index + 1] as LayerRecord | undefined;
+  // Raising precedence trades places with the next row of the same class.
+  // The request carries the block's resulting order, because the endpoint
+  // rewrites the order value of every layer it names from that layer's
+  // position in the request.
+  const raised = raisedOrder(block, layer);
   const [refusal, setRefusal] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -192,10 +216,10 @@ function LayerRow({
       <td>
         <button
           type="button"
-          disabled={readOnly || above === undefined}
+          disabled={readOnly || raised === null}
           onClick={() => {
-            if (above !== undefined) {
-              attempt(() => reorderLayers([above.ID, layer.ID]));
+            if (raised !== null) {
+              attempt(() => reorderLayers(raised));
             }
           }}
         >

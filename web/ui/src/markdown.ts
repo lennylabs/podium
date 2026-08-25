@@ -18,10 +18,18 @@ import { marked } from 'marked';
 // allowedURI admits an http, https, or mailto URL and a URL carrying no
 // scheme at all, which is what a relative link inside a manifest looks like.
 // Every other scheme, javascript: and data: among them, fails the test and
-// the sanitizer drops the attribute carrying it. The trailing alternatives
-// are the relative forms: a value whose first character cannot open a scheme,
-// and a value whose leading scheme-shaped run is not terminated by a colon.
-const allowedURI = /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+// the sanitizer drops the attribute carrying it.
+//
+// The test decides scheme-bearing against relative before it consults the
+// allowlist, and it decides it on the production RFC 3986 spells: a scheme is
+// a letter followed by letters, digits, and the three punctuation characters,
+// terminated by a colon. The negative lookahead is that production, so a
+// value carrying any scheme reaches the allowlist and only the three named
+// there survive. A run that admitted the relative forms by their own spelling
+// would have to enumerate every character a scheme cannot hold, and a
+// character it missed, a digit among them, would admit the scheme carrying it
+// as if it were relative.
+const allowedURI = /^(?:(?:https?|mailto):|(?![a-z][a-z0-9+.\-]*:))/i;
 
 // The attributes that carry a single URL on the markup a markdown renderer
 // emits, plus the form attributes the HTML profile would otherwise keep.
