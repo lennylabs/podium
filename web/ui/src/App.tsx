@@ -13,7 +13,10 @@ import { isIdentityRefusal, listLayers, loadDomain, searchArtifacts, signOut, su
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
 import { domainHref, layersHref, searchHref, useRoute } from './route';
+import type { ThemePreference } from './theme';
+import { useTheme } from './theme';
 import { useAsync } from './useAsync';
+import { CommandPalette } from './surfaces/CommandPalette';
 import { DomainBrowser } from './surfaces/DomainBrowser';
 import { SearchSurface } from './surfaces/SearchSurface';
 import { ArtifactViewer } from './surfaces/ArtifactViewer';
@@ -35,8 +38,27 @@ export function App() {
   // and the refused arm both offer a retry of that read, and a retry that
   // reloaded the document would lose the posture the page already holds.
   const [catalogNonce, setCatalogNonce] = useState(0);
+  // The palette is reachable from every surface, so the shell owns whether it
+  // is open and the whole page carries the accelerator that opens it.
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [theme, setTheme] = useTheme();
 
   useEffect(() => subscribeReadOnly(setReadOnly), []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      // ⌘K on a Mac and ctrl-K elsewhere are the one accelerator, and the
+      // browser binds neither to anything the page would be preventing.
+      if (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+    };
+  }, []);
 
   // The sidebar tree is the shell's own catalog read, re-issued on each route
   // the reader enters. On the layers route it is also the panel's expiry
@@ -119,11 +141,30 @@ export function App() {
   // states the same across the page. Neither claims anything about content
   // beyond what the read returned, and the banner carries no control of its
   // own, because the authentication control belongs to the shell.
-  const anonymous = scope === 'public-subset' && subject === '';
+  //
+  // Both pieces assert a property of the caller, so both are gated on the
+  // posture read having answered. A read that did not answer places the page
+  // on the arm that presents what the catalog read returned under the
+  // public-subset arm's constraint, and that arm reports nothing about
+  // whether this caller holds a subject.
+  const anonymous = posture !== null && scope === 'public-subset' && subject === '';
 
   return (
     <div className="app">
-      <TopBar posture={posture} />
+      <TopBar
+        posture={posture}
+        theme={theme}
+        onTheme={setTheme}
+        onOpenPalette={() => {
+          setPaletteOpen(true);
+        }}
+      />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => {
+          setPaletteOpen(false);
+        }}
+      />
       {anonymous && (
         <PageBanner testID="anonymous-banner">
           You are not signed in. This page shows what the registry served.
@@ -333,7 +374,7 @@ function TreeNode({ node }: { node: DomainDescriptor }) {
 function SessionEnded({ recovery }: { recovery: ReactNode }) {
   return (
     <div className="banner banner-danger" role="alert" data-testid="session-ended">
-      <p className="banner-title">Your session has ended. Sign in again to continue.</p>
+      <p className="banner-title">Your session has expired. Please log in again.</p>
       {recovery}
     </div>
   );
@@ -419,28 +460,149 @@ function AuthRecovery({ posture, onRetry }: { posture: SessionPosture | null; on
   );
 }
 
-/** TopBar carries the one authentication control. The sign-in control rule
- * keys it on the posture read's browser_auth.enabled and subject, and both
- * conjuncts are required on each control: a deployment running no browser
- * flow renders neither on any value of subject, which covers the
+/** docsHref is where the shell's Docs link goes. The documentation is a site
+ * of its own rather than anything the registry serves, so the link leaves the
+ * origin and says so. */
+const docsHref = 'https://lennylabs.github.io/podium';
+
+/** TopBar is the shell's one header: the wordmark, the registry this page is
+ * served from, the trigger that opens the palette, the documentation link,
+ * and the identity cluster.
+ *
+ * The cluster carries the one authentication control. The sign-in control
+ * rule keys it on the posture read's browser_auth.enabled and subject, and
+ * both conjuncts are required on each control: a deployment running no
+ * browser flow renders neither on any value of subject, which covers the
  * gateway-fronted deployment where a subject resolves because the gateway
  * authenticated the request. Each path comes from the read rather than from a
  * literal in this bundle. */
-function TopBar({ posture }: { posture: SessionPosture | null }) {
+function TopBar({
+  posture,
+  theme,
+  onTheme,
+  onOpenPalette,
+}: {
+  posture: SessionPosture | null;
+  theme: ThemePreference;
+  onTheme: (next: ThemePreference) => void;
+  onOpenPalette: () => void;
+}) {
   const control = authControl(posture);
+  const subject = posture?.subject ?? '';
   return (
     <header className="topbar">
       <Wordmark />
+      {/* The registry the page is served from. The bundle is served by the
+          registry itself, so the origin names it and no response has to. */}
+      <span className="mono topbar-host" data-testid="registry-host">
+        {window.location.host}
+      </span>
       <span className="spacer" />
-      {posture?.subject !== undefined && <span className="mono subject">{posture.subject}</span>}
+      <button type="button" className="search-trigger" data-testid="search-trigger" onClick={onOpenPalette}>
+        <span aria-hidden="true">⌕</span>
+        Search artifacts
+        <span className="mono key-hint">⌘K</span>
+      </button>
+      <span className="topbar-divider" aria-hidden="true" />
+      <a className="docs-link" href={docsHref} target="_blank" rel="noreferrer">
+        Docs <span aria-hidden="true">↗</span>
+      </a>
+      <span className="topbar-divider" aria-hidden="true" />
       {control.kind === 'sign-in' && (
         <a className="button primary" data-testid="sign-in" href={control.path}>
           Sign in
         </a>
       )}
-      {control.kind === 'sign-out' && <SignOutButton path={control.path} />}
+      {/* The cluster stands wherever a subject resolved, and the sign-out
+          entry point inside it is what the sign-in control rule gates: a
+          subject that resolved on a deployment running no browser flow gets
+          the menu without it. */}
+      {subject !== '' && (
+        <AccountMenu
+          subject={subject}
+          theme={theme}
+          onTheme={onTheme}
+          signOutPath={control.kind === 'sign-out' ? control.path : null}
+        />
+      )}
     </header>
   );
+}
+
+/** AccountMenu is the identity cluster and the menu behind it. It carries the
+ * caller's own subject, the appearance preference, and the sign-out entry
+ * point where the deployment runs one. It carries no role badge and no group
+ * membership: no response reports that the caller holds the administrator
+ * role, and no response enumerates the caller's groups, so the menu states
+ * neither. The layer quota is absent for the same reason: the registry
+ * reports the limit on the refusal that hits it rather than on any read. */
+function AccountMenu({
+  subject,
+  theme,
+  onTheme,
+  signOutPath,
+}: {
+  subject: string;
+  theme: ThemePreference;
+  onTheme: (next: ThemePreference) => void;
+  signOutPath: string | null;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="account">
+      <button
+        type="button"
+        className="account-trigger"
+        data-testid="account-trigger"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen((prior) => !prior);
+        }}
+      >
+        <span className="mono avatar" aria-hidden="true">
+          {initialsOf(subject)}
+        </span>
+        <span className="mono subject">{subject}</span>
+      </button>
+      {open && (
+        <div className="account-menu" role="menu" aria-label="Account" data-testid="account-menu">
+          <p className="mono quiet">{subject}</p>
+          <p className="label">Appearance</p>
+          <div className="view-toggle" role="group" aria-label="Appearance">
+            {(['system', 'light', 'dark'] as ThemePreference[]).map((choice) => (
+              <button
+                key={choice}
+                type="button"
+                className={theme === choice ? 'toggle toggle-open' : 'toggle'}
+                aria-pressed={theme === choice}
+                onClick={() => {
+                  onTheme(choice);
+                }}
+              >
+                {choice}
+              </button>
+            ))}
+          </div>
+          {signOutPath !== null && <SignOutButton path={signOutPath} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** initialsOf is the avatar's mono label. A subject is an identifier rather
+ * than a person's name, so the initials come off the identifier's own parts
+ * and a subject that carries none falls back to its first character. */
+export function initialsOf(subject: string): string {
+  const local = subject.split('@')[0];
+  const parts = local.split(/[.\-_]/).filter((part) => part !== '');
+  if (parts.length === 0) {
+    return subject.slice(0, 1).toUpperCase();
+  }
+  return parts
+    .slice(0, 2)
+    .map((part) => part.slice(0, 1).toUpperCase())
+    .join('');
 }
 
 /** Wordmark is the mark the design pass fixed, drawn inline: a filled disc

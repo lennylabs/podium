@@ -22,6 +22,11 @@ import { useAsync, useErrorReport } from '../useAsync';
 
 type TabName = 'rendered' | 'frontmatter' | 'source' | 'resources';
 
+/** fetchedDelivery is the delivery a file retrieved from object storage
+ * carries. The rail groups on it and the resource table states it in its own
+ * column. */
+const fetchedDelivery = 'fetched on demand';
+
 export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unknown) => void }) {
   // An empty version is the default read, which the registry answers with the
   // latest version. The picker sets one, and the notice keys on the pair
@@ -242,16 +247,47 @@ function ArtifactRail({ artifact, frontmatter }: { artifact: LoadArtifactRespons
         {resources.length === 0 ? (
           <EmptyState>This artifact bundles no files.</EmptyState>
         ) : (
-          <ul className="rail-list">
-            {resources.map((row) => (
-              <li key={row.name} className="mono">
-                {row.name} <span className="quiet">{row.delivery}</span>
-              </li>
-            ))}
-          </ul>
+          <>
+            {/* The rail splits the two deliveries, because a file that
+                arrived with the response and one that is fetched on demand
+                cost the reader different things to open. The tab keeps them
+                as one list under a delivery column. */}
+            <RailResourceGroup
+              label="Inline"
+              rows={resources.filter((row) => row.delivery !== fetchedDelivery)}
+              absent="No file arrived with the response."
+            />
+            <RailResourceGroup
+              label="Fetched on demand"
+              rows={resources.filter((row) => row.delivery === fetchedDelivery)}
+              absent="No file is fetched on demand."
+            />
+          </>
         )}
       </section>
     </aside>
+  );
+}
+
+/** RailResourceGroup is one delivery's files in the rail. An empty group
+ * states its absence rather than disappearing, because the two groups
+ * together are what tell the reader how this artifact's files arrive. */
+function RailResourceGroup({ label, rows, absent }: { label: string; rows: ResourceRow[]; absent: string }) {
+  return (
+    <div className="rail-group">
+      <p className="label quiet">{label}</p>
+      {rows.length === 0 ? (
+        <EmptyState>{absent}</EmptyState>
+      ) : (
+        <ul className="rail-list">
+          {rows.map((row) => (
+            <li key={row.name} className="mono">
+              {row.name}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
@@ -319,7 +355,7 @@ function resourceRows(artifact: LoadArtifactResponse): ResourceRow[] {
   const fetched = Object.entries(artifact.large_resources ?? {}).map(([name, link]) => ({
     name,
     format: formatOf(name, link.content_type),
-    delivery: 'fetched on demand',
+    delivery: fetchedDelivery,
     size: link.size,
     href: link.presigned_url,
   }));
@@ -356,33 +392,95 @@ function formatOf(name: string, contentType?: string): string {
   return dot <= 0 ? 'unknown' : name.slice(dot + 1);
 }
 
+/** ResourceTable lists every bundled file as one set distinguished by its
+ * delivery column. Nothing is previewed, so the row's action is the only path
+ * to the file, and the control above the table takes the whole set at once.
+ * Selecting a row opens the detail card under the table. */
 function ResourceTable({ rows }: { rows: ResourceRow[] }) {
+  const [selected, setSelected] = useState('');
+  const detail = rows.find((row) => row.name === selected) ?? null;
+  const total = rows.reduce((sum, row) => sum + row.size, 0);
   return (
-    <table className="data-table" aria-label="Resources">
-      <thead>
-        <tr>
-          <th>File</th>
-          <th>Format</th>
-          <th>Size</th>
-          <th>Delivery</th>
-          <th>Action</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.name}>
-            <td className="mono">{row.name}</td>
-            <td className="mono">{row.format}</td>
-            <td className="mono">{row.size} bytes</td>
-            <td>{row.delivery}</td>
-            <td>
-              <a href={row.href} download={row.name}>
-                Download
-              </a>
-            </td>
+    <>
+      <button
+        type="button"
+        className="download-all"
+        data-testid="download-all"
+        onClick={() => {
+          for (const row of rows) {
+            downloadFile(row.href, row.name);
+          }
+        }}
+      >
+        Download all ↓ {formatSize(total)}
+      </button>
+      <table className="data-table" aria-label="Resources">
+        <thead>
+          <tr>
+            <th>File</th>
+            <th>Format</th>
+            <th>Size</th>
+            <th>Delivery</th>
+            <th>Action</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr
+              key={row.name}
+              className={row.name === selected ? 'row-selected' : ''}
+              onClick={() => {
+                setSelected(row.name);
+              }}
+            >
+              <td className="mono">{row.name}</td>
+              <td className="mono">{row.format}</td>
+              <td className="mono">{row.size} bytes</td>
+              <td>{row.delivery}</td>
+              <td>
+                <a href={row.href} download={row.name}>
+                  Download
+                </a>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {detail !== null && (
+        <div className="resource-detail" data-testid="resource-detail">
+          <p className="label">Selected</p>
+          <p className="mono">{detail.name}</p>
+          <p className="quiet mono">
+            {detail.format} · {formatSize(detail.size)} · {detail.delivery}
+          </p>
+          <a className="button" href={detail.href} download={detail.name}>
+            Download
+          </a>
+        </div>
+      )}
+    </>
   );
+}
+
+/** downloadFile retrieves one file without leaving the page. An inline file
+ * is already in the document as a data URL and a fetched one is a presigned
+ * URL, so both are taken by the same anchor. */
+function downloadFile(href: string, name: string): void {
+  const anchor = window.document.createElement('a');
+  anchor.href = href;
+  anchor.download = name;
+  anchor.click();
+}
+
+/** formatSize states a byte count the way the control above the table does.
+ * The unit is chosen from the count so a bundle of a few kilobytes and one of
+ * a few hundred megabytes read the same way. */
+export function formatSize(bytes: number): string {
+  if (bytes < 1024) {
+    return `${String(bytes)} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

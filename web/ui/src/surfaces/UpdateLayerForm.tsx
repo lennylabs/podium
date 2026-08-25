@@ -40,8 +40,10 @@ export function UpdateLayerForm({
   const [result, setResult] = useState<LayerSecretResult | null>(null);
   const [refusal, setRefusal] = useState<unknown>(null);
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
+  // send is held apart from the form's submit handler so a refused patch can
+  // be re-issued from the refusal itself, which is the treatment every other
+  // refused write on the panel carries.
+  const send = () => {
     const patch: LayerUpdate = git
       ? { ref, root, force_push_policy: policy, rotate_webhook_secret: rotate }
       : { local_path: localPath, root };
@@ -65,6 +67,11 @@ export function UpdateLayerForm({
         setRefusal(err);
       },
     );
+  };
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    send();
   };
 
   if (result !== null) {
@@ -211,7 +218,19 @@ export function UpdateLayerForm({
       <button type="button" onClick={onClose}>
         Cancel
       </button>
-      {refusal !== null && <ErrorState error={refusal} />}
+      {refusal !== null && (
+        <>
+          <ErrorState error={refusal} onRetry={send} />
+          <button
+            type="button"
+            onClick={() => {
+              setRefusal(null);
+            }}
+          >
+            Dismiss
+          </button>
+        </>
+      )}
     </form>
   );
 }

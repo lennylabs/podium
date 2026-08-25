@@ -20,17 +20,28 @@ import { UpdateLayerForm } from './UpdateLayerForm';
 import { Badge, Banner, EmptyState, ErrorState, Loading } from '../components/primitives';
 import { SourceCell } from '../components/SourceCell';
 import type { BreakGlass, LayerRecord } from '../api';
-import { ApiError, listLayers, reingestLayer, reorderLayers, unregisterLayer } from '../api';
+import { ApiError, listDeletedLayers, listLayers, reingestLayer, reorderLayers, unregisterLayer } from '../api';
 import { useAsync } from '../useAsync';
+
+/** Refusal is a write the registry refused, held with the write itself so the
+ * row can re-issue exactly what was attempted. */
+interface Refusal {
+  error: unknown;
+  retry: () => void;
+}
 
 export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: boolean }) {
   const layers = useAsync(() => listOrdered(), []);
+  // The recoverable list is read for its count alone here. The section it
+  // opens reads the list itself, so the panel holds no copy of what that
+  // section renders.
+  const recoverable = useAsync(() => listDeletedLayers(), []);
   const [registering, setRegistering] = useState(false);
   const [showingDeleted, setShowingDeleted] = useState(false);
   // A write's refusal is drawn on the row it was attempted on. The panel
   // holds the map because a reorder is committed by a drop on another row
   // and its refusal belongs to the row that moved.
-  const [refusals, setRefusals] = useState<Record<string, unknown>>({});
+  const [refusals, setRefusals] = useState<Record<string, Refusal | null>>({});
   // Each row's reingest state is driven by that row's own response, which is
   // what lets the fan-out leave every row it has not heard from untouched.
   const [reingest, setReingest] = useState<Record<string, ReingestState>>({});
@@ -45,8 +56,8 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
   }
   const rows = layers.value ?? [];
 
-  const recordRefusal = (id: string, err: unknown) => {
-    setRefusals((prev) => ({ ...prev, [id]: err }));
+  const recordRefusal = (id: string, err: unknown, retry: () => void) => {
+    setRefusals((prev) => ({ ...prev, [id]: { error: err, retry } }));
   };
   const clearRefusal = (id: string) => {
     setRefusals((prev) => ({ ...prev, [id]: null }));
@@ -86,15 +97,18 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
     if (order === null) {
       return;
     }
-    reorderLayers(order).then(
-      () => {
-        clearRefusal(from);
-        layers.reload();
-      },
-      (err: unknown) => {
-        recordRefusal(from, err);
-      },
-    );
+    const send = () => {
+      reorderLayers(order).then(
+        () => {
+          clearRefusal(from);
+          layers.reload();
+        },
+        (err: unknown) => {
+          recordRefusal(from, err, send);
+        },
+      );
+    };
+    send();
   };
 
   return (
@@ -106,12 +120,25 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
       {readOnly && (
         <Banner tone="danger">
           <span data-testid="read-only-banner">
-            The registry is temporarily read-only, so no layer can be changed right now. Browsing and search still
-            work.
+            Something went wrong — the registry is temporarily read-only. Browsing and search still work.
           </span>
         </Banner>
       )}
       <div className="panel-actions">
+        {/* The recoverable link leads the row and states how much is still
+            restorable, because that count is the one piece of panel state
+            naming something on its way to being erased. */}
+        <button
+          type="button"
+          className="link-action"
+          data-testid="recoverable-link"
+          onClick={() => {
+            setShowingDeleted((open) => !open);
+          }}
+        >
+          ↺ Recently unregistered
+          {recoverable.value === null ? '' : ` · ${String(recoverable.value.length)}`}
+        </button>
         <button
           type="button"
           className="button primary"
@@ -131,17 +158,17 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
         >
           Reingest all
         </button>
-        <button
-          type="button"
-          onClick={() => {
-            setShowingDeleted((open) => !open);
-          }}
-        >
-          Recently unregistered
-        </button>
       </div>
       {registering && <RegisterLayerForm subject={subject} onRegistered={layers.reload} readOnly={readOnly} />}
-      {showingDeleted && <DeletedLayers onRestored={layers.reload} readOnly={readOnly} />}
+      {showingDeleted && (
+        <DeletedLayers
+          onRestored={() => {
+            layers.reload();
+            recoverable.reload();
+          }}
+          readOnly={readOnly}
+        />
+      )}
       <p className="label quiet">Precedence — drag to reorder</p>
       <p className="quiet">
         The last row wins. Every user-defined layer composes above every admin-defined layer, so a row moves within its
@@ -198,9 +225,16 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
                 onWrite={() => {
                   clearRefusal(layer.ID);
                   layers.reload();
+                  // An unregister moves the layer into the recoverable list,
+                  // so the count the header states is re-read on every write
+                  // rather than only on the one that reopens the section.
+                  recoverable.reload();
                 }}
-                onRefusal={(err) => {
-                  recordRefusal(layer.ID, err);
+                onRefusal={(err, retry) => {
+                  recordRefusal(layer.ID, err, retry);
+                }}
+                onDismissRefusal={() => {
+                  clearRefusal(layer.ID);
                 }}
               />
             ))}
@@ -285,11 +319,12 @@ function LayerRow({
   onDismissReingest,
   onWrite,
   onRefusal,
+  onDismissRefusal,
 }: {
   layer: LayerRecord;
   subject: string;
   readOnly: boolean;
-  refusal: unknown;
+  refusal: Refusal | null;
   reingest: ReingestState;
   dragging: boolean;
   over: boolean;
@@ -300,7 +335,8 @@ function LayerRow({
   onReingest: (breakGlass?: BreakGlass) => void;
   onDismissReingest: () => void;
   onWrite: () => void;
-  onRefusal: (err: unknown) => void;
+  onRefusal: (err: unknown, retry: () => void) => void;
+  onDismissRefusal: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -310,8 +346,14 @@ function LayerRow({
   // row and says only that the registry refused that action and that nothing
   // changed. It reports neither who owns the layer nor the state of the
   // session, because the refusal carries neither.
+  // The refusal carries the write beside it, so Try again re-issues exactly
+  // the action that was refused rather than a fresh guess at it.
   const attempt = (run: () => Promise<unknown>) => {
-    run().then(onWrite, onRefusal);
+    run().then(onWrite, (err: unknown) => {
+      onRefusal(err, () => {
+        attempt(run);
+      });
+    });
   };
 
   const rowClass = [dragging ? 'row-dragging' : '', over ? 'row-drop-target' : ''].filter((name) => name !== '');
@@ -409,11 +451,23 @@ function LayerRow({
             }}
           />
         )}
-        {refusal !== null && refusal !== undefined && (
-          <p className="row-refusal" role="alert">
-            The registry refused that action and nothing changed.{' '}
-            <span className="mono">{refusal instanceof ApiError ? refusal.code : 'registry.unavailable'}</span>
-          </p>
+        {refusal !== null && (
+          <div className="row-refusal" role="alert">
+            <p>
+              The registry refused that action and nothing changed.{' '}
+              <span className="mono">
+                {refusal.error instanceof ApiError ? refusal.error.code : 'registry.unavailable'}
+              </span>
+            </p>
+            {/* The refusal is cleared by re-issuing the write or by
+                dismissing it. Every other control on the row stays live. */}
+            <button type="button" onClick={refusal.retry}>
+              Try again
+            </button>
+            <button type="button" onClick={onDismissRefusal}>
+              Dismiss
+            </button>
+          </div>
         )}
       </td>
     </tr>
@@ -490,7 +544,7 @@ function VisibilityCell({ layer }: { layer: LayerRecord }) {
     users.length > 0 ? `users: ${summarize(users)}` : '',
   ].filter((marker) => marker !== '');
   if (markers.length === 0) {
-    return <span className="quiet">no grants</span>;
+    return <span className="quiet">no grants — only you</span>;
   }
   return (
     <>

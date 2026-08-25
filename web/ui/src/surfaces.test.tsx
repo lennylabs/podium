@@ -54,7 +54,11 @@ function stubRegistry(stubs: Record<string, Stub>): void {
       const path = url.split('?')[0];
       // A path a surface both reads and writes takes a method-qualified key
       // where the two answer differently, and the bare path otherwise.
-      const stub = stubs[`${method} ${path}`] ??
+      // A path whose query argument selects a different response takes the
+      // whole URL as its key, which is how the deleted-layer read is told
+      // apart from the layer list it shares a path with.
+      const stub = (url === path ? undefined : stubs[url]) ??
+        stubs[`${method} ${path}`] ??
         stubs[path] ?? { status: 404, body: { code: 'registry.not_found', message: 'no stub' } };
       const status = stub.status ?? 200;
       return Promise.resolve(
@@ -256,6 +260,9 @@ describe('the sign-in control', () => {
       '/v1/ui/auth/sign-out': { body: {} },
     });
     render(<App />);
+    // The sign-out entry point is the one the account menu carries, so the
+    // cluster is opened first.
+    fireEvent.click(await screen.findByTestId('account-trigger'));
     const control = await screen.findByTestId('sign-out');
     expect(screen.queryByTestId('sign-in')).toBeNull();
     fireEvent.click(control);
@@ -383,7 +390,10 @@ describe('the domain browser', () => {
     expect(screen.getByText('platform/deploy')).toBeTruthy();
     expect(screen.getByText('curated')).toBeTruthy();
     expect(screen.getByText('Lifted from sparse subdomains')).toBeTruthy();
-    expect(screen.getByText('The listing was trimmed to fit the response budget.')).toBeTruthy();
+    // The note reaches the reader at the returned edge rather than above the
+    // description, beside the count and the control that continues past it.
+    const continuation = await screen.findByTestId('listing-continuation');
+    expect(continuation.textContent).toContain('The listing was trimmed to fit the response budget.');
   });
 
   // The §6.10 envelope says whether the condition clears on its own. Where it
@@ -1112,7 +1122,7 @@ describe('read-only mode', () => {
     render(<App />);
     await screen.findByLabelText('Layer panel');
     await screen.findByTestId('read-only-banner');
-    fireEvent.click(screen.getByRole('button', { name: 'Recently unregistered' }));
+    fireEvent.click(screen.getByTestId('recoverable-link'));
     await screen.findByLabelText('Recently unregistered');
     expect(screen.getByTestId('read-only-banner')).toBeTruthy();
   });
@@ -1681,7 +1691,7 @@ describe('the layer write flows', () => {
       '/v1/layers': { body: { layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }] } },
       '/v1/layers/restore': { body: {} },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Recently unregistered' }));
+    fireEvent.click(screen.getByTestId('recoverable-link'));
     const surface = await screen.findByLabelText('Recently unregistered');
     const erasesOn = new Date(unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
     expect(surface.textContent).toContain(unregisteredAt.toISOString().slice(0, 10));
@@ -1708,7 +1718,7 @@ describe('the layer write flows', () => {
     goTo('#/layers');
     render(<App />);
     await screen.findByLabelText('Layer panel');
-    fireEvent.click(screen.getByRole('button', { name: 'Recently unregistered' }));
+    fireEvent.click(screen.getByTestId('recoverable-link'));
     const surface = await screen.findByLabelText('Recently unregistered');
     expect(surface.textContent).toContain('The registry reported no erase date.');
   });
@@ -1783,3 +1793,355 @@ function scratchLayer(owner = 'alice@acme.com'): Record<string, unknown> {
     Owner: owner,
   };
 }
+
+describe('the command palette', () => {
+  const artifact = {
+    id: 'platform/review',
+    type: 'skill',
+    version: '1.2.0',
+    content_hash: 'sha256:abc',
+    manifest_body: '# Review\n',
+    frontmatter: manifestDoc,
+  };
+
+  function palettePage(results: Record<string, unknown>[], total = results.length): void {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': { body: emptyDomain },
+      '/v1/search_artifacts': { body: { total_matched: total, results } },
+      '/v1/load_artifact': { body: artifact },
+      '/v1/dependents': { body: { edges: [] } },
+      '/v1/layers': { body: { layers: [] } },
+    });
+  }
+
+  // The palette is reachable from anywhere: the shell's search trigger opens
+  // it and so does the accelerator, and it lists artifacts alone, because
+  // domain navigation is the sidebar tree's.
+  it('opens from the trigger and from ⌘K, lists what matched, and opens a row', async () => {
+    palettePage([{ id: 'platform/review', type: 'skill', version: '1.2.0' }], 4);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('search-trigger'));
+    const panel = screen.getByTestId('palette');
+    fireEvent.change(within(panel).getByLabelText('Search artifacts'), { target: { value: 'review' } });
+    expect((await screen.findByTestId('palette-heading')).textContent).toBe('Artifacts · 1 of 4');
+    expect(within(panel).getByText('review')).toBeTruthy();
+    fireEvent.keyDown(panel, { key: 'Enter' });
+    expect(window.location.hash).toBe('#/artifact/platform%2Freview');
+    expect(screen.queryByTestId('palette')).toBeNull();
+    // The accelerator opens the same panel from the surface the navigation
+    // landed on.
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    expect(screen.getByTestId('palette')).toBeTruthy();
+  });
+
+  // The inline filter syntax is the palette's form of the pills the search
+  // surface renders, and it reaches the same endpoint arguments.
+  it('carries the inline filter syntax into the search request', async () => {
+    palettePage([]);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('search-trigger'));
+    fireEvent.change(within(screen.getByTestId('palette')).getByLabelText('Search artifacts'), {
+      target: { value: 'type:skill tag:review scope:platform lint' },
+    });
+    await waitFor(() => {
+      expect(lastSearch().get('query')).toBe('lint');
+    });
+    expect(lastSearch().get('type')).toBe('skill');
+    expect(lastSearch().get('tags')).toBe('review');
+    expect(lastSearch().get('scope')).toBe('platform');
+  });
+
+  // ⌘⏎ hands the query to the search surface, which is the one place the
+  // whole result set is listed, and esc closes the panel over the page it
+  // was opened from.
+  it('hands the query to the search surface on ⌘⏎ and closes on esc', async () => {
+    palettePage([{ id: 'platform/review', type: 'skill' }]);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('search-trigger'));
+    const panel = screen.getByTestId('palette');
+    fireEvent.change(within(panel).getByLabelText('Search artifacts'), { target: { value: 'review' } });
+    fireEvent.keyDown(panel, { key: 'Enter', metaKey: true });
+    expect(window.location.hash).toBe('#/search/review');
+    fireEvent.keyDown(window, { key: 'k', metaKey: true });
+    fireEvent.keyDown(screen.getByTestId('palette'), { key: 'Escape' });
+    expect(screen.queryByTestId('palette')).toBeNull();
+  });
+
+  // A query that matched nothing offers the recovery path and says nothing
+  // about what a different caller would have seen.
+  it('states no match without hinting that anything is hidden', async () => {
+    palettePage([], 0);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('search-trigger'));
+    const panel = screen.getByTestId('palette');
+    // The just-opened panel teaches the filter syntax before a query is run.
+    expect(screen.getByTestId('palette-syntax').textContent).toContain('type:skill');
+    fireEvent.change(within(panel).getByLabelText('Search artifacts'), { target: { value: 'nothingmatches' } });
+    expect(await screen.findByText(/Nothing matched nothingmatches/)).toBeTruthy();
+    expect(within(panel).queryByText(/hidden/i)).toBeNull();
+    expect(within(panel).queryByText(/permission/i)).toBeNull();
+  });
+});
+
+describe('the shell’s identity cluster', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.document.documentElement.removeAttribute('data-theme');
+  });
+
+  // The shell names the registry the page is served from, links the
+  // documentation, and carries the trigger that opens the palette.
+  it('names the registry, links the docs, and carries the search trigger', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': { body: emptyDomain },
+    });
+    render(<App />);
+    expect((await screen.findByTestId('registry-host')).textContent).toBe(window.location.host);
+    expect(screen.getByRole('link', { name: /Docs/ }).getAttribute('href')).toContain('https://');
+    expect(screen.getByTestId('search-trigger').textContent).toContain('⌘K');
+  });
+
+  // The appearance preference is the client's own state, and it is applied by
+  // stamping data-theme on the root element, which is what overrides the
+  // visitor's prefers-color-scheme in both directions.
+  it('pins a theme onto the root element and returns it to the system setting', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/load_domain': { body: emptyDomain },
+    });
+    render(<App />);
+    const cluster = await screen.findByTestId('account-trigger');
+    expect(cluster.textContent).toContain('alice@acme.com');
+    fireEvent.click(cluster);
+    const menu = screen.getByTestId('account-menu');
+    fireEvent.click(within(menu).getByRole('button', { name: 'dark' }));
+    expect(window.document.documentElement.getAttribute('data-theme')).toBe('dark');
+    expect(window.localStorage.getItem('podium.theme')).toBe('dark');
+    fireEvent.click(within(menu).getByRole('button', { name: 'system' }));
+    expect(window.document.documentElement.hasAttribute('data-theme')).toBe(false);
+  });
+});
+
+describe('the trimmed listing', () => {
+  const trimmed = {
+    path: 'platform',
+    subdomains: [],
+    notable: [
+      { id: 'platform/deploy', type: 'skill' },
+      { id: 'platform/lint', type: 'skill' },
+    ],
+    note: 'The listing was trimmed to fit the response budget.',
+  };
+
+  // The trimmed case is a pill among the header badges and a line at the end
+  // of the list stating what is on the page against the match count, with a
+  // control that continues past the returned edge.
+  it('states the shown count against the total and re-reads deeper', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': { body: trimmed },
+      '/v1/search_artifacts': { body: { total_matched: 21 } },
+    });
+    goTo('#/domain/platform');
+    render(<App />);
+    await screen.findByLabelText('Domain browser');
+    expect(screen.getByText('listing trimmed')).toBeTruthy();
+    const line = await screen.findByTestId('listing-continuation');
+    await waitFor(() => {
+      expect(line.textContent).toContain('2 of 21 artifacts shown.');
+    });
+    fireEvent.click(within(line).getByRole('button', { name: 'Load the rest' }));
+    await waitFor(() => {
+      expect(requests.some((r) => r.url.startsWith('/v1/load_domain') && r.url.includes('depth=3'))).toBe(true);
+    });
+  });
+
+  // A domain with dozens of children is a map rather than a card grid, so the
+  // subdomains become count tiles under a filter and the artifacts a sortable
+  // table.
+  it('switches to tiles and a sortable table past the at-scale threshold', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': {
+        body: {
+          path: 'platform',
+          subdomains: Array.from({ length: 24 }, (_, i) => ({ path: `platform/d${String(i)}`, name: `d${String(i)}` })),
+          notable: [
+            { id: 'platform/deploy', type: 'skill', version: '2.0.0', source: 'featured' },
+            { id: 'platform/lint', type: 'rule', version: '1.0.0' },
+          ],
+        },
+      },
+    });
+    goTo('#/domain/platform');
+    render(<App />);
+    const browser = await screen.findByLabelText('Domain browser');
+    expect(within(browser).getByTestId('show-all-subdomains').textContent).toBe('Show all 24 subdomains');
+    fireEvent.change(within(browser).getByLabelText('Filter subdomains'), { target: { value: 'd1' } });
+    expect(within(browser).queryByRole('link', { name: 'd2' })).toBeNull();
+    // The author's own picks keep their own heading, and the table sorts on
+    // the column the header names.
+    expect(within(browser).getByText('Curated by the domain author')).toBeTruthy();
+    const tables = within(browser).getAllByLabelText('Artifacts');
+    expect(within(tables[0]).getByRole('link', { name: 'platform/deploy' })).toBeTruthy();
+  });
+});
+
+describe('the anonymous framing', () => {
+  // The framing asserts a property of the caller, so it is withheld where the
+  // posture read did not answer: the page presents what the catalog read
+  // returned and reports nothing about whether this caller holds a subject.
+  it('claims nothing about the caller where the posture read did not answer', async () => {
+    stubRegistry({
+      '/v1/ui/session': { status: 503, body: { code: 'registry.unavailable', message: 'down' } },
+      '/v1/load_domain': {
+        body: { path: '', subdomains: [], notable: [{ id: 'platform/deploy', type: 'skill' }] },
+      },
+    });
+    render(<App />);
+    expect(await screen.findByText('platform/deploy')).toBeTruthy();
+    expect(screen.queryByTestId('anonymous-banner')).toBeNull();
+    expect(screen.queryByText('Not signed in')).toBeNull();
+  });
+});
+
+describe('the artifact viewer’s resources', () => {
+  function resourcePage(): void {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'platform/review',
+          type: 'context',
+          version: '1.0.0',
+          content_hash: 'sha256:abc',
+          manifest_body: '# Review\n',
+          frontmatter: '',
+          resources: { 'checklist.md': 'body' },
+          large_resources: {
+            'corpus.bin': {
+              presigned_url: 'https://objects.acme.com/corpus',
+              content_hash: 'sha256:def',
+              size: 2 * 1024 * 1024,
+              content_type: 'application/octet-stream',
+            },
+          },
+        },
+      },
+      '/v1/dependents': { body: { edges: [] } },
+    });
+    goTo('#/artifact/platform%2Freview');
+  }
+
+  // The rail splits the two deliveries, because a file that arrived with the
+  // response and one that is fetched on demand cost the reader different
+  // things to open.
+  it('splits the rail into the inline files and the ones fetched on demand', async () => {
+    resourcePage();
+    render(<App />);
+    await screen.findByLabelText('Artifact viewer');
+    const section = screen.getByLabelText('Bundled resources');
+    const groups = section.querySelectorAll('.rail-group');
+    expect(groups.length).toBe(2);
+    expect(groups[0].textContent).toContain('Inline');
+    expect(groups[0].textContent).toContain('checklist.md');
+    expect(groups[1].textContent).toContain('Fetched on demand');
+    expect(groups[1].textContent).toContain('corpus.bin');
+  });
+
+  // The tab keeps the two deliveries as one list, takes the whole set at
+  // once from the control above the table, and opens the selected row's
+  // detail card under it.
+  it('offers the whole set above the table and details the selected row under it', async () => {
+    resourcePage();
+    render(<App />);
+    await screen.findByLabelText('Artifact viewer');
+    fireEvent.click(screen.getByRole('tab', { name: /Resources/ }));
+    // The total is the two files together: four inline bytes and two
+    // megabytes fetched on demand.
+    expect(screen.getByTestId('download-all').textContent).toBe('Download all ↓ 2.0 MB');
+    expect(screen.queryByTestId('resource-detail')).toBeNull();
+    const rows = within(screen.getByLabelText('Resources')).getAllByRole('row').slice(1);
+    fireEvent.click(rows[1]);
+    const detail = screen.getByTestId('resource-detail');
+    expect(detail.textContent).toContain('corpus.bin');
+    expect(detail.textContent).toContain('fetched on demand');
+    expect(rows[1].className).toContain('row-selected');
+  });
+});
+
+describe('a refused layer write', () => {
+  function refusedPage(): void {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer('bob@acme.com')] } },
+      '/v1/layers?deleted=true': { body: { layers: [] } },
+      'DELETE /v1/layers': { status: 403, body: { code: 'auth.forbidden', message: 'not permitted' } },
+    });
+    goTo('#/layers');
+  }
+
+  async function refuseAnUnregister(): Promise<void> {
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Unregister' }));
+    fireEvent.change(screen.getByLabelText('Type the layer ID to confirm'), { target: { value: 'alice-personal' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Unregister layer' }));
+    await screen.findByText(/nothing changed/);
+  }
+
+  // The refusal is drawn on the row with a Try again beside it, and the
+  // control re-issues the write that was refused rather than a fresh guess
+  // at it.
+  it('re-issues the refused write from the row', async () => {
+    refusedPage();
+    render(<App />);
+    await refuseAnUnregister();
+    const sent = requests.filter((r) => r.method === 'DELETE').length;
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => {
+      expect(requests.filter((r) => r.method === 'DELETE').length).toBe(sent + 1);
+    });
+  });
+
+  // Dismiss clears the row's refusal without driving another write, which is
+  // the only other way out of the state.
+  it('clears the refusal on dismiss and drives no write', async () => {
+    refusedPage();
+    render(<App />);
+    await refuseAnUnregister();
+    const sent = requests.filter((r) => r.method === 'DELETE').length;
+    fireEvent.click(within(screen.getByRole('alert')).getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => {
+      expect(screen.queryByText(/nothing changed/)).toBeNull();
+    });
+    expect(requests.filter((r) => r.method === 'DELETE').length).toBe(sent);
+    // Every other control on the row stayed live throughout.
+    expect(screen.getByRole('button', { name: 'Edit' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  // The recoverable link leads the action row and states how much is still
+  // restorable, which is the one piece of panel state naming something on
+  // its way to being erased.
+  it('states the recoverable count on the panel’s first action', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+      '/v1/layers?deleted=true': {
+        body: { layers: [{ ...userLayer(), ID: 'alice-old', DeletedAt: new Date().toISOString() }] },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    const link = screen.getByTestId('recoverable-link');
+    await waitFor(() => {
+      expect(link.textContent).toBe('↺ Recently unregistered · 1');
+    });
+    // It is the first control in the action row, ahead of the primary
+    // Register layer and the secondary Reingest all.
+    const actions = within(link.parentElement as HTMLElement).getAllByRole('button');
+    expect(actions.map((button) => button.textContent?.slice(0, 8))).toEqual(['↺ Recent', 'Register', 'Reingest']);
+  });
+});

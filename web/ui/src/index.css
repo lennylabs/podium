@@ -63,6 +63,7 @@
   --danger: #b3341c;
   --danger-bg: #fdeee9;
   --danger-bd: #f0c4b8;
+  --scrim: rgba(20, 19, 15, 0.42);
   --font-ui: 'Space Grotesk', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --font-display: 'Anton', var(--font-ui);
@@ -89,6 +90,7 @@
     --danger: #ff6b4a;
     --danger-bg: rgba(255, 107, 74, 0.12);
     --danger-bd: #5c2a1e;
+    --scrim: rgba(6, 8, 13, 0.62);
   }
 }
 
@@ -111,6 +113,7 @@
   --danger: #ff6b4a;
   --danger-bg: rgba(255, 107, 74, 0.12);
   --danger-bd: #5c2a1e;
+  --scrim: rgba(6, 8, 13, 0.62);
 }
 
 body {
@@ -838,4 +841,230 @@ button,
   border: 1px solid var(--danger);
   border-radius: 10px;
   background: var(--surf);
+}
+
+/* The registry the page is served from, set behind the wordmark by a rule
+   and read as an identifier rather than as prose. */
+.topbar-host {
+  padding-left: 12px;
+  border-left: 1px solid var(--b2);
+  font-size: 11px;
+  color: var(--faint);
+}
+
+.topbar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--b2);
+}
+
+/* The search trigger opens the palette. It is a button drawn as a field,
+   because the query is typed in the palette rather than here. */
+.search-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 300px;
+  max-width: 300px;
+  min-width: 150px;
+  height: 32px;
+  margin: 0;
+  padding: 0 10px;
+  background: var(--surf2);
+  color: var(--meta);
+}
+
+.key-hint {
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 1px solid var(--bd);
+  border-radius: 5px;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.docs-link {
+  color: var(--link);
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+/* The identity cluster and the menu behind it. */
+.account {
+  position: relative;
+}
+
+.account-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 100px;
+  background: var(--chip);
+  font-size: 10.5px;
+}
+
+.account-menu {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  z-index: 20;
+  min-width: 240px;
+  padding: 12px 14px;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  box-shadow: 0 30px 60px -24px var(--scrim);
+}
+
+/* The command palette sits over a scrim, 96px from the top, on whatever page
+   it was opened from. */
+.palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  justify-content: center;
+  padding-top: 96px;
+  background: var(--scrim);
+}
+
+.palette {
+  width: 660px;
+  max-width: calc(100% - 32px);
+  height: fit-content;
+  padding: 14px;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  box-shadow: 0 30px 60px -24px var(--scrim);
+}
+
+.palette-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  background: var(--surf2);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  color: var(--ink);
+  font: inherit;
+}
+
+.palette-rows,
+.palette-recents {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+.palette-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+}
+
+.palette-row-selected {
+  background: var(--wash);
+  border-color: var(--cbd);
+}
+
+.palette-row-path {
+  font-size: 11.5px;
+}
+
+.palette-footer {
+  margin: 10px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--b2);
+  font-size: 10.5px;
+}
+
+/* The end-of-list continuation for a trimmed listing. It reads as a system
+   message about the listing rather than as content or as an error. */
+.listing-continuation {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--bd);
+}
+
+/* The at-scale subdomain treatment: count tiles in a grid, or one per row. */
+.tile-grid,
+.tile-list {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.tile-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+}
+
+.clipped {
+  display: block;
+  max-width: 420px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The resource table's selected row and the card it drives. */
+.row-selected td {
+  background: var(--wash);
+  box-shadow: inset 2px 0 0 var(--acc);
+}
+
+.resource-detail {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: var(--surf2);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+}
+
+.download-all {
+  margin-bottom: 10px;
+}
+
+/* The recoverable-layers link leads the panel's action row as a quiet accent
+   control rather than as another button. */
+.link-action {
+  border-color: transparent;
+  background: transparent;
+  color: var(--link);
+}
+
+.rail-group {
+  margin-top: 8px;
 }
