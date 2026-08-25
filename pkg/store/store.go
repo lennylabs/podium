@@ -419,15 +419,11 @@ type Store interface {
 	// for the 30-day window. Subsequent Get/List calls exclude them.
 	DeleteLayerConfig(ctx context.Context, tenantID, id string) error
 	// RestoreLayerConfig clears the soft-delete tombstone on a layer and
-	// its artifacts, implementing the §8.4 recovery path. The store does
-	// not authorize the caller: §7.3.1 gates `restore` at the handler, and
-	// authorizes it on a user-defined layer to that layer's stored owner or
-	// to a tenant admin. Returns ErrNotFound when no soft-deleted layer
-	// matches.
+	// its artifacts, implementing the §8.4 admin recovery path. Returns
+	// ErrNotFound when no soft-deleted layer matches.
 	RestoreLayerConfig(ctx context.Context, tenantID, id string) error
-	// ListDeletedLayerConfigs returns the tenant's soft-deleted layers so a
-	// caller §7.3.1 authorizes can see what is recoverable within the
-	// window.
+	// ListDeletedLayerConfigs returns the tenant's soft-deleted layers so
+	// an admin can see what is recoverable within the window.
 	ListDeletedLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error)
 	// PurgeExpiredLayerDeletions hard-deletes soft-deleted layers and
 	// their artifacts whose DeletedAt predates `before`, ending the §8.4
