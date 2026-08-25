@@ -16,7 +16,7 @@ Do not copy the inline styles out of these files. They are inline because of how
 
 | File | What it holds |
 |:--|:--|
-| `Podium App.dc.html` | 37 screen mockups, grouped in numbered turns. Open it and read the board ids (14a, 17c, 20f…) — this README refers to them. |
+| `Podium App.dc.html` | 35 screen mockups, grouped in numbered turns. Open it and read the board ids (14a, 17c, 20f…) — this README refers to them. |
 | `Podium UI Inventory.dc.html` | 57 components, every state, in both themes, plus a complete "what uses what" dependency table. Build from this file. |
 | `support.js` | Runtime for the two HTML files. Not part of the design. |
 
@@ -88,9 +88,10 @@ Every screen except the sign-in dialog is the same shell.
 
 - **TopBar** — 52px tall, `surf`, 1px `bd` bottom border, 16px horizontal padding, 16px gap. Left to right: wordmark (24px mark + Anton 17–18px uppercase, `.03em`); registry hostname in 11px mono `faint` behind a 12px left padding and a 1px `b2` rule; flexible spacer; search trigger; 1px × 22px divider; Docs link (12.5px, `link`, external arrow, `white-space:nowrap`); divider; identity cluster.
   - The **search trigger** is 32px tall, `flex: 1 1 300px; max-width: 300px; min-width: 150px`, 1px `bd`, 8px radius, `surf2`, holding a magnifier, "Search artifacts", and a ⌘K key hint. It is a button that opens the palette, not an input.
-  - **Identity** is a 24px circular `chip` avatar with mono initials, the email at 12.5px, and an `ADMIN` badge when applicable. Anonymous replaces the cluster with a primary "Sign in".
+  - **Identity** is a 24px circular `chip` avatar with mono initials and the email at 12.5px. It carries no role badge: no response reports that the caller holds the administrator role, so the shell renders nothing that predicts it. A caller with no subject replaces the cluster with a primary "Sign in", and the sign-in control rule in the brief decides whether that control is rendered at all.
 - **Sidebar** — 268px fixed, `surf`, 1px `bd` right border, full height, flex column. Nav items (Browse / Search / Layers) at 13.5px in 7px-radius rows, active row filled `chip` at weight 600. Then a `CATALOG` section label with the depth marker ("3 levels") right-aligned. Then the tree. A footer pinned to the bottom by `margin-top:auto` states "4 layers · 312 artifacts" and "ingested 6m ago" in 10.5px mono.
-  - Anonymous drops the **Layers** nav item and swaps the footer for "Public catalog" / "Sign in to see more". It keeps the depth marker.
+  - The **Layers** nav item is keyed on the posture read rather than on the presence of a subject. A deployment that authenticates no caller renders it for everyone, because that deployment treats the local operator as the administrator and the panel is the point there. Only a deployment that does authenticate callers drops it for a caller with no subject. Board 14f draws that second case.
+  - The footer copy for a caller with no subject follows the brief's catalog-scope rule. On the arm where the catalog read answers a public subset the footer states "Not signed in" beside the "Sign in" control and claims nothing about content beyond what was returned. On the arms where the whole catalog is returned there is no public-view framing at all: the footer keeps its layer and artifact counts. Where the catalog read is refused there is no anonymous view to frame, and the refused-state screen stands in place of the catalog. The depth marker is kept in every case.
 - **Main** — `display: grid; grid-template-columns: 268px 1fr`. Content padding is `26px 30px 40px`, max width 1120–1180px.
 - A **PageBanner**, when present, sits between the TopBar and the grid, full width.
 
@@ -112,7 +113,7 @@ Behaviour the API forces:
 - **Folded artifacts.** An entry with `FoldedFrom` is not a child of this domain. It goes in a separate dashed group titled "LIFTED FROM SPARSE SUBDOMAINS / Not direct children", each row carrying an `↑ FROM <subdomain>` badge.
 - **Rendering note.** When the server trimmed the listing, show both a `listing trimmed` pill among the header badges and a line at the end of the list: "4 of 21 artifacts shown." with a "Load the rest" button. It must read as neither content nor error.
 - **At scale (15a).** Past roughly twenty subdomains, switch to compact count tiles in a 6-column grid with a filter field, a grid/list toggle, and a "Show all 24 subdomains" control. Artifacts become a sortable DataTable with type filters and a curated section header; descriptions drop to one clipped line.
-- **Anonymous (14f).** A neutral `PUBLIC VIEW` PageBanner. The layer panel is hidden from the nav. Nothing states or implies that hidden artifacts exist.
+- **Anonymous (14f).** The board draws one arm of the catalog-scope rule: a deployment that authenticates callers, a caller who resolves no subject, and a catalog read that answered. A neutral PageBanner states that the caller is not signed in and offers the sign-in control. Nothing states or implies that artifacts were withheld or that hidden artifacts exist. The layer panel is hidden from the nav on this arm only. The whole-catalog arms carry no banner, and the refused arm renders the refused state instead of a catalog.
 
 ### 2. Search — 14b, 20b
 
@@ -148,7 +149,7 @@ The table columns are drag handle (34px), layer, source, visibility, last ingest
 
 - **Visibility is a union of grants**, not one value. A layer can be organization-wide *and* group-scoped; render every grant as a chip in one wrapping cell. A layer with none shows "no grants — only you".
 - **Source types are pluggable.** An unknown type still renders: a generic chip with the type name, its details behind a Disclosure ("▸ 4 source fields"), actions unchanged.
-- **Roles.** An administrator manages every layer. An ordinary user sees all of them but acts only on their own; the rest show "Admin-owned" in place of actions. The layer list endpoint is not scoped by caller, so this split is presentation over a list the server hands you whole.
+- **Roles.** An administrator manages every layer, and an ordinary user manages the layers that user defined. The layer list endpoint is not scoped by caller, so this split is presentation over a list the server hands you whole. No response reports that the caller holds the administrator role, so the panel predicts no outcome: it renders its write operations on every row, marks a row the caller does not own as owned elsewhere, and presents whatever refusal a write receives. A refusal is neither an ownership decision nor a signal that the session ended, and the panel's copy must not read it as either.
 - **Read-only mode (14e).** `§13.2.1` puts a marker on read responses, so present the state **before** a write is attempted: one banner reading "Something went wrong — the registry is temporarily read-only. Browsing and search still work.", every write control muted at once. Never a failure per button press.
 - **Recently unregistered (17g).** Unregister is a soft delete recoverable for 30 days. This table lists layer, source, artifact count, unregistered date, erase date with a depleting bar, and Restore. Accent marks three days or fewer.
 
@@ -187,11 +188,13 @@ Error codes to branch on, from `writeReingestError`: `ingest.frozen`, `ingest.hi
 
 **Artifacts only** — domain navigation lives in the tree. Typing shows a group heading with the count, rows of artifact name, path, type and version, and a keyboard footer: ↑↓ navigate, ⏎ open, ⌘⏎ for all results on the Search surface, esc. Just-opened shows recent queries plus the inline filter syntax (`type:skill`, `tag:review`, `scope:platform`), which teaches the query language the Search page exposes as chips. No match offers a spelling correction and says nothing about what might be hidden.
 
-### 8. Authentication — 15i, 15j, 15k, 15l
+### 8. Authentication — 15k, 15l
 
-Sign in is a 470px dialog: the mark, "Continue with Acme SSO", and a device-code alternative. The device-code step is titled "Approve this sign-in" and gives an "Open sso.acme.com/device ↗" button beside a copyable code, with a spinner and an expiry countdown.
+Sign in has no screen of its own. It is the shell control the brief's sign-in control rule fixes: a top-level navigation to the sign-in path the posture read reports, after which the identity provider owns the page. Board 14f shows the control in the anonymous top bar. Nothing is drawn as an in-page flow, and no device-code step belongs here: the device grant is the CLI and SDK acquisition path, and the browser flow reads no device-code endpoint.
 
-Session expiry is one sentence — "Your session has expired. Please log in again." — over the page the user was on, which is **kept, not cleared**. The account menu carries name, email, ADMIN badge, appearance (System / Light / Dark), layer quota, API tokens, and Sign out. It does **not** list group memberships; a user can be in many.
+Sign out is a `POST` the page issues, carrying the same proof the panel's writes carry, after which the page navigates. Render it as a control rather than as a link, because that is the method the route answers.
+
+Session expiry (15k) is one sentence — "Your session has expired. Please log in again." — over the page the user was on, which is **kept, not cleared**. The signal is a refused catalog read; a refused write says nothing about the session. The account menu (15l) carries name, email, appearance (System / Light / Dark), layer quota, API tokens, and Sign out. It carries no role badge, and it does **not** list group memberships; a user can be in many.
 
 ---
 
@@ -214,7 +217,7 @@ Prefers-reduced-motion should stop the caret blink and the spinner rotation; nei
 
 ## State the client owns
 
-- **Identity** — anonymous / user / admin, resolved solely from what the request carries. Never inferred from what a domain returns.
+- **Identity** — read from the posture read: whether the browser flow is enabled, whether a subject resolved, and the deployment's identity posture. The administrator role is not reported, so the client holds no admin state. Never inferred from what a domain returns.
 - **Theme** — system / light / dark, persisted; `data-theme` on the root overrides `prefers-color-scheme`.
 - **Read-only** — read from the marker on read responses, applied to every write control at once.
 - **Per-surface** — loading, empty, error, forbidden. Every list and every rail section needs all four.
@@ -249,4 +252,4 @@ Fonts load from Google Fonts: Space Grotesk 400–700, JetBrains Mono 400–700,
 
 ## Not yet designed
 
-Named so they are not mistaken for oversights: the update-layer form; empty states for an empty domain, a search with no results, a registry with no layers, and an empty restore list; not-found and forbidden pages (the ErrorPage component exists, the screens do not); loading states for the browser, search, and layer list; the non-admin layer panel; the standalone deployment with no identity provider; browse-mode search with filters and no query; a surface over `GET /v1/scope/preview`; and any responsive behaviour below 1440px.
+Named so they are not mistaken for oversights: the update-layer form; empty states for an empty domain, a search with no results, a registry with no layers, and an empty restore list; not-found and forbidden pages (the ErrorPage component exists, the screens do not); loading states for the browser, search, and layer list; the non-admin layer panel; the standalone deployment with no identity provider; browse-mode search with filters and no query; a surface over `GET /v1/scope/preview`; the refused-catalog arm of the catalog-scope rule, where a caller has no anonymous view at all; and any responsive behaviour below 1440px.

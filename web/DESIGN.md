@@ -263,9 +263,12 @@ branching per producer: the property table is omitted entirely, with no header
 standing over an empty table and no placeholder row, and the rest of the viewer
 reads as a finished document rather than as a partial load. That treatment is
 distinct from the one for a frontmatter block that fails to parse, which is a
-defect the reader is told about. The producers known today, and the source that
-owns each, are recorded under "The design handout" in
-`proposals/0013-build-the-13-10-web-ui.md`.
+defect the reader is told about. The producers known today are a search result
+that carries no frontmatter block and an artifact response whose frontmatter is
+cleared when the manifest arrives by link instead of inline. The response
+structs in `pkg/registry/server/server.go` own both, and
+`docs/reference/http-api.md` carries the search-result case under
+`search_artifacts`.
 
 ### 4. Layer panel
 
@@ -381,8 +384,9 @@ standalone registry that authenticates no caller admits every write and the role
 split is presentation there as well. The design consequence is that the panel can
 now receive a refusal from a write it would otherwise have assumed would succeed,
 including on a layer its own role split presented as the caller's to manage. It
-presents that refusal as a per-layer authorization outcome rather than as a
-failure of the page.
+presents that refusal rather than treating it as a failure of the page, and it
+reads the refusal as neither an ownership decision nor an ended session, under
+the expiry-signal rule the state matrix below names.
 
 Whether an anonymous caller sees the panel is a design decision rather than one
 the API makes. Listing layers carries no authorization check, and a standalone
@@ -399,14 +403,20 @@ Most of the design work is here rather than in the happy path.
 **Identity states.** The UI has these. The anonymous state and the authenticated
 state are told apart by whether the posture read resolves a subject for the
 caller. The administrator state is not reported at all, so the page does not
-predict it.
+predict it. Where the posture read does not answer, the page renders the
+anonymous presentation "The posture read" in
+`proposals/0013-build-the-13-10-web-ui.md` states for that arm: neither
+authentication control is rendered, the layer panel renders its write
+operations, and the panel presents whatever refusal a write receives.
 
 1. **Anonymous.** The posture read resolves no subject, so the caller browses
    without an identity (§13.10 on web-UI authentication, with the visibility
-   grants in §4.6). How much of the catalog that caller sees is set by the
-   catalog-scope rule below. The catalog still renders. Nothing is broken and no
-   error has occurred, so an anonymous view must not read as a failure. This is a
-   legitimate browsing mode.
+   grants in §4.6). How much of the catalog that caller sees, and whether the
+   catalog answers at all, are set by the catalog-scope rule below. Where the
+   catalog read answers, nothing is broken and no error has occurred, so that
+   view must not read as a failure: it is a legitimate browsing mode. Where the
+   catalog read is refused, the refused arm of the catalog-scope rule governs
+   instead.
 2. **Authenticated user.** The effective view is the composition of every layer
    whose visibility declaration matches the caller's identity, which always
    includes the public layers (spec §4.6). The same user manages their own
@@ -427,13 +437,18 @@ than assuming a public subset. The rule keys on that read's
 read" in `proposals/0013-build-the-13-10-web-ui.md`, and on whether the catalog
 read answers at all.
 
-- Where a catalog read is refused rather than answered, the deployment offers no
-  anonymous view, and the page renders the refused state rather than an empty
-  catalog or a filtered one. Where a caller who had a subject sees that refusal,
-  it is the session-expiry transition the expiry-signal rule below names.
+- Where a catalog read is refused rather than answered, that caller has no
+  anonymous view of the catalog, and the page renders the refused state rather
+  than an empty catalog or a filtered one. Where a caller who had a subject sees
+  that refusal, it is the session-expiry transition the expiry-signal rule below
+  names.
 - Where the catalog read answers, the anonymous view is the public subset when
   the read reports `identity_provider_configured` true and `public_mode` false.
   On every other combination of the two it is the whole catalog.
+- Where the posture read does not answer, the page holds neither key. It
+  presents whatever the catalog read returned, under the constraint the
+  public-subset arm carries below, and it renders the anonymous presentation
+  "The posture read" states for that arm.
 
 That keying carries one named exception, and it is the only one. A registry
 configured with an identity provider whose label the process does not recognise
@@ -459,7 +474,8 @@ owned by "The posture read" in `proposals/0013-build-the-13-10-web-ui.md`.
 |:--|:--|:--|
 | true | absent | sign-in, as a top-level navigation to the sign-in path the read reports |
 | true | present | sign-out, issued as a `POST` from the page carrying the same proof the panel's writes carry, after which the page navigates |
-| false | absent or present | neither control |
+| anything other than true | absent or present | neither control |
+| the read did not answer | not reported | neither control |
 
 Sign-out is issued as a `POST` rather than followed as a link because that is the
 method the route answers, which "The route methods" in the same proposal owns,
@@ -473,7 +489,11 @@ status an unregistered path receives", in the same proposal). The third row
 covers the deployments that run no browser flow, including the gateway-fronted
 §13.10 deployment where a subject does resolve because the gateway authenticated
 the request; clearing a Podium cookie would not end the gateway's own session
-there.
+there. The fourth row is the arm "The posture read" owns: where the read fails
+or is not served the page holds no value for either key, so it renders neither
+control and the layer panel renders its write operations. That arm fires on
+every registry the read is not mounted on, so it is a routine state rather than
+a corner.
 
 The transitions matter as much as the states: signing in, signing out, and a
 session expiring mid-use while a page is already rendered. The signal for that
