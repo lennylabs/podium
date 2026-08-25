@@ -1,7 +1,7 @@
 # Proposal 0013: Build the §13.10 web UI
 
 - Issue: (to be filed)
-- Status: Approved (2026-08-24). Signed off by the maintainer for implementation.
+- Status: Applied to spec (2026-08-24). Signed off by the maintainer for implementation.
   Converged by maintainer decision rather than by a clean sweep: three
   adversarial review runs fixed 121 findings over 43 rounds and none reached a
   clean sweep, and the third was stopped mid-run at the maintainer's direction.
