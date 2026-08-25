@@ -21,7 +21,7 @@ Prefer `oidc-jwt` where the gateway can forward a verifiable token. It trusts th
 
 The gateway forwards the caller's IdP-signed JWT to the registry. The registry verifies the token on every request against the issuer's JWKS, which it resolves from the issuer's OIDC discovery document.
 
-`oidc-jwt` covers a directly-reachable registry as well, where a Podium client presents a token it acquired itself through the device-code flow. The verification path is identical, because the registry checks the token rather than the network path. The [OIDC cookbooks](oidc/) configure that arrangement per IdP.
+`oidc-jwt` covers a directly-reachable registry as well, where a CLI, an SDK, or another API client presents a token it acquired itself through the device-code flow, and, where that registry enables the browser flow, where a browser presents the token the registry obtained for it through its own authorization-code exchange and returned in `__Host-podium_session`. The verification path is identical, because the registry checks the token rather than the network path. The [OIDC cookbooks](oidc/) configure that arrangement per IdP.
 
 ```yaml
 # registry.yaml  (single-node or clustered server, fronted by a gateway)
