@@ -86,6 +86,8 @@ func KnownMatrices() []Matrix {
 					"auth.token_expired",
 					"auth.forbidden",
 					"auth.device_code_pending",
+					"auth.csrf_invalid",
+					"auth.exchange_failed",
 					"config.invalid",
 					"config.no_registry",
 					"config.unknown_harness",

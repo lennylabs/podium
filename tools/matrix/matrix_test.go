@@ -54,6 +54,33 @@ func TestKnownMatrices_ReturnsCells(t *testing.T) {
 	}
 }
 
+// The browser acquisition flow's codes are audited like every other
+// §6.10 code, so the axis has to carry them. Without the cells the
+// `// Matrix: §6.10 (...)` annotations on their envelope tests name no
+// cell and the audit passes whether or not those tests exist.
+// Spec: §6.10
+func TestKnownMatrices_ErrorCodes_CoverBrowserFlow(t *testing.T) {
+	t.Parallel()
+	var codes map[string]bool
+	for _, m := range KnownMatrices() {
+		if m.ID != "§6.10" {
+			continue
+		}
+		codes = map[string]bool{}
+		for _, cell := range m.Cells() {
+			codes[strings.Join(cell, "/")] = true
+		}
+	}
+	if codes == nil {
+		t.Fatal("KnownMatrices carries no §6.10 matrix")
+	}
+	for _, want := range []string{"auth.csrf_invalid", "auth.exchange_failed"} {
+		if !codes[want] {
+			t.Errorf("§6.10 axis missing error code %q", want)
+		}
+	}
+}
+
 func TestSanitize(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
