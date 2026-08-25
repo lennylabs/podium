@@ -117,7 +117,7 @@ podium logout [--registry <url>]
 
 When `--issuer` is unset, `podium login` probes the resolved registry URL for RFC 8414 authorization-server metadata at `/.well-known/oauth-authorization-server` and reads the device-authorization and token endpoints from it. The registry process does not serve that document itself, so discovery succeeds only when a fronting proxy or gateway publishes it; otherwise pass `--issuer` (or set `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`). Setting `PODIUM_NO_BROWSER` to a truthy value (`1`, `true`, `yes`, or `on`) has the same effect as `--no-browser` for headless and CI environments. Tokens cache in the OS keychain keyed by registry URL; multiple registries can be authenticated simultaneously.
 
-`podium login` is a no-op when the resolved registry is a filesystem path or one of the loopback defaults, `http://127.0.0.1:8080` or `http://localhost:8080`. It reports that the registry needs no authentication and exits. A single-node server published at any other URL runs the full device-code flow, so a deployment that configures `oidc-jwt` authenticates through this command.
+`podium login` is a no-op when the resolved registry is a filesystem path or one of the loopback defaults, `http://127.0.0.1:8080` or `http://localhost:8080`. It reports that the registry needs no authentication and exits. A single-node server published at any other URL runs the full device-code flow, so a deployment that configures `oidc-jwt` authenticates the CLI through this command. Where the registry enables the browser flow, the registry signs a browser in through its own authorization-code exchange instead.
 
 ---
 
