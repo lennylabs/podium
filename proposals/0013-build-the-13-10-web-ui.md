@@ -271,7 +271,8 @@ sites and testing sections after sign-off.
       assertion, the rebuild-is-clean CI check, and the
       `dangerouslySetInnerHTML` check under "Rendering untrusted content".
       Levels: unit, e2e. Depends on: —
-- [ ] **U1 · code** — UI-1. The UI surfaces built against `web/DESIGN.md`,
+- [ ] **U1 · code** — UI-1. The UI surfaces built against the design pass's
+      output in `web/design/`, with `web/DESIGN.md` as the brief behind it,
       including the sanitized markdown rendering path and its sanitizer cases,
       the posture read on load together with the sign-in and sign-out
       affordances G1's sign-in control table gates on it and the rest of the
@@ -2541,7 +2542,11 @@ What lands, in addition to the committed-bundle constraints above:
 - `web/web.go`'s `go:embed` directive is repointed at the built bundle, and its
   package and `Assets` doc comments stop describing three hand-written files. The
   served-root entry in the committed-bundle constraints governs the root
-  `web.Assets()` returns.
+  `web.Assets()` returns. The directive names the bundle's own directory rather
+  than `web/`, so it reaches neither `web/DESIGN.md` nor the design pass's output
+  in `web/design/`. A directive broad enough to capture either ships the design
+  reference and its assets inside the binary, which is why "The design handout"
+  places that output in a subdirectory.
 - `web/web_test.go` moves with the directive. Its assertions read
   `index.html`, `app.js`, and `style.css` out of the embedded set by exact name
   at its root (`:13-21`, `:24-32`), and the vanilla `app.js` and `style.css`
@@ -2571,6 +2576,23 @@ the committed-bundle constraints above.
 layouts, the state treatments, and the component inventory, and the
 implementation builds what that pass produces. The implementor does not design
 the UI.
+
+That output lands in `web/design/`, which is the path U1 builds from. It follows
+the convention `site/design/` already sets for the website handoff: a `README.md`
+carrying the overview and the fidelity notes, beside a static HTML design
+reference that shows the intended layout. `site/design/README.md` states the
+rule that transfers with it, which is that the reference is a prototype to
+recreate in the codebase's own patterns rather than production code to copy, and
+that the reference itself does not ship.
+
+It is a subdirectory rather than files beside the brief for one reason that
+matters to B1. `web/web.go` currently embeds three named files, so nothing else
+in `web/` reaches the binary today, and B1 replaces that directive with one
+covering the React build output. A directive written to capture a directory
+would sweep the design reference and its assets into the binary alongside the
+bundle. Keeping the handout in its own subdirectory means the embed names the
+build output and reaches nothing else, and the rebuild-is-clean check compares
+only what the bundler wrote.
 
 Two items in the brief are design problems rather than implementation details
 and must not be settled by whoever writes the React:
