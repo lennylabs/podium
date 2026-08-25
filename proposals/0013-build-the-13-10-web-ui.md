@@ -1,7 +1,10 @@
 # Proposal 0013: Build the §13.10 web UI
 
 - Issue: (to be filed)
-- Status: Draft
+- Status: Converged (2026-08-24), by maintainer decision rather than by a clean
+  sweep. Three adversarial review runs fixed 121 findings over 43 rounds and
+  none reached a clean sweep; the third was stopped mid-run at the maintainer's
+  direction. Awaiting sign-off.
 - Date: 2026-08-22
 
 This document stages the proposed spec, code, test, and documentation changes.
