@@ -384,8 +384,17 @@ layer-write authorization rule stated in the same proposal section: an operation
 on a user-defined layer is authorized to that layer's owner or to a tenant
 admin, an operation on an admin-defined layer is authorized to a tenant admin
 alone, and the rule covers register, unregister, update, restore, reorder, and
-reingest. The rule is live only where the deployment both configures an identity
-provider and does not run in public mode, which is the liveness condition that
+reingest. Register is decided against the layer its ID names rather than against
+what the form posts: a register whose ID names no layer stored in the tenant is
+authorized to a caller the admin arm admits or to a caller who resolves a
+verified subject, and a register whose ID names a layer that is already stored,
+including one that is unregistered and still inside its recovery window, takes
+the per-layer arms above against that stored layer. The panel therefore treats
+creating a layer under an unused ID and re-registering an existing ID as
+different authorization cases, and the recoverable layers its restore surface
+lists are IDs a new registration cannot take over. The rule is live only where
+the deployment both configures an identity provider and does not run in public
+mode, which is the liveness condition that
 rule carries. A registry missing either conjunct admits every one of the panel's
 writes and the role split is presentation there as well, which covers both the
 standalone registry that authenticates no caller and a registry that engages
@@ -446,12 +455,15 @@ read answers at all.
 
 - Where a catalog read is refused because the caller's identity could not be
   verified, that caller has no anonymous view of the catalog, and the page
-  renders the refused state rather than an empty catalog or a filtered one. This
-  arm is ordered ahead of the two below, whether or not the posture read
-  answered, so neither of them applies to such a refusal. Where a caller who had
-  a subject sees that refusal, it is the session-expiry transition the
-  expiry-signal rule below names. A catalog read that fails for a reason
-  unrelated to identity, such as an unavailable registry or a server failure, is
+  renders the refused state rather than an empty catalog or a filtered one.
+  Which refusals a catalog read returns when the caller's identity cannot be
+  verified is owned by the expiry-signal rule under "The browser session" in
+  `proposals/0013-build-the-13-10-web-ui.md`, and the page reads them there
+  rather than from this brief. This arm is ordered ahead of the two below,
+  whether or not the posture read answered, so neither of them applies to such a
+  refusal. Where a caller who had a subject sees that refusal, it is the
+  session-expiry transition that same rule names. A catalog read that fails for
+  any other reason, such as an unavailable registry or a server failure, is
   outside this rule and takes the surface's own error state under "Per-surface
   states" below.
 - Where the catalog read answers, the anonymous view is the public subset when
@@ -509,9 +521,12 @@ The transitions matter as much as the states: signing in, signing out, and a
 session expiring mid-use while a page is already rendered. The signal for that
 last transition is fixed by the expiry-signal rule under "The browser session" in
 `proposals/0013-build-the-13-10-web-ui.md`. The catalog read is the panel's
-expiry signal. A refused write carries no expiry information and is not an
-ownership decision, so a design that reads such a refusal as an ended session, or
-as a statement about who owns the layer, reaches the wrong state on both counts.
+expiry signal. The refusal a write receives when the caller's session can no
+longer be verified carries no expiry information and is not an ownership
+decision, so a design that reads that refusal as an ended session, or as a
+statement about who owns the layer, reaches the wrong state on both counts. A
+write refused by the owner gate is a separate case, which the layer-write
+authorization rule owns and the layer panel above states.
 
 **Per-surface states.** Each surface needs loading, empty, error, and forbidden.
 Two deserve specific attention:
