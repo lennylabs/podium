@@ -210,11 +210,14 @@ export function App() {
         <main className="content">
           {/* The expiry transition is rendered over the page the caller was
               on, which is kept rather than cleared, so it sits above the
-              surface on every route. */}
+              surface on every route and the surface stays mounted under it.
+              The refused arm that stands in place of the catalog is the one
+              reached by a caller who held no subject, where there is no page
+              to keep. */}
           {expired && <SessionEnded recovery={recovery} />}
           {refused && !expired && route.name === 'layers' && <RefusedRead onRetry={retryCatalog} />}
-          {refused && route.name !== 'layers' ? (
-            <RefusedCatalog error={catalogError} recovery={expired ? null : recovery} />
+          {refused && !expired && route.name !== 'layers' ? (
+            <RefusedCatalog error={catalogError} recovery={recovery} />
           ) : (
             <Surface route={route} subject={subject} readOnly={readOnly} onCatalogOutcome={onCatalogOutcome} />
           )}
@@ -446,9 +449,9 @@ function RefusedRead({ onRetry }: { onRetry: () => void }) {
  * verified. Such a caller has no anonymous view of the catalog, so the page
  * renders this in place of the catalog rather than an empty or a filtered
  * one. It states that the registry did not serve this catalog to this caller
- * and says nothing about what the catalog holds. The recovery control is null
- * where the expiry treatment above already carries it, so the page offers one
- * control rather than two. */
+ * and says nothing about what the catalog holds. It is rendered only where
+ * the expiry treatment is not, so the page offers one recovery control rather
+ * than two. */
 function RefusedCatalog({ error, recovery }: { error: unknown; recovery: ReactNode }) {
   return (
     <section className="surface" aria-label="Catalog refused">

@@ -2,14 +2,12 @@
 // §4.2 domain hierarchy. It renders the caller's position in that hierarchy
 // at every level, and it states nothing about what a response does not carry.
 
-import { useState } from 'react';
-
 import { ArtifactTable, SubdomainTiles } from './DomainAtScale';
 import { ArtifactRow } from '../components/ArtifactRow';
 import { Badge, EmptyState, ErrorState, Loading } from '../components/primitives';
 import type { DomainDescriptor } from '../api';
 import { loadDomain, searchArtifacts } from '../api';
-import { domainHref } from '../route';
+import { domainHref, searchHref } from '../route';
 import { useAsync, useErrorReport } from '../useAsync';
 
 // The browser renders two levels of the returned tree at once and follows a
@@ -23,11 +21,7 @@ const renderedDepth = 2;
 const atScale = 20;
 
 export function DomainBrowser({ path, onError }: { path: string; onError: (err: unknown) => void }) {
-  // The response is trimmed to fit the response budget, and the depth is the
-  // one argument the read takes, so a reader who continues past the returned
-  // edge re-reads the same domain deeper.
-  const [depth, setDepth] = useState(renderedDepth);
-  const domain = useAsync(() => loadDomain(path, depth), [path, depth]);
+  const domain = useAsync(() => loadDomain(path, renderedDepth), [path]);
   useErrorReport(domain.error, onError);
 
   if (domain.loading) {
@@ -91,18 +85,8 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           </ul>
         ))}
       {/* The trimmed listing is continued at the end of the list rather than
-          announced above it: the reader meets it where the returned edge is,
-          and the control re-reads the same domain deeper. */}
-      {trimmed && (
-        <TrimmedListing
-          scope={body.path}
-          shown={direct.length}
-          note={body.note ?? ''}
-          onLoadMore={() => {
-            setDepth((held) => held + 1);
-          }}
-        />
-      )}
+          announced above it: the reader meets it where the returned edge is. */}
+      {trimmed && <TrimmedListing scope={body.path} shown={direct.length} note={body.note ?? ''} />}
 
       {folded.length > 0 && (
         <section className="folded">
@@ -125,18 +109,14 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
  * registry takes before it truncates its own result set. A count the search
  * did not return leaves the line stating what is on the page, because the
  * line reports what the reads returned rather than a figure derived from
- * neither. */
-function TrimmedListing({
-  scope,
-  shown,
-  note,
-  onLoadMore,
-}: {
-  scope: string;
-  shown: number;
-  note: string;
-  onLoadMore: () => void;
-}) {
+ * neither.
+ *
+ * The continuation is that same scoped search rather than a deeper read of
+ * this domain. `load_domain` takes the subtree depth as its only argument,
+ * and the notable list is capped independently of it, so raising the depth
+ * returns no artifact the reader does not already hold and can return fewer
+ * once the §4.5.5 budget loop pops entries off the list. */
+function TrimmedListing({ scope, shown, note }: { scope: string; shown: number; note: string }) {
   const total = useAsync(() => searchArtifacts({ query: '', type: '', scope, tags: [] }, 1), [scope]);
   const matched = total.value?.total_matched ?? 0;
   return (
@@ -145,11 +125,18 @@ function TrimmedListing({
         {matched > shown ? `${String(shown)} of ${String(matched)} artifacts shown.` : `${String(shown)} artifacts shown.`}{' '}
         {note}
       </p>
-      <button type="button" onClick={onLoadMore}>
+      <a className="button" data-testid="listing-continue" href={scopedSearchHref(scope)}>
         Load the rest
-      </button>
+      </a>
     </div>
   );
+}
+
+/** scopedSearchHref addresses the search this domain's listing continues
+ * into. The registry root carries no scope filter, because the empty path
+ * bounds nothing. */
+function scopedSearchHref(scope: string): string {
+  return searchHref(scope === '' ? '' : `scope:${scope}`);
 }
 
 /** SubdomainList renders the returned subtree recursively down to the depth

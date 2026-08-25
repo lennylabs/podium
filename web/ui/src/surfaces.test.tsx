@@ -13,6 +13,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
+import { searchHref } from './route';
 import type { SessionPosture } from './session';
 
 /** Stub is one registry response: the status and the JSON body a path
@@ -1010,8 +1011,40 @@ describe('the session-expiry transition', () => {
       '/v1/load_domain': { status: 401, body: { code: 'auth.token_expired', message: 'expired' } },
     });
     render(<App />);
-    await screen.findByLabelText('Catalog refused');
+    await screen.findByTestId('session-ended');
     expect((await screen.findByTestId('expiry-sign-in')).getAttribute('href')).toBe('/v1/ui/auth/sign-in');
+    // The transition stands over the page the caller was on. The refused
+    // screen that stands in place of the catalog belongs to the caller who
+    // held no subject, so it is not what this caller gets.
+    expect(screen.queryByLabelText('Catalog refused')).toBeNull();
+  });
+
+  // The expiry arm keeps the page underneath. A caller reading a domain whose
+  // sidebar expansion is then refused keeps the domain surface, with the one
+  // sentence over it.
+  it('keeps the domain the caller was reading under the transition', async () => {
+    stubRegistry({
+      '/v1/ui/session': {
+        body: posture({
+          subject: 'alice@acme.com',
+          browser_auth: { enabled: true, sign_in_path: '/v1/ui/auth/sign-in', sign_out_path: '/v1/ui/auth/sign-out' },
+        }),
+      },
+      '/v1/load_domain': { body: { path: 'platform', subdomains: [{ path: 'platform/ci', name: 'ci' }], notable: [] } },
+      '/v1/search_artifacts': { body: { total_matched: 0 } },
+      '/v1/layers': { body: { layers: [] } },
+    });
+    goTo('#/domain/platform');
+    render(<App />);
+    await screen.findByLabelText('Domain browser');
+    const tree = await screen.findByLabelText('Catalog');
+    stubRegistry({
+      '/v1/load_domain': { status: 401, body: { code: 'auth.token_expired', message: 'expired' } },
+    });
+    fireEvent.click(within(tree).getAllByRole('button', { expanded: false })[0]);
+    await screen.findByTestId('session-ended');
+    expect(screen.getByLabelText('Domain browser')).toBeTruthy();
+    expect(screen.queryByLabelText('Catalog refused')).toBeNull();
   });
 
   // The layers route issues no catalog read of its own, so the panel would
@@ -1045,7 +1078,7 @@ describe('the session-expiry transition', () => {
       '/v1/load_domain': { status: 401, body: { code: 'auth.token_expired', message: 'expired' } },
     });
     render(<App />);
-    await screen.findByLabelText('Catalog refused');
+    await screen.findByTestId('session-ended');
     expect(screen.queryByTestId('expiry-sign-in')).toBeNull();
     expect(screen.getByText(/runs no browser sign-in/)).toBeTruthy();
     // The third row renders no authentication control, so the treatment has to
@@ -1216,7 +1249,7 @@ describe('read-only mode', () => {
       '/v1/layers': { body: { layers: [userLayer()] } },
     });
     goTo('#/');
-    await screen.findByLabelText('Catalog refused');
+    await screen.findByTestId('session-ended');
     goTo('#/layers');
     await screen.findByTestId('session-ended');
     await screen.findByLabelText('Layer panel');
@@ -2066,8 +2099,10 @@ describe('the trimmed listing', () => {
 
   // The trimmed case is a pill among the header badges and a line at the end
   // of the list stating what is on the page against the match count, with a
-  // control that continues past the returned edge.
-  it('states the shown count against the total and re-reads deeper', async () => {
+  // control that continues past the returned edge. The continuation is the
+  // scoped search the line takes its total from, because load_domain offers
+  // no lever over the notable list.
+  it('states the shown count against the total and continues into the scoped search', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ public_mode: true }) },
       '/v1/load_domain': { body: trimmed },
@@ -2081,10 +2116,19 @@ describe('the trimmed listing', () => {
     await waitFor(() => {
       expect(line.textContent).toContain('2 of 21 artifacts shown.');
     });
-    fireEvent.click(within(line).getByRole('button', { name: 'Load the rest' }));
+    const cont = within(line).getByRole('link', { name: 'Load the rest' });
+    expect(cont.getAttribute('href')).toBe(searchHref('scope:platform'));
+    goTo(searchHref('scope:platform'));
+    await screen.findByLabelText('Search');
     await waitFor(() => {
-      expect(requests.some((r) => r.url.startsWith('/v1/load_domain') && r.url.includes('depth=3'))).toBe(true);
+      expect(requests.some((r) => r.url.startsWith('/v1/search_artifacts') && r.url.includes('scope=platform'))).toBe(
+        true,
+      );
     });
+    // Raising the subtree depth is what the control must not do: the notable
+    // list is capped independently of it, so a deeper read returns no
+    // artifact the reader does not already hold.
+    expect(requests.some((r) => r.url.startsWith('/v1/load_domain') && r.url.includes('depth=3'))).toBe(false);
   });
 
   // A domain with dozens of children is a map rather than a card grid, so the
