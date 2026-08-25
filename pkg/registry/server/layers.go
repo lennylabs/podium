@@ -676,11 +676,17 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// IMPLEMENTOR'S CHOICE (proposal 0013, "The layer-ownership defect"):
 	// the shipped PutLayerConfig upsert's atomicity is accepted unchanged for
 	// two registrations racing under the same ID between this lookup and the
-	// write. Both racers pass the gate only when both are authorized on the
-	// layer as it stands, so the race decides which authorized write lands
-	// last rather than whether an unauthorized one lands; a store-level
-	// compare-and-set would change no authorization outcome, and no backend
-	// exposes one today.
+	// write. The accepted window is the arm below that admits an unused ID: two
+	// callers who each observe exists == false under the same previously-unused
+	// ID are each admitted for resolving a verified subject, and their upserts
+	// resolve last-writer-wins, so alice's layer can be overwritten by bob even
+	// though the serialized order refuses bob on the user-defined arm of
+	// authorizeLayerWrite. A conditional insert would close that window and
+	// would change that outcome, but no store backend exposes one today, and
+	// the window is bounded by the lookup-to-upsert interval on a single ID.
+	// The arm that admits an existing layer has no such window: both racers are
+	// authorized on the layer as it stands, so the race there decides only
+	// which authorized write lands last.
 	stored, exists, err := e.lookupLayerForWrite(r.Context(), req.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
