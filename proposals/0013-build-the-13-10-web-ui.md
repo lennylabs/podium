@@ -267,9 +267,11 @@ sites and testing sections after sign-off.
       value; C3 is what makes that configuration a startup refusal.
       Levels: unit, e2e. Depends on: S1, C2
 - [ ] **B1 · code** — BUILD-1. The React toolchain, the committed bundle, the
-      `go:embed` change, `web/web_test.go`, the served-bundle end-to-end
-      assertion, the rebuild-is-clean CI check, and the
-      `dangerouslySetInnerHTML` check under "Rendering untrusted content".
+      removal of `web/index.html`, `web/app.js`, and `web/style.css`, which are
+      the served bundle today rather than sources, the `go:embed` change,
+      `web/web_test.go`, the served-bundle end-to-end assertion, the
+      rebuild-is-clean CI check, and the `dangerouslySetInnerHTML` check under
+      "Rendering untrusted content".
       Levels: unit, e2e. Depends on: —
 - [ ] **U1 · code** — UI-1. The UI surfaces built against the design pass's
       output in `web/design/`, with `web/DESIGN.md` as the brief behind it,
@@ -2534,8 +2536,31 @@ name and restates none of its content.
   stable gate, and the built bundle is the only generated artifact the change
   adds to the tree.
 
+**`web/` is the served root today, which is what makes this a removal rather
+than an addition.** `web/web.go`'s `Assets` doc comment says the returned file
+system is rooted at the repository's `web/` directory, and `web/web_test.go:15`
+reads `index.html` from that root. So `web/index.html`, `web/app.js`, and
+`web/style.css` are not sources that a build consumes. They are the served
+bundle, hand-written, sitting at the root the file server mounts. The React
+build emits its own entry document, so leaving them in place puts two
+`index.html` files in the tree, one at the conventional location that no longer
+serves and one in the bundle directory that does. A reader who opens the first
+is reading dead markup that still looks authoritative, and a directive or a test
+that reaches for the root finds the stale copy rather than failing.
+
+They are therefore deleted rather than superseded, and the deletion is part of
+B1 rather than an implied consequence of it.
+
 What lands, in addition to the committed-bundle constraints above:
 
+- `web/index.html`, `web/app.js`, and `web/style.css` are removed. Nothing is
+  carried forward from them: the brief states that the existing implementation
+  is a placeholder rather than a baseline to preserve.
+- `web/` after the change holds the Go package (`web.go`, `web_test.go`), the
+  brief (`DESIGN.md`), the design pass's output (`design/`), the React source,
+  and the committed bundle. Source and bundle each take their own subdirectory,
+  so no build input, build output, Go file, or design file shares a directory
+  with another kind.
 - The bundle is committed at a path that escapes the bare `dist/` entry at
   `.gitignore:18`, either by negation or by a directory name that does not match
   it.
@@ -2567,8 +2592,11 @@ What lands, in addition to the committed-bundle constraints above:
 - A `.gitattributes` entry marks the bundle generated so review diffs collapse.
   The repository has none today.
 
-**IMPLEMENTOR'S CHOICE:** the bundler and the output path. Any answer satisfies
-the committed-bundle constraints above.
+**IMPLEMENTOR'S CHOICE:** the bundler, the source directory, and the output
+directory. Any answer satisfies the committed-bundle constraints above, keeps
+source and output in separate subdirectories of `web/`, and leaves neither at
+`web/` root, which is where the removed files sat and where a stale entry
+document would be mistaken for the served one.
 
 ## The design handout
 
