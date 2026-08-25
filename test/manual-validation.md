@@ -4763,25 +4763,26 @@ to 3 completed and the browser still signed in.
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "add release skill"
    ```
 
-2. Open the layer panel in the signed-in page and register a layer. Choose
-   "Your own layer" as the class, "Git repository" as the source, `$WORK/own-repo`
-   as the repository, `main` as the ref, and an ID of `own-release`.
+2. Open the layer panel in the signed-in page, press Register layer, and fill
+   the form. Choose "Your own layer" as the class and "Git repository" as the
+   source, give `$WORK/own-repo` as the repository, `main` as the ref, and
+   `own-release` as the layer ID.
 
-   **Expect.** The form offers no visibility controls on this class, and it says
-   that a layer of your own is visible to you alone and counts against the layer
-   limit an administrator sets. The registry fixes a user-defined layer's
-   visibility to the registrant and discards any the request carries, which is
-   why the axes are absent rather than disabled.
+   **Expect.** The form states that a layer of your own is visible to you alone
+   and counts against the layer limit an administrator sets. The registration is
+   stored user-defined with the signed-in caller as its owner and its visibility
+   fixed to that subject, whatever visibility the request carried, which is why
+   the form offers no visibility axes on this class.
 
 3. Read what the panel returns.
 
-   **Expect.** The panel shows the layer's webhook URL and its HMAC secret, with
-   a copy control on each, and states that the secret is returned on registration
-   and on a rotation and is redacted from every other response, so it cannot be
-   read back once this reveal is dismissed. The reveal stays on
-   screen until the reader acknowledges it, so a secret is not lost to an
-   accidental navigation. Acknowledge it and confirm the panel returns to the
-   layer list.
+   **Expect.** The reveal carries a "Shown once" label, the layer's webhook URL
+   and its HMAC secret with a copy control on each, and a Done control that
+   stays disabled until the reader ticks the acknowledgement. The reveal holds
+   the screen until then, so a secret is not lost to an accidental navigation.
+   Tick the acknowledgement, press Done, and confirm the panel returns to the
+   layer list. Whether the secret is served again is a property of the API,
+   which step 4 probes.
 
 4. Confirm the layer is listed as this caller's and that the secret is not
    served again.
@@ -4790,8 +4791,10 @@ to 3 completed and the browser still signed in.
    curl -sS "http://127.0.0.1:8153/v1/layers" | python3 -m json.tool | grep -i -e '"ID"' -e secret
    ```
 
-   **Expect.** `own-release` is listed, and no line carries a secret value. In
-   the panel the row carries the "yours" marker, which the panel draws by
+   **Expect.** `own-release` is listed, and no line carries a secret value. The
+   secret is returned on registration and on a rotation and is redacted from
+   every other response, so once the reveal is dismissed it cannot be read back.
+   In the panel the row carries the "yours" marker, which the panel draws by
    comparing the layer's stored owner against the subject the posture read
    reports. The list read itself is unfiltered: it reports every layer in the
    tenant to any caller who can reach it, and the marker is a rendering of
@@ -4840,20 +4843,21 @@ properties of a rendering.
 1. In the layer panel, press Unregister on the `own-release` row.
 
    **Expect.** A confirmation appears rather than the layer disappearing, and no
-   write is issued by this press. The confirmation names the layer, says its
-   artifacts leave every caller's effective view at once, and says the layer and
-   its artifacts stay recoverable for the deployment's retention window rather
-   than being erased.
+   write is issued by this press. The confirmation states both halves of what
+   unregistering does: it names the layer, says its artifacts disappear from
+   every caller's view the next time they sync, and says the layer stays
+   recoverable for the deployment's retention window, naming the date it is
+   erased on, rather than being erased now.
 
 2. Attempt to complete the unregister without performing the confirmation's own
    act.
 
-   **Expect.** The confirm control is unavailable until the reader performs a
-   deliberate act distinct from the press on the row. What that act is comes from
-   the design pass; this step asserts only that one is required and that the
-   write is not issued before it.
+   **Expect.** The confirmation carries a "Type the layer ID to confirm" field,
+   and the "Unregister layer" control stays disabled until the typed value
+   equals the layer ID. No write is issued before that, so the action cannot be
+   taken by a second press on the row.
 
-3. Perform the confirmation's act and confirm.
+3. Type `own-release` into the confirmation field and press Unregister layer.
 
    **Expect.** The write is issued, the row leaves the layer list, and the layer
    appears under the recently-unregistered list the panel draws from the
@@ -4890,7 +4894,11 @@ the part no Go test reads, and the panel presenting per-owner scoping as
 server-enforced while the server failed open is the defect this closes.
 
 **Prerequisites.** The S44 stack, and a layer owned by the `admin` user. Run S48
-to register `own-release` and stop before S49, or re-register it.
+to register `own-release` and stop before S49, or re-register it. A second
+browser profile, or a second browser, that has never signed in to this stack.
+`__Host-podium_session` is one cookie per origin per browser profile and
+Keycloak's own SSO cookie is per profile as well, so a second window of the
+profile S47 signed in from cannot hold a second session.
 
 **Steps.**
 
@@ -4901,13 +4909,29 @@ to register `own-release` and stop before S49, or re-register it.
    $KC set-password -r master --username bob --new-password bob
    ```
 
-2. Open `http://127.0.0.1:8153/ui/` in a second private browser window, sign in
-   as `bob` with the password `bob`, and open the layer panel.
+2. Open `http://127.0.0.1:8153/ui/` in the second browser profile, sign in as
+   `bob` with the password `bob`, and open the layer panel. Do not use a private
+   window of the profile S47 signed in from: every window of a profile shares
+   one cookie jar, so bob's callback would replace the admin session rather than
+   establish a second one, and Keycloak's SSO cookie on that profile would
+   return the sign-in without a prompt and mint a token for `admin`.
 
-   **Expect.** The panel lists `own-release` along with the layers
-   `registry.yaml` declares. `GET /v1/layers` is unfiltered, so bob reads the
-   whole tenant's layer list. The `own-release` row carries no "yours" marker,
-   because bob's subject is not its stored owner.
+   Confirm the session this window holds is bob's before pressing anything
+   destructive. Read the posture route in that same window, from the address bar
+   or from the network panel.
+
+   ```text
+   http://127.0.0.1:8153/v1/ui/session
+   ```
+
+   **Expect.** The body reports `subject` naming bob rather than the admin
+   subject. A body naming admin means the sign-in reused the admin profile's SSO
+   session, and every later step in this scenario would then exercise the owner
+   arm of the rule rather than the non-owner arm it exists to test. The panel
+   lists `own-release` along with the layers `registry.yaml` declares.
+   `GET /v1/layers` is unfiltered, so bob reads the whole tenant's layer list.
+   The `own-release` row carries no "yours" marker, because bob's subject is not
+   its stored owner.
 
 3. Press Unregister on the `own-release` row and complete the confirmation as
    S49 step 3 does.
@@ -4926,8 +4950,9 @@ to register `own-release` and stop before S49, or re-register it.
    non-owner delete another caller's layer, which is the failure this scenario
    exists to catch.
 
-5. Confirm the owner is still authorized. Return to the first window, still
-   signed in as `admin`, and press Unregister on the same row.
+5. Confirm the owner is still authorized. Return to the window S47 signed in
+   from, whose session step 2 left untouched because bob signed in from a
+   separate profile, and press Unregister on the same row.
 
    **Expect.** The confirmation appears and the write succeeds. Without this
    step a registry refusing every caller would pass step 3 for the wrong reason.
