@@ -43,9 +43,11 @@ layer-panel paragraph of §13.10 states who may do what there: an administrator
 manages the registered layer list, and an ordinary user manages the layers that
 user defined. The list read hands the panel every layer stored under the tenant,
 on the terms the unfiltered-list rule sets, and no response reports that the
-caller holds the administrator role. The panel therefore presents that difference
-as a marker over a uniformly actionable list rather than by withholding controls,
-on the terms the layer-panel section below states.
+caller holds the administrator role. The panel therefore does not predict that
+role. It renders its write operations on every row of a uniformly actionable
+list and presents whatever refusal a write receives. The one marker it carries is
+the ownership marker the layer-panel section below defines, which is a property
+of a user-defined row rather than a rendering of the caller's role.
 
 The registry process serves the UI on the same origin as the API it calls, from
 the mount point §13.10 names under "Web UI" and
@@ -53,9 +55,14 @@ the mount point §13.10 names under "Web UI" and
 routes. The mount is opt-in behind the `--web-ui` flag §13.10 describes, so a
 design must not assume the UI is reachable on every registry. The UI has no
 privileged access. §13.10 states that it talks to the registry's HTTP API as any
-other consumer would and that it resolves identity solely from what the request
-carries, so a screen shows only what the caller is already entitled to see, and a
-smaller catalog is a normal result rather than an error.
+other consumer would, so a screen shows only what the caller is already entitled
+to see, and a smaller catalog is a normal result rather than an error. §13.10
+scopes its acquisition clause to the deployment where the browser flow is
+disabled, and there the UI runs no acquisition flow of its own and resolves
+identity solely from what the request carries. Where the browser flow is enabled
+the registry runs the acquisition itself, and what that flow does is owned by
+"The browser session" in `proposals/0013-build-the-13-10-web-ui.md`, which the
+sign-in control rule in the state matrix below keys on.
 
 ## Current state
 
@@ -387,13 +394,17 @@ admin, an operation on an admin-defined layer is authorized to a tenant admin
 alone, and the rule covers register, unregister, update, restore, reorder, and
 reingest. The panel therefore treats creating a layer under an unused ID and
 re-registering an existing ID as different authorization cases, which that rule
-decides, and the recoverable layers its restore surface lists are IDs a new
-registration cannot take over. The rule is live only where the deployment both
-configures an identity provider and does not run in public mode, which is the
-liveness condition that rule carries. A registry missing either conjunct admits
+decides. The rule is live only where the deployment both configures an identity
+provider and does not run in public mode, which is the liveness condition that
+rule carries. A registry missing either conjunct admits
 every one of the panel's writes and the role split is presentation there as
 well, which covers both the standalone registry that authenticates no caller and
-a registry that engages public mode. The design consequence is that the panel can now receive a refusal
+a registry that engages public mode. Where the rule is live, a registration under
+one of the recoverable IDs the panel's restore surface lists is authorized on the
+same terms as any other write against that stored layer, so the recovery window
+is not a window in which an unauthorized caller can take the ID over, while a
+caller that rule does authorize on the stored layer may register under it. The
+design consequence is that the panel can now receive a refusal
 from a write it would otherwise have assumed would succeed, including on a layer
 its own role split presented as the caller's to manage. It presents that refusal
 rather than treating it as a failure of the page.
