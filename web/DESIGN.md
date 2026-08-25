@@ -359,68 +359,6 @@ administrator (§13.10, with the admin-authorization wiring in
 caller is therefore a UI choice, and it has to keep the panel available in the
 standalone deployment, where nobody authenticates and the panel is the point.
 
-### 5. Audit viewer
-
-**This surface has no spec basis and no API behind it yet.** §13.10 names four
-surfaces and this is not among them, and the registry serves no route that reads
-audit events. The maintainer has asked for it, so it is designed here, and the
-dependency is stated rather than left for the design pass to discover. Nothing on
-this surface can be built until §13.10 gains it and a read API exists. The rest
-of the brief describes surfaces whose data is already served; this one does not.
-
-**What the audit stream is.** Every read call is logged with the caller's
-identity, the visibility outcome, what was requested, the resolved layer
-composition, and the result size, alongside ingest events, admin actions, and
-break-glass invocations. §8 in `spec/08-audit-and-observability.md` defines the
-event types and the fields; `pkg/audit/audit.go` carries the event struct. Read
-both there rather than from a list here.
-
-**Why this surface is not a table of the event struct.** The audit stream exists
-to answer questions an operator or a reviewer arrives with: who saw this
-artifact, what did this person reach, what changed on this layer and who changed
-it, and did a break-glass happen. A screen that renders the event fields in
-columns leaves the reader to do the joining. The design pass decides what the
-questions are and what a screen shaped around each looks like.
-
-**The constraint that shapes everything here.** The audit stream is the record of
-who saw what, so a viewer that leaks it hands a reader the visibility model in
-reverse: the events name artifacts and layers, and reading them discloses that
-those artifacts exist to someone who cannot load them. §8 attaches
-retention and redaction rules that the surface has to respect rather than
-re-derive, including query text redacted to placeholders on a shorter clock than
-the events themselves, and PII scrubbed from query text before it is written.
-Two design consequences follow. A reader must never be shown an event about an
-artifact they could not load, and a display of query text has to read correctly
-when the text has been redacted out from under it rather than showing an empty
-field where words used to be.
-
-**Who reads it.** §8's own framing sends the audit stream to a SIEM or an audit
-dashboard, so a Podium-native viewer is a second consumer rather than the first.
-Whether it serves an administrator only, or a user asking what they themselves
-reached, is an open question this brief does not settle. The answer changes the
-surface completely: an administrator's view is an investigation tool over
-everyone, and a user's view is a personal history. The design pass should treat
-these as two candidate surfaces and say which it is designing, rather than one
-screen with rows hidden.
-
-**States this surface has to handle**, beyond the ones every surface shares:
-
-- An empty result that means nothing matched, distinguished from one that means
-  the reader may not see what matched. The concealment rule above makes these
-  produce the same screen unless the design separates them.
-- A record older than its retention window, which is absent rather than empty.
-- An event whose query text has aged into redaction, which is present with that
-  field replaced.
-- A stream whose sink is unavailable, which is a degraded read rather than an
-  empty one.
-
-**Open questions for the design pass.** Which questions the surface answers and
-what a screen shaped around each looks like; whether it is an administrator's
-investigation view, a user's own history, or both; how a reader moves between an
-event and the artifact or layer it names, given that the artifact may be one the
-reader cannot open; and how a time range is chosen, since every question here is
-scoped to one.
-
 ## The state matrix
 
 Most of the design work is here rather than in the happy path.
@@ -492,11 +430,7 @@ of that state rather than a failure per button press.
 
 - Authoring or editing artifacts. The UI is a reader and a layer manager;
   artifacts are authored in git.
-- Any admin surface beyond the layer panel and the audit viewer.
-- Erasure. §8.5 defines a right-to-be-forgotten path and the registry serves it
-  as an admin route, and the audit viewer reads rather than erases. A surface
-  that shows a reader what is recorded about a person and lets them erase it in
-  the same view is a larger decision than reading, and it is not taken here.
+- Any admin surface beyond the layer panel.
 - Any visual identity beyond what the existing token set already establishes.
 
 ## What the design pass should produce
