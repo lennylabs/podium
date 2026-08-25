@@ -82,7 +82,7 @@ The registry process reads `PODIUM_IDENTITY_PROVIDER` for its own value. A consu
 | Registry `PODIUM_IDENTITY_PROVIDER` | What the registry does | Where it is documented |
 |:--|:--|:--|
 | unset | Every caller is anonymous. Admin-defined layers registered through the endpoint default to `public` visibility. | [Access control](access-control) |
-| `oidc-jwt` | Callers present a JWT the configured IdP issued, which the registry verifies against its JWKS. Callers obtain that token by completing the CLI's device-code flow. | [OIDC cookbooks](oidc/) |
+| `oidc-jwt` | Callers present a JWT the configured IdP issued, which the registry verifies against its JWKS. A CLI, an SDK, or another API client obtains that token by completing the device-code flow, and on a registry that enables the browser flow a browser obtains it through the registry's own authorization-code exchange, which the registry returns in the `__Host-podium_session` cookie. | [OIDC cookbooks](oidc/) |
 | `oidc-jwt` | The registry verifies a gateway-forwarded IdP-signed JWT against the issuer's JWKS on every request. | [Gateway-delegated identity](gateway-delegated-identity) |
 | `trusted-headers` | The registry trusts gateway-injected identity headers without verifying them. | [Gateway-delegated identity](gateway-delegated-identity) |
 | `injected-session-token` | A managed runtime signs a per-session JWT and the registry verifies it on every call. | [Clustered](clustered#identity-flow) |

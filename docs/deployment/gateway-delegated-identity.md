@@ -6,9 +6,9 @@ description: Run the registry behind a gateway that authenticates the caller, us
 
 # Gateway-delegated identity
 
-A deployment may run the registry behind a gateway that has already authenticated the caller: an OIDC ingress, an OAuth2 proxy, an identity-verifying sidecar, or a non-OIDC corporate SSO. Two registry-process identity providers let the registry consume that gateway-supplied identity and filter layer visibility by it, rather than running its own device-code flow.
+A deployment may run the registry behind a gateway that has already authenticated the caller: an OIDC ingress, an OAuth2 proxy, an identity-verifying sidecar, or a non-OIDC corporate SSO. Two registry-process identity providers let the registry consume that gateway-supplied identity and filter layer visibility by it, rather than running its own device-code flow. `oidc-jwt` also serves a directly reachable registry, where the registry verifies the caller's token itself; `trusted-headers` requires the fronting gateway.
 
-Both are selected by the registry's `PODIUM_IDENTITY_PROVIDER`. They are registry-side values: a Podium client behind the gateway sends no credential of its own, because identity is supplied by the gateway. The MCP server's `PODIUM_IDENTITY_PROVIDER` continues to admit only `oauth-device-code` and `injected-session-token`, and rejects these two values. Both apply on a [single-node](single-node) or a [clustered](clustered) deployment, and both are mutually exclusive with public mode.
+Both are selected by the registry's `PODIUM_IDENTITY_PROVIDER`. They are registry-side values: a Podium client behind a gateway that has already authenticated the caller, under either provider, sends no credential of its own, because identity is supplied by the gateway. The MCP server's `PODIUM_IDENTITY_PROVIDER` continues to admit only `oauth-device-code` and `injected-session-token`, and rejects these two values. Both apply on a [single-node](single-node) or a [clustered](clustered) deployment, and both are mutually exclusive with public mode.
 
 | Value | Behavior | Use when |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ The token's `iss` is accepted when it matches the configured issuer or the `acce
 
 A deployment that sets `identity_provider.subject_claim` lists values of the named claim in its `users:` entries, in `PODIUM_OPERATOR_ADMINS`, and in `PODIUM_BOOTSTRAP_ADMINS`. The instance-operator grant and the per-tenant admin grants match the recorded subject and have no email fallback, so a `sub` value left in either variable grants nothing once the registry records another claim as the subject. The named claim must also identify one principal for the life of the deployment.
 
-A token that fails signature, `iss`, or `aud` validation is rejected with `auth.untrusted_token`, and an expired token with `auth.token_expired`. A request carrying no token is anonymous and sees public visibility only. While the issuer's JWKS is unreachable, verification fails closed and the request is anonymous rather than rejected.
+A token that fails signature, `iss`, or `aud` validation is rejected with `auth.untrusted_token`, and an expired token with `auth.token_expired`. A request whose configured token header carries no `Bearer` credential is anonymous rather than rejected and sees public visibility only. Where the registry enables the browser flow (see [Web UI](#web-ui)), such a request is anonymous only when it also presents no valid `__Host-podium_session` cookie, and the configured token header is still read first. The gateway-fronted deployment this page configures enables no browser flow, so the registry reads no cookie there. While the issuer's JWKS is unreachable, verification fails closed and the request is anonymous rather than rejected.
 
 ## trusted-headers
 
@@ -104,7 +104,11 @@ Enabling either provider changes the resolved default layer visibility. On a reg
 
 ## Web UI
 
-Under either provider the web UI is served by the same registry process and carries no device-code flow of its own. Where a gateway fronts the registry, the gateway authenticates the request and the registry resolves the caller's identity from the forwarded token or the injected headers, exactly as for any other API request, so the UI inherits the request's resolved identity. Where the registry is directly reachable under `oidc-jwt`, the registry verifies the token the caller presents itself, and a browser request that carries no token resolves as anonymous and sees public visibility only. A non-loopback web-UI bind under `trusted-headers` is also subject to the provider's bind restriction.
+Under either provider the web UI is served by the same registry process and carries no device-code flow of its own. Where a gateway fronts the registry, the gateway authenticates the request and the registry resolves the caller's identity from the forwarded token or the injected headers, exactly as for any other API request, so the UI inherits the request's resolved identity. Where the registry is directly reachable under `oidc-jwt`, the registry verifies the token the caller presents itself. Such a registry may also enable the browser flow (`--web-ui-auth` / `PODIUM_WEB_UI_AUTH`), in which case the registry signs the browser in through the identity provider and returns the resulting token in the `__Host-podium_session` cookie, which the [HTTP API reference](../reference/http-api#browser-session) documents. With the browser flow disabled, a browser request whose configured token header carries no `Bearer` credential resolves as anonymous and sees public visibility only; with it enabled, such a request resolves as anonymous only when it also presents no valid session cookie, and the configured token header is still read first. A non-loopback web-UI bind under `trusted-headers` is also subject to the provider's bind restriction.
+
+### A gateway that rewrites Host
+
+The registry refuses a state-changing request that carries cross-site browser-origin evidence with `403 auth.csrf_invalid`, and it compares the request's `Origin` header against the request's own `Host` header, which keeps the check free of a configuration key for the registry's public origin. A gateway that rewrites `Host` to an upstream service name breaks that comparison. A legitimate same-origin write from the UI then carries an `Origin` whose host differs from `Host`, so every write from the browser is refused with `403 auth.csrf_invalid` while every CLI and SDK write keeps succeeding, because a non-browser client carries no browser-origin evidence at all. The remedy is to pass the browser-facing `Host` through unrewritten.
 
 ## Startup guards
 

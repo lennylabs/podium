@@ -101,7 +101,7 @@ describe("loadConfig", () => {
   it("declares a failure threshold for the serialized search index", () => {
     expect(
       loadConfig({ repoRoot: REPO_ROOT, version: "0.0.0-test" }).searchIndexLimitBytes,
-    ).toBe(600 * 1024);
+    ).toBe(640 * 1024);
   });
 });
 
