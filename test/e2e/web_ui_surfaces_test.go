@@ -92,10 +92,17 @@ const readOnlyHeaderName = "X-Podium-Read-Only"
 // panelLayerFields are the layer-record members the layer panel reads: the
 // identifier it keys a row on, the class and the order that place the row in
 // the composition, the owner the ownership marker compares against, and the
-// staleness stamp the row renders. The registry marshals store.LayerConfig
-// directly, so the casing is not uniform: a tagged member carries its tag and
-// every other member carries its Go field name.
-var panelLayerFields = []string{"ID", "Order", "UserDefined", "Owner", "last_ingested_at"}
+// staleness stamp the row renders, plus the force-push policy the update
+// form edits. The registry marshals store.LayerConfig directly, so the casing
+// is not uniform: a tagged member carries its tag and every other member
+// carries its Go field name.
+var panelLayerFields = []string{"ID", "Order", "UserDefined", "Owner", "last_ingested_at", "force_push_policy"}
+
+// panelLayerOmitted are the panel's members whose json tag carries omitempty
+// and which a layer served from a local path leaves unset, so the wire object
+// carries neither. Their names are checked against the struct tag through the
+// bundle alone.
+var panelLayerOmitted = map[string]bool{"last_ingested_at": true, "force_push_policy": true}
 
 // Spec: §13.10, §7.3.1 — the served bundle reads a layer record under the
 // member names the registry marshals it with. The registry marshals the store
@@ -125,12 +132,9 @@ func TestWebUI_ServedBundleReadsTheLayerRecordFields(t *testing.T) {
 	if len(listed.Layers) == 0 {
 		t.Fatalf("the registry listed no layer to read the member names off\nbody: %s", body)
 	}
-	// last_ingested_at is omitempty and a layer served from a local path
-	// carries no stamp, so the wire object is checked for the members that
-	// are always present and the omitted one is checked against the struct
-	// tag through the bundle alone.
+	// The wire object is checked for the members that are always present.
 	for _, field := range panelLayerFields {
-		if field == "last_ingested_at" {
+		if panelLayerOmitted[field] {
 			continue
 		}
 		if _, ok := listed.Layers[0][field]; !ok {

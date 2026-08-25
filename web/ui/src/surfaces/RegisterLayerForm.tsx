@@ -8,8 +8,9 @@
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 
-import { Banner, CopyField, ErrorState } from '../components/primitives';
-import type { LayerRegisterResult, LayerRegistration } from '../api';
+import { SecretReveal } from './SecretReveal';
+import { ErrorState } from '../components/primitives';
+import type { LayerRegistration, LayerSecretResult } from '../api';
 import { ApiError, registerLayer } from '../api';
 
 export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: () => void; readOnly: boolean }) {
@@ -24,7 +25,7 @@ export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: ()
   const [groups, setGroups] = useState('');
   const [userScoped, setUserScoped] = useState(false);
   const [users, setUsers] = useState('');
-  const [result, setResult] = useState<LayerRegisterResult | null>(null);
+  const [result, setResult] = useState<LayerSecretResult | null>(null);
   const [refusal, setRefusal] = useState<unknown>(null);
 
   // An axis the reader turned on with no member named would register a
@@ -64,6 +65,7 @@ export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: ()
     return (
       <SecretReveal
         result={result}
+        outcome={`Layer ${result.layer.ID} is registered.`}
         onDone={() => {
           setResult(null);
         }}
@@ -249,40 +251,4 @@ function members(raw: string): string[] {
     .split(',')
     .map((member) => member.trim())
     .filter((member) => member !== '');
-}
-
-function SecretReveal({ result, onDone }: { result: LayerRegisterResult; onDone: () => void }) {
-  const [acknowledged, setAcknowledged] = useState(false);
-  if (result.webhook_secret === undefined || result.webhook_secret === '') {
-    // A local-path source returns neither a webhook URL nor a secret, so the
-    // whole reveal is conditional.
-    return <Banner tone="accent">Layer {result.layer.ID} is registered.</Banner>;
-  }
-  return (
-    <div className="secret-reveal" aria-label="Webhook secret">
-      <p className="label">Shown once</p>
-      <p>
-        The webhook URL is permanent. The secret is returned here and on a rotation, and the registry stores only a
-        hash of it.
-      </p>
-      {/* Both values are here to be taken away, so each carries its own
-          copy control. The secret is never served again, so a reader who
-          leaves without it has to rotate the secret to get another. */}
-      <CopyField label="Webhook URL" value={result.webhook_url ?? ''} />
-      <CopyField label="Webhook secret" value={result.webhook_secret} />
-      <label>
-        <input
-          type="checkbox"
-          checked={acknowledged}
-          onChange={(event) => {
-            setAcknowledged(event.target.checked);
-          }}
-        />
-        I have stored the secret.
-      </label>
-      <button type="button" disabled={!acknowledged} onClick={onDone}>
-        Done
-      </button>
-    </div>
-  );
 }

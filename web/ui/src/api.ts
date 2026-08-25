@@ -231,6 +231,7 @@ export interface LayerRecord {
   Organization?: boolean;
   Groups?: string[] | null;
   Users?: string[] | null;
+  force_push_policy?: string;
   last_ingested_at?: string;
   LastIngestedRef?: string;
 }
@@ -336,22 +337,48 @@ export interface LayerRegistration {
   users?: string[];
 }
 
-/** LayerRegisterResult carries the one-time credential. A git source returns
- * a webhook URL and an HMAC secret, and this response and a secret rotation
- * are the only places the secret is returned. A local-path source returns
- * neither. */
-export interface LayerRegisterResult {
+/** LayerSecretResult carries the one-time credential. A git source returns a
+ * webhook URL and an HMAC secret on registration and on a secret rotation,
+ * and those two responses are the only places the secret is returned. A
+ * local-path source returns neither, and so does an update that requests no
+ * rotation. */
+export interface LayerSecretResult {
   layer: LayerRecord;
   webhook_url?: string;
   webhook_secret?: string;
 }
 
-export function registerLayer(body: LayerRegistration): Promise<LayerRegisterResult> {
-  return request<LayerRegisterResult>(paths.layers, {
+export function registerLayer(body: LayerRegistration): Promise<LayerSecretResult> {
+  return request<LayerSecretResult>(paths.layers, {
     ...write,
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
+  });
+}
+
+/** LayerUpdate is the partial patch the update endpoint honours. A field the
+ * patch omits keeps its prior value, and the identifying fields (the tenant,
+ * the layer ID, and the source type) are immutable. Owner and visibility are
+ * absent: the registry ignores them on a user-defined layer and answers
+ * success, so a control for them would report a change that never happened. */
+export interface LayerUpdate {
+  ref?: string;
+  root?: string;
+  local_path?: string;
+  force_push_policy?: string;
+  rotate_webhook_secret?: boolean;
+}
+
+/** updateLayer patches one layer. A rotation returns the fresh HMAC secret
+ * once, on the same terms as registration, so the result carries the same
+ * one-time credential fields. */
+export function updateLayer(id: string, patch: LayerUpdate): Promise<LayerSecretResult> {
+  return request<LayerSecretResult>(`${paths.layers}/update${query({ id })}`, {
+    ...write,
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(patch),
   });
 }
 

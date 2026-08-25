@@ -793,6 +793,74 @@ describe('the layer write flows', () => {
     expect(screen.getByRole('button', { name: 'Done' }).hasAttribute('disabled')).toBe(false);
   });
 
+  // The update is a partial patch and a rotation returns the fresh secret
+  // once, on the same terms as registration, so the rotation runs through the
+  // same reveal rather than through a second treatment.
+  it('patches a git layer and reveals the rotated secret once', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [adminLayer()] } },
+      'PUT /v1/layers/update': {
+        body: {
+          layer: { ID: 'company', SourceType: 'git', Order: 1 },
+          webhook_url: 'https://registry.acme.com/v1/ingest/webhook/company',
+          webhook_secret: 'whsec-rotated',
+        },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const form = await screen.findByLabelText('Update company');
+    // The registry ignores an owner or a visibility patch on a user-defined
+    // layer and still answers success, so neither is offered anywhere.
+    expect(screen.queryByLabelText('Organization')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Ref'), { target: { value: 'release' } });
+    fireEvent.change(screen.getByLabelText('Force-push policy'), { target: { value: 'strict' } });
+    fireEvent.click(screen.getByLabelText('Rotate the webhook secret'));
+    fireEvent.submit(form);
+    await waitFor(() => {
+      expect(requests.some((r) => r.url === '/v1/layers/update?id=company' && r.method === 'PUT')).toBe(true);
+    });
+    const sent = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
+    expect(sent.ref).toBe('release');
+    expect(sent.force_push_policy).toBe('strict');
+    expect(sent.rotate_webhook_secret).toBe(true);
+    await screen.findByLabelText('Webhook secret');
+    expect(screen.getByText('whsec-rotated')).toBeTruthy();
+  });
+
+  // Only a git source carries a webhook secret, and the registry refuses a
+  // rotation on any other source, so the control is unavailable on a
+  // local-path layer and says why.
+  it('offers no rotation on a local-path layer and patches its source details', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+      'PUT /v1/layers/update': { body: { layer: userLayer() } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const form = await screen.findByLabelText('Update alice-personal');
+    const rotate = screen.getByLabelText('Rotate the webhook secret');
+    expect(rotate.hasAttribute('disabled')).toBe(true);
+    expect(form.textContent).toContain('Only a git layer carries a webhook secret.');
+    fireEvent.change(screen.getByLabelText('Local path'), { target: { value: '/Users/alice/moved' } });
+    fireEvent.submit(form);
+    await waitFor(() => {
+      expect(requests.some((r) => r.url === '/v1/layers/update?id=alice-personal' && r.method === 'PUT')).toBe(true);
+    });
+    const sent = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
+    expect(sent.local_path).toBe('/Users/alice/moved');
+    expect(sent.rotate_webhook_secret).toBeUndefined();
+    // A patch that rotates nothing carries no secret, so the reveal is
+    // replaced by the outcome the update reports.
+    expect((await screen.findByText('Layer alice-personal is updated.')).textContent).toBeTruthy();
+  });
+
   // §4.6 composes every user-defined layer above every admin-defined one
   // whatever the stored order values are, so a move runs inside the moving
   // layer's own class and the request names that class's layers alone. A

@@ -14,6 +14,7 @@ import { useState } from 'react';
 import { DeletedLayers } from './DeletedLayers';
 import { RegisterLayerForm } from './RegisterLayerForm';
 import { ReingestControl } from './ReingestControl';
+import { UpdateLayerForm } from './UpdateLayerForm';
 import { Badge, Banner, EmptyState, ErrorState, Loading } from '../components/primitives';
 import type { LayerRecord } from '../api';
 import { ApiError, listLayers, reorderLayers, unregisterLayer } from '../api';
@@ -149,6 +150,7 @@ function LayerRow({
   const index = order.indexOf(layer.ID);
   const [refusal, setRefusal] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   // A write the panel sends can come back refused, including on a row the
   // panel presented as this caller's to manage. The refusal is drawn on the
@@ -191,6 +193,15 @@ function LayerRow({
         >
           Raise precedence
         </button>
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => {
+            setEditing((open) => !open);
+          }}
+        >
+          Edit
+        </button>
         <ReingestControl
           layerID={layer.ID}
           readOnly={readOnly}
@@ -209,6 +220,19 @@ function LayerRow({
         >
           Unregister
         </button>
+        {editing && (
+          <UpdateLayerForm
+            layer={layer}
+            readOnly={readOnly}
+            onUpdated={() => {
+              setRefusal(null);
+              onWrite();
+            }}
+            onClose={() => {
+              setEditing(false);
+            }}
+          />
+        )}
         {confirming && (
           <UnregisterConfirmation
             layer={layer}
