@@ -4235,9 +4235,9 @@ misconfigured:
    deployment enables the browser flow and this caller resolves no subject,
    which is the case the §13.10 sign-in control rule renders sign-in for. The
    page shows no verification URL and no device code, because the registry runs
-   no device-code flow for a browser, and it shows no sign-out control, because
-   that is the control the same rule renders for a caller who resolves a
-   subject.
+   no device-code flow for a browser, and it shows neither the account cluster
+   nor the sign-out control inside it, because the same rule renders those for a
+   caller who resolves a subject.
 
 7. Confirm the restricted artifact is invisible rather than merely absent from a
    list, by requesting it directly with no credential.
@@ -4685,8 +4685,10 @@ and record the skip.
    password `admin`.
 
    **Expect.** The browser leaves the registry for the authorization endpoint,
-   returns to `http://127.0.0.1:8153/ui/` after the login, and the page now shows
-   a sign-out control in place of sign-in. A browser that lands on an
+   returns to `http://127.0.0.1:8153/ui/` after the login, and the account
+   cluster stands where the sign-in control was: the top bar carries the
+   caller's own subject instead of a Sign in button, and the sign-out control
+   sits inside the menu that cluster opens. A browser that lands on an
    `invalid_scope` or `invalid_redirect_uri` error page at Keycloak means
    prerequisite 4's client scope or redirect URI did not take.
 
@@ -4722,7 +4724,8 @@ and record the skip.
    registry-mediated flow exists for, and the page rendering author-controlled
    markdown on the same origin is why.
 
-6. Sign out from the page's control, then reload.
+6. Open the account cluster from the subject in the top bar, press Sign out
+   inside the menu, then reload.
 
    **Expect.** The page returns to the anonymous view: the compensation policy
    is gone from the catalog and the sign-in control is back. Signing out clears
@@ -4909,6 +4912,22 @@ profile S47 signed in from cannot hold a second session.
    $KC set-password -r master --username bob --new-password bob
    ```
 
+   Read bob's `sub` the way prerequisite 5 read admin's, so step 2 has a value
+   to compare the posture body against.
+
+   ```bash
+   export BOB_SUBJECT="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
+     -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
+     -d username=bob -d password=bob \
+     | python3 -c "import base64,json,sys; p=json.load(sys.stdin)['access_token'].split('.')[1]; p+='='*(-len(p)%4); print(json.loads(base64.urlsafe_b64decode(p))['sub'])")"
+   echo "$BOB_SUBJECT"
+   ```
+
+   **Expect.** A `sub` value that differs from `$SUBJECT`, the admin `sub` S44
+   exported. The subject claim is `sub` by default, so neither value is a login
+   name and the two are distinguished by comparison rather than by reading a
+   username out of them.
+
 2. Open `http://127.0.0.1:8153/ui/` in the second browser profile, sign in as
    `bob` with the password `bob`, and open the layer panel. Do not use a private
    window of the profile S47 signed in from: every window of a profile shares
@@ -4924,10 +4943,11 @@ profile S47 signed in from cannot hold a second session.
    http://127.0.0.1:8153/v1/ui/session
    ```
 
-   **Expect.** The body reports `subject` naming bob rather than the admin
-   subject. A body naming admin means the sign-in reused the admin profile's SSO
-   session, and every later step in this scenario would then exercise the owner
-   arm of the rule rather than the non-owner arm it exists to test. The panel
+   **Expect.** The body reports `subject` equal to `$BOB_SUBJECT`, which differs
+   from `$SUBJECT`. A body whose `subject` equals `$SUBJECT` means the sign-in
+   reused the admin profile's SSO session, and every later step in this scenario
+   would then exercise the owner arm of the rule rather than the non-owner arm
+   it exists to test. The panel
    lists `own-release` along with the layers `registry.yaml` declares.
    `GET /v1/layers` is unfiltered, so bob reads the whole tenant's layer list.
    The `own-release` row carries no "yours" marker, because bob's subject is not
