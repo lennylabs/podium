@@ -591,7 +591,7 @@ describe('the session-expiry transition', () => {
   // The third row of the sign-in control table bounds what the treatment may
   // offer: a deployment running no browser flow renders no authentication
   // control, so the treatment states what it offers in its place.
-  it('offers no sign-in control where the deployment runs no browser flow', async () => {
+  it('offers a retry of the refused read where the deployment runs no browser flow', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
       '/v1/load_domain': { status: 401, body: { code: 'auth.token_expired', message: 'expired' } },
@@ -600,6 +600,28 @@ describe('the session-expiry transition', () => {
     await screen.findByLabelText('Catalog refused');
     expect(screen.queryByTestId('expiry-sign-in')).toBeNull();
     expect(screen.getByText(/runs no browser sign-in/)).toBeTruthy();
+    // The third row renders no authentication control, so the treatment has to
+    // state what it offers in its place, and a retry of the refused read is
+    // that control.
+    expect(screen.getByTestId('expiry-retry')).toBeTruthy();
+  });
+
+  // The refused arm is reached by a caller who never held a subject as well,
+  // on a registry whose verifier refuses a browser that carries no token. The
+  // expiry transition belongs to the caller whose read resolved a subject, so
+  // this caller is told what the read returned and nothing about a session.
+  it('claims no ended session where the posture read resolved no subject', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ browser_auth: { enabled: false } }) },
+      '/v1/load_domain': { status: 401, body: { code: 'auth.untrusted_token', message: 'no identity' } },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    await screen.findByTestId('refused-read');
+    expect(screen.queryByTestId('session-ended')).toBeNull();
+    expect(screen.queryByTestId('expiry-sign-in')).toBeNull();
   });
 });
 
@@ -607,11 +629,14 @@ describe('read-only mode', () => {
   // §13.2.1 marks a read-only registry on its read responses, so the panel
   // presents the state once and makes every write control unavailable at the
   // same time. A panel that keeps its controls live collects one refusal per
-  // button press instead, which is the presentation the brief forbids.
+  // button press instead, which is the presentation the brief forbids. The
+  // marker arrives on a catalog read, because the middleware that sets it
+  // wraps the meta-tool mux and the layer endpoints are mounted beside it.
   it('presents the state once and makes every write control unavailable', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
-      '/v1/layers': { body: { layers: [adminLayer(), userLayer()] }, headers: { 'X-Podium-Read-Only': 'true' } },
+      '/v1/load_domain': { body: emptyDomain, headers: { 'X-Podium-Read-Only': 'true' } },
+      '/v1/layers': { body: { layers: [adminLayer(), userLayer()] } },
     });
     goTo('#/layers');
     render(<App />);
@@ -627,6 +652,7 @@ describe('read-only mode', () => {
   it('keeps every write control live where the registry serves writes', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/load_domain': { body: emptyDomain },
       '/v1/layers': { body: { layers: [userLayer()] } },
     });
     goTo('#/layers');
@@ -634,6 +660,25 @@ describe('read-only mode', () => {
     await screen.findByLabelText('Layer panel');
     expect(screen.queryByTestId('read-only-banner')).toBeNull();
     expect(screen.getByRole('button', { name: 'Reingest' }).hasAttribute('disabled')).toBe(false);
+  });
+
+  // The layer endpoints are outside the §13.2.1 middleware, so a response from
+  // one of them carries the marker on no mode. A panel that read that absence
+  // as "the registry serves writes" would clear the banner on its own list
+  // read and on every reload after it.
+  it('keeps the banner where a layer read carries no marker', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/load_domain': { body: emptyDomain, headers: { 'X-Podium-Read-Only': 'true' } },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    await screen.findByTestId('read-only-banner');
+    fireEvent.click(screen.getByRole('button', { name: 'Recently unregistered' }));
+    await screen.findByLabelText('Recently unregistered');
+    expect(screen.getByTestId('read-only-banner')).toBeTruthy();
   });
 });
 

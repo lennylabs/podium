@@ -52,9 +52,21 @@ interface ErrorEnvelope {
 
 // §13.2.1 puts a read-only marker on the registry's responses, so the page
 // can present that state before a write is attempted rather than collecting
-// one refusal per button press. Every response carries it, so the client
-// publishes what the marker said and the shell holds the value.
+// one refusal per button press.
 const readOnlyHeader = 'X-Podium-Read-Only';
+
+// The middleware that sets the marker wraps the meta-tool mux alone. The
+// layer endpoints, the posture read, and the authentication routes are mounted
+// beside it and carry no marker on any mode, so a response from one of them
+// reports nothing about the mode. Reading a missing header there as "the
+// registry serves writes" would clear the banner on every panel read and leave
+// the write controls live on a read-only registry.
+const readOnlyMarked: ReadonlySet<string> = new Set<string>([
+  paths.loadDomain,
+  paths.searchArtifacts,
+  paths.loadArtifact,
+  paths.dependents,
+]);
 
 type ReadOnlyListener = (readOnly: boolean) => void;
 
@@ -69,7 +81,10 @@ export function subscribeReadOnly(listener: ReadOnlyListener): () => void {
   };
 }
 
-function publishReadOnly(response: Response): void {
+function publishReadOnly(path: string, response: Response): void {
+  if (!readOnlyMarked.has(path.split('?')[0])) {
+    return;
+  }
   const readOnly = response.headers.get(readOnlyHeader) === 'true';
   for (const listener of readOnlyListeners) {
     listener(readOnly);
@@ -78,7 +93,7 @@ function publishReadOnly(response: Response): void {
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, init);
-  publishReadOnly(response);
+  publishReadOnly(path, response);
   const text = await response.text();
   if (!response.ok) {
     throw errorFrom(response.status, text);

@@ -9,7 +9,6 @@
 // and treats the local operator as the administrator, and the panel is the
 // point of that deployment.
 
-import type { ReactNode } from 'react';
 import { useState } from 'react';
 
 import { DeletedLayers } from './DeletedLayers';
@@ -24,17 +23,7 @@ import { useAsync } from '../useAsync';
  * window with no date leaves the reader to work out what it means. */
 const recoveryDays = 30;
 
-export function LayerPanel({
-  subject,
-  readOnly,
-  sessionEnded,
-  recovery,
-}: {
-  subject: string;
-  readOnly: boolean;
-  sessionEnded: boolean;
-  recovery: ReactNode;
-}) {
+export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: boolean }) {
   const layers = useAsync(() => listOrdered(), []);
   const [registering, setRegistering] = useState(false);
   const [showingDeleted, setShowingDeleted] = useState(false);
@@ -51,16 +40,6 @@ export function LayerPanel({
   return (
     <section className="surface" aria-label="Layer panel">
       <h1>Layers</h1>
-      {/* The session ended while the page was open. The panel is kept
-          underneath, because the treatment states a transition rather than
-          replacing what the caller was looking at, and the control beside it
-          is whatever the deployment's posture licenses. */}
-      {sessionEnded && (
-        <div className="banner banner-danger" role="alert" data-testid="session-ended">
-          <p className="banner-title">Your session has ended. Sign in again to manage layers.</p>
-          {recovery}
-        </div>
-      )}
       {/* §13.2.1 marks a read-only registry on its read responses, so the
           state is presented once here and every write control is unavailable
           at once rather than each one failing when it is pressed. */}
