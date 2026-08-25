@@ -14,6 +14,7 @@ import { ArtifactRow } from '../components/ArtifactRow';
 import { EmptyState, ErrorState, Loading } from '../components/primitives';
 import type { SearchFilters, SearchResponse } from '../api';
 import { searchArtifacts } from '../api';
+import { parseQueryLine } from '../query';
 import type { Async } from '../useAsync';
 import { useAsync, useErrorReport } from '../useAsync';
 
@@ -26,10 +27,17 @@ const resultCap = 10;
 const firstClassTypes = ['skill', 'agent', 'context', 'command', 'rule', 'hook', 'mcp-server'];
 
 export function SearchSurface({ query, onError }: { query: string; onError: (err: unknown) => void }) {
-  const [type, setType] = useState('');
-  const [scope, setScope] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
-  const [text, setText] = useState(query);
+  // The route query carries the same line the palette types, so the surface
+  // runs the palette's own parse over it. A query arriving as
+  // "type:skill auth" opens with the skill pill filled and "auth" in the
+  // field, which is the request the palette issued and the result set it
+  // listed. The shell remounts the surface on each query, so the parse seeds
+  // the state once per query and the reader's later edits stand.
+  const seed = parseQueryLine(query);
+  const [type, setType] = useState(seed.type);
+  const [scope, setScope] = useState(seed.scope);
+  const [tags, setTags] = useState<string[]>(seed.tags);
+  const [text, setText] = useState(seed.query);
 
   const filters: SearchFilters = { query: text, type, scope, tags };
   const key = JSON.stringify(filters);

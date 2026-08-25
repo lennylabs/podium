@@ -208,6 +208,61 @@ describe('the application shell', () => {
     expect(within(tree).queryByRole('link', { name: 'ci' })).toBeNull();
   });
 
+  // The deeper read is a catalog read, so a refusal for an unverifiable
+  // identity is the expiry signal rather than a permission property of the
+  // domain. A caller whose session ends while the page is open is owed the
+  // expiry transition, which is what the shell renders from the outcome the
+  // node hands it.
+  it('renders the expiry transition where a deeper level is refused for an unverifiable identity', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/load_domain': { body: catalog },
+      '/v1/search_artifacts': { body: { total_matched: 0 } },
+      '/v1/layers': { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText('Catalog');
+    fireEvent.click(within(tree).getAllByRole('button', { expanded: false })[0]);
+    stubRegistry({
+      '/v1/load_domain': { status: 401, body: { code: 'auth.token_expired', message: 'expired' } },
+    });
+    fireEvent.click(within(tree).getAllByRole('button', { expanded: false })[0]);
+    expect(await screen.findByTestId('session-ended')).toBeTruthy();
+    expect(screen.queryByTestId('restricted-domain')).toBeNull();
+  });
+
+  // A level that did not load for any other reason states that and nothing
+  // more. The domain stays enterable, because no response reported that this
+  // caller may not open it, and expanding the node again re-issues the read
+  // rather than latching the failure for the life of the page.
+  it('keeps a domain enterable where its deeper read failed and re-reads it on the next expansion', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': { body: catalog },
+      '/v1/search_artifacts': { body: { total_matched: 0 } },
+      '/v1/layers': { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText('Catalog');
+    fireEvent.click(within(tree).getAllByRole('button', { expanded: false })[0]);
+    stubRegistry({
+      '/v1/load_domain': { status: 503, body: { code: 'registry.unavailable', message: 'down' } },
+    });
+    const toggle = within(tree).getAllByRole('button', { expanded: false })[0];
+    fireEvent.click(toggle);
+    expect(await screen.findByTestId('unavailable-domain')).toBeTruthy();
+    expect(within(tree).getByRole('link', { name: 'ci' })).toBeTruthy();
+    expect(screen.queryByTestId('restricted-domain')).toBeNull();
+    // The failure cleared, and the next expansion is what re-issues the read.
+    stubRegistry({
+      '/v1/load_domain': { body: { path: 'platform/ci', subdomains: [{ path: 'platform/ci/lint', name: 'lint' }] } },
+    });
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    expect(await within(tree).findByText('lint')).toBeTruthy();
+    expect(screen.queryByTestId('unavailable-domain')).toBeNull();
+  });
+
   // The refused arm has no catalog to navigate. The tree and the counts are
   // emptied rather than left standing with what an earlier read returned,
   // and the depth marker is kept, because it states a property of this
@@ -1863,9 +1918,39 @@ describe('the command palette', () => {
     fireEvent.change(within(panel).getByLabelText('Search artifacts'), { target: { value: 'review' } });
     fireEvent.keyDown(panel, { key: 'Enter', metaKey: true });
     expect(window.location.hash).toBe('#/search/review');
+    await screen.findByLabelText('Search');
     fireEvent.keyDown(window, { key: 'k', metaKey: true });
     fireEvent.keyDown(screen.getByTestId('palette'), { key: 'Escape' });
     expect(screen.queryByTestId('palette')).toBeNull();
+  });
+
+  // The handoff carries the filters the palette parsed rather than the line
+  // read back as free text: the search surface issues the request the palette
+  // issued and renders the filters as the pills the syntax teaches.
+  it('reproduces the palette’s filters and result set on the search surface', async () => {
+    palettePage([{ id: 'platform/review', type: 'skill' }], 3);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('search-trigger'));
+    const panel = screen.getByTestId('palette');
+    fireEvent.change(within(panel).getByLabelText('Search artifacts'), {
+      target: { value: 'type:skill tag:review scope:platform lint' },
+    });
+    await waitFor(() => {
+      expect(lastSearch().get('type')).toBe('skill');
+    });
+    fireEvent.keyDown(panel, { key: 'Enter', metaKey: true });
+    await screen.findByLabelText('Search');
+    await waitFor(() => {
+      expect(lastSearch().get('query')).toBe('lint');
+    });
+    expect(lastSearch().get('type')).toBe('skill');
+    expect(lastSearch().get('tags')).toBe('review');
+    expect(lastSearch().get('scope')).toBe('platform');
+    // The parsed filters are the pills the surface opens with, so the reader
+    // can drop one from the row the palette's syntax taught.
+    expect(within(screen.getByLabelText('Scope')).getByText('platform')).toBeTruthy();
+    expect(screen.getByLabelText('Remove the review filter')).toBeTruthy();
+    expect(screen.getByLabelText('Remove the skill filter')).toBeTruthy();
   });
 
   // A query that matched nothing offers the recovery path and says nothing
@@ -1921,6 +2006,50 @@ describe('the shell’s identity cluster', () => {
     expect(window.localStorage.getItem('podium.theme')).toBe('dark');
     fireEvent.click(within(menu).getByRole('button', { name: 'system' }));
     expect(window.document.documentElement.hasAttribute('data-theme')).toBe(false);
+  });
+
+  // The menu carries the layer quota, read from the §4.7.8 endpoint the
+  // registry gates on no role, so the caller sees the cap on how many layers
+  // of their own they may hold.
+  it('states the layer quota the registry reports', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/load_domain': { body: emptyDomain },
+      '/v1/quota': { body: { tenant_id: 'acme', limits: { MaxUserLayers: 3 } } },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('account-trigger'));
+    expect((await screen.findByTestId('layer-quota')).textContent).toBe('3 user-defined layers');
+  });
+
+  // A quota read that fails leaves the menu with no quota entry rather than a
+  // figure no response carried.
+  it('drops the quota entry where the read does not answer', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/load_domain': { body: emptyDomain },
+      '/v1/quota': { status: 503, body: { code: 'registry.unavailable', message: 'down' } },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('account-trigger'));
+    await screen.findByTestId('account-menu');
+    await waitFor(() => {
+      expect(requests.some((r) => r.url === '/v1/quota')).toBe(true);
+    });
+    expect(screen.queryByTestId('layer-quota')).toBeNull();
+  });
+
+  // A tenant whose quota disables the cap holds any number of layers, which
+  // the entry states rather than reporting the negative value.
+  it('states a disabled cap as no limit', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/load_domain': { body: emptyDomain },
+      '/v1/quota': { body: { limits: { MaxUserLayers: -1 } } },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId('account-trigger'));
+    expect((await screen.findByTestId('layer-quota')).textContent).toBe('no cap on your layers');
   });
 });
 
@@ -1990,10 +2119,13 @@ describe('the trimmed listing', () => {
 });
 
 describe('the anonymous framing', () => {
-  // The framing asserts a property of the caller, so it is withheld where the
-  // posture read did not answer: the page presents what the catalog read
-  // returned and reports nothing about whether this caller holds a subject.
-  it('claims nothing about the caller where the posture read did not answer', async () => {
+  // Where the catalog read answers and the posture read does not, the page is
+  // on the public-subset arm and takes that arm's treatment: it presents what
+  // the catalog read returned, states that no subject resolved, and claims
+  // nothing about content beyond what was returned. The authentication
+  // controls key on the posture read, so a read that did not answer renders
+  // neither of them.
+  it('takes the public-subset treatment where the posture read did not answer', async () => {
     stubRegistry({
       '/v1/ui/session': { status: 503, body: { code: 'registry.unavailable', message: 'down' } },
       '/v1/load_domain': {
@@ -2002,8 +2134,13 @@ describe('the anonymous framing', () => {
     });
     render(<App />);
     expect(await screen.findByText('platform/deploy')).toBeTruthy();
-    expect(screen.queryByTestId('anonymous-banner')).toBeNull();
-    expect(screen.queryByText('Not signed in')).toBeNull();
+    expect(screen.getByTestId('anonymous-banner')).toBeTruthy();
+    expect(screen.getByText('Not signed in')).toBeTruthy();
+    expect(screen.queryByTestId('sign-in')).toBeNull();
+    expect(screen.queryByTestId('sign-out')).toBeNull();
+    // The arm says nothing about content having been withheld.
+    expect(screen.queryByText(/hidden/i)).toBeNull();
+    expect(screen.queryByText(/withheld/i)).toBeNull();
   });
 });
 

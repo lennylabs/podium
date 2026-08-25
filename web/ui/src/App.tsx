@@ -9,7 +9,16 @@ import type { ReactNode } from 'react';
 
 import { Banner, ErrorState, Loading, PageBanner } from './components/primitives';
 import type { DomainDescriptor } from './api';
-import { isIdentityRefusal, listLayers, loadDomain, searchArtifacts, signOut, subscribeReadOnly } from './api';
+import {
+  ApiError,
+  isIdentityRefusal,
+  listLayers,
+  loadDomain,
+  readQuota,
+  searchArtifacts,
+  signOut,
+  subscribeReadOnly,
+} from './api';
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
 import { domainHref, layersHref, searchHref, useRoute } from './route';
@@ -142,12 +151,13 @@ export function App() {
   // beyond what the read returned, and the banner carries no control of its
   // own, because the authentication control belongs to the shell.
   //
-  // Both pieces assert a property of the caller, so both are gated on the
-  // posture read having answered. A read that did not answer places the page
-  // on the arm that presents what the catalog read returned under the
-  // public-subset arm's constraint, and that arm reports nothing about
-  // whether this caller holds a subject.
-  const anonymous = posture !== null && scope === 'public-subset' && subject === '';
+  // Both pieces key on the arm rather than on the posture read having
+  // answered. A catalog read that answers while the posture read does not
+  // lands on the public-subset arm, and that arm carries this presentation:
+  // the page states that no subject resolved for it and claims nothing about
+  // content beyond what was returned. The authentication controls stay keyed
+  // on the read, so that arm renders neither of them.
+  const anonymous = scope === 'public-subset' && subject === '';
 
   return (
     <div className="app">
@@ -191,7 +201,7 @@ export function App() {
           </p>
           {/* The refused arm has no catalog to navigate, so the tree and the
               counts are empty rather than absent. */}
-          <CatalogTree nodes={refused ? [] : (tree.value?.subdomains ?? [])} />
+          <CatalogTree nodes={refused ? [] : (tree.value?.subdomains ?? [])} onOutcome={onCatalogOutcome} />
           <div className="sidebar-footer">
             <CatalogCounts counts={refused ? null : counts.value} />
             {anonymous && <p className="quiet">Not signed in</p>}
@@ -227,7 +237,10 @@ function Surface({
 }) {
   switch (route.name) {
     case 'search':
-      return <SearchSurface query={route.query} onError={onCatalogOutcome} />;
+      // The surface seeds its filter state from the query, so a fresh query
+      // arriving from the palette while the surface is already open remounts
+      // it rather than leaving the prior query's pills standing.
+      return <SearchSurface key={route.query} query={route.query} onError={onCatalogOutcome} />;
     case 'artifact':
       return <ArtifactViewer id={route.id} onError={onCatalogOutcome} />;
     case 'layers':
@@ -307,11 +320,11 @@ export function since(stamp: string, now: number): string {
 /** CatalogTree is the sidebar's navigation over the §4.2 domain hierarchy.
  * The levels the eager read returned are rendered at once and a deeper level
  * is read when the reader expands the node it hangs under. */
-function CatalogTree({ nodes }: { nodes: DomainDescriptor[] }) {
+function CatalogTree({ nodes, onOutcome }: { nodes: DomainDescriptor[]; onOutcome: (err: unknown) => void }) {
   return (
     <ul className="catalog-tree" aria-label="Catalog">
       {nodes.map((node) => (
-        <TreeNode key={node.path} node={node} />
+        <TreeNode key={node.path} node={node} onOutcome={onOutcome} />
       ))}
     </ul>
   );
@@ -319,27 +332,49 @@ function CatalogTree({ nodes }: { nodes: DomainDescriptor[] }) {
 
 /** TreeNode is one domain in the sidebar tree. A node whose children came
  * with the eager read renders them from it, and a node at the read's edge
- * reads its own level when it is expanded. A read the registry refuses leaves
- * the domain listed and not enterable, which is what the reader is owed: the
- * domain is in the hierarchy and this caller cannot open it. */
-function TreeNode({ node }: { node: DomainDescriptor }) {
+ * reads its own level when it is expanded.
+ *
+ * That deeper read is a catalog read, so its failure is split three ways. A
+ * refusal for an unverifiable identity is handed to the shell, because the
+ * catalog read is the expiry signal and a caller whose session ends while the
+ * page is open is owed the transition rather than a relabelled node. An
+ * authorization refusal leaves the domain listed and not enterable, which is
+ * what the reader is owed there: the domain is in the hierarchy and this
+ * caller cannot open it. Every other failure is the surface's own error
+ * state, so the domain stays enterable, the node states that the level did
+ * not load, and a later expansion re-issues the read. */
+function TreeNode({ node, onOutcome }: { node: DomainDescriptor; onOutcome: (err: unknown) => void }) {
   const [open, setOpen] = useState(false);
   const [loaded, setLoaded] = useState<DomainDescriptor[] | null>(null);
   const [restricted, setRestricted] = useState(false);
+  const [failed, setFailed] = useState(false);
   const eager = node.subdomains;
   const children = eager ?? loaded;
 
   const expand = () => {
-    setOpen((prior) => !prior);
-    if (eager !== undefined || loaded !== null || restricted) {
+    const opening = !open;
+    setOpen(opening);
+    // Only an expansion reads a level, and only the authorization refusal
+    // latches: a level that did not load for any other reason is read again
+    // the next time the reader asks for it.
+    if (!opening || eager !== undefined || loaded !== null || restricted) {
       return;
     }
+    setFailed(false);
     loadDomain(node.path, treeDepth).then(
       (level) => {
         setLoaded(level.subdomains);
       },
-      () => {
-        setRestricted(true);
+      (err: unknown) => {
+        if (isIdentityRefusal(err)) {
+          onOutcome(err);
+          return;
+        }
+        if (err instanceof ApiError && err.status === 403) {
+          setRestricted(true);
+          return;
+        }
+        setFailed(true);
       },
     );
   };
@@ -361,7 +396,15 @@ function TreeNode({ node }: { node: DomainDescriptor }) {
           {node.name}
         </a>
       )}
-      {open && children !== null && children.length > 0 && <CatalogTree nodes={children} />}
+      {/* The failed arm states that this level did not load and claims
+          nothing about what the caller may see. Expanding the node again is
+          what retries it. */}
+      {failed && (
+        <span className="label" data-testid="unavailable-domain">
+          did not load
+        </span>
+      )}
+      {open && children !== null && children.length > 0 && <CatalogTree nodes={children} onOutcome={onOutcome} />}
     </li>
   );
 }
@@ -530,12 +573,11 @@ function TopBar({
 }
 
 /** AccountMenu is the identity cluster and the menu behind it. It carries the
- * caller's own subject, the appearance preference, and the sign-out entry
- * point where the deployment runs one. It carries no role badge and no group
- * membership: no response reports that the caller holds the administrator
- * role, and no response enumerates the caller's groups, so the menu states
- * neither. The layer quota is absent for the same reason: the registry
- * reports the limit on the refusal that hits it rather than on any read. */
+ * caller's own subject, the appearance preference, the layer quota, and the
+ * sign-out entry point where the deployment runs one. It carries no role
+ * badge and no group membership: no response reports that the caller holds
+ * the administrator role, and no response enumerates the caller's groups, so
+ * the menu states neither. */
 function AccountMenu({
   subject,
   theme,
@@ -583,10 +625,37 @@ function AccountMenu({
               </button>
             ))}
           </div>
+          <LayerQuota />
           {signOutPath !== null && <SignOutButton path={signOutPath} />}
         </div>
       )}
     </div>
+  );
+}
+
+/** LayerQuota is the menu's quota entry: the §7.3.1 cap on how many
+ * user-defined layers one identity may hold, read from the §4.7.8 quota
+ * endpoint. That read is gated on no role, so it is a call an SDK would make
+ * against the same endpoint and the menu gains no privileged access.
+ *
+ * The entry is rendered only where the read reports a figure. A read that
+ * fails, and a tenant carrying no cap of its own, both leave the menu with no
+ * quota entry rather than a number the response did not carry: the value zero
+ * selects the deployment default, and no response reports what that default
+ * resolved to. A negative value disables the cap, which the entry states. */
+function LayerQuota() {
+  const quota = useAsync(() => readQuota(), []);
+  const cap = quota.value?.limits?.MaxUserLayers;
+  if (cap === undefined || cap === 0) {
+    return null;
+  }
+  return (
+    <>
+      <p className="label">Layer quota</p>
+      <p className="mono quiet" data-testid="layer-quota">
+        {cap < 0 ? 'no cap on your layers' : `${cap} user-defined layers`}
+      </p>
+    </>
   );
 }
 

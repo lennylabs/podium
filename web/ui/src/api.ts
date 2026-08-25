@@ -13,6 +13,7 @@ export const paths = {
   loadArtifact: '/v1/load_artifact',
   dependents: '/v1/dependents',
   layers: '/v1/layers',
+  quota: '/v1/quota',
 } as const;
 
 /** ApiError carries the §6.10 error envelope: the machine-readable code the
@@ -474,6 +475,27 @@ export function reingestLayer(id: string, breakGlass?: BreakGlass): Promise<Inge
 
 export function unregisterLayer(id: string): Promise<unknown> {
   return request<unknown>(paths.layers + query({ id }), { ...write, method: 'DELETE' });
+}
+
+/** QuotaEnvelope is the §4.7.8 quota read. The limits are marshalled from
+ * store.Quota, which carries no field tags, so each member is named after the
+ * Go field. The account menu reads one of them, the per-identity cap on
+ * user-defined layers. */
+export interface QuotaEnvelope {
+  tenant_id?: string;
+  limits?: {
+    MaxUserLayers?: number;
+    StorageBytes?: number;
+    SearchQPS?: number;
+    MaterializeRate?: number;
+    AuditVolumePerDay?: number;
+  };
+}
+
+/** readQuota takes the §4.7.8 quota read. It is an ordinary read an SDK makes
+ * against the same endpoint, and the registry gates it on no role. */
+export function readQuota(): Promise<QuotaEnvelope> {
+  return request<QuotaEnvelope>(paths.quota);
 }
 
 /** signOut issues the sign-out route as a POST, which is the method the route

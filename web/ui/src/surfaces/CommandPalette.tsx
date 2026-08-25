@@ -8,8 +8,9 @@ import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
 import { EmptyState, ErrorState, Loading } from '../components/primitives';
-import type { ArtifactDescriptor, SearchFilters, SearchResponse } from '../api';
+import type { ArtifactDescriptor, SearchResponse } from '../api';
 import { searchArtifacts } from '../api';
+import { parseQueryLine } from '../query';
 import { artifactHref, searchHref } from '../route';
 import type { Async } from '../useAsync';
 import { useAsync } from '../useAsync';
@@ -21,42 +22,6 @@ const paletteCap = 8;
 /** recentCap is how many queries the just-opened panel lists. */
 const recentCap = 5;
 
-/**
- * parsePaletteQuery splits the typed line into the filters the search
- * endpoint takes. `type:`, `tag:`, and `scope:` are the inline form of the
- * pills the search surface renders, and whatever is left of the line is the
- * query text.
- */
-export function parsePaletteQuery(line: string): SearchFilters {
-  const filters: SearchFilters = { query: '', type: '', scope: '', tags: [] };
-  const words: string[] = [];
-  for (const word of line.split(/\s+/)) {
-    const [head, ...rest] = word.split(':');
-    const value = rest.join(':');
-    if (value === '') {
-      if (word !== '') {
-        words.push(word);
-      }
-      continue;
-    }
-    switch (head) {
-      case 'type':
-        filters.type = value;
-        break;
-      case 'scope':
-        filters.scope = value;
-        break;
-      case 'tag':
-        filters.tags.push(value);
-        break;
-      default:
-        words.push(word);
-    }
-  }
-  filters.query = words.join(' ');
-  return filters;
-}
-
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [line, setLine] = useState('');
   const [index, setIndex] = useState(0);
@@ -66,7 +31,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const typed = line.trim();
   const results = useAsync<SearchResponse>(
     async () =>
-      typed === '' ? { total_matched: 0, results: [] } : searchArtifacts(parsePaletteQuery(typed), paletteCap),
+      typed === '' ? { total_matched: 0, results: [] } : searchArtifacts(parseQueryLine(typed), paletteCap),
     [typed],
   );
   const rows = results.value?.results ?? [];
@@ -96,6 +61,10 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
 
   const openSearch = () => {
     remember(typed);
+    // The whole typed line travels, filters and all. The search surface runs
+    // the same parse over it, so the request it issues and the pills it
+    // renders are the ones this panel typed rather than the line read back as
+    // free text.
     window.location.hash = searchHref(typed);
     onClose();
   };
