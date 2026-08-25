@@ -218,6 +218,13 @@ jobs:
             git status --porcelain
             exit 1
           fi
+      - name: UI unit tests
+        # The §13.10 surfaces and the sanitizer are covered by the UI's own
+        # test runner, which renders the components into a DOM and stubs the
+        # registry reads they issue. It runs after the diff check so a test
+        # artifact cannot be mistaken for a stale bundle.
+        working-directory: web/ui
+        run: npm test
       - name: No unsanitized markup outside the sanitized rendering path
         # React admits already-sanitized markup only through
         # dangerouslySetInnerHTML, and the UI carries the attribute on one
