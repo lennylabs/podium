@@ -133,6 +133,31 @@ func TestBrowserAuth_SignInSetsTransactionCookie(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.4 — a sign-in window below one second still bounds the
+// transaction cookie. The flag path accepts a duration below one second, and a
+// Max-Age truncated to 0 is the session-cookie form rather than a bounded
+// window. The non-positive arms pin the floor a misconfigured endpoint hits.
+func TestBrowserAuth_SignInSubSecondTTLStillBounds(t *testing.T) {
+	t.Parallel()
+	for _, ttl := range []time.Duration{500 * time.Millisecond, 999 * time.Millisecond, time.Nanosecond, 0, -time.Minute} {
+		ts := httptest.NewServer(authEndpoint(t, "", ttl).SignInHandler())
+		defer ts.Close()
+
+		resp, err := noRedirect().Get(ts.URL + server.PathWebUISignIn)
+		if err != nil {
+			t.Fatalf("GET sign-in: %v", err)
+		}
+		resp.Body.Close()
+		c := cookieNamed(resp, server.CookieAuthTransaction)
+		if c == nil {
+			t.Fatalf("ttl %s: sign-in set no __Host-podium_auth cookie", ttl)
+		}
+		if c.MaxAge < 1 {
+			t.Errorf("ttl %s: Max-Age = %d, want a positive bound on the sign-in window", ttl, c.MaxAge)
+		}
+	}
+}
+
 // signIn runs the sign-in leg and returns the transaction cookie and the
 // authorization redirect it produced.
 func signIn(t *testing.T, ep *server.BrowserAuthEndpoint) (*http.Cookie, *url.URL) {
@@ -451,6 +476,27 @@ func TestBrowserAuth_RouteMethods(t *testing.T) {
 				t.Errorf("status = %d, want 405", rec.Code)
 			}
 		})
+	}
+}
+
+// Spec: §7.3.4 — the callback clears __Host-podium_auth on every response it
+// emits, the method refusal included. The §6.3.4 gate excludes the callback by
+// name, so a cross-origin POST reaches that arm, and a refusal that carried no
+// clearing header would leave the transaction replayable.
+func TestBrowserAuth_CallbackMethodRefusalClearsTransaction(t *testing.T) {
+	t.Parallel()
+	ep := authEndpoint(t, "", time.Minute)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, server.PathWebUICallback, nil)
+	req.AddCookie(&http.Cookie{Name: server.CookieAuthTransaction, Value: "the-state.the-verifier"})
+	ep.CallbackHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", rec.Code)
+	}
+	c := cookieNamed(rec.Result(), server.CookieAuthTransaction)
+	if c == nil || c.MaxAge >= 0 {
+		t.Errorf("Set-Cookie = %q, want an expiring __Host-podium_auth", rec.Header().Values("Set-Cookie"))
 	}
 }
 

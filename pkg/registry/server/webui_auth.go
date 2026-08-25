@@ -84,7 +84,7 @@ func (e *BrowserAuthEndpoint) SignInHandler() http.Handler {
 			return
 		}
 		http.SetCookie(w, hostCookie(CookieAuthTransaction, encodeTransaction(tx),
-			int(e.cfg.TransactionTTL.Seconds())))
+			transactionMaxAge(e.cfg.TransactionTTL)))
 		http.Redirect(w, r, redirect, http.StatusFound)
 	})
 }
@@ -96,14 +96,18 @@ func (e *BrowserAuthEndpoint) SignInHandler() http.Handler {
 // which is what makes the transaction single-use (§7.3.4).
 func (e *BrowserAuthEndpoint) CallbackHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The callback consumes the transaction on the request that delivers
+		// it, so the clearing Set-Cookie is a property of the route rather
+		// than of the outcome. Set it before any body is written and ahead of
+		// every arm below, including the method refusal and a request that
+		// delivered no cookie to consume. The §6.3.4 gate excludes this route
+		// by name, so a cross-origin form POST reaches the method refusal, and
+		// a refusal that skipped the clearing would leave the transaction
+		// replayable for the rest of its Max-Age.
+		http.SetCookie(w, clearedHostCookie(CookieAuthTransaction))
 		if !methodIs(w, r, http.MethodGet) {
 			return
 		}
-		// The callback consumes the transaction on the request that delivers
-		// it, so the clearing Set-Cookie is a property of the route rather
-		// than of the outcome. Set it before any body is written, including
-		// on a request that delivered no cookie to consume.
-		http.SetCookie(w, clearedHostCookie(CookieAuthTransaction))
 
 		cb := e.cfg.Flow.ParseCallback(r.URL.Query())
 		tx, ok := readTransaction(r)
@@ -164,6 +168,21 @@ func methodIs(w http.ResponseWriter, r *http.Request, want string) bool {
 	writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
 		"method not allowed: "+r.Method)
 	return false
+}
+
+// transactionMaxAge renders the configured sign-in window as a cookie
+// Max-Age, rounding up to at least one second. hostCookie reads a maxAge of 0
+// as the session row's form, so a truncated sub-second window would emit
+// __Host-podium_auth with no Max-Age at all and leave the transaction live for
+// the whole browser session. A sub-second duration reaches this function from
+// the --web-ui-auth-transaction-ttl flag, which the environment clamp in
+// internal/serverboot does not see.
+func transactionMaxAge(ttl time.Duration) int {
+	seconds := (ttl + time.Second - 1) / time.Second
+	if seconds < 1 {
+		return 1
+	}
+	return int(seconds)
 }
 
 // hostCookie builds a __Host- cookie per the §7.3.4 cookie contract. A
