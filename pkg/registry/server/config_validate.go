@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"time"
 )
 
 // Errors that the §13.10 startup-time configuration guards may
@@ -70,6 +71,33 @@ type StartupConfig struct {
 	// may bind a non-loopback address only when this is set and an identity
 	// provider is configured.
 	WebUIAllowPublicBind bool
+	// WebUIAuth reports whether the §6.3.4 browser acquisition flow is
+	// enabled (--web-ui-auth / PODIUM_WEB_UI_AUTH). It is the one enablement
+	// key: the §7.3.4 authentication routes are mounted only when it is set,
+	// and only then does the oidc-jwt verifier read __Host-podium_session.
+	WebUIAuth bool
+	// WebUIAuthTransactionTTL is the sign-in window
+	// (--web-ui-auth-transaction-ttl / PODIUM_WEB_UI_AUTH_TRANSACTION_TTL),
+	// carried as __Host-podium_auth's Max-Age (§7.3.4). It carries a default,
+	// so no configuration leaves it unset.
+	WebUIAuthTransactionTTL time.Duration
+	// The §6.3.4 acquisition values: the OAuth client identifier, the client
+	// credential, the redirect URI, and the identity provider's authorization
+	// and token endpoints. Each is required where the browser flow is
+	// enabled.
+	WebUIOAuthClientID              string
+	WebUIOAuthClientSecret          string
+	WebUIRedirectURI                string
+	WebUIOAuthAuthorizationEndpoint string
+	WebUIOAuthTokenEndpoint         string
+	// WebUIOAuthScopes is the scope set the sign-in redirect sends
+	// (PODIUM_WEB_UI_OAUTH_SCOPES). It carries a default and is no
+	// acquisition value.
+	WebUIOAuthScopes []string
+	// WebUIOAuthExchangeTimeout bounds the callback's token-endpoint request
+	// (PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT). It carries a default and is no
+	// acquisition value.
+	WebUIOAuthExchangeTimeout time.Duration
 	// TrustedProxySecret is the §6.3.3 PODIUM_TRUSTED_PROXY_SECRET. When set, a
 	// non-loopback trusted-headers bind is permitted because the secret gates
 	// header trust at the request level.

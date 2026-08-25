@@ -20,8 +20,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// OIDCJWT is the server-side oidc-jwt provider (§6.3.3). It verifies a
-// gateway-forwarded IdP-signed JWT against the issuer's JWKS on every request.
+// OIDCJWT is the server-side oidc-jwt provider (§6.3.3). It verifies the
+// caller's IdP-signed JWT against the issuer's JWKS on every request,
+// whichever accepted location the token arrived in.
 // Identity is resolved from the request by the request-time verifier
 // (OIDCVerifier.Verify), so Resolve is never called on the server path; it
 // returns an error to make a stray client-side use loud rather than silent.
@@ -41,8 +42,8 @@ func (OIDCJWT) Resolve(context.Context) (Identity, error) {
 // caller from the inbound request and have no token of their own to present.
 var errServerSideProvider = errors.New("identity: server-side provider resolves the caller from the request, not via Resolve")
 
-// UntrustedTokenError reports that a gateway-forwarded oidc-jwt token failed
-// verification (§6.3.3). It wraps ErrUntrustedToken so existing errors.Is
+// UntrustedTokenError reports that an oidc-jwt token failed verification
+// (§6.3.3), in either accepted credential location. It wraps ErrUntrustedToken so existing errors.Is
 // checks keep working, and carries the token's issuer so the HTTP boundary can
 // populate the §6.10 envelope's details.token_iss. Issuer is "" when the token
 // was malformed before the iss claim could be read.
@@ -62,7 +63,7 @@ func (e *UntrustedTokenError) Error() string {
 func (e *UntrustedTokenError) Unwrap() error { return ErrUntrustedToken }
 
 // ErrKeySetUnavailable reports that the issuer JWKS could not be fetched and no
-// cached key set is available, so a forwarded token cannot be verified. Per
+// cached key set is available, so the caller's token cannot be verified. Per
 // §6.3.3 the request is then treated as anonymous (public visibility only)
 // rather than rejected, distinguishing a transient IdP outage from a token
 // that actually fails verification.
@@ -83,8 +84,9 @@ func untrustedToken(issuer, reason string) error {
 // the public key as the HMAC secret.
 var oidcAllowedAlgs = []string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "EdDSA"}
 
-// OIDCVerifier verifies a gateway-forwarded OIDC JWT against the issuer's JWKS
-// (§6.3.3 oidc-jwt). It resolves the JWKS URI from the issuer's OIDC discovery
+// OIDCVerifier verifies an OIDC JWT against the issuer's JWKS (§6.3.3
+// oidc-jwt). It receives the raw token with no knowledge of the location it
+// arrived in, so it verifies both accepted locations identically. It resolves the JWKS URI from the issuer's OIDC discovery
 // document at ${issuer}/.well-known/openid-configuration and caches the key set
 // for cacheTTL, refreshing when the cache is older than cacheTTL or when a
 // token presents a kid absent from the cached set (key rotation). It accepts a

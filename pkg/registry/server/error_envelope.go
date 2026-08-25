@@ -63,15 +63,29 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	"auth.untrusted_runtime": {
 		suggestedAction: "Add the runtime's signing key with 'podium admin runtime register --keys-file', then restart the registry.",
 	},
-	// §6.3.3 / §6.10: the gateway-delegated oidc-jwt provider's codes.
+	// §6.3.3 / §6.10: the registry-process oidc-jwt provider's codes. The
+	// remediation names both accepted credential locations, because the
+	// registry verifies the same token whether a gateway forwarded it in the
+	// configured token header or the registry obtained it through the §6.3.4
+	// exchange and returned it in the session cookie.
 	"auth.token_expired": {
-		suggestedAction: "Refresh the token. For 'injected-session-token' the runtime reissues it; for 'oidc-jwt' the gateway forwards a new token.",
+		suggestedAction: "Refresh the token. For 'injected-session-token' the runtime reissues it; for 'oidc-jwt' a gateway forwards a new token, and a browser session is renewed by signing in again.",
 	},
 	"auth.untrusted_token": {
-		suggestedAction: "Verify the gateway forwards a token from the issuer and audience configured for 'oidc-jwt' (PODIUM_OAUTH_ISSUER, PODIUM_OAUTH_AUDIENCE).",
+		suggestedAction: "Verify the token reaching the registry comes from the issuer and audience configured for 'oidc-jwt' (PODIUM_OAUTH_ISSUER, PODIUM_OAUTH_AUDIENCE). A gateway-forwarded token is corrected at the gateway; a browser session is re-established by signing in again.",
 	},
 	"auth.tenant_unknown": {
 		suggestedAction: "Provision the organization as a tenant, or forward a token whose org_id claim names an existing tenant.",
+	},
+	// §6.3.4 / §6.10: the browser acquisition flow's codes. Both are
+	// permanent for the request that took them, so neither is retryable.
+	// auth.csrf_invalid covers the browser-origin gate's refusal and the
+	// sign-in callback's pre-authorization refusal on one axis.
+	"auth.csrf_invalid": {
+		suggestedAction: "Reload the web UI and retry the operation from it; if the registry is behind a gateway, pass the browser-facing Host header through unrewritten.",
+	},
+	"auth.exchange_failed": {
+		suggestedAction: "Check the configured OAuth client credential and that the redirect URI the registry sends is registered with the identity provider for this client.",
 	},
 	// §7.3.3: tenant management is a multi-tenant-only capability. A
 	// single-tenant or standalone registry has no additional tenant to manage,

@@ -37,6 +37,13 @@ func serveCmd(args []string) int {
 	// provider is configured (serverboot validates this).
 	webUI := fs.Bool("web-ui", false, "mount the bundled web UI at /ui/ (overrides PODIUM_WEB_UI)")
 	webUIAllowPublicBind := fs.Bool("web-ui-allow-public-bind", false, "allow the web UI on a non-loopback bind when an identity provider is configured (overrides PODIUM_WEB_UI_ALLOW_PUBLIC_BIND)")
+	// §6.3.4 browser acquisition flow: the enablement key and the sign-in
+	// window carry both a flag and a variable. The acquisition values are
+	// environment-only, because one of them is a client credential and a
+	// credential passed on the command line is readable from the process
+	// table.
+	webUIAuth := fs.Bool("web-ui-auth", false, "sign the browser in through the registry with the OAuth authorization-code flow (overrides PODIUM_WEB_UI_AUTH)")
+	webUIAuthTransactionTTL := fs.String("web-ui-auth-transaction-ttl", "", "sign-in window as a Go duration, 10m by default (overrides PODIUM_WEB_UI_AUTH_TRANSACTION_TTL)")
 	// §13.10 hybrid search: force BM25-only regardless of any configured
 	// vector backend or embedding provider.
 	noEmbeddings := fs.Bool("no-embeddings", false, "disable embeddings and fall back to BM25-only search (overrides PODIUM_NO_EMBEDDINGS)")
@@ -70,6 +77,12 @@ func serveCmd(args []string) int {
 	}
 	if *webUIAllowPublicBind {
 		_ = os.Setenv("PODIUM_WEB_UI_ALLOW_PUBLIC_BIND", "true")
+	}
+	if *webUIAuth {
+		_ = os.Setenv("PODIUM_WEB_UI_AUTH", "true")
+	}
+	if *webUIAuthTransactionTTL != "" {
+		_ = os.Setenv("PODIUM_WEB_UI_AUTH_TRANSACTION_TTL", *webUIAuthTransactionTTL)
 	}
 	if *noEmbeddings {
 		_ = os.Setenv("PODIUM_NO_EMBEDDINGS", "true")

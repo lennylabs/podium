@@ -9,6 +9,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/registry/server"
 )
 
 // injectedTokenVerifier builds the §6.3.2 request-time verifier for the
@@ -191,16 +192,34 @@ func bearerTokenFromHeader(r *http.Request, headerName string) string {
 }
 
 // oidcJWTVerifier builds the §6.3.3 request-time verifier for the oidc-jwt
-// provider. It extracts the forwarded JWT from the configured token header,
+// provider. It reads the caller's JWT from the configured token header,
 // verifies it against the issuer's JWKS, applies the §6.3.1 IdpGroupMapping,
-// and returns the caller layer.Identity. A request carrying no token is
-// anonymous and sees public visibility only (it is not rejected); a token that
-// fails verification is returned as an error so the server maps
-// identity.ErrTokenExpired / *identity.UntrustedTokenError to the §6.10
-// envelope (auth.token_expired / auth.untrusted_token).
-func oidcJWTVerifier(verifier *identity.OIDCVerifier, tokenHeader string, groups *identity.IdpGroupMapping) func(*http.Request) (layer.Identity, error) {
+// and returns the caller layer.Identity. A token that fails verification is
+// returned as an error so the server maps identity.ErrTokenExpired /
+// *identity.UntrustedTokenError to the §6.10 envelope (auth.token_expired /
+// auth.untrusted_token).
+//
+// sessionCookie carries the §6.3.4 browser-flow enablement. It is the whole
+// condition on the second accepted credential location: with it set, the
+// verifier reads __Host-podium_session when the configured token header
+// carries no bearer credential, and with it clear the verifier reads no
+// cookie at all, so a stale session cookie sent to such a registry carries
+// nothing. The configured token header is read first either way, and the two
+// locations are never merged, because a gateway that authenticated the
+// request is the authority in that deployment.
+//
+// A request whose configured token header carries no bearer credential is
+// anonymous rather than rejected, and it sees public visibility only (§4.6).
+// Where the browser flow is enabled, such a request is anonymous only when it
+// also presents no valid __Host-podium_session cookie.
+func oidcJWTVerifier(verifier *identity.OIDCVerifier, tokenHeader string, groups *identity.IdpGroupMapping, sessionCookie bool) func(*http.Request) (layer.Identity, error) {
 	return func(r *http.Request) (layer.Identity, error) {
 		raw := bearerTokenFromHeader(r, tokenHeader)
+		if raw == "" && sessionCookie {
+			if c, err := r.Cookie(server.CookieSession); err == nil {
+				raw = strings.TrimSpace(c.Value)
+			}
+		}
 		if raw == "" {
 			return layer.Identity{}, nil
 		}

@@ -239,6 +239,44 @@ func envInt(key string, def int) int {
 	return n
 }
 
+// The §6.3.4 browser-flow defaults. The transaction TTL is the sign-in
+// window §7.3.4 fixes for __Host-podium_auth's Max-Age. The exchange timeout
+// follows the registry-side HTTP client the oidc-jwt verifier already uses
+// against the same identity provider. The scope set is the default both
+// shipped acquisition paths carry, so a deployment that configures nothing
+// gets the same set from the browser and from the CLI.
+const (
+	defaultWebUIAuthTransactionTTL   = 10 * time.Minute
+	defaultWebUIOAuthExchangeTimeout = 10 * time.Second
+)
+
+var defaultWebUIOAuthScopes = []string{"openid", "profile", "email", "groups"}
+
+// envPositiveDuration returns the Go duration a variable names, clamping an
+// unset, unparsable, or non-positive value to def. It does not reuse envInt,
+// which returns its default for an unset, unparsable, or negative value and
+// passes a literal 0 through: a zero deadline is no deadline at all, and a
+// zero cookie Max-Age is not the sign-in window §7.3.4 bounds.
+func envPositiveDuration(key string, def time.Duration) time.Duration {
+	d, err := time.ParseDuration(os.Getenv(key))
+	if err != nil || d <= 0 {
+		return def
+	}
+	return d
+}
+
+// envScopeSet returns the space-delimited scope set a variable names, or def
+// when the variable is unset or names no scope. The default branch is
+// load-bearing: an authorization request carrying no scope narrows every
+// group-scoped visibility decision for browser callers alone.
+func envScopeSet(key string, def []string) []string {
+	scopes := strings.Fields(os.Getenv(key))
+	if len(scopes) == 0 {
+		return def
+	}
+	return scopes
+}
+
 func envInt64(key string, def int64) int64 {
 	v := os.Getenv(key)
 	if v == "" {
@@ -1112,7 +1150,8 @@ func run(ctx context.Context, stop func()) error {
 			log.Printf("identity provider: injected-session-token (verifying runtime-signed JWTs)")
 		}
 		if cfg.identityProvider == "oidc-jwt" {
-			// §6.3.3: verify the gateway-forwarded token against the issuer JWKS.
+			// §6.3.3: verify the caller's token against the issuer JWKS, in
+			// either accepted credential location.
 			// Refuse to start without an https issuer and a configured audience.
 			if err := oidcJWTConfigGuard(cfg.identityProvider, cfg.oauthIssuer, cfg.oauthAudience); err != nil {
 				return err
@@ -1132,14 +1171,14 @@ func run(ctx context.Context, stop func()) error {
 			if err := verifier.Prime(); err != nil {
 				return fmt.Errorf("oidc-jwt: issuer %q is unreachable at startup, refusing to start (§6.3.3): %w", cfg.oauthIssuer, err)
 			}
-			layerVerify = oidcJWTVerifier(verifier, cfg.oauthTokenHeader, cfg.idpGroupMapping)
+			layerVerify = oidcJWTVerifier(verifier, cfg.oauthTokenHeader, cfg.idpGroupMapping, cfg.webUIAuth)
 			bootOpts = append(bootOpts, server.WithIdentityVerifier(layerVerify))
 			verifierInstalled = true
 			// §6.3.3: the accepted set is the configured issuer plus the
 			// access_token_issuer the discovery document published, which is
 			// known only after Prime and never reaches Settings(). This line is
 			// the operator-visible record of the widened set.
-			log.Printf("identity provider: oidc-jwt (verifying forwarded tokens against accepted issuers %s)", strings.Join(verifier.AcceptedIssuers(), ", "))
+			log.Printf("identity provider: oidc-jwt (verifying caller tokens against accepted issuers %s)", strings.Join(verifier.AcceptedIssuers(), ", "))
 			if cfg.oauthSubjectClaim != "" {
 				log.Printf("identity provider: oidc-jwt reads the caller subject from claim %q", cfg.oauthSubjectClaim)
 			}
@@ -1229,6 +1268,48 @@ func run(ctx context.Context, stop func()) error {
 	if cfg.webUI {
 		mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(web.Assets()))))
 		log.Printf("web UI mounted at /ui/")
+		if cfg.webUIAuth {
+			// §7.3.4: the browser authentication routes. The enclosing block
+			// supplies the web-UI conjunct, and validate() has already run,
+			// so no booted process can falsify the oidc-jwt, public-mode,
+			// acquisition-value, or redirect-URI conjuncts of the §13.10
+			// guard. The registry keeps no session state: the
+			// pre-authorization transaction travels with the browser, so any
+			// replica serves the callback.
+			browserAuth := server.NewBrowserAuthEndpoint(server.BrowserAuthConfig{
+				Flow: identity.AuthCodeFlow{
+					AuthorizationEndpoint: cfg.webUIOAuthAuthorizationEndpoint,
+					TokenURL:              cfg.webUIOAuthTokenEndpoint,
+					ClientID:              cfg.webUIOAuthClientID,
+					ClientSecret:          cfg.webUIOAuthClientSecret,
+					RedirectURI:           cfg.webUIRedirectURI,
+					Scopes:                cfg.webUIOAuthScopes,
+					// §6.3.4: the redirect asks the IdP for the registry's
+					// resolved audience, which is the configuration field
+					// LoadConfig filled from PODIUM_OAUTH_AUDIENCE or from
+					// the identity_provider.audience config-file key. Reading
+					// the environment variable here would send an empty
+					// audience on a registry configured through registry.yaml.
+					Audience: cfg.oauthAudience,
+					Client:   &http.Client{Timeout: cfg.webUIOAuthExchangeTimeout},
+				},
+				TransactionTTL: cfg.webUIAuthTransactionTTL,
+			})
+			mux.Handle(server.PathWebUISignIn, browserAuth.SignInHandler())
+			mux.Handle(server.PathWebUICallback, browserAuth.CallbackHandler())
+			mux.Handle(server.PathWebUISignOut, browserAuth.SignOutHandler())
+			log.Printf("web UI browser sign-in mounted at %s (§6.3.4)", server.PathWebUISignIn)
+		}
+		// §7.3.4: the posture read is mounted on the web UI alone rather than
+		// on the browser flow, because a registry serving the UI with no
+		// browser flow is the deployment whose page has to learn not to offer
+		// sign-in.
+		mux.Handle(server.PathWebUISession, server.SessionPosture{
+			IdentityProviderConfigured: cfg.identityProvider != "",
+			PublicMode:                 cfg.publicMode,
+			BrowserAuthEnabled:         cfg.webUIAuth,
+			Identity:                   layerIdentity,
+		}.Handler())
 	}
 	if mreg != nil {
 		// §13.8 Prometheus scrape endpoint. operationName("/metrics") is "", so
@@ -1410,7 +1491,12 @@ func run(ctx context.Context, stop func()) error {
 		return fmt.Errorf("tracing: %w", terr)
 	}
 	defer func() { _ = shutdownTracing(context.Background()) }()
-	handler := otelhttp.NewHandler(mux, "podium-registry",
+	// §6.3.4: the browser-origin gate wraps the boot mux, so every layer
+	// write, webhook ingest, and erase the mux registers ahead of the
+	// catch-all passes it once. Installed inside Server.Handler() it would
+	// cover the catch-all alone and miss exactly the writes it exists to
+	// protect.
+	handler := otelhttp.NewHandler(server.BrowserOriginGate(mux), "podium-registry",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			if op := server.OperationName(r.URL.Path); op != "" {
 				return op
@@ -1479,6 +1565,40 @@ type Config struct {
 	// a configured identity provider, lets the UI bind a non-loopback address.
 	webUI                bool
 	webUIAllowPublicBind bool
+	// webUIAuth enables the §6.3.4 browser acquisition flow (--web-ui-auth /
+	// PODIUM_WEB_UI_AUTH). It is the one enablement key: it decides whether
+	// the §7.3.4 authentication routes are mounted and whether the oidc-jwt
+	// verifier reads __Host-podium_session. The remaining browser-flow keys
+	// are environment-only, because one of them is a client credential and a
+	// credential passed on the command line is readable from the process
+	// table, so the whole acquisition set is kept off it.
+	webUIAuth bool
+	// webUIAuthTransactionTTL is the sign-in window
+	// (--web-ui-auth-transaction-ttl / PODIUM_WEB_UI_AUTH_TRANSACTION_TTL),
+	// carried as __Host-podium_auth's Max-Age (§7.3.4). Read as a Go
+	// duration; an unset, unparsable, or non-positive value takes the
+	// 10-minute default §7.3.4 fixes.
+	webUIAuthTransactionTTL time.Duration
+	// The §6.3.4 acquisition values. The registry refuses to start with the
+	// browser flow enabled and any of them empty.
+	webUIOAuthClientID              string
+	webUIOAuthClientSecret          string
+	webUIRedirectURI                string
+	webUIOAuthAuthorizationEndpoint string
+	webUIOAuthTokenEndpoint         string
+	// webUIOAuthScopes is the scope set the sign-in redirect sends
+	// (PODIUM_WEB_UI_OAUTH_SCOPES). It defaults to
+	// "openid profile email groups" rather than to "openid" alone, because a
+	// token issued without the scope that carries the group claim carries
+	// none and every group-scoped visibility decision narrows silently for a
+	// browser caller.
+	webUIOAuthScopes []string
+	// webUIOAuthExchangeTimeout bounds the callback's token-endpoint request
+	// (PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT). An unset, unparsable, or
+	// non-positive value takes the 10-second default, because a zero
+	// http.Client.Timeout is no deadline at all and the registry's own
+	// http.Server carries ReadHeaderTimeout alone.
+	webUIOAuthExchangeTimeout time.Duration
 	// signMode is the §13.10 ingest-signing selection (--sign /
 	// PODIUM_SIGN). Standalone signing is disabled by default; the only
 	// accepted value is "registry-key", which signs every accepted manifest
@@ -1820,30 +1940,41 @@ func idpGroupMappingStr(m *identity.IdpGroupMapping) string {
 
 func LoadConfig() *Config {
 	c := &Config{
-		bind:                       envDefault("PODIUM_BIND", "127.0.0.1:8080"),
-		publicMode:                 isTrue(os.Getenv("PODIUM_PUBLIC_MODE")),
-		allowPublicBind:            isTrue(os.Getenv("PODIUM_ALLOW_PUBLIC_BIND")),
-		webUI:                      isTrue(os.Getenv("PODIUM_WEB_UI")),
-		webUIAllowPublicBind:       isTrue(os.Getenv("PODIUM_WEB_UI_ALLOW_PUBLIC_BIND")),
-		signMode:                   os.Getenv("PODIUM_SIGN"),
-		identityProvider:           os.Getenv("PODIUM_IDENTITY_PROVIDER"),
-		oauthAudience:              os.Getenv("PODIUM_OAUTH_AUDIENCE"),
-		oauthAuthorizationEndpoint: os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
-		oauthIssuer:                os.Getenv("PODIUM_OAUTH_ISSUER"),
-		oauthTokenHeader:           os.Getenv("PODIUM_OAUTH_TOKEN_HEADER"),
-		oauthSubjectClaim:          os.Getenv("PODIUM_OAUTH_SUBJECT_CLAIM"),
-		oauthGroupsClaim:           os.Getenv("PODIUM_OAUTH_GROUPS_CLAIM"),
-		oauthJWKSCacheTTLSeconds:   envInt("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", 0),
-		trustedProxySecret:         os.Getenv("PODIUM_TRUSTED_PROXY_SECRET"),
-		multiTenant:                isTrue(os.Getenv("PODIUM_MULTI_TENANT")),
-		operatorAdmins:             parseBootstrapAdmins(os.Getenv("PODIUM_OPERATOR_ADMINS")),
-		storeType:                  envDefault("PODIUM_REGISTRY_STORE", "sqlite"),
-		sqlitePath:                 os.Getenv("PODIUM_SQLITE_PATH"),
-		postgresDSN:                os.Getenv("PODIUM_POSTGRES_DSN"),
-		objectStore:                envDefault("PODIUM_OBJECT_STORE", "filesystem"),
-		filesystemRoot:             os.Getenv("PODIUM_FILESYSTEM_ROOT"),
-		publicURL:                  os.Getenv("PODIUM_PUBLIC_URL"),
-		s3Endpoint:                 os.Getenv("PODIUM_S3_ENDPOINT"),
+		bind:                 envDefault("PODIUM_BIND", "127.0.0.1:8080"),
+		publicMode:           isTrue(os.Getenv("PODIUM_PUBLIC_MODE")),
+		allowPublicBind:      isTrue(os.Getenv("PODIUM_ALLOW_PUBLIC_BIND")),
+		webUI:                isTrue(os.Getenv("PODIUM_WEB_UI")),
+		webUIAllowPublicBind: isTrue(os.Getenv("PODIUM_WEB_UI_ALLOW_PUBLIC_BIND")),
+		// §6.3.4 browser acquisition flow. The two duration reads clamp
+		// rather than reuse envInt, which passes a literal 0 through.
+		webUIAuth:                       isTrue(os.Getenv("PODIUM_WEB_UI_AUTH")),
+		webUIAuthTransactionTTL:         envPositiveDuration("PODIUM_WEB_UI_AUTH_TRANSACTION_TTL", defaultWebUIAuthTransactionTTL),
+		webUIOAuthClientID:              os.Getenv("PODIUM_WEB_UI_OAUTH_CLIENT_ID"),
+		webUIOAuthClientSecret:          os.Getenv("PODIUM_WEB_UI_OAUTH_CLIENT_SECRET"),
+		webUIRedirectURI:                os.Getenv("PODIUM_WEB_UI_REDIRECT_URI"),
+		webUIOAuthAuthorizationEndpoint: os.Getenv("PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT"),
+		webUIOAuthTokenEndpoint:         os.Getenv("PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT"),
+		webUIOAuthScopes:                envScopeSet("PODIUM_WEB_UI_OAUTH_SCOPES", defaultWebUIOAuthScopes),
+		webUIOAuthExchangeTimeout:       envPositiveDuration("PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT", defaultWebUIOAuthExchangeTimeout),
+		signMode:                        os.Getenv("PODIUM_SIGN"),
+		identityProvider:                os.Getenv("PODIUM_IDENTITY_PROVIDER"),
+		oauthAudience:                   os.Getenv("PODIUM_OAUTH_AUDIENCE"),
+		oauthAuthorizationEndpoint:      os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
+		oauthIssuer:                     os.Getenv("PODIUM_OAUTH_ISSUER"),
+		oauthTokenHeader:                os.Getenv("PODIUM_OAUTH_TOKEN_HEADER"),
+		oauthSubjectClaim:               os.Getenv("PODIUM_OAUTH_SUBJECT_CLAIM"),
+		oauthGroupsClaim:                os.Getenv("PODIUM_OAUTH_GROUPS_CLAIM"),
+		oauthJWKSCacheTTLSeconds:        envInt("PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS", 0),
+		trustedProxySecret:              os.Getenv("PODIUM_TRUSTED_PROXY_SECRET"),
+		multiTenant:                     isTrue(os.Getenv("PODIUM_MULTI_TENANT")),
+		operatorAdmins:                  parseBootstrapAdmins(os.Getenv("PODIUM_OPERATOR_ADMINS")),
+		storeType:                       envDefault("PODIUM_REGISTRY_STORE", "sqlite"),
+		sqlitePath:                      os.Getenv("PODIUM_SQLITE_PATH"),
+		postgresDSN:                     os.Getenv("PODIUM_POSTGRES_DSN"),
+		objectStore:                     envDefault("PODIUM_OBJECT_STORE", "filesystem"),
+		filesystemRoot:                  os.Getenv("PODIUM_FILESYSTEM_ROOT"),
+		publicURL:                       os.Getenv("PODIUM_PUBLIC_URL"),
+		s3Endpoint:                      os.Getenv("PODIUM_S3_ENDPOINT"),
 		// §13.12 marks PODIUM_S3_REGION required for s3; no implicit default
 		// so a missing region is named by validate() rather than
 		// silently replaced by us-east-1.
@@ -2056,8 +2187,19 @@ func (c *Config) validate() error {
 		AllowPublicBind:      c.allowPublicBind,
 		WebUI:                c.webUI,
 		WebUIAllowPublicBind: c.webUIAllowPublicBind,
-		TrustedProxySecret:   c.trustedProxySecret,
-		MultiTenant:          c.multiTenant,
+		// §6.3.4: the browser flow's enablement key and the values C3's
+		// startup guard validates against it.
+		WebUIAuth:                       c.webUIAuth,
+		WebUIAuthTransactionTTL:         c.webUIAuthTransactionTTL,
+		WebUIOAuthClientID:              c.webUIOAuthClientID,
+		WebUIOAuthClientSecret:          c.webUIOAuthClientSecret,
+		WebUIRedirectURI:                c.webUIRedirectURI,
+		WebUIOAuthAuthorizationEndpoint: c.webUIOAuthAuthorizationEndpoint,
+		WebUIOAuthTokenEndpoint:         c.webUIOAuthTokenEndpoint,
+		WebUIOAuthScopes:                c.webUIOAuthScopes,
+		WebUIOAuthExchangeTimeout:       c.webUIOAuthExchangeTimeout,
+		TrustedProxySecret:              c.trustedProxySecret,
+		MultiTenant:                     c.multiTenant,
 	}
 	if err := startup.Validate(); err != nil {
 		return err
