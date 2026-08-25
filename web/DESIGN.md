@@ -41,8 +41,11 @@ as analysts, prompt authors, and reviewers who want to browse the catalog withou
 installing the SDK or learning the CLI. It is also where layers are managed. The
 layer-panel paragraph of §13.10 states who may do what there: an administrator
 manages the registered layer list, and an ordinary user manages the layers that
-user defined. The panel therefore has to read differently for those
-two roles rather than presenting one list of uniformly actionable rows.
+user defined. The list read hands the panel every layer stored under the tenant,
+on the terms the unfiltered-list rule sets, and no response reports that the
+caller holds the administrator role. The panel therefore presents that difference
+as a marker over a uniformly actionable list rather than by withholding controls,
+on the terms the layer-panel section below states.
 
 The registry process serves the UI on the same origin as the API it calls, from
 the mount point §13.10 names under "Web UI" and
@@ -275,8 +278,9 @@ structs in `pkg/registry/server/server.go` own both, and
 
 The catalog is assembled from layers, and spec §4.6 defines what a layer is: one
 source and one visibility declaration, composed in precedence order. This is the
-only surface with write operations, and the only one whose contents differ by
-role.
+only surface with write operations. Its rows differ by layer class and by
+ownership rather than by the caller's role, because the list read is unscoped and
+no response reports that the caller holds the administrator role.
 
 A layer record identifies its source, records when it was last ingested, carries
 an order value that sets its precedence, and declares who can see it. The registry
@@ -482,7 +486,7 @@ owned by "The posture read" in `proposals/0013-build-the-13-10-web-ui.md`.
 |:--|:--|:--|
 | true | absent | sign-in, as a top-level navigation to the sign-in path the read reports |
 | true | present | sign-out, issued as a `POST` from the page carrying the same proof the panel's writes carry, after which the page navigates |
-| anything other than true | absent or present | neither control |
+| false | absent or present | neither control |
 | the read did not answer | not reported | neither control |
 
 Sign-out is issued as a `POST` rather than followed as a link because that is the
