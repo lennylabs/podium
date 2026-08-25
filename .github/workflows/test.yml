@@ -1,9 +1,11 @@
 name: test
 
-# Per-PR + per-push CI gate. Runs the Go suite, the SDK suites, and
-# uploads coverage. Three jobs run in parallel so a slow Python suite
-# doesn't block Go feedback (and vice versa). The full nightly sweep
-# adds lint + matrix-audit + coverage-budget; see nightly.yml.
+# Per-PR + per-push CI gate. Runs the Go suite, the SDK suites, and the
+# web-UI lane that rebuilds the committed §13.10 bundle and fails if the
+# working tree differs, and it uploads coverage. The jobs run in parallel
+# so a slow Python suite doesn't block Go feedback (and vice versa). The
+# full nightly sweep adds lint + matrix-audit + coverage-budget; see
+# nightly.yml.
 
 on:
   pull_request:
@@ -213,14 +215,23 @@ jobs:
         # dangerouslySetInnerHTML, and the UI's single sanitized artifact-body
         # rendering path carries the one permitted occurrence. The check is
         # scoped to web/ because site/ renders build-time authored content and
-        # is outside this control.
+        # is outside this control. The check counts occurrences rather than
+        # files, so a second attribute added inside the rendering path itself
+        # fails too.
         run: |
-          hits=$(grep -rln 'dangerouslySetInnerHTML' web/ui/src \
-            --exclude-dir=node_modules \
-            | grep -v '^web/ui/src/markdown/SanitizedMarkdown.tsx$' || true)
-          if [ -n "$hits" ]; then
+          path='web/ui/src/markdown/SanitizedMarkdown.tsx'
+          matches=$(grep -rn 'dangerouslySetInnerHTML' web/ui/src \
+            --exclude-dir=node_modules || true)
+          outside=$(printf '%s\n' "$matches" | grep -v "^$path:" | grep . || true)
+          if [ -n "$outside" ]; then
             echo "dangerouslySetInnerHTML outside the sanitized rendering path:"
-            echo "$hits"
+            echo "$outside"
+            exit 1
+          fi
+          inside=$(printf '%s\n' "$matches" | grep -c "^$path:" || true)
+          if [ "$inside" -gt 1 ]; then
+            echo "the sanitized rendering path carries more than one dangerouslySetInnerHTML:"
+            printf '%s\n' "$matches" | grep "^$path:"
             exit 1
           fi
       - name: No reference to the removed vanilla SPA

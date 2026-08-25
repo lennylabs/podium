@@ -4106,11 +4106,10 @@ misconfigured:
    mis-registered restricted layer produces the same result in step 6 and the
    scenario passes on nothing. This step is also what gives step 7 its meaning.
 
-6. Load the UI with no credential: no gateway in front, no header, no prior
-   `podium login`. Open `http://127.0.0.1:8153/ui/` in a browser to see what a
-   person sees, and issue the same call the page makes so the result is
-   machine-checkable. The UI fetches `/v1/load_domain` on load, through a
-   same-origin `fetch` that attaches no credential.
+6. Call the registry with no credential: no gateway in front, no header, no
+   prior `podium login`. These are the reads the UI is specified to make on the
+   same origin it is served from, issued directly so the result is
+   machine-checkable.
 
    ```bash
    curl -sS "http://127.0.0.1:8153/v1/load_domain?path="; echo
@@ -4119,10 +4118,16 @@ misconfigured:
 
    **Expect.** HTTP 200. The `notable` list carries the public artifact and not
    the restricted one, and the search for the restricted artifact's name reports
-   `total_matched: 0`. In the browser the page lists the public artifact only,
-   reports no authentication error, and shows no login prompt, verification URL,
-   or device code, because from the registry's side nothing failed: the request
-   carried no bearer value and resolved as anonymous.
+   `total_matched: 0`. Neither call reports an authentication error, and neither
+   response carries a login prompt, a verification URL, or a device code,
+   because from the registry's side nothing failed: the request carried no
+   bearer value and resolved as anonymous.
+
+   **Pending.** The served bundle at `http://127.0.0.1:8153/ui/` currently
+   renders an application shell with no catalog surfaces, so opening it in a
+   browser exercises nothing here. Restore the browser half of this step once
+   the §13.10 surfaces land: the page then lists the public artifact only and
+   shows no login prompt.
 
 7. Confirm the restricted artifact is invisible rather than merely absent from a
    list, by requesting it directly with no credential.
@@ -4145,13 +4150,14 @@ misconfigured:
    authenticated caller. Run step 5 first and compare the two.
 
 **Known gap this records.** A directly reachable UI showing only public
-artifacts is current behavior rather than a defect. The shipped UI attaches no
-credential: every network call it makes goes through one same-origin `fetch`
-with no headers, used by its call sites `/v1/load_domain`,
-`/v1/search_artifacts`, and `/v1/load_artifact`.
-In-browser authentication is deferred to its own proposal, and this scenario
-pins what the spec now says so a later change to the UI has to move that text
-with it.
+artifacts is current behavior rather than a defect. The vanilla-JavaScript
+placeholder this scenario was written against attached no credential: every
+network call it made went through one same-origin `fetch` with no headers,
+against `/v1/load_domain`, `/v1/search_artifacts`, and `/v1/load_artifact`. That
+placeholder has been removed, and the reads the curl commands above stand in for
+are the ones the replacement is specified to make. In-browser authentication is
+deferred to its own proposal, and this scenario pins what the spec now says so a
+later change to the UI has to move that text with it.
 
 **Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
 
