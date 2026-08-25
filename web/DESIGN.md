@@ -250,6 +250,29 @@ splits the bundled files one by one (`attachResources` in the same file), so a
 single artifact can present inline files beside fetched files, and the resource
 list has to read as one list rather than as two.
 
+**The sanitization rule.** An artifact body is markdown authored by whoever can
+write to a layer's source, and the viewer renders it as a document on the
+registry's own origin, which is the origin the session cookie is scoped to. This
+rule is the single statement of how the UI renders an untrusted artifact body:
+what is sanitized, what the sanitizer takes as its input, where it is applied,
+which URL schemes survive it, and what falls outside it. Every other site that
+mentions the rule cites it by name and states only what is local to that site.
+
+The viewer renders an artifact body through one rendering path in the web UI's
+own source tree, and that path sanitizes what it renders. The sanitizer runs on
+the rendered output rather than on the markdown source, so a markdown construct
+that the renderer emits as raw HTML is neutralized rather than carried through,
+and a construct that survives the markdown renderer cannot bypass the sanitizer.
+No executable node and no event-handler attribute survives sanitization. The
+sanitizer carries an allowlist that admits no URL scheme other than `http`,
+`https`, and `mailto` on any attribute it keeps, so a URL bearing any other
+scheme, including `javascript:` and `data:`, does not survive on a link or on any
+other attribute. Frontmatter does not reach this path. It is rendered as a
+property table with values escaped as text, and it is not markdown and is not
+rendered as such. Which sanitizer implementation the rendering path uses is the
+implementor's choice, and any answer satisfies this rule in full and states no
+scheme, attribute, or path condition the rule does not carry.
+
 ### 4. Layer panel
 
 The catalog is assembled from layers, and spec §4.6 defines what a layer is: one
