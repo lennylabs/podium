@@ -220,36 +220,54 @@ jobs:
           fi
       - name: No unsanitized markup outside the sanitized rendering path
         # React admits already-sanitized markup only through
-        # dangerouslySetInnerHTML, and the UI's single sanitized artifact-body
-        # rendering path carries the one permitted occurrence. The check is
-        # scoped to the UI's own source tree at web/ui because site/ renders
-        # build-time authored content and is outside this control. The scope
-        # is the whole tree rather than web/ui/src, because the bundler
-        # resolves imports from anywhere under its root. The committed bundle
-        # sits at web/bundle, outside that scope, so React's own minified
-        # occurrence is not matched. The check counts occurrences rather than
-        # files, so a second attribute added inside the rendering path itself
-        # fails too.
+        # dangerouslySetInnerHTML, and the UI carries the attribute on one
+        # sanitized rendering path. The check names no path: it fails when the
+        # UI's own source tree carries more than one occurrence, and when the
+        # occurrences span more than one file, which is the property the
+        # constraint states without fixing where the sanitized renderer lives.
+        # The scope is the UI's own tree at web/ui because site/ renders
+        # build-time authored content and is outside this control, and because
+        # the bundler resolves imports from anywhere under its root. The
+        # committed bundle sits at web/bundle, outside that scope, so React's
+        # own minified occurrence is not matched. The step asserts its scope
+        # exists and treats any grep status other than match or no-match as a
+        # failure, so a relocated source tree fails the job rather than
+        # emptying the scope and reporting success.
         run: |
-          path='web/ui/src/markdown/SanitizedMarkdown.tsx'
-          matches=$(grep -rn 'dangerouslySetInnerHTML' web/ui \
-            --exclude-dir=node_modules || true)
-          outside=$(printf '%s\n' "$matches" | grep -v "^$path:" | grep . || true)
-          if [ -n "$outside" ]; then
-            echo "dangerouslySetInnerHTML outside the sanitized rendering path:"
-            echo "$outside"
+          if [ ! -d web/ui/src ]; then
+            echo "the UI source tree is no longer at web/ui/src; rescope this check"
             exit 1
           fi
-          inside=$(printf '%s\n' "$matches" | grep -c "^$path:" || true)
-          if [ "$inside" -gt 1 ]; then
-            echo "the sanitized rendering path carries more than one dangerouslySetInnerHTML:"
-            printf '%s\n' "$matches" | grep "^$path:"
+          rc=0
+          matches=$(grep -rn 'dangerouslySetInnerHTML' web/ui \
+            --exclude-dir=node_modules) || rc=$?
+          case "$rc" in
+            0 | 1) ;;
+            *)
+              echo "grep exited $rc while scanning web/ui; the check inspected nothing"
+              exit 1
+              ;;
+          esac
+          occurrences=$(printf '%s\n' "$matches" | grep -c . || true)
+          files=$(printf '%s\n' "$matches" | cut -d: -f1 | sort -u | grep -c . || true)
+          if [ "$occurrences" -gt 1 ] || [ "$files" -gt 1 ]; then
+            echo "dangerouslySetInnerHTML is permitted on one sanitized rendering path only;"
+            echo "found $occurrences occurrences across $files files:"
+            printf '%s\n' "$matches"
             exit 1
           fi
       - name: No reference to the removed vanilla SPA
         run: |
+          rc=0
           hits=$(grep -rn 'web/app\.js' . \
-            --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=proposals || true)
+            --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=proposals) || rc=$?
+          case "$rc" in
+            0 | 1) ;;
+            *)
+              echo "grep exited $rc while scanning the repository; the check inspected nothing"
+              exit 1
+              ;;
+          esac
           if [ -n "$hits" ]; then
             echo "the vanilla SPA script was removed; these references are stale:"
             echo "$hits"
