@@ -43,13 +43,28 @@ func TestWebUI_ServedBundleAssetsResolve(t *testing.T) {
 		t.Fatalf("served index references no script or stylesheet: %s", index)
 	}
 	for _, ref := range refs {
-		url := ref[1]
-		if !strings.HasPrefix(url, "/ui/") {
-			t.Errorf("asset reference %q does not resolve under the /ui/ mount", url)
+		url, ok := bundleAssetURL(srv.BaseURL, ref[1])
+		if !ok {
+			t.Errorf("asset reference %q is rooted outside the /ui/ mount", ref[1])
 			continue
 		}
-		if st, _ := getRaw(t, srv.BaseURL+url); st != 200 {
+		if st, _ := getRaw(t, url); st != 200 {
 			t.Errorf("GET %s status = %d, want 200\nlog:\n%s", url, st, srv.log())
 		}
 	}
+}
+
+// bundleAssetURL resolves an asset reference from the served index against
+// the /ui/ mount. A relative reference resolves against the served index's
+// directory, and a reference rooted at /ui/ resolves against the origin.
+// It reports false when the reference is rooted outside the mount, which
+// is the one form the outer mux answers with 404.
+func bundleAssetURL(base, ref string) (string, bool) {
+	if !strings.HasPrefix(ref, "/") {
+		return base + "/ui/" + strings.TrimPrefix(ref, "./"), true
+	}
+	if strings.HasPrefix(ref, "/ui/") {
+		return base + ref, true
+	}
+	return "", false
 }

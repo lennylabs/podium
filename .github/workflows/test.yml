@@ -204,23 +204,35 @@ jobs:
         run: |
           npm ci
           npm run build
-      - name: Committed bundle matches its source
+      - name: Rebuilding the bundle leaves the working tree unchanged
+        # The built bundle is the only generated artifact the build adds to
+        # the tree, so the predicate covers the whole working tree rather
+        # than web/bundle alone. A cache directory, a stats emission, or a
+        # lockfile rewrite anywhere else fails the check too. npm ci writes
+        # web/ui/node_modules, which the node_modules/ .gitignore entry
+        # already excludes.
         run: |
-          git diff --exit-code -- web/bundle \
-            || { echo "web/bundle is stale; run 'npm run build' in web/ui and commit the result"; exit 1; }
-          test -z "$(git status --porcelain -- web/bundle)" \
-            || { echo "web/bundle gained or lost untracked files; commit them"; git status --porcelain -- web/bundle; exit 1; }
+          if ! git diff --exit-code || [ -n "$(git status --porcelain)" ]; then
+            echo "rebuilding the UI bundle changed the working tree;"
+            echo "run 'npm run build' in web/ui and commit the result"
+            git status --porcelain
+            exit 1
+          fi
       - name: No unsanitized markup outside the sanitized rendering path
         # React admits already-sanitized markup only through
         # dangerouslySetInnerHTML, and the UI's single sanitized artifact-body
         # rendering path carries the one permitted occurrence. The check is
-        # scoped to web/ because site/ renders build-time authored content and
-        # is outside this control. The check counts occurrences rather than
+        # scoped to the UI's own source tree at web/ui because site/ renders
+        # build-time authored content and is outside this control. The scope
+        # is the whole tree rather than web/ui/src, because the bundler
+        # resolves imports from anywhere under its root. The committed bundle
+        # sits at web/bundle, outside that scope, so React's own minified
+        # occurrence is not matched. The check counts occurrences rather than
         # files, so a second attribute added inside the rendering path itself
         # fails too.
         run: |
           path='web/ui/src/markdown/SanitizedMarkdown.tsx'
-          matches=$(grep -rn 'dangerouslySetInnerHTML' web/ui/src \
+          matches=$(grep -rn 'dangerouslySetInnerHTML' web/ui \
             --exclude-dir=node_modules || true)
           outside=$(printf '%s\n' "$matches" | grep -v "^$path:" | grep . || true)
           if [ -n "$outside" ]; then
