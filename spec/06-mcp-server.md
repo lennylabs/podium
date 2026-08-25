@@ -37,7 +37,7 @@ Provider-specific options are passed as additional env vars (e.g., `PODIUM_OAUTH
 
 ## 6.3 Identity Providers
 
-Identity providers attach the caller's OAuth-attested identity to every registry call. `oauth-device-code` is the client-side acquisition provider: the consumer obtains and caches the token through the device-code flow. `injected-session-token` is the provider the registry verifies server-side, by checking the runtime's signature on each call (§6.3.2).
+Identity providers attach the caller's OAuth-attested identity to every registry call. `oauth-device-code` is the client-side acquisition provider: the consumer obtains and caches the token through the device-code flow. `injected-session-token` is the provider the registry verifies server-side, by checking the runtime's signature on each call (§6.3.2). §6.3.4 specifies the browser acquisition flow, in which a registry serving the web UI (§13.10) obtains the `oidc-jwt` credential for a browser through a server-side authorization-code exchange.
 
 - **`oauth-device-code`** _(default)_. Interactive device-code flow on first use; tokens cached in the OS keychain (macOS Keychain, Windows Credential Manager, libsecret on Linux). Refreshes transparently. Defaults: access-token TTL 15 min, refresh-token TTL 7 days, revocation propagation ≤60s. Options: `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_TOKEN_KEYCHAIN_NAME`.
 
@@ -89,11 +89,15 @@ Token rotation is the runtime's responsibility; the MCP server's only obligation
 
 ### 6.3.3 Server-Side Request Authentication
 
-`oidc-jwt` and `trusted-headers` are registry-process identity providers for a deployment that runs the registry behind a gateway that has already authenticated the caller (an OIDC ingress, an OAuth2 proxy, an identity-verifying sidecar, or a non-OIDC corporate SSO). Both are selected by the registry's `PODIUM_IDENTITY_PROVIDER`. They are not client-side providers: the MCP server's `PODIUM_IDENTITY_PROVIDER` admits only `oauth-device-code` and `injected-session-token`, and rejects these two values at startup. A Podium client behind such a gateway sends no credential of its own, because identity is supplied by the gateway. Both apply on a standalone (§13.10) or a standard (§13.1) backend, and both are mutually exclusive with public mode: setting either alongside `PODIUM_PUBLIC_MODE` fails at startup with `config.public_mode_with_idp` (§13.10).
+`oidc-jwt` and `trusted-headers` are registry-process identity providers. `oidc-jwt` serves a deployment where the registry verifies the caller's token itself, whether a gateway forwarded that token or the registry obtained it through the §6.3.4 exchange. `trusted-headers` serves a deployment that runs the registry behind a gateway that has already authenticated the caller (an OIDC ingress, an OAuth2 proxy, an identity-verifying sidecar, or a non-OIDC corporate SSO). Both are selected by the registry's `PODIUM_IDENTITY_PROVIDER`. They are not client-side providers: the MCP server's `PODIUM_IDENTITY_PROVIDER` admits only `oauth-device-code` and `injected-session-token`, and rejects these two values at startup. A Podium client behind a gateway that has already authenticated the caller, under either provider, sends no credential of its own, because identity is supplied by the gateway. Both apply on a standalone (§13.10) or a standard (§13.1) backend, and both are mutually exclusive with public mode: setting either alongside `PODIUM_PUBLIC_MODE` fails at startup with `config.public_mode_with_idp` (§13.10).
 
 Both record the caller's subject and `email` and match them against `users:` layer visibility (§4.6). They derive the caller's organization (the §4.7.1 tenant) from the authenticated identity rather than a client-supplied value: `oidc-jwt` from the verified `org_id` claim, and `trusted-headers` from the `X-Podium-User-Org` header. On a single-tenant registry, whether a standalone backend (§13.10) or a standard backend started without `PODIUM_MULTI_TENANT`, the registry resolves every authenticated caller to its sole tenant and does not consult the organization value; provisioning additional tenants on such a registry does not enable per-request routing. On a multi-tenant registry, the organization value selects the tenant per §6.3.1. Each value resolves groups differently, as described below.
 
-**`oidc-jwt` (verified).** The gateway forwards the caller's IdP-signed JWT in the header named by `token_header` (default `Authorization`). The registry parses the named header's value as the standard HTTP Bearer credential regardless of the header name: the value must be `Bearer <token>`, the prefix is matched case-insensitively, and surrounding whitespace is trimmed from the token. A header value without the prefix carries no token, so the request is anonymous and sees public visibility only (§4.6).
+**`oidc-jwt` (verified).** The gateway forwards the caller's IdP-signed JWT in the header named by `token_header` (default `Authorization`). The registry parses the named header's value as the standard HTTP Bearer credential regardless of the header name: the value must be `Bearer <token>`, the prefix is matched case-insensitively, and surrounding whitespace is trimmed from the token. A header value without the prefix carries no bearer credential, as do an omitted header and a `Bearer ` value that trims to empty.
+
+The credential is accepted in a second location. Where the browser flow (§6.3.4) is enabled, a token the registry itself obtained through the §6.3.4 exchange may arrive in the `__Host-podium_session` cookie instead of the configured token header, and the registry verifies it identically against the issuer JWKS for the same `aud`. Because it is the same credential, the second location adds no verification rule and no refusal. The registry reads the configured token header first, and a bearer credential found there decides the request's identity; it reads `__Host-podium_session` only when the configured token header carries no bearer credential and the browser flow is enabled on that registry. A registry with the browser flow disabled reads no cookie at all, and a stale `__Host-podium_session` sent to it carries nothing. The two locations are never merged, and no request draws part of its identity from each: a gateway that authenticated the request is the authority in that deployment, and a registry-set cookie does not displace a gateway-forwarded identity.
+
+A request whose configured token header carries no bearer credential is anonymous and sees public visibility only (§4.6). Where the browser flow is enabled, such a request is anonymous only when it also presents no valid `__Host-podium_session` cookie, meaning a cookie whose token verifies against the issuer JWKS for the same `aud`; the configured token header is still read first. Where the flow is disabled the rule applies to the configured token header alone.
 
 The registry verifies the token on every request. It selects the signing key by `kid` from the issuer's JWKS, resolved from the OIDC discovery document at `<issuer>/.well-known/openid-configuration` and refreshed when the cached key set is older than `jwks_cache_ttl_seconds` (default 300) or when a token presents a `kid` absent from the cached set. It checks the signature against an asymmetric algorithm (RSA, ECDSA, or EdDSA; symmetric algorithms are rejected, so a public key cannot be replayed as an HMAC secret), and validates `iss` against the accepted issuers, `aud` against `PODIUM_OAUTH_AUDIENCE`, and the `exp`/`nbf` window. On success it records the caller's subject and `email`, derives the organization from the verified `org_id` claim, and resolves groups through SCIM or the `IdpGroupMapping` adapter (§6.3.1) applied to the token's group claim. A token that fails signature, `iss`, or `aud` validation is rejected with `auth.untrusted_token`, and an expired token with `auth.token_expired`. While the issuer JWKS is unreachable at runtime, verification fails closed and the request is anonymous rather than rejected.
 
@@ -112,6 +116,64 @@ This mode rests on the operational assumption, which the registry cannot verify,
 Because `trusted-headers` reads identity from headers it cannot verify, the identity it trusts is exactly the set of clients that can reach the bind address, so the provider constrains the bind at startup. (`oidc-jwt`, which verifies every token regardless of the network path, carries no bind restriction.) On a single-tenant registry, a loopback bind (`127.0.0.0/8`, `::1`) is always allowed; a non-loopback bind fails to start with `config.trusted_headers_public_bind` unless `PODIUM_TRUSTED_PROXY_SECRET` or `--allow-public-bind` is set. On a multi-tenant registry, where `X-Podium-User-Org` selects among tenants and a co-resident process can reach a loopback bind, co-residency does not authenticate the gateway, so the proxy secret is required regardless of bind address, including loopback; an unset secret fails to start with `config.trusted_headers_multitenant_no_secret`. The proxy secret is the registry's only request-level control over header trust, because the registry serves HTTP and TLS terminates upstream. The `--allow-public-bind` flag records the operator's assumption that an upstream control the registry cannot verify, such as mutual TLS, a firewall, or a network policy, keeps the registry reachable only through the gateway.
 
 The `X-Podium-User-*` and `X-Podium-Proxy-Secret` headers are request inputs read only in `trusted-headers` mode. They are unrelated to the §13.2.1 read-only response headers, and `trusted-headers` does not consult the `X-Forwarded-User` audit annotation (§8.1) as an authorization input.
+
+### 6.3.4 Browser Acquisition Flow (`oidc-jwt`)
+
+Where a registry serving the web UI (§13.10) enables the browser flow, a browser acquires the `oidc-jwt` credential through the registry rather than holding one of its own. The registry runs the OAuth 2.0 authorization-code flow with PKCE against the identity provider: the sign-in route redirects the browser to the provider's authorization endpoint, and the callback route exchanges the returned authorization code for an access token server-side and returns that token to the browser in the `__Host-podium_session` cookie. §7.3.4 specifies the routes, the single-use pre-authorization transaction they carry, and what each outcome sets and clears.
+
+The token the cookie carries is the same IdP-signed access token a device-code consumer presents, and it carries the registry's resolved audience because the authorization request asks the IdP for that audience the way the device-code flow does. The flow therefore adds no credential to §6.3.3: the registry verifies the token in the cookie exactly as it verifies one in the configured token header, against the issuer JWKS for the same `aud`. The registry keeps no session record, mints no session identifier, and holds no session key. A deployment whose IdP issues opaque access tokens cannot use the browser flow, on the same terms the `oidc-jwt` path already imposes on a forwarded token, and so cannot a deployment whose IdP neither honors the audience parameter nor is configured to mint the registry's resolved audience for this client.
+
+Options: `PODIUM_WEB_UI_OAUTH_CLIENT_ID`, `PODIUM_WEB_UI_OAUTH_CLIENT_SECRET`, `PODIUM_WEB_UI_REDIRECT_URI`, `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT`, `PODIUM_OAUTH_AUDIENCE`. The client identifier, the client credential, the redirect URI, the authorization endpoint, and the token endpoint are the acquisition values. They are required in addition to the issuer and audience `oidc-jwt` already requires (§6.3.3), and a registry that enables the browser flow with any of them empty fails startup with `config.web_ui_auth_unconfigured` (§13.10). `PODIUM_OAUTH_AUDIENCE` carries the registry's resolved audience, which the authorization request sends; it is the audience `oidc-jwt` already requires, and the browser flow adds no key of its own for it. The keys that enable and tune the flow in the registry process are documented in §13.10.
+
+`PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` is the device-authorization endpoint of the §6.3 `oauth-device-code` flow, and the browser flow does not read it. The authorization endpoint the sign-in route redirects to is `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT`, and it is the only key the flow reads for that purpose. The startup guard does not accept the device-code key in place of it: a configuration that sets `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` and leaves `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` empty fails the authorization-endpoint conjunct and fails startup with `config.web_ui_auth_unconfigured` naming the key the flow needs, so an operator who sets only the device-code key gets a startup refusal rather than a redirect to nowhere.
+
+**The authorization request.** The sign-in route mints the `state` and the PKCE `code_verifier`, returns both in the `__Host-podium_auth` cookie, and redirects the browser to `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` carrying the query parameters in the table below and no others. The enumeration is closed.
+
+| Parameter | Value | Where it comes from |
+|:--|:--|:--|
+| `response_type` | the literal `code` | fixed |
+| `client_id` | `PODIUM_WEB_UI_OAUTH_CLIENT_ID` | configuration |
+| `redirect_uri` | `PODIUM_WEB_UI_REDIRECT_URI`, sent byte-identically here and on the token request | configuration |
+| `scope` | `PODIUM_WEB_UI_OAUTH_SCOPES`, space-delimited, defaulting to `openid profile email groups` | configuration |
+| `audience` | the registry's resolved audience | configuration |
+| `state` | minted per transaction: 32 random bytes, base64url-encoded without padding | minted |
+| `code_challenge` | the base64url encoding, without padding, of the SHA-256 digest of the verifier, where the verifier is 32 random bytes in the same encoding, which is 43 characters and satisfies RFC 7636 §4.1 | derived |
+| `code_challenge_method` | the literal `S256`, always sent | fixed |
+
+`code_challenge_method` is always sent because RFC 7636 §4.3 makes `plain` the default when the parameter is absent, and under `plain` the challenge is the verifier itself, travelling through the browser's address bar and the IdP's redirect chain, which removes the property PKCE is here for.
+
+The scope set defaults to `openid profile email groups` rather than to `openid` alone, because the §6.3.1 `IdpGroupMapping` adapter reads a group claim out of the token and a token issued without the scope that carries the group claim carries none, so every group-scoped visibility decision would narrow silently for a browser caller while the same subject sees more from the CLI. The value is configured rather than fixed because the scope that puts a group claim on the access token is IdP-specific, and an IdP that defines no such scope refuses the authorization request outright.
+
+**The token request.** The callback exchanges the authorization code at `PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT` with the form fields in the table below and no others.
+
+| Field | Value |
+|:--|:--|
+| `grant_type` | the literal `authorization_code` |
+| `code` | the `code` the callback query carries |
+| `redirect_uri` | `PODIUM_WEB_UI_REDIRECT_URI`, byte-identical to the value the authorization request sent, which RFC 6749 §4.1.3 requires of a request whose authorization leg carried one |
+| `client_id` | `PODIUM_WEB_UI_OAUTH_CLIENT_ID` |
+| `client_secret` | `PODIUM_WEB_UI_OAUTH_CLIENT_SECRET`, always sent as a form field |
+| `code_verifier` | the verifier `__Host-podium_auth` holds, per RFC 7636 §4.5 |
+
+The request is a POST carrying `Content-Type: application/x-www-form-urlencoded` and `Accept: application/json`, and its non-`200` body is decoded as the RFC 6749 §5.2 error envelope. The client credential is sent as a form field rather than as an HTTP Basic credential, and it is always sent, because a registry that enables the browser flow with an empty client credential fails startup (§13.10) and no running registry reaches an omitted field. §6.10 states which code each exchange failure returns.
+
+The exchange consumes the ID token for nothing. `__Host-podium_session` carries the access token, and every resolved subject comes from verifying that access token under §6.3.3, so the registry reads no ID-token claim. The authorization request therefore sends no `nonce` and the callback compares none: `state` binds the callback to the browser that started the transaction and `code_verifier` binds the exchange to the client that started it, and there is no third token for a third value to bind.
+
+**The browser-origin gate.** A credential a browser attaches by itself authenticates any request the browser can be induced to make, so every write the registry exposes to a browser is otherwise forgeable across origins. The registry refuses a state-changing request that carries cross-site browser-origin evidence.
+
+The gate is scoped by the evidence the request carries rather than by which credential authenticated it. The session cookie is not the only credential a browser attaches by itself: where a gateway fronts the registry under `oidc-jwt` or `trusted-headers`, §13.10 serves the UI from the same registry process behind the same gateway, and there the browser's credential is the gateway's own ambient session, which the gateway converts into the configured token header on every request the browser can be induced to make, including a cross-origin form POST. A gate scoped to the session cookie would leave those writes forgeable, so the predicate below reads the request.
+
+- **What counts as state-changing.** A request is state-changing for this gate when its HTTP method is other than `GET`, `HEAD`, or `OPTIONS`. The predicate is the method rather than the handler's effect, because the gate runs before the handler and has nothing else to read, and because the safe methods are the ones a browser issues as an ordinary navigation or subresource load.
+- **The refusal.** Every state-changing request, other than the sign-in and callback routes, that carries cross-site browser-origin evidence is refused before the handler runs with `403` `auth.csrf_invalid` (§6.10), whatever credential authenticated it.
+- **What counts as cross-site evidence.** Browser-origin evidence is cross-site when the request carries a `Sec-Fetch-Site` header whose value is other than `same-origin` or `none`, or an `Origin` header whose host and port differ from the host and port the request's own `Host` header names. The scheme is not compared. An HTTP `Host` header carries no scheme, and a registry behind a TLS-terminating gateway cannot observe the browser-facing one, since the registry serves HTTP and TLS terminates upstream (§6.3.3). A predicate that compared the scheme would refuse every panel write on the deployment §13.10 describes and on the §13.1 topology, where a browser on `https://registry.acme.com/ui/` sends `Origin: https://registry.acme.com` to a registry whose own request scheme is `http`. Omitting the scheme term admits a downgrade origin such as `http://<host>` as same-origin, which costs this gate nothing, because §13.10 requires the flow's redirect URI to be an `https` URL or a loopback `http` URL and a browser therefore holds no session credential to present on such an origin.
+- **A deployment the comparison does not serve.** Comparing against `Host` is what keeps the gate free of a configuration key for the registry's public origin. One deployment that comparison does not serve is a gateway that rewrites `Host` to an upstream service name: there a legitimate same-origin write from the UI carries an `Origin` whose host differs from `Host`, so every write from the UI is refused with `403` `auth.csrf_invalid` while every CLI and SDK write keeps succeeding. The remedy is to pass the browser-facing `Host` through unrewritten.
+- **What is admitted.** A state-changing request carrying neither header carries no browser-origin evidence and is admitted, which is what a CLI, an SDK, or any other non-browser client sends. The gate is triggered by evidence and never requires a proof of same origin, so a request that proves nothing is admitted rather than refused; a gate that swept those requests in would break every non-browser writer on a registry that enables the browser flow. That admitted case is the gate's residual: a browser that sent neither header would be indistinguishable from a non-browser client. Every browser that can reach a web UI deployment sends `Sec-Fetch-Site` on a cross-site request and `Origin` on a cross-origin form POST.
+- **The gate is not conditional on the browser flow.** It reads the request rather than the deployment, so it runs on every state-changing request the registry serves, including on a registry that enables no browser flow and on one that serves no web UI. A second enablement axis would leave the gateway-fronted `trusted-headers` deployment, where the browser flow cannot be enabled at all, outside a control its own forgery case needs, and it would cost a non-browser client nothing either way. The gate is stated in this section because the browser flow is what makes a browser-borne credential reachable in the first place; the predicate itself names no deployment.
+- **Sign-out is inside the gate.** Sign-out answers on `POST`, so the method predicate covers it. A forged sign-out is a denial of service against a signed-in operator, so a sign-out the gate refuses returns `403` `auth.csrf_invalid` before the handler runs and clears no cookie.
+- **Sign-in and the callback are outside the gate.** Both answer on `GET`, so the method predicate leaves them outside it, and the exclusion is stated by name as well, so that an implementation that widens the method predicate does not pull them in. Each is a top-level navigation, and a browser that already holds `__Host-podium_session` from an earlier sign-in sends that cookie on both, so under an unqualified predicate every re-sign-in would be refused, no session would ever be established for that browser, and no recovery would remain, since re-running sign-in is the only recovery an expired session has. What binds both routes is the single-use pre-authorization transaction carrying `state` and the PKCE verifier in `__Host-podium_auth` (§7.3.4), which refuses exactly the forged and replayed callbacks a same-origin check would. A forced cross-origin sign-in can do no more than replace the victim's own `__Host-podium_auth` cookie with a transaction the registry mints for that same browser, which the victim's own IdP session then completes.
+- **Cookies.** The gate sets no cookie and reads none. `SameSite` is a defense in depth on the cookies this flow sets rather than the control the gate rests on, which is why the evidence check does not consult it.
+
+The gate carries no request-side value. It is the browser-origin evidence check above and nothing else: it sets no cookie, requires no header, and mints no server-stored token, so it reads and writes no state. A double-submit cookie and its matching request header are deliberately absent. Keyed to authentication by `__Host-podium_session`, such a value would attach to no forged request, because that cookie is `SameSite=Lax` and a `SameSite=Lax` cookie reaches a cross-site request only on a top-level navigation with a safe method, and the same-site cross-origin forgery it would otherwise reach is already refused twice by the evidence check, once on `Sec-Fetch-Site: same-site` and once on the `Origin` host comparison. On a browser old enough to send neither header it is not a control at all, because a stateless double submit carries nothing a server-side comparison could distinguish from a value the registry issued, and its only control is the `__Host-` prefix that such a browser does not enforce. Against no incremental refusal it would cost a page-readable value on an origin that renders author-controlled markup, and a failure mode in which a browser holding a live session and no such cookie is refused on every write with no recovery.
 
 ## 6.4 Workspace Local Overlay
 
@@ -324,10 +386,12 @@ The MCP server is a stdio subprocess spawned by its host. The host is responsibl
 | Registry offline                              | Serve from cache; return explicit "offline" status on fresh `load_domain` / `search_domains` / `search_artifacts`.                                                             |
 | Workspace overlay path missing                | Skip the workspace local overlay; warn once.                                                                                                                |
 | Auth token expired (`oauth-device-code`)      | Trigger refresh; if interactive refresh required, surface in tool response with reauth instructions via MCP elicitation.                                    |
-| Auth token expired (`injected-session-token`, `oidc-jwt`) | Reject with `auth.token_expired`. The host's runtime is responsible for refresh; for `oidc-jwt` the gateway forwards a new token. |
+| Auth token expired (`injected-session-token`, `oidc-jwt`) | Reject with `auth.token_expired`. The host's runtime is responsible for refresh; under `oidc-jwt` a gateway-forwarded token is replaced by the gateway, and a browser session is renewed by signing in again (§6.3.4). |
 | Untrusted runtime (`injected-session-token`)  | Reject with `auth.untrusted_runtime`. The deployment adds the runtime's signing key to the registry's trusted key set (§6.3.2) and restarts the registry. |
-| Untrusted forwarded token (`oidc-jwt`)        | Reject with `auth.untrusted_token`. The token failed signature, `iss`, or `aud` validation against the accepted issuers and the configured audience (§6.3.3).                       |
+| Untrusted token (`oidc-jwt`)                  | Reject with `auth.untrusted_token`. The token failed signature, `iss`, or `aud` validation against the accepted issuers and the configured audience (§6.3.3), in either accepted credential location.                       |
 | Verified token names no tenant (`oidc-jwt`)   | Reject with `auth.tenant_unknown`. The token verified, but its `org_id` names no provisioned tenant on a multi-tenant registry.                              |
+| Cross-site browser-origin evidence on a state-changing request, or a browser sign-in callback whose pre-authorization transaction does not validate | Reject with `403` `auth.csrf_invalid`. §6.3.4 states each predicate. |
+| Browser sign-in code exchange refused by the IdP | Reject with `502` `auth.exchange_failed`. The IdP answered the exchange and refused it; the operator checks the configured client credential and the registered redirect URI (§6.3.4). |
 | Visibility denial on a call                   | Return a structured error naming the unreachable resource (without leaking the layer's existence); log to the registry audit stream as `visibility.denied`. |
 | Materialization destination unwritable        | Fail the `load_artifact` call with a structured error; nothing partial is left on disk.                                                                     |
 | Signature verification failure                | Fail with `materialize.signature_invalid`; do not write to disk.                                                                                            |
@@ -352,26 +416,26 @@ All errors use a structured envelope:
 }
 ```
 
-The gateway-delegated providers (§6.3.3) add three `auth.*` codes. `auth.token_expired` reports an expired `injected-session-token` or `oidc-jwt` token; it carries no `details`, because the expiry is reported without an issuer field:
+The registry-process providers (§6.3.3) add `auth.*` codes. `auth.token_expired` reports an expired `injected-session-token` token, or an expired `oidc-jwt` token in either accepted credential location; it carries no `details`, because the expiry is reported without an issuer field:
 
 ```json
 {
   "code": "auth.token_expired",
   "message": "The authenticated token has expired.",
   "retryable": false,
-  "suggested_action": "Refresh the token. For 'injected-session-token' the runtime reissues it; for 'oidc-jwt' the gateway forwards a new token."
+  "suggested_action": "Refresh the token. For 'injected-session-token' the runtime reissues it; for 'oidc-jwt' a gateway forwards a new token, and a browser session is renewed by signing in again."
 }
 ```
 
-`auth.untrusted_token` reports a forwarded `oidc-jwt` token that failed signature, `iss`, or `aud` verification. `details.token_iss` carries the rejected token's issuer, distinct from the runtime code's `details.runtime_iss`:
+`auth.untrusted_token` reports an `oidc-jwt` token that failed signature, `iss`, or `aud` verification, in either accepted credential location. `details.token_iss` carries the rejected token's issuer, distinct from the runtime code's `details.runtime_iss`:
 
 ```json
 {
   "code": "auth.untrusted_token",
-  "message": "Forwarded token from issuer 'https://acme.okta.com/oauth2/default' failed verification.",
+  "message": "Token from issuer 'https://acme.okta.com/oauth2/default' failed verification.",
   "details": { "token_iss": "https://acme.okta.com/oauth2/default" },
   "retryable": false,
-  "suggested_action": "Verify the gateway forwards a token from the issuer and audience configured for 'oidc-jwt' (PODIUM_OAUTH_ISSUER, PODIUM_OAUTH_AUDIENCE)."
+  "suggested_action": "Verify the token reaching the registry comes from the issuer and audience configured for 'oidc-jwt' (PODIUM_OAUTH_ISSUER, PODIUM_OAUTH_AUDIENCE). A gateway-forwarded token is corrected at the gateway; a browser session is re-established by signing in again."
 }
 ```
 
@@ -384,6 +448,28 @@ The gateway-delegated providers (§6.3.3) add three `auth.*` codes. `auth.token_
   "details": { "token_org_id": "globex" },
   "retryable": false,
   "suggested_action": "Provision the organization as a tenant, or forward a token whose org_id claim names an existing tenant."
+}
+```
+
+The browser acquisition flow (§6.3.4) adds `auth.*` codes. `auth.csrf_invalid` is answered with `403` and covers two refusals on one axis: a state-changing request the §6.3.4 browser-origin gate refuses, which the registry answers before the handler runs and whatever credential authenticated the request, and a browser sign-in callback the single-use pre-authorization transaction refuses. §6.3.4 states each predicate. The two refusals are disjoint by route, because the sign-in and callback routes are outside the gate:
+
+```json
+{
+  "code": "auth.csrf_invalid",
+  "message": "The request was refused because it did not pass the browser-origin check.",
+  "retryable": false,
+  "suggested_action": "Reload the web UI and retry the operation from it; if the registry is behind a gateway, pass the browser-facing Host header through unrewritten."
+}
+```
+
+`auth.exchange_failed` is answered with `502` and reports a browser sign-in callback whose code exchange the IdP answered and refused, such as an `invalid_grant` response or a refusal caused by a wrong client credential. It is a permanent failure for that request, so its envelope carries `retryable: false`. An IdP the registry could not reach for the exchange, and one whose token endpoint answered with a `5xx`, are transient failures against a dependency the registry called and are reported with `registry.unavailable` instead:
+
+```json
+{
+  "code": "auth.exchange_failed",
+  "message": "The identity provider refused the authorization code exchange.",
+  "retryable": false,
+  "suggested_action": "Check the configured OAuth client credential and that the redirect URI the registry sends is registered with the identity provider for this client."
 }
 ```
 
