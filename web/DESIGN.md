@@ -404,6 +404,14 @@ from a write it would otherwise have assumed would succeed, including on a layer
 its own role split presented as the caller's to manage. It presents that refusal
 rather than treating it as a failure of the page.
 
+The marker the panel puts on a row it presents as another caller's is a
+comparison against the caller's own subject, and the posture read reports a
+subject only where one resolves. Where it resolves none the comparison has no
+left-hand side, and that is also a posture on which the liveness condition above
+leaves every one of the panel's writes admitted, so the panel renders no
+ownership marker at all there and every row reads as equally actionable. The
+marker is reserved for a caller whose subject resolved.
+
 Whether an anonymous caller sees the panel is a design decision rather than one
 the API makes. Listing layers carries no authorization check, and a standalone
 deployment with no identity provider treats the local operator as the
@@ -457,14 +465,15 @@ read answers at all.
 - Where a catalog read is refused because the caller's identity could not be
   verified, that caller has no anonymous view of the catalog, and the page
   renders the refused state rather than an empty catalog or a filtered one.
-  Which refusals a catalog read returns when the caller's identity cannot be
-  verified is owned by the catalog-scope rule under "The design handout" in
-  `proposals/0013-build-the-13-10-web-ui.md`, and the page reads them there
-  rather than from this brief. That rule is also where the deployment class this
-  arm exists for is stated: a registry whose identity provider verifies a
-  runtime-signed token refuses every catalog call from a browser that holds
-  none, so a caller who never held a subject reaches this arm as readily as one
-  who did. This arm is ordered ahead of the two below, whether or not the
+  What a catalog read returns for a session the registry cannot verify is owned
+  by the expiry-signal rule under "The browser session" in
+  `proposals/0013-build-the-13-10-web-ui.md`, and the page reads it there rather
+  than from this brief. A second deployment class reaches this same arm with no
+  session involved, and the catalog-scope rule under "The design handout" in
+  that proposal is where that class is stated: a registry whose identity
+  provider verifies a runtime-signed token refuses every catalog call from a
+  browser that holds none, so a caller who never held a subject reaches this arm
+  as readily as one who did. This arm is ordered ahead of the two below, whether or not the
   posture read answered, so neither of them applies to such a refusal. Where a
   caller who had a subject sees that refusal, the transition it marks is the
   session expiry the expiry-signal rule under "The browser session" in the same
@@ -523,15 +532,15 @@ there. The fourth row is the arm "The posture read" owns: where the read fails
 or is not served the page holds no value for either key, so it renders neither
 control and the layer panel renders its write operations.
 
-The control is keyed on a posture read taken when the page loads, so a session
-that ends while the page is already rendered leaves the keys stale. A catalog
-read refused because the caller's identity could not be verified re-keys the
-control: the page issues the posture read again and renders whichever row the
-fresh values select. On the deployments that run the browser flow that read
-resolves no subject once the session has ended, so the control becomes sign-in,
-which is the affordance the refused-catalog treatment needs beside it. The
-re-read is the only mechanism that changes the control after load, and no other
-response re-keys it.
+The control is keyed on the posture read the page takes when it loads. A session
+that ends while the page is already rendered is signalled by the catalog read
+rather than by the shell, on the terms the expiry-signal rule under "The browser
+session" in the same proposal gives it, and the treatment for that transition
+carries its own control. What that control may be is bounded by the third row:
+where the read reports the browser flow disabled the page renders no
+authentication control on any value of `subject`, so the expiry treatment on
+such a deployment offers no sign-in affordance and has to state what it offers
+in its place.
 
 The transitions matter as much as the states: signing in, signing out, and a
 session expiring mid-use while a page is already rendered. The signal for that
