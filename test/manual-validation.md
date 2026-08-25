@@ -4109,8 +4109,8 @@ misconfigured:
 6. Load the UI with no credential: no gateway in front, no header, no prior
    `podium login`. Open `http://127.0.0.1:8153/ui/` in a browser to see what a
    person sees, and issue the same call the page makes so the result is
-   machine-checkable. The SPA fetches `/v1/load_domain` on load
-   (`web/app.js:37`, through the bare `fetch` at `web/app.js:12`).
+   machine-checkable. The UI fetches `/v1/load_domain` on load, through a
+   same-origin `fetch` that attaches no credential.
 
    ```bash
    curl -sS "http://127.0.0.1:8153/v1/load_domain?path="; echo
@@ -4145,10 +4145,10 @@ misconfigured:
    authenticated caller. Run step 5 first and compare the two.
 
 **Known gap this records.** A directly reachable UI showing only public
-artifacts is current behavior rather than a defect. The shipped SPA attaches no
-credential: every network call it makes goes through one bare same-origin
-`fetch` with no headers (`web/app.js:12`), used by its three call sites,
-`/v1/load_domain`, `/v1/search_artifacts`, and `/v1/load_artifact`.
+artifacts is current behavior rather than a defect. The shipped UI attaches no
+credential: every network call it makes goes through one same-origin `fetch`
+with no headers, used by its call sites `/v1/load_domain`,
+`/v1/search_artifacts`, and `/v1/load_artifact`.
 In-browser authentication is deferred to its own proposal, and this scenario
 pins what the spec now says so a later change to the UI has to move that text
 with it.

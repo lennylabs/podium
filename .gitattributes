@@ -1,0 +1,4 @@
+# The §13.10 web UI's bundle is build output from web/ui, committed so a
+# clean clone builds with only a Go toolchain. Marking it generated
+# collapses it in review diffs and keeps it out of language statistics.
+web/bundle/** linguist-generated=true

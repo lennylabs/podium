@@ -182,3 +182,53 @@ jobs:
         run: |
           npm install
           npm test
+
+  web:
+    name: web-ui
+    runs-on: ubuntu-latest
+    # The §13.10 UI bundle is committed so go:embed resolves and a clean
+    # clone builds with only a Go toolchain. This job is what keeps the
+    # committed output trustworthy: it rebuilds from source and fails on
+    # any working-tree difference.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+      - name: Build the UI bundle
+        working-directory: web/ui
+        run: |
+          npm ci
+          npm run build
+      - name: Committed bundle matches its source
+        run: |
+          git diff --exit-code -- web/bundle \
+            || { echo "web/bundle is stale; run 'npm run build' in web/ui and commit the result"; exit 1; }
+          test -z "$(git status --porcelain -- web/bundle)" \
+            || { echo "web/bundle gained or lost untracked files; commit them"; git status --porcelain -- web/bundle; exit 1; }
+      - name: No unsanitized markup outside the sanitized rendering path
+        # React admits already-sanitized markup only through
+        # dangerouslySetInnerHTML, and the UI's single sanitized artifact-body
+        # rendering path carries the one permitted occurrence. The check is
+        # scoped to web/ because site/ renders build-time authored content and
+        # is outside this control.
+        run: |
+          hits=$(grep -rln 'dangerouslySetInnerHTML' web/ui/src \
+            --exclude-dir=node_modules \
+            | grep -v '^web/ui/src/markdown/SanitizedMarkdown.tsx$' || true)
+          if [ -n "$hits" ]; then
+            echo "dangerouslySetInnerHTML outside the sanitized rendering path:"
+            echo "$hits"
+            exit 1
+          fi
+      - name: No reference to the removed vanilla SPA
+        run: |
+          hits=$(grep -rn 'web/app\.js' . \
+            --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=proposals || true)
+          if [ -n "$hits" ]; then
+            echo "the vanilla SPA script was removed; these references are stale:"
+            echo "$hits"
+            exit 1
+          fi

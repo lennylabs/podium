@@ -66,11 +66,11 @@ sign-in control rule in the state matrix below keys on.
 
 ## Current state
 
-The existing implementation is the vanilla-JS file at `web/app.js`. It renders
-the domain browser, the search box, and the artifact viewer as unstyled text, and
-it has no layer panel. It is a placeholder rather than a baseline to preserve.
-Treat this brief as a first design rather than a redesign, and do not carry
-forward the current structure.
+The UI had no design. A vanilla-JavaScript placeholder rendered the domain
+browser, the search box, and the artifact viewer as unstyled text, and it carried
+no layer panel. That placeholder was removed together with the markup and the
+stylesheet it shipped with, and nothing was carried forward from it. Treat this
+brief as a first design rather than a redesign.
 
 ## Constraints
 
