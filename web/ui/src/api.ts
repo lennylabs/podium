@@ -251,6 +251,12 @@ export interface LayerRecord {
   force_push_policy?: string;
   last_ingested_at?: string;
   LastIngestedRef?: string;
+  /** DeletedAt is when the layer was unregistered. It is set on the records
+   * the deleted read returns and absent on every other layer, and the
+   * recovery surface derives the erase date from it. The field carries no
+   * omitempty tag, so an active layer marshals it as null rather than
+   * omitting it. */
+  DeletedAt?: string | null;
 }
 
 /** IngestSummary is the §7.3.1 reingest result. The registry runs the whole
@@ -436,8 +442,34 @@ export async function listDeletedLayers(): Promise<LayerRecord[]> {
   return body.layers ?? [];
 }
 
-export function reingestLayer(id: string): Promise<IngestSummary> {
-  return request<IngestSummary>(`${paths.layers}/reingest${query({ id })}`, { ...write, method: 'POST' });
+/** BreakGlass is the §4.7.2 override a reingest carries to run inside a
+ * freeze window. The registry refuses it without a justification, and the
+ * freeze rule requires two distinct approvers, so the surface that offers the
+ * override collects both before it sends one. */
+export interface BreakGlass {
+  justification: string;
+  approvers: string[];
+}
+
+/** reingestLayer runs the ingest pipeline for one layer. The request carries
+ * a body only where the caller is overriding a freeze window, because the
+ * endpoint reads break_glass, justification, and approvers there and reads
+ * nothing from the body otherwise. */
+export function reingestLayer(id: string, breakGlass?: BreakGlass): Promise<IngestSummary> {
+  const path = `${paths.layers}/reingest${query({ id })}`;
+  if (breakGlass === undefined) {
+    return request<IngestSummary>(path, { ...write, method: 'POST' });
+  }
+  return request<IngestSummary>(path, {
+    ...write,
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      break_glass: true,
+      justification: breakGlass.justification,
+      approvers: breakGlass.approvers,
+    }),
+  });
 }
 
 export function unregisterLayer(id: string): Promise<unknown> {

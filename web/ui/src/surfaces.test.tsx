@@ -197,6 +197,7 @@ describe('the catalog-scope rule', () => {
     render(<App />);
     expect(await screen.findByText('security/internal-review')).toBeTruthy();
     expect(screen.queryByText('Not signed in')).toBeNull();
+    expect(screen.queryByTestId('anonymous-banner')).toBeNull();
   });
 
   // The public-subset arm carries its framing and states nothing about what
@@ -210,6 +211,13 @@ describe('the catalog-scope rule', () => {
     expect(await screen.findByText('Not signed in')).toBeTruthy();
     expect(screen.queryByText(/hidden/i)).toBeNull();
     expect(screen.queryByText(/withheld/i)).toBeNull();
+    // The arm carries two pieces: the sidebar footer note and the page
+    // banner. The banner carries no control of its own, because the
+    // authentication control belongs to the shell.
+    const banner = screen.getByTestId('anonymous-banner');
+    expect(banner.textContent).toContain('not signed in');
+    expect(banner.querySelector('button')).toBeNull();
+    expect(banner.querySelector('a')).toBeNull();
   });
 
   // The refused arm, ordered ahead of the other two. A registry whose
@@ -375,16 +383,95 @@ describe('the artifact viewer', () => {
     goTo('#/artifact/platform%2Freview');
     render(<App />);
     await screen.findByLabelText('Artifact viewer');
+    // The rendered tab is the one the viewer opens on, and the rail carries
+    // the frontmatter beside it.
     expect(screen.getByTestId('artifact-body').querySelector('h1')?.textContent).toBe('Review');
-    const table = screen.getByTestId('frontmatter-table');
-    expect(table.textContent).toContain('name');
-    expect(table.textContent).toContain('security');
+    const rail = screen.getByTestId('rail-frontmatter-table');
+    expect(rail.textContent).toContain('name');
+    expect(rail.textContent).toContain('security');
     expect(screen.queryByText('Invalid syntax')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: /Frontmatter/ }));
+    const table = screen.getByTestId('frontmatter-table');
+    expect(table.textContent).toContain('security');
     // The authored skill file is populated on a skill artifact, so the
-    // viewer carries it.
-    expect(screen.getByLabelText('Authored source').textContent).toContain('Authored skill body.');
+    // viewer carries its tab.
+    fireEvent.click(screen.getByRole('tab', { name: 'Authored source' }));
+    expect(screen.getByText(/Authored skill body\./)).toBeTruthy();
     const relation = await screen.findByText('platform/review-strict');
     expect(relation.getAttribute('href')).toBe('#/artifact/platform%2Freview-strict');
+  });
+
+  // The viewer is two columns with a tab set over the content one. The
+  // resource tab carries the count of what the artifact bundles, and a tab
+  // whose artifact carries nothing for it is not drawn at all rather than
+  // opening on an empty panel.
+  it('draws the tab set with the resource count and drops a tab the artifact carries nothing for', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'platform/review',
+          type: 'context',
+          version: '1.0.0',
+          content_hash: 'sha256:abc',
+          manifest_body: '# Review\n',
+          frontmatter: manifestDoc,
+          resources: { 'checklist.md': 'body', 'rubric.md': 'body' },
+        },
+      },
+      '/v1/dependents': { body: { edges: [] } },
+    });
+    goTo('#/artifact/platform%2Freview');
+    render(<App />);
+    await screen.findByLabelText('Artifact viewer');
+    expect(screen.getByRole('tab', { name: /Resources/ }).textContent).toContain('2');
+    expect(screen.queryByRole('tab', { name: 'Authored source' })).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: /Resources/ }));
+    expect(screen.getByLabelText('Resources').textContent).toContain('checklist.md');
+  });
+
+  // load_artifact defaults to the latest version and takes any other, so a
+  // reader who picks one is told which version they are reading and is given
+  // the way back to the latest.
+  it('reads the version the picker names and marks it as an older one', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'platform/review',
+          type: 'context',
+          version: '2.3.0',
+          content_hash: 'sha256:abc',
+          manifest_body: '# Review\n',
+          frontmatter: '',
+        },
+      },
+      '/v1/dependents': { body: { edges: [] } },
+    });
+    goTo('#/artifact/platform%2Freview');
+    render(<App />);
+    await screen.findByLabelText('Artifact viewer');
+    expect(screen.queryByTestId('older-version')).toBeNull();
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'platform/review',
+          type: 'context',
+          version: '1.0.0',
+          content_hash: 'sha256:old',
+          manifest_body: '# Review\n',
+          frontmatter: '',
+        },
+      },
+      '/v1/dependents': { body: { edges: [] } },
+    });
+    fireEvent.change(screen.getByLabelText('Version'), { target: { value: '1.0.0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'View' }));
+    const notice = await screen.findByTestId('older-version');
+    expect(notice.textContent).toContain('1.0.0');
+    expect(screen.getByRole('button', { name: 'Go to 2.3.0' })).toBeTruthy();
+    expect(requests.some((r) => r.url.includes('version=1.0.0'))).toBe(true);
   });
 
   // The presigned channel delivers the canonical manifest document rather
@@ -416,7 +503,7 @@ describe('the artifact viewer', () => {
     expect(rendered.querySelector('h1')?.textContent).toBe('Review');
     expect(rendered.querySelector('hr')).toBeNull();
     expect(rendered.textContent).not.toContain('name: review');
-    const table = screen.getByTestId('frontmatter-table');
+    const table = screen.getByTestId('rail-frontmatter-table');
     expect(table.textContent).toContain('name');
     expect(table.textContent).toContain('security');
     expect(screen.queryByText('No frontmatter on this artifact.')).toBeNull();
@@ -443,7 +530,7 @@ describe('the artifact viewer', () => {
     expect(screen.queryByLabelText('Authored source')).toBeNull();
   });
 
-  it('omits the property table where the response yields no frontmatter pairs', async () => {
+  it('drops the rail’s frontmatter section where the response yields no pairs', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ public_mode: true }) },
       '/v1/load_artifact': {
@@ -461,7 +548,13 @@ describe('the artifact viewer', () => {
     goTo('#/artifact/platform%2Freview');
     render(<App />);
     await screen.findByLabelText('Artifact viewer');
-    expect(screen.queryByTestId('frontmatter-table')).toBeNull();
+    // The rail reads as provenance followed directly by relations: the
+    // section header goes with the table rather than standing over an empty
+    // one, and the tab carries no parse-failure badge.
+    expect(screen.queryByTestId('rail-frontmatter-table')).toBeNull();
+    expect(screen.queryByLabelText('Frontmatter')).toBeNull();
+    expect(screen.getByRole('tab', { name: /Frontmatter/ }).textContent).not.toContain('!');
+    fireEvent.click(screen.getByRole('tab', { name: /Frontmatter/ }));
     expect(screen.getByText('No frontmatter on this artifact.')).toBeTruthy();
     expect(await screen.findByText('Nothing extends or depends on this artifact.')).toBeTruthy();
   });
@@ -484,8 +577,12 @@ describe('the artifact viewer', () => {
     goTo('#/artifact/platform%2Freview');
     render(<App />);
     await screen.findByLabelText('Artifact viewer');
-    expect(screen.getByText('Invalid syntax')).toBeTruthy();
+    // The parse failure is reported on the tab that opens the block, so a
+    // reader on another tab is told the block did not parse.
+    expect(screen.getByRole('tab', { name: /Frontmatter/ }).textContent).toContain('!');
     expect(screen.getByTestId('artifact-body').querySelector('h1')?.textContent).toBe('Review');
+    fireEvent.click(screen.getByRole('tab', { name: /Frontmatter/ }));
+    expect(screen.getAllByText('Invalid syntax').length).toBeGreaterThan(0);
   });
 });
 
@@ -530,15 +627,17 @@ describe('the layer panel', () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
       '/v1/layers': { body: { layers: [userLayer('bob@acme.com')] } },
-      '/v1/layers/reingest': { status: 403, body: { code: 'auth.forbidden', message: 'not permitted' } },
+      'DELETE /v1/layers': { status: 403, body: { code: 'auth.forbidden', message: 'not permitted' } },
     });
     goTo('#/layers');
     render(<App />);
     await screen.findByLabelText('Layer panel');
-    fireEvent.click(screen.getByRole('button', { name: 'Reingest' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Unregister' }));
+    fireEvent.change(screen.getByLabelText('Type the layer ID to confirm'), { target: { value: 'alice-personal' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Unregister layer' }));
     expect(await screen.findByText(/nothing changed/)).toBeTruthy();
     expect(screen.getByText('auth.forbidden')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Unregister' }).hasAttribute('disabled')).toBe(false);
+    expect(screen.getByRole('button', { name: 'Edit' }).hasAttribute('disabled')).toBe(false);
   });
 
   it('renders one marker per matching visibility axis and summarises an axis that overflows', async () => {
@@ -633,6 +732,22 @@ describe('the session-expiry transition', () => {
     expect(screen.getByTestId('expiry-retry')).toBeTruthy();
   });
 
+  // A posture read that did not answer is a different arm from a deployment
+  // that reported the browser flow disabled. It is reachable on any
+  // deployment, so the recovery claims nothing about whether a browser
+  // sign-in exists and offers the retry alone.
+  it('claims no deployment property where the posture read did not answer', async () => {
+    stubRegistry({
+      '/v1/ui/session': { status: 503, body: { code: 'registry.unavailable', message: 'no posture' } },
+      '/v1/load_domain': { status: 401, body: { code: 'auth.untrusted_token', message: 'no identity' } },
+    });
+    render(<App />);
+    await screen.findByLabelText('Catalog refused');
+    expect(screen.queryByText(/runs no browser sign-in/)).toBeNull();
+    expect(screen.queryByTestId('expiry-sign-in')).toBeNull();
+    expect(screen.getByTestId('expiry-retry')).toBeTruthy();
+  });
+
   // The refused arm is reached by a caller who never held a subject as well,
   // on a registry whose verifier refuses a browser that carries no token. The
   // expiry transition belongs to the caller whose read resolved a subject, so
@@ -701,10 +816,15 @@ describe('read-only mode', () => {
     render(<App />);
     await screen.findByLabelText('Layer panel');
     await screen.findByTestId('read-only-banner');
-    for (const name of ['Register layer', 'Reingest', 'Unregister', 'Raise precedence']) {
+    for (const name of ['Register layer', 'Reingest all', 'Reingest', 'Unregister', 'Edit']) {
       for (const control of screen.getAllByRole('button', { name })) {
         expect(control.hasAttribute('disabled')).toBe(true);
       }
+    }
+    // Reordering is a write too, so the rows carry no drag on a read-only
+    // registry rather than committing a move the registry would refuse.
+    for (const row of screen.getAllByLabelText(/Drag .* to reorder/)) {
+      expect(row.closest('tr')?.getAttribute('draggable')).toBe('false');
     }
   });
 
@@ -1029,20 +1149,61 @@ describe('the layer write flows', () => {
     goTo('#/layers');
     render(<App />);
     await screen.findByLabelText('Layer panel');
-    const controls = screen.getAllByRole('button', { name: 'Raise precedence' });
-    // The admin layer is alone in its class, so its control has nothing to
-    // move past and is held.
-    expect(controls[0].hasAttribute('disabled')).toBe(true);
-    fireEvent.click(controls[1]);
+    // The move commits on drop: the dragged row lands where the row it was
+    // dropped onto stood.
+    dragRowOnto('alice-personal', 'alice-scratch');
     await waitFor(() => {
       expect(requests.some((r) => r.url === '/v1/layers/reorder' && r.method === 'POST')).toBe(true);
     });
     // The user-defined block is alice-personal, alice-scratch, bob-personal
-    // in stored order, and the move trades the first two. The whole block is
-    // named, bob-personal included, so its rewritten order value keeps it
-    // below the pair rather than colliding with them; the registry authorizes
-    // each named layer on its own and the panel presents whatever it refuses.
+    // in stored order, and the move puts the first row where the second
+    // stood. The whole block is named, bob-personal included, so its
+    // rewritten order value keeps it below the pair rather than colliding
+    // with them; the registry authorizes each named layer on its own and the
+    // panel presents whatever it refuses.
     expect(bodies.at(-1)).toBe(JSON.stringify({ order: ['alice-scratch', 'alice-personal', 'bob-personal'] }));
+  });
+
+  // §4.6 composes every user-defined layer above every admin-defined one
+  // whatever the stored order values are, so a drop across the class boundary
+  // names a move no composition would make and the panel sends nothing.
+  it('sends no reorder where the drop crosses the layer-class boundary', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [adminLayer(), userLayer(), scratchLayer()] } },
+      '/v1/layers/reorder': { body: { layers: [] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    dragRowOnto('alice-personal', 'company');
+    await waitFor(() => {
+      expect(screen.getByLabelText('Layer panel')).toBeTruthy();
+    });
+    expect(requests.some((r) => r.url === '/v1/layers/reorder')).toBe(false);
+  });
+
+  // The fan-out issues one request per layer in sequence. A row changes only
+  // when its own request returns, so the panel fabricates no progress and a
+  // row shows what its own response carried.
+  it('reingests every layer in sequence and moves each row on its own response', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [adminLayer(), userLayer()] } },
+      '/v1/layers/reingest': { body: { accepted: 1, idempotent: 0 } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Reingest all' }));
+    await waitFor(() => {
+      expect(screen.getByLabelText('Reingest result for company')).toBeTruthy();
+      expect(screen.getByLabelText('Reingest result for alice-personal')).toBeTruthy();
+    });
+    const reingests = requests.filter((r) => r.url.startsWith('/v1/layers/reingest'));
+    expect(reingests.length).toBe(2);
+    expect(reingests[0].url).toContain('id=company');
+    expect(reingests[1].url).toContain('id=alice-personal');
   });
 
   // The reingest call runs the whole pipeline inside the request and answers
@@ -1079,7 +1240,7 @@ describe('the layer write flows', () => {
     render(<App />);
     await screen.findByLabelText('Layer panel');
     fireEvent.click(screen.getByRole('button', { name: 'Reingest' }));
-    await screen.findByLabelText('Reingest result');
+    await screen.findByLabelText('Reingest result for alice-personal');
     expect(screen.getByText('4 accepted')).toBeTruthy();
     expect(screen.getByText('2 unchanged')).toBeTruthy();
     expect(screen.getByText('1 lint failures')).toBeTruthy();
@@ -1087,7 +1248,7 @@ describe('the layer write flows', () => {
     expect(screen.getByText('platform/lint@1.0.0')).toBeTruthy();
     expect(screen.getByLabelText('Advisories')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-    expect(screen.queryByLabelText('Reingest result')).toBeNull();
+    expect(screen.queryByLabelText('Reingest result for alice-personal')).toBeNull();
   });
 
   // A registry with no ingest runner wired records the intent and answers
@@ -1145,6 +1306,76 @@ describe('the layer write flows', () => {
     expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   });
 
+  // A reingest inside a §4.7.2 freeze window is refused with ingest.frozen,
+  // and the same endpoint takes the break-glass override, so the arm offers
+  // it rather than leaving the reader with a refusal and no next action. The
+  // registry requires a justification and the freeze rule two distinct
+  // approvers, so the override carries all three.
+  it('offers the break-glass override where a freeze window refused the reingest', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+      '/v1/layers/reingest': {
+        status: 409,
+        body: { code: 'ingest.frozen', message: 'a freeze window is active', retryable: false },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Reingest' }));
+    await screen.findByLabelText('Reingest alice-personal during a freeze window');
+    const override = screen.getByRole('button', { name: 'Reingest during the freeze' });
+    // The override stays held until the justification and two distinct
+    // approvers are in place, because the registry refuses it without them.
+    expect(override.hasAttribute('disabled')).toBe(true);
+    fireEvent.change(screen.getByLabelText('Justification'), { target: { value: 'incident 7' } });
+    fireEvent.change(screen.getByLabelText('First approver'), { target: { value: 'alice@acme.com' } });
+    expect(override.hasAttribute('disabled')).toBe(true);
+    fireEvent.change(screen.getByLabelText('Second approver'), { target: { value: 'bob@acme.com' } });
+    fireEvent.click(override);
+    await waitFor(() => {
+      expect(bodies.at(-1)).toBe(
+        JSON.stringify({
+          break_glass: true,
+          justification: 'incident 7',
+          approvers: ['alice@acme.com', 'bob@acme.com'],
+        }),
+      );
+    });
+  });
+
+  // Every other reingest refusal carries its own remediation in the
+  // envelope, and the codes the pipeline answers with have different next
+  // actions, so the arm presents the envelope's message and suggested action
+  // rather than one line that fits none of them.
+  it('presents a refused reingest with the envelope’s own message and remediation', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+      '/v1/layers/reingest': {
+        status: 422,
+        body: {
+          code: 'ingest.lint_failed',
+          message: '3 artifacts failed the lint gate',
+          retryable: false,
+          suggested_action: 'Fix the reported manifests and reingest.',
+        },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Reingest' }));
+    const refused = await screen.findByLabelText('Reingest refused');
+    expect(refused.textContent).toContain('3 artifacts failed the lint gate');
+    expect(refused.textContent).toContain('Fix the reported manifests and reingest.');
+    expect(refused.textContent).toContain('ingest.lint_failed');
+    // The envelope reports that the condition does not clear on its own, so
+    // the arm offers no retry.
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
   // The cap refusal carries the limit and the caller's current count, and
   // this is where the user created the layer, so the count is rendered here
   // rather than arriving as the generic failure every other refusal gets.
@@ -1172,7 +1403,11 @@ describe('the layer write flows', () => {
     expect(screen.getByText('quota.layer_count_exceeded')).toBeTruthy();
   });
 
-  it('lists what is still recoverable and restores it', async () => {
+  // The recovery surface answers how long is left before erasure, so every
+  // row states when the layer was unregistered, the date it is erased on,
+  // and how much of the §8.4 window remains. A row inside the accent window
+  // says so, because that is the row to act on today.
+  it('lists what is still recoverable with its erase date and restores it', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
       '/v1/layers': { body: { layers: [] } },
@@ -1183,19 +1418,63 @@ describe('the layer write flows', () => {
     await screen.findByLabelText('Layer panel');
     // The deleted read answers on the same path with a query argument, so
     // the stub is swapped once the panel is up.
+    const unregisteredAt = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
-      '/v1/layers': { body: { layers: [userLayer()] } },
+      '/v1/layers': { body: { layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }] } },
       '/v1/layers/restore': { body: {} },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Recently unregistered' }));
-    await screen.findByLabelText('Recently unregistered');
+    const surface = await screen.findByLabelText('Recently unregistered');
+    const erasesOn = new Date(unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    expect(surface.textContent).toContain(unregisteredAt.toISOString().slice(0, 10));
+    expect(surface.textContent).toContain(erasesOn);
+    const left = screen.getByTestId('days-left-alice-personal');
+    expect(left.textContent).toBe('1 days left');
+    expect(left.className).toContain('accent');
+    // The source is on the same record, so the row names where the layer
+    // came from rather than its identifier alone.
+    expect(surface.textContent).toContain('/Users/alice/registry');
     fireEvent.click(await screen.findByRole('button', { name: 'Restore' }));
     await waitFor(() => {
       expect(requests.some((r) => r.url.startsWith('/v1/layers/restore') && r.method === 'POST')).toBe(true);
     });
   });
+
+  // A record carrying no tombstone time states that rather than computing a
+  // date from a value it does not hold.
+  it('states no erase date where the record carries no unregistered time', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [{ ...userLayer(), DeletedAt: null }] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Recently unregistered' }));
+    const surface = await screen.findByLabelText('Recently unregistered');
+    expect(surface.textContent).toContain('The registry reported no erase date.');
+  });
 });
+
+/** dragRowOnto drives the panel's drag-to-reorder: the row is picked up by
+ * its handle and dropped onto another row, and the move commits on the drop.
+ */
+function dragRowOnto(from: string, onto: string): void {
+  const source = layerRow(from);
+  const target = layerRow(onto);
+  fireEvent.dragStart(source);
+  fireEvent.dragOver(target);
+  fireEvent.drop(target);
+}
+
+function layerRow(id: string): HTMLElement {
+  const row = screen.getByLabelText(`Drag ${id} to reorder`).closest('tr');
+  if (row === null) {
+    throw new Error(`no layer row for ${id}`);
+  }
+  return row;
+}
 
 function adminLayer(owner = ''): Record<string, unknown> {
   return {

@@ -1,20 +1,22 @@
 // Reingesting a layer. The registry runs the whole §7.3.1 ingest pipeline
 // inside the request, so the call can stay open for a long time and answers
 // with a summary of what the snapshot accepted, what it rejected, and what it
-// conflicted on. The control therefore carries three states the row does not:
-// a pending state while the request is open, the summary the reader dismisses
-// once they have read it, and the whole-snapshot rejection the registry
-// answers with 409 ingest.immutable_violation.
+// conflicted on. The control therefore carries states the row does not: a
+// pending state while the request is open, the summary the reader dismisses
+// once they have read it, the whole-snapshot rejection the registry answers
+// with 409 ingest.immutable_violation, the freeze window the caller may
+// override, and every other refusal, which is presented with the envelope's
+// own message and remediation.
 //
-// Every other failure is a refusal of the action rather than a result of it,
-// so it is handed back to the row, which presents it the way it presents the
-// refusal of any other write.
+// The state lives on the panel rather than here, because the panel runs the
+// fan-out across every layer and a row changes only when its own request
+// returns.
 
 import { useState } from 'react';
 
 import { Badge } from '../components/primitives';
-import type { IngestAdvisory, IngestConflict, IngestRejection, IngestSummary } from '../api';
-import { ApiError, reingestLayer } from '../api';
+import type { BreakGlass, IngestAdvisory, IngestConflict, IngestRejection, IngestSummary } from '../api';
+import { ApiError } from '../api';
 
 /** immutableViolation is the §6.10 code the registry answers with when every
  * artifact in the snapshot collided with a published version. Nothing was
@@ -22,60 +24,76 @@ import { ApiError, reingestLayer } from '../api';
  * being handed a summary of zeroes. */
 const immutableViolation = 'ingest.immutable_violation';
 
-type State =
+/** frozen is the §6.10 code an active §4.7.2 freeze window answers with. The
+ * endpoint takes a break-glass override on the same request, so this arm
+ * offers that override rather than only reporting the refusal. */
+const frozen = 'ingest.frozen';
+
+/** ReingestState is what one row's reingest is doing. Every arm is reached
+ * from that row's own response. */
+export type ReingestState =
   | { kind: 'idle' }
   | { kind: 'running' }
   | { kind: 'summary'; summary: IngestSummary }
-  | { kind: 'rejected'; error: ApiError };
+  | { kind: 'rejected'; error: ApiError }
+  | { kind: 'frozen'; error: ApiError }
+  | { kind: 'refused'; error: unknown };
+
+export const idleReingest: ReingestState = { kind: 'idle' };
+
+/** reingestRefusal classifies what a reingest request failed with. The
+ * whole-snapshot rejection and the freeze window each have a treatment of
+ * their own, and every other code the pipeline answers with, including
+ * ingest.history_rewritten, ingest.lint_failed, the quota codes,
+ * ingest.public_mode_rejects_sensitive, ingest.source_unreachable, and
+ * registry.unavailable, is presented with the envelope's own message and
+ * remediation rather than a fixed line. */
+export function reingestRefusal(err: unknown): ReingestState {
+  if (err instanceof ApiError && err.code === immutableViolation) {
+    return { kind: 'rejected', error: err };
+  }
+  if (err instanceof ApiError && err.code === frozen) {
+    return { kind: 'frozen', error: err };
+  }
+  return { kind: 'refused', error: err };
+}
 
 export function ReingestControl({
   layerID,
+  state,
   readOnly,
-  onIngested,
-  onRefusal,
+  onStart,
+  onDismiss,
 }: {
   layerID: string;
+  state: ReingestState;
   readOnly: boolean;
-  onIngested: () => void;
-  onRefusal: (err: unknown) => void;
+  onStart: (breakGlass?: BreakGlass) => void;
+  onDismiss: () => void;
 }) {
-  const [state, setState] = useState<State>({ kind: 'idle' });
-
-  const start = () => {
-    setState({ kind: 'running' });
-    reingestLayer(layerID).then(
-      (summary) => {
-        setState({ kind: 'summary', summary });
-        onIngested();
-      },
-      (err: unknown) => {
-        if (err instanceof ApiError && err.code === immutableViolation) {
-          setState({ kind: 'rejected', error: err });
-          return;
-        }
-        setState({ kind: 'idle' });
-        onRefusal(err);
-      },
-    );
-  };
-
-  const dismiss = () => {
-    setState({ kind: 'idle' });
-  };
-
   return (
     <>
-      <button type="button" disabled={readOnly || state.kind === 'running'} onClick={start}>
+      <button
+        type="button"
+        disabled={readOnly || state.kind === 'running'}
+        onClick={() => {
+          onStart();
+        }}
+      >
         Reingest
       </button>
       {state.kind === 'running' && (
-        <p className="loading" role="status" data-testid="reingest-running">
+        <p className="loading" role="status" data-testid={`reingest-running-${layerID}`}>
           <span className="spinner" aria-hidden="true" />
           Reingesting {layerID}. The registry runs the whole pipeline before it answers.
         </p>
       )}
-      {state.kind === 'summary' && <IngestReport layerID={layerID} summary={state.summary} onDone={dismiss} />}
-      {state.kind === 'rejected' && <SnapshotRejected error={state.error} onDone={dismiss} />}
+      {state.kind === 'summary' && <IngestReport layerID={layerID} summary={state.summary} onDone={onDismiss} />}
+      {state.kind === 'rejected' && <SnapshotRejected error={state.error} onDone={onDismiss} />}
+      {state.kind === 'frozen' && (
+        <BreakGlassConfirmation layerID={layerID} error={state.error} onOverride={onStart} onCancel={onDismiss} />
+      )}
+      {state.kind === 'refused' && <ReingestRefused error={state.error} onRetry={onStart} onDone={onDismiss} />}
     </>
   );
 }
@@ -89,7 +107,7 @@ function IngestReport({ layerID, summary, onDone }: { layerID: string; summary: 
   const conflicts = summary.conflicts ?? [];
   const advisories = summary.advisories ?? [];
   return (
-    <div className="ingest-report" role="dialog" aria-label="Reingest result">
+    <div className="ingest-report" role="dialog" aria-label={`Reingest result for ${layerID}`}>
       <p className="banner-title">Reingest finished</p>
       <p className="mono quiet">{layerID}</p>
       {summary.accepted === undefined ? (
@@ -191,6 +209,113 @@ function SnapshotRejected({ error, onDone }: { error: ApiError; onDone: () => vo
       <p className="quiet">Bump the versions in the source and reingest.</p>
       <button type="button" onClick={onDone}>
         Close
+      </button>
+    </div>
+  );
+}
+
+/** BreakGlassConfirmation is the freeze-window arm. §4.7.2 lets an operator
+ * run inside a freeze window with a justification and two distinct approvers,
+ * and the endpoint reads all three off the same request, so the refusal
+ * offers the override rather than leaving the reader with no next action. The
+ * override is recorded in the audit log, so the confirmation states that
+ * before it is sent. */
+function BreakGlassConfirmation({
+  layerID,
+  error,
+  onOverride,
+  onCancel,
+}: {
+  layerID: string;
+  error: ApiError;
+  onOverride: (breakGlass: BreakGlass) => void;
+  onCancel: () => void;
+}) {
+  const [justification, setJustification] = useState('');
+  const [first, setFirst] = useState('');
+  const [second, setSecond] = useState('');
+  const approvers = [first.trim(), second.trim()].filter((approver) => approver !== '');
+  const complete = justification.trim() !== '' && approvers.length === 2 && approvers[0] !== approvers[1];
+  return (
+    <div className="confirm" role="dialog" aria-label={`Reingest ${layerID} during a freeze window`}>
+      <p className="banner-title">A freeze window is open</p>
+      <p className="mono banner-code">{error.code}</p>
+      <p>{error.message}</p>
+      <p>
+        Reingesting {layerID} now overrides that window. It takes a justification and two distinct approvers, and the
+        registry records the override in the audit log.
+      </p>
+      <label className="field">
+        <span className="label">Justification</span>
+        <input
+          type="text"
+          value={justification}
+          onChange={(event) => {
+            setJustification(event.target.value);
+          }}
+        />
+      </label>
+      <label className="field">
+        <span className="label">First approver</span>
+        <input
+          type="text"
+          value={first}
+          onChange={(event) => {
+            setFirst(event.target.value);
+          }}
+        />
+      </label>
+      <label className="field">
+        <span className="label">Second approver</span>
+        <input
+          type="text"
+          value={second}
+          onChange={(event) => {
+            setSecond(event.target.value);
+          }}
+        />
+      </label>
+      <button
+        type="button"
+        disabled={!complete}
+        onClick={() => {
+          onOverride({ justification: justification.trim(), approvers });
+        }}
+      >
+        Reingest during the freeze
+      </button>
+      <button type="button" onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+/** ReingestRefused presents every other refusal on the terms the envelope
+ * states them: its code, its message, and the remediation it carries. The
+ * pipeline answers with codes whose next action differs, so the surface
+ * carries the envelope's own words rather than one line that fits none of
+ * them, and it offers a retry where the envelope says the condition clears. */
+function ReingestRefused({ error, onRetry, onDone }: { error: unknown; onRetry: () => void; onDone: () => void }) {
+  const envelope = error instanceof ApiError ? error : null;
+  return (
+    <div className="banner banner-danger" role="alert" aria-label="Reingest refused">
+      <p className="banner-title">The registry refused this reingest and the layer is unchanged.</p>
+      <p className="mono banner-code">{envelope?.code ?? 'registry.unavailable'}</p>
+      <p>{envelope !== null ? envelope.message : String(error)}</p>
+      {envelope !== null && envelope.suggestedAction !== '' && <p className="quiet">{envelope.suggestedAction}</p>}
+      {(envelope === null || envelope.retryable) && (
+        <button
+          type="button"
+          onClick={() => {
+            onRetry();
+          }}
+        >
+          Try again
+        </button>
+      )}
+      <button type="button" onClick={onDone}>
+        Dismiss
       </button>
     </div>
   );

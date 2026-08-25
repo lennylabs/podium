@@ -67,7 +67,10 @@ export function authControl(posture: SessionPosture | null): AuthControl {
  * sign-in rather than the sign-out authControl renders for the same posture.
  * The sign-in control rule's third row bounds it: a deployment reporting the
  * browser flow disabled renders no authentication control at all, and the
- * surface states what it offers in its place.
+ * surface states what it offers in its place. A read that did not answer
+ * reports no path to navigate to, so it renders no control either; the two
+ * arms differ in what the surface may say about the deployment, which is why
+ * the surface reads the posture rather than this result alone.
  */
 export function expiryControl(posture: SessionPosture | null): AuthControl {
   if (posture === null || !posture.browser_auth.enabled) {

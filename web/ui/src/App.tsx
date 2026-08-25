@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { ReactNode } from 'react';
 
-import { Banner, ErrorState, Loading } from './components/primitives';
+import { Banner, ErrorState, Loading, PageBanner } from './components/primitives';
 import { isIdentityRefusal, loadDomain, signOut, subscribeReadOnly } from './api';
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
@@ -113,9 +113,21 @@ export function App() {
   const subject = posture?.subject ?? '';
   const recovery = <AuthRecovery posture={posture} onRetry={retryCatalog} />;
 
+  // The public-subset arm of the catalog-scope rule carries two pieces. The
+  // sidebar footer states that the caller is not signed in, and this banner
+  // states the same across the page. Neither claims anything about content
+  // beyond what the read returned, and the banner carries no control of its
+  // own, because the authentication control belongs to the shell.
+  const anonymous = scope === 'public-subset' && subject === '';
+
   return (
     <div className="app">
       <TopBar posture={posture} />
+      {anonymous && (
+        <PageBanner testID="anonymous-banner">
+          You are not signed in. This page shows what the registry served.
+        </PageBanner>
+      )}
       <div className="app-body">
         <nav className="sidebar" aria-label="Sections">
           <a href={domainHref('')}>Browse</a>
@@ -124,7 +136,7 @@ export function App() {
               deployment. The nav reads no posture field and predicts no
               outcome the server decides. */}
           <a href={layersHref}>Layers</a>
-          {scope === 'public-subset' && subject === '' && <p className="quiet footer-note">Not signed in</p>}
+          {anonymous && <p className="quiet footer-note">Not signed in</p>}
         </nav>
         <main className="content">
           {/* The expiry transition is rendered over the page the caller was
@@ -227,26 +239,36 @@ function RefusedCatalog({ error, recovery }: { error: unknown; recovery: ReactNo
  * control rule's third row: a deployment reporting the browser flow disabled
  * renders no authentication control on any value of subject, so on such a
  * deployment this offers a retry of the refused read as its only control and
- * states that as what stands in place of sign-in. */
+ * states that as what stands in place of sign-in.
+ *
+ * The arm where the posture read did not answer is separate. It is reachable
+ * on any deployment, because a transient failure of that read leaves the page
+ * holding no posture whatever the registry runs, so the recovery states
+ * nothing about whether a browser sign-in exists and offers the retry alone.
+ * Printing the disabled-deployment sentence there would assert a deployment
+ * property no read reported. */
 function AuthRecovery({ posture, onRetry }: { posture: SessionPosture | null; onRetry: () => void }) {
   const control = expiryControl(posture);
-  if (control.kind !== 'sign-in') {
+  if (control.kind === 'sign-in') {
     return (
-      <>
-        <p className="quiet">
-          This registry runs no browser sign-in. Retry the read once the credential it reads is in place again, or ask
-          the operator who runs it.
-        </p>
-        <button type="button" data-testid="expiry-retry" onClick={onRetry}>
-          Try again
-        </button>
-      </>
+      <a className="button primary" data-testid="expiry-sign-in" href={control.path}>
+        Sign in
+      </a>
     );
   }
   return (
-    <a className="button primary" data-testid="expiry-sign-in" href={control.path}>
-      Sign in
-    </a>
+    <>
+      <p className="quiet">
+        {posture === null
+          ? 'The registry did not report its authentication posture for this page, so there is nothing to offer ' +
+            'beyond the read itself.'
+          : 'This registry runs no browser sign-in. Retry the read once the credential it reads is in place again, ' +
+            'or ask the operator who runs it.'}
+      </p>
+      <button type="button" data-testid="expiry-retry" onClick={onRetry}>
+        Try again
+      </button>
+    </>
   );
 }
 

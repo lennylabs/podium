@@ -58,6 +58,28 @@ export function Banner({ tone = 'neutral', children }: { tone?: Tone; children: 
   );
 }
 
+/**
+ * PageBanner is the Banner preset that sits between the top bar and the
+ * grid, full width, and speaks about the page rather than about a control on
+ * it. It carries no control of its own: where the reader's next action is an
+ * authentication one, that control belongs to the shell.
+ */
+export function PageBanner({
+  tone = 'neutral',
+  testID,
+  children,
+}: {
+  tone?: Tone;
+  testID?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`page-banner banner banner-${tone}`} role="status" data-testid={testID}>
+      {children}
+    </div>
+  );
+}
+
 export function Loading({ label }: { label: string }) {
   return (
     <p className="loading" role="status">

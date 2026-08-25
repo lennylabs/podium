@@ -2,9 +2,22 @@
    No component hard-codes a colour: the dark theme is the same component
    with a different token set. The light values are the default, an
    unconfigured visitor's prefers-color-scheme switches the palette, and a
-   data-theme attribute on the root element overrides both. */
+   data-theme attribute on the root element overrides both.
 
-:root {
+   Each data-theme arm re-declares the whole token set, which is what makes
+   the override win in both directions. A light arm declaring color-scheme
+   alone loses every colour to the dark media query on a visitor whose
+   operating system reports dark, which leaves dark surfaces under a
+   light-declared color-scheme.
+
+   The families below are the stack the bundle renders in. The design pass
+   fixes Space Grotesk, JetBrains Mono, and Anton, and it records that an
+   air-gapped registry has to self-host them. This bundle ships no font
+   asset and loads no stylesheet from another origin, so naming those
+   families here would name faces no deployment resolves. */
+
+:root,
+:root[data-theme='light'] {
   --page: #f4f1ea;
   --surf: #ffffff;
   --surf2: #fcfbf6;
@@ -23,8 +36,9 @@
   --danger: #b3341c;
   --danger-bg: #fdeee9;
   --danger-bd: #f0c4b8;
-  --font-ui: 'Space Grotesk', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-ui: system-ui, sans-serif;
+  --font-mono: ui-monospace, monospace;
+  color-scheme: light;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -47,10 +61,6 @@
     --danger-bg: rgba(255, 107, 74, 0.12);
     --danger-bd: #5c2a1e;
   }
-}
-
-:root[data-theme='light'] {
-  color-scheme: light;
 }
 
 :root[data-theme='dark'] {
@@ -120,7 +130,10 @@ h3 {
   border-bottom: 1px solid var(--bd);
 }
 
+/* The design pass fixes Anton for the wordmark. The bundle ships no font
+   asset, so the wordmark renders in the UI stack at its heaviest weight. */
 .wordmark {
+  font-family: var(--font-ui);
   font-weight: 700;
   letter-spacing: 0.03em;
   text-transform: uppercase;
@@ -454,6 +467,109 @@ button,
 
 .panel-actions {
   margin-bottom: 14px;
+}
+
+/* The page banner sits between the top bar and the grid, full width. */
+.page-banner {
+  margin: 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+/* The artifact viewer is two columns: the content at 1fr and the rail
+   beside it, on the inset ground with a hairline divider. */
+.artifact-viewer {
+  display: grid;
+  grid-template-columns: 1fr 316px;
+  gap: 26px;
+}
+
+.artifact-rail {
+  padding: 18px 16px;
+  background: var(--surf2);
+  border-left: 1px solid var(--bd);
+}
+
+.artifact-rail section {
+  margin-bottom: 22px;
+}
+
+.rail-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 18px 0 14px;
+  border-bottom: 1px solid var(--bd);
+}
+
+.tab {
+  margin: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+}
+
+.tab-open {
+  border-bottom-color: var(--acc);
+  font-weight: 600;
+}
+
+.version-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.version-picker input {
+  width: 110px;
+  padding: 4px 8px;
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  background: var(--surf);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.drag-cell {
+  width: 34px;
+}
+
+.drag-handle {
+  color: var(--faint);
+  cursor: grab;
+}
+
+/* Drag to reorder: the row lifts with an accent border and the row it would
+   drop onto carries a 2px accent indicator. The move commits on drop. */
+.row-dragging td {
+  background: var(--wash);
+  border-color: var(--acc);
+}
+
+.row-drop-target td {
+  box-shadow: inset 0 2px 0 var(--acc);
+}
+
+.accent {
+  color: var(--link);
+}
+
+/* The depleting bar. It draws how much of the recovery window is left, and
+   the row states the same count in words beside it. */
+.depleting {
+  display: block;
+  width: 120px;
+  height: 4px;
+  margin-top: 4px;
+  border-radius: 100px;
+  background: linear-gradient(to right, var(--acc) var(--remaining), var(--b2) var(--remaining));
 }
 
 .register-form,

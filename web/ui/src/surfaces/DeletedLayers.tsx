@@ -2,10 +2,18 @@
 // every caller's effective view at once and soft-deletes the layer for a
 // retention window, so the panel carries a surface for the layers that have
 // not been erased.
+//
+// The question this surface answers is how long is left, so every row states
+// the date it was unregistered, the date it is erased on, and how much of the
+// window remains. A row inside the accent window says so, because that is the
+// row a reader has to act on today.
 
 import { useState } from 'react';
 
+import { accentDays, daysLeft, erasesOn, recoveryDays } from './recovery';
 import { EmptyState, ErrorState, Loading } from '../components/primitives';
+import { SourceCell } from '../components/SourceCell';
+import type { LayerRecord } from '../api';
 import { ApiError, listDeletedLayers, restoreLayer } from '../api';
 import { useAsync } from '../useAsync';
 
@@ -20,37 +28,42 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
     return <ErrorState error={deleted.error} onRetry={deleted.reload} />;
   }
   const rows = deleted.value ?? [];
+  const restore = (id: string) => {
+    restoreLayer(id).then(
+      () => {
+        setRefusal(null);
+        deleted.reload();
+        onRestored();
+      },
+      (err: unknown) => {
+        setRefusal(err);
+      },
+    );
+  };
+
   return (
     <section aria-label="Recently unregistered">
       <h2>Recently unregistered</h2>
+      <p className="quiet">A layer stays restorable for {recoveryDays} days, after which it is erased.</p>
       {rows.length === 0 ? (
         <EmptyState>Nothing is waiting to be erased.</EmptyState>
       ) : (
-        <ul className="artifact-list">
-          {rows.map((layer) => (
-            <li key={layer.ID} className="artifact-row">
-              <span className="mono">{layer.ID}</span>
-              <button
-                type="button"
-                disabled={readOnly}
-                onClick={() => {
-                  restoreLayer(layer.ID).then(
-                    () => {
-                      setRefusal(null);
-                      deleted.reload();
-                      onRestored();
-                    },
-                    (err: unknown) => {
-                      setRefusal(err);
-                    },
-                  );
-                }}
-              >
-                Restore
-              </button>
-            </li>
-          ))}
-        </ul>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Layer</th>
+              <th>Source</th>
+              <th>Unregistered</th>
+              <th>Erased</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((layer) => (
+              <DeletedRow key={layer.ID} layer={layer} readOnly={readOnly} onRestore={restore} />
+            ))}
+          </tbody>
+        </table>
       )}
       {refusal !== null && (
         <p className="row-refusal" role="alert">
@@ -60,4 +73,83 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
       )}
     </section>
   );
+}
+
+function DeletedRow({
+  layer,
+  readOnly,
+  onRestore,
+}: {
+  layer: LayerRecord;
+  readOnly: boolean;
+  onRestore: (id: string) => void;
+}) {
+  const window = recoveryWindow(layer);
+  return (
+    <tr>
+      <td className="mono">{layer.ID}</td>
+      <td>
+        <SourceCell layer={layer} />
+      </td>
+      <td className="mono quiet">{window === null ? 'unreported' : window.unregistered}</td>
+      <td>
+        {window === null ? (
+          // The record carries no tombstone time, so the row states that
+          // rather than computing a date from a value it does not hold.
+          <span className="quiet">The registry reported no erase date.</span>
+        ) : (
+          <>
+            <span className="mono">{window.erases}</span>{' '}
+            <span className={window.left <= accentDays ? 'accent' : 'quiet'} data-testid={`days-left-${layer.ID}`}>
+              {window.left} days left
+            </span>
+            <span
+              className="depleting"
+              role="presentation"
+              style={{ ['--remaining' as string]: `${String(window.remaining)}%` }}
+            />
+          </>
+        )}
+      </td>
+      <td>
+        <button
+          type="button"
+          disabled={readOnly}
+          onClick={() => {
+            onRestore(layer.ID);
+          }}
+        >
+          Restore
+        </button>
+      </td>
+    </tr>
+  );
+}
+
+interface RecoveryWindow {
+  unregistered: string;
+  erases: string;
+  left: number;
+  /** remaining is how much of the window is left, as a percentage, which is
+   * what the depleting bar draws. */
+  remaining: number;
+}
+
+/** recoveryWindow derives the row's dates from the tombstone the record
+ * carries, or null where it carries none. */
+function recoveryWindow(layer: LayerRecord): RecoveryWindow | null {
+  if (layer.DeletedAt === undefined || layer.DeletedAt === null || layer.DeletedAt === '') {
+    return null;
+  }
+  const at = new Date(layer.DeletedAt);
+  if (Number.isNaN(at.getTime())) {
+    return null;
+  }
+  const left = daysLeft(at, Date.now());
+  return {
+    unregistered: at.toISOString().slice(0, 10),
+    erases: erasesOn(at),
+    left,
+    remaining: Math.round((left / recoveryDays) * 100),
+  };
 }

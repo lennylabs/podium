@@ -12,23 +12,30 @@
 import { useState } from 'react';
 
 import { DeletedLayers } from './DeletedLayers';
+import { erasesOn, recoveryDays } from './recovery';
 import { RegisterLayerForm } from './RegisterLayerForm';
-import { ReingestControl } from './ReingestControl';
+import type { ReingestState } from './ReingestControl';
+import { idleReingest, ReingestControl, reingestRefusal } from './ReingestControl';
 import { UpdateLayerForm } from './UpdateLayerForm';
 import { Badge, Banner, EmptyState, ErrorState, Loading } from '../components/primitives';
-import type { LayerRecord } from '../api';
-import { ApiError, listLayers, reorderLayers, unregisterLayer } from '../api';
+import { SourceCell } from '../components/SourceCell';
+import type { BreakGlass, LayerRecord } from '../api';
+import { ApiError, listLayers, reingestLayer, reorderLayers, unregisterLayer } from '../api';
 import { useAsync } from '../useAsync';
-
-/** recoveryDays is the window an unregistered layer stays restorable for
- * (§8.4). The confirmation states it with the date it runs out, because a
- * window with no date leaves the reader to work out what it means. */
-const recoveryDays = 30;
 
 export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: boolean }) {
   const layers = useAsync(() => listOrdered(), []);
   const [registering, setRegistering] = useState(false);
   const [showingDeleted, setShowingDeleted] = useState(false);
+  // A write's refusal is drawn on the row it was attempted on. The panel
+  // holds the map because a reorder is committed by a drop on another row
+  // and its refusal belongs to the row that moved.
+  const [refusals, setRefusals] = useState<Record<string, unknown>>({});
+  // Each row's reingest state is driven by that row's own response, which is
+  // what lets the fan-out leave every row it has not heard from untouched.
+  const [reingest, setReingest] = useState<Record<string, ReingestState>>({});
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [over, setOver] = useState<string | null>(null);
 
   if (layers.loading) {
     return <Loading label="Loading the layers." />;
@@ -37,6 +44,58 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
     return <ErrorState error={layers.error} onRetry={layers.reload} />;
   }
   const rows = layers.value ?? [];
+
+  const recordRefusal = (id: string, err: unknown) => {
+    setRefusals((prev) => ({ ...prev, [id]: err }));
+  };
+  const clearRefusal = (id: string) => {
+    setRefusals((prev) => ({ ...prev, [id]: null }));
+  };
+  const setRowReingest = (id: string, state: ReingestState) => {
+    setReingest((prev) => ({ ...prev, [id]: state }));
+  };
+
+  /** runReingest drives one layer's reingest and moves that layer's row
+   * alone. The pipeline runs inside the request, so nothing is reported
+   * until it returns and the row shows what its own response carried. */
+  const runReingest = async (id: string, breakGlass?: BreakGlass): Promise<void> => {
+    setRowReingest(id, { kind: 'running' });
+    try {
+      const summary = await reingestLayer(id, breakGlass);
+      setRowReingest(id, { kind: 'summary', summary });
+      clearRefusal(id);
+      layers.reload();
+    } catch (err: unknown) {
+      setRowReingest(id, reingestRefusal(err));
+    }
+  };
+
+  /** reingestAll is the fan-out. It issues one request per layer in
+   * sequence, so a row changes only when its own request returns and no row
+   * shows progress the registry has not reported. */
+  const reingestAll = async (): Promise<void> => {
+    for (const row of rows) {
+      await runReingest(row.ID);
+    }
+  };
+
+  const commitMove = (from: string, onto: string) => {
+    setDragging(null);
+    setOver(null);
+    const order = movedOrder(blockOf(rows, from), from, onto);
+    if (order === null) {
+      return;
+    }
+    reorderLayers(order).then(
+      () => {
+        clearRefusal(from);
+        layers.reload();
+      },
+      (err: unknown) => {
+        recordRefusal(from, err);
+      },
+    );
+  };
 
   return (
     <section className="surface" aria-label="Layer panel">
@@ -55,12 +114,22 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
       <div className="panel-actions">
         <button
           type="button"
+          className="button primary"
           disabled={readOnly}
           onClick={() => {
             setRegistering((open) => !open);
           }}
         >
           Register layer
+        </button>
+        <button
+          type="button"
+          disabled={readOnly || rows.length === 0}
+          onClick={() => {
+            void reingestAll();
+          }}
+        >
+          Reingest all
         </button>
         <button
           type="button"
@@ -73,9 +142,10 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
       </div>
       {registering && <RegisterLayerForm subject={subject} onRegistered={layers.reload} readOnly={readOnly} />}
       {showingDeleted && <DeletedLayers onRestored={layers.reload} readOnly={readOnly} />}
-      <p className="label quiet">Precedence: the last row wins</p>
+      <p className="label quiet">Precedence — drag to reorder</p>
       <p className="quiet">
-        Every user-defined layer composes above every admin-defined layer, so a row moves within its own block.
+        The last row wins. Every user-defined layer composes above every admin-defined layer, so a row moves within its
+        own block.
       </p>
       {rows.length === 0 ? (
         <EmptyState>No layers are registered under this tenant.</EmptyState>
@@ -83,6 +153,9 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
         <table className="data-table layer-table">
           <thead>
             <tr>
+              <th className="drag-cell">
+                <span className="label">Move</span>
+              </th>
               <th>Layer</th>
               <th>Source</th>
               <th>Visibility</th>
@@ -97,8 +170,38 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
                 layer={layer}
                 subject={subject}
                 readOnly={readOnly}
-                onWrite={layers.reload}
-                block={blockOf(rows, layer)}
+                refusal={refusals[layer.ID] ?? null}
+                reingest={reingest[layer.ID] ?? idleReingest}
+                dragging={dragging === layer.ID}
+                over={over === layer.ID}
+                onDragStart={() => {
+                  setDragging(layer.ID);
+                }}
+                onDragOver={() => {
+                  setOver(layer.ID);
+                }}
+                onDrop={() => {
+                  if (dragging !== null) {
+                    commitMove(dragging, layer.ID);
+                  }
+                }}
+                onDragEnd={() => {
+                  setDragging(null);
+                  setOver(null);
+                }}
+                onReingest={(breakGlass) => {
+                  void runReingest(layer.ID, breakGlass);
+                }}
+                onDismissReingest={() => {
+                  setRowReingest(layer.ID, idleReingest);
+                }}
+                onWrite={() => {
+                  clearRefusal(layer.ID);
+                  layers.reload();
+                }}
+                onRefusal={(err) => {
+                  recordRefusal(layer.ID, err);
+                }}
               />
             ))}
           </tbody>
@@ -130,33 +233,39 @@ async function listOrdered(): Promise<LayerRecord[]> {
  * user-defined layer above every admin-defined one whatever the stored order
  * values are, so the block bounds both where the control can take a row and
  * what the request names. */
-function blockOf(rows: LayerRecord[], layer: LayerRecord): LayerRecord[] {
-  return rows.filter((row) => (row.UserDefined === true) === (layer.UserDefined === true));
+function blockOf(rows: LayerRecord[], id: string): LayerRecord[] {
+  const moving = rows.find((row) => row.ID === id);
+  if (moving === undefined) {
+    return [];
+  }
+  return rows.filter((row) => (row.UserDefined === true) === (moving.UserDefined === true));
 }
 
-/** raisedOrder returns the block's resulting order after a row trades places
- * with the row below it, or null where the row is already at the winning end.
+/** movedOrder returns the block's resulting order after the dragged row is
+ * dropped onto another row of the same class, or null where the drop names no
+ * move the block can make.
  *
  * The reorder endpoint assigns each layer the request names an absolute order
  * value taken from its position in the request rather than swapping two
- * stored values. A request naming the traded pair alone therefore stamps the
- * block's first two order values onto that pair and leaves every other row of
- * the block holding the value it already had, which ties or inverts rows the
- * move was not meant to touch. The request names the whole block so the
- * endpoint's positional assignment reproduces the order the panel displayed.
+ * stored values. A request naming the moved pair alone therefore stamps the
+ * block's first order values onto that pair and leaves every other row of the
+ * block holding the value it already had, which ties or inverts rows the move
+ * was not meant to touch. The request names the whole block so the endpoint's
+ * positional assignment reproduces the order the panel displayed.
  *
  * Every layer the request names is authorized on its own under the §7.3.1
  * layer-write rule, and the list read is unfiltered, so a block holding a
  * layer this caller may not write has its move refused whole. The panel
  * presents that refusal on the row rather than predicting it. */
-function raisedOrder(block: LayerRecord[], layer: LayerRecord): string[] | null {
-  const index = block.findIndex((row) => row.ID === layer.ID);
-  if (index < 0 || index + 1 >= block.length) {
+function movedOrder(block: LayerRecord[], from: string, onto: string): string[] | null {
+  const order = block.map((row) => row.ID);
+  const at = order.indexOf(from);
+  const target = order.indexOf(onto);
+  if (at < 0 || target < 0 || at === target) {
     return null;
   }
-  const order = block.map((row) => row.ID);
-  order[index] = block[index + 1].ID;
-  order[index + 1] = layer.ID;
+  order.splice(at, 1);
+  order.splice(target, 0, from);
   return order;
 }
 
@@ -164,21 +273,35 @@ function LayerRow({
   layer,
   subject,
   readOnly,
+  refusal,
+  reingest,
+  dragging,
+  over,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+  onReingest,
+  onDismissReingest,
   onWrite,
-  block,
+  onRefusal,
 }: {
   layer: LayerRecord;
   subject: string;
   readOnly: boolean;
+  refusal: unknown;
+  reingest: ReingestState;
+  dragging: boolean;
+  over: boolean;
+  onDragStart: () => void;
+  onDragOver: () => void;
+  onDrop: () => void;
+  onDragEnd: () => void;
+  onReingest: (breakGlass?: BreakGlass) => void;
+  onDismissReingest: () => void;
   onWrite: () => void;
-  block: LayerRecord[];
+  onRefusal: (err: unknown) => void;
 }) {
-  // Raising precedence trades places with the next row of the same class.
-  // The request carries the block's resulting order, because the endpoint
-  // rewrites the order value of every layer it names from that layer's
-  // position in the request.
-  const raised = raisedOrder(block, layer);
-  const [refusal, setRefusal] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
 
@@ -188,19 +311,33 @@ function LayerRow({
   // changed. It reports neither who owns the layer nor the state of the
   // session, because the refusal carries neither.
   const attempt = (run: () => Promise<unknown>) => {
-    run().then(
-      () => {
-        setRefusal(null);
-        onWrite();
-      },
-      (err: unknown) => {
-        setRefusal(err);
-      },
-    );
+    run().then(onWrite, onRefusal);
   };
 
+  const rowClass = [dragging ? 'row-dragging' : '', over ? 'row-drop-target' : ''].filter((name) => name !== '');
+
   return (
-    <tr>
+    <tr
+      className={rowClass.join(' ')}
+      draggable={!readOnly}
+      onDragStart={onDragStart}
+      onDragOver={(event) => {
+        // A row that does not cancel the drag-over event is not a drop
+        // target, so the drop never fires and the move is silently lost.
+        event.preventDefault();
+        onDragOver();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop();
+      }}
+      onDragEnd={onDragEnd}
+    >
+      <td className="drag-cell">
+        <span className="drag-handle" aria-label={`Drag ${layer.ID} to reorder`} role="img">
+          ⋮⋮
+        </span>
+      </td>
       <td className="mono">
         {layer.ID}
         {ownedByCaller(layer, subject) && <Badge tone="accent">yours</Badge>}
@@ -216,17 +353,6 @@ function LayerRow({
       <td>
         <button
           type="button"
-          disabled={readOnly || raised === null}
-          onClick={() => {
-            if (raised !== null) {
-              attempt(() => reorderLayers(raised));
-            }
-          }}
-        >
-          Raise precedence
-        </button>
-        <button
-          type="button"
           disabled={readOnly}
           onClick={() => {
             setEditing((open) => !open);
@@ -236,12 +362,10 @@ function LayerRow({
         </button>
         <ReingestControl
           layerID={layer.ID}
+          state={reingest}
           readOnly={readOnly}
-          onIngested={() => {
-            setRefusal(null);
-            onWrite();
-          }}
-          onRefusal={setRefusal}
+          onStart={onReingest}
+          onDismiss={onDismissReingest}
         />
         <button
           type="button"
@@ -256,10 +380,7 @@ function LayerRow({
           <UpdateLayerForm
             layer={layer}
             readOnly={readOnly}
-            onUpdated={() => {
-              setRefusal(null);
-              onWrite();
-            }}
+            onUpdated={onWrite}
             onClose={() => {
               setEditing(false);
             }}
@@ -277,7 +398,7 @@ function LayerRow({
             }}
           />
         )}
-        {refusal !== null && (
+        {refusal !== null && refusal !== undefined && (
           <p className="row-refusal" role="alert">
             The registry refused that action and nothing changed.{' '}
             <span className="mono">{refusal instanceof ApiError ? refusal.code : 'registry.unavailable'}</span>
@@ -311,7 +432,7 @@ function UnregisterConfirmation({
       <p className="banner-title">Unregister {layer.ID}?</p>
       <p>Its artifacts disappear from every caller&rsquo;s view the next time they sync.</p>
       <p>
-        The layer is recoverable for {recoveryDays} days, until {erasesOn()}, after which it is erased.
+        The layer is recoverable for {recoveryDays} days, until {erasesOn(new Date())}, after which it is erased.
       </p>
       <label className="field">
         <span className="label">Type the layer ID to confirm</span>
@@ -333,13 +454,6 @@ function UnregisterConfirmation({
   );
 }
 
-/** erasesOn returns the date the recovery window runs out, as the calendar
- * date the reader reads rather than as a duration they have to add up. */
-function erasesOn(): string {
-  const at = new Date(Date.now() + recoveryDays * 24 * 60 * 60 * 1000);
-  return at.toISOString().slice(0, 10);
-}
-
 /** ownedByCaller is the panel's ownership marker. It is a property of a
  * user-defined row alone: on such a row it compares the row's stored owner
  * against the caller's own subject, and the posture read reports a subject
@@ -349,23 +463,6 @@ function erasesOn(): string {
  * that owner names no authorized subject. */
 function ownedByCaller(layer: LayerRecord, subject: string): boolean {
   return layer.UserDefined === true && subject !== '' && layer.Owner === subject;
-}
-
-function SourceCell({ layer }: { layer: LayerRecord }) {
-  if (layer.SourceType === 'git') {
-    return (
-      <span className="mono">
-        {layer.Repo}
-        {layer.Ref !== undefined && layer.Ref !== '' ? `@${layer.Ref}` : ''}
-      </span>
-    );
-  }
-  if (layer.SourceType === 'local') {
-    return <span className="mono">{layer.LocalPath}</span>;
-  }
-  // The source type is pluggable, so a type this panel has not seen renders
-  // as its name rather than as a broken row.
-  return <Badge tone="quiet">{layer.SourceType}</Badge>;
 }
 
 /** VisibilityCell renders one marker per matching axis, in the fixed order
