@@ -272,6 +272,17 @@ func TestBrowserAuth_CallbackTransactionRefusals(t *testing.T) {
 			if e.SuggestedAction == "" {
 				t.Error("auth.csrf_invalid carries no suggested_action")
 			}
+			// The §6.3.4 gate excludes the callback route, so the message
+			// names the pre-authorization transaction. Reporting the
+			// browser-origin check here would name a control that did not
+			// run and would make the two refusals sharing this code
+			// indistinguishable from the body.
+			if !strings.Contains(e.Message, "sign-in transaction") {
+				t.Errorf("message = %q, want the pre-authorization transaction named", e.Message)
+			}
+			if strings.Contains(e.Message, "browser-origin") {
+				t.Errorf("message = %q, want no reference to the browser-origin gate", e.Message)
+			}
 			if c := cookieNamed(resp, server.CookieAuthTransaction); c == nil || c.MaxAge >= 0 {
 				t.Errorf("transaction cookie = %+v, want a clearing Set-Cookie on every response", c)
 			}

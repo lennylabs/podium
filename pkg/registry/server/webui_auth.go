@@ -113,9 +113,13 @@ func (e *BrowserAuthEndpoint) CallbackHandler() http.Handler {
 		tx, ok := readTransaction(r)
 		if !ok || cb.State == "" || cb.State != tx.State {
 			// An absent, expired, or non-matching transaction is refused
-			// whatever else the query carries (§6.3.4, §7.3.4).
+			// whatever else the query carries (§6.3.4, §7.3.4). The §6.3.4
+			// gate excludes this route, so the message names the
+			// pre-authorization transaction rather than the browser-origin
+			// check the gate reports; the two refusals share the code and
+			// stay distinguishable from the body.
 			writeError(w, http.StatusForbidden, "auth.csrf_invalid",
-				"The request was refused because it did not pass the browser-origin check.")
+				"The sign-in transaction was missing, expired, or did not match; re-run sign-in.")
 			return
 		}
 		if cb.Error != "" {

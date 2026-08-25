@@ -489,12 +489,22 @@ into `404` (`:487-491`), which is safe there only because not-found refuses on
 `update` and admits on `register`. An arm the rule above does not carry is a
 defect in the implementation.
 
-**IMPLEMENTOR'S CHOICE:** whether the gate needs an atomicity guarantee beyond
-what `PutLayerConfig` gives today, for two registrations racing under the same ID
-between the existence lookup and the upsert. Any answer is stated once, in this
-section, and if it is that the shipped upsert's behavior is accepted unchanged,
-that answer is recorded here as a decision with its reason, so a later reviewer
-does not rediscover it as a further arm of the lookup.
+**The register-race decision.** The gate needs no atomicity guarantee beyond what
+`PutLayerConfig` gives today. The shipped upsert's behavior is accepted
+unchanged, and this paragraph is the single statement of that decision and its
+reason; it is not a further arm of the existence lookup.
+
+The window is the arm that admits a previously-unused ID. Two callers who each
+observe `exists == false` under the same ID are each admitted for resolving a
+verified subject, and their upserts resolve last-writer-wins, so the layer one
+caller registers can be overwritten by the other even though the serialized order
+refuses the second on the user-defined arm of the rule above. A conditional
+insert would close that window, and no store backend exposes one today, so
+closing it is a store-contract change this proposal does not make. The window is
+bounded by the lookup-to-upsert interval on a single ID. The arm that admits an
+existing layer carries no such window, because both racers are authorized on the
+layer as it stands, so the race there decides only which authorized write lands
+last.
 
 **The deployment carve-out.** This paragraph is the single statement of when the
 owner gate is live and of what follows where it is not. Every other site in this

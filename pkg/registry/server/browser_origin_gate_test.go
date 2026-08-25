@@ -3,6 +3,7 @@ package server_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -73,8 +74,14 @@ func TestBrowserOriginGate_RefusesCrossSiteEvidence(t *testing.T) {
 				if ran {
 					t.Error("the handler ran; the gate refuses before it")
 				}
-				if e := envelopeCode(t, resp); e.Code != "auth.csrf_invalid" {
+				e := envelopeCode(t, resp)
+				if e.Code != "auth.csrf_invalid" {
 					t.Errorf("code = %q, want auth.csrf_invalid", e.Code)
+				}
+				// The gate and the callback's transaction refusal share the
+				// code, so the message is what tells them apart.
+				if !strings.Contains(e.Message, "browser-origin check") {
+					t.Errorf("message = %q, want the browser-origin check named", e.Message)
 				}
 			})
 		}
