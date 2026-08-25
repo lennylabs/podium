@@ -16,21 +16,32 @@ export const paths = {
 } as const;
 
 /** ApiError carries the §6.10 error envelope: the machine-readable code the
- * page branches on, the prose message, the retry signal, and the optional
- * remediation hint. */
+ * page branches on, the prose message, the retry signal, the optional
+ * remediation hint, and the machine-readable details a code carries. A
+ * surface that renders a refusal in the place the reader caused it reads the
+ * details rather than parsing the message. */
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string;
   readonly retryable: boolean;
   readonly suggestedAction: string;
+  readonly details: Record<string, unknown>;
 
-  constructor(status: number, code: string, message: string, retryable: boolean, suggestedAction: string) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    retryable: boolean,
+    suggestedAction: string,
+    details: Record<string, unknown> = {},
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.retryable = retryable;
     this.suggestedAction = suggestedAction;
+    this.details = details;
   }
 }
 
@@ -48,6 +59,7 @@ interface ErrorEnvelope {
   message?: string;
   retryable?: boolean;
   suggested_action?: string;
+  details?: Record<string, unknown>;
 }
 
 // §13.2.1 puts a read-only marker on the registry's responses, so the page
@@ -115,6 +127,7 @@ function errorFrom(status: number, body: string): ApiError {
     envelope.message ?? `The registry answered ${status}.`,
     envelope.retryable ?? false,
     envelope.suggested_action ?? '',
+    envelope.details ?? {},
   );
 }
 
@@ -201,7 +214,9 @@ export interface DependencyEdge {
 
 /** LayerRecord mirrors store.LayerConfig, which the registry marshals
  * directly into every layer response. The casing is that struct's, which is
- * not uniformly snake_case, so each name here is read off the Go field. */
+ * not uniformly snake_case, so each name here is read off the Go field: a
+ * member the struct tags carries the tagged name, and every other member
+ * carries the Go field name the marshaller falls back to. */
 export interface LayerRecord {
   ID: string;
   SourceType: string;
@@ -216,8 +231,45 @@ export interface LayerRecord {
   Organization?: boolean;
   Groups?: string[] | null;
   Users?: string[] | null;
-  LastIngestedAt?: string;
+  last_ingested_at?: string;
   LastIngestedRef?: string;
+}
+
+/** IngestSummary is the §7.3.1 reingest result. The registry runs the whole
+ * pipeline inside the request, so this is what the panel presents once the
+ * request returns. */
+export interface IngestSummary {
+  layer?: string;
+  accepted?: number;
+  idempotent?: number;
+  lint_failures?: number;
+  conflicts?: IngestConflict[];
+  rejected?: IngestRejection[];
+  advisories?: IngestAdvisory[];
+  /** queued marks the arm a registry with no ingest runner wired answers
+   * with: the request is recorded and there is no summary to read. */
+  queued?: string;
+}
+
+export interface IngestConflict {
+  artifact_id: string;
+  version: string;
+  old_hash?: string;
+  new_hash?: string;
+  code: string;
+}
+
+export interface IngestRejection {
+  artifact_id: string;
+  code: string;
+  reason: string;
+}
+
+export interface IngestAdvisory {
+  artifact_id: string;
+  code: string;
+  severity: string;
+  message: string;
 }
 
 /** SearchFilters are the filters §13.10 fixes for the UI: the ones the SDK
@@ -303,9 +355,11 @@ export function registerLayer(body: LayerRegistration): Promise<LayerRegisterRes
   });
 }
 
-/** reorderLayers re-sequences the whole list. The composition order decides
- * how an extending artifact merges with its parent, so the panel sends the
- * resulting order rather than a single move. */
+/** reorderLayers re-sequences the layers it names. The composition order
+ * decides how an extending artifact merges with its parent, so the panel
+ * sends the resulting order rather than a single move. Each layer in the
+ * array is authorized on its own under the §7.3.1 layer-write rule, so the
+ * caller sends the layers its move reorders and no others. */
 export function reorderLayers(order: string[]): Promise<unknown> {
   return request<unknown>(`${paths.layers}/reorder`, {
     ...write,
@@ -327,8 +381,8 @@ export async function listDeletedLayers(): Promise<LayerRecord[]> {
   return body.layers ?? [];
 }
 
-export function reingestLayer(id: string): Promise<unknown> {
-  return request<unknown>(`${paths.layers}/reingest${query({ id })}`, { ...write, method: 'POST' });
+export function reingestLayer(id: string): Promise<IngestSummary> {
+  return request<IngestSummary>(`${paths.layers}/reingest${query({ id })}`, { ...write, method: 'POST' });
 }
 
 export function unregisterLayer(id: string): Promise<unknown> {

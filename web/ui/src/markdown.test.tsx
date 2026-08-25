@@ -69,6 +69,10 @@ describe('the sanitized artifact-body rendering path', () => {
       '![x](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)\n',
       '<img src="data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=" alt="x">\n',
       '<video src="data:text/html,x"></video>\n',
+      // A candidate list carries several URLs, and the offending one need not
+      // lead. A test that reads the whole value passes on the leading
+      // relative candidate and keeps every later candidate verbatim.
+      '<img src="/ok.png" srcset="/ok.png 1x, data:text/html;base64,PHN2Zz48L3N2Zz4= 2x" alt="x">\n',
     ];
     for (const body of bodies) {
       const container = renderBody(body);

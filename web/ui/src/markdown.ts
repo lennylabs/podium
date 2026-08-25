@@ -23,31 +23,64 @@ import { marked } from 'marked';
 // and a value whose leading scheme-shaped run is not terminated by a colon.
 const allowedURI = /^(?:(?:https?|mailto):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
 
-// The attributes that carry a URL on the markup a markdown renderer emits,
-// plus the form attributes the HTML profile would otherwise keep. Every one
-// of them is re-tested against the allowlist below.
-const urlAttributes = ['href', 'src', 'srcset', 'xlink:href', 'action', 'formaction', 'background', 'poster'];
+// The attributes that carry a single URL on the markup a markdown renderer
+// emits, plus the form attributes the HTML profile would otherwise keep.
+// Every one of them is re-tested against the allowlist below.
+const urlAttributes = ['href', 'src', 'xlink:href', 'action', 'formaction', 'background', 'poster'];
+
+// The attributes that carry a candidate list rather than a single URL. Each
+// candidate is a URL followed by an optional descriptor, and the candidates
+// are separated by commas, so a test that reads the whole value inspects the
+// leading candidate alone and keeps every later one verbatim.
+const candidateListAttributes = ['srcset', 'imagesrcset'];
 
 // A browser ignores leading and embedded whitespace and control characters
 // when it resolves a URL's scheme, so the test runs on the value with those
 // removed rather than on the authored bytes.
 const attributeWhitespace = /[\u0000-\u0020\u00A0\u1680\u180E\u2000-\u2029\u205F\u3000]/g;
 
+/** allows reports whether one URL passes the allowlist. The value is tested
+ * with whitespace and control characters removed, because a browser ignores
+ * them when it resolves a scheme. */
+function allows(url: string): boolean {
+  return allowedURI.test(url.replace(attributeWhitespace, ''));
+}
+
+/** allowsEveryCandidate reports whether every candidate in a candidate list
+ * passes the allowlist. A candidate's descriptor is separated from its URL by
+ * whitespace, which the test removes, so the descriptor joins the relative
+ * path it follows and changes no verdict. A URL that itself carries a comma
+ * splits into fragments that are each tested, so a data: URL whose payload
+ * carries one fails on its own scheme-bearing fragment. The attribute is
+ * dropped whole when any candidate fails, so a list is never rewritten into a
+ * shorter one the author did not write. */
+function allowsEveryCandidate(value: string): boolean {
+  const candidates = value.split(',').filter((candidate) => candidate.trim() !== '');
+  return candidates.length > 0 && candidates.every(allows);
+}
+
 // The allowlist above is expressed to the sanitizer as its URI pattern, but
 // that pattern is one of several branches the sanitizer admits a URL on: it
 // keeps a data: URL on a media element's source attribute whatever the
-// pattern says. The rule admits no scheme other than http, https, and mailto
-// on any attribute the sanitizer keeps, so this hook re-tests every URL
-// attribute that survived and drops the ones no scheme in the allowlist
-// covers. It closes every branch at once rather than naming the media
-// elements, so a sanitizer release that adds a branch does not reopen it.
+// pattern says, and it tests a candidate list by its leading candidate alone.
+// The rule admits no scheme other than http, https, and mailto on any
+// attribute the sanitizer keeps, so this hook re-tests every URL attribute
+// that survived and drops the ones no scheme in the allowlist covers. It
+// closes the element branches at once rather than naming the media elements,
+// so a sanitizer release that adds one does not reopen them.
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (!(node instanceof Element)) {
     return;
   }
   for (const name of urlAttributes) {
     const value = node.getAttribute(name);
-    if (value !== null && !allowedURI.test(value.replace(attributeWhitespace, ''))) {
+    if (value !== null && !allows(value)) {
+      node.removeAttribute(name);
+    }
+  }
+  for (const name of candidateListAttributes) {
+    const value = node.getAttribute(name);
+    if (value !== null && !allowsEveryCandidate(value)) {
       node.removeAttribute(name);
     }
   }

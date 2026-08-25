@@ -8,6 +8,7 @@ package e2e
 // it, so this is the level where the two are compared.
 
 import (
+	"encoding/json"
 	"regexp"
 	"sort"
 	"strings"
@@ -87,6 +88,67 @@ func TestWebUI_ServedBundleReadsTheReadOnlyMarker(t *testing.T) {
 // readOnlyHeaderName is the §13.2.1 marker the read-only middleware sets on
 // every response (pkg/registry/server/server.go).
 const readOnlyHeaderName = "X-Podium-Read-Only"
+
+// panelLayerFields are the layer-record members the layer panel reads: the
+// identifier it keys a row on, the class and the order that place the row in
+// the composition, the owner the ownership marker compares against, and the
+// staleness stamp the row renders. The registry marshals store.LayerConfig
+// directly, so the casing is not uniform: a tagged member carries its tag and
+// every other member carries its Go field name.
+var panelLayerFields = []string{"ID", "Order", "UserDefined", "Owner", "last_ingested_at"}
+
+// Spec: §13.10, §7.3.1 — the served bundle reads a layer record under the
+// member names the registry marshals it with. The registry marshals the store
+// struct directly, so a member's name on the wire is either its json tag or
+// its Go field name, and the two are mixed in one object. Reading a tagged
+// member under its Go field name yields undefined on every response, which
+// renders as a permanently absent value rather than as a failure, so the
+// correspondence is pinned against a layer the running binary returns.
+func TestWebUI_ServedBundleReadsTheLayerRecordFields(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"my-skill/ARTIFACT.md": smallteamLowArtifact("ui artifact"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_WEB_UI=true"},
+		"serve", "--standalone", "--web-ui", "--layer-path", reg)
+
+	st, body := getRaw(t, srv.BaseURL+"/v1/layers")
+	if st != 200 {
+		t.Fatalf("GET /v1/layers = %d, want 200\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+	var listed struct {
+		Layers []map[string]json.RawMessage `json:"layers"`
+	}
+	if err := json.Unmarshal(body, &listed); err != nil {
+		t.Fatalf("decode the layer list: %v (%s)", err, body)
+	}
+	if len(listed.Layers) == 0 {
+		t.Fatalf("the registry listed no layer to read the member names off\nbody: %s", body)
+	}
+	// last_ingested_at is omitempty and a layer served from a local path
+	// carries no stamp, so the wire object is checked for the members that
+	// are always present and the omitted one is checked against the struct
+	// tag through the bundle alone.
+	for _, field := range panelLayerFields {
+		if field == "last_ingested_at" {
+			continue
+		}
+		if _, ok := listed.Layers[0][field]; !ok {
+			t.Errorf("the layer record carries no %q member; the panel reads one\nbody: %s", field, body)
+		}
+	}
+
+	st, index := getRaw(t, srv.BaseURL+"/ui/")
+	if st != 200 {
+		t.Fatalf("GET /ui/ status = %d, want 200\nlog:\n%s", st, srv.log())
+	}
+	scripts := strings.Join(bundleScripts(t, srv, string(index)), "\n")
+	for _, field := range panelLayerFields {
+		if !strings.Contains(scripts, `"`+field+`"`) && !strings.Contains(scripts, "."+field) {
+			t.Errorf("the served bundle references no %q layer member; the panel reads it under some other name", field)
+		}
+	}
+}
 
 // bundleAPIPaths returns the registry paths the bundle's own client code
 // references, read off the scripts the served index names.

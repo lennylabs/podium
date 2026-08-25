@@ -73,22 +73,32 @@ export function EmptyState({ children }: { children: ReactNode }) {
 
 /**
  * ErrorState presents a §6.10 envelope: the code the page branches on, the
- * prose message, and the remediation hint where the code carries one. A
- * retryable condition gets the retry the envelope says clears on its own.
+ * prose message, the remediation hint where the code carries one, and the
+ * retry signal. The retry control is rendered only where the envelope says
+ * the condition clears on its own; where it says the condition does not, the
+ * state says so instead, because offering a retry there sends the reader
+ * round a loop that ends the same way. A failure carrying no envelope at all
+ * is a transport failure, which does clear on its own.
  */
 export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
   const envelope = error instanceof ApiError ? error : null;
+  const retryable = envelope === null || envelope.retryable;
   return (
     <div className="banner banner-danger" role="alert">
       <p className="banner-title">The registry did not answer this request.</p>
       {envelope !== null && <p className="mono banner-code">{envelope.code}</p>}
       <p>{envelope !== null ? envelope.message : String(error)}</p>
       {envelope !== null && envelope.suggestedAction !== '' && <p className="quiet">{envelope.suggestedAction}</p>}
-      {onRetry !== undefined && (
-        <button type="button" onClick={onRetry}>
-          Try again
-        </button>
-      )}
+      {onRetry !== undefined &&
+        (retryable ? (
+          <button type="button" onClick={onRetry}>
+            Try again
+          </button>
+        ) : (
+          <p className="quiet" data-testid="not-retryable">
+            Retrying does not clear this condition.
+          </p>
+        ))}
     </div>
   );
 }

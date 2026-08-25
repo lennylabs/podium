@@ -13,9 +13,10 @@ import { useState } from 'react';
 
 import { DeletedLayers } from './DeletedLayers';
 import { RegisterLayerForm } from './RegisterLayerForm';
+import { ReingestControl } from './ReingestControl';
 import { Badge, Banner, EmptyState, ErrorState, Loading } from '../components/primitives';
 import type { LayerRecord } from '../api';
-import { ApiError, listLayers, reingestLayer, reorderLayers, unregisterLayer } from '../api';
+import { ApiError, listLayers, reorderLayers, unregisterLayer } from '../api';
 import { useAsync } from '../useAsync';
 
 /** recoveryDays is the window an unregistered layer stays restorable for
@@ -35,7 +36,6 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
     return <ErrorState error={layers.error} onRetry={layers.reload} />;
   }
   const rows = layers.value ?? [];
-  const order = rows.map((layer) => layer.ID);
 
   return (
     <section className="surface" aria-label="Layer panel">
@@ -73,6 +73,9 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
       {registering && <RegisterLayerForm onRegistered={layers.reload} readOnly={readOnly} />}
       {showingDeleted && <DeletedLayers onRestored={layers.reload} readOnly={readOnly} />}
       <p className="label quiet">Precedence: the last row wins</p>
+      <p className="quiet">
+        Every user-defined layer composes above every admin-defined layer, so a row moves within its own block.
+      </p>
       {rows.length === 0 ? (
         <EmptyState>No layers are registered under this tenant.</EmptyState>
       ) : (
@@ -87,15 +90,14 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
             </tr>
           </thead>
           <tbody>
-            {rows.map((layer, index) => (
+            {rows.map((layer) => (
               <LayerRow
                 key={layer.ID}
                 layer={layer}
                 subject={subject}
                 readOnly={readOnly}
                 onWrite={layers.reload}
-                order={order}
-                index={index}
+                block={blockOf(rows, layer)}
               />
             ))}
           </tbody>
@@ -105,12 +107,29 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
   );
 }
 
-/** listOrdered reads the layer list in precedence order. The order value sets
- * precedence within the tenant and the read does not promise an order, so the
- * panel sorts by it rather than by arrival. */
+/** listOrdered reads the layer list in the order §4.6 composes it in. The
+ * order value sets precedence within a class, and the composition rule places
+ * every user-defined layer above every admin-defined layer whatever the stored
+ * order values are, so the rows are grouped by class first and sorted by order
+ * inside each group. Sorting the whole list by order alone would name the
+ * wrong winning row on any tenant whose most recently registered layer is
+ * admin-defined, because registration hands each new layer the highest
+ * existing order. */
 async function listOrdered(): Promise<LayerRecord[]> {
   const layers = await listLayers();
-  return [...layers].sort((a, b) => a.Order - b.Order);
+  const byOrder = (a: LayerRecord, b: LayerRecord) => a.Order - b.Order;
+  const admin = layers.filter((layer) => layer.UserDefined !== true).sort(byOrder);
+  const user = layers.filter((layer) => layer.UserDefined === true).sort(byOrder);
+  return [...admin, ...user];
+}
+
+/** blockOf returns the contiguous run of rows a layer shares its class with,
+ * which is the run a reorder may move it inside. A move across the class
+ * boundary changes no composition order, and a request naming a layer the
+ * move does not reorder is refused wherever the layer-write rule is live, so
+ * the block bounds both the control and the request. */
+function blockOf(rows: LayerRecord[], layer: LayerRecord): LayerRecord[] {
+  return rows.filter((row) => (row.UserDefined === true) === (layer.UserDefined === true));
 }
 
 function LayerRow({
@@ -118,16 +137,16 @@ function LayerRow({
   subject,
   readOnly,
   onWrite,
-  order,
-  index,
+  block,
 }: {
   layer: LayerRecord;
   subject: string;
   readOnly: boolean;
   onWrite: () => void;
-  order: string[];
-  index: number;
+  block: LayerRecord[];
 }) {
+  const order = block.map((row) => row.ID);
+  const index = order.indexOf(layer.ID);
   const [refusal, setRefusal] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);
 
@@ -161,7 +180,7 @@ function LayerRow({
       <td>
         <VisibilityCell layer={layer} />
       </td>
-      <td className="mono quiet">{layer.LastIngestedAt ?? 'never'}</td>
+      <td className="mono quiet">{layer.last_ingested_at ?? 'never'}</td>
       <td>
         <button
           type="button"
@@ -172,15 +191,15 @@ function LayerRow({
         >
           Raise precedence
         </button>
-        <button
-          type="button"
-          disabled={readOnly}
-          onClick={() => {
-            attempt(() => reingestLayer(layer.ID));
+        <ReingestControl
+          layerID={layer.ID}
+          readOnly={readOnly}
+          onIngested={() => {
+            setRefusal(null);
+            onWrite();
           }}
-        >
-          Reingest
-        </button>
+          onRefusal={setRefusal}
+        />
         <button
           type="button"
           disabled={readOnly}
@@ -265,7 +284,7 @@ function erasesOn(): string {
   return at.toISOString().slice(0, 10);
 }
 
-/** moved returns the whole order with one layer at a new position, which is
+/** moved returns the block's order with one layer at a new position, which is
  * what the reorder call takes. */
 function moved(order: string[], from: number, to: number): string[] {
   const next = [...order];

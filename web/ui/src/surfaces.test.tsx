@@ -52,7 +52,10 @@ function stubRegistry(stubs: Record<string, Stub>): void {
         bodies.push(init.body);
       }
       const path = url.split('?')[0];
-      const stub = stubs[path] ?? { status: 404, body: { code: 'registry.not_found', message: 'no stub' } };
+      // A path a surface both reads and writes takes a method-qualified key
+      // where the two answer differently, and the bare path otherwise.
+      const stub = stubs[`${method} ${path}`] ??
+        stubs[path] ?? { status: 404, body: { code: 'registry.not_found', message: 'no stub' } };
       const status = stub.status ?? 200;
       return Promise.resolve(
         new Response(stub.text ?? JSON.stringify(stub.body ?? {}), {
@@ -251,6 +254,23 @@ describe('the domain browser', () => {
     expect(screen.getByText('curated')).toBeTruthy();
     expect(screen.getByText('Lifted from sparse subdomains')).toBeTruthy();
     expect(screen.getByText('The listing was trimmed to fit the response budget.')).toBeTruthy();
+  });
+
+  // The §6.10 envelope says whether the condition clears on its own. Where it
+  // says the condition does not, offering a retry sends the reader round a
+  // loop that ends the same way, so the state says so instead.
+  it('offers no retry of a read the envelope reports as not clearing on its own', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': {
+        status: 400,
+        body: { code: 'registry.invalid_argument', message: 'no such domain', retryable: false },
+      },
+    });
+    render(<App />);
+    expect(await screen.findByTestId('not-retryable')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+    expect(screen.getByText('registry.invalid_argument')).toBeTruthy();
   });
 
   it('renders a domain that carries neither subdomains nor artifacts as a finished page', async () => {
@@ -773,20 +793,156 @@ describe('the layer write flows', () => {
     expect(screen.getByRole('button', { name: 'Done' }).hasAttribute('disabled')).toBe(false);
   });
 
-  it('sends the resulting order when a row changes precedence', async () => {
+  // §4.6 composes every user-defined layer above every admin-defined one
+  // whatever the stored order values are, so a move runs inside the moving
+  // layer's own class and the request names that class's layers alone. A
+  // reorder that named the admin layer as well would ask the registry to
+  // authorize a write against a layer the move does not reorder.
+  it('sends the resulting order for the moving layer’s own class', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
-      '/v1/layers': { body: { layers: [adminLayer(), userLayer()] } },
+      '/v1/layers': { body: { layers: [adminLayer(), userLayer(), scratchLayer()] } },
       '/v1/layers/reorder': { body: { layers: [] } },
     });
     goTo('#/layers');
     render(<App />);
     await screen.findByLabelText('Layer panel');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Raise precedence' })[0]);
+    const controls = screen.getAllByRole('button', { name: 'Raise precedence' });
+    // The admin layer is alone in its class, so its control has nothing to
+    // move past and is held.
+    expect(controls[0].hasAttribute('disabled')).toBe(true);
+    fireEvent.click(controls[1]);
     await waitFor(() => {
       expect(requests.some((r) => r.url === '/v1/layers/reorder' && r.method === 'POST')).toBe(true);
     });
-    expect(bodies.at(-1)).toBe(JSON.stringify({ order: ['alice-personal', 'company'] }));
+    expect(bodies.at(-1)).toBe(JSON.stringify({ order: ['alice-scratch', 'alice-personal'] }));
+  });
+
+  // The reingest call runs the whole pipeline inside the request and answers
+  // with a summary the reader has to act on, so the control presents the
+  // counts and the itemised rejections and conflicts rather than returning
+  // the row to rest.
+  it('presents what the reingest snapshot accepted, rejected, and conflicted on', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+      '/v1/layers/reingest': {
+        body: {
+          layer: 'alice-personal',
+          accepted: 4,
+          idempotent: 2,
+          lint_failures: 1,
+          rejected: [{ artifact_id: 'platform/deploy', code: 'ingest.sensitivity_floor', reason: 'above the floor' }],
+          conflicts: [
+            {
+              artifact_id: 'platform/lint',
+              version: '1.0.0',
+              old_hash: 'sha256:aaa',
+              new_hash: 'sha256:bbb',
+              code: 'ingest.immutable_violation',
+            },
+          ],
+          advisories: [
+            { artifact_id: 'platform/ci', code: 'license.changed', severity: 'warning', message: 'license changed' },
+          ],
+        },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Reingest' }));
+    await screen.findByLabelText('Reingest result');
+    expect(screen.getByText('4 accepted')).toBeTruthy();
+    expect(screen.getByText('2 unchanged')).toBeTruthy();
+    expect(screen.getByText('1 lint failures')).toBeTruthy();
+    expect(screen.getByLabelText('Rejected artifacts')).toBeTruthy();
+    expect(screen.getByText('platform/lint@1.0.0')).toBeTruthy();
+    expect(screen.getByLabelText('Advisories')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+    expect(screen.queryByLabelText('Reingest result')).toBeNull();
+  });
+
+  // A registry with no ingest runner wired records the intent and answers
+  // with no summary, so the control says the request was recorded rather than
+  // presenting a summary of zeroes.
+  it('reports a recorded reingest where the registry runs no pipeline in the request', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+      '/v1/layers/reingest': { body: { queued: 'alice-personal', queued_at: '2026-08-25T00:00:00Z' } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Reingest' }));
+    expect(await screen.findByTestId('reingest-recorded')).toBeTruthy();
+  });
+
+  // A snapshot whose every artifact collided with a published version is
+  // refused whole with 409 ingest.immutable_violation. Nothing was accepted
+  // and the layer is unchanged, and bumping the versions is the only thing
+  // that clears it, so the arm names the colliding versions and offers no
+  // retry.
+  it('names the colliding versions where the whole snapshot was refused', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+      '/v1/layers/reingest': {
+        status: 409,
+        body: {
+          code: 'ingest.immutable_violation',
+          message: 'same-version content conflict: platform/lint@1.0.0 already exists with different content',
+          retryable: false,
+          details: {
+            conflicts: [
+              {
+                artifact_id: 'platform/lint',
+                version: '1.0.0',
+                old_hash: 'sha256:aaa',
+                new_hash: 'sha256:bbb',
+                code: 'ingest.immutable_violation',
+              },
+            ],
+          },
+        },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Reingest' }));
+    await screen.findByLabelText('Reingest rejected');
+    expect(screen.getByText('Nothing was ingested')).toBeTruthy();
+    expect(screen.getByText('platform/lint@1.0.0')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
+  });
+
+  // The cap refusal carries the limit and the caller's current count, and
+  // this is where the user created the layer, so the count is rendered here
+  // rather than arriving as the generic failure every other refusal gets.
+  it('renders the layer limit and the current count where a registration exceeds the cap', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+      'POST /v1/layers': {
+        status: 429,
+        body: {
+          code: 'quota.layer_count_exceeded',
+          message: 'user-defined layer cap of 3 reached for alice@acme.com',
+          details: { limit: 3, current: 3 },
+        },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
+    fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'alice-extra' } });
+    fireEvent.submit(screen.getByLabelText('Register a layer'));
+    const refusal = await screen.findByLabelText('Layer limit reached');
+    expect(refusal.textContent).toContain('3 of 3');
+    expect(screen.getByText('quota.layer_count_exceeded')).toBeTruthy();
   });
 
   it('lists what is still recoverable and restores it', async () => {
@@ -833,6 +989,19 @@ function userLayer(owner = 'alice@acme.com'): Record<string, unknown> {
     SourceType: 'local',
     LocalPath: '/Users/alice/registry',
     Order: 2,
+    UserDefined: true,
+    Owner: owner,
+  };
+}
+
+/** scratchLayer is a second user-defined layer, which a reorder case needs so
+ * the moving layer has a sibling inside its own class. */
+function scratchLayer(owner = 'alice@acme.com'): Record<string, unknown> {
+  return {
+    ID: 'alice-scratch',
+    SourceType: 'local',
+    LocalPath: '/Users/alice/scratch',
+    Order: 3,
     UserDefined: true,
     Owner: owner,
   };

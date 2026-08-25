@@ -10,7 +10,7 @@ import { useState } from 'react';
 
 import { Banner, CopyField, ErrorState } from '../components/primitives';
 import type { LayerRegisterResult, LayerRegistration } from '../api';
-import { registerLayer } from '../api';
+import { ApiError, registerLayer } from '../api';
 
 export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: () => void; readOnly: boolean }) {
   const [id, setID] = useState('');
@@ -204,13 +204,41 @@ export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: ()
       <button type="submit" disabled={readOnly || incomplete}>
         Register
       </button>
-      {/* The registry refuses a registration past the per-user cap with an
-          error carrying the limit and the caller's current count, and this is
-          where the user creates the layer, so the refusal is presented here
-          rather than as a failure of the page. */}
-      {refusal !== null && <ErrorState error={refusal} />}
+      {refusal !== null && <RegistrationRefusal refusal={refusal} />}
     </form>
   );
+}
+
+/** layerCapExceeded is the §6.10 code the registry refuses a registration
+ * past the per-user layer cap with. Its details carry the limit and the
+ * caller's current count. */
+const layerCapExceeded = 'quota.layer_count_exceeded';
+
+/**
+ * RegistrationRefusal presents what the registry refused. The cap refusal is
+ * the one the reader can act on, and this is where they created the layer, so
+ * it renders the limit and their current count here rather than arriving as
+ * the generic failure every other refusal gets.
+ */
+function RegistrationRefusal({ refusal }: { refusal: unknown }) {
+  if (!(refusal instanceof ApiError) || refusal.code !== layerCapExceeded) {
+    return <ErrorState error={refusal} />;
+  }
+  return (
+    <div className="banner banner-danger" role="alert" aria-label="Layer limit reached">
+      <p className="banner-title">
+        You have reached your layer limit — {count(refusal.details.current)} of {count(refusal.details.limit)}.
+      </p>
+      <p className="mono banner-code">{refusal.code}</p>
+      <p>Unregister a layer you no longer read from, or ask an administrator to raise the limit.</p>
+    </div>
+  );
+}
+
+/** count renders a details value the registry sends as a number. A registry
+ * that omits it leaves the reader a dash rather than the word "undefined". */
+function count(value: unknown): string {
+  return typeof value === 'number' ? String(value) : '—';
 }
 
 /** members splits a comma-separated member list into the identifiers the
