@@ -425,10 +425,11 @@ operations, and the panel presents whatever refusal a write receives.
 3. **Administrator.** Manages every layer in the tenant, including the
    admin-defined layers an ordinary user cannot modify or unregister. Destructive
    operations are not exclusive to this role, since a user can unregister a layer
-   they own, so the panel differs by which layers it exposes rather than by
-   whether it offers destruction at all. No response reports that the caller holds
-   this role, so the panel renders its write operations and presents whatever
-   refusal a write receives rather than predicting the outcome.
+   they own. No response reports that the caller holds this role, and the list
+   read hands the panel every layer stored under the tenant on the terms the
+   unfiltered-list rule sets, so the panel renders its write operations over the
+   whole list and presents whatever refusal a write receives rather than
+   predicting the outcome.
 
 **The catalog-scope rule.** How much of the catalog an anonymous caller sees is a
 property of the deployment, and the page reads it from the posture read rather
@@ -439,15 +440,16 @@ read answers at all.
 
 - Where a catalog read is refused rather than answered, that caller has no
   anonymous view of the catalog, and the page renders the refused state rather
-  than an empty catalog or a filtered one. Where a caller who had a subject sees
-  that refusal, it is the session-expiry transition the expiry-signal rule below
-  names.
+  than an empty catalog or a filtered one. This arm decides first, whether or not
+  the posture read answered, so no other arm of this rule applies to a refused
+  catalog read. Where a caller who had a subject sees that refusal, it is the
+  session-expiry transition the expiry-signal rule below names.
 - Where the catalog read answers, the anonymous view is the public subset when
-  the read reports `identity_provider_configured` true and `public_mode` false.
-  On every other combination of the two it is the whole catalog.
-- Where the posture read does not answer, the page holds neither key. It
-  presents whatever the catalog read returned, under the constraint the
-  public-subset arm carries below, and it renders the anonymous presentation
+  the posture read reports `identity_provider_configured` true and `public_mode`
+  false. On every other combination of the two it is the whole catalog.
+- Where the catalog read answers and the posture read does not, the page holds
+  neither key. It presents what the catalog read returned, under the constraint
+  the public-subset arm carries below, and it renders the anonymous presentation
   "The posture read" states for that arm.
 
 That keying carries one named exception, and it is the only one. A registry

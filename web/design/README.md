@@ -84,7 +84,7 @@ Spacing runs on a 4px grid; the common steps are 6, 8, 10, 12, 14, 16, 18, 22, 2
 
 ## Layout shell
 
-Every screen except the sign-in dialog is the same shell.
+Every screen is the same shell.
 
 - **TopBar** — 52px tall, `surf`, 1px `bd` bottom border, 16px horizontal padding, 16px gap. Left to right: wordmark (24px mark + Anton 17–18px uppercase, `.03em`); registry hostname in 11px mono `faint` behind a 12px left padding and a 1px `b2` rule; flexible spacer; search trigger; 1px × 22px divider; Docs link (12.5px, `link`, external arrow, `white-space:nowrap`); divider; identity cluster.
   - The **search trigger** is 32px tall, `flex: 1 1 300px; max-width: 300px; min-width: 150px`, 1px `bd`, 8px radius, `surf2`, holding a magnifier, "Search artifacts", and a ⌘K key hint. It is a button that opens the palette, not an input.
@@ -101,7 +101,7 @@ Every screen except the sign-in dialog is the same shell.
 
 Board ids refer to `Podium App.dc.html`.
 
-### 1. Domain browser — 14a (light), 15a (at scale), 20a (trimmed), 14f (anonymous)
+### 1. Domain browser — 14a (light), 15a (at scale), 20a (trimmed), 14f (anonymous), 14g (refused catalog)
 
 **Purpose:** the entry point and primary navigation. Backed by `load_domain`.
 
@@ -113,7 +113,8 @@ Behaviour the API forces:
 - **Folded artifacts.** An entry with `FoldedFrom` is not a child of this domain. It goes in a separate dashed group titled "LIFTED FROM SPARSE SUBDOMAINS / Not direct children", each row carrying an `↑ FROM <subdomain>` badge.
 - **Rendering note.** When the server trimmed the listing, show both a `listing trimmed` pill among the header badges and a line at the end of the list: "4 of 21 artifacts shown." with a "Load the rest" button. It must read as neither content nor error.
 - **At scale (15a).** Past roughly twenty subdomains, switch to compact count tiles in a 6-column grid with a filter field, a grid/list toggle, and a "Show all 24 subdomains" control. Artifacts become a sortable DataTable with type filters and a curated section header; descriptions drop to one clipped line.
-- **Anonymous (14f).** The board draws one arm of the catalog-scope rule: a deployment that authenticates callers, a caller who resolves no subject, and a catalog read that answered. A neutral PageBanner states that the caller is not signed in and offers the sign-in control. Nothing states or implies that artifacts were withheld or that hidden artifacts exist. The layer panel is hidden from the nav on this arm only. The whole-catalog arms carry no banner, and the refused arm renders the refused state instead of a catalog.
+- **Anonymous (14f).** The board draws one arm of the catalog-scope rule: a deployment that authenticates callers, a caller who resolves no subject, and a catalog read that answered. A neutral PageBanner states that the caller is not signed in and offers the sign-in control. Nothing states or implies that artifacts were withheld or that hidden artifacts exist. The layer panel is hidden from the nav on this arm only. The whole-catalog arms carry no banner, and the refused arm is board 14g.
+- **Refused catalog (14g).** The board draws the refused arm of the catalog-scope rule: the catalog read is refused, so the caller has no anonymous view at all. The refused-state screen stands in place of the catalog, the sidebar tree and the footer counts are empty, and the shell keeps its sign-in control. The screen states that the registry did not serve this catalog to this caller and says nothing about what the catalog holds. It is distinct from the session-expiry treatment at 15k, which is the same refusal reached by a caller who had a subject.
 
 ### 2. Search — 14b, 20b
 
@@ -141,7 +142,7 @@ Header is breadcrumb, h1, type and version badges, description. Then tabs: **Ren
 
 ### 4. Layer panel — 14d, 14e, 17f, 17g
 
-The only surface with writes, and the only one whose contents differ by role.
+The only surface with writes. Its contents differ by layer class rather than by caller role, because the list endpoint hands the panel every layer under the tenant and no response reports the caller's role.
 
 Header with title, description, and actions: "↺ Recently unregistered · 3" as a quiet accent link, then "Register layer" (primary) and "Reingest all" (secondary). Below, a label reading "PRECEDENCE — DRAG TO REORDER / lower row wins" — **the winning end must be labelled**, not implied by position.
 
@@ -192,9 +193,9 @@ Error codes to branch on, from `writeReingestError`: `ingest.frozen`, `ingest.hi
 
 Sign in has no screen of its own. It is the shell control the brief's sign-in control rule fixes: a top-level navigation to the sign-in path the posture read reports, after which the identity provider owns the page. Board 14f shows the control in the anonymous top bar. Nothing is drawn as an in-page flow, and no device-code step belongs here: the device grant is the CLI and SDK acquisition path, and the browser flow reads no device-code endpoint.
 
-Sign out is a `POST` the page issues, carrying the same proof the panel's writes carry, after which the page navigates. Render it as a control rather than as a link, because that is the method the route answers.
+Sign out is a `POST` the page issues, carrying the same proof the panel's writes carry, after which the page navigates. Render it as a control rather than as a link, because that is the method the route answers. It is conditioned the same way "Sign in" is: the brief's sign-in control rule renders it only where the posture read reports the browser flow enabled and a subject resolved. A subject that resolved on a deployment running no browser flow gets the account menu without it, which is the AccountMenu state the inventory draws beside the signed-in one.
 
-Session expiry (15k) is one sentence — "Your session has expired. Please log in again." — over the page the user was on, which is **kept, not cleared**. The signal is a refused catalog read; a refused write says nothing about the session. The account menu (15l) carries name, email, appearance (System / Light / Dark), layer quota, API tokens, and Sign out. It carries no role badge, and it does **not** list group memberships; a user can be in many.
+Session expiry (15k) is one sentence — "Your session has expired. Please log in again." — over the page the user was on, which is **kept, not cleared**. The signal is a refused catalog read; a refused write says nothing about the session. The caller reaching this state has no anonymous view of the catalog, so the dialog offers no browsing mode: the primary control signs in again and the secondary is the sign-out `POST`, which clears the stale cookie and leaves the caller on the refused state that 14g draws. The account menu (15l) carries name, email, appearance (System / Light / Dark), layer quota, API tokens, and Sign out. It carries no role badge, and it does **not** list group memberships; a user can be in many.
 
 ---
 
@@ -252,4 +253,4 @@ Fonts load from Google Fonts: Space Grotesk 400–700, JetBrains Mono 400–700,
 
 ## Not yet designed
 
-Named so they are not mistaken for oversights: the update-layer form; empty states for an empty domain, a search with no results, a registry with no layers, and an empty restore list; not-found and forbidden pages (the ErrorPage component exists, the screens do not); loading states for the browser, search, and layer list; the non-admin layer panel; the standalone deployment with no identity provider; browse-mode search with filters and no query; a surface over `GET /v1/scope/preview`; the refused-catalog arm of the catalog-scope rule, where a caller has no anonymous view at all; and any responsive behaviour below 1440px.
+Named so they are not mistaken for oversights: the update-layer form; empty states for an empty domain, a search with no results, a registry with no layers, and an empty restore list; not-found and forbidden pages (the ErrorPage component exists, the screens do not); loading states for the browser, search, and layer list; the non-admin layer panel; the standalone deployment with no identity provider; browse-mode search with filters and no query; a surface over `GET /v1/scope/preview`; and any responsive behaviour below 1440px.
