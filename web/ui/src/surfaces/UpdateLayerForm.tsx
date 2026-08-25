@@ -1,15 +1,17 @@
 // Updating a layer. The update is a partial patch, so a field left as the
-// stored value is sent unchanged and the registry keeps it. The form offers
-// the source details and the force-push policy and nothing else: the registry
-// ignores an owner or a visibility patch on a user-defined layer and still
-// answers success, so a control for either would report a change that never
-// happened.
+// stored value is sent unchanged and the registry keeps it. The visibility
+// axes are offered on an admin-defined layer, which is the class the endpoint
+// applies them to. §4.6 fixes a user-defined layer's visibility at
+// registration, and the registry ignores an owner or a visibility patch there
+// and still answers success, so that class displays its visibility rather
+// than editing it.
 
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 
 import { SecretReveal } from './SecretReveal';
-import { ErrorState } from '../components/primitives';
+import { members } from './members';
+import { Badge, ErrorState } from '../components/primitives';
 import type { LayerRecord, LayerSecretResult, LayerUpdate } from '../api';
 import { updateLayer } from '../api';
 
@@ -30,6 +32,11 @@ export function UpdateLayerForm({
   const [localPath, setLocalPath] = useState(layer.LocalPath ?? '');
   const [policy, setPolicy] = useState(layer.force_push_policy ?? 'tolerant');
   const [rotate, setRotate] = useState(false);
+  const editableVisibility = layer.UserDefined !== true;
+  const [isPublic, setPublic] = useState(layer.Public === true);
+  const [organization, setOrganization] = useState(layer.Organization === true);
+  const [groups, setGroups] = useState((layer.Groups ?? []).join(', '));
+  const [users, setUsers] = useState((layer.Users ?? []).join(', '));
   const [result, setResult] = useState<LayerSecretResult | null>(null);
   const [refusal, setRefusal] = useState<unknown>(null);
 
@@ -38,6 +45,15 @@ export function UpdateLayerForm({
     const patch: LayerUpdate = git
       ? { ref, root, force_push_policy: policy, rotate_webhook_secret: rotate }
       : { local_path: localPath, root };
+    if (editableVisibility) {
+      // Each axis the patch carries grants, and an axis it omits keeps its
+      // stored value, so the form sends an axis the reader turned on and a
+      // member list they named.
+      patch.public = isPublic;
+      patch.organization = organization;
+      patch.groups = members(groups);
+      patch.users = members(users);
+    }
     updateLayer(layer.ID, patch).then(
       (next) => {
         setRefusal(null);
@@ -115,6 +131,64 @@ export function UpdateLayerForm({
           }}
         />
       </label>
+      {editableVisibility ? (
+        <fieldset className="field">
+          <legend className="label">Visibility</legend>
+          <label>
+            <input
+              type="checkbox"
+              checked={isPublic}
+              disabled={layer.Public === true}
+              onChange={(event) => {
+                setPublic(event.target.checked);
+              }}
+            />
+            Public
+          </label>
+          <label>
+            <input
+              type="checkbox"
+              checked={organization}
+              disabled={layer.Organization === true}
+              onChange={(event) => {
+                setOrganization(event.target.checked);
+              }}
+            />
+            Organization
+          </label>
+          <label className="field">
+            <span className="label">Group names, separated by commas</span>
+            <input
+              type="text"
+              value={groups}
+              onChange={(event) => {
+                setGroups(event.target.value);
+              }}
+            />
+          </label>
+          <label className="field">
+            <span className="label">User identifiers, separated by commas</span>
+            <input
+              type="text"
+              value={users}
+              onChange={(event) => {
+                setUsers(event.target.value);
+              }}
+            />
+          </label>
+          {/* The endpoint grants on each axis and revokes on none, so a grant
+              already stored cannot be taken back here and its control says so
+              rather than offering a change the registry would answer success
+              to without making. */}
+          <p className="quiet">An axis already granted stays granted. Unregister the layer to withdraw it.</p>
+        </fieldset>
+      ) : (
+        <div className="field">
+          <span className="label">Visibility</span>
+          <Badge tone="quiet">you alone</Badge>
+          <p className="quiet">A layer of your own is fixed to you at registration and cannot be widened.</p>
+        </div>
+      )}
       {/* Only a git source carries a webhook secret, so the control stays on
           the row of a layer that has none and reports why it cannot be
           taken rather than disappearing between source types. */}

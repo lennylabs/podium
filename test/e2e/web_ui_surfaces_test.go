@@ -154,6 +154,46 @@ func TestWebUI_ServedBundleReadsTheLayerRecordFields(t *testing.T) {
 	}
 }
 
+// identityRefusalCodes are the §6.10 codes the identity middleware answers a
+// read with when it could not verify the caller
+// (pkg/registry/server/identity_verify.go). The page renders the refused arm
+// of the catalog-scope rule on these and on no other refusal.
+var identityRefusalCodes = []string{"auth.token_expired", "auth.untrusted_token", "auth.untrusted_runtime"}
+
+// verifiedRefusalCode is answered with the same status by the tenant router,
+// for a caller whose token verified and whose organization maps to no
+// provisioned tenant (pkg/registry/server/server.go). A page keying the
+// refused arm on the status would tell that caller their session ended.
+const verifiedRefusalCode = "auth.tenant_unknown"
+
+// Spec: §13.10, §6.10, §4.6 — the served bundle keys the refused arm of the
+// catalog-scope rule on the codes the identity middleware writes rather than
+// on the status those refusals share with a refusal that verified the caller.
+// The codes are the whole contract between the two sides, so they are read off
+// the served asset against the catalog the registry writes.
+func TestWebUI_ServedBundleKeysOnTheIdentityRefusalCodes(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"my-skill/ARTIFACT.md": smallteamLowArtifact("ui artifact"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_WEB_UI=true"},
+		"serve", "--standalone", "--web-ui", "--layer-path", reg)
+
+	st, index := getRaw(t, srv.BaseURL+"/ui/")
+	if st != 200 {
+		t.Fatalf("GET /ui/ status = %d, want 200\nlog:\n%s", st, srv.log())
+	}
+	scripts := strings.Join(bundleScripts(t, srv, string(index)), "\n")
+	for _, code := range identityRefusalCodes {
+		if !strings.Contains(scripts, code) {
+			t.Errorf("the served bundle references no %q; the refused arm reads the code the middleware writes", code)
+		}
+	}
+	if strings.Contains(scripts, verifiedRefusalCode) {
+		t.Errorf("the served bundle references %q; that refusal verified the caller and takes the surface's own error state", verifiedRefusalCode)
+	}
+}
+
 // bundleAPIPaths returns the registry paths the bundle's own client code
 // references, read off the scripts the served index names.
 func bundleAPIPaths(t *testing.T, srv *serverProc, index string) []string {

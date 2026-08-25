@@ -1,6 +1,11 @@
-// Registering a layer. Visibility is a set of independent grants that
-// combine as a union, so the form offers them as combinable checkboxes and
-// says once that visibility is fixed at registration. A git source returns a
+// Registering a layer. The panel serves both halves of the §13.10 role split,
+// so the form carries the layer class as a control. A user registering their
+// own layer creates a user-defined one, which is the class §7.3.1 caps per
+// user and authorizes its owner on, and the registry fixes such a layer's
+// visibility to the registrant and discards any visibility the request
+// carries, so the axes are offered on the admin-defined class alone.
+// Visibility there is a set of independent grants that combine as a union, so
+// the form offers them as combinable checkboxes. A git source returns a
 // webhook URL and an HMAC secret, and that response and a secret rotation are
 // the only places the secret is returned, so the reveal states that it is
 // shown once and stays until the reader acknowledges it.
@@ -9,16 +14,32 @@ import type { FormEvent } from 'react';
 import { useState } from 'react';
 
 import { SecretReveal } from './SecretReveal';
+import { members } from './members';
 import { ErrorState } from '../components/primitives';
 import type { LayerRegistration, LayerSecretResult } from '../api';
 import { ApiError, registerLayer } from '../api';
 
-export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: () => void; readOnly: boolean }) {
+export function RegisterLayerForm({
+  subject,
+  onRegistered,
+  readOnly,
+}: {
+  subject: string;
+  onRegistered: () => void;
+  readOnly: boolean;
+}) {
   const [id, setID] = useState('');
   const [sourceType, setSourceType] = useState('git');
   const [repo, setRepo] = useState('');
   const [ref, setRef] = useState('');
   const [localPath, setLocalPath] = useState('');
+  // The class defaults to the one the caller can register. A user-defined
+  // layer's owner is derived from the caller's own subject and the registry
+  // refuses the registration where none resolves, so a caller who holds a
+  // subject opens on their own layer and a caller who holds none opens on the
+  // tenant's. Either way the class stays a control, because the posture read
+  // reports no role and the panel predicts no outcome.
+  const [userDefined, setUserDefined] = useState(subject !== '');
   const [isPublic, setPublic] = useState(false);
   const [organization, setOrganization] = useState(false);
   const [groupScoped, setGroupScoped] = useState(false);
@@ -33,7 +54,8 @@ export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: ()
   // selected axis carries at least one member.
   const groupMembers = members(groups);
   const userMembers = members(users);
-  const incomplete = (groupScoped && groupMembers.length === 0) || (userScoped && userMembers.length === 0);
+  const incomplete =
+    !userDefined && ((groupScoped && groupMembers.length === 0) || (userScoped && userMembers.length === 0));
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -43,10 +65,14 @@ export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: ()
       repo: sourceType === 'git' ? repo : undefined,
       ref: sourceType === 'git' ? ref : undefined,
       local_path: sourceType === 'local' ? localPath : undefined,
-      public: isPublic,
-      organization,
-      groups: groupScoped ? groupMembers : undefined,
-      users: userScoped ? userMembers : undefined,
+      user_defined: userDefined,
+      // The registry derives a user-defined layer's visibility from the
+      // registrant and discards what the request carries, so the axes are
+      // sent on the admin-defined class alone.
+      public: userDefined ? undefined : isPublic,
+      organization: userDefined ? undefined : organization,
+      groups: !userDefined && groupScoped ? groupMembers : undefined,
+      users: !userDefined && userScoped ? userMembers : undefined,
     };
     registerLayer(body).then(
       (next) => {
@@ -85,6 +111,23 @@ export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: ()
           }}
         />
       </label>
+      <label className="field">
+        <span className="label">Layer class</span>
+        <select
+          value={userDefined ? 'user' : 'admin'}
+          onChange={(event) => {
+            setUserDefined(event.target.value === 'user');
+          }}
+        >
+          <option value="user">Your own layer</option>
+          <option value="admin">A layer for the whole tenant</option>
+        </select>
+      </label>
+      {userDefined && (
+        <p className="quiet">
+          A layer of your own is visible to you alone, and it counts against the layer limit an administrator sets.
+        </p>
+      )}
       <label className="field">
         <span className="label">Source</span>
         <select
@@ -132,6 +175,7 @@ export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: ()
           />
         </label>
       )}
+      {!userDefined && (
       <fieldset className="field">
         <legend className="label">Visibility</legend>
         <label>
@@ -201,8 +245,8 @@ export function RegisterLayerForm({ onRegistered, readOnly }: { onRegistered: ()
         {/* §4.6 combines the axes as a union, so a layer carrying more than
             one grant is visible to a caller who matches any of them. */}
         <p className="quiet">A caller who matches any selected grant sees this layer.</p>
-        <p className="quiet">Visibility is fixed at registration.</p>
       </fieldset>
+      )}
       <button type="submit" disabled={readOnly || incomplete}>
         Register
       </button>
@@ -241,14 +285,4 @@ function RegistrationRefusal({ refusal }: { refusal: unknown }) {
  * that omits it leaves the reader a dash rather than the word "undefined". */
 function count(value: unknown): string {
   return typeof value === 'number' ? String(value) : '—';
-}
-
-/** members splits a comma-separated member list into the identifiers the
- * registration carries, dropping the empty runs a trailing separator or a
- * stray space leaves behind. */
-function members(raw: string): string[] {
-  return raw
-    .split(',')
-    .map((member) => member.trim())
-    .filter((member) => member !== '');
 }

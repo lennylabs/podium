@@ -45,13 +45,25 @@ export class ApiError extends Error {
   }
 }
 
+/** identityRefusalCodes are the §6.10 codes the identity middleware answers a
+ * read with when it could not verify the caller. A token past its exp returns
+ * auth.token_expired, one failing signature, iss, or aud returns
+ * auth.untrusted_token, and a runtime-signed token the registry holds no key
+ * for returns auth.untrusted_runtime. */
+const identityRefusalCodes: ReadonlySet<string> = new Set<string>([
+  'auth.token_expired',
+  'auth.untrusted_token',
+  'auth.untrusted_runtime',
+]);
+
 /** isIdentityRefusal reports whether a failed read was refused because the
- * caller's identity could not be verified. The identity middleware answers
- * 401 on that path, and the catalog-scope rule orders that arm ahead of the
- * scope arms, so the page renders the refused state rather than an empty or a
- * filtered catalog. */
+ * caller's identity could not be verified, which is the arm the catalog-scope
+ * rule orders ahead of the scope arms. It reads the code rather than the
+ * status: the registry answers 401 on refusals that verified the caller
+ * perfectly well, auth.tenant_unknown among them, and the catalog-scope rule
+ * leaves every other failure to the surface's own error state. */
 export function isIdentityRefusal(err: unknown): boolean {
-  return err instanceof ApiError && err.status === 401;
+  return err instanceof ApiError && identityRefusalCodes.has(err.code);
 }
 
 interface ErrorEnvelope {
@@ -93,8 +105,13 @@ export function subscribeReadOnly(listener: ReadOnlyListener): () => void {
   };
 }
 
+// The marker middleware wraps the meta-tool mux from inside the identity
+// verification and the tenant router, so a refusal from either is written
+// before that middleware is entered and carries no marker whatever the mode
+// is. A response that did not reach the middleware therefore reports nothing
+// about the mode, and the marker is republished only from one that did.
 function publishReadOnly(path: string, response: Response): void {
-  if (!readOnlyMarked.has(path.split('?')[0])) {
+  if (!readOnlyMarked.has(path.split('?')[0]) || !response.ok) {
     return;
   }
   const readOnly = response.headers.get(readOnlyHeader) === 'true';
@@ -320,9 +337,11 @@ export async function listLayers(): Promise<LayerRecord[]> {
 // with it because the request is same-origin.
 const write: RequestInit = { credentials: 'same-origin' };
 
-/** LayerRegistration is the register request body. Visibility is fixed at
- * registration for a user-defined layer, so the panel offers these values
- * here and nowhere else. */
+/** LayerRegistration is the register request body. user_defined chooses the
+ * layer class, which decides both the authorization the §7.3.1 layer-write
+ * rule applies to every later write and whether the registry reads the
+ * visibility axes: it fixes a user-defined layer's visibility to the
+ * registrant and discards what the request carries there. */
 export interface LayerRegistration {
   id: string;
   source_type: string;
@@ -359,15 +378,21 @@ export function registerLayer(body: LayerRegistration): Promise<LayerSecretResul
 
 /** LayerUpdate is the partial patch the update endpoint honours. A field the
  * patch omits keeps its prior value, and the identifying fields (the tenant,
- * the layer ID, and the source type) are immutable. Owner and visibility are
- * absent: the registry ignores them on a user-defined layer and answers
- * success, so a control for them would report a change that never happened. */
+ * the layer ID, and the source type) are immutable. The visibility axes are
+ * honoured on an admin-defined layer alone: §4.6 fixes a user-defined layer's
+ * visibility at registration, so the registry ignores them there and still
+ * answers success. Each axis grants and none revokes, which is the same
+ * patch the CLI drives. */
 export interface LayerUpdate {
   ref?: string;
   root?: string;
   local_path?: string;
   force_push_policy?: string;
   rotate_webhook_secret?: boolean;
+  public?: boolean;
+  organization?: boolean;
+  groups?: string[];
+  users?: string[];
 }
 
 /** updateLayer patches one layer. A rotation returns the fresh HMAC secret

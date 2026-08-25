@@ -643,6 +643,38 @@ describe('the session-expiry transition', () => {
     expect(screen.queryByTestId('session-ended')).toBeNull();
     expect(screen.queryByTestId('expiry-sign-in')).toBeNull();
   });
+
+  // The refused arm belongs to a read the registry could not verify an
+  // identity for, and the codes that carry it are the ones the identity
+  // middleware writes. The tenant router answers auth.tenant_unknown with the
+  // same status for a caller whose token verified, so a page keying on the
+  // status alone would tell that caller their session ended while it is
+  // intact. That failure takes the surface's own error state.
+  it('claims no ended session where a verified caller names an unprovisioned tenant', async () => {
+    const unknownTenant = {
+      status: 401,
+      body: {
+        code: 'auth.tenant_unknown',
+        message: "Verified token names organization 'globex' which is not a provisioned tenant.",
+        details: { token_org_id: 'globex' },
+      },
+    };
+    stubRegistry({
+      '/v1/ui/session': {
+        body: posture({
+          subject: 'alice@acme.com',
+          browser_auth: { enabled: true, sign_in_path: '/v1/ui/auth/sign-in', sign_out_path: '/v1/ui/auth/sign-out' },
+        }),
+      },
+      '/v1/load_domain': unknownTenant,
+      '/v1/layers': unknownTenant,
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByText('auth.tenant_unknown');
+    expect(screen.queryByTestId('session-ended')).toBeNull();
+    expect(screen.queryByTestId('refused-read')).toBeNull();
+  });
 });
 
 describe('read-only mode', () => {
@@ -700,6 +732,48 @@ describe('read-only mode', () => {
     await screen.findByLabelText('Recently unregistered');
     expect(screen.getByTestId('read-only-banner')).toBeTruthy();
   });
+
+  // The middleware that sets the marker wraps the meta-tool mux from inside
+  // the identity verification and the tenant router, so a refusal from either
+  // is written before that middleware runs and carries no marker whatever the
+  // mode is. A page that read that absence as "the registry serves writes"
+  // would clear the banner and make every write control live again the moment
+  // the session expired on a registry that still refuses every write.
+  it('keeps the banner where a catalog read is refused', async () => {
+    stubRegistry({
+      '/v1/ui/session': {
+        body: posture({
+          subject: 'alice@acme.com',
+          browser_auth: { enabled: true, sign_in_path: '/v1/ui/auth/sign-in', sign_out_path: '/v1/ui/auth/sign-out' },
+        }),
+      },
+      '/v1/load_domain': { body: emptyDomain, headers: { 'X-Podium-Read-Only': 'true' } },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    await screen.findByTestId('read-only-banner');
+    // The session ends, so the shell's next catalog read is refused before it
+    // reaches the marker middleware. Re-entering the route re-issues it.
+    stubRegistry({
+      '/v1/ui/session': {
+        body: posture({
+          subject: 'alice@acme.com',
+          browser_auth: { enabled: true, sign_in_path: '/v1/ui/auth/sign-in', sign_out_path: '/v1/ui/auth/sign-out' },
+        }),
+      },
+      '/v1/load_domain': { status: 401, body: { code: 'auth.token_expired', message: 'expired' } },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+    });
+    goTo('#/');
+    await screen.findByLabelText('Catalog refused');
+    goTo('#/layers');
+    await screen.findByTestId('session-ended');
+    await screen.findByLabelText('Layer panel');
+    expect(screen.getByTestId('read-only-banner')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reingest' }).hasAttribute('disabled')).toBe(true);
+  });
 });
 
 describe('the layer write flows', () => {
@@ -728,10 +802,12 @@ describe('the layer write flows', () => {
     });
   });
 
-  // §4.6 defines visibility as independent grants that combine as a union,
-  // and a user-defined layer's visibility is fixed at registration, so an
-  // axis the form does not offer is unreachable from the UI entirely.
-  it('registers a layer on every visibility axis', async () => {
+  // §13.10 makes the panel the surface a user manages their own user-defined
+  // layers on, which is the class §7.3.1 caps per user and authorizes its
+  // owner on, so that is the class the form registers by default. The
+  // registry fixes such a layer's visibility to the registrant and discards
+  // what the request carries, so the axes are absent on that class.
+  it('registers the caller’s own layer as user-defined and offers it no visibility axes', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
       '/v1/layers': { body: { layer: { ID: 'alice-personal', SourceType: 'local', Order: 1, UserDefined: true } } },
@@ -741,6 +817,57 @@ describe('the layer write flows', () => {
     await screen.findByLabelText('Layer panel');
     fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
     fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'alice-personal' } });
+    expect(screen.queryByLabelText('Organization')).toBeNull();
+    expect(screen.queryByLabelText('Public')).toBeNull();
+    fireEvent.submit(screen.getByLabelText('Register a layer'));
+    await waitFor(() => {
+      expect(requests.some((r) => r.url === '/v1/layers' && r.method === 'POST')).toBe(true);
+    });
+    const sent = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
+    expect(sent.user_defined).toBe(true);
+    expect(sent.public).toBeUndefined();
+    expect(sent.organization).toBeUndefined();
+    expect(sent.groups).toBeUndefined();
+    expect(sent.users).toBeUndefined();
+  });
+
+  // A user-defined layer's owner is derived from the caller's own subject and
+  // the registry refuses the registration where none resolves, so a caller
+  // holding no subject, which is every caller of a standalone registry, opens
+  // on the tenant's class instead of on a registration that cannot succeed.
+  it('opens on the tenant’s class where the posture read resolved no subject', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ identity_provider_configured: false }) },
+      '/v1/layers': { body: { layer: { ID: 'company', SourceType: 'local', Order: 1 } } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
+    fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'company' } });
+    expect(screen.getByLabelText('Organization')).toBeTruthy();
+    fireEvent.submit(screen.getByLabelText('Register a layer'));
+    await waitFor(() => {
+      expect(requests.some((r) => r.url === '/v1/layers' && r.method === 'POST')).toBe(true);
+    });
+    const sent = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
+    expect(sent.user_defined).toBe(false);
+  });
+
+  // §4.6 defines visibility as independent grants that combine as a union.
+  // They are honoured on an admin-defined layer, which is the class the form
+  // offers them on.
+  it('registers an admin-defined layer on every visibility axis', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layer: { ID: 'company', SourceType: 'local', Order: 1 } } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
+    fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'company' } });
+    fireEvent.change(screen.getByLabelText('Layer class'), { target: { value: 'admin' } });
     fireEvent.click(screen.getByLabelText('Organization'));
     fireEvent.click(screen.getByLabelText('Groups'));
     // An axis selected with no member named registers a grant admitting
@@ -758,6 +885,7 @@ describe('the layer write flows', () => {
       expect(requests.some((r) => r.url === '/v1/layers' && r.method === 'POST')).toBe(true);
     });
     const sent = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
+    expect(sent.user_defined).toBe(false);
     expect(sent.organization).toBe(true);
     expect(sent.groups).toEqual(['secops', 'appsec']);
     expect(sent.users).toEqual(['carol@acme.com']);
@@ -813,9 +941,14 @@ describe('the layer write flows', () => {
     await screen.findByLabelText('Layer panel');
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const form = await screen.findByLabelText('Update company');
-    // The registry ignores an owner or a visibility patch on a user-defined
-    // layer and still answers success, so neither is offered anywhere.
-    expect(screen.queryByLabelText('Organization')).toBeNull();
+    // The endpoint applies a visibility patch on an admin-defined layer, so
+    // the form carries the axes and the patch carries what they name. It
+    // grants on each axis and revokes on none, so a stored grant is displayed
+    // as unavailable rather than offered as a change the registry answers
+    // success to without making.
+    expect(screen.getByLabelText('Organization').hasAttribute('disabled')).toBe(true);
+    fireEvent.click(screen.getByLabelText('Public'));
+    fireEvent.change(screen.getByLabelText('Group names, separated by commas'), { target: { value: 'secops' } });
     fireEvent.change(screen.getByLabelText('Ref'), { target: { value: 'release' } });
     fireEvent.change(screen.getByLabelText('Force-push policy'), { target: { value: 'strict' } });
     fireEvent.click(screen.getByLabelText('Rotate the webhook secret'));
@@ -827,6 +960,8 @@ describe('the layer write flows', () => {
     expect(sent.ref).toBe('release');
     expect(sent.force_push_policy).toBe('strict');
     expect(sent.rotate_webhook_secret).toBe(true);
+    expect(sent.public).toBe(true);
+    expect(sent.groups).toEqual(['secops']);
     await screen.findByLabelText('Webhook secret');
     expect(screen.getByText('whsec-rotated')).toBeTruthy();
   });
@@ -847,6 +982,11 @@ describe('the layer write flows', () => {
     const form = await screen.findByLabelText('Update alice-personal');
     const rotate = screen.getByLabelText('Rotate the webhook secret');
     expect(rotate.hasAttribute('disabled')).toBe(true);
+    // §4.6 fixes a user-defined layer's visibility at registration, and the
+    // registry ignores a visibility patch there and still answers success, so
+    // that class displays its visibility rather than editing it.
+    expect(screen.queryByLabelText('Organization')).toBeNull();
+    expect(form.textContent).toContain('fixed to you at registration');
     expect(form.textContent).toContain('Only a git layer carries a webhook secret.');
     fireEvent.change(screen.getByLabelText('Local path'), { target: { value: '/Users/alice/moved' } });
     fireEvent.submit(form);
@@ -856,6 +996,8 @@ describe('the layer write flows', () => {
     const sent = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
     expect(sent.local_path).toBe('/Users/alice/moved');
     expect(sent.rotate_webhook_secret).toBeUndefined();
+    expect(sent.public).toBeUndefined();
+    expect(sent.groups).toBeUndefined();
     // A patch that rotates nothing carries no secret, so the reveal is
     // replaced by the outcome the update reports.
     expect((await screen.findByText('Layer alice-personal is updated.')).textContent).toBeTruthy();
@@ -863,13 +1005,17 @@ describe('the layer write flows', () => {
 
   // §4.6 composes every user-defined layer above every admin-defined one
   // whatever the stored order values are, so a move runs inside the moving
-  // layer's own class and the request names that class's layers alone. A
-  // reorder that named the admin layer as well would ask the registry to
-  // authorize a write against a layer the move does not reorder.
-  it('sends the resulting order for the moving layer’s own class', async () => {
+  // layer's own class. The registry authorizes every layer a reorder names
+  // and rewrites every one of their order values, so the request names the
+  // pair the move trades and nothing else: a request naming the rest of the
+  // block would be refused whole on the first row this caller does not own,
+  // and the list read is unfiltered, so rows owned by others are in it.
+  it('sends the pair the move trades and no other layer', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
-      '/v1/layers': { body: { layers: [adminLayer(), userLayer(), scratchLayer()] } },
+      '/v1/layers': {
+        body: { layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()] },
+      },
       '/v1/layers/reorder': { body: { layers: [] } },
     });
     goTo('#/layers');
@@ -1059,6 +1205,20 @@ function userLayer(owner = 'alice@acme.com'): Record<string, unknown> {
     Order: 2,
     UserDefined: true,
     Owner: owner,
+  };
+}
+
+/** bobLayer is a user-defined layer another subject owns. The list read is
+ * unfiltered, so it reaches the panel alongside the caller's own, and a
+ * reorder that named it would be refused whole. */
+function bobLayer(): Record<string, unknown> {
+  return {
+    ID: 'bob-personal',
+    SourceType: 'local',
+    LocalPath: '/Users/bob/registry',
+    Order: 4,
+    UserDefined: true,
+    Owner: 'bob@acme.com',
   };
 }
 

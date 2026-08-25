@@ -71,7 +71,7 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
           Recently unregistered
         </button>
       </div>
-      {registering && <RegisterLayerForm onRegistered={layers.reload} readOnly={readOnly} />}
+      {registering && <RegisterLayerForm subject={subject} onRegistered={layers.reload} readOnly={readOnly} />}
       {showingDeleted && <DeletedLayers onRestored={layers.reload} readOnly={readOnly} />}
       <p className="label quiet">Precedence: the last row wins</p>
       <p className="quiet">
@@ -126,9 +126,10 @@ async function listOrdered(): Promise<LayerRecord[]> {
 
 /** blockOf returns the contiguous run of rows a layer shares its class with,
  * which is the run a reorder may move it inside. A move across the class
- * boundary changes no composition order, and a request naming a layer the
- * move does not reorder is refused wherever the layer-write rule is live, so
- * the block bounds both the control and the request. */
+ * boundary changes no composition order, so the block bounds where the
+ * control can take a row. It does not bound what the request names: the
+ * registry authorizes every layer the request names, so the request names the
+ * pair the move trades and no others. */
 function blockOf(rows: LayerRecord[], layer: LayerRecord): LayerRecord[] {
   return rows.filter((row) => (row.UserDefined === true) === (layer.UserDefined === true));
 }
@@ -146,8 +147,13 @@ function LayerRow({
   onWrite: () => void;
   block: LayerRecord[];
 }) {
-  const order = block.map((row) => row.ID);
-  const index = order.indexOf(layer.ID);
+  const index = block.findIndex((row) => row.ID === layer.ID);
+  // Raising precedence trades places with the next row of the same class, and
+  // that pair is the whole reorder. Each layer a reorder names is authorized
+  // on its own and has its order value rewritten, so naming the rest of the
+  // block would ask for a write against layers the move leaves where they
+  // are and would be refused whole on the first one this caller does not own.
+  const above = block[index + 1] as LayerRecord | undefined;
   const [refusal, setRefusal] = useState<unknown>(null);
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -186,9 +192,11 @@ function LayerRow({
       <td>
         <button
           type="button"
-          disabled={readOnly || index === order.length - 1}
+          disabled={readOnly || above === undefined}
           onClick={() => {
-            attempt(() => reorderLayers(moved(order, index, index + 1)));
+            if (above !== undefined) {
+              attempt(() => reorderLayers([above.ID, layer.ID]));
+            }
           }}
         >
           Raise precedence
@@ -306,15 +314,6 @@ function UnregisterConfirmation({
 function erasesOn(): string {
   const at = new Date(Date.now() + recoveryDays * 24 * 60 * 60 * 1000);
   return at.toISOString().slice(0, 10);
-}
-
-/** moved returns the block's order with one layer at a new position, which is
- * what the reorder call takes. */
-function moved(order: string[], from: number, to: number): string[] {
-  const next = [...order];
-  const [layer] = next.splice(from, 1);
-  next.splice(to, 0, layer);
-  return next;
 }
 
 /** ownedByCaller is the panel's ownership marker. It is a property of a
