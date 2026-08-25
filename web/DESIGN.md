@@ -264,8 +264,9 @@ standing over an empty table and no placeholder row, and the rest of the viewer
 reads as a finished document rather than as a partial load. That treatment is
 distinct from the one for a frontmatter block that fails to parse, which is a
 defect the reader is told about. The producers known today are a search result
-that carries no frontmatter block and an artifact response whose frontmatter is
-cleared when the manifest arrives by link instead of inline. The response
+whose inherited extension block could not be rewritten, which carries no
+frontmatter block at all, and a non-skill artifact response whose frontmatter is
+cleared because the manifest arrives by link instead of inline. The response
 structs in `pkg/registry/server/server.go` own both, and
 `docs/reference/http-api.md` carries the search-result case under
 `search_artifacts`.
@@ -379,14 +380,15 @@ layer-write authorization rule stated in the same proposal section: an operation
 on a user-defined layer is authorized to that layer's owner or to a tenant
 admin, an operation on an admin-defined layer is authorized to a tenant admin
 alone, and the rule covers register, unregister, update, restore, reorder, and
-reingest. It is live only under the liveness condition that rule carries, so a
-standalone registry that authenticates no caller admits every write and the role
-split is presentation there as well. The design consequence is that the panel can
-now receive a refusal from a write it would otherwise have assumed would succeed,
-including on a layer its own role split presented as the caller's to manage. It
-presents that refusal rather than treating it as a failure of the page, and it
-reads the refusal as neither an ownership decision nor an ended session, under
-the expiry-signal rule the state matrix below names.
+reingest. The rule is live only where the deployment both configures an identity
+provider and does not run in public mode, which is the liveness condition that
+rule carries. A registry missing either conjunct admits every one of the panel's
+writes and the role split is presentation there as well, which covers both the
+standalone registry that authenticates no caller and a registry that engages
+public mode. The design consequence is that the panel can now receive a refusal
+from a write it would otherwise have assumed would succeed, including on a layer
+its own role split presented as the caller's to manage. It presents that refusal
+rather than treating it as a failure of the page.
 
 Whether an anonymous caller sees the panel is a design decision rather than one
 the API makes. Listing layers carries no authorization check, and a standalone
@@ -415,8 +417,8 @@ operations, and the panel presents whatever refusal a write receives.
    catalog answers at all, are set by the catalog-scope rule below. Where the
    catalog read answers, nothing is broken and no error has occurred, so that
    view must not read as a failure: it is a legitimate browsing mode. Where the
-   catalog read is refused, the refused arm of the catalog-scope rule governs
-   instead.
+   catalog read is refused because the caller's identity could not be verified,
+   the refused arm of the catalog-scope rule governs instead.
 2. **Authenticated user.** The effective view is the composition of every layer
    whose visibility declaration matches the caller's identity, which always
    includes the public layers (spec §4.6). The same user manages their own
@@ -438,12 +440,16 @@ than assuming a public subset. The rule keys on that read's
 read" in `proposals/0013-build-the-13-10-web-ui.md`, and on whether the catalog
 read answers at all.
 
-- Where a catalog read is refused rather than answered, that caller has no
-  anonymous view of the catalog, and the page renders the refused state rather
-  than an empty catalog or a filtered one. This arm decides first, whether or not
-  the posture read answered, so no other arm of this rule applies to a refused
-  catalog read. Where a caller who had a subject sees that refusal, it is the
-  session-expiry transition the expiry-signal rule below names.
+- Where a catalog read is refused because the caller's identity could not be
+  verified, that caller has no anonymous view of the catalog, and the page
+  renders the refused state rather than an empty catalog or a filtered one. This
+  arm is ordered ahead of the two below, whether or not the posture read
+  answered, so neither of them applies to such a refusal. Where a caller who had
+  a subject sees that refusal, it is the session-expiry transition the
+  expiry-signal rule below names. A catalog read that fails for a reason
+  unrelated to identity, such as an unavailable registry or a server failure, is
+  outside this rule and takes the surface's own error state under "Per-surface
+  states" below.
 - Where the catalog read answers, the anonymous view is the public subset when
   the posture read reports `identity_provider_configured` true and `public_mode`
   false. On every other combination of the two it is the whole catalog.
