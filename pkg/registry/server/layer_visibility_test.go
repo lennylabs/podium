@@ -92,8 +92,10 @@ func TestLayerEndpoint_UserDefinedOwnerFromIdentity(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.2 — mutating an admin-defined layer requires admin auth; a
-// user-defined layer belongs to its registrant and updates without it.
+// Spec: §7.3.1 — the layer-write authorization rule. Mutating an
+// admin-defined layer is authorized to a tenant admin alone. A user-defined
+// layer is authorized to its stored owner or to a tenant admin, so a caller
+// whom the admin arm denies and who resolves no subject is refused as well.
 func TestLayerEndpoint_UpdateAdminGating(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
@@ -121,9 +123,14 @@ func TestLayerEndpoint_UpdateAdminGating(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("admin-defined update status = %d, want 403", resp.StatusCode)
 	}
-	// User-defined layer update succeeds without admin auth.
+	// The user-defined layer is owned by alice; this endpoint's default
+	// identity resolver resolves no subject, so the owner arm fails and the
+	// denying admin arm refuses the update.
 	resp2, body2 := putJSON(t, ts.URL, "/v1/layers/update?id=personal", map[string]any{"local_path": "/p2"})
-	if resp2.StatusCode != http.StatusOK {
-		t.Errorf("user-defined update status = %d, want 200: %s", resp2.StatusCode, body2)
+	if resp2.StatusCode != http.StatusForbidden {
+		t.Errorf("user-defined update status = %d, want 403: %s", resp2.StatusCode, body2)
+	}
+	if code := errCode(t, body2); code != "auth.forbidden" {
+		t.Errorf("user-defined update code = %q, want auth.forbidden", code)
 	}
 }
