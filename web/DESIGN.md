@@ -81,9 +81,16 @@ forward the current structure.
   readiness responses report the serving state and nothing about the path the
   caller took (`HealthResponse` and `ReadyResponse` in
   `pkg/registry/server/server.go`, documented under Health in
-  `docs/reference/http-api.md`). Every screen therefore has to work
-  without knowing how the caller was authenticated, and it has to read the same
-  whether the caller resolves to a person or to anonymous.
+  `docs/reference/http-api.md`). No screen may key on whether a gateway fronts
+  the registry. One endpoint does report the deployment's identity posture and
+  the caller's own resolved subject, and it is the posture read, whose fields are
+  owned by "The posture read" in
+  `proposals/0013-build-the-13-10-web-ui.md`. The application shell keys its
+  authentication control on that read, under the sign-in control rule in the
+  state matrix below. The catalog and the per-surface screens do not: each has to
+  work without knowing how the caller was authenticated, and each reads the same
+  whether the caller resolves to a person or to anonymous, with the scope of the
+  catalog itself decided by the catalog-scope rule in the state matrix below.
 - **Design tokens already exist.** `site/src/styles/tokens.css` is the token file
   the documentation site uses, and `.claude/rules/doc-diagram-style.md` binds
   every diagram class to the same file. The UI should inherit that vocabulary
@@ -239,7 +246,7 @@ edges are served by their own endpoint rather than by the artifact response
 (`handleDependents` in `pkg/registry/server/server.go`), so the graph arrives on a
 second request and the design needs a state for an artifact that has no edges.
 
-Two cases the design must handle explicitly. The first is an artifact whose body
+Three cases the design must handle explicitly. The first is an artifact whose body
 arrives as a presigned URL with the inline body empty, which the registry does for
 a document above the inline cutoff (`attachManifestBody` in
 `pkg/registry/server/server.go`, described under `load_artifact` in
@@ -249,6 +256,16 @@ The second is an artifact carrying resources of both kinds at once. The registry
 splits the bundled files one by one (`attachResources` in the same file), so a
 single artifact can present inline files beside fetched files, and the resource
 list has to read as one list rather than as two.
+
+The third is a response that yields no frontmatter pairs to render. More than one
+path through the API produces it, so the treatment covers the state rather than
+branching per producer: the property table is omitted entirely, with no header
+standing over an empty table and no placeholder row, and the rest of the viewer
+reads as a finished document rather than as a partial load. That treatment is
+distinct from the one for a frontmatter block that fails to parse, which is a
+defect the reader is told about. The producers known today, and the source that
+owns each, are recorded under "The design handout" in
+`proposals/0013-build-the-13-10-web-ui.md`.
 
 ### 4. Layer panel
 
@@ -282,7 +299,12 @@ record's properties drive design work.
   them as separate members, so a layer can be organization-wide and group-scoped
   at the same time. The panel renders a combination rather than a single badge, it
   stays readable when a layer names several groups or several users, and it needs
-  a treatment for a layer with no grants at all. Spec §4.6 fixes a user-defined
+  a treatment for a layer with no grants at all. A layer matching on more than one
+  axis is displayed as one marker per matching axis, rendered together in a fixed
+  axis order rather than collapsed into a single-valued label, so two layers
+  carrying the same grants read identically and no axis is dropped to make room.
+  Where an axis names more members than the row can hold, the treatment summarises
+  the overflow within that axis rather than hiding the axis. Spec §4.6 fixes a user-defined
   layer's visibility at registration and forbids widening it, so that case is
   displayed rather than edited.
 
@@ -341,15 +363,26 @@ registry refuses a registration past the cap with an error carrying the limit an
 the caller's current count, so the panel renders that refusal where the user
 creates a layer rather than as a generic failure.
 
-Two properties of the shipped API constrain how far the panel can lean on that
-role split. The layer list is not scoped to the caller: the list handler consults
-no identity and returns every layer stored under the tenant, so the panel's role
-split is presentation over a list the server hands it whole. Ownership scoping is
-also not enforced today on the write path: spec §13.10 and §7.3.1 describe a user
-acting on that user's own layers, while the update, unregister, reorder, and
-restore handlers in `pkg/registry/server/layers.go` gate only on whether a layer
-is admin-defined. That divergence between the spec and the Go source is reported
-separately, and the panel design follows the spec's scoping.
+Two properties of the shipped API decide how far the panel can lean on that role
+split. The first is the read. The layer list is not scoped to the caller: it
+returns every layer stored under the tenant, so the panel's role split is
+presentation over a list the server hands it whole. That statement is owned by
+the unfiltered-list rule under "The layer-ownership defect" in
+`proposals/0013-build-the-13-10-web-ui.md`, and the panel carries no condition
+that rule does not state.
+
+The second is the write. Each write is authorized per layer, under the
+layer-write authorization rule stated in the same proposal section: an operation
+on a user-defined layer is authorized to that layer's owner or to a tenant
+admin, an operation on an admin-defined layer is authorized to a tenant admin
+alone, and the rule covers register, unregister, update, restore, reorder, and
+reingest. It is live only under the liveness condition that rule carries, so a
+standalone registry that authenticates no caller admits every write and the role
+split is presentation there as well. The design consequence is that the panel can
+now receive a refusal from a write it would otherwise have assumed would succeed,
+including on a layer its own role split presented as the caller's to manage. It
+presents that refusal as a per-layer authorization outcome rather than as a
+failure of the page.
 
 Whether an anonymous caller sees the panel is a design decision rather than one
 the API makes. Listing layers carries no authorization check, and a standalone
@@ -363,27 +396,92 @@ standalone deployment, where nobody authenticates and the panel is the point.
 
 Most of the design work is here rather than in the happy path.
 
-**Identity states.** The UI has these, and cannot always tell them apart from the
-client side:
+**Identity states.** The UI has these. The anonymous state and the authenticated
+state are told apart by whether the posture read resolves a subject for the
+caller. The administrator state is not reported at all, so the page does not
+predict it.
 
-1. **Anonymous.** The request carries no credential, so the caller resolves as
-   anonymous and sees public visibility only (§13.10 on web-UI authentication,
-   with the visibility grants in §4.6). The catalog still renders. Nothing is
-   broken and no error has occurred, so an anonymous view must not read as a
-   failure. This is a legitimate browsing mode.
+1. **Anonymous.** The posture read resolves no subject, so the caller browses
+   without an identity (§13.10 on web-UI authentication, with the visibility
+   grants in §4.6). How much of the catalog that caller sees is set by the
+   catalog-scope rule below. The catalog still renders. Nothing is broken and no
+   error has occurred, so an anonymous view must not read as a failure. This is a
+   legitimate browsing mode.
 2. **Authenticated user.** The effective view is the composition of every layer
    whose visibility declaration matches the caller's identity, which always
    includes the public layers (spec §4.6). The same user manages their own
-   user-defined layers under §13.10 and §7.3.1, subject to the enforcement gap
-   noted in the layer panel above.
+   user-defined layers under §13.10 and §7.3.1, on the terms the layer-write
+   authorization rule sets, which the layer panel above states.
 3. **Administrator.** Manages every layer in the tenant, including the
    admin-defined layers an ordinary user cannot modify or unregister. Destructive
    operations are not exclusive to this role, since a user can unregister a layer
    they own, so the panel differs by which layers it exposes rather than by
-   whether it offers destruction at all.
+   whether it offers destruction at all. No response reports that the caller holds
+   this role, so the panel renders its write operations and presents whatever
+   refusal a write receives rather than predicting the outcome.
+
+**The catalog-scope rule.** How much of the catalog an anonymous caller sees is a
+property of the deployment, and the page reads it from the posture read rather
+than assuming a public subset. The rule keys on that read's
+`identity_provider_configured` and `public_mode`, both owned by "The posture
+read" in `proposals/0013-build-the-13-10-web-ui.md`, and on whether the catalog
+read answers at all.
+
+- Where a catalog read is refused rather than answered, the deployment offers no
+  anonymous view, and the page renders the refused state rather than an empty
+  catalog or a filtered one. Where a caller who had a subject sees that refusal,
+  it is the session-expiry transition the expiry-signal rule below names.
+- Where the catalog read answers, the anonymous view is the public subset when
+  the read reports `identity_provider_configured` true and `public_mode` false.
+  On every other combination of the two it is the whole catalog.
+
+That keying carries one named exception, and it is the only one. A registry
+configured with an identity provider whose label the process does not recognise
+installs no verifier, resolves every caller the same way, and serves its whole
+catalog to all of them, while the posture read places it on the public-subset arm
+because the read reports the configured setting rather than an installed
+verifier. The read carries no field that separates that deployment from a
+verifying one, and the page cannot separate it either. The rule therefore
+constrains what the arm licenses the page to state: on the public-subset arm the
+page presents the catalog the read returned and states nothing that would be
+false on that deployment, asserting neither that artifacts were withheld nor that
+hidden artifacts exist. That is the same constraint the empty-versus-filtered
+question below already carries. The design pass drives no stub combination of its
+own for this deployment, because the read reports it identically to a verifying
+registry.
+
+**The sign-in control rule.** The UI carries one authentication control, and it
+belongs to the application shell rather than to any surface in the list above.
+The rule keys on the posture read's `browser_auth.enabled` and `subject`, both
+owned by "The posture read" in `proposals/0013-build-the-13-10-web-ui.md`.
+
+| `browser_auth.enabled` | `subject` | Control rendered |
+|:--|:--|:--|
+| true | absent | sign-in, as a top-level navigation to the sign-in path the read reports |
+| true | present | sign-out, issued as a `POST` from the page carrying the same proof the panel's writes carry, after which the page navigates |
+| false | absent or present | neither control |
+
+Sign-out is issued as a `POST` rather than followed as a link because that is the
+method the route answers, which "The route methods" in the same proposal owns,
+and a control a human clicks has to issue the request the route answers. Both
+conjuncts are required on each of the first two rows. The read reports the two
+paths only when the flow is enabled, and each route is registered only where the
+flow is enabled, so a control rendered on any other combination sends the browser
+to a path the registry does not serve, and what comes back is the deployment's
+answer for an unregistered path rather than anything the page can present ("The
+status an unregistered path receives", in the same proposal). The third row
+covers the deployments that run no browser flow, including the gateway-fronted
+§13.10 deployment where a subject does resolve because the gateway authenticated
+the request; clearing a Podium cookie would not end the gateway's own session
+there.
 
 The transitions matter as much as the states: signing in, signing out, and a
-session expiring mid-use while a page is already rendered.
+session expiring mid-use while a page is already rendered. The signal for that
+last transition is fixed by the expiry-signal rule under "The browser session" in
+`proposals/0013-build-the-13-10-web-ui.md`. The catalog read is the panel's
+expiry signal. A refused write carries no expiry information and is not an
+ownership decision, so a design that reads such a refusal as an ended session, or
+as a statement about who owns the layer, reaches the wrong state on both counts.
 
 **Per-surface states.** Each surface needs loading, empty, error, and forbidden.
 Two deserve specific attention:
