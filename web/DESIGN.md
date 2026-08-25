@@ -407,10 +407,13 @@ rather than treating it as a failure of the page.
 The marker the panel puts on a row it presents as another caller's is a
 comparison against the caller's own subject, and the posture read reports a
 subject only where one resolves. Where it resolves none the comparison has no
-left-hand side, and that is also a posture on which the liveness condition above
-leaves every one of the panel's writes admitted, so the panel renders no
-ownership marker at all there and every row reads as equally actionable. The
-marker is reserved for a caller whose subject resolved.
+left-hand side, so the panel renders no ownership marker at all there. The
+marker is reserved for a caller whose subject resolved. Whether the panel's
+writes are admitted is decided on a different axis: the liveness condition above
+is a property of the deployment's configuration rather than of whether this
+caller resolved a subject, so on a registry where the rule is live a caller who
+resolves no subject carries no marker and still receives the refusal the
+paragraph above tells the panel to present.
 
 Whether an anonymous caller sees the panel is a design decision rather than one
 the API makes. Listing layers carries no authorization check, and a standalone
