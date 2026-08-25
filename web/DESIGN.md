@@ -398,11 +398,17 @@ from a write it would otherwise have assumed would succeed, including on a layer
 its own role split presented as the caller's to manage. It presents that refusal
 rather than treating it as a failure of the page.
 
-The marker the panel puts on a row it presents as another caller's is a
-comparison against the caller's own subject, and the posture read reports a
-subject only where one resolves. Where it resolves none the comparison has no
-left-hand side, so the panel renders no ownership marker at all there. The
-marker is reserved for a caller whose subject resolved. Whether the panel's
+The panel's ownership marker carries only what that rule makes an ownership
+fact, which is why it applies to a user-defined row alone. On a user-defined row
+the marker is a comparison of the row's stored owner against the caller's own
+subject, and the posture read reports a subject only where one resolves. Where
+it resolves none the comparison has no left-hand side, so such a row carries no
+ownership marker. On an admin-defined row the same rule authorizes a tenant
+admin alone, whatever the stored owner names, because that owner is supplied by
+the caller who registered or patched the layer and names no authorized subject.
+An admin-defined row therefore carries no ownership marker on any value of that
+field, and the panel presents the stored owner as the field it is rather than as
+a statement about who may write it. Whether the panel's
 writes are admitted is decided on a different axis: the liveness condition above
 is a property of the deployment's configuration rather than of whether this
 caller resolved a subject, so on a registry where the rule is live a caller who
@@ -466,11 +472,14 @@ read answers at all.
   by the expiry-signal rule under "The browser session" in
   `proposals/0013-build-the-13-10-web-ui.md`, and the page reads it there rather
   than from this brief. A second deployment class reaches this same arm with no
-  session involved, and the catalog-scope rule under "The design handout" in
-  that proposal is where that class is stated: a registry whose identity
-  provider verifies a runtime-signed token refuses every catalog call from a
-  browser that holds none, so a caller who never held a subject reaches this arm
-  as readily as one who did. This arm is ordered ahead of the two below, whether or not the
+  session involved. A registry whose identity provider verifies a runtime-signed
+  token refuses every catalog call from a browser that holds none, because that
+  verification runs ahead of the handler and a caller carrying no token fails it
+  (`pkg/registry/server/identity_verify.go` and `pkg/identity/runtime.go` own
+  that behaviour). A caller who never held a subject therefore reaches this arm
+  as readily as one who did, and the posture read carries no field that separates
+  such a deployment from one whose catalog read answers.
+  This arm is ordered ahead of the two below, whether or not the
   posture read answered, so neither of them applies to such a refusal. Where a
   caller who had a subject sees that refusal, the transition it marks is the
   session expiry the expiry-signal rule under "The browser session" in the same
@@ -546,9 +555,12 @@ last transition is fixed by the expiry-signal rule under "The browser session" i
 expiry signal. The refusal a write receives when the caller's session can no
 longer be verified carries no expiry information and is not an ownership
 decision, so a design that reads that refusal as an ended session, or as a
-statement about who owns the layer, reaches the wrong state on both counts. A
-write refused by the owner gate is a separate case, which the layer-write
-authorization rule owns and the layer panel above states.
+statement about who owns the layer, reaches the wrong state on both counts. The
+panel receives one refusal on that path and cannot tell a caller the owner gate
+turned away from a caller whose session can no longer be verified, because both
+arrive the same way and no field separates them. What the refusal means for
+authorization is owned by the layer-write authorization rule, which the layer
+panel above states, and it carries no session information.
 
 **Per-surface states.** Each surface needs loading, empty, error, and forbidden.
 Two deserve specific attention:
