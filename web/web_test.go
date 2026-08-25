@@ -49,8 +49,8 @@ func TestAssets_ReferencedEntryPointsResolve(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 — the binary carries the whole built bundle. A bare
-// go:embed directory pattern silently drops files whose names begin with
+// Spec: §13.10 — the binary carries the whole built bundle. A bare embed
+// directory pattern silently drops files whose names begin with
 // _ or . , which is how the bundler names the shared chunks it splits
 // out, so this compares the embedded set against the committed
 // directory on disk rather than against the two files the index happens

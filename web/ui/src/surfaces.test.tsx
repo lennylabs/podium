@@ -27,6 +27,11 @@ interface Stub {
   /** headers are the response headers the page reads, which is where the
    * §13.2.1 read-only marker arrives. */
   headers?: Record<string, string>;
+  /** deferred holds the response until a later macrotask, which is what a
+   * network round-trip does. A stub that answers within the same batch of
+   * React updates as the call that issued it hides every intermediate state
+   * the surface renders while the request is in flight. */
+  deferred?: boolean;
 }
 
 interface Recorded {
@@ -62,15 +67,22 @@ function stubRegistry(stubs: Record<string, Stub>): void {
         stubs[`${method} ${path}`] ??
         stubs[path] ?? { status: 404, body: { code: 'registry.not_found', message: 'no stub' } };
       const status = stub.status ?? 200;
-      return Promise.resolve(
+      const answer = () =>
         new Response(stub.text ?? JSON.stringify(stub.body ?? {}), {
           status,
           headers: {
             'content-type': stub.text === undefined ? 'application/json' : 'text/markdown',
             ...stub.headers,
           },
-        }),
-      );
+        });
+      if (stub.deferred === true) {
+        return new Promise<Response>((resolve) => {
+          setTimeout(() => {
+            resolve(answer());
+          }, 0);
+        });
+      }
+      return Promise.resolve(answer());
     }),
   );
 }
@@ -1374,10 +1386,16 @@ describe('the layer write flows', () => {
   });
 
 
+  // The registration reloads the list, and the reload answers over the
+  // network rather than within the batch that issued it, so the list read is
+  // deferred here. The panel must hold the reveal across a reload that
+  // reports loading, because the secret is served once and a panel that
+  // remounted the form in its place would leave the reader with no copy.
   it('reveals a git layer’s webhook secret once and holds the reveal until it is acknowledged', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
-      '/v1/layers': {
+      'GET /v1/layers': { body: { layers: [] }, deferred: true },
+      'POST /v1/layers': {
         body: {
           layer: { ID: 'alice-personal', SourceType: 'git', Order: 1, UserDefined: true },
           webhook_url: 'https://registry.acme.com/v1/ingest/webhook/alice-personal',
@@ -1392,6 +1410,13 @@ describe('the layer write flows', () => {
     fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'alice-personal' } });
     fireEvent.submit(screen.getByLabelText('Register a layer'));
     await screen.findByLabelText('Webhook secret');
+    expect(screen.getByText('whsec-abc')).toBeTruthy();
+    // The reload the registration triggered lands after the reveal paints,
+    // and the reveal is still there once it has.
+    await waitFor(() => {
+      expect(requests.filter((r) => r.url === '/v1/layers' && r.method === 'GET').length).toBeGreaterThan(1);
+    });
+    expect(screen.getByLabelText('Webhook secret')).toBeTruthy();
     expect(screen.getByText('whsec-abc')).toBeTruthy();
     // The secret is served here and nowhere else, so it carries an explicit
     // copy control rather than leaving the reader to select it. The URL
@@ -1409,7 +1434,7 @@ describe('the layer write flows', () => {
   it('patches a git layer and reveals the rotated secret once', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
-      '/v1/layers': { body: { layers: [adminLayer()] } },
+      '/v1/layers': { body: { layers: [adminLayer()] }, deferred: true },
       'PUT /v1/layers/update': {
         body: {
           layer: { ID: 'company', SourceType: 'git', Order: 1 },

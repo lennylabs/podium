@@ -147,11 +147,10 @@ func slicesContains(hay []string, needle string) bool {
 // browserStack is a registry assembled as the boot path assembles it, with
 // the browser flow enabled against the stub IdP.
 type browserStack struct {
-	ts    *httptest.Server
-	stub  *oauthStub
-	idp   *jwksIdP
-	mode  *server.ModeTracker
-	audit []string
+	ts   *httptest.Server
+	stub *oauthStub
+	idp  *jwksIdP
+	mode *server.ModeTracker
 }
 
 type stackOpts struct {

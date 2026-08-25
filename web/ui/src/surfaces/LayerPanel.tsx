@@ -48,7 +48,12 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
 
-  if (layers.loading) {
+  // The loading state stands in for the panel on the first read alone. A
+  // write reloads the list, and the reload reports loading again, so swapping
+  // the whole panel out here would unmount the form that issued the write and
+  // discard the one-time webhook secret its response carried. The panel holds
+  // the rows it already has until the reload answers.
+  if (layers.loading && layers.value === null) {
     return <Loading label="Loading the layers." />;
   }
   if (layers.error !== null) {
