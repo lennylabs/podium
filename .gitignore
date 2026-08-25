@@ -8,6 +8,13 @@ coverage.html
 /podium
 /podium-server
 /podium-mcp
+# Build output from `go build ./tools/<name>`, which lands at the repository
+# root under the tool's own name.
+/coverage
+/doccov
+/matrix
+/minttoken
+/speccov
 __pycache__/
 *.pyc
 .venv/

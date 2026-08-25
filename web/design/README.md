@@ -16,8 +16,8 @@ Do not copy the inline styles out of these files. They are inline because of how
 
 | File | What it holds |
 |:--|:--|
-| `Podium App.dc.html` | 35 screen mockups, grouped in numbered turns. Open it and read the board ids (14a, 17c, 20f…) — this README refers to them. |
-| `Podium UI Inventory.dc.html` | 57 components, every state, in both themes, plus a complete "what uses what" dependency table. Build from this file. |
+| `Podium App.dc.html` | The screen mockups, grouped in numbered turns. Open it and read the board ids (14a, 17c, 20f…) — this README refers to them. |
+| `Podium UI Inventory.dc.html` | The components, every state, in both themes, plus a "what uses what" dependency table. Build from this file. |
 | `support.js` | Runtime for the two HTML files. Not part of the design. |
 
 Open either file directly in a browser. No build step, no server.
@@ -232,7 +232,7 @@ Two rules with teeth:
 
 ## Components
 
-57 components in `Podium UI Inventory.dc.html`, in both themes, with every state. Section 07 of that file is a complete dependency table — build primitives first, then composites, then surfaces.
+`Podium UI Inventory.dc.html` holds the components, in both themes, with every state. Section 07 of that file is the dependency table: build primitives first, then composites, then surfaces.
 
 Rules the set depends on:
 
