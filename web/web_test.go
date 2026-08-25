@@ -2,6 +2,7 @@ package web_test
 
 import (
 	"io/fs"
+	"os"
 	"regexp"
 	"strings"
 	"testing"
@@ -45,6 +46,40 @@ func TestAssets_ReferencedEntryPointsResolve(t *testing.T) {
 		if _, err := fs.ReadFile(web.Assets(), path); err != nil {
 			t.Errorf("referenced asset %s missing from the bundle: %v", ref, err)
 		}
+	}
+}
+
+// Spec: §13.10 — the binary carries the whole built bundle. A bare
+// go:embed directory pattern silently drops files whose names begin with
+// _ or . , which is how the bundler names the shared chunks it splits
+// out, so this compares the embedded set against the committed
+// directory on disk rather than against the two files the index happens
+// to reference today.
+func TestAssets_EmbedsEveryCommittedFile(t *testing.T) {
+	embedded := make(map[string]bool)
+	if err := fs.WalkDir(web.Assets(), ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			embedded[path] = true
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walking the embedded bundle: %v", err)
+	}
+	committed := os.DirFS("bundle")
+	if err := fs.WalkDir(committed, ".", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() || embedded[path] {
+			return nil
+		}
+		t.Errorf("committed bundle file %s is not embedded in the binary", path)
+		return nil
+	}); err != nil {
+		t.Fatalf("walking the committed bundle: %v", err)
 	}
 }
 

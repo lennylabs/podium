@@ -11,7 +11,13 @@ import (
 	"io/fs"
 )
 
-//go:embed bundle
+// The pattern carries the all: prefix because a bare directory pattern
+// drops every matched file whose name begins with _ or . , and the
+// bundler emits _-prefixed names for the shared chunks it splits out. A
+// dropped chunk is invisible to the entry document, so the page would
+// 404 at runtime on a path the mount cannot serve.
+//
+//go:embed all:bundle
 var assets embed.FS
 
 // bundle is the built UI rooted at its own entry document, so

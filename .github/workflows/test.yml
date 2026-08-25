@@ -248,7 +248,11 @@ jobs:
               exit 1
               ;;
           esac
-          occurrences=$(printf '%s\n' "$matches" | grep -c . || true)
+          # grep -rn emits one line per matching line, so counting lines
+          # would score two occurrences on a single JSX row as one. Count
+          # the matches themselves with -o.
+          occurrences=$(grep -ro 'dangerouslySetInnerHTML' web/ui \
+            --exclude-dir=node_modules | grep -c . || true)
           files=$(printf '%s\n' "$matches" | cut -d: -f1 | sort -u | grep -c . || true)
           if [ "$occurrences" -gt 1 ] || [ "$files" -gt 1 ]; then
             echo "dangerouslySetInnerHTML is permitted on one sanitized rendering path only;"
