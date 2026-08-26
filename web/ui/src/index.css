@@ -147,8 +147,21 @@ code {
   overflow-wrap: break-word;
 }
 
+/* Most anchors in this interface are structural: a card, a listing row, a
+   breadcrumb crumb, a sidebar entry. The surrounding structure is the
+   affordance there, and the user-agent underline drawn under each one turns a
+   page of navigation into a page of link text. The underline is therefore off
+   by default and restored where a link sits inside running prose, which is
+   the one place its position is not already obvious. */
 a {
   color: var(--link);
+  text-decoration: none;
+}
+
+/* Rendered markdown is running prose, so an inline link carries the
+   underline: nothing else in the paragraph marks where it starts and ends. */
+.prose a {
+  text-decoration: underline;
 }
 
 h1 {
@@ -697,6 +710,13 @@ h2.label {
   gap: 8px;
 }
 
+/* The identifier names the row and carries the link tone, which is what sets
+   it apart from the path and the badges beside it. The row is the affordance,
+   so the underline is drawn on hover rather than standing under every row. */
+.artifact-id:hover {
+  text-decoration: underline;
+}
+
 /* The relevance column. The indicator leads the row so it holds one x
    position down a result set. Drawn after the badges instead, it moves with
    whichever of type, version, and sensitivity a row happens to carry, and the
@@ -747,11 +767,21 @@ h2.label {
   flex: 1;
 }
 
+/* The card title is the card's name, set in the ink the card is drawn in.
+   Drawn in the link tone it reads as an inline link sitting inside the card
+   rather than as the card's own name, and the chevron at the right edge is
+   what states the card opens the domain. The compact tile states the same
+   thing the same way. */
 .subdomain-name {
   display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 600;
+  color: var(--ink);
+}
+
+.subdomain-name:hover > span {
+  text-decoration: underline;
 }
 
 /* A sparse chain arrives folded into one entry, so a card title can be a long
