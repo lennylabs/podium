@@ -35,25 +35,35 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // the registry already served is looking at the latest one.
   const [viewing, setViewing] = useState('');
   const [latest, setLatest] = useState('');
+  // The response the page is standing on. A version the registry cannot
+  // resolve is refused, and the picker that asked for it lives on this page,
+  // so the last response that did resolve is held and keeps the page drawn
+  // while the refusal is presented beside the control that caused it. Without
+  // it the reader loses the picker along with the rest of the surface, and
+  // the route still names this artifact, so nothing is left to recover with.
+  const [held, setHeld] = useState<LoadArtifactResponse | null>(null);
   const artifact = useAsync(() => loadArtifact(id, viewing === '' ? undefined : viewing), [id, viewing]);
   useErrorReport(artifact.error, onError);
+  if (artifact.value !== null && artifact.value !== held) {
+    setHeld(artifact.value);
+  }
+  // A held response belongs to the identifier it was read for, so navigating
+  // to another artifact starts over rather than standing the previous one's
+  // document under the new route.
+  const body = artifact.value ?? (held !== null && held.id === id ? held : null);
   // A manifest above the inline cutoff arrives as a presigned URL with the
   // inline body empty, so the document is fetched here and both columns read
   // the result: the fetch's own loading and failure states are confined to
   // the content column, because the rail's metadata came with the registry's
   // own response and is already there.
-  const link = artifact.value?.manifest_body_url;
+  const link = body?.manifest_body_url;
   const fetched = useAsync(async () => (link === undefined ? '' : fetchText(link)), [link?.presigned_url ?? '']);
 
-  if (artifact.loading) {
-    return <Loading label="Loading the artifact." />;
-  }
-  if (artifact.error !== null) {
-    return <ErrorState error={artifact.error} onRetry={artifact.reload} />;
-  }
-  const body = artifact.value;
   if (body === null) {
-    return null;
+    if (artifact.error !== null) {
+      return <ErrorState error={artifact.error} onRetry={artifact.reload} />;
+    }
+    return artifact.loading ? <Loading label="Loading the artifact." /> : null;
   }
   if (viewing === '' && latest !== body.version) {
     setLatest(body.version);
@@ -88,12 +98,31 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
         {description !== '' && <p className="lead">{description}</p>}
         <div className="artifact-meta">
           <VersionPicker
+            key={viewing}
             viewing={viewing}
             onView={(version) => {
               setViewing(version);
             }}
           />
+          {artifact.loading && <Loading label="Loading the artifact." />}
         </div>
+        {artifact.error !== null && (
+          <ErrorState
+            error={artifact.error}
+            title="The registry did not serve that version."
+            testID="version-refused"
+          >
+            <p className="quiet">Still showing version {body.version}.</p>
+            <button
+              type="button"
+              onClick={() => {
+                setViewing('');
+              }}
+            >
+              Show latest
+            </button>
+          </ErrorState>
+        )}
         {older && (
           <div className="banner banner-accent" role="status" data-testid="older-version">
             <p className="banner-title">You are reading version {body.version}.</p>

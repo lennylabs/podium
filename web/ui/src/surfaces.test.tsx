@@ -1565,6 +1565,75 @@ describe("the artifact viewer", () => {
     expect(requests.some((r) => r.url.includes("version=1.0.0"))).toBe(true);
   });
 
+  // A version the registry cannot resolve is refused, and the picker that
+  // asked for it lives in the viewer's own header. The refusal is presented
+  // beside that control and the page it stands on is kept, because the route
+  // still names this artifact and a page replaced by a full-width error
+  // offers the reader nothing to recover with.
+  it("keeps the viewer standing when the registry refuses the version the picker names", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 404,
+        body: {
+          code: "registry.not_found",
+          message: "version: invalid pin: no candidate matches",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    fireEvent.change(screen.getByLabelText("Version"), {
+      target: { value: "9.9.9" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    const refusal = await screen.findByTestId("version-refused");
+    expect(refusal.textContent).toContain("invalid pin");
+    // The surface the picker sits on is still drawn, and so is the picker.
+    expect(screen.getByLabelText("Artifact viewer")).toBeTruthy();
+    expect(screen.getByLabelText("Version")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "review" })).toBeTruthy();
+    expect(refusal.textContent).toContain("2.3.0");
+    // The recovery control returns the reader to the version the page held.
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Show latest" }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("version-refused")).toBeNull();
+    });
+    expect((screen.getByLabelText("Version") as HTMLInputElement).value).toBe(
+      "",
+    );
+  });
+
   // The presigned channel delivers the canonical manifest document rather
   // than a body, and the response clears the field that document
   // duplicates. A viewer that hands the fetched document to the rendering

@@ -131,13 +131,30 @@ export function EmptyState({ children }: { children: ReactNode }) {
  * state says so instead, because offering a retry there sends the reader
  * round a loop that ends the same way. A failure carrying no envelope at all
  * is a transport failure, which does clear on its own.
+ *
+ * A caller that keeps its surface standing around the failure states what the
+ * refusal was about in `title` and puts the recovery control that belongs to
+ * that surface in `children`, so the reader is offered a way on from inside
+ * the same banner rather than from a page that is no longer there.
  */
-export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+export function ErrorState({
+  error,
+  onRetry,
+  title = 'The registry did not answer this request.',
+  testID,
+  children,
+}: {
+  error: unknown;
+  onRetry?: () => void;
+  title?: string;
+  testID?: string;
+  children?: ReactNode;
+}) {
   const envelope = error instanceof ApiError ? error : null;
   const retryable = envelope === null || envelope.retryable;
   return (
-    <div className="banner banner-danger" role="alert">
-      <p className="banner-title">The registry did not answer this request.</p>
+    <div className="banner banner-danger" role="alert" data-testid={testID}>
+      <p className="banner-title">{title}</p>
       {envelope !== null && <p className="mono banner-code">{envelope.code}</p>}
       <p>{envelope !== null ? envelope.message : String(error)}</p>
       {envelope !== null && envelope.suggestedAction !== '' && <p className="quiet">{envelope.suggestedAction}</p>}
@@ -151,6 +168,7 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
             Retrying does not clear this condition.
           </p>
         ))}
+      {children}
     </div>
   );
 }
