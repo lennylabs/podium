@@ -1083,6 +1083,10 @@ input[type="checkbox"] {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 7px;
+  /* The column is a fixed proportion of the table, so a name longer than it
+     breaks inside the cell rather than pushing out over the source beside
+     it. */
+  overflow-wrap: anywhere;
 }
 
 /* The precedence position sits under the name on its own line, so it reads at
@@ -1130,6 +1134,50 @@ input[type="checkbox"] {
   font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* The layer table lays its columns out to fixed proportions rather than to
+   its content. Sized from the content, the source column's `width: 100%` took
+   every spare pixel and the identifier column collapsed to min-content, so a
+   name such as `eng-shared-context-library` broke over four lines beside an
+   ellipsised path in a column four times as wide, and the column the reader
+   identifies the row by was the narrowest one in the table. The proportions
+   are the design's grid, which gives the layer 1.5fr against 1fr for the
+   source and the visibility and 0.9fr for the ingest time. */
+.layer-table {
+  table-layout: fixed;
+}
+
+.layer-table th:nth-child(2) {
+  width: 27%;
+}
+
+.layer-table th:nth-child(3) {
+  width: 18%;
+}
+
+.layer-table th:nth-child(4) {
+  width: 18%;
+}
+
+.layer-table th:nth-child(5) {
+  width: 16%;
+}
+
+/* The actions column carries no heading, so the width the row's control bar
+   needs is declared on the header cell the fixed layout reads it from. Left
+   to the remainder the bar ran out of its own column and over the ingest
+   time beside it. */
+.layer-table th:last-child {
+  width: 140px;
+}
+
+/* Fixed layout takes the column widths from the header row and already bounds
+   the cell, so the source cell's own width claim is dropped here. Its
+   `max-width: 0` would otherwise clamp the cell's content box to nothing. */
+.layer-table .source-col {
+  width: auto;
+  max-width: none;
 }
 
 /* The layer table lays itself out from its content, and the ingest column is

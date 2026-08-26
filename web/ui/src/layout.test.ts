@@ -296,10 +296,75 @@ describe("layer source cell", () => {
     expect(column.width).toBe("100%");
   });
 
+  it("drops that claim where the layer table fixes its own columns", () => {
+    const { cell } = layerTable();
+    expect(window.getComputedStyle(cell).width).toBe("auto");
+    expect(window.getComputedStyle(cell).maxWidth).toBe("none");
+  });
+
   it("clips an unknown type's field values on the same terms", () => {
     const value = descendantStyle("source-fields", "dd");
     expect(value.whiteSpace).toBe("nowrap");
     expect(value.overflow).toBe("hidden");
     expect(value.textOverflow).toBe("ellipsis");
+  });
+});
+
+/** layerTable attaches the layer panel's table with one header row and one
+ * source cell, and returns the table, its header cells in column order, and
+ * the source cell. */
+function layerTable(): {
+  table: HTMLTableElement;
+  headers: HTMLTableCellElement[];
+  cell: HTMLTableCellElement;
+} {
+  const table = document.createElement("table");
+  table.className = "data-table layer-table";
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  const headers: HTMLTableCellElement[] = [];
+  for (const label of ["Move", "Layer", "Source", "Visibility", "Last ingest", ""]) {
+    const header = document.createElement("th");
+    header.textContent = label;
+    if (label === "Move") {
+      header.className = "drag-cell";
+    }
+    headRow.appendChild(header);
+    headers.push(header);
+  }
+  head.appendChild(headRow);
+  table.appendChild(head);
+  const body = document.createElement("tbody");
+  const row = document.createElement("tr");
+  const cell = document.createElement("td");
+  cell.className = "source-col";
+  row.appendChild(cell);
+  body.appendChild(row);
+  table.appendChild(body);
+  document.body.appendChild(table);
+  mounted.push(table);
+  return { table, headers, cell };
+}
+
+// The layer table's columns. The row is identified by its layer name, so that
+// column is the widest content column in the table. Sized from its content the
+// source column claimed every spare pixel and the identifier column collapsed
+// to min-content, which wrapped an ordinary layer name over four lines.
+describe("layer table columns", () => {
+  it("lays the columns out to fixed proportions rather than to the content", () => {
+    expect(window.getComputedStyle(layerTable().table).tableLayout).toBe("fixed");
+  });
+
+  it("gives the layer column more width than any other content column", () => {
+    const [, layer, source, visibility, ingest] = layerTable().headers;
+    const width = (header: HTMLTableCellElement) =>
+      Number.parseFloat(window.getComputedStyle(header).width);
+    expect(width(layer)).toBeGreaterThan(width(source));
+    expect(width(layer)).toBeGreaterThan(width(visibility));
+    expect(width(layer)).toBeGreaterThan(width(ingest));
+  });
+
+  it("breaks a name longer than its column inside the cell", () => {
+    expect(styled("layer-id-cell").overflowWrap).toBe("anywhere");
   });
 });
