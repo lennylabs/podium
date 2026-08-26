@@ -2169,11 +2169,17 @@ describe("search", () => {
     expect((await screen.findByTestId("result-count")).textContent).toBe(
       "Showing 3 of 143",
     );
-    // A result set spans domains, so a ranked row leads with the whole
-    // identifier and keeps its type and version beside it rather than in the
-    // listing's right-hand column.
+    // A ranked row keeps its type and version beside the identifier rather
+    // than in the listing's right-hand column.
     expect(screen.queryByTestId("artifact-row-aside")).toBeNull();
-    const first = screen.getByRole("link", { name: "platform/review" });
+    // The row names the artifact and states its full path beside it, which is
+    // the same identifying line the domain listing draws. A ranked row that
+    // printed the whole identifier alone would give the name no weight.
+    const first = screen.getByRole("link", { name: "review" });
+    const head = first.parentElement as HTMLElement;
+    expect(
+      within(head).getByText("platform/review").className,
+    ).toBe("mono quiet artifact-path");
     expect(
       within(first.parentElement as HTMLElement).getByText("SKILL"),
     ).toBeTruthy();
@@ -2332,7 +2338,7 @@ describe("search", () => {
     });
     goTo("#/search/");
     render(<App />);
-    expect(await screen.findByRole("link", { name: "eng/deploy" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "deploy" })).toBeTruthy();
     expect(screen.queryByText("matched by meaning")).toBeNull();
     expect(screen.queryAllByTestId("relevance-bars")).toEqual([]);
     expect(screen.queryByTestId("artifact-row-relevance")).toBeNull();

@@ -63,9 +63,9 @@ function RelevanceBars({ filled }: { filled: number }) {
 }
 
 /** ArtifactRow draws one entry. ranked marks a row that arrived from a ranked
- * result set, which is what decides how the row names its artifact, and
- * topScore is the strongest score in that set, which the indicator ranks
- * against. A topScore of zero is a set nothing was scored in, and such a set
+ * result set, which is what decides whether the row carries a relevance
+ * indicator and where it places its type and version, and topScore is the
+ * strongest score in that set, which the indicator ranks against. A topScore of zero is a set nothing was scored in, and such a set
  * carries no relevance indicator. */
 export function ArtifactRow({
   artifact,
@@ -91,15 +91,17 @@ export function ArtifactRow({
         </div>
       )}
       <div className="artifact-row-body">
-        {/* The identifying line. A listing row names the artifact and states
-            its full path beside it, because the domain is already the page;
-            a ranked row leads with the whole identifier, because a result
-            set spans domains and the path is what distinguishes two rows. */}
+        {/* The identifying line. Every row names the artifact and states its
+            full path beside it, on the listing and on the ranked result set
+            alike: the name is what the reader is looking for and carries the
+            link tone, and the path is what tells two rows of the same name
+            apart across domains. Printing the whole identifier alone leaves
+            the name no weight and makes the reader parse a path to find it. */}
         <div className="artifact-row-head">
           <a className="mono artifact-id" href={artifactHref(artifact.id)}>
-            {ranked ? artifact.id : artifactLeaf(artifact.id)}
+            {artifactLeaf(artifact.id)}
           </a>
-          {!ranked && <span className="mono quiet artifact-path">{artifact.id}</span>}
+          <span className="mono quiet artifact-path">{artifact.id}</span>
           {/* A ranked row keeps its type and version inline, beside the
               identifier its relevance is measured on. A listing row moves
               them to the column at the row's right edge. */}
