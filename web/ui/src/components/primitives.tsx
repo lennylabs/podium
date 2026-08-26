@@ -8,7 +8,7 @@ import { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api';
-import { useDialogFocus } from './focus';
+import { dismissAttribute, useDialogFocus } from './focus';
 
 export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
 
@@ -390,7 +390,13 @@ export function Modal({
           <div className="modal-title-row">
             <h2 id={headingID}>{title}</h2>
             {dismissible && (
-              <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
+              <button
+                type="button"
+                className="modal-close"
+                aria-label="Close"
+                {...{ [dismissAttribute]: '' }}
+                onClick={onClose}
+              >
                 ✕
               </button>
             )}

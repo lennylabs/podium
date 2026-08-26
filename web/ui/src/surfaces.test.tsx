@@ -3306,6 +3306,33 @@ describe("the layer write flows", () => {
     );
   });
 
+  // A dialog opens with focus on the field the reader has to fill in. Opening
+  // focus on the dismissal ✕ made the first Enter close the dialog the reader
+  // had just opened, and put the destructive confirmation's opening focus on
+  // a second way to cancel.
+  it("opens each dialog with focus on its first field rather than on the dismissal control", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    await screen.findByTestId("register-form");
+    expect(document.activeElement).toBe(screen.getByLabelText("Layer ID"));
+    // The dismissal stays reachable by Tab from there.
+    const close = screen.getByRole("button", { name: "Close" });
+    expect(close.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(close);
+    openRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    const dialog = await screen.findByLabelText("Unregister alice-personal");
+    expect(document.activeElement).toBe(
+      within(dialog).getByLabelText("Type the layer ID to confirm"),
+    );
+  });
+
   // §13.10 makes the panel the surface a user manages their own user-defined
   // layers on, which is the class §7.3.1 caps per user and authorizes its
   // owner on, so that is the class the form registers by default. The

@@ -7,6 +7,15 @@
 import { useEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 
+/**
+ * dismissAttribute marks a control whose only job is to close the dialog. A
+ * dialog opens with focus on the first control that does its work, so the
+ * dismissal ✕ that leads the header is skipped when focus moves in: landing
+ * there makes the reader's first Enter close the dialog they just opened.
+ * The control stays in the Tab cycle.
+ */
+export const dismissAttribute = 'data-dialog-dismiss';
+
 /** focusableStops matches the controls a dialog can hand focus to. */
 const focusableStops = [
   'a[href]',
@@ -20,9 +29,9 @@ const focusableStops = [
 /**
  * useDialogFocus gives a dialog the three behaviours a `role="dialog"` owes a
  * keyboard reader, for as long as `active` holds: focus moves to the first
- * control inside it when it opens, Tab and Shift+Tab cycle within it rather
- * than walking out onto the covered surface, and focus returns to whatever
- * held it when the dialog opened once the dialog closes.
+ * control inside it that is not a dismissal when it opens, Tab and Shift+Tab
+ * cycle within it rather than walking out onto the covered surface, and focus
+ * returns to whatever held it when the dialog opened once the dialog closes.
  *
  * Attach the returned ref to the element carrying `role="dialog"`. The
  * element the dialog was opened from is read at that moment rather than
@@ -43,9 +52,14 @@ export function useDialogFocus<T extends HTMLElement>(active = true): RefObject<
     const held = document.activeElement;
     const opener = held instanceof HTMLElement && held !== document.body ? held : null;
     const stops = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableStops));
-    const opening = stops();
+    const opening = stops().filter((stop) => !stop.hasAttribute(dismissAttribute));
     if (opening.length > 0) {
       opening[0].focus();
+    } else {
+      // A dialog whose only control dismisses it still takes the reader's
+      // focus off the covered surface, so the dialog itself receives it.
+      dialog.tabIndex = -1;
+      dialog.focus();
     }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Tab') {
