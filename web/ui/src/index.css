@@ -646,8 +646,9 @@ h2.label {
 /* The relevance column. The indicator leads the row so it holds one x
    position down a result set. Drawn after the badges instead, it moves with
    whichever of type, version, and sensitivity a row happens to carry, and the
-   bars stop reading as a column. The column is present on every ranked row,
-   including the vector-only row that draws no bars, so the row bodies align. */
+   bars stop reading as a column. The column is present on every row of a
+   scored result set, including the vector-only row that draws no bars, so the
+   row bodies align. */
 .artifact-row-relevance {
   flex: none;
   padding-top: 3px;

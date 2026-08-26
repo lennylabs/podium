@@ -1216,6 +1216,32 @@ describe("search", () => {
     expect(screen.queryByText(/score 8/)).toBeNull();
   });
 
+  // Spec: §13.10 — a standalone registry started with --no-embeddings serves
+  // BM25 alone, and an empty query returns every match at score zero, so a
+  // whole result set can reach the page unscored. Nothing in such a set was
+  // matched by vector similarity, so the surface draws no relevance indicator
+  // and claims no semantic match on any row.
+  it("draws no relevance indicator when no result in the set carries a score", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts": {
+        body: {
+          total_matched: 2,
+          results: [
+            { id: "eng/deploy", type: "context", description: "Deploy runbook" },
+            { id: "finance/ap/pay-invoice", type: "skill" },
+          ],
+        },
+      },
+    });
+    goTo("#/search/");
+    render(<App />);
+    expect(await screen.findByRole("link", { name: "eng/deploy" })).toBeTruthy();
+    expect(screen.queryByText("matched by meaning")).toBeNull();
+    expect(screen.queryAllByTestId("relevance-bars")).toEqual([]);
+    expect(screen.queryByTestId("artifact-row-relevance")).toBeNull();
+  });
+
   // An active filter carries the control that removes it, which is what
   // returns the row to the unfiltered read.
   it("drops a filter from the request when its pill is removed", async () => {

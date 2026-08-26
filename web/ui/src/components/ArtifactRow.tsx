@@ -32,9 +32,17 @@ function filledBars(score: number, topScore: number): number {
  * The indicator is drawn on a ranked row alone, which is a property of the
  * surface rather than of the descriptor: the registry marshals the score with
  * omitempty, so a zero score and an unscored descriptor are indistinguishable
- * on the wire. A search row therefore reads an absent score as the vector-only
- * arm, and an unranked listing such as the domain browser draws no indicator
- * at all. */
+ * on the wire. An unranked listing such as the domain browser draws no
+ * indicator at all.
+ *
+ * A ranked row reads an absent score as the vector-only arm only where the
+ * result set carries a score at all. A set where no row does is not a lexical
+ * ranking with vector-only rows fused into it: an empty query returns every
+ * match at score zero (`pkg/registry/core/core.go`), and a registry serving
+ * BM25 alone (§13.10 `--no-embeddings`) runs no vector retrieval to fuse in.
+ * Reading that set as semantic matching would label every row for a match the
+ * deployment never performed, so an unscored set draws no indicator and no
+ * label. */
 function RelevanceBars({ filled }: { filled: number }) {
   if (filled === 0) {
     return <span className="relevance" data-testid="relevance-bars" data-filled="0" aria-hidden="true" />;
@@ -55,9 +63,10 @@ function RelevanceBars({ filled }: { filled: number }) {
 }
 
 /** ArtifactRow draws one entry. ranked marks a row that arrived from a ranked
- * result set, which is what decides whether the row carries a relevance
- * indicator, and topScore is the strongest score in that set, which the
- * indicator ranks against. */
+ * result set, which is what decides how the row names its artifact, and
+ * topScore is the strongest score in that set, which the indicator ranks
+ * against. A topScore of zero is a set nothing was scored in, and such a set
+ * carries no relevance indicator. */
 export function ArtifactRow({
   artifact,
   ranked = false,
@@ -68,14 +77,15 @@ export function ArtifactRow({
   topScore?: number;
 }) {
   const version = artifact.version !== undefined && artifact.version !== '' ? artifact.version : '';
-  const filled = ranked ? filledBars(artifact.score ?? 0, topScore) : 0;
+  const scored = ranked && topScore > 0;
+  const filled = scored ? filledBars(artifact.score ?? 0, topScore) : 0;
   return (
     <li className="artifact-row">
       {/* The relevance column. The indicator leads the row rather than
           trailing the badges, because a badge row is as wide as the values it
           happens to carry: drawn after it, the bars land on a different x
           position on every row and stop reading as a column. */}
-      {ranked && (
+      {scored && (
         <div className="artifact-row-relevance" data-testid="artifact-row-relevance">
           <RelevanceBars filled={filled} />
         </div>
@@ -105,7 +115,7 @@ export function ArtifactRow({
           {artifact.folded_from !== undefined && artifact.folded_from !== '' && (
             <Badge tone="quiet">from {artifact.folded_from}</Badge>
           )}
-          {ranked && filled === 0 && <span className="quiet label">matched by meaning</span>}
+          {scored && filled === 0 && <span className="quiet label">matched by meaning</span>}
         </div>
         {artifact.description !== undefined && artifact.description !== '' && (
           <p className="artifact-description">{artifact.description}</p>
