@@ -667,8 +667,21 @@ interface RelationChip {
  * extended by it, and each group states its own absence so a direction with
  * no members reads as empty rather than as missing. The count stands beside
  * the label once a group holds more than one member, where a single chip
- * already counts itself. */
-function RailRelationGroup({ label, chips, absent }: { label: string; chips: RelationChip[]; absent: string }) {
+ * already counts itself. Each chip carries a leading dot toned by direction,
+ * accent on the edge this artifact declares and meta on the edges that end
+ * here, so the two directions stay apart once the group labels have scrolled
+ * out of the reader's eye. */
+function RailRelationGroup({
+  label,
+  chips,
+  absent,
+  direction,
+}: {
+  label: string;
+  chips: RelationChip[];
+  absent: string;
+  direction: 'outbound' | 'inbound';
+}) {
   return (
     <div className="rail-group">
       <p className="label quiet">{chips.length > 1 ? `${label} · ${chips.length}` : label}</p>
@@ -678,6 +691,7 @@ function RailRelationGroup({ label, chips, absent }: { label: string; chips: Rel
         <ul className="relation-list">
           {chips.map((chip) => (
             <li key={chip.text} className="relation-chip">
+              <span className={`relation-dot ${direction}`} aria-hidden="true" />
               <a className="mono" href={chip.href}>
                 {chip.text}
               </a>
@@ -743,12 +757,23 @@ function Relations({ artifact, frontmatter }: { artifact: LoadArtifactResponse; 
   return (
     <section aria-label="Relations">
       <p className="label">Relations</p>
-      <RailRelationGroup label="extends" chips={outbound} absent="This artifact extends nothing." />
+      <RailRelationGroup
+        label="extends"
+        chips={outbound}
+        absent="This artifact extends nothing."
+        direction="outbound"
+      />
       {edges.loading && <Loading label="Loading relations." />}
       {edges.error !== null && <ErrorState error={edges.error} onRetry={edges.reload} />}
       {edges.value !== null &&
         inboundGroups(edges.value).map((group) => (
-          <RailRelationGroup key={group.label} label={group.label} chips={group.chips} absent={group.absent} />
+          <RailRelationGroup
+            key={group.label}
+            label={group.label}
+            chips={group.chips}
+            absent={group.absent}
+            direction="inbound"
+          />
         ))}
     </section>
   );

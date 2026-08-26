@@ -2761,6 +2761,55 @@ describe("the artifact viewer", () => {
     ).toBeNull();
   });
 
+  // Spec: §13.10 — the viewer links to extending or dependent artifacts. The
+  // chips of both directions are the same bordered row, so the leading dot is
+  // what separates the edge the artifact declares from the edges that end at
+  // it once the group label is out of the reader's eye.
+  it("tones each relation chip's leading dot by the direction of its edge", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "finance/ap/three-way-match",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Three-way match\n",
+          frontmatter: "---\ntype: skill\nversion: 1.0.0\n---\n",
+          manifest_merged: true,
+          raw_frontmatter:
+            "---\ntype: skill\nversion: 1.0.0\nextends: finance/ap/pay-invoice\n---\n",
+        },
+      },
+      "/v1/dependents": {
+        body: {
+          edges: [
+            {
+              from: "finance/ap/close-books",
+              to: "finance/ap/three-way-match",
+              kind: "extends",
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/artifact/finance%2Fap%2Fthree-way-match");
+    render(<App />);
+    const relations = await screen.findByLabelText("Relations");
+    await screen.findByText("finance/ap/close-books");
+    // Every chip carries a dot, and only the outbound group's is accented.
+    const chips = [...relations.querySelectorAll(".relation-chip")];
+    expect(
+      chips.map(
+        (chip) => chip.querySelector(".relation-dot")?.className ?? "none",
+      ),
+    ).toEqual(["relation-dot outbound", "relation-dot inbound"]);
+    // The dot stands before the id rather than after it.
+    expect(chips[0].firstElementChild?.className).toBe(
+      "relation-dot outbound",
+    );
+  });
+
   // The rail is a fixed-width column, and provenance is a set of labelled
   // values rather than prose: each one stands in a borderless list under its
   // own section label, so the bordered frontmatter and relations sections

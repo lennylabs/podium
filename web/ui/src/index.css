@@ -3137,11 +3137,29 @@ label:has(> input:disabled) {
    paragraph of links. The identifier can be longer than the rail is wide and
    breaks inside itself. */
 .relation-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 8px 10px;
   border: 1px solid var(--bd);
   border-radius: 8px;
   background: var(--surf);
   margin-bottom: 6px;
+}
+
+/* The chip's direction marker. It is decorative, so the direction it stands
+   for is carried by the group label rather than by the dot alone, and colour
+   is the only thing that separates the two tones. */
+.relation-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--meta);
+}
+
+.relation-dot.outbound {
+  background: var(--acc);
 }
 
 .relation-chip a {
