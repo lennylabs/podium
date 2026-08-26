@@ -969,8 +969,24 @@ label:has(> input:disabled) {
   box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
 }
 
+/* An artifact body is markdown authored by whoever can write to the layer, so
+   nothing it holds may widen the column it renders in. A long unbroken token
+   breaks inside the word when the line offers no other break opportunity, and
+   `anywhere` rather than `break-word` so the break also lowers the element's
+   min-content width, which is what a grid track measures. Without it the body
+   grows the column, the shell scrolls sideways, and the top bar and the
+   sidebar leave the viewport. */
 .prose {
   max-width: 760px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* An image carries an intrinsic width the author picked and no break
+   opportunity at all, so it scales down to the column instead. */
+.prose img {
+  max-width: 100%;
+  height: auto;
 }
 
 .prose pre {
@@ -987,14 +1003,25 @@ label:has(> input:disabled) {
   background: var(--chip);
 }
 
+/* A table has a min-content width of its own that no wrapping brings under
+   the column width, so it scrolls inside its own box. `display: block` is what
+   gives the element a scroll container; the rows still lay out as a table. */
 .prose table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
   border-collapse: collapse;
 }
 
+/* A cell reverts to `break-word`, which breaks a token too long for the cell
+   without lowering the table's min-content width. The table then keeps the
+   column widths its content asks for and scrolls, rather than collapsing every
+   heading into one character per line. */
 .prose th,
 .prose td {
   padding: 6px 10px;
   border: 1px solid var(--bd);
+  overflow-wrap: break-word;
 }
 
 .spinner {

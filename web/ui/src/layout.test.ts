@@ -28,6 +28,19 @@ function styled(className: string): CSSStyleDeclaration {
   return window.getComputedStyle(element);
 }
 
+/** descendantStyle attaches an element of the given tag inside a container
+ * carrying the given classes and returns the style the stylesheet computes
+ * for the descendant. */
+function descendantStyle(className: string, tag: string): CSSStyleDeclaration {
+  const container = document.createElement("div");
+  container.className = className;
+  const child = document.createElement(tag);
+  container.appendChild(child);
+  document.body.appendChild(container);
+  mounted.push(container);
+  return window.getComputedStyle(child);
+}
+
 describe("shell layout", () => {
   it("gives the content column a zero minimum", () => {
     expect(styled("app-body").gridTemplateColumns).toBe("268px minmax(0, 1fr)");
@@ -45,5 +58,33 @@ describe("shell layout", () => {
     expect(styled("artifact-viewer").gridTemplateColumns).toBe(
       "minmax(0, 1fr) 316px",
     );
+  });
+});
+
+// The artifact body is author-controlled markdown, and a token or a table
+// wider than the prose column would otherwise grow the column and scroll the
+// whole shell sideways, carrying the top bar and the sidebar off screen. The
+// cases pin the declarations that keep wide content inside the column.
+describe("rendered artifact body", () => {
+  it("breaks a token the prose column is too narrow to hold", () => {
+    const prose = styled("prose");
+    expect(prose.overflowWrap).toBe("anywhere");
+    expect(prose.minWidth).toBe("0");
+  });
+
+  it("scrolls a wide table inside its own box", () => {
+    const table = descendantStyle("prose", "table");
+    expect(table.overflowX).toBe("auto");
+    expect(table.display).toBe("block");
+    expect(table.maxWidth).toBe("100%");
+  });
+
+  it("keeps a table cell's break from squeezing its column", () => {
+    expect(descendantStyle("prose", "th").overflowWrap).toBe("break-word");
+    expect(descendantStyle("prose", "td").overflowWrap).toBe("break-word");
+  });
+
+  it("scales an oversized image down to the prose column", () => {
+    expect(descendantStyle("prose", "img").maxWidth).toBe("100%");
   });
 });
