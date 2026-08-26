@@ -343,10 +343,10 @@ describe("the application shell", () => {
     expect(within(tree).getByRole("link", { name: "paging" })).toBeTruthy();
   });
 
-  // Expanding a node whose level came back empty has to put something on
-  // screen. Drawing nothing leaves the press with no outcome and reads as an
-  // expansion that failed.
-  it("states an expanded level the registry reported as empty", async () => {
+  // A node whose level came back empty is a leaf. The tree draws the leaf
+  // state for it, which is the dropped toggle, and it writes no sentence
+  // inside the tree about the empty level.
+  it("turns a node whose level came back empty into a leaf", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": {
@@ -366,12 +366,17 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    expect(within(tree).queryByTestId("empty-domain")).toBeNull();
     fireEvent.click(
       within(tree).getAllByRole("button", { expanded: false })[0],
     );
-    const empty = await within(tree).findByTestId("empty-domain");
-    expect(empty.textContent).toBe("No subdomains.");
+    // The toggle goes once the level resolves to nothing, so the row is a
+    // leaf and the tree holds no prose row under it.
+    await waitFor(() => {
+      expect(within(tree).queryAllByRole("button")).toHaveLength(0);
+    });
+    expect(within(tree).getByRole("link", { name: "finance" })).toBeTruthy();
+    expect(within(tree).queryByText(/No subdomains/)).toBeNull();
+    expect(tree.querySelectorAll("p")).toHaveLength(0);
   });
 
   // A domain the registry refuses to open stays in the hierarchy and is not

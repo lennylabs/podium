@@ -422,6 +422,11 @@ function TreeNode({
   const label = domainLabel(node.path, parent);
   const children = eager ?? loaded;
   const isCurrent = node.path === current;
+  // A level that resolved to nothing makes this node a leaf, so the row drops
+  // its toggle and keeps the label aligned with its siblings. The tree draws
+  // no sentence for the empty level: a leaf carries no children, and the
+  // dropped toggle is what states that there is nothing to open.
+  const leaf = children !== null && children.length === 0;
 
   // A route that moves onto this node's ancestry opens it. The tree is not
   // remounted when the reader follows a link, so the ancestry has to reach an
@@ -475,9 +480,13 @@ function TreeNode({
       {/* The row is its own element so the current domain's fill stops at the
           row rather than running down the nested level under it. */}
       <div className={isCurrent ? 'catalog-row catalog-row-current' : 'catalog-row'}>
-        <button type="button" className="tree-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
-          {open ? '▾' : '▸'}
-        </button>
+        {leaf ? (
+          <span className="tree-leaf" aria-hidden="true" />
+        ) : (
+          <button type="button" className="tree-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+            {open ? '▾' : '▸'}
+          </button>
+        )}
         {/* The label is the whole folded stretch of path the entry navigates
             across, and the row clips it to the sidebar's width, so it carries
             the label as its title for a reader whose row is too narrow. */}
@@ -511,15 +520,6 @@ function TreeNode({
       </div>
       {open && children !== null && children.length > 0 && (
         <CatalogTree nodes={children} parent={node.path} current={current} onOutcome={onOutcome} />
-      )}
-      {/* A node the reader expanded onto an empty level states that the level
-          is empty. Drawing nothing there leaves the press with no outcome on
-          screen and reads as an expansion that failed, which is the one thing
-          the row is not. */}
-      {open && children !== null && children.length === 0 && (
-        <p className="catalog-empty quiet" data-testid="empty-domain">
-          No subdomains.
-        </p>
       )}
     </li>
   );

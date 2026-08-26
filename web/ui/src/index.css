@@ -282,9 +282,12 @@ h3 {
   overflow-y: auto;
 }
 
+/* The sentence that stands in for an empty catalog sits under the tree,
+   indented to the level a first row would occupy. */
 .catalog-empty {
   margin: 0;
-  font-size: 13px;
+  padding: 2px 0 2px 24px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -317,6 +320,7 @@ h3 {
 /* The toggle and the state markers keep their width, so the label is the one
    item the row takes the shortfall out of. */
 .catalog-row > .tree-toggle,
+.catalog-row > .tree-leaf,
 .catalog-row > .label {
   flex: none;
 }
@@ -334,21 +338,28 @@ h3 {
   color: var(--ink);
 }
 
-/* The empty level sits where a nested tree would, indented to the level the
-   expansion opened so it reads as this node's content. */
-.catalog-empty {
-  margin: 0;
-  padding: 2px 0 2px 24px;
-  font-size: 12px;
-}
-
-.tree-toggle {
+.tree-toggle,
+.tree-leaf {
   padding: 0 4px;
   margin: 0;
   border: none;
   background: none;
   color: var(--faint);
+  font-size: 13.5px;
   line-height: 1;
+}
+
+/* A leaf has nothing to open, so its row holds the toggle's slot open and
+   draws nothing in it, which keeps the labels of a level on one left edge.
+   The slot is held by the marker glyph itself, drawn invisible, so it stays
+   the toggle's width when the type changes. */
+.tree-leaf {
+  display: inline-block;
+  color: transparent;
+}
+
+.tree-leaf::before {
+  content: '\25b8';
 }
 
 /* The footer is pinned to the bottom of the sidebar. */
