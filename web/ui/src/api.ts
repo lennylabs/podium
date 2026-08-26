@@ -252,6 +252,15 @@ export interface LoadArtifactResponse {
    * (§4.6). It is the only place the artifact's own `extends:` reference
    * survives such a response. */
   raw_frontmatter?: string;
+  /** deprecated, replaced_by, and deprecation_warning carry the §4.7.4
+   * lifecycle signal. The registry keeps serving a retired artifact and
+   * reports the state alongside the bytes, and it resolves the state through
+   * an `extends:` merge, so the viewer reads these rather than the
+   * frontmatter pair of the same names. replaced_by is an artifact
+   * identifier, which the viewer links to. */
+  deprecated?: boolean;
+  replaced_by?: string;
+  deprecation_warning?: string;
 }
 
 /** DependencyEdge is one graph edge served by the dependents endpoint. */

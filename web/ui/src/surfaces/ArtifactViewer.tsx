@@ -19,6 +19,7 @@ import { Lead } from '../components/Lead';
 import {
   Badge,
   CopyButton,
+  DeprecatedBadge,
   EmptyState,
   ErrorPage,
   ErrorState,
@@ -121,8 +122,10 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           <TypeBadge type={body.type} />
           <VersionBadge version={body.version} />
           <SensitivityBadge sensitivity={body.sensitivity} />
+          <DeprecatedBadge deprecated={body.deprecated} />
         </div>
         {description !== '' && <Lead text={description} />}
+        <DeprecationNotice artifact={body} />
         <div className="artifact-meta">
           <VersionPicker
             key={viewing}
@@ -173,6 +176,36 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
       </div>
       <ArtifactRail artifact={body} frontmatter={document.frontmatter} showFrontmatter={tab !== 'frontmatter'} />
     </section>
+  );
+}
+
+/** DeprecationNotice states the §4.7.4 lifecycle warning the registry serves
+ * beside the artifact's bytes, and links the upgrade target the warning names.
+ * The frontmatter table carries the same pair as text, which leaves the reader
+ * to notice a row among a dozen and to retype the identifier it names, so the
+ * notice stands under the header and the target is the link that opens it. An
+ * artifact naming no replacement still gets the notice, because the state the
+ * reader has to act on is the deprecation rather than the target. */
+function DeprecationNotice({ artifact }: { artifact: LoadArtifactResponse }) {
+  if (artifact.deprecated !== true) {
+    return null;
+  }
+  const replacement = artifact.replaced_by ?? '';
+  return (
+    <div className="banner banner-accent" role="status" data-testid="deprecated-notice">
+      <p className="banner-title">This artifact is deprecated.</p>
+      {replacement === '' ? (
+        <p className="quiet">The registry still serves it, and its manifest names no replacement.</p>
+      ) : (
+        <p className="quiet">
+          The registry still serves it. Its replacement is{' '}
+          <a className="mono" href={artifactHref(replacement)}>
+            {replacement}
+          </a>
+          .
+        </p>
+      )}
+    </div>
   );
 }
 

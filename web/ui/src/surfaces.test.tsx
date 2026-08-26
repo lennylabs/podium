@@ -2195,6 +2195,90 @@ describe("the artifact viewer", () => {
     expect(requests.some((r) => r.url.includes("version=1.0.0"))).toBe(true);
   });
 
+  // The registry keeps serving a deprecated artifact and reports the lifecycle
+  // state beside the bytes, so the viewer marks the artifact as retired and
+  // opens the upgrade target the response names.
+  // Spec: §4.7.4
+  it("marks a deprecated artifact and links the artifact that replaces it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "eng/old-deploy",
+          type: "context",
+          version: "0.1.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Superseded\n",
+          frontmatter: "deprecated: true\nreplaced_by: eng/deploy\n",
+          deprecated: true,
+          replaced_by: "eng/deploy",
+          deprecation_warning: "artifact is deprecated; replaced_by eng/deploy",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/eng%2Fold-deploy");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    expect(screen.getByText("DEPRECATED")).toBeTruthy();
+    const notice = screen.getByTestId("deprecated-notice");
+    const link = within(notice).getByRole("link", { name: "eng/deploy" });
+    expect(link.getAttribute("href")).toBe("#/artifact/eng%2Fdeploy");
+  });
+
+  // A deprecated artifact whose manifest names no upgrade target still carries
+  // the warning, because the state the reader has to act on is the deprecation.
+  // Spec: §4.7.4
+  it("marks a deprecated artifact that names no replacement", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "eng/old-deploy",
+          type: "context",
+          version: "0.1.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Superseded\n",
+          frontmatter: "deprecated: true\n",
+          deprecated: true,
+          deprecation_warning: "artifact is deprecated",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/eng%2Fold-deploy");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const notice = screen.getByTestId("deprecated-notice");
+    expect(notice.textContent).toContain("names no replacement");
+    expect(within(notice).queryByRole("link")).toBeNull();
+  });
+
+  // A live artifact carries neither the badge nor the notice, so the marker
+  // means what it says.
+  // Spec: §4.7.4
+  it("leaves a live artifact unmarked", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "eng/deploy",
+          type: "context",
+          version: "0.1.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Deploy\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/eng%2Fdeploy");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    expect(screen.queryByTestId("deprecated-notice")).toBeNull();
+    expect(screen.queryByText("DEPRECATED")).toBeNull();
+  });
+
   // The picker is a single entry field beside its own button, and Enter in
   // such a field commits it. A reader who types a version and presses return
   // gets the same read the button performs.

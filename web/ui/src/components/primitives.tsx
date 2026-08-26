@@ -146,6 +146,22 @@ export function SensitivityBadge({ sensitivity }: { sensitivity?: string }) {
   return <Badge>sensitivity: {sensitivity}</Badge>;
 }
 
+/**
+ * DeprecatedBadge marks an artifact the registry still serves but has retired.
+ * The registry reports the lifecycle state on the response rather than leaving
+ * it to be read out of the frontmatter, so the badge keys on that field and
+ * carries the accent tone: a reader who lands on a retired artifact has to see
+ * that it is retired before reading it.
+ *
+ * Spec: §4.7.4
+ */
+export function DeprecatedBadge({ deprecated }: { deprecated?: boolean }) {
+  if (deprecated !== true) {
+    return null;
+  }
+  return <Badge tone="accent">DEPRECATED</Badge>;
+}
+
 export function Banner({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
   return (
     <div className={`banner banner-${tone}`} role="status">
