@@ -68,6 +68,33 @@ describe("shell layout", () => {
       "minmax(0, 1fr) 316px",
     );
   });
+
+  // The rail is a column of the page rather than a card, so it runs the whole
+  // height of the content area: the viewer stretches to the area's height and
+  // the content element drops the inset the other surfaces sit within, which
+  // leaves the rail against the right edge with its divider on its left.
+  it("runs the artifact rail the full height of the content area", () => {
+    const container = document.createElement("div");
+    container.className = "content";
+    const viewer = document.createElement("section");
+    viewer.className = "surface artifact-viewer";
+    container.appendChild(viewer);
+    document.body.appendChild(container);
+    mounted.push(container);
+
+    const content = window.getComputedStyle(container);
+    expect(content.paddingTop).toBe("0px");
+    expect(content.paddingRight).toBe("0px");
+    expect(content.maxWidth).toBe("none");
+    expect(window.getComputedStyle(viewer).minHeight).toBe("100%");
+  });
+
+  // The inset the content element gave up moves onto the viewer's own two
+  // columns, so the prose and the rail keep their margins.
+  it("moves the inset onto the artifact viewer's columns", () => {
+    expect(styled("artifact-content").paddingLeft).toBe("30px");
+    expect(styled("artifact-rail").paddingLeft).toBe("22px");
+  });
 });
 
 // The artifact body is author-controlled markdown, and a token or a table

@@ -1367,15 +1367,38 @@ label:has(> input:disabled) {
 }
 
 /* The artifact viewer is two columns: the content at 1fr and the rail
-   beside it, on the inset ground with a hairline divider. */
+   beside it, on the inset ground with a hairline divider. The rail is a
+   column of the page rather than a card, so it runs the whole height of the
+   content area and reaches its right edge. That means the viewer draws
+   across the area the other surfaces sit inset within: the content element
+   drops its padding and its measure for this surface, and the two columns
+   carry the padding instead. The selector keys off the viewer being the
+   surface that mounted, so the viewer's own loading and failure arms, which
+   are ordinary cards, keep the inset ground. */
+.content:has(> .artifact-viewer) {
+  max-width: none;
+  padding: 0;
+}
+
+/* A banner standing over the viewer, such as the expired-session notice,
+   would otherwise sit against the edges the flush surface removed. */
+.content:has(> .artifact-viewer) > .banner {
+  margin: 26px 30px 0;
+}
+
 .artifact-viewer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 316px;
-  gap: 26px;
+  min-height: 100%;
+}
+
+.artifact-content {
+  min-width: 0;
+  padding: 26px 30px 40px;
 }
 
 .artifact-rail {
-  padding: 18px 16px;
+  padding: 26px 22px 40px;
   background: var(--surf2);
   border-left: 1px solid var(--bd);
 }
