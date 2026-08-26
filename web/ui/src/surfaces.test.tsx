@@ -8253,13 +8253,19 @@ describe("the trimmed listing", () => {
     expect(subrow.getByLabelText("Filter subdomains")).toBeTruthy();
     // The switch is the segmented control the register form uses, so the
     // chosen view is the segment raised onto the surface colour rather than
-    // the one filled with the track colour.
+    // the one filled with the track colour, and each segment is labelled in
+    // the sentence case every other segmented control in the build carries.
     const viewSwitch = subrow.getByRole("group", { name: "Subdomain view" });
     expect(viewSwitch.className.split(" ")).toContain("segmented");
-    expect(within(viewSwitch).getByRole("button", { name: "grid" }).className).toBe(
+    expect(
+      within(viewSwitch)
+        .getAllByRole("button")
+        .map((segment) => segment.textContent),
+    ).toEqual(["Grid", "List"]);
+    expect(within(viewSwitch).getByRole("button", { name: "Grid" }).className).toBe(
       "segment segment-on",
     );
-    expect(within(viewSwitch).getByRole("button", { name: "list" }).className).toBe("segment");
+    expect(within(viewSwitch).getByRole("button", { name: "List" }).className).toBe("segment");
     expect((subhead as HTMLElement).textContent).toContain("24");
     // The grid itself is not in that row.
     expect(subrow.queryByLabelText("Subdomains")).toBeNull();

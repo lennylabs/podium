@@ -16,6 +16,15 @@ import { artifactHref, domainHref } from '../route';
  * rest, which keeps a domain with dozens of children to one screen. */
 const tileCap = 12;
 
+/** subdomainViews pairs each view with the label its segment carries. The
+ * state key is lowercase because it names a CSS class, and a segment label is
+ * sentence-case prose the way every other segmented control in the build reads
+ * (§13.10). */
+const subdomainViews = [
+  { view: 'grid', label: 'Grid' },
+  { view: 'list', label: 'List' },
+] as const;
+
 /** SubdomainTiles is the compact treatment: the section label carrying the
  * child count, a filter over the names and a grid-or-list toggle on the same
  * row, and one tile per child.
@@ -84,17 +93,17 @@ export function SubdomainTiles({
           }}
         />
         <div className="segmented" role="group" aria-label="Subdomain view">
-          {(['grid', 'list'] as const).map((choice) => (
+          {subdomainViews.map((choice) => (
             <button
-              key={choice}
+              key={choice.view}
               type="button"
-              className={view === choice ? 'segment segment-on' : 'segment'}
-              aria-pressed={view === choice}
+              className={view === choice.view ? 'segment segment-on' : 'segment'}
+              aria-pressed={view === choice.view}
               onClick={() => {
-                setView(choice);
+                setView(choice.view);
               }}
             >
-              {choice}
+              {choice.label}
             </button>
           ))}
         </div>
