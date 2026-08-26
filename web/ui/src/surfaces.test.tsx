@@ -5873,7 +5873,7 @@ describe("the layer write flows", () => {
     const panel = await screen.findByLabelText("Layer panel");
     const link = screen.getByTestId("recoverable-link");
     await waitFor(() => {
-      expect(link.textContent).toBe("\u21ba Recently unregistered \u00b7 1");
+      expect(link.querySelector(".badge")?.textContent).toBe("1");
     });
     // The link leads to the surface rather than opening it inside the panel,
     // so the panel carries its own table alone.
@@ -6831,8 +6831,11 @@ describe("a refused layer write", () => {
     await screen.findByLabelText("Layer panel");
     const link = screen.getByTestId("recoverable-link");
     await waitFor(() => {
-      expect(link.textContent).toBe("↺ Recently unregistered · 1");
+      expect(link.querySelector(".badge")?.textContent).toBe("1");
     });
+    // The figure is the badge every other count in the UI uses, so it reads
+    // as a count rather than as running text appended to the label.
+    expect(link.textContent).not.toContain("·");
     // It is the first control in the action row, ahead of the primary
     // Register layer and the secondary Reingest all.
     const actions = Array.from(
@@ -6869,6 +6872,7 @@ describe("a refused layer write", () => {
     const link = screen.getByTestId("recoverable-link");
     await waitFor(() => {
       expect(link.textContent).toBe("↺ Recently unregistered");
+      expect(link.querySelector(".badge")).toBe(null);
     });
     expect(
       screen

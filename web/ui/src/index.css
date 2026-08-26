@@ -2861,6 +2861,15 @@ label:has(> input:disabled) {
   color: var(--link);
 }
 
+/* The recoverable count rides the link as the same badge every other count in
+   the UI uses, so it reads as a figure rather than as part of the label. The
+   badge sets its own trailing margin for listing use, which here would push
+   the count off the link's right padding. */
+.link-action .badge {
+  margin-right: 0;
+  margin-left: 7px;
+}
+
 .rail-group {
   margin-top: 8px;
 }

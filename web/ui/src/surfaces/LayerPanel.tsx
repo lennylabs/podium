@@ -248,9 +248,10 @@ export function LayerPanel({
             href={deletedLayersHref}
           >
             ↺ Recently unregistered
-            {recoverable.value === null || recoverable.value.length === 0
-              ? ""
-              : ` · ${String(recoverable.value.length)}`}
+            {recoverable.value === null ||
+            recoverable.value.length === 0 ? null : (
+              <Badge tone="quiet">{String(recoverable.value.length)}</Badge>
+            )}
           </a>
           <button
             type="button"
