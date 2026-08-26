@@ -11,6 +11,7 @@
 
 import {
   cleanup,
+  createEvent,
   fireEvent,
   render,
   screen,
@@ -7250,6 +7251,40 @@ describe("the command palette", () => {
     await screen.findByLabelText("Search");
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     fireEvent.keyDown(screen.getByTestId("palette"), { key: "Escape" });
+    expect(screen.queryByTestId("palette")).toBeNull();
+  });
+
+  // Closing the panel hands focus back to the header's search trigger, and a
+  // ⏎ the panel leaves uncancelled then activates that trigger as the
+  // browser's default action for the key: the panel reopens over the artifact
+  // or the search surface it just navigated to, still holding the query. Both
+  // arms consume the key, so both cancel it.
+  it("cancels the ⏎ it consumes so the trigger it returns focus to is not activated", async () => {
+    palettePage([{ id: "platform/review", type: "skill" }]);
+    render(<App />);
+    const trigger = await screen.findByTestId("search-trigger");
+    trigger.focus();
+    fireEvent.click(trigger);
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "review" },
+    });
+    await screen.findByTestId("palette-heading");
+    const open = createEvent.keyDown(panel, { key: "Enter" });
+    fireEvent(panel, open);
+    expect(open.defaultPrevented).toBe(true);
+    expect(window.location.hash).toBe("#/artifact/platform%2Freview");
+    expect(screen.queryByTestId("palette")).toBeNull();
+    // ⌘⏎ leaves through the same trigger, so it cancels the key as well.
+    fireEvent.click(screen.getByTestId("search-trigger"));
+    const reopened = screen.getByTestId("palette");
+    fireEvent.change(within(reopened).getByLabelText("Search artifacts"), {
+      target: { value: "review" },
+    });
+    const all = createEvent.keyDown(reopened, { key: "Enter", metaKey: true });
+    fireEvent(reopened, all);
+    expect(all.defaultPrevented).toBe(true);
+    expect(window.location.hash).toBe("#/search/review");
     expect(screen.queryByTestId("palette")).toBeNull();
   });
 

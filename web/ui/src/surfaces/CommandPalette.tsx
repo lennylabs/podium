@@ -99,13 +99,22 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         setIndex((at) => (rows.length === 0 ? 0 : (at + rows.length - 1) % rows.length));
         return;
       case 'Enter':
+        // Both arms navigate and close the panel, and closing it hands focus
+        // back to the control it was opened from. That control is the header's
+        // search trigger, and an uncancelled ⏎ activates whatever holds focus
+        // when the browser applies the key's default action: the panel reopens
+        // over the surface the reader just navigated to. The panel consumes
+        // ⏎, so it cancels it.
+        //
         // ⌘⏎ hands the same query to the search surface, which is the one
         // place the whole result set is listed.
         if (event.metaKey || event.ctrlKey) {
+          event.preventDefault();
           openSearch();
           return;
         }
         if (rows.length > 0) {
+          event.preventDefault();
           openRow(rows[Math.min(index, rows.length - 1)].id);
         }
         return;
