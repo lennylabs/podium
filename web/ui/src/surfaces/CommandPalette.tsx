@@ -112,6 +112,11 @@ function PalettePanel({
   // that points at nothing.
   const listed = typed !== '' && !results.loading && results.error === null && rows.length > 0;
   const at = listed ? Math.min(index, rows.length - 1) : -1;
+  // The no-match arm below offers one action, the handoff to the search
+  // surface, and the footer advertises ⏎ the whole time the panel is open. So
+  // ⏎ runs that one action on the arm that has no row to open, rather than
+  // being a key the legend names and nothing answers.
+  const offersSearch = typed !== '' && !results.loading && results.error === null && rows.length === 0;
 
   const openRow = (id: string) => {
     onRun(typed);
@@ -159,9 +164,14 @@ function PalettePanel({
           openSearch();
           return;
         }
-        if (rows.length > 0) {
+        if (listed) {
           event.preventDefault();
           openRow(rows[Math.min(index, rows.length - 1)].id);
+          return;
+        }
+        if (offersSearch) {
+          event.preventDefault();
+          openSearch();
         }
         return;
       default:

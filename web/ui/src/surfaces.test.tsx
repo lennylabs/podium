@@ -8265,6 +8265,23 @@ describe("the command palette", () => {
     expect(within(panel).queryByText(/permission/i)).toBeNull();
   });
 
+  // The footer advertises ⏎ for as long as the panel is open, so the arm with
+  // no row to open answers it with the one action it does offer, which is the
+  // handoff the visible button performs.
+  it("runs the query on the search surface when ⏎ has no row to open", async () => {
+    palettePage([], 0);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "nothingmatches" },
+    });
+    await screen.findByText(/Nothing matched “nothingmatches”/);
+    fireEvent.keyDown(panel, { key: "Enter" });
+    expect(screen.queryByTestId("palette")).toBeNull();
+    expect(window.location.hash).toBe("#/search/nothingmatches");
+  });
+
   // The no-match line quotes the query so a reader can see where it ends, and
   // it advises dropping a filter only when the line carries one to drop.
   it("quotes the query and withholds filter advice on a line with no filter", async () => {
