@@ -1347,12 +1347,32 @@ input[type="checkbox"] {
   max-width: 0;
 }
 
+/* A detail line is one row of two runs: the leading directories, which the
+   cell clips, and the final segment, which it holds out of the clip. Clipping
+   the whole line from the right left several layers under one parent
+   rendering the identical string, so the column stopped telling the rows
+   apart. The tail's automatic right margin takes the spare width while the
+   line fits, which keeps a short line against the left edge; where the tail
+   alone is wider than the cell, the margin resolves to zero, the end
+   alignment takes effect, and the line runs off the left edge rather than
+   losing the segment that identifies the row. */
 .source-detail {
-  display: block;
+  display: flex;
+  justify-content: flex-end;
   overflow: hidden;
   font-size: 11.5px;
-  text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.source-detail-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-detail-tail {
+  flex: none;
+  margin-right: auto;
 }
 
 /* The layer table lays its columns out to fixed proportions rather than to

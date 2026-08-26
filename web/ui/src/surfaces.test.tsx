@@ -3705,11 +3705,16 @@ describe("the layer panel", () => {
     const git = within(layerRow("acme-git-main"));
     expect(git.getByText("git")).toBeTruthy();
     expect(git.getByText("main")).toBeTruthy();
-    expect(git.getByText("git@github.com:acme/registry.git")).toBeTruthy();
-    expect(git.getByText("catalog/")).toBeTruthy();
+    // A detail line is split into the run the cell may clip and the run it
+    // always draws, so the value is read off the line rather than matched as
+    // one text node.
+    expect(details(layerRow("acme-git-main"))).toEqual([
+      "git@github.com:acme/registry.git",
+      "catalog/",
+    ]);
     const local = within(layerRow("alice-personal"));
     expect(local.getByText("local")).toBeTruthy();
-    expect(local.getByText("/Users/alice/registry")).toBeTruthy();
+    expect(details(layerRow("alice-personal"))).toEqual(["/Users/alice/registry"]);
   });
 
   // A local path or a repository URL can be far longer than the source
@@ -3743,8 +3748,84 @@ describe("the layer panel", () => {
     expect(detail?.getAttribute("title")).toBe(longPath);
     const style = window.getComputedStyle(detail as Element);
     expect(style.whiteSpace).toBe("nowrap");
-    expect(style.textOverflow).toBe("ellipsis");
     expect(style.overflow).toBe("hidden");
+    const head = window.getComputedStyle(
+      detail?.querySelector(".source-detail-head") as Element,
+    );
+    expect(head.textOverflow).toBe("ellipsis");
+  });
+
+  // Layers registered under one parent directory share every leading
+  // directory of their path, so a line clipped from the right rendered them
+  // as the same string and the source column stopped telling the rows apart.
+  // The segment that identifies the row is held out of the clip.
+  it("holds each source path's last segment out of the clip", async () => {
+    const parent = "/var/folders/q_/df6ygvl10fj4g162_ld1tkvw0000gn/T/registries";
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "finance",
+              SourceType: "local",
+              LocalPath: `${parent}/finance-shared`,
+              Order: 1,
+            },
+            {
+              ID: "eng",
+              SourceType: "local",
+              LocalPath: `${parent}/eng-shared`,
+              Order: 2,
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const tail = (id: string) =>
+      layerRow(id).querySelector(".source-detail-tail")?.textContent;
+    expect(tail("finance")).toBe("finance-shared");
+    expect(tail("eng")).toBe("eng-shared");
+    const head = (id: string) =>
+      layerRow(id).querySelector(".source-detail-head")?.textContent;
+    expect(head("finance")).toBe(`${parent}/`);
+  });
+
+  // A final segment wider than the column would be clipped at its own end by
+  // an ordinary clip, which loses exactly the characters the reader is
+  // scanning for, so the line runs off the left edge of the cell instead.
+  it("runs a source path off the left where its last segment fills the cell", async () => {
+    const longSegment = "a".repeat(60);
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "wide",
+              SourceType: "local",
+              LocalPath: `/srv/${longSegment}`,
+              Order: 1,
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const row = layerRow("wide");
+    expect(row.querySelector(".source-detail-tail")?.textContent).toBe(longSegment);
+    const line = window.getComputedStyle(
+      row.querySelector(".source-detail") as Element,
+    );
+    expect(line.justifyContent).toBe("flex-end");
+    expect(row.querySelector(".source-detail")?.getAttribute("title")).toBe(
+      `/srv/${longSegment}`,
+    );
   });
 
   // A source type is pluggable, so a type the panel has never seen still
@@ -6502,6 +6583,14 @@ function layerRow(id: string): HTMLElement {
     throw new Error(`no layer row for ${id}`);
   }
   return row;
+}
+
+/** details is the source cell's location lines on one row, each read whole
+ * across the run the cell may clip and the run it always draws. */
+function details(row: HTMLElement): string[] {
+  return Array.from(row.querySelectorAll(".source-detail"), (line) =>
+    (line.textContent ?? ""),
+  );
 }
 
 /** lastIngestCell is the Last ingest cell of one row, which the table

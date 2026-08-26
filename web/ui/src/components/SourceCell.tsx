@@ -75,15 +75,31 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
   );
 }
 
-/** Detail is one quiet location line under the source reference. The title
- * attribute repeats the value because the line is clipped where the column is
- * narrower than the value. */
+/** Detail is one quiet location line under the source reference. The line is
+ * split so that the clip falls on the leading directories and the identifying
+ * final segment is always drawn: several layers under one parent share every
+ * leading directory, and clipping from the right rendered them as the same
+ * string, which stops the column telling the rows apart. The title attribute
+ * repeats the whole value because the head is still clipped where the column
+ * is narrower than it. */
 function Detail({ value }: { value: string }) {
+  const { head, tail } = splitDetail(value);
   return (
     <div className="mono quiet source-detail" title={value}>
-      {value}
+      <span className="source-detail-head">{head}</span>
+      <span className="source-detail-tail">{tail}</span>
     </div>
   );
+}
+
+/** splitDetail divides a location line into the head the cell may clip and
+ * the tail it holds out of the clip. The tail is the value's final path
+ * segment, and a trailing separator travels with it so a root such as
+ * `artifacts/` reads whole. */
+export function splitDetail(value: string): { head: string; tail: string } {
+  const stripped = value.endsWith('/') ? value.slice(0, -1) : value;
+  const cut = stripped.lastIndexOf('/');
+  return { head: value.slice(0, cut + 1), tail: value.slice(cut + 1) };
 }
 
 /** sourceFields is the source-carrying members of the layer record that this

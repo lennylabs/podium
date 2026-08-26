@@ -504,15 +504,36 @@ describe("layer identifier cell", () => {
 // either of which can be several times the column's width. Wrapping one broke
 // it between characters over three or four lines and left the rows of one
 // table at unequal heights, so a detail line is clipped to one line instead.
-// The column asks the table for nothing of its own, so the clip narrows with
-// the viewport rather than pushing the columns beside it off the card.
+// The clip falls on the leading directories, because the final segment is
+// what tells two rows under one parent apart. The column asks the table for
+// nothing of its own, so the clip narrows with the viewport rather than
+// pushing the columns beside it off the card.
 describe("layer source cell", () => {
   it("clips a source detail line instead of breaking it mid-token", () => {
     const detail = styled("source-detail");
     expect(detail.whiteSpace).toBe("nowrap");
     expect(detail.overflow).toBe("hidden");
-    expect(detail.textOverflow).toBe("ellipsis");
     expect(detail.overflowWrap).not.toBe("anywhere");
+  });
+
+  it("takes the clip out of the head and never shrinks the tail", () => {
+    const detail = styled("source-detail");
+    expect(detail.display).toBe("flex");
+    const head = styled("source-detail-head");
+    expect(head.overflow).toBe("hidden");
+    expect(head.textOverflow).toBe("ellipsis");
+    expect(head.minWidth).toBe("0");
+    const tail = styled("source-detail-tail");
+    expect(tail.getPropertyValue("flex")).toBe("0 0 auto");
+  });
+
+  // A tail wider than the cell on its own has nowhere to shrink to. The
+  // automatic margin holds a line that fits against the left edge, and where
+  // one does not fit the end alignment runs it off the left edge instead of
+  // clipping the segment the reader is scanning for.
+  it("runs a line the tail alone overflows off the left edge", () => {
+    expect(styled("source-detail").justifyContent).toBe("flex-end");
+    expect(styled("source-detail-tail").marginRight).toBe("auto");
   });
 
   it("lets the source column take the width the other columns leave", () => {
