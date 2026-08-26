@@ -1,9 +1,12 @@
 package ingest
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"testing/fstest"
+
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 const ctxArtifactInternal = "---\n" +
@@ -76,4 +79,36 @@ func mapKeys(m map[string][]byte) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestLoadOne_MalformedFrontmatterIsInvalidArtifact covers
+// spec: §7.3.1 — a manifest the parser cannot decode is a fault in the layer's
+// content, so the walk error carries ErrInvalidArtifact. The server maps that
+// sentinel to a non-retryable ingest refusal; without it the failure falls
+// through to the unclassified default, which reports the registry as
+// unavailable and advises a retry that repeats the same parse failure.
+func TestLoadOne_MalformedFrontmatterIsInvalidArtifact(t *testing.T) {
+	t.Parallel()
+	const malformed = "---\n" +
+		"type: context\n" +
+		"version: 1.0.0\n" +
+		"description: d\n" +
+		"weird: [unclosed\n" +
+		"---\n\nbody\n"
+	fsys := fstest.MapFS{
+		"x/y/ARTIFACT.md": &fstest.MapFile{Data: []byte(malformed)},
+	}
+	_, err := loadOne(fsys, "x/y/ARTIFACT.md", "layer")
+	if err == nil {
+		t.Fatalf("loadOne accepted malformed YAML frontmatter")
+	}
+	if !errors.Is(err, ErrInvalidArtifact) {
+		t.Errorf("error %v does not wrap ErrInvalidArtifact", err)
+	}
+	if !errors.Is(err, manifest.ErrInvalidYAML) {
+		t.Errorf("error %v lost the underlying parse cause", err)
+	}
+	if !strings.Contains(err.Error(), "x/y") {
+		t.Errorf("error %q does not name the offending artifact", err)
+	}
 }

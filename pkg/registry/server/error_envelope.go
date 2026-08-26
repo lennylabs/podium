@@ -50,6 +50,16 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	"ingest.immutable_violation": {
 		suggestedAction: "Bump the artifact version; an existing version's content is immutable.",
 	},
+	// spec §7.3.1 ingest-cases: "Lint failure | Rejected as
+	// ingest.lint_failed. The artifact remains at its previous version (if
+	// any)." The refusal is a fault in the layer's content, so reingesting the
+	// same source repeats it; the remediation is to correct the artifact the
+	// message names. This is the code an unparseable manifest carries, and the
+	// hint is what keeps that refusal off the registry-availability
+	// remediation.
+	"ingest.lint_failed": {
+		suggestedAction: "Correct the artifact the message names in the layer's source, then reingest; the same source fails identically until it is fixed.",
+	},
 	// Hard caps: retrying without operator action does not succeed.
 	"quota.layer_count_exceeded": {
 		suggestedAction: "Remove an existing user-defined layer or raise the tenant's layer quota.",

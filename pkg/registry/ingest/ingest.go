@@ -1085,6 +1085,23 @@ func newlyUnlistedAdvisory(dr store.DomainRecord, prevRaw string, seen bool) *li
 	}
 }
 
+// invalidArtifactError carries a manifest-parse failure under
+// ErrInvalidArtifact without spelling the sentinel into the message. The
+// message is the operator-facing text, and it already names the artifact and
+// the parse position; repeating the code there would duplicate the envelope's
+// own code field.
+type invalidArtifactError struct{ cause error }
+
+func (e invalidArtifactError) Error() string   { return e.cause.Error() }
+func (e invalidArtifactError) Unwrap() []error { return []error{ErrInvalidArtifact, e.cause} }
+
+// invalidArtifact classifies a manifest the parser cannot decode as a fault in
+// the layer's content. spec: §7.3.1 — the refusal is an ingest rejection of the
+// artifact. Without the sentinel the failure reaches the server's unclassified
+// default, which reports the registry as unavailable and advises a retry that
+// reproduces the same parse failure until the source is corrected.
+func invalidArtifact(cause error) error { return invalidArtifactError{cause: cause} }
+
 func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecord, error) {
 	dir := dirOf(artifactPath)
 	id := dirToCanonical(dir)
@@ -1101,7 +1118,7 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 	}
 	a, err := manifest.ParseArtifact(bytes)
 	if err != nil {
-		return filesystem.ArtifactRecord{}, fmt.Errorf("%s: %w", id, err)
+		return filesystem.ArtifactRecord{}, fmt.Errorf("%s: %w", id, invalidArtifact(err))
 	}
 	rec := filesystem.ArtifactRecord{
 		ID:            id,
@@ -1118,7 +1135,7 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		}
 		s, err := manifest.ParseSkill(skillBytes)
 		if err != nil {
-			return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, err)
+			return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, invalidArtifact(err))
 		}
 		rec.Skill = s
 		rec.SkillBytes = skillBytes
