@@ -15,8 +15,8 @@ import { describe, expect, it } from 'vitest';
 import { ArtifactBody } from './components/ArtifactBody';
 import { PropertyTable } from './components/PropertyTable';
 
-function renderBody(body: string): HTMLElement {
-  return render(<ArtifactBody body={body} />).container;
+function renderBody(body: string, resources: readonly string[] = []): HTMLElement {
+  return render(<ArtifactBody body={body} resources={resources} />).container;
 }
 
 /** attributeValues returns every attribute value on every element rendered,
@@ -96,12 +96,17 @@ describe('the sanitized artifact-body rendering path', () => {
 
   // A relative URL carries no scheme, and the allowlist admits it. The
   // forms a manifest's own links take are a path, a bare filename, a query,
-  // and a fragment, and a value whose leading run cannot open a scheme.
+  // and a fragment, and a value whose leading run cannot open a scheme. The
+  // clause is that the anchor keeps a destination; where that destination is
+  // a cross-artifact prose reference, the routing pass rewrites it to this
+  // UI's own route, so the clause is asserted as a destination that survived
+  // rather than as the authored value.
   it('keeps a relative URL', () => {
     const relative = ['/docs/a.md', 'sibling.md', './nested/b.md', '?version=2', '#section', '1abc:not-a-scheme'];
     for (const url of relative) {
-      const container = renderBody(`[Go](${url})\n`);
-      expect(container.querySelector('a')?.getAttribute('href')).toBe(url);
+      const anchor = renderBody(`[Go](${url})\n`).querySelector('a');
+      expect(anchor?.getAttribute('href')).not.toBe(null);
+      expect(anchor?.classList.contains('link-stripped')).toBe(false);
     }
   });
 
@@ -234,5 +239,37 @@ describe('the sanitized artifact-body rendering path', () => {
     expect(container.querySelector('img')).toBeNull();
     expect(container.querySelector('[onerror]')).toBeNull();
     expect(container.textContent).toContain('<img src=x onerror="window.hijacked=1">');
+  });
+});
+
+// A §4.4 prose reference names another artifact by its canonical ID, written
+// as a relative markdown link, and `lint.prose_reference` admits that form.
+// Left as authored the browser resolves it against the `/ui/` mount and the
+// reader leaves the SPA for the registry's plain-text 404, so the viewer
+// routes it to the artifact route the relations rail builds for the same
+// target (§13.10).
+describe('a cross-artifact prose reference in the body', () => {
+  it('routes to the artifact the reference names', () => {
+    const container = renderBody('See [the base](legal/base-policy).\n');
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('#/artifact/legal%2Fbase-policy');
+  });
+
+  it('routes a reference written with a leading ./ and a version pin', () => {
+    const container = renderBody('See [the base](./legal/base-policy@1.2.0).\n');
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('#/artifact/legal%2Fbase-policy');
+  });
+
+  it('leaves a bundled file, an anchor, and an absolute URL as authored', () => {
+    const container = renderBody(
+      'A [file](reference.md), an [anchor](#section), and a [page](https://example.com/a).\n',
+      ['reference.md'],
+    );
+    const hrefs = [...container.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href'));
+    expect(hrefs).toEqual(['reference.md', '#section', 'https://example.com/a']);
+  });
+
+  it('leaves a reference that escapes the artifact package as authored', () => {
+    const container = renderBody('See [outside](../elsewhere).\n');
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('../elsewhere');
   });
 });

@@ -7,8 +7,14 @@ import { useMemo } from 'react';
 
 import { renderArtifactBody } from '../markdown';
 
-export function ArtifactBody({ body }: { body: string }) {
-  const markup = useMemo(() => renderArtifactBody(body), [body]);
+/** noResources is the default bundle, held as one value so a caller that
+ * passes none does not invalidate the memo below on every render. */
+const noResources: readonly string[] = [];
+
+export function ArtifactBody({ body, resources = noResources }: { body: string; resources?: readonly string[] }) {
+  // The bundled file names decide whether a relative §4.4 prose reference
+  // names one of them or another artifact, and only the second is routed.
+  const markup = useMemo(() => renderArtifactBody(body, resources), [body, resources]);
   if (markup.trim() === '') {
     // A manifest carrying frontmatter and nothing else is a finished
     // document, and so is one whose only content the sanitizer removed. The

@@ -19,6 +19,8 @@
 import DOMPurify from 'dompurify';
 import { marked } from 'marked';
 
+import { artifactHref } from './route';
+
 // allowedURI admits an http, https, or mailto URL and a URL carrying no
 // scheme at all, which is what a relative link inside a manifest looks like.
 // Every other scheme, javascript: and data: among them, fails the test and
@@ -158,12 +160,69 @@ function replaceStrippedImages(root: DocumentFragment): void {
   }
 }
 
+// A §4.4 prose reference is written as an ordinary relative markdown link,
+// and `lint.prose_reference` admits one only when it resolves to a file the
+// artifact bundles or to another artifact's canonical ID. The second form is
+// the one an author is directed to write for a cross-artifact reference, and
+// left as authored the browser resolves it against the `/ui/` mount, where
+// the registry serves no such path: following it leaves the SPA for a
+// plain-text 404 and the shell disappears. So a reference that names no
+// bundled file is rewritten to the artifact route, which is the route the
+// relations rail already builds for the same target.
+//
+// The pass runs on the sanitizer's output, so it only ever sees an anchor
+// whose href the allowlist already admitted, and it rewrites that href to a
+// hash route on this same document.
+
+/** referenceScheme is the RFC 3986 scheme production. A reference carrying
+ * one addresses something outside this registry and is left as authored. */
+const referenceScheme = /^[a-z][a-z0-9+.\-]*:/i;
+
+/** artifactReference returns the artifact ID a relative href names, or null
+ * when the href names something this UI has no route for: a fragment, a
+ * root-relative path, an absolute URL, a file the artifact bundles, or one of
+ * the artifact's own manifest files. It mirrors the resolution order
+ * `lint.prose_reference` applies, so the viewer routes exactly the references
+ * the linter resolves to another artifact. */
+function artifactReference(href: string, resources: ReadonlySet<string>): string | null {
+  const trimmed = href.trim();
+  if (trimmed === '' || trimmed.startsWith('#') || trimmed.startsWith('/') || referenceScheme.test(trimmed)) {
+    return null;
+  }
+  // A query or a fragment is not part of an artifact ID, and neither is a
+  // §4.7.6 version pin, which the linter strips before the catalog lookup.
+  const target = trimmed.split(/[?#]/, 1)[0].replace(/^\.\//, '');
+  if (target === '' || target === '.' || target === '..' || target.startsWith('../')) {
+    return null;
+  }
+  if (resources.has(target) || target === 'ARTIFACT.md' || target === 'SKILL.md') {
+    return null;
+  }
+  const pin = target.indexOf('@');
+  const id = pin < 0 ? target : target.slice(0, pin);
+  return id === '' ? null : id;
+}
+
+/** routeArtifactReferences rewrites every cross-artifact prose reference in
+ * the rendered body to the viewer's own route. */
+function routeArtifactReferences(root: DocumentFragment, resources: ReadonlySet<string>): void {
+  for (const anchor of root.querySelectorAll('a[href]')) {
+    const id = artifactReference(anchor.getAttribute('href') ?? '', resources);
+    if (id !== null) {
+      anchor.setAttribute('href', artifactHref(id));
+    }
+  }
+}
+
 /**
  * renderArtifactBody renders an artifact's markdown body to sanitized markup.
  * The return value is the only markup this UI hands to the browser as markup,
  * and it is safe to insert because it has been through the sanitizer here.
+ *
+ * `resources` names the files the artifact bundles, which is what decides
+ * whether a relative reference names a bundled file or another artifact.
  */
-export function renderArtifactBody(body: string): string {
+export function renderArtifactBody(body: string, resources: readonly string[] = []): string {
   const rendered = marked.parse(body, { async: false, gfm: true }) as string;
   const sanitized = DOMPurify.sanitize(rendered, {
     // The HTML profile drops SVG and MathML, which no markdown renderer
@@ -185,6 +244,7 @@ export function renderArtifactBody(body: string): string {
     RETURN_DOM_FRAGMENT: true,
   });
   replaceStrippedImages(sanitized);
+  routeArtifactReferences(sanitized, new Set(resources));
   const holder = document.createElement('div');
   holder.append(sanitized);
   return holder.innerHTML;

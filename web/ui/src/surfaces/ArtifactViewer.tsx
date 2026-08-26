@@ -9,7 +9,7 @@
 // Authored source, and Resources, and each one disappears where the artifact
 // carries nothing for it rather than standing an empty panel in the layout.
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import type { KeyboardEvent } from 'react';
 
@@ -364,7 +364,10 @@ function Manifest({
 }) {
   const { body, frontmatter } = document;
   const skillRaw = artifact.skill_raw ?? '';
-  const resources = resourceRows(artifact);
+  // Both memos hold across a re-render that leaves the response alone, so the
+  // rendered body is not re-sanitized every time a tab changes.
+  const resources = useMemo(() => resourceRows(artifact), [artifact]);
+  const resourceNames = useMemo(() => resources.map((row) => row.name), [resources]);
   // The frontmatter block is parsed here rather than inside the panel,
   // because the tab badge reports the parse failure and the tab is drawn
   // before the panel it opens.
@@ -436,7 +439,7 @@ function Manifest({
         ))}
       </div>
       <div role="tabpanel" id={`panel-${open}`} aria-labelledby={`tab-${open}`}>
-        {open === 'rendered' && <ArtifactBody body={body} />}
+        {open === 'rendered' && <ArtifactBody body={body} resources={resourceNames} />}
         {open === 'frontmatter' && <PropertyTable raw={frontmatter} offerRaw />}
         {open === 'source' && <AuthoredSource name="SKILL.md" value={skillRaw} />}
         {open === 'resources' && <ResourceTable rows={resources} />}
