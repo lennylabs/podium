@@ -1387,6 +1387,48 @@ describe("the artifact viewer", () => {
     expect(within(title as HTMLElement).queryByText(/sensitivity/)).toBeNull();
   });
 
+  // A skill omits `description` from ARTIFACT.md and declares it in the
+  // authored SKILL.md instead (§4.3.4), which load_artifact returns under
+  // skill_raw. A header that reads the manifest frontmatter alone states no
+  // description for any skill, while the listing that linked to the page
+  // states one.
+  //
+  // Spec: §4.3.4
+  it("states a skill's description from the authored file where the manifest omits it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "finance/accounts-payable/pay-invoice",
+          type: "skill",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Pay an invoice\n",
+          frontmatter:
+            "---\ntype: skill\nversion: 2.3.0\nsensitivity: low\n---\n",
+          skill_raw:
+            "---\nname: pay-invoice\ndescription: Pay a supplier invoice.\n---\n\n# Pay an invoice\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/finance%2Faccounts-payable%2Fpay-invoice");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const heading = within(
+      screen.getByLabelText("Artifact viewer"),
+    ).getAllByRole("heading", { level: 1 })[0];
+    const content = heading.closest(".artifact-content") as HTMLElement;
+    const lead = within(content).getByText("Pay a supplier invoice.");
+    expect(lead.className).toBe("lead");
+    // The description stands between the identifier line and the version
+    // picker, which is where the header states it for every other type.
+    const identifier = within(content).getByText(
+      "finance/accounts-payable/pay-invoice",
+    );
+    expect(identifier.nextElementSibling).toBe(lead);
+  });
+
   // A classification value states a level and never the axis it measures, so
   // "internal" beside the type and the version reads as one more unnamed
   // property of the artifact. The badge names the axis and carries the weight

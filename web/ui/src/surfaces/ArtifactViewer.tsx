@@ -93,7 +93,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
       ? { body: body.manifest_body, frontmatter: body.frontmatter }
       : { body: split.body, frontmatter: body.frontmatter === '' ? split.frontmatter : body.frontmatter };
 
-  const description = descriptionOf(document.frontmatter);
+  const description = descriptionOf(document.frontmatter, body.skill_raw ?? '');
 
   return (
     <section className="surface artifact-viewer" aria-label="Artifact viewer">
@@ -178,10 +178,20 @@ function domainOf(id: string): string {
 
 /** descriptionOf is the artifact's own description, which the header states
  * under the title. load_artifact reports no description field of its own, so
- * it is read from the frontmatter the response carries, and a block that
- * declares none yields nothing rather than a placeholder. */
-function descriptionOf(frontmatter: string): string {
-  const found = parseFrontmatter(frontmatter).properties.find((property) => property.key === 'description');
+ * it is read from the frontmatter the response carries. A skill omits the
+ * field from its manifest and declares it in the authored SKILL.md instead
+ * (§4.3.4), which the response carries separately, so that block is read
+ * where the manifest declares none. An artifact declaring it in neither
+ * yields nothing rather than a placeholder. */
+function descriptionOf(frontmatter: string, skillRaw: string): string {
+  const declared = declaredDescription(frontmatter);
+  return declared === '' ? declaredDescription(skillRaw) : declared;
+}
+
+/** declaredDescription is the description a manifest document's frontmatter
+ * block declares, or nothing where it declares none. */
+function declaredDescription(document: string): string {
+  const found = parseFrontmatter(document).properties.find((property) => property.key === 'description');
   return found?.value ?? '';
 }
 
