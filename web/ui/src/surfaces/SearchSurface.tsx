@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 
 import { ArtifactRow } from "../components/ArtifactRow";
-import { EmptyState, ErrorState, Loading, Magnifier } from "../components/primitives";
+import { Chevron, EmptyState, ErrorState, Loading, Magnifier } from "../components/primitives";
 import type { SearchFilters, SearchResponse } from "../api";
 import { loadDomain, searchArtifacts } from "../api";
 import { scopePaths } from "../domain";
@@ -213,8 +213,18 @@ function FilterSelect({
   options: string[];
   onSelect: (value: string) => void;
 }) {
+  // A native select is as wide as its widest option, so the scope control
+  // stretched to the deepest domain path in the catalog and left a dead gap
+  // between its label and its indicator. The pill draws the closed label and
+  // the chevron itself, which takes the width from the label, and the select
+  // is laid over the pill transparently so the control the reader operates is
+  // still the browser's own.
   return (
     <span className="pill pill-select">
+      <span className="pill-select-label" aria-hidden="true">
+        {label}: all
+      </span>
+      <Chevron />
       <select
         aria-label={`Filter by ${label}`}
         value=""

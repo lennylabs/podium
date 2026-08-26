@@ -414,6 +414,35 @@ describe("command palette header", () => {
   });
 });
 
+// A native select takes its width from its widest option, so the scope filter
+// stretched to the deepest domain path the catalog holds. The pill draws the
+// closed label itself and takes the select out of flow, so the width comes
+// from the label and the option list contributes none of it.
+describe("filter dropdown", () => {
+  /** filterSelect attaches the closed filter pill and returns it beside its
+   * select. */
+  function filterSelect(): { pill: HTMLElement; select: Element } {
+    const pill = document.createElement("span");
+    pill.className = "pill pill-select";
+    const select = document.createElement("select");
+    pill.appendChild(select);
+    document.body.appendChild(pill);
+    mounted.push(pill);
+    return { pill, select };
+  }
+
+  it("takes the option list out of the pill's width", () => {
+    const { pill, select } = filterSelect();
+    expect(window.getComputedStyle(select).position).toBe("absolute");
+    expect(window.getComputedStyle(select).opacity).toBe("0");
+    expect(window.getComputedStyle(pill).position).toBe("relative");
+  });
+
+  it("carries the focus ring on the pill, because the select is transparent", () => {
+    expect(selectors()).toContain(".pill-select:has(select:focus-visible)");
+  });
+});
+
 /** selectors is every selector the stylesheet carries, which is how a case
  * asserts the absence of a rule for a state no attached element matches. */
 function selectors(): string[] {

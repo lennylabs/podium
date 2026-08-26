@@ -102,6 +102,22 @@ export function Magnifier({ size = 13 }: { size?: number }) {
   );
 }
 
+/**
+ * Chevron is the small right-pointing indicator the shell draws beside a
+ * control that leads somewhere or opens something. It is drawn rather than
+ * typed so it takes its colour from the text beside it, and the element it
+ * sits in rotates it where it points another way.
+ *
+ * Spec: §13.10
+ */
+export function Chevron() {
+  return (
+    <svg className="chevron" viewBox="0 0 10 10" aria-hidden="true">
+      <path d="M3 1.5L7 5l-4 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }

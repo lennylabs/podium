@@ -5,7 +5,7 @@
 import { ArtifactTable, SubdomainTiles } from './DomainAtScale';
 import { ArtifactRow } from '../components/ArtifactRow';
 import { Breadcrumb } from '../components/Breadcrumb';
-import { Badge, EmptyState, ErrorPage, Loading } from '../components/primitives';
+import { Badge, Chevron, EmptyState, ErrorPage, Loading } from '../components/primitives';
 import type { DomainDescriptor } from '../api';
 import { catalogArtifactIDs, loadDomain } from '../api';
 import {
@@ -308,12 +308,3 @@ function SubdomainCounts({
     </div>
   );
 }
-
-function Chevron() {
-  return (
-    <svg className="chevron" viewBox="0 0 10 10" aria-hidden="true">
-      <path d="M3 1.5L7 5l-4 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-

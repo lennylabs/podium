@@ -1140,23 +1140,48 @@ input[type="checkbox"] {
 }
 
 /* An enumerable filter is added from a dropdown drawn as the outlined pill
-   its applied state replaces. The native indicator is left in place: the
-   control is the width of its own text, so the pill has no room to draw a
-   chevron of its own beside it. */
+   its applied state replaces. A native select is as wide as its widest option,
+   so the scope control stretched to the deepest domain path in the catalog and
+   opened a dead gap between its label and its indicator. The pill draws the
+   closed label and the chevron itself, which sets the width from the label,
+   and the select is laid over the pill transparently so the reader still
+   operates the browser's own control and its popup list. */
 .pill-select {
-  padding: 0;
+  position: relative;
+  gap: 7px;
   border-color: var(--bd);
   color: var(--meta);
 }
 
 .pill-select select {
-  padding: 2px 4px 2px 10px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
   border: none;
   border-radius: 100px;
   background: none;
-  color: inherit;
   font: inherit;
+  opacity: 0;
+}
+
+.pill-select-label {
   font-size: 12.5px;
+}
+
+.pill-select .chevron {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  transform: rotate(90deg);
+}
+
+/* The focus ring the shell draws everywhere else lands on the select, which is
+   transparent, so the pill carries it on the select's behalf. */
+.pill-select:has(select:focus-visible) {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
 }
 
 .pill-entry input {

@@ -1812,6 +1812,45 @@ describe("search", () => {
     });
   });
 
+  // A native select is as wide as its widest option, so a catalog carrying a
+  // deep domain path stretched the scope control to that path and left a gap
+  // between the label and the indicator. The closed pill draws its own label,
+  // which is what sets its width, and the option list stays behind it.
+  it("draws the closed dropdown's own label so the option list does not set its width", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            {
+              path: "finance/accounts-payable/invoicing/settlement",
+              name: "settlement",
+            },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/");
+    render(<App />);
+    const scope = await screen.findByLabelText("Filter by scope");
+    const pill = scope.closest(".pill-select");
+    expect(pill).not.toBeNull();
+    const drawn = pill?.querySelector(".pill-select-label");
+    expect(drawn?.textContent).toBe("scope: all");
+    expect(drawn?.getAttribute("aria-hidden")).toBe("true");
+    // The label the pill draws is the closed state of the control, so it is
+    // the short one rather than the deepest path the list offers.
+    expect(
+      within(scope)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toContain("scope: finance/accounts-payable/invoicing/settlement");
+    expect(pill?.querySelector(".chevron")).not.toBeNull();
+  });
+
   // A §4.5.5 sparse chain reaches the root listing folded into one entry, so
   // the domains it crossed appear in no response field of their own. Each is
   // a page the browser navigates to and a prefix the search matches, so the
