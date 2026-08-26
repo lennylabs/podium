@@ -1754,7 +1754,9 @@ label:has(> input:disabled) {
 }
 
 /* The depleting bar. It draws how much of the recovery window is left, and
-   the row states the same count in words beside it. */
+   the row states the same count in words beside it. The fill is neutral for
+   as long as the window is comfortable, so the accent is left to mean the
+   layer is close to erasure rather than to mean the row exists. */
 .depleting {
   display: block;
   width: 120px;
@@ -1763,9 +1765,13 @@ label:has(> input:disabled) {
   border-radius: 100px;
   background: linear-gradient(
     to right,
-    var(--acc) var(--remaining),
+    var(--depleting-fill, var(--meta)) var(--remaining),
     var(--b2) var(--remaining)
   );
+}
+
+.depleting-urgent {
+  --depleting-fill: var(--acc);
 }
 
 .secret-reveal {

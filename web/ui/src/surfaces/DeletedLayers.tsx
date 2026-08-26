@@ -121,12 +121,15 @@ function DeletedRow({
           <span className="quiet">The registry reported no erase date.</span>
         ) : (
           <>
-            <span className="mono">{window.erases}</span>{' '}
-            <span className={window.left <= accentDays ? 'accent' : 'quiet'} data-testid={`days-left-${layer.ID}`}>
+            {/* The date, the count, and the bar carry the same urgency, so a
+                row about to be erased reads as one accented unit rather than
+                as a bar that is accent on every row. */}
+            <span className={window.urgent ? 'mono accent' : 'mono'}>{window.erases}</span>{' '}
+            <span className={window.urgent ? 'accent' : 'quiet'} data-testid={`days-left-${layer.ID}`}>
               {window.left} days left
             </span>
             <span
-              className="depleting"
+              className={window.urgent ? 'depleting depleting-urgent' : 'depleting'}
               role="presentation"
               style={{ ['--remaining' as string]: `${String(window.remaining)}%` }}
             />
@@ -155,6 +158,9 @@ interface RecoveryWindow {
   /** remaining is how much of the window is left, as a percentage, which is
    * what the depleting bar draws. */
   remaining: number;
+  /** urgent is whether the window is inside the accent threshold, which the
+   * date, the count, and the bar all read to decide their tone. */
+  urgent: boolean;
 }
 
 /** recoveryWindow derives the row's dates from the tombstone the record
@@ -173,5 +179,6 @@ function recoveryWindow(layer: LayerRecord): RecoveryWindow | null {
     erases: erasesOn(at),
     left,
     remaining: Math.round((left / recoveryDays) * 100),
+    urgent: left <= accentDays,
   };
 }

@@ -4557,6 +4557,49 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The accent is what the surface reserves for a layer about to be erased,
+  // so a row with most of its window left draws its bar in the neutral tone
+  // and only a row inside the threshold turns the date, the count, and the
+  // bar accent together.
+  it("accents the erase clock only inside the threshold", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ...userLayer(),
+              ID: "alice-roomy",
+              DeletedAt: new Date(Date.now() - day / 2).toISOString(),
+            },
+            {
+              ...userLayer(),
+              ID: "alice-expiring",
+              DeletedAt: new Date(Date.now() - 28 * day).toISOString(),
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    await screen.findByLabelText("Recently unregistered");
+
+    const [roomy, expiring] = Array.from(
+      document.querySelectorAll(".depleting"),
+    );
+    expect(screen.getByTestId("days-left-alice-roomy").textContent).toBe(
+      "29 days left",
+    );
+    expect(roomy.className).not.toContain("depleting-urgent");
+
+    expect(screen.getByTestId("days-left-alice-expiring").textContent).toBe(
+      "1 days left",
+    );
+    expect(expiring.className).toContain("depleting-urgent");
+  });
+
   // The recovery surface is a page of its own under the panel. It carries a
   // table and the panel carries another, so rendered together the reader gets
   // two stacked tables and the precedence label and the layer rows are pushed
