@@ -1726,7 +1726,7 @@ describe("the domain browser", () => {
     expect(within(trail).queryByRole("link")).toBeNull();
   });
 
-  it("titles the registry root, which has no leaf segment", async () => {
+  it("titles the registry root for what it holds, having no leaf segment", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": { body: emptyDomain },
@@ -1734,8 +1734,54 @@ describe("the domain browser", () => {
     render(<App />);
     const browser = await screen.findByLabelText("Domain browser");
     expect(within(browser).getByRole("heading", { level: 1 }).textContent).toBe(
-      "Registry root",
+      "All domains",
     );
+  });
+
+  // §4.5.5 fixes that the root carries no description, so the entry screen
+  // states what the root is rather than reporting the absence as it would for
+  // a domain whose author left one out.
+  it("states what the registry root is instead of reporting a missing description", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    await screen.findByLabelText("Domain browser");
+    expect(
+      screen.getByText(
+        "This is the top of the domain hierarchy, and every domain the registry holds sits below it.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("This domain carries no description.")).toBeNull();
+  });
+
+  // Every visible artifact sits under the root, so the entry screen's own
+  // count is the §4.5.2 catalog rather than the artifacts the empty path
+  // holds directly, of which a registry organized into domains has none.
+  it("counts the whole catalog and the top-level domains in the root header", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/catalog": { body: catalogOf(312) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            { path: "eng", name: "eng" },
+            { path: "finance/ap", name: "ap" },
+          ],
+          notable: [],
+        },
+      },
+    });
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const head = within(browser).getByRole("heading", { level: 1 })
+      .parentElement;
+    expect(head?.textContent).toBe("All domains312 ARTIFACTS2 DOMAINS");
+    // The catalog count heads the page without continuing the listing: those
+    // artifacts sit under the subdomains rather than past a trimmed edge.
+    expect(screen.queryByTestId("listing-continuation")).toBeNull();
   });
 
   // The counts qualify the domain name, so they sit on the title's line in
@@ -1779,7 +1825,7 @@ describe("the domain browser", () => {
     render(<App />);
     const browser = await screen.findByLabelText("Domain browser");
     const head = within(browser).getByRole("heading", { level: 1 }).parentElement;
-    expect(head?.textContent).toBe("Registry root1 SUBDOMAIN");
+    expect(head?.textContent).toBe("All domains1 DOMAIN");
   });
 
   it("renders a domain that carries neither subdomains nor artifacts as a finished page", async () => {

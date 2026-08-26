@@ -33,10 +33,16 @@ const atScale = 20;
 /** leafName is what the page is titled. The breadcrumb above the title already
  * carries the ancestry, so repeating the whole slash-separated path in the h1
  * states the reader's position twice and runs the title off the content column
- * on a deep domain. The registry root has no leaf and is named instead. */
+ * on a deep domain.
+ *
+ * The registry root has no leaf and is named for what it holds. §4.5.5 records
+ * that the root carries no description and no author-curated entries, so a
+ * title that named the position alone would head a screen whose every other
+ * part is a domain-shaped absence, and the entry screen would read as an empty
+ * domain instead of the top of the hierarchy. */
 function leafName(path: string): string {
   if (path === '') {
-    return 'Registry root';
+    return 'All domains';
   }
   const segments = path.split('/');
   return segments[segments.length - 1];
@@ -83,6 +89,15 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
   const total = held !== null && held > direct.length ? held : null;
   const trimmed = total !== null || (body.note !== undefined && body.note !== '');
   const compact = body.subdomains.length > atScale;
+  const root = body.path === '';
+  // The root's artifact badge counts the whole catalog rather than what the
+  // empty path holds directly. §4.5.2 returns every visible ID under the
+  // scope, and at the root that scope is the registry, so a count of direct
+  // children alone reads as zero on a registry that holds thousands. The
+  // figure stays out of `total`, which drives the trimmed-listing line: the
+  // root's listing is not a truncated view of those artifacts, they sit under
+  // the subdomains the page already links to.
+  const catalogHeld = catalog.value === null ? 0 : catalog.value.length;
 
   return (
     <section className="surface" aria-label="Domain browser">
@@ -95,13 +110,21 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
               two agree wherever nothing was trimmed, and the listing wins
               where it carries entries the catalog does not count as direct
               children, which is the folded group. */}
-          <CountBadge count={Math.max(body.notable.length, total ?? 0)} noun="artifact" />
-          <CountBadge count={body.subdomains.length} noun="subdomain" />
+          <CountBadge count={root ? catalogHeld : Math.max(body.notable.length, total ?? 0)} noun="artifact" />
+          {/* Nothing is a subdomain of the root, so the entry screen counts
+              the top-level domains by that name. */}
+          <CountBadge count={body.subdomains.length} noun={root ? 'domain' : 'subdomain'} />
           {trimmed && <Badge tone="accent">listing trimmed</Badge>}
         </div>
       </div>
+      {/* A domain with no description of its own is told it carries none. The
+          root is told what it is instead: §4.5.5 fixes that the root has no
+          description to carry, so reporting the absence states a defect where
+          there is none. */}
       {body.description !== undefined && body.description !== '' ? (
         <p className="lead">{body.description}</p>
+      ) : root ? (
+        <p className="quiet lead">This is the top of the domain hierarchy, and every domain the registry holds sits below it.</p>
       ) : (
         <p className="quiet lead">This domain carries no description.</p>
       )}
