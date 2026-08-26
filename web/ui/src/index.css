@@ -213,9 +213,14 @@ h3 {
   flex: 1;
 }
 
+/* The content column is minmax(0, 1fr) rather than 1fr because a grid track's
+   automatic minimum is its min-content width, which lets a wide table or a
+   long identifier push the column past the viewport and scroll the whole
+   document sideways. A zero minimum keeps the column inside the shell and
+   leaves the overflow to the containers that already scroll. */
 .app-body {
   display: grid;
-  grid-template-columns: 268px 1fr;
+  grid-template-columns: 268px minmax(0, 1fr);
   min-height: calc(100vh - 52px);
 }
 
@@ -310,6 +315,7 @@ h3 {
 .content {
   padding: 26px 30px 40px;
   max-width: 1120px;
+  min-width: 0;
 }
 
 .breadcrumb {
@@ -987,13 +993,18 @@ button,
    title rather than being pushed down the page by the controls. */
 .panel-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   gap: 20px;
   margin-bottom: 18px;
 }
 
+/* The title column asks for 320px before the row wraps, so a column too
+   narrow to hold the title beside the controls drops the controls to a line
+   of their own rather than squeezing the description to a few words a line. */
 .panel-head > :first-child {
   min-width: 0;
+  flex: 1 1 320px;
 }
 
 .panel-actions {
@@ -1040,7 +1051,7 @@ button,
    beside it, on the inset ground with a hairline divider. */
 .artifact-viewer {
   display: grid;
-  grid-template-columns: 1fr 316px;
+  grid-template-columns: minmax(0, 1fr) 316px;
   gap: 26px;
 }
 
@@ -1048,6 +1059,21 @@ button,
   padding: 18px 16px;
   background: var(--surf2);
   border-left: 1px solid var(--bd);
+}
+
+/* The rail is a fixed 316px, so under about 1100px of viewport the column
+   beside it holds less than 300px and the rendered markdown stops being
+   readable. The rail moves under the content there and carries its divider
+   on its top edge. */
+@media (max-width: 1100px) {
+  .artifact-viewer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .artifact-rail {
+    border-left: 0;
+    border-top: 1px solid var(--bd);
+  }
 }
 
 .artifact-rail section {
