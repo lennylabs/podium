@@ -2205,6 +2205,113 @@ describe("search", () => {
     expect(screen.queryByText(/score 8/)).toBeNull();
   });
 
+  // Spec: §13.10 — a truncated result list reaches the results the cap
+  // withheld. §5 search takes a result count and no offset, so the
+  // continuation raises `top_k` on the same request, and it stops at the
+  // largest count the endpoint serves rather than issuing a request §5
+  // refuses. Past that the recovery line stands alone.
+  it("continues a truncated result list up to the largest count search serves", async () => {
+    const hits = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `platform/svc${String(i + 1)}`,
+        type: "skill",
+        score: 9 - i * 0.01,
+      }));
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts?query=review&top_k=10": {
+        body: { total_matched: 143, results: hits(10) },
+      },
+      "/v1/search_artifacts?query=review&top_k=30": {
+        body: { total_matched: 143, results: hits(30) },
+      },
+      "/v1/search_artifacts?query=review&top_k=50": {
+        body: { total_matched: 143, results: hits(50) },
+      },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    expect((await screen.findByTestId("result-count")).textContent).toBe(
+      "Showing 10 of 143",
+    );
+    const foot = screen.getByTestId("search-continuation");
+    // The caption sits with the control, so the reader reads the order the
+    // withheld results arrive in beside the control that asks for them.
+    expect(within(foot).getByText("Ranked by relevance.")).toBeTruthy();
+    fireEvent.click(within(foot).getByRole("button", { name: "Load 20 more" }));
+    await waitFor(() => {
+      expect(lastSearch().get("top_k")).toBe("30");
+    });
+    expect((await screen.findByTestId("result-count")).textContent).toBe(
+      "Showing 30 of 143",
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Load 20 more" }));
+    await waitFor(() => {
+      expect(lastSearch().get("top_k")).toBe("50");
+    });
+    expect((await screen.findByTestId("result-count")).textContent).toBe(
+      "Showing 50 of 143",
+    );
+    // The cap is spent, so the control is gone and narrowing the request is
+    // what the surface offers.
+    expect(screen.queryByTestId("search-continuation")).toBeNull();
+    expect(
+      screen.getByText(
+        "Narrow the result set with a filter, drill into a subdomain, or run a more specific query.",
+      ),
+    ).toBeTruthy();
+  });
+
+  // Spec: §13.10 — the continuation asks for what is still withheld rather
+  // than a fixed page, and it is gone once the list is whole. A new request
+  // is a new result set, so an edited filter drops the cap back.
+  it("asks for the withheld results alone and resets the cap on a new request", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts?query=review&top_k=10": {
+        body: {
+          total_matched: 12,
+          results: Array.from({ length: 10 }, (_, i) => ({
+            id: `platform/svc${String(i + 1)}`,
+            type: "skill",
+          })),
+        },
+      },
+      "/v1/search_artifacts?query=review&top_k=12": {
+        body: {
+          total_matched: 12,
+          results: Array.from({ length: 12 }, (_, i) => ({
+            id: `platform/svc${String(i + 1)}`,
+            type: "skill",
+          })),
+        },
+      },
+      "/v1/search_artifacts?query=review&type=skill&top_k=10": {
+        body: { total_matched: 4, results: [{ id: "platform/svc1", type: "skill" }] },
+      },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    expect((await screen.findByTestId("result-count")).textContent).toBe(
+      "Showing 10 of 12",
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Load 2 more" }));
+    await waitFor(() => {
+      expect(lastSearch().get("top_k")).toBe("12");
+    });
+    expect((await screen.findByTestId("result-count")).textContent).toBe(
+      "Showing 12 of 12",
+    );
+    expect(screen.queryByTestId("search-continuation")).toBeNull();
+    // The raised cap belonged to the request that carried it, so the filtered
+    // request opens at the first page again.
+    selectFilter("type", "skill");
+    await waitFor(() => {
+      expect(lastSearch().get("type")).toBe("skill");
+    });
+    expect(lastSearch().get("top_k")).toBe("10");
+  });
+
   // Spec: §13.10 — a standalone registry started with --no-embeddings serves
   // BM25 alone, and an empty query returns every match at score zero, so a
   // whole result set can reach the page unscored. Nothing in such a set was

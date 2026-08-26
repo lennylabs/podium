@@ -23,6 +23,13 @@ import { useAsync, useErrorReport } from "../useAsync";
 
 const resultCap = 10;
 
+/** searchPage is how many further results one continuation request asks for,
+ * and searchCapMax is the largest `top_k` §5 accepts: a request above it is
+ * refused with INVALID_ARGUMENT rather than served, so the cap stops there
+ * and the recovery line stands alone for a match count past it. */
+const searchPage = 20;
+const searchCapMax = 50;
+
 /** scopeDepth is how deep the scope dropdown reads the domain tree. It is the
  * depth the sidebar tree opens at, so every domain the reader can see without
  * expanding a node can also be named as a scope. A depth of 1 returns the
@@ -78,7 +85,18 @@ export function SearchSurface({
 
   const filters: SearchFilters = { query: text, type, scope, tags };
   const key = JSON.stringify(filters);
-  const search = useAsync(() => searchArtifacts(filters, resultCap), [key]);
+  // The continuation raises the cap on the same request rather than paging,
+  // because §5 search takes a result count and no offset. A new request is a
+  // new result set, so the cap drops back to the first page when the query or
+  // a filter changes; it is reset during the render that reads the new key so
+  // the raised cap never issues a request against the new filters.
+  const [cap, setCap] = useState(resultCap);
+  const [capKey, setCapKey] = useState(key);
+  if (capKey !== key) {
+    setCapKey(key);
+    setCap(resultCap);
+  }
+  const search = useAsync(() => searchArtifacts(filters, cap), [key, cap]);
   // A search is a page of the catalog like any other, so the query and the
   // filters live in the route rather than only in component state: the
   // address bar names the search that is on screen, a reload restores it, and
@@ -173,7 +191,13 @@ export function SearchSurface({
           </p>
         )}
       </div>
-      <SearchResults search={search} />
+      <SearchResults
+        search={search}
+        cap={cap}
+        onMore={(step) => {
+          setCap((held) => Math.min(held + step, searchCapMax));
+        }}
+      />
     </section>
   );
 }
@@ -305,7 +329,15 @@ function TokenEntry({
   );
 }
 
-function SearchResults({ search }: { search: Async<SearchResponse> }) {
+function SearchResults({
+  search,
+  cap,
+  onMore,
+}: {
+  search: Async<SearchResponse>;
+  cap: number;
+  onMore: (step: number) => void;
+}) {
   if (search.loading) {
     return <Loading label="Searching." />;
   }
@@ -331,9 +363,15 @@ function SearchResults({ search }: { search: Async<SearchResponse> }) {
     (top, artifact) => Math.max(top, artifact.score ?? 0),
     0,
   );
+  const withheld = body.total_matched - results.length;
+  // A result the cap withheld is reachable from the foot of the list. The
+  // step asks for one page more, bounded by what is still withheld and by the
+  // largest count §5 serves, and a step of zero means the cap is spent and
+  // narrowing the request is the only way further.
+  const step = Math.min(searchPage, withheld, searchCapMax - cap);
   return (
     <>
-      {results.length < body.total_matched && (
+      {withheld > 0 && (
         <p className="quiet">
           Narrow the result set with a filter, drill into a subdomain, or run a
           more specific query.
@@ -349,6 +387,21 @@ function SearchResults({ search }: { search: Async<SearchResponse> }) {
           />
         ))}
       </ul>
+      {step > 0 && (
+        <div className="listing-continuation" data-testid="search-continuation">
+          <button
+            type="button"
+            className="button"
+            data-testid="search-continue"
+            onClick={() => {
+              onMore(step);
+            }}
+          >
+            Load {step} more
+          </button>
+          <p className="quiet">Ranked by relevance.</p>
+        </div>
+      )}
     </>
   );
 }
