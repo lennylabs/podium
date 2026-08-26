@@ -359,7 +359,11 @@ export function Modal({
   children: ReactNode;
 }) {
   const headingID = useId();
-  const dialog = useDialogFocus<HTMLDivElement>();
+  // The title identifies the dialog: a caller that replaces a form with the
+  // outcome of its submission renders a second Modal in the first one's
+  // place, and React reuses the element, so the title is what tells the focus
+  // move that the dialog behind it is a different one.
+  const dialog = useDialogFocus<HTMLDivElement>(true, title);
   useEffect(() => {
     if (!dismissible) {
       return;

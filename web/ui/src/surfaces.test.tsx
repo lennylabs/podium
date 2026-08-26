@@ -4147,6 +4147,56 @@ describe("the layer write flows", () => {
     );
   });
 
+  // The outcome is a second dialog rendered in the form's place, so it takes
+  // the reader's focus the way the form did. The submit control that held
+  // focus unmounts with the form, which leaves focus on the document, and a
+  // keyboard reader is then given no sign that the registration finished or
+  // that a dialog covers the page.
+  it("moves focus into the registration outcome dialog", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "local",
+            Order: 1,
+            UserDefined: true,
+          },
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    // A pointer press focuses the control it lands on, which jsdom leaves to
+    // the caller, and the control focus returns to is read from there.
+    const trigger = screen.getByRole("button", { name: "Register layer" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const form = screen.getByRole("dialog", { name: "Register a layer" });
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "/Users/alice/reg" },
+    });
+    fireEvent.click(within(form).getByRole("button", { name: "Register" }));
+    await screen.findByText("Layer alice-personal is registered.");
+    const outcome = screen.getByRole("dialog", { name: "Layer registered" });
+    await waitFor(() => {
+      expect(outcome.contains(document.activeElement)).toBe(true);
+    });
+    // Leaving the outcome still hands focus back to the control the
+    // registration was started from.
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(trigger);
+    });
+  });
+
   // The update is a partial patch and a rotation returns the fresh secret
   // once, on the same terms as registration, so the rotation runs through the
   // same reveal rather than through a second treatment.

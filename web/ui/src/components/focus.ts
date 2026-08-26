@@ -38,9 +38,32 @@ const focusableStops = [
  * passed in, so a dialog does not have to know what opened it; a control that
  * has left the document by the time the dialog closes is skipped, because
  * focusing a detached node silently drops focus on the document instead.
+ *
+ * A caller that presents a sequence of dialogs through one element, such as a
+ * form the outcome of its own submission replaces, passes an `identity` that
+ * changes with the dialog. Without it React reuses the element, the effect
+ * does not run again, and the second dialog opens with focus wherever the
+ * first left it: on the document, once the submit control that held it
+ * unmounted.
  */
-export function useDialogFocus<T extends HTMLElement>(active = true): RefObject<T | null> {
+export function useDialogFocus<T extends HTMLElement>(active = true, identity?: unknown): RefObject<T | null> {
   const container = useRef<T>(null);
+  // The control the dialog was opened from is read once for as long as the
+  // dialog is open, and handing focus back is its own effect for that reason:
+  // re-reading it when the identity changes would read the document, because
+  // the control the reader was on unmounts with the content being replaced.
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const held = document.activeElement;
+    const opener = held instanceof HTMLElement && held !== document.body ? held : null;
+    return () => {
+      if (opener !== null && opener.isConnected) {
+        opener.focus();
+      }
+    };
+  }, [active]);
   useEffect(() => {
     if (!active) {
       return;
@@ -49,8 +72,6 @@ export function useDialogFocus<T extends HTMLElement>(active = true): RefObject<
     if (dialog === null) {
       return;
     }
-    const held = document.activeElement;
-    const opener = held instanceof HTMLElement && held !== document.body ? held : null;
     const stops = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableStops));
     const opening = stops().filter((stop) => !stop.hasAttribute(dismissAttribute));
     if (opening.length > 0) {
@@ -83,11 +104,8 @@ export function useDialogFocus<T extends HTMLElement>(active = true): RefObject<
     document.addEventListener('keydown', onKeyDown);
     return () => {
       document.removeEventListener('keydown', onKeyDown);
-      if (opener !== null && opener.isConnected) {
-        opener.focus();
-      }
     };
-  }, [active]);
+  }, [active, identity]);
   return container;
 }
 
