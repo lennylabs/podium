@@ -93,8 +93,13 @@ export function SearchSurface({
   const body = search.value;
 
   return (
+    // The content column opens on the query field. A "Search" title over a
+    // field already labelled "Search artifacts" restates the field and pushes
+    // it and the filter row down the page, so the surface carries none and is
+    // named for assistive technology by the landmark label alone. The layer
+    // panel does carry a title, because its header also holds a description
+    // and its write actions.
     <section className="surface" aria-label="Search">
-      <h1>Search</h1>
       {/* The field is a row rather than a bare input: the magnifier names it
           as the query field the way the top bar's trigger and the palette's
           own field do, and the border belongs to the row so the icon sits

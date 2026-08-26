@@ -1743,6 +1743,36 @@ describe("the domain browser", () => {
 });
 
 describe("search", () => {
+  // The design opens the search content column on the query field. A page
+  // title over a field already labelled "Search artifacts" restates the field
+  // and pushes it and the filter row down, so the surface carries no heading
+  // and the landmark label is what names it. The layer panel keeps its title,
+  // which is what tells the two apart.
+  it("opens on the query field rather than on a page title", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    const surface = await screen.findByLabelText("Search");
+    expect(within(surface).queryAllByRole("heading")).toEqual([]);
+    // The first thing the column draws is the field itself.
+    expect(surface.firstElementChild?.className).toBe("search-field");
+
+    // The layer panel is the surface the design does title, so the absence
+    // above reads as this surface's own rule rather than as a shell that
+    // draws no headings at all.
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    expect(
+      within(panel).getByRole("heading", { level: 1 }).textContent,
+    ).toBe("Layers");
+  });
+
   it("carries the type, scope, and tag filters on the request it issues", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
