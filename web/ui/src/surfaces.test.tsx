@@ -756,6 +756,58 @@ describe("the application shell", () => {
     expect(screen.queryByTestId("unavailable-domain")).toBeNull();
   });
 
+  // The node's failed read is the shell's own, and the reader has one outage
+  // in front of them rather than two. A surface retry that reaches the
+  // registry re-issues the node level as well, so the row stops saying the
+  // level did not load without the reader collapsing it and expanding it
+  // again.
+  it("clears a node's failed level when a surface retry reaches the registry", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: catalog },
+      "/v1/catalog": { body: { ids: [] } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    fireEvent.click(
+      within(tree).getAllByRole("button", { expanded: false })[0],
+    );
+    // The registry stops answering, so the node's own level does not load and
+    // the domain the reader then opens does not either.
+    stubRegistry({
+      "/v1/load_domain": {
+        status: 503,
+        body: {
+          code: "registry.unavailable",
+          message: "down",
+          retryable: true,
+        },
+      },
+      "/v1/catalog": { body: { ids: [] } },
+    });
+    fireEvent.click(
+      within(tree).getAllByRole("button", { expanded: false })[0],
+    );
+    expect(await screen.findByTestId("unavailable-domain")).toBeTruthy();
+    goTo(domainHref("platform/ci"));
+    const failed = await screen.findByTestId("domain-failed");
+    // The registry answers again and the surface's own retry is pressed.
+    stubRegistry({
+      "/v1/load_domain": {
+        body: {
+          path: "platform/ci",
+          subdomains: [{ path: "platform/ci/lint", name: "lint" }],
+          notable: [],
+        },
+      },
+      "/v1/catalog": { body: { ids: [] } },
+    });
+    fireEvent.click(within(failed).getByRole("button", { name: "Retry" }));
+    expect(await within(tree).findByText("lint")).toBeTruthy();
+    expect(screen.queryByTestId("unavailable-domain")).toBeNull();
+  });
+
   // The refused arm has no catalog to navigate. The tree and the counts are
   // emptied rather than left standing with what an earlier read returned.
   it("empties the tree and the counts where the catalog read is refused", async () => {

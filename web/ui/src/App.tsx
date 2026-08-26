@@ -61,6 +61,14 @@ export function App() {
   // and the refused arm both offer a retry of that read, and a retry that
   // reloaded the document would lose the posture the page already holds.
   const [catalogNonce, setCatalogNonce] = useState(0);
+  // reachNonce marks a read that reached the registry after one that did not.
+  // The tree's deeper levels are read per node and each node holds its own
+  // failure, which the shell's root read never touches: that read answered,
+  // so nothing about it moves when a surface beside it recovers. The bump is
+  // what re-issues those node reads, so one retry clears the sidebar the same
+  // outage marked rather than leaving the reader to collapse the row and
+  // expand it again.
+  const [reachNonce, setReachNonce] = useState(0);
   // The palette is reachable from every surface, so the shell owns whether it
   // is open and the whole page carries the accelerator that opens it.
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -156,7 +164,14 @@ export function App() {
     priorOutcome.current = catalogError;
     // The layers route's surface reports no read of its own: the shell's read
     // is what the panel keys on, and it carries its own retry there.
-    if (!recovered || route.name === 'layers' || tree.loading || tree.error === null) {
+    if (!recovered || route.name === 'layers') {
+      return;
+    }
+    // The tree's nodes are re-read whether or not the root read failed,
+    // because a node level that did not load is the shell's own failed read
+    // and the retry that just answered says the registry is reachable again.
+    setReachNonce((nonce) => nonce + 1);
+    if (tree.loading || tree.error === null) {
       return;
     }
     reloadCatalog();
@@ -280,6 +295,7 @@ export function App() {
             parent=""
             current={route.name === 'domain' && route.path !== '' ? route.path : null}
             onOutcome={onCatalogOutcome}
+            reach={reachNonce}
           />
           {catalogEmpty && (
             <p className="quiet catalog-empty" data-testid="catalog-empty">
@@ -487,11 +503,13 @@ function CatalogTree({
   parent,
   current,
   onOutcome,
+  reach,
 }: {
   nodes: DomainDescriptor[];
   parent: string;
   current: string | null;
   onOutcome: (err: unknown) => void;
+  reach: number;
 }) {
   const [all, setAll] = useState(false);
   // The reader's own position is never one of the folded rows: a level whose
@@ -506,7 +524,14 @@ function CatalogTree({
   return (
     <ul className="catalog-tree" aria-label="Catalog">
       {shown.map((node) => (
-        <TreeNode key={node.path} node={node} parent={parent} current={current} onOutcome={onOutcome} />
+        <TreeNode
+          key={node.path}
+          node={node}
+          parent={parent}
+          current={current}
+          onOutcome={onOutcome}
+          reach={reach}
+        />
       ))}
       {folded && (
         <li className="catalog-node">
@@ -540,17 +565,23 @@ function CatalogTree({
  * what the reader is owed there: the domain is in the hierarchy and this
  * caller cannot open it. Every other failure is the surface's own error
  * state, so the domain stays enterable, the node states that the level did
- * not load, and a later expansion re-issues the read. */
+ * not load, and the read is re-issued by a later expansion or by the shell
+ * reaching the registry again. */
 function TreeNode({
   node,
   parent,
   current,
   onOutcome,
+  reach,
 }: {
   node: DomainDescriptor;
   parent: string;
   current: string | null;
   onOutcome: (err: unknown) => void;
+  /** reach counts the reads that reached the registry after one that did
+   * not. A bump re-issues this node's level, so a node whose read failed
+   * during an outage clears when a retry elsewhere on the page answers. */
+  reach: number;
 }) {
   const ancestor = onCurrentPath(node.path, current);
   const [open, setOpen] = useState(ancestor);
@@ -588,7 +619,8 @@ function TreeNode({
   // An open node reads its own level when the eager read did not carry it,
   // whether the reader expanded it or the route did. Only the authorization
   // refusal latches: a level that did not load for any other reason is read
-  // again the next time the node opens.
+  // again the next time the node opens, and again when a read elsewhere on
+  // the page reaches a registry that had stopped answering.
   useEffect(() => {
     if (!open || eager !== undefined || loaded !== null || restricted) {
       return;
@@ -619,7 +651,7 @@ function TreeNode({
     return () => {
       live = false;
     };
-  }, [open, eager, loaded, restricted, node.path, onOutcome]);
+  }, [open, eager, loaded, restricted, node.path, onOutcome, reach]);
 
   return (
     <li className="catalog-node">
@@ -679,8 +711,9 @@ function TreeNode({
           </a>
         )}
         {/* The failed arm states that this level did not load and claims
-            nothing about what the caller may see. Expanding the node again is
-            what retries it. */}
+            nothing about what the caller may see. Expanding the node again
+            retries it, and so does a retry beside it that reaches the
+            registry. */}
         {failed && (
           <span className="label" data-testid="unavailable-domain">
             did not load
@@ -696,7 +729,13 @@ function TreeNode({
         )}
       </div>
       {open && children !== null && children.length > 0 && (
-        <CatalogTree nodes={children} parent={node.path} current={current} onOutcome={onOutcome} />
+        <CatalogTree
+          nodes={children}
+          parent={node.path}
+          current={current}
+          onOutcome={onOutcome}
+          reach={reach}
+        />
       )}
     </li>
   );
