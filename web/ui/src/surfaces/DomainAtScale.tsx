@@ -145,7 +145,14 @@ export function SubdomainTiles({
                 key={child.path}
                 className={view === "grid" ? "tile" : "tile tile-row"}
               >
-                <a className="tile-name mono" href={domainHref(child.path)}>
+                {/* The tile is one target, on both arms. The name carries the
+                  overlay that makes the whole tile follow the link
+                  (`index.css`, `.stretched-link`), so the row's description
+                  and its count are aimable too. */}
+                <a
+                  className="tile-name mono stretched-link"
+                  href={domainHref(child.path)}
+                >
                   {domainLabel(child.path, parent)}
                 </a>
                 {/* The row has the width for what the tile has no room to

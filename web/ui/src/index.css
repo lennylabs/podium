@@ -161,6 +161,27 @@ a {
   text-decoration: none;
 }
 
+/* A card or a tile is drawn as one target: a bordered box holding a name, a
+   description and what stands under it, with a chevron stating that it opens.
+   The anchor is the name alone, so without this the reader who aims at the
+   box hits the 20px name line or nothing at all. The overlay covers the
+   positioned ancestor the card establishes, which makes the whole box the
+   anchor's hit area while the accessible name stays the name the anchor
+   wraps. Nothing else inside such a card is interactive, so the overlay
+   covers no other control. */
+.stretched-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+/* The box the overlay covers carries the focus ring, so the shell's own ring
+   is dropped here: drawn as well it rings the name inside the ring around the
+   box the keyboard is about to follow. */
+.stretched-link:focus-visible {
+  box-shadow: none;
+}
+
 /* Rendered markdown is running prose, so an inline link carries the
    underline: nothing else in the paragraph marks where it starts and ends. */
 .prose a {
@@ -786,10 +807,21 @@ h2.label {
 }
 
 .subdomain {
+  position: relative;
   padding: 12px 14px;
   border: 1px solid var(--bd);
   border-radius: 9px;
   background: var(--surf);
+  cursor: pointer;
+}
+
+/* The card is the anchor's hit area, so it carries the focus ring the shell
+   draws everywhere else on the anchor's behalf. Drawn around the name alone
+   it would ring a fifth of what the keyboard is about to follow. */
+.subdomain:has(.stretched-link:focus-visible),
+.tile:has(.stretched-link:focus-visible) {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
 }
 
 /* The border belongs to the listing rather than to each entry: a domain's
@@ -901,7 +933,9 @@ h2.label {
   color: var(--ink);
 }
 
-.subdomain-name:hover > span {
+/* The pointer anywhere over the card is over the anchor, so the name answers
+   for the whole box rather than for the line the pointer happens to be on. */
+.subdomain:hover .subdomain-name > span {
   text-decoration: underline;
 }
 
@@ -3101,6 +3135,7 @@ label:has(> input:disabled) {
 }
 
 .tile {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -3108,6 +3143,7 @@ label:has(> input:disabled) {
   background: var(--surf);
   border: 1px solid var(--bd);
   border-radius: 9px;
+  cursor: pointer;
 }
 
 /* A tile is a name and what stands under it. The name is set in the ink the
@@ -3121,7 +3157,7 @@ label:has(> input:disabled) {
   word-break: break-all;
 }
 
-.tile-name:hover {
+.tile:hover .tile-name {
   text-decoration: underline;
 }
 

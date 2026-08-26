@@ -1487,6 +1487,38 @@ describe("the domain browser", () => {
     expect(cards[2].textContent).toContain("0 artifacts");
   });
 
+  // Spec: §13.10 — the card is drawn as one target, so the description and
+  // the count line are aimable as well as the name. The card carries the
+  // overlay class the stylesheet stretches over the whole box
+  // (`index.css`, `.stretched-link`), which `layout.test.ts` pins.
+  it("makes the whole subdomain card follow its link", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/catalog": { body: { ids: ["platform/ci/lint"] } },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: [
+            { path: "platform/ci", name: "ci", description: "Pipelines." },
+          ],
+          notable: [],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const grid = within(browser).getByRole("list", { name: "Subdomains" });
+    const card = within(grid).getAllByRole("listitem")[0];
+    const link = within(card).getByRole("link");
+    expect(link.className).toContain("stretched-link");
+    expect(link.getAttribute("href")).toBe("#/domain/platform%2Fci");
+    // The overlay is measured against the card, so the card holds the link
+    // and the description the overlay has to cover.
+    expect(card.contains(link)).toBe(true);
+    expect(card.textContent).toContain("Pipelines.");
+  });
+
   // A catalog read that failed establishes no artifact count, so the card
   // states what the load_domain response reported below the child and claims
   // nothing the page did not read.
@@ -9014,6 +9046,12 @@ describe("the trimmed listing", () => {
     const rows = within(browser).getByRole("list", { name: "Subdomains" });
     const first = within(rows).getAllByRole("listitem")[0];
     expect(first.className.split(" ")).toContain("tile-row");
+    // The row is one target on both arms: the description and the count sit
+    // under the overlay the stylesheet stretches over the tile
+    // (`index.css`, `.stretched-link`).
+    expect(within(first).getByRole("link").className).toContain(
+      "stretched-link",
+    );
     expect(first.textContent).toContain("Everything the build pipeline runs.");
     // A child that carries no description states so rather than leaving the
     // row's middle blank.

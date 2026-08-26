@@ -290,7 +290,10 @@ function SubdomainGrid({
     <ul className="subdomain-grid" aria-label="Subdomains">
       {subdomains.map((child) => (
         <li key={child.path} className="subdomain">
-          <a className="subdomain-name mono" href={domainHref(child.path)}>
+          {/* The card is one target. The name carries the overlay that makes
+              the whole card follow the link (`index.css`, `.stretched-link`),
+              so the description and the counts are aimable too. */}
+          <a className="subdomain-name mono stretched-link" href={domainHref(child.path)}>
             <span>{domainLabel(child.path, parent)}</span>
             <Chevron />
           </a>

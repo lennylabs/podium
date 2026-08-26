@@ -956,3 +956,69 @@ function propertyRows(count: number): HTMLTableRowElement[] {
   return rows;
 }
 
+
+// A subdomain card and a compact tile are each drawn as one target: a
+// bordered box holding a name, a description and what stands under it, with a
+// chevron stating that it opens. The anchor inside is the name alone, so the
+// box is only aimable where the overlay covers it, and the box only
+// establishes the containing block that overlay is measured against where it
+// is positioned. Without both the reader who clicks the description or the
+// count hits nothing.
+describe("subdomain click target", () => {
+  it("covers its positioned card with the name's overlay", () => {
+    expect(ruleText(".stretched-link::after")).toContain("position: absolute");
+    expect(ruleText(".stretched-link::after")).toContain("inset: 0");
+  });
+
+  it("positions the card and the tile the overlay is measured against", () => {
+    expect(styled("subdomain").position).toBe("relative");
+    expect(styled("tile").position).toBe("relative");
+  });
+
+  it("aims the pointer at the whole card and the whole tile", () => {
+    expect(styled("subdomain").cursor).toBe("pointer");
+    expect(styled("tile").cursor).toBe("pointer");
+  });
+
+  // The pointer anywhere over the box is over the anchor, so the name answers
+  // for the box rather than for the line the pointer is on.
+  it("underlines the name from a hover anywhere over the box", () => {
+    expect(ruleText(".subdomain:hover .subdomain-name > span")).toContain(
+      "underline",
+    );
+    expect(ruleText(".tile:hover .tile-name")).toContain("underline");
+  });
+
+  // The focus ring follows the hit area for the same reason: drawn around the
+  // name alone it rings a fraction of what the keyboard is about to follow.
+  it("rings the whole box while the link holds focus", () => {
+    const ring = ruleText(
+      '.subdomain:has(.stretched-link:focus-visible), .tile:has(.stretched-link:focus-visible)',
+    );
+    expect(ring).toContain("box-shadow");
+    // The shell's own ring on the anchor is dropped, so the box carries one
+    // ring rather than a ring inside a ring.
+    expect(ruleText(".stretched-link:focus-visible")).toContain(
+      "box-shadow: none",
+    );
+  });
+});
+
+/** ruleText returns the declarations the stylesheet holds for the given
+ * selector. jsdom computes no pseudo-element style and matches no `:hover` or
+ * `:focus-visible` state, so a case pinning one of those reads the rule the
+ * browser applies instead of a computed value. */
+function ruleText(selector: string): string {
+  const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      if (
+        rule instanceof CSSStyleRule &&
+        normalize(rule.selectorText) === normalize(selector)
+      ) {
+        return rule.cssText;
+      }
+    }
+  }
+  return "";
+}
