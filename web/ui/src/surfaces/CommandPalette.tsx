@@ -219,7 +219,7 @@ function PaletteHints({ recents, onPick }: { recents: string[]; onPick: (query: 
     <div className="palette-hints">
       <p className="label">Recent queries</p>
       {recents.length === 0 ? (
-        <EmptyState>No query has been run on this page yet.</EmptyState>
+        <EmptyState scope="inline">No query has been run on this page yet.</EmptyState>
       ) : (
         <ul className="palette-recents">
           {recents.map((query) => (
@@ -276,7 +276,7 @@ function PaletteResults({
   if (rows.length === 0) {
     return (
       <div className="palette-empty">
-        <EmptyState>Nothing matched {typed}. Check the spelling, or drop a filter from the line.</EmptyState>
+        <EmptyState scope="inline">Nothing matched {typed}. Check the spelling, or drop a filter from the line.</EmptyState>
         <button type="button" onClick={onSearch}>
           Run it on the search surface
         </button>

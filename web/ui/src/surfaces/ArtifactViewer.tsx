@@ -563,7 +563,7 @@ function ArtifactRail({
       <section aria-label="Bundled resources">
         <p className="label">Resources</p>
         {resources.length === 0 ? (
-          <EmptyState>This artifact bundles no files.</EmptyState>
+          <EmptyState scope="inline">This artifact bundles no files.</EmptyState>
         ) : (
           <>
             {/* The rail splits the two deliveries, because a file that
@@ -595,7 +595,7 @@ function RailResourceGroup({ label, rows, absent }: { label: string; rows: Resou
     <div className="rail-group">
       <p className="label quiet">{label}</p>
       {rows.length === 0 ? (
-        <EmptyState>{absent}</EmptyState>
+        <EmptyState scope="inline">{absent}</EmptyState>
       ) : (
         <ul className="rail-list">
           {rows.map((row) => (
@@ -670,7 +670,7 @@ function RailRelationGroup({ label, chips, absent }: { label: string; chips: Rel
     <div className="rail-group">
       <p className="label quiet">{chips.length > 1 ? `${label} · ${chips.length}` : label}</p>
       {chips.length === 0 ? (
-        <EmptyState>{absent}</EmptyState>
+        <EmptyState scope="inline">{absent}</EmptyState>
       ) : (
         <ul className="relation-list">
           {chips.map((chip) => (

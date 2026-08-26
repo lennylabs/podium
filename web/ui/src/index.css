@@ -1808,6 +1808,39 @@ label:has(> input:disabled) {
   }
 }
 
+/* An absence is drawn as its own box so it does not read as content the
+   surface failed to draw, and it is set quieter and smaller than the listing
+   or the section label it stands under. A bare paragraph at body weight makes
+   the missing thing the loudest thing in the column. */
+.empty {
+  margin: 0;
+  color: var(--faint);
+  text-align: center;
+  text-wrap: pretty;
+}
+
+/* The page preset replaces a whole listing, so it takes the solid card the
+   listing would have occupied. */
+.empty-page {
+  padding: 26px;
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  background: var(--surf);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* The inline preset stands for one section of the artifact rail, beside
+   sections that hold content, so its border is dashed: the box marks where
+   the members would sit without claiming to be one of them. */
+.empty-inline {
+  padding: 14px;
+  border: 1px dashed var(--bd);
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
 /* The panel's head puts the title and its description on the left and the
    actions on the same line, right-aligned, so the description sits under the
    title rather than being pushed down the page by the controls. */

@@ -241,8 +241,19 @@ export function Loading({ label }: { label: string }) {
   );
 }
 
-export function EmptyState({ children }: { children: ReactNode }) {
-  return <p className="empty">{children}</p>;
+/** EmptyScope is how much of the surface an absence stands for. A `page`
+ * absence replaces a listing and is drawn as a bordered card, and an
+ * `inline` one stands for a single section of the artifact rail and is drawn
+ * as a smaller dashed box. Both read quieter than the content they replace,
+ * because an absence that outweighs the labels around it makes the missing
+ * thing the loudest thing on the surface.
+ *
+ * Spec: §13.10
+ */
+export type EmptyScope = 'page' | 'inline';
+
+export function EmptyState({ scope = 'page', children }: { scope?: EmptyScope; children: ReactNode }) {
+  return <p className={`empty empty-${scope}`}>{children}</p>;
 }
 
 /** ErrorPageKind is what a whole-surface failure was: the read resolved

@@ -2154,6 +2154,26 @@ describe("search", () => {
       ),
     ).toBeTruthy();
   });
+
+  it("draws the empty result as a card set quieter than a result row", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/nothing");
+    render(<App />);
+    const absent = await screen.findByText(
+      "Nothing matched. Widen the query or clear a filter.",
+    );
+    expect(absent.className.split(" ")).toContain("empty-page");
+    // The page preset is a bordered card, and the sentence inside it is
+    // smaller and quieter than the body text a result would have carried.
+    const style = window.getComputedStyle(absent);
+    expect(style.fontSize).toBe("13px");
+    expect(style.color).toBe("var(--faint)");
+    expect(style.borderRadius).toBe("11px");
+    expect(style.padding).toBe("26px");
+  });
 });
 
 describe("the artifact viewer", () => {
@@ -3210,6 +3230,50 @@ describe("the artifact viewer", () => {
       await screen.findByText("Nothing extends this artifact."),
     ).toBeTruthy();
     expect(screen.getByText("This artifact extends nothing.")).toBeTruthy();
+  });
+
+  it("draws a rail section’s absence quieter than the section label over it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "Body.\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    // Every absent rail section takes the inline preset, so absence never
+    // reads louder than the sections that hold content.
+    for (const sentence of [
+      "This artifact extends nothing.",
+      "Nothing extends this artifact.",
+      "This artifact bundles no files.",
+    ]) {
+      const absent = await screen.findByText(sentence);
+      expect([sentence, absent.className.split(" ")]).toEqual([
+        sentence,
+        ["empty", "empty-inline"],
+      ]);
+      const style = window.getComputedStyle(absent);
+      expect([sentence, style.fontSize, style.color]).toEqual([
+        sentence,
+        "12.5px",
+        "var(--faint)",
+      ]);
+      expect([sentence, style.borderRadius, style.padding]).toEqual([
+        sentence,
+        "9px",
+        "14px",
+      ]);
+    }
   });
 
   it("drops the rail’s frontmatter section while the Frontmatter tab stands the same pairs full width", async () => {
