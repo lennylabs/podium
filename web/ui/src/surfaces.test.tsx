@@ -3013,6 +3013,43 @@ describe("the artifact viewer", () => {
       const panel = screen.getByTestId("frontmatter-table");
       expect(panel.querySelector(".clamped")).toBeNull();
     });
+
+    // A key the author wrote with no value is a pair the block carries, so
+    // the row stands. Rendered as a blank cell it reads as the table having
+    // failed rather than as the value being absent, so the cell states the
+    // absence with an em dash in both the rail and the full-width panel.
+    // Spec: §13.10
+    it("states an empty frontmatter value as an em dash", async () => {
+      stubHeights(60);
+      stubViewer('""');
+      await screen.findByLabelText("Artifact viewer");
+      const railValue = screen.getByTestId("property-absent-description");
+      expect(railValue.textContent).toBe("—");
+      // The dash is decoration to a screen reader, so the cell names which
+      // key it belongs to and what the dash stands for.
+      expect(railValue.getAttribute("aria-label")).toBe(
+        "description has no value",
+      );
+      // The clip's control belongs to a value there is something to open,
+      // and an absent one carries none.
+      expect(screen.queryByTestId("property-value-description")).toBeNull();
+      expect(
+        screen.queryByRole("button", {
+          name: "Show the whole description value",
+        }),
+      ).toBeNull();
+      // The neighbouring pair still states its own value.
+      expect(
+        screen.getByTestId("rail-frontmatter-table").textContent,
+      ).toContain("many-tags");
+
+      fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+      expect(
+        screen
+          .getByTestId("frontmatter-table")
+          .querySelector(".property-absent")?.textContent,
+      ).toBe("—");
+    });
   });
 });
 

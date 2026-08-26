@@ -672,6 +672,13 @@ h2.label {
   margin: 0;
 }
 
+/* The em dash standing for a key the author left empty. It is the absence
+   itself rather than a value, so it takes the de-emphasized tone the other
+   absent states use. */
+.property-absent {
+  color: var(--faint);
+}
+
 /* The listings are ul elements, so they carry the user-agent list indent and
    marker until they are reset. Left in place, the indent pushes a listing 40px
    right of the section label that heads it and past the right edge of the

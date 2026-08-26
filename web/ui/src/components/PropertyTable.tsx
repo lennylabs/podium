@@ -6,7 +6,7 @@
 // The heading belongs to the caller. The viewer stands one over the full
 // table and the rail drops its section header along with the table where the
 // response yields no pairs, so this renders the table, the two absent states,
-// and the full-width panel's own lines.
+// the em dash a valueless key takes, and the full-width panel's own lines.
 
 import { useState } from 'react';
 
@@ -107,7 +107,9 @@ export function PropertyTable({
                   {property.key}
                 </th>
                 <td>
-                  {clampValues ? (
+                  {property.value.trim() === '' ? (
+                    <AbsentValue keyName={property.key} />
+                  ) : clampValues ? (
                     <ClampedText
                       text={property.value}
                       className="property-value"
@@ -129,6 +131,24 @@ export function PropertyTable({
         </p>
       )}
     </>
+  );
+}
+
+/** AbsentValue is the treatment for a key the author wrote with no value.
+ * The pair is present in the block, so the row stays and its value cell
+ * carries an em dash: a blank cell reads as the table having failed to render
+ * the value rather than as the author having left it empty (§13.10). The dash
+ * is decoration to a screen reader, so the cell names the state instead. */
+function AbsentValue({ keyName }: { keyName: string }) {
+  return (
+    <span
+      className="property-absent"
+      data-testid={`property-absent-${keyName}`}
+      role="img"
+      aria-label={`${keyName} has no value`}
+    >
+      —
+    </span>
   );
 }
 
