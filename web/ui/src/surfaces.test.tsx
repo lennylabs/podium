@@ -13,6 +13,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
+import { parseQueryLine } from './query';
 import { searchHref } from './route';
 import type { SessionPosture } from './session';
 // The stylesheet is imported for its own sake: the wrapping rule the rail
@@ -577,6 +578,32 @@ describe('search', () => {
     await waitFor(() => {
       expect(lastSearch().get('tags')).toBeNull();
     });
+  });
+
+  // A search is addressable: the query and the active filters live in the
+  // route, so the address bar names what is on screen and the reader can
+  // reload it or send it to someone else.
+  it('carries the typed query and the active filters in the location hash', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/search_artifacts': { body: { total_matched: 0 } },
+    });
+    goTo(searchHref(''));
+    render(<App />);
+    await screen.findByLabelText('Search');
+    fireEvent.change(screen.getByLabelText('Search artifacts'), { target: { value: 'deploy' } });
+    await waitFor(() => {
+      expect(window.location.hash).toBe(searchHref('deploy'));
+    });
+    fireEvent.click(within(screen.getByRole('group', { name: 'Type' })).getByRole('button', { name: 'skill' }));
+    addToken('tag', 'security');
+    await waitFor(() => {
+      expect(window.location.hash).toBe(searchHref('type:skill tag:security deploy'));
+    });
+    // The hash the surface writes is the one the surface reads, so a reload
+    // of it stands the same query and the same pills back up.
+    const restored = parseQueryLine(decodeURIComponent(window.location.hash.replace('#/search/', '')));
+    expect(restored).toEqual({ query: 'deploy', type: 'skill', scope: '', tags: ['security'] });
   });
 
   it('renders a search that matched nothing as an empty result rather than a failure', async () => {

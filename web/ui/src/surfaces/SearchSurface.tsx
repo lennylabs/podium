@@ -8,13 +8,14 @@
 // and a filter whose values cannot be enumerated is added through a token
 // entry. The result count sits at the right of the same row.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { ArtifactRow } from '../components/ArtifactRow';
 import { EmptyState, ErrorState, Loading } from '../components/primitives';
 import type { SearchFilters, SearchResponse } from '../api';
 import { searchArtifacts } from '../api';
-import { parseQueryLine } from '../query';
+import { formatQueryLine, parseQueryLine } from '../query';
+import { replaceRoute, searchHref } from '../route';
 import type { Async } from '../useAsync';
 import { useAsync, useErrorReport } from '../useAsync';
 
@@ -42,6 +43,16 @@ export function SearchSurface({ query, onError }: { query: string; onError: (err
   const filters: SearchFilters = { query: text, type, scope, tags };
   const key = JSON.stringify(filters);
   const search = useAsync(() => searchArtifacts(filters, resultCap), [key]);
+  // A search is a page of the catalog like any other, so the query and the
+  // filters live in the route rather than only in component state: the
+  // address bar names the search that is on screen, a reload restores it, and
+  // the reader can send it to someone else. The entry is replaced rather than
+  // pushed because a pushed entry per keystroke would bury whatever the
+  // reader was looking at before the search under one step per character.
+  const line = formatQueryLine(filters);
+  useEffect(() => {
+    replaceRoute(searchHref(line));
+  }, [line]);
   useErrorReport(search.error, onError);
   const body = search.value;
 

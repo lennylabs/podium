@@ -45,6 +45,20 @@ export function searchHref(query: string): string {
 
 export const layersHref = '#/layers';
 
+/**
+ * replaceRoute rewrites the current history entry to `href` without pushing a
+ * new one and without firing `hashchange`, so a surface can hold its state in
+ * the address bar as the reader edits it. Following a link stays a push, and
+ * the reader's back step returns to where they came from rather than to the
+ * previous keystroke.
+ */
+export function replaceRoute(href: string): void {
+  if (window.location.hash === href) {
+    return;
+  }
+  window.history.replaceState(null, '', href);
+}
+
 /** useRoute tracks the location hash. */
 export function useRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
