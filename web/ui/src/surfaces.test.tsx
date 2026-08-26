@@ -1174,6 +1174,62 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // The authored source tab is a file view rather than a bare value beside a
+  // control: a header states the file and its extent, a gutter numbers the
+  // lines so a reader can quote one, and the file is takeable whole by Copy
+  // or by Download.
+  it("shows the authored file under a header with a numbered gutter and a download", async () => {
+    const skillRaw = "---\nname: review\n---\n\nBody line.\n";
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: manifestDoc,
+          skill_raw: skillRaw,
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: "Authored source" }));
+    const pane = screen.getByRole("tabpanel");
+    // The header names the file and states its extent. The trailing newline
+    // is a byte rather than a line, so the count is the five authored lines.
+    expect(pane.querySelector(".source-head")?.textContent).toBe(
+      "SKILL.md5 lines · 33 B",
+    );
+    expect(
+      [...pane.querySelectorAll(".source-gutter div")].map(
+        (line) => line.textContent,
+      ),
+    ).toEqual(["1", "2", "3", "4", "5"]);
+    expect(pane.querySelector(".source-code")?.textContent).toBe(
+      skillRaw.trimEnd(),
+    );
+    // Download takes the file itself, trailing newline included.
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(function (this: HTMLAnchorElement) {
+        expect(this.getAttribute("download")).toBe("SKILL.md");
+        expect(this.getAttribute("href")).toBe(
+          `data:text/plain;charset=utf-8,${encodeURIComponent(skillRaw)}`,
+        );
+      });
+    fireEvent.click(
+      within(pane).getByRole("button", { name: "Download SKILL.md" }),
+    );
+    expect(click).toHaveBeenCalledTimes(1);
+    click.mockRestore();
+    expect(within(pane).getByRole("button", { name: "Copy" })).toBeTruthy();
+  });
+
   // Every bundled file is retrievable from its own row: nothing is
   // previewed, so the row's action is the only path to the file. One binary
   // file puts the whole inline set into base64, and that row's action carries

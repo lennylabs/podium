@@ -1645,3 +1645,83 @@ button,
 .rail-group {
   margin-top: 8px;
 }
+
+/* The authored source panel. The lede and the take-away controls sit on one
+   line above the block, and the block states the file and its extent in a
+   header over a numbered gutter. The gutter and the code share one
+   line-height so the numbers stay in register with the lines they count. */
+.source-pane {
+  --source-line: 1.75;
+}
+
+.source-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.source-lede {
+  margin-right: auto;
+  font-size: 13.5px;
+  color: var(--sec);
+}
+
+.source-actions button {
+  margin-right: 0;
+  white-space: nowrap;
+}
+
+.source-block {
+  max-width: 840px;
+  overflow: hidden;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+}
+
+.source-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: var(--surf2);
+  border-bottom: 1px solid var(--b2);
+  font-size: 11.5px;
+  color: var(--sec);
+}
+
+.source-head .quiet {
+  margin-left: auto;
+}
+
+.source-lines {
+  display: flex;
+  min-width: 0;
+}
+
+.source-gutter {
+  flex: none;
+  padding: 14px 0 16px;
+  background: var(--surf2);
+  border-right: 1px solid var(--b2);
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: var(--source-line);
+  text-align: right;
+  user-select: none;
+}
+
+.source-gutter div {
+  padding: 0 10px;
+}
+
+.source-code {
+  min-width: 0;
+  margin: 0;
+  padding: 14px 16px 16px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: var(--source-line);
+  white-space: pre;
+}

@@ -19,17 +19,29 @@ export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
  * field renders the value as preformatted text so its line breaks survive.
  */
 export function CopyField({ label, value, block = false }: { label: string; value: string; block?: boolean }) {
-  const [copied, setCopied] = useState(false);
   return (
     <div className="copy-field">
       <span className="label quiet">{label}</span>
       {block ? <pre className="mono copy-value">{value}</pre> : <span className="mono copy-value">{value}</span>}
+      <CopyButton value={value} />
+    </div>
+  );
+}
+
+/**
+ * CopyButton is the explicit copy control CopyField carries, on its own for a
+ * surface that lays the value out itself. It reports the outcome beside
+ * itself, because a browser that exposes no clipboard leaves the value on the
+ * page to be selected and the control must not claim a copy that did not
+ * occur.
+ */
+export function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <>
       <button
         type="button"
         onClick={() => {
-          // A browser that exposes no clipboard leaves the value on the page
-          // to be selected, so the control reports what happened rather than
-          // claiming a copy that did not occur.
           void navigator.clipboard?.writeText(value).then(
             () => {
               setCopied(true);
@@ -43,7 +55,7 @@ export function CopyField({ label, value, block = false }: { label: string; valu
         Copy
       </button>
       {copied && <span className="quiet">Copied</span>}
-    </div>
+    </>
   );
 }
 

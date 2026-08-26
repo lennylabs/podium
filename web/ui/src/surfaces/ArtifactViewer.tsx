@@ -13,7 +13,7 @@ import { useState } from 'react';
 
 import { ArtifactBody } from '../components/ArtifactBody';
 import { Breadcrumb } from '../components/Breadcrumb';
-import { Badge, CopyField, EmptyState, ErrorState, Loading } from '../components/primitives';
+import { Badge, CopyButton, EmptyState, ErrorState, Loading } from '../components/primitives';
 import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
 import type { LargeResourceLink, LoadArtifactResponse } from '../api';
@@ -234,10 +234,64 @@ function Manifest({ artifact, document }: { artifact: LoadArtifactResponse; docu
       <div role="tabpanel" id={`panel-${open}`} aria-labelledby={`tab-${open}`}>
         {open === 'rendered' && <ArtifactBody body={body} />}
         {open === 'frontmatter' && <PropertyTable raw={frontmatter} offerRaw />}
-        {open === 'source' && <CopyField label="SKILL.md" value={skillRaw} block />}
+        {open === 'source' && <AuthoredSource name="SKILL.md" value={skillRaw} />}
         {open === 'resources' && <ResourceTable rows={resources} />}
       </div>
     </>
+  );
+}
+
+/** AuthoredSource is the authored file laid out as a file view: a line
+ * stating what the tab holds with the take-away controls beside it, then a
+ * bordered block whose header names the file and its extent, over a numbered
+ * gutter. The reader reaches this tab to quote a line or to take the file
+ * away, so the numbering and the download are what the panel is for. */
+function AuthoredSource({ name, value }: { name: string; value: string }) {
+  // A file ends with a newline, and splitting on it yields a trailing empty
+  // element that is not a line. One trailing newline is dropped so the count
+  // and the gutter agree with what an editor reports.
+  const lines = value.replace(/\n$/, '').split('\n');
+  const bytes = new TextEncoder().encode(value).length;
+  return (
+    <section className="source-pane">
+      <div className="source-actions">
+        <span className="source-lede">
+          The authored file, byte for byte. The Rendered tab shows the parsed body.
+        </span>
+        <CopyButton value={value} />
+        <button
+          type="button"
+          onClick={() => {
+            downloadFile(inlineHref(value, false), name);
+          }}
+        >
+          Download {name}
+        </button>
+      </div>
+      <div className="source-block">
+        <div className="source-head mono">
+          <span>{name}</span>
+          <span className="quiet">
+            {lines.length} lines · {formatSize(bytes)}
+          </span>
+        </div>
+        <div className="source-lines">
+          {/* The gutter is decorative for a reader who is listening rather
+              than looking: it repeats no content, and a screen reader that
+              read it would interleave numbers with the file's own text. */}
+          <div className="source-gutter mono" aria-hidden="true">
+            {lines.map((_, index) => (
+              <div key={index}>{index + 1}</div>
+            ))}
+          </div>
+          {/* The joined lines rather than the value, because a trailing
+              newline draws a line the gutter does not number and pulls the
+              two columns out of register. Copy and Download carry the
+              value itself. */}
+          <pre className="mono source-code">{lines.join('\n')}</pre>
+        </div>
+      </div>
+    </section>
   );
 }
 
