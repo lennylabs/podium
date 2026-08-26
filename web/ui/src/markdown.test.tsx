@@ -182,6 +182,29 @@ describe('the sanitized artifact-body rendering path', () => {
     expect(live?.classList.contains('link-stripped')).toBe(false);
   });
 
+  // An image whose source the allowlist refused has nothing left to draw, and
+  // the element on its own draws the browser's broken-image placeholder. The
+  // rendering path replaces it with a note carrying its alt text, which the
+  // stylesheet names the removal beside. The marker is stripped from every
+  // node the body writes it on, so a body cannot pass an image of its own off
+  // as a neutralized one.
+  it('replaces an image whose source it removed with a note', () => {
+    const stripped = [
+      '<img src="https://example.com/track.gif?u=1" alt="a beacon" width="10">\n',
+      '<img srcset="https://example.com/track.gif?u=1 1x" alt="a beacon">\n',
+    ];
+    for (const body of stripped) {
+      const container = renderBody(body);
+      expect(container.querySelector('img')).toBeNull();
+      const note = container.querySelector('.image-stripped');
+      expect(note?.textContent).toBe('a beacon');
+    }
+
+    const live = renderBody('<img class="image-stripped" src="/assets/x.png" alt="local">\n');
+    expect(live.querySelector('img')?.getAttribute('src')).toBe('/assets/x.png');
+    expect(live.querySelector('.image-stripped')).toBeNull();
+  });
+
   it('renders a markup-carrying frontmatter value as literal text', () => {
     const container = render(<PropertyTable raw={'title: <img src=x onerror="window.hijacked=1">\n'} />).container;
     expect(container.querySelector('img')).toBeNull();

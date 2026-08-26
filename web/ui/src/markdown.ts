@@ -129,6 +129,7 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
       node.removeAttribute(name);
     }
   }
+  clearMarkers(node);
   markStrippedLink(node);
 });
 
@@ -140,18 +141,46 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 // broken.
 const strippedLinkClass = 'link-stripped';
 
-/** markStrippedLink marks an anchor that carries no destination. The class is
- * stripped from every node first, so a body that writes the class on a live
- * link of its own cannot pass that link off as a neutralized one. */
-function markStrippedLink(node: Element): void {
-  if (node.classList.contains(strippedLinkClass)) {
-    node.classList.remove(strippedLinkClass);
-    if (node.classList.length === 0) {
-      node.removeAttribute('class');
-    }
+// The class the note left in place of an image carries. An image whose source
+// the allowlist refused has nothing left to draw, and the element on its own
+// draws the browser's broken-image placeholder, which tells the reader that
+// something failed rather than that the viewer refused the source. The note
+// names the removal in the same terms the stripped link uses.
+const strippedImageClass = 'image-stripped';
+
+/** clearMarkers strips both removal markers from a node, so a body that
+ * writes one on a live element of its own cannot pass that element off as a
+ * neutralized one. */
+function clearMarkers(node: Element): void {
+  for (const marker of [strippedLinkClass, strippedImageClass]) {
+    node.classList.remove(marker);
   }
+  if (node.hasAttribute('class') && node.classList.length === 0) {
+    node.removeAttribute('class');
+  }
+}
+
+/** markStrippedLink marks an anchor that carries no destination. */
+function markStrippedLink(node: Element): void {
   if (node.tagName === 'A' && !node.hasAttribute('href')) {
     node.classList.add(strippedLinkClass);
+  }
+}
+
+/** replaceStrippedImages replaces every image left without a source by a note
+ * holding the image's alt text. The element is replaced rather than marked
+ * because an image draws no text of its own, so a marker class on it would
+ * leave the reader the broken-image placeholder it exists to remove.
+ *
+ * The pass runs on the sanitizer's output rather than inside its hook,
+ * because the hook clears the marker classes from every node it visits and
+ * would clear the marker off the note this pass inserts. */
+function replaceStrippedImages(root: DocumentFragment): void {
+  for (const image of root.querySelectorAll('img:not([src])')) {
+    const note = document.createElement('span');
+    note.className = strippedImageClass;
+    note.textContent = image.getAttribute('alt') ?? '';
+    image.replaceWith(note);
   }
 }
 
@@ -162,7 +191,7 @@ function markStrippedLink(node: Element): void {
  */
 export function renderArtifactBody(body: string): string {
   const rendered = marked.parse(body, { async: false, gfm: true }) as string;
-  return DOMPurify.sanitize(rendered, {
+  const sanitized = DOMPurify.sanitize(rendered, {
     // The HTML profile drops SVG and MathML, which no markdown renderer
     // emits and which carry their own script-bearing constructs.
     USE_PROFILES: { html: true },
@@ -176,5 +205,13 @@ export function renderArtifactBody(body: string): string {
     // credential prompt this control exists to prevent.
     FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'option'],
     FORBID_ATTR: ['style'],
+    // The fragment is taken rather than the string so the pass below runs on
+    // the sanitizer's own output. Nothing between the two adds an element or
+    // an attribute the sanitizer did not pass.
+    RETURN_DOM_FRAGMENT: true,
   });
+  replaceStrippedImages(sanitized);
+  const holder = document.createElement('div');
+  holder.append(sanitized);
+  return holder.innerHTML;
 }

@@ -1569,6 +1569,19 @@ label:has(> input:disabled) {
   color: var(--meta);
 }
 
+/* The note left where an image whose source the sanitizer refused stood. It
+   holds the image's alt text, and the removal is named beside it so the
+   reader sees a refusal rather than a broken image. */
+.prose .image-stripped {
+  color: var(--meta);
+}
+
+.prose .image-stripped::after {
+  content: " (image removed)";
+  font-size: 12px;
+  color: var(--meta);
+}
+
 .prose pre {
   padding: 12px;
   overflow-x: auto;

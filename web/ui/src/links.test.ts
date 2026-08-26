@@ -67,4 +67,17 @@ describe("link treatment", () => {
   it("draws a stripped markdown link as body text", () => {
     expect(anchorStyle("link-stripped", "prose").textDecoration).toBe("none");
   });
+
+  // The sanitizer strips an image's source when it names a foreign host, and
+  // the note left in its place draws in the secondary tone.
+  it("draws the note left by a stripped markdown image as secondary text", () => {
+    const container = document.createElement("div");
+    container.className = "prose";
+    const note = document.createElement("span");
+    note.className = "image-stripped";
+    container.appendChild(note);
+    document.body.appendChild(container);
+    mounted.push(container);
+    expect(window.getComputedStyle(note).color).toBe("var(--meta)");
+  });
 });
