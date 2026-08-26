@@ -560,6 +560,45 @@ describe("the application shell", () => {
     expect(screen.queryByTestId("catalog-ingest")).toBeNull();
   });
 
+  // The failed read is the shell's own. The surface beside it retries only
+  // the read the surface owns, so the sidebar carries the retry for the tree
+  // and the counts, and running it clears the state it is stated under.
+  it("recovers the tree and the counts from the sidebar's own retry", async () => {
+    const stubs: Record<string, Stub> = {
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": {
+        status: 503,
+        body: { code: "registry.unavailable", message: "down" },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 312 } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+    };
+    stubRegistry(stubs);
+    render(<App />);
+    await screen.findByTestId("catalog-failed");
+    expect(screen.getByTestId("catalog-counts").textContent).toBe(
+      "Counts unavailable",
+    );
+
+    stubs["/v1/load_domain"] = { body: rootDomains };
+    // A surface can carry a retry at the same moment, so this one is named
+    // for the read it re-issues rather than sharing the bare label.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Try again reading the catalog" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-failed")).toBeNull();
+    });
+    expect(
+      within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
+    ).toHaveLength(2);
+    expect(screen.getByTestId("catalog-counts").textContent).toBe(
+      "1 layers · 312 artifacts",
+    );
+    expect(screen.getByTestId("catalog-depth").textContent).toBe("2 levels");
+  });
+
   // A read that returned a catalog holding no domain gets a line saying so.
   // The depth marker goes with the tree it describes, because a descent
   // stated over an empty sidebar reads as a tree that failed to render.

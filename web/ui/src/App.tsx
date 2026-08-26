@@ -126,16 +126,22 @@ export function App() {
     setCatalogError(err);
   }, []);
 
+  // The sidebar tree and the footer counts are the shell's own reads on every
+  // route, so re-issuing them is a bump of the nonce wherever the reader is.
+  const reloadCatalog = useCallback(() => {
+    setCatalogNonce((nonce) => nonce + 1);
+  }, []);
+
   const retryCatalog = useCallback(() => {
     // The shell owns the catalog read on the layers route, so the retry
     // re-issues it in place. Every other route's surface owns the read that
     // was refused, and reloading the document is what re-issues that one.
     if (route.name === 'layers') {
-      setCatalogNonce((nonce) => nonce + 1);
+      reloadCatalog();
       return;
     }
     window.location.reload();
-  }, [route.name]);
+  }, [route.name, reloadCatalog]);
 
   if (!postureLoaded) {
     return <Loading label="Loading." />;
@@ -251,10 +257,26 @@ export function App() {
               The catalog holds no domains. Register a layer to fill it.
             </p>
           )}
+          {/* The failed read is the shell's own, and the surface beside it
+              retries only the read the surface owns. So the retry that clears
+              this state sits here, where the state it clears is stated. */}
           {catalogFailed && (
-            <p className="quiet catalog-empty" data-testid="catalog-failed">
-              The catalog could not be read. The content beside this navigation carries the retry.
-            </p>
+            <div className="catalog-empty" data-testid="catalog-failed">
+              <p className="quiet">The catalog could not be read.</p>
+              {/* A surface can carry a retry of its own at the same moment,
+                  so this one names the read it re-issues. The name opens with
+                  the visible label, which is what a voice control matches
+                  on. */}
+              <button
+                type="button"
+                className="catalog-retry"
+                data-testid="catalog-retry"
+                aria-label="Try again reading the catalog"
+                onClick={reloadCatalog}
+              >
+                Try again
+              </button>
+            </div>
           )}
           <div className="sidebar-footer">
             <CatalogCounts counts={refused || catalogFailed ? null : counts.value} unavailable={catalogFailed} />

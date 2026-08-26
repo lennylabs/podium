@@ -291,6 +291,18 @@ h3 {
   line-height: 1.5;
 }
 
+.catalog-empty p {
+  margin: 0;
+}
+
+/* The sidebar's own retry sits inside a 12px block, so it takes the block's
+   scale rather than the page's button scale. */
+.catalog-retry {
+  margin: 6px 0 0;
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
 .catalog-node {
   font-size: 13px;
 }
