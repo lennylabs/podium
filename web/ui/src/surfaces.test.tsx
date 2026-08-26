@@ -295,6 +295,47 @@ describe("the application shell", () => {
     expect(wordmark.textContent).toBe("Podium");
   });
 
+  // A §4.5.5 sparse chain arrives collapsed into one entry whose path holds
+  // every segment it crossed and whose name holds only the last one. The row
+  // states the stretch of path it navigates across, because a row drawn from
+  // the name puts support/escalations on screen as escalations under the root
+  // and states a position in the hierarchy that domain does not hold.
+  it("names a folded subdomain by the path it navigates to", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            {
+              path: "support/escalations",
+              name: "escalations",
+              subdomains: [
+                { path: "support/escalations/paging", name: "paging" },
+              ],
+            },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    const folded = within(tree).getByRole("link", {
+      name: "support/escalations",
+    });
+    expect(folded.getAttribute("href")).toBe(domainHref("support/escalations"));
+    expect(within(tree).queryByText("escalations")).toBeNull();
+    // A row under the folded one carries its own segment alone, because the
+    // label is relative to the parent the row hangs under.
+    fireEvent.click(
+      within(tree).getAllByRole("button", { expanded: false })[0],
+    );
+    expect(within(tree).getByRole("link", { name: "paging" })).toBeTruthy();
+  });
+
   // A domain the registry refuses to open stays in the hierarchy and is not
   // enterable, which is what the reader is owed: the tree lists it and the
   // link is gone.

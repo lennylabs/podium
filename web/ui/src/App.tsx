@@ -204,6 +204,7 @@ export function App() {
               counts are empty rather than absent. */}
           <CatalogTree
             nodes={refused ? [] : (tree.value?.subdomains ?? [])}
+            parent=""
             current={route.name === 'domain' && route.path !== '' ? route.path : null}
             onOutcome={onCatalogOutcome}
           />
@@ -326,20 +327,34 @@ function onCurrentPath(path: string, current: string | null): boolean {
  * the page sits instead of a row of collapsed roots. */
 function CatalogTree({
   nodes,
+  parent,
   current,
   onOutcome,
 }: {
   nodes: DomainDescriptor[];
+  parent: string;
   current: string | null;
   onOutcome: (err: unknown) => void;
 }) {
   return (
     <ul className="catalog-tree" aria-label="Catalog">
       {nodes.map((node) => (
-        <TreeNode key={node.path} node={node} current={current} onOutcome={onOutcome} />
+        <TreeNode key={node.path} node={node} parent={parent} current={current} onOutcome={onOutcome} />
       ))}
     </ul>
   );
+}
+
+/** treeLabel is the label a tree row carries under `parent`. A §4.5.5 sparse
+ * chain is collapsed by the server into one entry whose path holds every
+ * segment it crossed while its name holds only the last one, so a row drawn
+ * from the name puts `support/escalations` on screen as `escalations` under
+ * the root and states a position in the hierarchy that domain does not hold.
+ * The label is the whole stretch of path the row navigates across, which
+ * leaves an unfolded row on its own segment. */
+function treeLabel(path: string, parent: string): string {
+  const prefix = parent === '' ? '' : `${parent}/`;
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }
 
 /** TreeNode is one domain in the sidebar tree. A node whose children came
@@ -357,10 +372,12 @@ function CatalogTree({
  * not load, and a later expansion re-issues the read. */
 function TreeNode({
   node,
+  parent,
   current,
   onOutcome,
 }: {
   node: DomainDescriptor;
+  parent: string;
   current: string | null;
   onOutcome: (err: unknown) => void;
 }) {
@@ -370,6 +387,7 @@ function TreeNode({
   const [restricted, setRestricted] = useState(false);
   const [failed, setFailed] = useState(false);
   const eager = node.subdomains;
+  const label = treeLabel(node.path, parent);
   const children = eager ?? loaded;
   const isCurrent = node.path === current;
 
@@ -430,14 +448,14 @@ function TreeNode({
         </button>
         {restricted ? (
           <>
-            <span className="mono">{node.name}</span>
+            <span className="mono">{label}</span>
             <span className="label" data-testid="restricted-domain">
               restricted
             </span>
           </>
         ) : (
           <a className="mono" href={domainHref(node.path)} aria-current={isCurrent ? 'page' : undefined}>
-            {node.name}
+            {label}
           </a>
         )}
         {/* The failed arm states that this level did not load and claims
@@ -450,7 +468,7 @@ function TreeNode({
         )}
       </div>
       {open && children !== null && children.length > 0 && (
-        <CatalogTree nodes={children} current={current} onOutcome={onOutcome} />
+        <CatalogTree nodes={children} parent={node.path} current={current} onOutcome={onOutcome} />
       )}
     </li>
   );
