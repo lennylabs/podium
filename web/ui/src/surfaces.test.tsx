@@ -186,6 +186,22 @@ function selectFilter(label: string, value: string): void {
  * was called on. */
 const scrolledIntoView: Element[] = [];
 
+/** openVersionPicker discloses the artifact viewer's version field from the
+ * badge in the header, which is where the affordance lives. */
+function openVersionPicker(): void {
+  fireEvent.click(screen.getByRole("button", { name: /^Version / }));
+}
+
+/** pinVersion reads the open artifact at another version through the header
+ * disclosure. */
+function pinVersion(version: string): void {
+  openVersionPicker();
+  fireEvent.change(screen.getByLabelText("Version"), {
+    target: { value: version },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "View" }));
+}
+
 beforeEach(() => {
   requests.length = 0;
   bodies.length = 0;
@@ -2511,6 +2527,47 @@ describe("the artifact viewer", () => {
     expect(screen.getByTestId("frontmatter-table")).toBeTruthy();
   });
 
+  // The version affordance is disclosed from the badge in the header. Most
+  // artifacts carry one published version, and standing an entry field and
+  // its button between the description and the tabs put a form on the page
+  // for a reader who has nothing to pick.
+  // Spec: §13.10
+  it("states the version in the header and discloses the field from it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    // Nothing stands open: no field, no View button, no VERSION label.
+    expect(screen.queryByLabelText("Version")).toBeNull();
+    expect(screen.queryByRole("button", { name: "View" })).toBeNull();
+    // The badge that states the version is what opens the field, and it sits
+    // in the title row beside the type badge.
+    const trigger = screen.getByRole("button", { name: /^Version v2\.3\.0/ });
+    expect(trigger.textContent).toContain("v2.3.0");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(trigger.closest(".page-title")).not.toBeNull();
+    fireEvent.click(trigger);
+    expect(screen.getByLabelText("Version")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "View" })).toBeTruthy();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    // Escape abandons the disclosure and leaves the header as it was.
+    fireEvent.keyDown(screen.getByLabelText("Version"), { key: "Escape" });
+    expect(screen.queryByLabelText("Version")).toBeNull();
+  });
+
   // load_artifact defaults to the latest version and takes any other, so a
   // reader who picks one is told which version they are reading and is given
   // the way back to the latest.
@@ -2547,10 +2604,7 @@ describe("the artifact viewer", () => {
       },
       "/v1/dependents": { body: { edges: [] } },
     });
-    fireEvent.change(screen.getByLabelText("Version"), {
-      target: { value: "1.0.0" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    pinVersion("1.0.0");
     const notice = await screen.findByTestId("older-version");
     expect(notice.textContent).toContain("1.0.0");
     expect(screen.getByRole("button", { name: "Go to 2.3.0" })).toBeTruthy();
@@ -2676,6 +2730,7 @@ describe("the artifact viewer", () => {
       },
       "/v1/dependents": { body: { edges: [] } },
     });
+    openVersionPicker();
     fireEvent.change(screen.getByLabelText("Version"), {
       target: { value: "1.0.0" },
     });
@@ -2719,15 +2774,12 @@ describe("the artifact viewer", () => {
       },
       "/v1/dependents": { body: { edges: [] } },
     });
-    fireEvent.change(screen.getByLabelText("Version"), {
-      target: { value: "9.9.9" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    pinVersion("9.9.9");
     const refusal = await screen.findByTestId("version-refused");
     expect(refusal.textContent).toContain("invalid pin");
     // The surface the picker sits on is still drawn, and so is the picker.
     expect(screen.getByLabelText("Artifact viewer")).toBeTruthy();
-    expect(screen.getByLabelText("Version")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Version / })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "review" })).toBeTruthy();
     expect(refusal.textContent).toContain("2.3.0");
     // The recovery control returns the reader to the version the page held.
@@ -2749,6 +2801,7 @@ describe("the artifact viewer", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("version-refused")).toBeNull();
     });
+    openVersionPicker();
     expect((screen.getByLabelText("Version") as HTMLInputElement).value).toBe(
       "",
     );
@@ -2788,16 +2841,14 @@ describe("the artifact viewer", () => {
     render(<App />);
     await screen.findByLabelText("Artifact viewer");
     // No stub answers this version, so the registry refuses the pin.
-    fireEvent.change(screen.getByLabelText("Version"), {
-      target: { value: "9.9.9" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    pinVersion("9.9.9");
     await screen.findByTestId("version-refused");
 
     goTo("#/artifact/eng%2Fxss");
     expect(await screen.findByRole("heading", { name: "xss" })).toBeTruthy();
     expect(screen.queryByTestId("artifact-failed")).toBeNull();
     expect(screen.queryByTestId("version-refused")).toBeNull();
+    openVersionPicker();
     expect((screen.getByLabelText("Version") as HTMLInputElement).value).toBe(
       "",
     );
@@ -2842,10 +2893,7 @@ describe("the artifact viewer", () => {
       },
       "/v1/dependents": { body: { edges: [] } },
     });
-    fireEvent.change(screen.getByLabelText("Version"), {
-      target: { value: "9.9.9" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    pinVersion("9.9.9");
     const refusal = await screen.findByTestId("version-refused");
     const occurrences = (refusal.textContent ?? "").split(
       "registry.not_found",

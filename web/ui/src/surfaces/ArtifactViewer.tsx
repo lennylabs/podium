@@ -26,7 +26,7 @@ import {
   Loading,
   SensitivityBadge,
   TypeBadge,
-  VersionBadge,
+  formatVersion,
 } from '../components/primitives';
 import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
@@ -133,22 +133,20 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
         <div className="page-title">
           <h1>{artifactName(body.id)}</h1>
           <TypeBadge type={body.type} />
-          <VersionBadge version={body.version} />
-          <SensitivityBadge sensitivity={body.sensitivity} />
-          <DeprecatedBadge deprecated={body.deprecated} />
-        </div>
-        {description !== '' && <Lead text={description} />}
-        <DeprecationNotice artifact={body} />
-        <div className="artifact-meta">
           <VersionPicker
             key={viewing}
+            current={body.version}
             viewing={viewing}
             onView={(version) => {
               setViewing(version);
             }}
           />
-          {artifact.loading && <Loading label="Loading the artifact." />}
+          <SensitivityBadge sensitivity={body.sensitivity} />
+          <DeprecatedBadge deprecated={body.deprecated} />
         </div>
+        {description !== '' && <Lead text={description} />}
+        <DeprecationNotice artifact={body} />
+        {artifact.loading && <Loading label="Loading the artifact." />}
         {artifact.error !== null && (
           <ErrorState
             error={artifact.error}
@@ -269,37 +267,81 @@ interface ManifestHalves {
 /** VersionPicker takes the version the reader wants. load_artifact defaults
  * to the latest version and takes any other, and no response reports which
  * versions exist, so the picker takes one rather than listing a set the
- * registry does not serve. */
-function VersionPicker({ viewing, onView }: { viewing: string; onView: (version: string) => void }) {
+ * registry does not serve.
+ *
+ * The closed control is the version badge in the header. Standing the field
+ * and its button on a row of their own put a form under every artifact's
+ * description, including the artifacts that carry one published version,
+ * which is the common case and the one that has nothing to pick. The entry
+ * field is disclosed from the badge instead, so the header states the version
+ * and the reader who wants another one asks for it.
+ *
+ * Spec: §13.10
+ */
+function VersionPicker({
+  current,
+  viewing,
+  onView,
+}: {
+  current: string;
+  viewing: string;
+  onView: (version: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState(viewing);
   const view = () => {
+    setOpen(false);
     onView(typed.trim());
   };
+  const label = formatVersion(current);
   return (
     <span className="version-picker">
-      <label className="label" htmlFor="version-picker-input">
-        Version
-      </label>
-      <input
-        id="version-picker-input"
-        type="text"
-        value={typed}
-        placeholder="latest"
-        onChange={(event) => {
-          setTyped(event.target.value);
+      <button
+        type="button"
+        className="badge badge-quiet version-picker-open"
+        aria-expanded={open}
+        aria-label={`Version ${label === '' ? 'unstated' : label}. Read another version.`}
+        onClick={() => {
+          setOpen(!open);
         }}
-        // A single-field entry control takes Enter as its commit, because a
-        // reader who typed a version reaches for the return key before the
-        // adjacent button.
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            view();
-          }
-        }}
-      />
-      <button type="button" onClick={view}>
-        View
+      >
+        {label === '' ? 'version' : label}
+        <span aria-hidden="true" className="version-picker-caret">
+          ▾
+        </span>
       </button>
+      {open && (
+        <span className="version-picker-field">
+          <label className="label" htmlFor="version-picker-input">
+            Version
+          </label>
+          <input
+            id="version-picker-input"
+            type="text"
+            value={typed}
+            placeholder="latest"
+            autoFocus
+            onChange={(event) => {
+              setTyped(event.target.value);
+            }}
+            // A single-field entry control takes Enter as its commit, because a
+            // reader who typed a version reaches for the return key before the
+            // adjacent button. Escape abandons the disclosure, which is what a
+            // reader who opened it by accident reaches for.
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                view();
+              }
+              if (event.key === 'Escape') {
+                setOpen(false);
+              }
+            }}
+          />
+          <button type="button" onClick={view}>
+            View
+          </button>
+        </span>
+      )}
     </span>
   );
 }

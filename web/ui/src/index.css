@@ -863,14 +863,6 @@ h2.label {
   font-size: 11px;
 }
 
-.artifact-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  margin: 4px 0;
-}
-
 /* The domain title and what the response counted sit on one line: the counts
    qualify the name, and a line of their own under the h1 reads as a second
    claim about the domain. The counts align to the title's baseline rather
@@ -1977,10 +1969,42 @@ label:has(> input:disabled) {
   font-weight: 600;
 }
 
+/* The version affordance in the artifact header. The closed control carries
+   the badge typography of the badges beside it, because it states the
+   version the page is standing on before it offers to change it. The field
+   it discloses is taken out of the flow so opening it does not push the
+   description and the tabs down the page. */
 .version-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.version-picker-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-size: 11.5px;
+}
+
+.version-picker-caret {
+  font-size: 8px;
+  color: var(--meta);
+}
+
+.version-picker-field {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  left: 0;
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--surf);
 }
 
 .version-picker input {
