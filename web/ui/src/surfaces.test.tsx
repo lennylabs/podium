@@ -3987,11 +3987,14 @@ describe("the artifact viewer", () => {
       expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
     });
 
-    // The property table is rows of key and value. A long value states what
-    // the author wrote in full: clipping it behind an opener hides part of
-    // the frontmatter and stretches that one row past the rows around it.
+    // The rail is a summary column, and the relation links §13.10 requires
+    // the viewer to carry stand under this table in the same scrolling
+    // column. A description of several hundred words rendered whole makes one
+    // row many screens tall and pushes those links off the fold, so the rail
+    // clips a scalar value at the three lines the header's own description
+    // reads at and offers the rest in place.
     // Spec: §13.10
-    it("states a long property value whole in the rail's table", async () => {
+    it("clips a long property value in the rail's table and opens it on request", async () => {
       stubHeights(900);
       stubViewer("The invoice approval path routes each document.");
       await screen.findByLabelText("Artifact viewer");
@@ -3999,15 +4002,62 @@ describe("the artifact viewer", () => {
       expect(value.textContent).toBe(
         "The invoice approval path routes each document.",
       );
-      expect(value.classList.contains("clamped")).toBe(false);
+      expect(value.classList.contains("clamped")).toBe(true);
+      // The control names its own row, so it is distinguishable from the
+      // header's control and from the other rows' controls.
+      const more = await screen.findByRole("button", {
+        name: "Show the whole description value",
+      });
+      expect(more.getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(more);
       expect(
-        screen.queryByRole("button", {
+        screen
+          .getByTestId("property-value-description")
+          .classList.contains("clamped"),
+      ).toBe(false);
+      // Collapsing restores the clip, so the control is not a one-way door.
+      fireEvent.click(
+        screen.getByRole("button", {
           name: "Show the whole description value",
         }),
-      ).toBeNull();
-      // No cell of the table carries a control of any name.
+      );
       expect(
-        screen.getByTestId("rail-frontmatter-table").querySelector("button"),
+        screen
+          .getByTestId("property-value-description")
+          .classList.contains("clamped"),
+      ).toBe(true);
+    });
+
+    // A sequence is entries the author wrote rather than one running value.
+    // Clipped, a list of ten tags reads as a list of four with the rest
+    // behind a control, so the rail states every entry.
+    // Spec: §13.10
+    it("states a sequence value whole in the rail's table", async () => {
+      stubHeights(900);
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": {
+          body: {
+            id: "edge/many-tags",
+            type: "context",
+            version: "0.1.0",
+            content_hash: "sha256:abc",
+            manifest_body: "# Many tags\n",
+            frontmatter:
+              "---\nname: many-tags\ntags: [alpha, bravo, charlie, delta, echo," +
+              " foxtrot, golf, hotel, india, juliet]\n---\n",
+          },
+        },
+        "/v1/dependents": { body: { edges: [] } },
+      });
+      goTo("#/artifact/edge%2Fmany-tags");
+      render(<App />);
+      await screen.findByLabelText("Artifact viewer");
+      const tags = screen.getByTestId("property-value-tags");
+      expect(tags.querySelectorAll("li")).toHaveLength(10);
+      expect(tags.classList.contains("clamped")).toBe(false);
+      expect(
+        screen.queryByRole("button", { name: "Show the whole tags value" }),
       ).toBeNull();
     });
 

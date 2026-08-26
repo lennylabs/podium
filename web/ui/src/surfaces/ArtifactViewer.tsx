@@ -556,10 +556,10 @@ function ArtifactRail({
       {hasFrontmatter && (
         <section aria-label="Frontmatter">
           <p className="label">Frontmatter</p>
-          {/* The rail clips each value, because the relation links stand
+          {/* The rail clips a scalar value, because the relation links stand
               under this table in the same scrolling column and a long
               description would otherwise push them far below the fold. */}
-          <PropertyTable raw={frontmatter} testID="rail-frontmatter-table" />
+          <PropertyTable raw={frontmatter} testID="rail-frontmatter-table" clampValues />
         </section>
       )}
       <Relations artifact={artifact} frontmatter={frontmatter} />

@@ -713,10 +713,12 @@ h2.label {
 .artifact-list,
 .subdomain-grid,
 .relation-list,
-/* A frontmatter value in the property table. It wraps whole in both sites,
-   so a value with no spaces in it breaks inside the cell rather than widening
-   the rail. */
+/* A frontmatter value in the property table. A value with no spaces in it
+   breaks inside the cell rather than widening the rail. The rail renders a
+   clipped value as a paragraph, whose user-agent margin would otherwise set
+   that row apart from the rows around it. */
 .property-value {
+  margin: 0;
   overflow-wrap: anywhere;
 }
 
