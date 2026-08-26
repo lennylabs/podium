@@ -500,6 +500,26 @@ describe("the application shell", () => {
     expect(screen.queryByTestId("catalog-ingest")).toBeNull();
     expect(screen.getByTestId("catalog-depth").textContent).toBe("2 levels");
   });
+
+  // A read that returned a catalog holding no domain gets a line saying so.
+  // The depth marker goes with the tree it describes, because a descent
+  // stated over an empty sidebar reads as a tree that failed to render.
+  it("states that the catalog holds no domains and drops the depth marker", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    await screen.findByLabelText("Catalog");
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-empty").textContent).toContain(
+        "The catalog holds no domains.",
+      );
+    });
+    expect(screen.queryByTestId("catalog-depth")).toBeNull();
+  });
 });
 
 describe("the sign-in control", () => {
@@ -4381,6 +4401,38 @@ describe("a refused layer write", () => {
       "Register",
       "Reingest",
     ]);
+  });
+
+  // A panel holding no layer carries the empty state alone. The precedence
+  // lines, the reordering note, and the recoverable count all describe
+  // acting on a row, so each is absent where there is no row, and the empty
+  // state is not read as a tree that failed to render under them.
+  it("drops the reorder copy and the zero count where no layer is registered", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    expect(panel.textContent).toContain(
+      "No layers are registered under this tenant.",
+    );
+    expect(panel.textContent).not.toContain("Precedence");
+    expect(panel.textContent).not.toContain("composes above");
+    expect(panel.textContent).not.toContain("Reordering takes effect");
+    // The recoverable read answers on the same stub, so it reports nothing
+    // recoverable and the link states no figure beside itself.
+    const link = screen.getByTestId("recoverable-link");
+    await waitFor(() => {
+      expect(link.textContent).toBe("↺ Recently unregistered");
+    });
+    expect(
+      screen
+        .getByRole("button", { name: "Reingest all" })
+        .hasAttribute("disabled"),
+    ).toBe(true);
   });
 });
 

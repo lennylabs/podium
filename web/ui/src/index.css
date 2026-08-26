@@ -282,6 +282,12 @@ h3 {
   overflow-y: auto;
 }
 
+.catalog-empty {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .catalog-node {
   font-size: 13px;
 }

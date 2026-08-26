@@ -191,7 +191,10 @@ export function LayerPanel({
         <div className="panel-actions">
           {/* The recoverable link leads the row and states how much is still
             restorable, because that count is the one piece of panel state
-            naming something on its way to being erased. */}
+            naming something on its way to being erased. The count is stated
+            only where there is something to recover: a zero beside the link
+            reads as a figure the operator has to act on, and the surface
+            behind the link already states that nothing is recoverable. */}
           <button
             type="button"
             className="link-action"
@@ -201,7 +204,7 @@ export function LayerPanel({
             }}
           >
             ↺ Recently unregistered
-            {recoverable.value === null
+            {recoverable.value === null || recoverable.value.length === 0
               ? ""
               : ` · ${String(recoverable.value.length)}`}
           </button>
@@ -258,17 +261,23 @@ export function LayerPanel({
       )}
       {/* The winning end of the order is named on the label itself. Left to
           the reader's inference from position, a table sorted the other way
-          round reads the same. */}
-      <p className="precedence-label">
-        <span className="label">
-          Precedence — drag or press the arrow keys on a handle to reorder
-        </span>
-        <span className="quiet">lower row wins</span>
-      </p>
-      <p className="quiet">
-        Every user-defined layer composes above every admin-defined layer, so a
-        row moves within its own block.
-      </p>
+          round reads the same. Both lines describe the reorder, so an empty
+          panel drops them: instructions for moving rows that do not exist
+          stand over the empty state as if the reader had missed something. */}
+      {rows.length > 0 && (
+        <>
+          <p className="precedence-label">
+            <span className="label">
+              Precedence — drag or press the arrow keys on a handle to reorder
+            </span>
+            <span className="quiet">lower row wins</span>
+          </p>
+          <p className="quiet">
+            Every user-defined layer composes above every admin-defined layer,
+            so a row moves within its own block.
+          </p>
+        </>
+      )}
       {rows.length === 0 ? (
         <EmptyState>No layers are registered under this tenant.</EmptyState>
       ) : (
@@ -355,7 +364,12 @@ export function LayerPanel({
  * default resolved to, and a read that fails reports nothing, so both arms
  * state the count alone rather than a limit no response carried. A caller who
  * resolves no subject owns no row the panel can recognize as theirs, so that
- * arm carries the reordering note by itself. */
+ * arm carries the reordering note by itself.
+ *
+ * The reordering note describes moving a row, so an empty panel drops it for
+ * the same reason the precedence lines above the table are dropped there. A
+ * caller who resolves no subject and holds no row is left with nothing to
+ * state, and the foot is absent rather than blank. */
 function PanelFoot({
   rows,
   subject,
@@ -366,20 +380,27 @@ function PanelFoot({
   const quota = useAsync(() => readQuota(), []);
   const cap = quota.value?.limits?.MaxUserLayers;
   const mine = rows.filter((row) => ownedByCaller(row, subject)).length;
+  const holding = subject !== "";
+  const reorderable = rows.length > 0;
+  if (!holding && !reorderable) {
+    return null;
+  }
   return (
     <p className="panel-foot quiet">
-      {subject !== "" && (
-        <>
-          <span data-testid="personal-layer-count">
-            {personalHolding(mine, cap)}
-          </span>
-          <span className="foot-divider" aria-hidden="true" />
-        </>
+      {holding && (
+        <span data-testid="personal-layer-count">
+          {personalHolding(mine, cap)}
+        </span>
       )}
-      <span>
-        Reordering takes effect on the next read; it does not trigger a
-        reingest.
-      </span>
+      {holding && reorderable && (
+        <span className="foot-divider" aria-hidden="true" />
+      )}
+      {reorderable && (
+        <span>
+          Reordering takes effect on the next read; it does not trigger a
+          reingest.
+        </span>
+      )}
     </p>
   );
 }

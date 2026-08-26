@@ -151,6 +151,12 @@ export function App() {
   const scope = catalogScope(posture, refused);
   const subject = posture?.subject ?? '';
   const recovery = <AuthRecovery posture={posture} onRetry={retryCatalog} />;
+  const catalogNodes = refused ? [] : (tree.value?.subdomains ?? []);
+  // A catalog read that came back holding no domain is a state of its own,
+  // distinct from the refused arm and from the read still being in flight.
+  // Both of those also render no node, so the empty line is gated on a read
+  // that returned rather than on the node list alone.
+  const catalogEmpty = !refused && !tree.loading && tree.error === null && catalogNodes.length === 0;
 
   // The public-subset arm of the catalog-scope rule carries two pieces. The
   // sidebar footer states that the caller is not signed in, and this banner
@@ -214,21 +220,30 @@ export function App() {
             <span className="label">Catalog</span>
             {/* The depth marker names how deep the sidebar resolves the tree
                 rather than how deep the catalog runs, which no response
-                reports. It is kept on every arm, including the refused one,
-                because it states a property of this navigation rather than
-                anything about what the catalog holds. */}
-            <span className="label" data-testid="catalog-depth">
-              {treeDepth} levels
-            </span>
+                reports. It is kept on the refused arm, because it states a
+                property of this navigation rather than anything about what
+                the catalog holds. It is dropped where the read returned no
+                domain, because there the marker stands over nothing and
+                describes a descent the reader cannot make. */}
+            {!catalogEmpty && (
+              <span className="label" data-testid="catalog-depth">
+                {treeDepth} levels
+              </span>
+            )}
           </p>
           {/* The refused arm has no catalog to navigate, so the tree and the
               counts are empty rather than absent. */}
           <CatalogTree
-            nodes={refused ? [] : (tree.value?.subdomains ?? [])}
+            nodes={catalogNodes}
             parent=""
             current={route.name === 'domain' && route.path !== '' ? route.path : null}
             onOutcome={onCatalogOutcome}
           />
+          {catalogEmpty && (
+            <p className="quiet catalog-empty" data-testid="catalog-empty">
+              The catalog holds no domains. Register a layer to fill it.
+            </p>
+          )}
           <div className="sidebar-footer">
             <CatalogCounts counts={refused ? null : counts.value} />
             {anonymous && <p className="quiet">Not signed in</p>}
