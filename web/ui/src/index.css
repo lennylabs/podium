@@ -1329,11 +1329,23 @@ input[type="checkbox"] {
 }
 
 .visibility-markers .badge {
+  display: inline-flex;
   max-width: 100%;
   margin-right: 0;
+  white-space: nowrap;
+}
+
+/* A marker too wide for the cell clips its member names and keeps its
+   remainder count, so the reader is always told how many members the axis
+   carries beyond the ones it names. */
+.visibility-markers .marker-named {
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.visibility-markers .marker-extra {
+  flex: none;
+  white-space: pre;
 }
 
 .ingest-ref {

@@ -2844,8 +2844,9 @@ describe("the layer panel", () => {
     await screen.findByLabelText("Layer panel");
     expect(screen.getByText("public")).toBeTruthy();
     expect(screen.getByText("organization")).toBeTruthy();
-    expect(screen.getByText("groups: secops · appsec +2")).toBeTruthy();
-    expect(screen.getByText("users: carol@acme.com")).toBeTruthy();
+    expect(screen.getByText("group: secops · appsec")).toBeTruthy();
+    expect(screen.getByText("+2")).toBeTruthy();
+    expect(screen.getByText("user: carol@acme.com")).toBeTruthy();
     // The markers sit beside each other in one wrapping cell, so a row that
     // grants on four axes is the height of a row that grants on one.
     const cell = screen.getByText("public").closest(".visibility-markers");
@@ -2853,11 +2854,56 @@ describe("the layer panel", () => {
     expect(cell?.querySelectorAll(".badge").length).toBe(4);
     for (const marker of [
       "organization",
-      "groups: secops · appsec +2",
-      "users: carol@acme.com",
+      "group: secops · appsec",
+      "user: carol@acme.com",
     ]) {
       expect(cell?.contains(screen.getByText(marker))).toBe(true);
     }
+  });
+
+  // The remainder count is the part of an overflowing marker the reader
+  // cannot reconstruct from anything else on the row, so it is drawn in its
+  // own element outside the clipping run rather than at the end of the
+  // member names, where the cell's ellipsis cut it off.
+  it("counts the members an overflowing visibility axis does not name", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "shared",
+              SourceType: "git",
+              Repo: "git@github.com:acme/shared.git",
+              Ref: "main",
+              Order: 1,
+              Groups: [
+                "secops",
+                "appsec",
+                "platform-eng",
+                "data-platform",
+                "design-ops",
+              ],
+              Users: ["alice@acme.com", "bob@acme.com", "carol@acme.com"],
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const cell = screen
+      .getByText("group: secops · appsec")
+      .closest(".visibility-markers");
+    expect(cell).toBeTruthy();
+    // An axis of addresses names one member and counts the other two, because
+    // two addresses are wider than the column holds.
+    expect(screen.getByText("user: alice@acme.com")).toBeTruthy();
+    const counts = [...(cell?.querySelectorAll(".marker-extra") ?? [])].map(
+      (node) => node.textContent?.trim(),
+    );
+    expect(counts).toEqual(["+3", "+2"]);
   });
 
   // The source cell names the type it is showing and states every source

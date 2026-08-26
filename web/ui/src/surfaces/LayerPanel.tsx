@@ -840,7 +840,7 @@ function UnregisterConfirmation({
               <td>
                 {markers.length === 0
                   ? "no grants — only you"
-                  : markers.join(", ")}
+                  : markers.map(markerText).join(", ")}
               </td>
             </tr>
           </tbody>
@@ -966,33 +966,75 @@ function VisibilityCell({ layer }: { layer: LayerRecord }) {
   return (
     <div className="visibility-markers">
       {markers.map((marker) => (
-        <Badge key={marker} tone="quiet">
-          {marker}
+        <Badge key={marker.named} tone="quiet">
+          {/* The names are the half the cell may clip, and the remainder
+              count is the half it may not: a marker cut off mid-list without
+              its count states neither who is granted nor how many are. */}
+          <span className="marker-named">{marker.named}</span>
+          {marker.extra > 0 ? (
+            <span className="marker-extra">{` +${String(marker.extra)}`}</span>
+          ) : null}
         </Badge>
       ))}
     </div>
   );
 }
 
+/** VisibilityMarker is one axis's marker: the axis and the members it names,
+ * and the count of members it does not. */
+interface VisibilityMarker {
+  named: string;
+  extra: number;
+}
+
 /** visibilityMarkers returns one marker per matching axis. The row and the
  * unregister confirmation both name what a layer grants, and they derive the
  * markers here so the audience the confirmation states is the audience the
  * row displays. */
-function visibilityMarkers(layer: LayerRecord): string[] {
+function visibilityMarkers(layer: LayerRecord): VisibilityMarker[] {
   const groups = layer.Groups ?? [];
   const users = layer.Users ?? [];
   return [
-    layer.Public === true ? "public" : "",
-    layer.Organization === true ? "organization" : "",
-    groups.length > 0 ? `groups: ${summarize(groups)}` : "",
-    users.length > 0 ? `users: ${summarize(users)}` : "",
-  ].filter((marker) => marker !== "");
+    layer.Public === true ? { named: "public", extra: 0 } : null,
+    layer.Organization === true ? { named: "organization", extra: 0 } : null,
+    groups.length > 0 ? summarize("group", groups) : null,
+    users.length > 0 ? summarize("user", users) : null,
+  ].filter((marker): marker is VisibilityMarker => marker !== null);
 }
+
+/** markerText states a marker as one string, which is what the unregister
+ * confirmation lists rather than drawing a row of badges. */
+function markerText(marker: VisibilityMarker): string {
+  return marker.extra > 0
+    ? `${marker.named} +${String(marker.extra)}`
+    : marker.named;
+}
+
+/** memberBudget is how many characters of member names one marker states
+ * before the rest become a count. The visibility column is the narrowest of
+ * the row's text columns, and a marker wider than this was clipped by the
+ * cell part-way through a name, which took the remainder count with it. Two
+ * short group names fit the budget; two addresses do not, so an axis of
+ * addresses names one and counts the rest. */
+const memberBudget = 24;
 
 /** summarize keeps an axis that names more members than the row can hold
  * inside its own marker, so the axis stays visible and the count is not
- * dropped to make room. */
-function summarize(members: string[]): string {
-  const shown = members.slice(0, 2).join(" · ");
-  return members.length > 2 ? `${shown} +${String(members.length - 2)}` : shown;
+ * dropped to make room. It names as many members as the budget holds, and at
+ * least one however long that one is. */
+function summarize(axis: string, members: string[]): VisibilityMarker {
+  const named: string[] = [];
+  let width = 0;
+  for (const member of members) {
+    const cost = named.length === 0 ? member.length : member.length + 3;
+    if (named.length > 0 && width + cost > memberBudget) {
+      break;
+    }
+    named.push(member);
+    width += cost;
+  }
+  return {
+    named: `${axis}: ${named.join(" · ")}`,
+    extra: members.length - named.length,
+  };
 }
