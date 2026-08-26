@@ -420,6 +420,13 @@ h3 {
   line-height: 1;
 }
 
+/* A node whose level came back empty keeps its control in the slot so the
+   reader's focus survives, and the marker glyph states that the slot no
+   longer opens anything. */
+.tree-toggle-empty {
+  cursor: default;
+}
+
 /* A leaf has nothing to open, so its row holds the toggle's slot open and
    draws nothing in it, which keeps the labels of a level on one left edge.
    The slot is held by the marker glyph itself, drawn invisible, so it stays

@@ -565,11 +565,18 @@ function TreeNode({
   const label = domainLabel(node.path, parent);
   const children = eager ?? loaded;
   const isCurrent = node.path === current;
-  // A level that resolved to nothing makes this node a leaf, so the row drops
-  // its toggle and keeps the label aligned with its siblings. The tree draws
-  // no sentence for the empty level: a leaf carries no children, and the
-  // dropped toggle is what states that there is nothing to open.
-  const leaf = children !== null && children.length === 0;
+  // A node the eager read already reported empty is a leaf, so the row draws
+  // the blank marker in the toggle's slot and keeps the label aligned with
+  // its siblings. The reader never had a toggle there to press.
+  const leaf = eager !== undefined && eager.length === 0;
+  // A node whose own level came back empty is a leaf the reader discovered by
+  // pressing the toggle, and that press is why the row keeps a control in the
+  // slot rather than dropping it. Unmounting the button the reader is
+  // standing on drops keyboard focus to the document body, which loses their
+  // place in the tree, and with a pointer the triangle vanishes with no
+  // stated outcome. The control stays in place, marked unavailable, and the
+  // row states that the level holds no subdomains.
+  const emptied = !leaf && loaded !== null && loaded.length === 0;
 
   // A route that moves onto this node's ancestry opens it. The tree is not
   // remounted when the reader follows a link, so the ancestry has to reach an
@@ -630,14 +637,27 @@ function TreeNode({
           // its name from the domain it opens. Without it a reader arriving by
           // keyboard or screen reader meets a run of identically named buttons
           // and cannot tell which level each one expands.
+          //
+          // The emptied node keeps the same button element, so React updates
+          // it in place and the focus the reader put on it survives the level
+          // resolving to nothing. It carries aria-disabled rather than
+          // disabled for the same reason: a disabled control is removed from
+          // the focus order, and the browser drops focus to the body.
           <button
             type="button"
-            className="tree-toggle"
-            aria-expanded={open}
-            aria-label={`${open ? 'Collapse' : 'Expand'} ${label}`}
-            onClick={() => setOpen(!open)}
+            className={emptied ? 'tree-toggle tree-toggle-empty' : 'tree-toggle'}
+            aria-expanded={emptied ? undefined : open}
+            aria-disabled={emptied ? true : undefined}
+            aria-label={
+              emptied ? `${label} has no subdomains` : `${open ? 'Collapse' : 'Expand'} ${label}`
+            }
+            onClick={() => {
+              if (!emptied) {
+                setOpen(!open);
+              }
+            }}
           >
-            {open ? '▾' : '▸'}
+            {emptied ? '·' : open ? '▾' : '▸'}
           </button>
         )}
         {/* The label is the whole folded stretch of path the entry navigates
@@ -668,6 +688,14 @@ function TreeNode({
         {failed && (
           <span className="label" data-testid="unavailable-domain">
             did not load
+          </span>
+        )}
+        {/* The marker is what an expansion that resolved to nothing produces
+            on screen, and it is a status so the outcome reaches a reader who
+            pressed the toggle and cannot see the row. */}
+        {emptied && (
+          <span className="label" role="status" data-testid="empty-domain">
+            no subdomains
           </span>
         )}
       </div>

@@ -516,10 +516,11 @@ describe("the application shell", () => {
     expect(within(tree).getByRole("link", { name: "paging" })).toBeTruthy();
   });
 
-  // A node whose level came back empty is a leaf. The tree draws the leaf
-  // state for it, which is the dropped toggle, and it writes no sentence
-  // inside the tree about the empty level.
-  it("turns a node whose level came back empty into a leaf", async () => {
+  // A node whose level came back empty keeps the control the reader pressed,
+  // marked unavailable, and the row states the outcome. The reader who
+  // pressed the toggle is left standing on it, and a row that dropped the
+  // button instead would take the reader's focus with it.
+  it("keeps the toggle in place and states the outcome when a level comes back empty", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": {
@@ -539,17 +540,49 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    fireEvent.click(
-      within(tree).getAllByRole("button", { expanded: false })[0],
-    );
-    // The toggle goes once the level resolves to nothing, so the row is a
-    // leaf and the tree holds no prose row under it.
+    const toggle = within(tree).getAllByRole("button", { expanded: false })[0];
+    toggle.focus();
+    fireEvent.click(toggle);
+    // The control stays in the row once the level resolves to nothing, and it
+    // is the same element, so the focus the reader put on it survives.
     await waitFor(() => {
-      expect(within(tree).queryAllByRole("button")).toHaveLength(0);
+      expect(
+        within(tree).getByRole("button", { name: "finance has no subdomains" }),
+      ).toBeTruthy();
     });
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute("aria-disabled")).toBe("true");
+    expect(toggle.getAttribute("aria-expanded")).toBeNull();
+    // The outcome is stated on the row rather than left to a triangle that
+    // vanished, and it is a status so a reader who cannot see the row is told.
+    const marker = within(tree).getByTestId("empty-domain");
+    expect(marker.getAttribute("role")).toBe("status");
+    expect(marker.textContent).toBe("no subdomains");
     expect(within(tree).getByRole("link", { name: "finance" })).toBeTruthy();
-    expect(within(tree).queryByText(/No subdomains/)).toBeNull();
     expect(tree.querySelectorAll("p")).toHaveLength(0);
+  });
+
+  // A level the eager read already reported empty never carried a toggle, so
+  // the row draws the blank marker and no control. The reader had nothing to
+  // press there and is owed no sentence about it.
+  it("draws no toggle for a node the eager read reported empty", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [{ path: "finance", name: "finance", subdomains: [] }],
+          notable: [],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    expect(within(tree).getByRole("link", { name: "finance" })).toBeTruthy();
+    expect(within(tree).queryAllByRole("button")).toHaveLength(0);
+    expect(within(tree).queryByTestId("empty-domain")).toBeNull();
   });
 
   // A domain the registry refuses to open stays in the hierarchy and is not
