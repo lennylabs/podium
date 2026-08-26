@@ -79,6 +79,20 @@ export function RegisterLayerForm({
     banner.focus();
   }, [refusal]);
 
+  // A refusal describes the request that was sent, so the first edit after it
+  // invalidates it and the banner is dropped rather than standing until the
+  // next submit, asserting a complaint about a field the reader has since
+  // corrected. The form's own change event covers every native control in it.
+  // The controls drawn as buttons rather than as inputs, the source segments
+  // and the token rows a member field draws, emit no change event, so they
+  // clear the refusal through the setter they are given.
+  const edited =
+    <T,>(set: (next: T) => void) =>
+    (next: T) => {
+      setRefusal(null);
+      set(next);
+    };
+
   // An axis the reader turned on with no member named would register a
   // grant that admits nobody, so the form holds the write until each
   // selected axis carries at least one member.
@@ -148,7 +162,14 @@ export function RegisterLayerForm({
       description="A layer points at a source Podium ingests. Its place in the order decides who wins when two layers carry the same artifact ID."
       onClose={onClose}
     >
-      <form className="register-form modal-form" data-testid="register-form" onSubmit={submit}>
+      <form
+        className="register-form modal-form"
+        data-testid="register-form"
+        onSubmit={submit}
+        onChange={() => {
+          setRefusal(null);
+        }}
+      >
         <div className="modal-body">
           {refusal !== null && (
             <div ref={refusalRef} tabIndex={-1} data-testid="register-refusal">
@@ -182,7 +203,7 @@ export function RegisterLayerForm({
               A layer of your own is visible to you alone, and it counts against the layer limit an administrator sets.
             </p>
           )}
-          <SourceChoice value={sourceType} onChange={setSourceType} />
+          <SourceChoice value={sourceType} onChange={edited(setSourceType)} />
           {sourceType === 'git' ? (
             <>
               <label className="field">
@@ -262,7 +283,7 @@ export function RegisterLayerForm({
                 <TokenInput
                   label="Group names, separated by commas"
                   value={groups}
-                  onChange={setGroups}
+                  onChange={edited(setGroups)}
                   tokens={groupMembers}
                   known={knownGroups}
                 />
@@ -276,7 +297,7 @@ export function RegisterLayerForm({
                 <TokenInput
                   label="User identifiers, separated by commas"
                   value={users}
-                  onChange={setUsers}
+                  onChange={edited(setUsers)}
                   tokens={userMembers}
                 />
               </VisibilityAxis>

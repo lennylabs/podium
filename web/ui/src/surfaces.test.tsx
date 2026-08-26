@@ -4807,6 +4807,41 @@ describe("the layer write flows", () => {
     );
   });
 
+  // A refusal names the request that was sent. Editing the form invalidates
+  // it, so the banner is dropped on the next change rather than standing
+  // over fields the reader has since corrected.
+  it("drops a refused registration when the reader edits the form", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "POST /v1/layers": {
+        status: 400,
+        body: {
+          code: "registry.invalid_argument",
+          message: "id and source_type are required",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByTestId("register-refusal");
+    // A field the refusal named, corrected.
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "a-new-id" },
+    });
+    expect(screen.queryByTestId("register-refusal")).toBeNull();
+
+    // The source segments are buttons rather than inputs and emit no change
+    // event, so they clear the refusal on their own.
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByTestId("register-refusal");
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    expect(screen.queryByTestId("register-refusal")).toBeNull();
+  });
+
   // The recovery surface answers how long is left before erasure, so every
   // row states when the layer was unregistered, the date it is erased on,
   // and how much of the §8.4 window remains. A row inside the accent window
