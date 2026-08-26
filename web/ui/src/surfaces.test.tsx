@@ -2508,6 +2508,76 @@ describe("the artifact viewer", () => {
       ).toBe(true);
     });
 
+    // A route change swaps the description in place rather than remounting the
+    // header, so the clip's own state has to follow the new text. Left alone,
+    // an opened long description leaves its control standing over the next
+    // artifact's single short line, where it collapses nothing.
+    it("drops the control when the route changes to a description the clip holds", async () => {
+      // Each paragraph overruns the clip in proportion to its own text, so the
+      // two artifacts measure differently against one stubbed layout.
+      const clientHeight = 60;
+      Object.defineProperty(HTMLParagraphElement.prototype, "scrollHeight", {
+        configurable: true,
+        get(this: HTMLParagraphElement) {
+          return this.classList.contains("clamped") &&
+            (this.textContent ?? "").length > 40
+            ? 900
+            : clientHeight;
+        },
+      });
+      Object.defineProperty(HTMLParagraphElement.prototype, "clientHeight", {
+        configurable: true,
+        get: () => clientHeight,
+      });
+      function viewed(id: string, description: string) {
+        return {
+          body: {
+            id,
+            type: "context",
+            version: "0.1.0",
+            content_hash: "sha256:abc",
+            manifest_body: "# Viewed\n",
+            frontmatter: `---\nname: viewed\ndescription: ${description}\n---\n`,
+          },
+        };
+      }
+      const stubs: Record<string, Stub> = {
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": viewed(
+          "edge/many-tags",
+          "The invoice approval path routes each document through every approver on it.",
+        ),
+        "/v1/dependents": { body: { edges: [] } },
+      };
+      stubRegistry(stubs);
+      goTo("#/artifact/edge%2Fmany-tags");
+      render(<App />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+      expect(
+        screen.getByRole("button", { name: "Show less" }),
+      ).toBeTruthy();
+
+      stubs["/v1/load_artifact"] = viewed("edge/no-body", "No body at all.");
+      goTo("#/artifact/edge%2Fno-body");
+      await waitFor(() => {
+        expect(screen.getByTestId("artifact-lead").textContent).toBe(
+          "No body at all.",
+        );
+      });
+      // The short line is stated whole and carries no control of either name.
+      expect(
+        screen.getByTestId("artifact-lead").classList.contains("clamped"),
+      ).toBe(true);
+      expect(screen.queryByRole("button", { name: "Show less" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+      // The rail states the same field, and its own control goes with it.
+      expect(
+        screen.queryByRole("button", {
+          name: "Show the whole description value",
+        }),
+      ).toBeNull();
+    });
+
     it("offers no control for a description the clip already holds", async () => {
       stubHeights(60);
       stubViewer("Pay a supplier invoice.");

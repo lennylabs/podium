@@ -36,6 +36,19 @@ export function ClampedText({
   const [expanded, setExpanded] = useState(false);
   const [overrun, setOverrun] = useState(false);
   const paragraph = useRef<HTMLParagraphElement>(null);
+  // A route change swaps the text into the same component instance rather
+  // than remounting it, so the state measured against the old string has to
+  // be dropped here. Without the reset, an opened description leaves its
+  // control standing over the next artifact's short line, where it collapses
+  // nothing: the measurement below returns early while expanded, so the
+  // overrun is never recomputed for the new text. React re-renders on this
+  // before it commits, so the stale control never reaches the screen.
+  const [measured, setMeasured] = useState(text);
+  if (measured !== text) {
+    setMeasured(text);
+    setExpanded(false);
+    setOverrun(false);
+  }
 
   useLayoutEffect(() => {
     const node = paragraph.current;
