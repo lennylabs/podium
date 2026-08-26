@@ -387,6 +387,25 @@ h3 {
   color: var(--ink);
 }
 
+/* The remainder row sits at the level it opens and reads as an annotation on
+   it, so it takes the quiet colour and the row's own metrics rather than the
+   page's button scale. */
+.catalog-more {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 2px 8px 2px 20px;
+  border: none;
+  background: none;
+  color: var(--faint);
+  font-size: 12px;
+  text-align: left;
+}
+
+.catalog-more:hover {
+  color: var(--ink);
+}
+
 .tree-toggle,
 .tree-leaf {
   padding: 0 4px;

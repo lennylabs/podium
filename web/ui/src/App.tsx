@@ -40,6 +40,14 @@ import { DeletedLayers } from './surfaces/DeletedLayers';
  * without reading the whole of it. */
 const treeDepth = 2;
 
+/** siblingCap is how many domains one level of the sidebar tree lists before
+ * the rest fold behind a remainder row. It is the tree's counterpart to the
+ * domain page's tile cap: a level that draws every child of a wide domain
+ * fills the sidebar with one level and pushes the pinned footer below the
+ * fold, so the tree keeps a level to a screen's worth of rows and states how
+ * many it is holding back. */
+const siblingCap = 8;
+
 /** contentID names the content region the skip link jumps to. */
 const contentID = 'main-content';
 
@@ -471,7 +479,13 @@ function onCurrentPath(path: string, current: string | null): boolean {
  * `current` is the domain the page is showing, or null on a route that is not
  * a domain. The tree resolves the ancestry down to it and marks it, so a
  * reader who arrived by a link or a breadcrumb sees where in the hierarchy
- * the page sits instead of a row of collapsed roots. */
+ * the page sits instead of a row of collapsed roots.
+ *
+ * A level wider than the cap keeps the remainder behind one row. A domain
+ * that carries a couple of dozen children otherwise draws a couple of dozen
+ * rows, which runs the sidebar past the viewport and takes the pinned footer
+ * counts with it, so the levels above it and the footer under it both leave
+ * the screen to list one domain's children. */
 function CatalogTree({
   nodes,
   parent,
@@ -483,11 +497,37 @@ function CatalogTree({
   current: string | null;
   onOutcome: (err: unknown) => void;
 }) {
+  const [all, setAll] = useState(false);
+  // The reader's own position is never one of the folded rows: a level whose
+  // current domain sits past the cap is drawn whole, because the row that
+  // marks where the page sits is what the tree is for.
+  const folded =
+    !all &&
+    nodes.length > siblingCap &&
+    !nodes.slice(siblingCap).some((node) => onCurrentPath(node.path, current));
+  const shown = folded ? nodes.slice(0, siblingCap) : nodes;
+
   return (
     <ul className="catalog-tree" aria-label="Catalog">
-      {nodes.map((node) => (
+      {shown.map((node) => (
         <TreeNode key={node.path} node={node} parent={parent} current={current} onOutcome={onOutcome} />
       ))}
+      {folded && (
+        <li className="catalog-node">
+          {/* The row states how many domains it is holding back and opens
+              them in place, so the level is reachable from the tree rather
+              than only from the domain page's subdomain list. */}
+          <button
+            type="button"
+            className="catalog-more mono"
+            onClick={() => {
+              setAll(true);
+            }}
+          >
+            + {nodes.length - siblingCap} more
+          </button>
+        </li>
+      )}
     </ul>
   );
 }

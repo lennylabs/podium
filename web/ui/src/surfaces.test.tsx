@@ -369,6 +369,65 @@ describe("the application shell", () => {
     expect(wordmark.textContent).toBe("Podium");
   });
 
+  // A level wider than the cap folds its remainder behind one row. Drawing
+  // every child of a wide domain fills the sidebar with one level, pushes the
+  // levels beside it and the pinned footer counts off the screen, and leaves
+  // the reader scrolling the sidebar to reach what the shell states about the
+  // catalog. The row states the count it holds back and opens it in place.
+  it("folds a level wider than the cap behind a remainder row", async () => {
+    const wide = Array.from({ length: 11 }, (_, i) => ({
+      path: `sub${String(i)}`,
+      name: `sub${String(i)}`,
+      // The level is drawn from what the eager read carried, so a child that
+      // came back with no level of its own keeps the case to one tree level.
+      subdomains: [],
+    }));
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: { path: "", subdomains: wide, notable: [] },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    expect(within(tree).getByText("sub7")).toBeTruthy();
+    expect(within(tree).queryByText("sub8")).toBeNull();
+    const more = within(tree).getByRole("button", { name: "+ 3 more" });
+    fireEvent.click(more);
+    expect(within(tree).getByText("sub10")).toBeTruthy();
+    expect(within(tree).queryByRole("button", { name: "+ 3 more" })).toBeNull();
+  });
+
+  // The reader's own position is never one of the folded rows. A domain that
+  // sits past the cap is what the page is showing, so the level is drawn
+  // whole and the row marking the current domain is on screen.
+  it("draws a folded level whole when the current domain sits past the cap", async () => {
+    const wide = Array.from({ length: 11 }, (_, i) => ({
+      path: `sub${String(i)}`,
+      name: `sub${String(i)}`,
+      // The level is drawn from what the eager read carried, so a child that
+      // came back with no level of its own keeps the case to one tree level.
+      subdomains: [],
+    }));
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: { path: "", subdomains: wide, notable: [] },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo(domainHref("sub9"));
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    expect(
+      within(tree).getByRole("link", { name: "sub9", current: "page" }),
+    ).toBeTruthy();
+    expect(within(tree).queryByRole("button", { name: /more$/ })).toBeNull();
+  });
+
   // Every toggle draws the same glyph, so the accessible name is the only
   // thing that separates one row's toggle from the next one's. A reader
   // moving through the tree by keyboard is owed the domain each toggle opens,
