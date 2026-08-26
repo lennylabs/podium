@@ -7,7 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ReactNode } from 'react';
 
-import { Banner, ErrorState, Loading, Magnifier, PageBanner } from './components/primitives';
+import { Banner, Chevron, ErrorState, Loading, Magnifier, PageBanner } from './components/primitives';
 import type { DomainDescriptor } from './api';
 import {
   ApiError,
@@ -743,7 +743,7 @@ function TreeNode({
         {leaf ? (
           <span className="tree-leaf" aria-hidden="true" />
         ) : (
-          // The glyph is the same character on every row, so the toggle takes
+          // The marker is the same drawing on every row, so the toggle takes
           // its name from the domain it opens. Without it a reader arriving by
           // keyboard or screen reader meets a run of identically named buttons
           // and cannot tell which level each one expands.
@@ -767,7 +767,13 @@ function TreeNode({
               }
             }}
           >
-            {emptied ? '·' : open ? '▾' : '▸'}
+            {/* The open and closed states are one chevron that the row turns,
+                which is the same indicator the subdomain cards on the domain
+                page draw. A filled triangle here would put two unrelated
+                disclosure marks in one view. The spent node keeps a typed
+                marker, because it opens nothing and a chevron would read as
+                something still to expand. */}
+            {emptied ? '·' : <Chevron />}
           </button>
         )}
         {/* The label is the whole folded stretch of path the entry navigates

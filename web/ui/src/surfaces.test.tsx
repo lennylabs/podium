@@ -736,6 +736,41 @@ describe("the application shell", () => {
     ).toBeTruthy();
   });
 
+  // The tree and the subdomain cards are two disclosure affordances in one
+  // view, so the tree's open and closed marker is the shell's stroked chevron
+  // rather than a typed triangle, and the row turns it through aria-expanded.
+  it("marks an open and a closed subtree with the shell's chevron", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            {
+              path: "finance",
+              name: "finance",
+              subdomains: [{ path: "finance/ap", name: "ap" }],
+            },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    const closed = within(tree).getByRole("button", { name: "Expand finance" });
+    expect(closed.querySelector("svg.chevron")).not.toBeNull();
+    expect(closed.textContent).toBe("");
+    fireEvent.click(closed);
+    const open = within(tree).getByRole("button", {
+      name: "Collapse finance",
+    });
+    expect(open.querySelector("svg.chevron")).not.toBeNull();
+    expect(open.textContent).toBe("");
+  });
+
   // A §4.5.5 sparse chain arrives collapsed into one entry whose path holds
   // every segment it crossed and whose name holds only the last one. The row
   // states the stretch of path it navigates across, because a row drawn from

@@ -467,17 +467,28 @@ h3 {
   cursor: default;
 }
 
-/* A leaf has nothing to open, so its row holds the toggle's slot open and
-   draws nothing in it, which keeps the labels of a level on one left edge.
-   The slot is held by the marker glyph itself, drawn invisible, so it stays
-   the toggle's width when the type changes. */
-.tree-leaf {
-  display: inline-block;
-  color: transparent;
+/* The toggle's marker is the shell's chevron, turned a quarter clockwise when
+   the level below the row is open. The row states which way it points through
+   aria-expanded already, so the rotation reads that rather than a second class
+   that would have to be kept in step with it. */
+.tree-toggle .chevron {
+  display: block;
+  width: 9px;
+  height: 9px;
 }
 
-.tree-leaf::before {
-  content: "\25b8";
+.tree-toggle[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+}
+
+/* A leaf has nothing to open, so its row holds the toggle's slot open and
+   draws nothing in it, which keeps the labels of a level on one left edge.
+   The slot is the chevron's width plus the toggle's padding, so the left edge
+   holds when a row's type changes. */
+.tree-leaf {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
 }
 
 /* The footer is pinned to the bottom of the sidebar. */
