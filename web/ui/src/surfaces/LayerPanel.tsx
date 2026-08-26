@@ -599,23 +599,28 @@ function LayerRow({
         </button>
       </td>
       <td className="mono">
-        {layer.ID}
-        {ownedByCaller(layer, subject) && <Badge tone="accent">yours</Badge>}
-        {layer.UserDefined !== true && (
-          <>
-            <Badge tone="quiet">admin-defined</Badge>
-            {/* The stored owner of an admin-defined layer is a
-                caller-supplied field naming no authorized subject, so the row
-                states it as the field it is: no ownership language and none
-                of the marker's styling. */}
-            <span className="quiet stored-owner" data-testid="stored-owner">
-              owner:{" "}
-              {layer.Owner === undefined || layer.Owner === ""
-                ? "unset"
-                : layer.Owner}
-            </span>
-          </>
-        )}
+        {/* The name and the markers qualifying it are one wrapping row, so the
+            gap between them comes from the row rather than from a badge's own
+            margin, which is trailing only. */}
+        <div className="layer-id-cell">
+          <span>{layer.ID}</span>
+          {ownedByCaller(layer, subject) && <Badge tone="accent">yours</Badge>}
+          {layer.UserDefined !== true && (
+            <>
+              <Badge tone="quiet">admin-defined</Badge>
+              {/* The stored owner of an admin-defined layer is a
+                  caller-supplied field naming no authorized subject, so the row
+                  states it as the field it is: no ownership language and none
+                  of the marker's styling. */}
+              <span className="quiet stored-owner" data-testid="stored-owner">
+                owner:{" "}
+                {layer.Owner === undefined || layer.Owner === ""
+                  ? "unset"
+                  : layer.Owner}
+              </span>
+            </>
+          )}
+        </div>
       </td>
       <td>
         <SourceCell layer={layer} />

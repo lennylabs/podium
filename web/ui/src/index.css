@@ -983,8 +983,19 @@ input[type="checkbox"] {
   border-radius: 9px;
 }
 
+/* The layer table's identifier cell. The name, the markers qualifying it, and
+   the stored-owner note are one wrapping row with a gap, the same way the page
+   title and the artifact row head carry their badges. Left to inline flow the
+   name and the first badge touch, because a badge sets its own trailing margin
+   and no leading one. */
+.layer-id-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 7px;
+}
+
 .stored-owner {
-  margin-left: 6px;
   font-size: 11.5px;
 }
 

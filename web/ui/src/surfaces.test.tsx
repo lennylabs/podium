@@ -2102,6 +2102,26 @@ describe("the layer panel", () => {
     expect(stored.className).not.toContain("badge");
   });
 
+  // A badge sets a trailing margin and no leading one, so a name written
+  // straight into the cell before one reads as a single run of text. The row
+  // that holds them supplies the gap.
+  it("sets the ownership marker off from the layer name it qualifies", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer("alice@acme.com")] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const marker = screen.getByText("yours");
+    const row = marker.parentElement;
+    expect(row).not.toBeNull();
+    expect(row?.textContent).toContain("alice-personal");
+    const style = window.getComputedStyle(row as HTMLElement);
+    expect(style.display).toBe("flex");
+    expect(style.getPropertyValue("gap")).toBe("7px");
+  });
+
   // The row states the last ingest as an age, the way the sidebar footer
   // states the same fact, with the ingest reference beneath it. The stored
   // stamp is a microsecond ISO-8601 string that wraps over two lines in this
