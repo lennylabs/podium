@@ -773,10 +773,10 @@ describe("the application shell", () => {
   });
 
   // A node whose level came back empty keeps the control the reader pressed,
-  // marked unavailable, and the row states the outcome. The reader who
-  // pressed the toggle is left standing on it, and a row that dropped the
-  // button instead would take the reader's focus with it.
-  it("keeps the toggle in place and states the outcome when a level comes back empty", async () => {
+  // marked unavailable, and announces the outcome. The reader who pressed the
+  // toggle is left standing on it, and a row that dropped the button instead
+  // would take the reader's focus with it.
+  it("keeps the toggle in place and announces the outcome when a level comes back empty", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": {
@@ -809,14 +809,19 @@ describe("the application shell", () => {
     expect(document.activeElement).toBe(toggle);
     expect(toggle.getAttribute("aria-disabled")).toBe("true");
     expect(toggle.getAttribute("aria-expanded")).toBeNull();
-    // The outcome is stated on the row rather than left to a triangle that
-    // vanished, and it is a status so a reader who cannot see the row is told.
+    // The outcome is announced rather than drawn beside the name. The row's
+    // right-aligned slot is the design's "restricted" slot and is too narrow
+    // for the sentence, which clipped to a fragment beside any name longer
+    // than a few characters, so the status lives in the accessibility tree
+    // alone and names the domain it reports on.
     const marker = within(tree).getByTestId("empty-domain");
     expect(marker.getAttribute("role")).toBe("status");
-    expect(marker.textContent).toBe("no subdomains");
-    // The marker is drawn in the row's own quiet type. In the section-label
-    // type it was wide enough to push the name it annotates out of the row.
-    expect(marker.className).toBe("catalog-marker");
+    expect(marker.textContent).toBe("finance has no subdomains");
+    expect(marker.className).toBe("assistive-only");
+    expect(within(tree).queryByText("no subdomains")).toBeNull();
+    expect(
+      tree.querySelectorAll(".catalog-row > .catalog-marker"),
+    ).toHaveLength(0);
     expect(within(tree).getByRole("link", { name: "finance" })).toBeTruthy();
     expect(tree.querySelectorAll("p")).toHaveLength(0);
   });

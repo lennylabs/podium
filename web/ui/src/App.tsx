@@ -683,8 +683,8 @@ function TreeNode({
   // slot rather than dropping it. Unmounting the button the reader is
   // standing on drops keyboard focus to the document body, which loses their
   // place in the tree, and with a pointer the triangle vanishes with no
-  // stated outcome. The control stays in place, marked unavailable, and the
-  // row states that the level holds no subdomains.
+  // stated outcome. The control stays in place, marked unavailable, and its
+  // name states that the level holds no subdomains.
   const emptied = !leaf && loaded !== null && loaded.length === 0;
 
   // A route that moves onto this node's ancestry opens it. The tree is not
@@ -809,17 +809,17 @@ function TreeNode({
             did not load
           </span>
         )}
-        {/* The marker is what an expansion that resolved to nothing produces
-            on screen, and it is a status so the outcome reaches a reader who
-            pressed the toggle and cannot see the row. */}
+        {/* The outcome of an expansion that resolved to nothing is announced
+            rather than drawn. The row's right-aligned slot is narrow enough
+            that "no subdomains" clips to a fragment beside any name longer
+            than a few characters, and the sentence it clips to says nothing;
+            the visible outcome the reader gets is the toggle's spent glyph
+            and the domain page's own line. The status stays in the
+            accessibility tree so the reader who pressed the toggle and cannot
+            see the row is still told. */}
         {emptied && (
-          <span
-            className="catalog-marker"
-            title="no subdomains"
-            role="status"
-            data-testid="empty-domain"
-          >
-            no subdomains
+          <span className="assistive-only" role="status" data-testid="empty-domain">
+            {label} has no subdomains
           </span>
         )}
       </div>
