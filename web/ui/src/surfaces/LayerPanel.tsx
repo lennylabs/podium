@@ -295,10 +295,11 @@ export function LayerPanel({
             </tr>
           </thead>
           <tbody>
-            {rows.map((layer) => (
+            {rows.map((layer, index) => (
               <LayerRow
                 key={layer.ID}
                 layer={layer}
+                position={index + 1}
                 subject={subject}
                 readOnly={readOnly}
                 refusal={refusals[layer.ID] ?? null}
@@ -484,6 +485,7 @@ function movedOrder(
 
 function LayerRow({
   layer,
+  position,
   subject,
   readOnly,
   refusal,
@@ -502,6 +504,7 @@ function LayerRow({
   onDismissRefusal,
 }: {
   layer: LayerRecord;
+  position: number;
   subject: string;
   readOnly: boolean;
   refusal: Refusal | null;
@@ -599,27 +602,18 @@ function LayerRow({
         </button>
       </td>
       <td className="mono">
-        {/* The name and the markers qualifying it are one wrapping row, so the
+        {/* The name and the marker qualifying it are one wrapping row, so the
             gap between them comes from the row rather than from a badge's own
-            margin, which is trailing only. */}
+            margin, which is trailing only. The badge beside the name carries
+            the ownership marker alone; the row's place in the precedence order
+            is the fact the panel is about, so it sits on its own line under
+            the name where every row states it at the same offset. */}
         <div className="layer-id-cell">
           <span>{layer.ID}</span>
           {ownedByCaller(layer, subject) && <Badge tone="accent">yours</Badge>}
-          {layer.UserDefined !== true && (
-            <>
-              <Badge tone="quiet">admin-defined</Badge>
-              {/* The stored owner of an admin-defined layer is a
-                  caller-supplied field naming no authorized subject, so the row
-                  states it as the field it is: no ownership language and none
-                  of the marker's styling. */}
-              <span className="quiet stored-owner" data-testid="stored-owner">
-                owner:{" "}
-                {layer.Owner === undefined || layer.Owner === ""
-                  ? "unset"
-                  : layer.Owner}
-              </span>
-            </>
-          )}
+        </div>
+        <div className="layer-order quiet" data-testid="layer-order">
+          {orderNote(position, layer)}
         </div>
       </td>
       <td>
@@ -830,6 +824,29 @@ function UnregisterConfirmation({
       </div>
     </Modal>
   );
+}
+
+/** orderNote states the row's place in the precedence order, with the layer's
+ * stored owner appended where the layer carries one.
+ *
+ * The position counts down the table rather than reading the stored `Order`
+ * field, because that field sets precedence within a class alone: §4.6
+ * composes every user-defined layer above every admin-defined layer whatever
+ * the stored values are, and registration hands each new layer the highest
+ * existing order, so the stored values are neither contiguous nor comparable
+ * across the two blocks. The table is already sorted the way the catalog
+ * composes, so its own positions are the precedence the panel is about.
+ *
+ * The owner is stated as the field it is, with no ownership language: on an
+ * admin-defined layer it is supplied by the caller who registered or patched
+ * the layer and names no authorized subject, and the ownership marker beside
+ * the name is what asserts who may write. */
+function orderNote(position: number, layer: LayerRecord): string {
+  const note = `order ${String(position)}`;
+  if (layer.Owner === undefined || layer.Owner === "") {
+    return note;
+  }
+  return `${note} · owner ${layer.Owner}`;
 }
 
 /** ownedByCaller is the panel's ownership marker. It is a property of a

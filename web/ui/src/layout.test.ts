@@ -214,10 +214,10 @@ describe("artifact listing", () => {
   });
 });
 
-// The layer table's identifier cell holds the layer name, the markers
-// qualifying it, and the stored-owner note. A badge declares a trailing margin
-// and no leading one, so the cell's own row supplies the space before the
-// first marker; without it the name and the marker touch.
+// The layer table's identifier cell holds the layer name and the marker
+// qualifying it. A badge declares a trailing margin and no leading one, so the
+// cell's own row supplies the space before the marker; without it the name and
+// the marker touch.
 describe("layer identifier cell", () => {
   it("lays the layer name and its markers out on one wrapping row with a gap", () => {
     const cell = styled("layer-id-cell");

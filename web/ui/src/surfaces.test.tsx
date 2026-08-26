@@ -2092,14 +2092,42 @@ describe("the layer panel", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     expect(screen.getAllByText("yours").length).toBe(1);
-    expect(screen.getByText("admin-defined")).toBeTruthy();
     // The admin-defined row still shows its stored owner, as the field it
     // is. It carries no ownership language and none of the marker's
     // styling, because the write rule authorizes a tenant admin there and
     // that field names no authorized subject.
-    const stored = screen.getByTestId("stored-owner");
-    expect(stored.textContent).toBe("owner: alice@acme.com");
+    const stored = screen.getAllByTestId("layer-order")[0];
+    expect(stored.textContent).toBe("order 1 · owner alice@acme.com");
     expect(stored.className).not.toContain("badge");
+  });
+
+  // The panel's subject is precedence, so every row states its own place in
+  // it. The position counts down the table, which is sorted the way §4.6
+  // composes the catalog, because the stored order values set precedence
+  // within a class alone and are neither contiguous nor comparable across the
+  // two blocks.
+  // Spec: §13.10
+  it("states each row's place in the precedence order", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            { ...adminLayer("platform-eng"), Order: 11 },
+            { ...userLayer("alice@acme.com"), Order: 21 },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    expect(
+      screen.getAllByTestId("layer-order").map((note) => note.textContent),
+    ).toEqual([
+      "order 1 · owner platform-eng",
+      "order 2 · owner alice@acme.com",
+    ]);
   });
 
   // A badge sets a trailing margin and no leading one, so a name written
@@ -2155,7 +2183,9 @@ describe("the layer panel", () => {
     expect(lastIngestCell("alice-personal").textContent).toBe("never—");
   });
 
-  it("states an unset stored owner on an admin-defined row rather than omitting the field", async () => {
+  // A layer carrying no stored owner states its position alone. Appending an
+  // empty owner clause would read as a field the reader could set from here.
+  it("states the position alone on a row whose stored owner is unset", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": { body: { layers: [adminLayer()] } },
@@ -2163,7 +2193,7 @@ describe("the layer panel", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    expect(screen.getByTestId("stored-owner").textContent).toBe("owner: unset");
+    expect(screen.getByTestId("layer-order").textContent).toBe("order 1");
     expect(screen.queryByText("yours")).toBeNull();
   });
 
