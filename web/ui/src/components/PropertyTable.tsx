@@ -5,8 +5,8 @@
 //
 // The heading belongs to the caller. The viewer stands one over the full
 // table and the rail drops its section header along with the table where the
-// response yields no pairs, so this renders the table and its two absent
-// states and nothing around them.
+// response yields no pairs, so this renders the table, the two absent states,
+// and the full-width panel's own lines.
 
 import { useState } from 'react';
 
@@ -20,7 +20,9 @@ export function PropertyTable({
   raw: string;
   testID?: string;
   /** offerRaw stands the Table and Raw YAML views side by side, which the
-   * full-width panel offers and the rail does not. */
+   * full-width panel offers and the rail does not. It also carries the two
+   * lines that state where the pairs came from and how their values are
+   * shown, which belong to the panel and not to the rail's narrow column. */
   offerRaw?: boolean;
 }) {
   // The value the response carries is a whole manifest document on the
@@ -53,8 +55,15 @@ export function PropertyTable({
   return (
     <>
       {offerRaw && (
-        <div className="view-toggle" role="group" aria-label="Frontmatter view">
-          <button
+        // The line and the toggle share a row, with the toggle pushed to the
+        // right edge of the panel, so the panel opens with one line of prose
+        // rather than with a control standing alone.
+        <div className="source-actions">
+          <span className="source-lede">
+            Parsed from the artifact&apos;s manifest. Unknown keys are preserved and shown as authored.
+          </span>
+          <div className="view-toggle" role="group" aria-label="Frontmatter view">
+            <button
             type="button"
             aria-pressed={!rawView}
             className={rawView ? 'toggle' : 'toggle toggle-open'}
@@ -73,7 +82,8 @@ export function PropertyTable({
             }}
           >
             Raw YAML
-          </button>
+            </button>
+          </div>
         </div>
       )}
       {offerRaw && rawView ? (
@@ -91,6 +101,11 @@ export function PropertyTable({
             ))}
           </tbody>
         </table>
+      )}
+      {offerRaw && !rawView && (
+        <p className="quiet property-note">
+          Values are shown verbatim. A long description wraps rather than being clipped.
+        </p>
       )}
     </>
   );

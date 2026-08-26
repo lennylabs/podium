@@ -1049,6 +1049,18 @@ input[type="checkbox"] {
   border-radius: 0;
 }
 
+/* The toggle sits on the panel's opening row beside the line that states
+   where the pairs came from, so it carries no margin of its own there. */
+.source-actions .view-toggle {
+  margin: 0;
+}
+
+.property-note {
+  max-width: 840px;
+  margin-top: 14px;
+  font-size: 12.5px;
+}
+
 .toggle:first-child {
   border-radius: 8px 0 0 8px;
 }

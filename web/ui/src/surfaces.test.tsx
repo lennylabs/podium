@@ -2226,6 +2226,56 @@ describe("the artifact viewer", () => {
     expect(screen.getByText("This artifact extends nothing.")).toBeTruthy();
   });
 
+  it("drops the rail’s frontmatter section while the Frontmatter tab stands the same pairs full width", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "Body.\n",
+          frontmatter: "---\nname: review\nsensitivity: low\n---\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    // The rendered tab carries no property table of its own, so the rail
+    // states the pairs beside it.
+    expect(screen.getByTestId("rail-frontmatter-table").textContent).toContain(
+      "sensitivity",
+    );
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    // The panel now stands the same pairs full width, so the rail drops its
+    // section header along with its table and reads as provenance followed
+    // directly by relations.
+    expect(screen.getByTestId("frontmatter-table").textContent).toContain(
+      "sensitivity",
+    );
+    expect(screen.queryByTestId("rail-frontmatter-table")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Frontmatter" })).toBeNull();
+    // The panel opens with the line that states where the pairs came from,
+    // and the Table and Raw YAML views stand beside it on the same row.
+    expect(
+      screen.getByText(/Unknown keys are preserved and shown as authored\./),
+    ).toBeTruthy();
+    expect(screen.getByText(/Values are shown verbatim\./)).toBeTruthy();
+    expect(
+      screen
+        .getByRole("group", { name: "Frontmatter view" })
+        .closest(".source-actions"),
+    ).not.toBeNull();
+    // Leaving the tab returns the rail's own copy.
+    fireEvent.click(screen.getByRole("tab", { name: "Rendered" }));
+    expect(screen.getByTestId("rail-frontmatter-table").textContent).toContain(
+      "sensitivity",
+    );
+  });
+
   it("reports a frontmatter block that does not parse without affecting the rest of the viewer", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },

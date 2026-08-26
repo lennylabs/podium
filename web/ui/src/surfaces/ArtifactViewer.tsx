@@ -47,6 +47,11 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // rather than on the picker alone, because a reader who picks the version
   // the registry already served is looking at the latest one.
   const [viewing, setViewing] = useState('');
+  // The open tab lives here rather than in the tab set, because the rail
+  // beside it reads it: the Frontmatter tab already stands the same pairs
+  // full width in the content column, and the rail's own copy of them would
+  // put the table on the screen twice.
+  const [tab, setTab] = useState<TabName>('rendered');
   const [latest, setLatest] = useState('');
   // The response the page is standing on. A version the registry cannot
   // resolve is refused, and the picker that asked for it lives on this page,
@@ -164,10 +169,10 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           <ErrorState error={fetched.error} onRetry={fetched.reload} />
         )}
         {(body.manifest_body_url === undefined || (!fetched.loading && fetched.error === null)) && (
-          <Manifest artifact={body} document={document} />
+          <Manifest artifact={body} document={document} tab={tab} onTab={setTab} />
         )}
       </div>
-      <ArtifactRail artifact={body} frontmatter={document.frontmatter} />
+      <ArtifactRail artifact={body} frontmatter={document.frontmatter} showFrontmatter={tab !== 'frontmatter'} />
     </section>
   );
 }
@@ -257,8 +262,17 @@ function VersionPicker({ viewing, onView }: { viewing: string; onView: (version:
  * skill file where the artifact carries one, and the bundled files. A tab
  * whose artifact carries nothing is not drawn, so the set can shrink without
  * leaving a hole. */
-function Manifest({ artifact, document }: { artifact: LoadArtifactResponse; document: ManifestHalves }) {
-  const [tab, setTab] = useState<TabName>('rendered');
+function Manifest({
+  artifact,
+  document,
+  tab,
+  onTab,
+}: {
+  artifact: LoadArtifactResponse;
+  document: ManifestHalves;
+  tab: TabName;
+  onTab: (tab: TabName) => void;
+}) {
   const { body, frontmatter } = document;
   const skillRaw = artifact.skill_raw ?? '';
   const resources = resourceRows(artifact);
@@ -302,7 +316,7 @@ function Manifest({ artifact, document }: { artifact: LoadArtifactResponse; docu
         return;
     }
     event.preventDefault();
-    setTab(tabs[next].name);
+    onTab(tabs[next].name);
     // Selection follows focus, so the focus moves with the selection rather
     // than staying on the tab the reader has already left.
     event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
@@ -324,7 +338,7 @@ function Manifest({ artifact, document }: { artifact: LoadArtifactResponse; docu
             tabIndex={open === entry.name ? 0 : -1}
             className={open === entry.name ? 'tab tab-open' : 'tab'}
             onClick={() => {
-              setTab(entry.name);
+              onTab(entry.name);
             }}
           >
             {entry.label}
@@ -407,12 +421,21 @@ async function fetchText(link: LargeResourceLink): Promise<string> {
 /** ArtifactRail carries what came with the registry's response: where the
  * artifact came from, its frontmatter, what depends on it, and what it
  * bundles. Each section has an absent state, and the frontmatter section is
- * the exception the design fixes: where the response yields no pairs the
- * section drops its header along with its table, so the rail reads as
- * provenance followed directly by relations. */
-function ArtifactRail({ artifact, frontmatter }: { artifact: LoadArtifactResponse; frontmatter: string }) {
+ * the exception the design fixes: where the response yields no pairs, or
+ * where the Frontmatter tab is already showing the same pairs full width in
+ * the content column, the section drops its header along with its table, so
+ * the rail reads as provenance followed directly by relations. */
+function ArtifactRail({
+  artifact,
+  frontmatter,
+  showFrontmatter,
+}: {
+  artifact: LoadArtifactResponse;
+  frontmatter: string;
+  showFrontmatter: boolean;
+}) {
   const pairs = parseFrontmatter(frontmatter);
-  const hasFrontmatter = pairs.error !== '' || pairs.properties.length > 0;
+  const hasFrontmatter = showFrontmatter && (pairs.error !== '' || pairs.properties.length > 0);
   const resources = resourceRows(artifact);
   return (
     <aside className="artifact-rail" aria-label="Artifact details">
