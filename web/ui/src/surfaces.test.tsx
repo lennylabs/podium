@@ -3815,6 +3815,39 @@ describe("the artifact viewer", () => {
       expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
     });
 
+    // Description is optional in an artifact's frontmatter. The listing row
+    // and the subdomain card both state its absence in an italic placeholder,
+    // and the header states it in the same one: collapsing the line away puts
+    // the title straight onto the tab strip and reads as a rendering gap.
+    // Spec: §13.10
+    it("states an absent description in the header", async () => {
+      stubHeights(60);
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": {
+          body: {
+            id: "edge/no-description",
+            type: "context",
+            version: "0.1.0",
+            content_hash: "sha256:abc",
+            manifest_body: "# No description\n",
+            frontmatter: "---\nname: no-description\n---\n",
+          },
+        },
+        "/v1/dependents": { body: { edges: [] } },
+      });
+      goTo("#/artifact/edge%2Fno-description");
+      render(<App />);
+      await screen.findByLabelText("Artifact viewer");
+      const lead = screen.getByTestId("artifact-lead");
+      expect(lead.textContent).toBe("No description.");
+      expect(lead.classList.contains("absent-description")).toBe(true);
+      // The placeholder is one short line, so it carries no clip and no
+      // control to open.
+      expect(lead.classList.contains("clamped")).toBe(false);
+      expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    });
+
     // The property table is rows of key and value. A long value states what
     // the author wrote in full: clipping it behind an opener hides part of
     // the frontmatter and stretches that one row past the rows around it.

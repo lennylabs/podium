@@ -144,7 +144,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           <SensitivityBadge sensitivity={body.sensitivity} />
           <DeprecatedBadge deprecated={body.deprecated} />
         </div>
-        {description !== '' && <Lead text={description} />}
+        <Lead text={description} />
         <DeprecationNotice artifact={body} />
         {artifact.loading && <Loading label="Loading the artifact." />}
         {artifact.error !== null && (
