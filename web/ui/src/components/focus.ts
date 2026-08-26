@@ -4,7 +4,7 @@
 // and a dialog that closes without handing focus back drops the reader at the
 // top of the document with no way to resume where they were.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 
 /**
@@ -195,4 +195,57 @@ export function usePopupDismiss<T extends HTMLElement>(
     };
   }, [open, trigger]);
   return popup;
+}
+
+// holds counts the dialogs on the page that refuse every dismissal route. It is
+// module state because the accelerators that open an overlay live in the shell,
+// above whatever surface opened the dialog, and a dialog does not know what is
+// listening for a key it has no way to see.
+let holds = 0;
+const heldListeners = new Set<() => void>();
+
+function publishHeld(): void {
+  for (const listener of heldListeners) {
+    listener();
+  }
+}
+
+/**
+ * holdDismissal marks the page as carrying a dialog the reader cannot leave by
+ * any route the dialog does not itself offer, and returns the release the
+ * caller runs when that dialog goes away. Content shown once and unrecoverable
+ * is what this is for: the one-time webhook secret withholds Escape, the scrim,
+ * and the close control, and an overlay opened over it from elsewhere would
+ * take focus and discard the credential when the reader followed it.
+ */
+export function holdDismissal(): () => void {
+  holds += 1;
+  publishHeld();
+  let released = false;
+  return () => {
+    if (released) {
+      return;
+    }
+    released = true;
+    holds -= 1;
+    publishHeld();
+  };
+}
+
+/**
+ * useDismissalHeld reports whether such a dialog is open. A page-level
+ * accelerator reads it and does nothing while it holds, so the acknowledgement
+ * the dialog gates on stays the one way out.
+ */
+export function useDismissalHeld(): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      heldListeners.add(listener);
+      return () => {
+        heldListeners.delete(listener);
+      };
+    },
+    () => holds > 0,
+    () => false,
+  );
 }

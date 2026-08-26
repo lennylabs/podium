@@ -8,7 +8,7 @@ import { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api';
-import { dismissAttribute, useDialogFocus } from './focus';
+import { dismissAttribute, holdDismissal, useDialogFocus } from './focus';
 
 export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
 
@@ -476,6 +476,10 @@ export function Modal({
   // place, and React reuses the element, so the title is what tells the focus
   // move that the dialog behind it is a different one.
   const dialog = useDialogFocus<HTMLDivElement>(true, title);
+  // A dialog that withholds every dismissal route says so page-wide, so an
+  // accelerator in the shell does not open an overlay over content the reader
+  // cannot get back.
+  useEffect(() => (dismissible ? undefined : holdDismissal()), [dismissible]);
   useEffect(() => {
     if (!dismissible) {
       return;

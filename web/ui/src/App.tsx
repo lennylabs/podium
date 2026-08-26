@@ -22,6 +22,7 @@ import {
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
 import { catalogDepth, domainLabel, marksCurrentDomain } from './domain';
+import { useDismissalHeld } from './components/focus';
 import { artifactDomain, domainHref, layersHref, searchHref, useRoute } from './route';
 import { since } from './time';
 import type { ThemePreference } from './theme';
@@ -73,10 +74,20 @@ export function App() {
   // is open and the whole page carries the accelerator that opens it.
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [theme, setTheme] = useTheme();
+  // A dialog that refuses every dismissal route holds the page, and the
+  // accelerator below is one of the routes it is refusing.
+  const dismissalHeld = useDismissalHeld();
 
   useEffect(() => subscribeReadOnly(setReadOnly), []);
 
   useEffect(() => {
+    // A dialog the reader can only leave by acknowledging it is showing
+    // content that is gone once it unmounts, and the palette would cover it,
+    // take focus, and navigate away from it on the first result opened. The
+    // accelerator is withheld for as long as such a dialog is on the page.
+    if (dismissalHeld) {
+      return;
+    }
     const onKey = (event: KeyboardEvent) => {
       // ⌘K on a Mac and ctrl-K elsewhere are the one accelerator, and the
       // browser binds neither to anything the page would be preventing.
@@ -89,7 +100,7 @@ export function App() {
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, []);
+  }, [dismissalHeld]);
 
   // The sidebar tree is the shell's own catalog read, re-issued on each route
   // the reader enters. On the layers route it is also the panel's expiry

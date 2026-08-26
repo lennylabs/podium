@@ -6034,6 +6034,51 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The reveal refuses Escape, the scrim, and every control behind it because
+  // the secret is unrecoverable, so the accelerator that opens the command
+  // palette has to refuse it too: a palette over the reveal takes focus, and
+  // opening any result navigates the shell and unmounts the secret.
+  it("refuses the command-palette accelerator while the secret reveal is open", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "git",
+            Order: 1,
+            UserDefined: true,
+          },
+          webhook_url:
+            "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+          webhook_secret: "whsec-abc",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByLabelText("Webhook secret");
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.queryByTestId("palette")).toBeNull();
+    expect(screen.getByText("whsec-abc")).toBeTruthy();
+    // The acknowledgement is still the way out, and the accelerator works
+    // again once the reveal is gone.
+    fireEvent.click(screen.getByLabelText("I have stored the secret."));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Webhook secret")).toBeNull();
+    });
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.getByTestId("palette")).toBeTruthy();
+  });
+
   // A local source returns no secret, so the registration outcome carries
   // nothing the reader has to take away and the dialog dismisses the way
   // every other dialog does.
