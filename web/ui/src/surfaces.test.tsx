@@ -2196,6 +2196,55 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // The registry prefixes several §6.10 messages with the code they carry, and
+  // the banner already states that code on a line of its own. The prose is
+  // stripped of the repetition so the reader is told the code once.
+  // Spec: §6.10
+  it("states the error code once when the registry repeats it in the message", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 404,
+        body: {
+          code: "registry.not_found",
+          message:
+            "registry.not_found: version: invalid pin: no candidate matches",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    fireEvent.change(screen.getByLabelText("Version"), {
+      target: { value: "9.9.9" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    const refusal = await screen.findByTestId("version-refused");
+    const occurrences = (refusal.textContent ?? "").split(
+      "registry.not_found",
+    ).length - 1;
+    expect(occurrences).toBe(1);
+    // The rest of the envelope's prose survives the strip.
+    expect(refusal.textContent).toContain(
+      "version: invalid pin: no candidate matches",
+    );
+  });
+
   // The presigned channel delivers the canonical manifest document rather
   // than a body, and the response clears the field that document
   // duplicates. A viewer that hands the fetched document to the rendering

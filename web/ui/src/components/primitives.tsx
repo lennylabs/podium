@@ -214,8 +214,11 @@ function errorPageKind(error: unknown): ErrorPageKind {
 
 /** envelopeMessage is the envelope's prose with a leading repetition of its
  * own code removed. The registry prefixes several messages with the code they
- * carry ("registry.not_found: artifact eng/deploy"), and the page states the
- * code once on a line of its own, so the prefix would print it twice. */
+ * carry ("registry.not_found: artifact eng/deploy"), and both the error page
+ * and the ErrorState banner state the code once on a line of their own, so
+ * the prefix would print it twice.
+ *
+ * Spec: §6.10 */
 function envelopeMessage(error: ApiError): string {
   const prefix = `${error.code}: `;
   return error.message.startsWith(prefix) ? error.message.slice(prefix.length) : error.message;
@@ -325,7 +328,7 @@ export function ErrorState({
     <div className="banner banner-danger" role="alert" data-testid={testID}>
       <p className="banner-title">{title}</p>
       {envelope !== null && <p className="mono banner-code">{envelope.code}</p>}
-      <p>{envelope !== null ? envelope.message : String(error)}</p>
+      <p>{envelope !== null ? envelopeMessage(envelope) : String(error)}</p>
       {envelope !== null && envelope.suggestedAction !== '' && <p className="quiet">{envelope.suggestedAction}</p>}
       {onRetry !== undefined &&
         (retryable ? (
