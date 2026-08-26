@@ -159,6 +159,29 @@ describe('the sanitized artifact-body rendering path', () => {
     expect(container.querySelector('img')?.getAttribute('src')).toBe('/assets/x.png');
   });
 
+  // An anchor whose destination the allowlist refused keeps its element and
+  // its text. Without a marker it draws in the link colour and invites a
+  // click that goes nowhere, so the rendering path marks it and the
+  // stylesheet drops it to body text with the removal named beside it. The
+  // class is stripped from every node first, so a body that writes the marker
+  // on a live link of its own cannot pass that link off as a neutralized one.
+  it('marks an anchor whose destination it removed', () => {
+    const stripped = [
+      '<a href="javascript:window.hijacked=1">click me</a>\n',
+      '<a href="&#106;avascript:window.hijacked=1">click me</a>\n',
+      '<a href=" javascript:window.hijacked=1">click me</a>\n',
+    ];
+    for (const body of stripped) {
+      const anchor = renderBody(body).querySelector('a');
+      expect(anchor?.classList.contains('link-stripped')).toBe(true);
+      expect(anchor?.textContent).toBe('click me');
+    }
+
+    const live = renderBody('<a class="link-stripped" href="https://example.com/a">Go</a>\n').querySelector('a');
+    expect(live?.getAttribute('href')).toBe('https://example.com/a');
+    expect(live?.classList.contains('link-stripped')).toBe(false);
+  });
+
   it('renders a markup-carrying frontmatter value as literal text', () => {
     const container = render(<PropertyTable raw={'title: <img src=x onerror="window.hijacked=1">\n'} />).container;
     expect(container.querySelector('img')).toBeNull();

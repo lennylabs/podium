@@ -129,7 +129,31 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
       node.removeAttribute(name);
     }
   }
+  markStrippedLink(node);
 });
+
+// The class an anchor left without a destination carries. An anchor whose
+// href the allowlist refused keeps its element and its text, and without a
+// marker it draws in the link colour and invites a click that goes nowhere.
+// The class drops it to body text and names the removal beside it, so the
+// reader sees that the destination is gone rather than a link that is merely
+// broken.
+const strippedLinkClass = 'link-stripped';
+
+/** markStrippedLink marks an anchor that carries no destination. The class is
+ * stripped from every node first, so a body that writes the class on a live
+ * link of its own cannot pass that link off as a neutralized one. */
+function markStrippedLink(node: Element): void {
+  if (node.classList.contains(strippedLinkClass)) {
+    node.classList.remove(strippedLinkClass);
+    if (node.classList.length === 0) {
+      node.removeAttribute('class');
+    }
+  }
+  if (node.tagName === 'A' && !node.hasAttribute('href')) {
+    node.classList.add(strippedLinkClass);
+  }
+}
 
 /**
  * renderArtifactBody renders an artifact's markdown body to sanitized markup.
