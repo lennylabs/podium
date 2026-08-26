@@ -43,6 +43,10 @@ interface Stub {
    * React updates as the call that issued it hides every intermediate state
    * the surface renders while the request is in flight. */
   deferred?: boolean;
+  /** rejects makes the call fail the way the browser fails a request that
+   * never reached the registry: the fetch promise rejects with a TypeError
+   * and there is no response to read. */
+  rejects?: boolean;
 }
 
 interface Recorded {
@@ -80,6 +84,9 @@ function stubRegistry(stubs: Record<string, Stub>): void {
           status: 404,
           body: { code: "registry.not_found", message: "no stub" },
         };
+      if (stub.rejects === true) {
+        return Promise.reject(new TypeError("Failed to fetch"));
+      }
       const status = stub.status ?? 200;
       const answer = () =>
         new Response(stub.text ?? JSON.stringify(stub.body ?? {}), {
@@ -4066,5 +4073,49 @@ describe("a refused layer write", () => {
       "Register",
       "Reingest",
     ]);
+  });
+});
+
+describe("a registry that did not answer", () => {
+  // A call the browser never delivered rejects with a JavaScript exception
+  // rather than with a §6.10 envelope. The surface presents it on the same
+  // terms as every other refusal, with a code and a sentence of its own, so
+  // the reader is told the registry is unreachable rather than shown the
+  // browser's internal exception text.
+  it("states the registry is unreachable and shows no exception text", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { rejects: true },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("registry.unavailable");
+    expect(alert.textContent).toContain(
+      "The registry could not be reached from this browser.",
+    );
+    expect(alert.textContent).not.toContain("TypeError");
+    expect(alert.textContent).not.toContain("Failed to fetch");
+  });
+
+  // The condition clears when the registry answers again, so the state keeps
+  // its retry and the retry re-issues the read that failed.
+  it("keeps a retry that re-issues the read", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { rejects: true },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const alert = await screen.findByRole("alert");
+    const sent = requests.filter((r) =>
+      r.url.startsWith("/v1/load_domain"),
+    ).length;
+    fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    await waitFor(() => {
+      expect(
+        requests.filter((r) => r.url.startsWith("/v1/load_domain")).length,
+      ).toBe(sent + 1);
+    });
   });
 });

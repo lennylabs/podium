@@ -121,10 +121,36 @@ function publishReadOnly(path: string, response: Response): void {
   }
 }
 
+/** unreachable is the ApiError a call that never reached the registry takes:
+ * a rejected fetch, a connection dropped mid-response, a DNS failure, or a
+ * page left open while the registry went away. The rejection carries a
+ * JavaScript exception rather than a §6.10 envelope, and the exception's own
+ * text names the browser's internal failure. Every surface renders a refusal
+ * as a code and a sentence, so the transport failure is given the same
+ * structure here rather than being passed to the surfaces as a bare
+ * exception. It takes registry.unavailable, which is the code §6.10 defines
+ * for a dependency that did not answer, and it is retryable because the
+ * condition clears when the registry answers again. */
+function unreachable(): ApiError {
+  return new ApiError(
+    0,
+    'registry.unavailable',
+    'The registry could not be reached from this browser.',
+    true,
+    'Check that the registry is running and that this page can still reach it, then try again.',
+  );
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, init);
-  publishReadOnly(path, response);
-  const text = await response.text();
+  let response: Response;
+  let text: string;
+  try {
+    response = await fetch(path, init);
+    publishReadOnly(path, response);
+    text = await response.text();
+  } catch {
+    throw unreachable();
+  }
   if (!response.ok) {
     throw errorFrom(response.status, text);
   }
