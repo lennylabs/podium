@@ -63,3 +63,12 @@ export function formatQueryLine(filters: SearchFilters): string {
   }
   return words.join(' ');
 }
+
+/**
+ * hasFilters reports whether a parsed line carries any of the filters the
+ * search surface exposes as pills. An empty state advises dropping a filter
+ * only when the line actually carries one.
+ */
+export function hasFilters(filters: SearchFilters): boolean {
+  return filters.type !== '' || filters.scope !== '' || filters.tags.length > 0;
+}

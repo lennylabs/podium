@@ -11,7 +11,7 @@ import { useDialogFocus } from '../components/focus';
 import { EmptyState, ErrorState, Loading, Magnifier, TypeBadge, formatVersion } from '../components/primitives';
 import type { ArtifactDescriptor, SearchResponse } from '../api';
 import { searchArtifacts } from '../api';
-import { parseQueryLine } from '../query';
+import { hasFilters, parseQueryLine } from '../query';
 import { artifactHref, searchHref } from '../route';
 import type { Async } from '../useAsync';
 import { useAsync } from '../useAsync';
@@ -315,9 +315,15 @@ function PaletteResults({
     return <ErrorState error={results.error} onRetry={results.reload} />;
   }
   if (rows.length === 0) {
+    // The query is quoted so a reader can see where it ends, and the advice to
+    // drop a filter is drawn only when the line carries one to drop.
+    const filtered = hasFilters(parseQueryLine(typed));
     return (
       <div className="palette-empty">
-        <EmptyState scope="inline">Nothing matched {typed}. Check the spelling, or drop a filter from the line.</EmptyState>
+        <EmptyState scope="inline">
+          Nothing matched “{typed}”.{' '}
+          {filtered ? 'Check the spelling, or drop a filter from the line.' : 'Check the spelling.'}
+        </EmptyState>
         <button type="button" onClick={onSearch}>
           Run it on the search surface
         </button>

@@ -8099,10 +8099,31 @@ describe("the command palette", () => {
       target: { value: "nothingmatches" },
     });
     expect(
-      await screen.findByText(/Nothing matched nothingmatches/),
+      await screen.findByText(/Nothing matched \u201cnothingmatches\u201d/),
     ).toBeTruthy();
     expect(within(panel).queryByText(/hidden/i)).toBeNull();
     expect(within(panel).queryByText(/permission/i)).toBeNull();
+  });
+
+  // The no-match line quotes the query so a reader can see where it ends, and
+  // it advises dropping a filter only when the line carries one to drop.
+  it("quotes the query and withholds filter advice on a line with no filter", async () => {
+    palettePage([], 0);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    const field = within(panel).getByLabelText("Search artifacts");
+    fireEvent.change(field, { target: { value: "the" } });
+    const plain = await screen.findByText(/Nothing matched \u201cthe\u201d\./);
+    expect(plain.textContent).toBe(
+      "Nothing matched \u201cthe\u201d. Check the spelling.",
+    );
+    // The same line with a filter on it gains the advice to drop one.
+    fireEvent.change(field, { target: { value: "type:skill the" } });
+    const filtered = await screen.findByText(/drop a filter from the line/);
+    expect(filtered.textContent).toBe(
+      "Nothing matched \u201ctype:skill the\u201d. Check the spelling, or drop a filter from the line.",
+    );
   });
 
   // A reopened panel is a fresh one. A panel that held the line the reader
