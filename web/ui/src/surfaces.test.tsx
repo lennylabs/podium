@@ -3547,6 +3547,60 @@ describe("the layer write flows", () => {
     });
   });
 
+  // A layer write moves the catalog itself, so the sidebar tree is re-read
+  // from the same signal as the footer counts. Refreshing only the counts
+  // left the tree standing on the hierarchy the reader arrived with, and a
+  // domain the write had just added appeared only after a page reload.
+  it("re-reads the sidebar tree after a layer write", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": {
+        body: { path: "", subdomains: [{ path: "eng", name: "eng" }], notable: [] },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 9 } },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    await waitFor(() => {
+      expect(
+        within(screen.getByLabelText("Catalog")).getByText("eng"),
+      ).toBeTruthy();
+    });
+    expect(
+      within(screen.getByLabelText("Catalog")).queryByText("hr"),
+    ).toBeNull();
+    // The reingest lands artifacts under a domain the catalog did not carry,
+    // and every read after it sees what the write left behind.
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            { path: "eng", name: "eng" },
+            { path: "hr", name: "hr" },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 10 } },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers/reingest": { body: { layer: "alice-personal", accepted: 1 } },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    await screen.findByLabelText("Reingest result for alice-personal");
+    await waitFor(() => {
+      expect(
+        within(screen.getByLabelText("Catalog")).getByText("hr"),
+      ).toBeTruthy();
+    });
+    expect(screen.getByTestId("catalog-counts").textContent).toBe(
+      "1 layers · 10 artifacts",
+    );
+  });
+
   // The confirmation is a dialog over a scrim rather than a panel inside the
   // row's actions cell. Rendered into the cell it took the column's width and
   // grew the row by several hundred pixels, which pushed every row below it

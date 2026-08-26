@@ -94,7 +94,10 @@ export function App() {
   // truncates the result set. Neither depends on where the reader is, so the
   // route does not re-read them; a layer write does, through the panel's
   // catalog-change signal, because a register or an unregister moves the very
-  // figures the footer states.
+  // figures the footer states. That signal bumps the nonce, so the counts and
+  // the sidebar tree are re-read from the one event: a write that adds or
+  // removes a domain moves both, and refreshing only the counts left the tree
+  // standing on the catalog the reader arrived with until the page reloaded.
   const counts = useAsync(() => readCounts(), [catalogNonce]);
 
   useEffect(() => {
@@ -306,7 +309,7 @@ export function App() {
               subject={subject}
               readOnly={readOnly}
               onCatalogOutcome={onCatalogOutcome}
-              onCatalogChange={counts.reload}
+              onCatalogChange={reloadCatalog}
             />
           )}
         </main>

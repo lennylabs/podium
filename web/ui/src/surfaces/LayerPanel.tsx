@@ -101,9 +101,9 @@ export function LayerPanel({
   const rows = layers.value ?? [];
 
   /** afterWrite re-reads everything a layer write moves: the panel's own
-   * rows, and the shell's catalog counts. Every write path goes through it,
-   * because a register, an unregister, a restore, and a reingest each change
-   * a figure the footer states. */
+   * rows, and the shell's catalog read behind the sidebar tree and the footer
+   * counts. Every write path goes through it, because a register, an
+   * unregister, a restore, and a reingest each move what the catalog holds. */
   const afterWrite = () => {
     layers.reload();
     onCatalogChange();
