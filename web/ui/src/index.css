@@ -472,18 +472,13 @@ h3 {
   flex-wrap: wrap;
   align-items: baseline;
   gap: 10px;
-  margin: 6px 0 4px;
+  /* The header states the path in the breadcrumb alone, so this row sits
+     directly over the description and carries the gap between them. */
+  margin: 6px 0 12px;
 }
 
 .page-title h1 {
   margin: 0;
-}
-
-/* The full identifier under an artifact's title. It repeats what the
-   breadcrumb and the title say together, because the identifier is what a
-   reader copies into the CLI or an SDK call. */
-.artifact-id-line {
-  margin: 0 0 10px;
 }
 
 .lead {

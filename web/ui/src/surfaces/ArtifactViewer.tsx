@@ -122,7 +122,6 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           <VersionBadge version={body.version} />
           <SensitivityBadge sensitivity={body.sensitivity} />
         </div>
-        <p className="mono quiet artifact-id-line">{body.id}</p>
         {description !== '' && <Lead text={description} />}
         <div className="artifact-meta">
           <VersionPicker
@@ -179,7 +178,9 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
 
 /** artifactName is the page title: the last segment of the artifact's §4.2
  * path, which is what names the artifact itself. The domains above it are
- * the breadcrumb's, and the whole identifier stands under the title. */
+ * the breadcrumb's, which is the one place the header states the path: a
+ * second line spelling the whole identifier repeats the breadcrumb three
+ * lines above it. */
 function artifactName(id: string): string {
   const cut = id.lastIndexOf('/');
   return cut < 0 ? id : id.slice(cut + 1);

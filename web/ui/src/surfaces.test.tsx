@@ -1606,12 +1606,13 @@ describe("the artifact viewer", () => {
     const title = heading.parentElement;
     expect(within(title as HTMLElement).getByText("SKILL")).toBeTruthy();
     expect(within(title as HTMLElement).getByText("v2.3.0")).toBeTruthy();
-    // The whole identifier stands under the title, and the breadcrumb leads
-    // back through the domains above it.
+    // The breadcrumb is the one place the header states the path. A mono
+    // line spelling the whole identifier under the badges repeats the trail
+    // three lines above it, so the content column states the path once.
     const content = heading.closest(".artifact-content") as HTMLElement;
     expect(
-      within(content).getByText("finance/accounts-payable/pay-invoice"),
-    ).toBeTruthy();
+      within(content).queryByText("finance/accounts-payable/pay-invoice"),
+    ).toBeNull();
     const trail = screen.getByLabelText("Breadcrumb");
     expect(
       within(trail).getByText("accounts-payable").getAttribute("href"),
@@ -1662,12 +1663,10 @@ describe("the artifact viewer", () => {
     const content = heading.closest(".artifact-content") as HTMLElement;
     const lead = within(content).getByText("Pay a supplier invoice.");
     expect(lead.classList.contains("lead")).toBe(true);
-    // The description stands between the identifier line and the version
-    // picker, which is where the header states it for every other type.
-    const identifier = within(content).getByText(
-      "finance/accounts-payable/pay-invoice",
-    );
-    expect(identifier.nextElementSibling).toBe(lead);
+    // The description stands between the title row and the version picker,
+    // which is where the header states it for every other type.
+    const title = heading.parentElement as HTMLElement;
+    expect(title.nextElementSibling).toBe(lead);
   });
 
   // A classification value states a level and never the axis it measures, so
