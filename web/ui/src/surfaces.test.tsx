@@ -259,8 +259,15 @@ describe("the application shell", () => {
           notable: [],
         },
       },
+      // The current domain carries a level of its own, so its node keeps the
+      // toggle the assertion below counts. A domain whose own read comes back
+      // empty is a leaf, and a leaf drops its toggle.
       "/v1/load_domain?path=platform%2Fci%2Flint&depth=2": {
-        body: { path: "platform/ci/lint", subdomains: [], notable: [] },
+        body: {
+          path: "platform/ci/lint",
+          subdomains: [{ path: "platform/ci/lint/rules", name: "rules" }],
+          notable: [],
+        },
       },
       "/v1/load_domain": { body: catalog },
       "/v1/search_artifacts": { body: { total_matched: 0 } },
@@ -4485,7 +4492,7 @@ describe("the trimmed listing", () => {
     });
     expect(within(browser).queryByRole("link", { name: "d2" })).toBeNull();
     // The author's own picks keep their own heading, and the table sorts on
-    // the column the header names.
+    // the column the sort control names.
     expect(
       within(browser).getByText("Curated by the domain author"),
     ).toBeTruthy();
@@ -4493,6 +4500,125 @@ describe("the trimmed listing", () => {
     expect(
       within(tables[0]).getByRole("link", { name: "platform/deploy" }),
     ).toBeTruthy();
+  });
+
+  // The compact treatment is the one the design pass fixed for this count: the
+  // section label carries the count and the controls over the listing share
+  // its row, a tile states what the response reported below the child, and the
+  // table's column labels mark the columns while the control above them
+  // chooses the ordering.
+  it("carries the compact listing's controls on the section label's row", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+            // One child came back with a level under it and the rest came
+            // back empty, which is the pair of tiles the count line splits.
+            subdomains:
+              i === 0
+                ? [
+                    { path: "platform/d0/one", name: "one" },
+                    { path: "platform/d0/two", name: "two" },
+                  ]
+                : [],
+          })),
+          notable: [
+            {
+              id: "platform/deploy",
+              type: "skill",
+              version: "2.0.0",
+              tags: ["release"],
+              source: "featured",
+            },
+            { id: "platform/lint", type: "rule", version: "1.0.0" },
+            { id: "platform/notes", type: "context", version: "1.2.0" },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+
+    // The subdomain label states the count, and the filter and the view
+    // toggle stand on the label's own row rather than above the grid.
+    const subhead = within(browser).getByRole("heading", {
+      name: "Subdomains",
+    }).parentElement;
+    expect(subhead).not.toBeNull();
+    const subrow = within(subhead as HTMLElement);
+    expect(subrow.getByLabelText("Filter subdomains")).toBeTruthy();
+    expect(subrow.getByRole("group", { name: "Subdomain view" })).toBeTruthy();
+    expect((subhead as HTMLElement).textContent).toContain("24");
+    // The grid itself is not in that row.
+    expect(subrow.queryByLabelText("Subdomains")).toBeNull();
+
+    // A tile counts what the response reported below the child, and a child
+    // whose subtree came back empty carries no count line at all.
+    const tiles = within(browser).getByRole("list", { name: "Subdomains" });
+    const first = within(tiles).getAllByRole("listitem")[0];
+    expect(first.textContent).toBe("d02 subdomains");
+    expect(within(tiles).getAllByRole("listitem")[1].textContent).toBe("d1");
+    expect(tiles.textContent).not.toContain("below");
+
+    // The artifact label carries the same row: a filter over the domain's own
+    // listing, an All chip standing for the unfiltered set, one chip per
+    // returned type, and the sort control.
+    const arthead = within(browser).getByRole("heading", { name: "Artifacts" })
+      .parentElement;
+    const artrow = within(arthead as HTMLElement);
+    expect(artrow.getByLabelText("Filter in this domain")).toBeTruthy();
+    expect(artrow.getByLabelText("Sort artifacts")).toBeTruthy();
+    const all = artrow.getByRole("button", { name: "All" });
+    expect(all.getAttribute("aria-pressed")).toBe("true");
+    expect(artrow.getByRole("button", { name: "rule" })).toBeTruthy();
+
+    // A type chip narrows the table to that type and takes the active state
+    // off the All chip.
+    fireEvent.click(artrow.getByRole("button", { name: "rule" }));
+    expect(all.getAttribute("aria-pressed")).toBe("false");
+    expect(
+      within(browser).queryByRole("link", { name: "platform/notes" }),
+    ).toBeNull();
+    fireEvent.click(all);
+    expect(
+      within(browser).getByRole("link", { name: "platform/notes" }),
+    ).toBeTruthy();
+
+    // The in-domain filter runs over the identifier the first column carries.
+    fireEvent.change(artrow.getByLabelText("Filter in this domain"), {
+      target: { value: "notes" },
+    });
+    expect(
+      within(browser).queryByRole("link", { name: "platform/lint" }),
+    ).toBeNull();
+    fireEvent.change(artrow.getByLabelText("Filter in this domain"), {
+      target: { value: "" },
+    });
+
+    // The picks stand in their own block under a header carrying their count,
+    // and the rest of the listing carries no heading of its own.
+    const curated = within(browser).getByText("Curated by the domain author")
+      .parentElement;
+    expect((curated as HTMLElement).textContent).toContain("1");
+    expect(within(browser).queryByText("Everything else")).toBeNull();
+
+    // The column labels mark the columns and carry no control: the ordering
+    // is chosen by the sort control above the table.
+    const rest = within(browser).getAllByLabelText("Artifacts")[1];
+    const columns = within(rest).getAllByRole("columnheader");
+    expect(columns.map((column) => column.textContent)).toEqual([
+      "Artifact",
+      "Type",
+      "Version",
+      "Tags",
+      "Description",
+    ]);
+    expect(within(columns[0]).queryByRole("button")).toBeNull();
   });
 });
 

@@ -12,3 +12,14 @@ export function domainLabel(path: string, parent: string): string {
   const prefix = parent === '' ? '' : `${parent}/`;
   return path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }
+
+/** subdomainCountLabel states what a response reported below a child. An entry
+ * with an empty subtree carries no line at all, because a card that reads
+ * "0 subdomains" claims a fact the descriptor omits at the deepest returned
+ * level rather than one it reports. */
+export function subdomainCountLabel(count: number): string | null {
+  if (count === 0) {
+    return null;
+  }
+  return `${String(count)} ${count === 1 ? 'subdomain' : 'subdomains'}`;
+}

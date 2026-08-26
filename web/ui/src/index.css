@@ -2095,6 +2095,121 @@ label:has(> input:disabled) {
   border-top: 1px dashed var(--bd);
 }
 
+/* The at-scale section header: the label and the count on the left, the
+   controls over the listing pushed to the row's right edge. At this count the
+   listing needs a filter, and a filter under its own label above the grid
+   costs a row the compact treatment exists to save. */
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 26px 0 12px;
+}
+
+.section-head > h2.label {
+  margin: 0;
+}
+
+.section-count {
+  font-size: 11px;
+}
+
+/* The controls that close the row sit on its right edge. The subdomain row
+   closes with its filter and the view toggle beside it, and the artifact row
+   closes with the sort control, because the chips it filters by belong beside
+   the label they narrow. */
+.section-head .view-toggle {
+  margin: 0;
+}
+
+.section-head .sort-control,
+.subdomain-tiles .section-head .filter-field {
+  margin-left: auto;
+}
+
+.filter-field {
+  width: 220px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  color: var(--meta);
+  font-size: 12.5px;
+}
+
+.sort-control select {
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* A column label marks the column rather than acting on it: the ordering is
+   chosen by the sort control above the table. */
+.data-table th.column-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--meta);
+  background: var(--surf2);
+}
+
+/* The author's own picks are a block of their own under an accent header, so
+   a curated row is distinguishable from a surfaced one without a badge on
+   every row. */
+.curated-block {
+  margin-bottom: 12px;
+}
+
+.curated-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--cbd);
+  border-bottom: none;
+  border-radius: 9px 9px 0 0;
+  background: var(--wash);
+  color: var(--link);
+}
+
+.curated-head .label {
+  color: inherit;
+}
+
+.curated-head .mono {
+  font-size: 10.5px;
+  opacity: 0.7;
+}
+
+.curated-block .data-table {
+  border-radius: 0 0 9px 9px;
+}
+
 /* The at-scale subdomain treatment: count tiles in a grid, or one per row. */
 .tile-grid,
 .tile-list {
@@ -2117,6 +2232,25 @@ label:has(> input:disabled) {
   background: var(--surf);
   border: 1px solid var(--bd);
   border-radius: 9px;
+}
+
+/* A tile is a name and what stands under it. The name is set in the ink the
+   rest of the tile is drawn in: a grid of two dozen underlined accent links
+   reads as a page of link text rather than as a map of the domain. */
+.tile-name {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--ink);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.tile-name:hover {
+  text-decoration: underline;
+}
+
+.tile-count {
+  font-size: 10.5px;
 }
 
 .clipped {

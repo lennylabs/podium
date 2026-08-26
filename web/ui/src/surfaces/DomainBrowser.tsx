@@ -8,7 +8,7 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge, EmptyState, ErrorPage, Loading } from '../components/primitives';
 import type { DomainDescriptor } from '../api';
 import { loadDomain, searchArtifacts } from '../api';
-import { domainLabel } from '../domain';
+import { domainLabel, subdomainCountLabel } from '../domain';
 import { domainHref, searchHref } from '../route';
 import { useAsync, useErrorReport } from '../useAsync';
 
@@ -94,28 +94,39 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
       {/* The two listings are labelled rather than titled. A heading at the
           h2 display size competes with the domain name above it and reads as
           a third peer section, so both carry the section-label role the
-          design pass fixed for a quiet divider over a list. */}
-      <h2 className="label">Subdomains</h2>
-      {body.subdomains.length === 0 && <EmptyState>This domain has no subdomains.</EmptyState>}
-      {body.subdomains.length > 0 &&
-        (compact ? (
-          <SubdomainTiles subdomains={body.subdomains} parent={body.path} />
-        ) : (
-          <SubdomainGrid subdomains={body.subdomains} parent={body.path} />
-        ))}
+          design pass fixed for a quiet divider over a list.
 
-      <h2 className="label">Artifacts in this domain</h2>
-      {direct.length === 0 && <EmptyState>This domain lists no artifacts.</EmptyState>}
-      {direct.length > 0 &&
-        (compact ? (
-          <ArtifactTable artifacts={direct} />
-        ) : (
-          <ul className="artifact-list">
-            {direct.map((artifact) => (
-              <ArtifactRow key={artifact.id} artifact={artifact} />
-            ))}
-          </ul>
-        ))}
+          The compact treatments carry their own label, because at this count
+          the label shares its row with the controls over the listing. */}
+      {compact && body.subdomains.length > 0 ? (
+        <SubdomainTiles subdomains={body.subdomains} parent={body.path} />
+      ) : (
+        <>
+          <h2 className="label">Subdomains</h2>
+          {body.subdomains.length === 0 ? (
+            <EmptyState>This domain has no subdomains.</EmptyState>
+          ) : (
+            <SubdomainGrid subdomains={body.subdomains} parent={body.path} />
+          )}
+        </>
+      )}
+
+      {compact && direct.length > 0 ? (
+        <ArtifactTable artifacts={direct} />
+      ) : (
+        <>
+          <h2 className="label">Artifacts in this domain</h2>
+          {direct.length === 0 ? (
+            <EmptyState>This domain lists no artifacts.</EmptyState>
+          ) : (
+            <ul className="artifact-list">
+              {direct.map((artifact) => (
+                <ArtifactRow key={artifact.id} artifact={artifact} />
+              ))}
+            </ul>
+          )}
+        </>
+      )}
       {/* The trimmed listing is continued at the end of the list rather than
           announced above it: the reader meets it where the returned edge is. */}
       {trimmed && <TrimmedListing scope={body.path} shown={direct.length} note={body.note ?? ''} />}
@@ -218,19 +229,16 @@ function SubdomainGrid({ subdomains, parent }: { subdomains: DomainDescriptor[];
   );
 }
 
-/** SubdomainCounts states what the response reported below a child. An entry
- * with an empty subtree carries no count line, because a card that reads
- * "0 subdomains" claims a fact the descriptor omits at the deepest returned
- * level rather than one it reports. */
+/** SubdomainCounts states what the response reported below a child, on the
+ * card treatment. The compact tile states the same count. */
 function SubdomainCounts({ subdomains }: { subdomains: DomainDescriptor[] }) {
-  if (subdomains.length === 0) {
+  const label = subdomainCountLabel(subdomains.length);
+  if (label === null) {
     return null;
   }
   return (
     <div className="subdomain-counts mono quiet">
-      <span>
-        {subdomains.length} {subdomains.length === 1 ? 'subdomain' : 'subdomains'}
-      </span>
+      <span>{label}</span>
     </div>
   );
 }
