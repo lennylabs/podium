@@ -1151,6 +1151,24 @@ input[type="checkbox"] {
   font-size: 13.5px;
 }
 
+/* Frontmatter is authored, so a key or a value can be one unbroken token such
+   as a serialised nested map. A table takes its min-content width as an
+   automatic minimum, and an unbreakable cell therefore sets the property table
+   wider than the column holding it: in the rail it renders past the right edge
+   of the window and scrolls the whole document sideways. Breaking a cell
+   wherever it has to puts the table's minimum back at one character, so the
+   table stays inside its column at every viewport width. The key column asks
+   for a share of the table so an unbreakable value cannot squeeze it down to
+   one character per line. */
+.property-table th,
+.property-table td {
+  overflow-wrap: anywhere;
+}
+
+.property-table th {
+  width: 40%;
+}
+
 .view-toggle {
   display: flex;
   gap: 0;

@@ -2286,6 +2286,35 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // Frontmatter is authored, so a value can be one unbroken token such as a
+  // serialised nested map. A table takes its min-content width as an automatic
+  // minimum, so a cell that cannot break widens the rail's table past the rail
+  // and scrolls the whole document sideways. The class carrying the break rule
+  // stands on the table itself, so both cells inherit it.
+  it("marks the property table as one whose cells break inside a long token", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "edge/odd-frontmatter",
+          type: "skill",
+          version: "0.1.0",
+          content_hash: "sha256:abc",
+          manifest_body: "Body.\n",
+          frontmatter:
+            '---\ntype: skill\ncustom_unknown_key: {"nested":{"deeper":[1,2,3]}}\n---\n',
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/edge%2Fodd-frontmatter");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const table = await screen.findByTestId("rail-frontmatter-table");
+    expect(table.className.split(" ")).toContain("property-table");
+    expect(table.textContent).toContain('{"nested":{"deeper":[1,2,3]}}');
+  });
+
   it("drops the rail’s frontmatter section where the response yields no pairs", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },

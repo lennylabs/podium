@@ -565,3 +565,25 @@ describe("layer table columns", () => {
     expect(styled("layer-id-cell").overflowWrap).toBe("anywhere");
   });
 });
+
+// A frontmatter value is authored, so it can be one unbroken token such as a
+// serialised nested map. A table takes its min-content width as an automatic
+// minimum, so a cell that cannot break sets the property table wider than the
+// rail that holds it and scrolls the whole document sideways. Both cells break
+// wherever they have to, which puts the table's minimum back at one character.
+describe("frontmatter property table", () => {
+  it("breaks a key longer than its column inside the cell", () => {
+    expect(descendantStyle("property-table", "th").overflowWrap).toBe("anywhere");
+  });
+
+  it("breaks a value longer than its column inside the cell", () => {
+    expect(descendantStyle("property-table", "td").overflowWrap).toBe("anywhere");
+  });
+
+  // A breakable value contributes nothing to the table's minimum, so without a
+  // claim of its own the key column collapses toward one character per line
+  // beside a value that asks for the whole table.
+  it("keeps a share of the table for the key column", () => {
+    expect(descendantStyle("property-table", "th").width).toBe("40%");
+  });
+});

@@ -99,7 +99,7 @@ export function PropertyTable({
       {offerRaw && rawView ? (
         <RawBlock block={block} offending={0} />
       ) : (
-        <table className="data-table" data-testid={testID}>
+        <table className="data-table property-table" data-testid={testID}>
           <tbody>
             {parsed.properties.map((property) => (
               <tr key={property.key}>
