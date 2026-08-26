@@ -2636,6 +2636,18 @@ describe("the layer panel", () => {
     expect(screen.getByText("organization")).toBeTruthy();
     expect(screen.getByText("groups: secops · appsec +2")).toBeTruthy();
     expect(screen.getByText("users: carol@acme.com")).toBeTruthy();
+    // The markers sit beside each other in one wrapping cell, so a row that
+    // grants on four axes is the height of a row that grants on one.
+    const cell = screen.getByText("public").closest(".visibility-markers");
+    expect(cell).toBeTruthy();
+    expect(cell?.querySelectorAll(".badge").length).toBe(4);
+    for (const marker of [
+      "organization",
+      "groups: secops · appsec +2",
+      "users: carol@acme.com",
+    ]) {
+      expect(cell?.contains(screen.getByText(marker))).toBe(true);
+    }
   });
 
   // The source cell names the type it is showing and states every source

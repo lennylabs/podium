@@ -959,14 +959,18 @@ function VisibilityCell({ layer }: { layer: LayerRecord }) {
   if (markers.length === 0) {
     return <span className="quiet">no grants — only you</span>;
   }
+  // The markers share one wrapping cell so a row that grants on four axes
+  // keeps the height of a row that grants on one. Left to the badge's own
+  // inline flow, a marker naming members broke over its own words and every
+  // axis took a line of its own, which tripled the row.
   return (
-    <>
+    <div className="visibility-markers">
       {markers.map((marker) => (
         <Badge key={marker} tone="quiet">
           {marker}
         </Badge>
       ))}
-    </>
+    </div>
   );
 }
 

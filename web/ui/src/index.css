@@ -1187,6 +1187,27 @@ input[type="checkbox"] {
   white-space: nowrap;
 }
 
+/* §4.6 visibility is a union of independent axes, so a row carries one marker
+   per matching axis and they read as one cell. The markers wrap as a row
+   instead of flowing as inline text: a marker that names members is long
+   enough to break over its own words in a column this narrow, which put every
+   axis on a line of its own and made a four-axis row three times the height of
+   a one-axis row. A marker wider than the column is ellipsised inside itself,
+   which keeps the axis on one line and marks that its members are cut. */
+.visibility-markers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.visibility-markers .badge {
+  max-width: 100%;
+  margin-right: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ingest-ref {
   font-size: 11.5px;
   overflow-wrap: anywhere;
