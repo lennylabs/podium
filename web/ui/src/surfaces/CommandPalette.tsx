@@ -3,9 +3,9 @@
 // query carries the inline filter syntax the search surface exposes as pills,
 // so the same filter set §13.10 fixes reaches the same endpoint from here.
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
-import type { KeyboardEvent, ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode, RefObject } from 'react';
 
 import { useDialogFocus } from '../components/focus';
 import { EmptyState, ErrorState, Loading, Magnifier, TypeBadge, formatVersion } from '../components/primitives';
@@ -36,7 +36,17 @@ const listboxID = 'palette-listbox';
 const filterExamples = ['type:skill', 'tag:review', 'scope:platform'];
 const optionID = (at: number) => `palette-option-${at}`;
 
-export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CommandPalette({
+  open,
+  onClose,
+  trigger,
+  content,
+}: {
+  open: boolean;
+  onClose: () => void;
+  trigger: RefObject<HTMLElement | null>;
+  content: RefObject<HTMLElement | null>;
+}) {
   // The queries this page has already run outlive one opening of the panel,
   // so they are held out here where closing it cannot discard them.
   const [recents, setRecents] = useState<string[]>([]);
@@ -56,7 +66,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   if (!open) {
     return null;
   }
-  return <PalettePanel onClose={onClose} recents={recents} onRun={remember} />;
+  return <PalettePanel onClose={onClose} recents={recents} onRun={remember} trigger={trigger} content={content} />;
 }
 
 /** PalettePanel is one opening of the panel: the query the reader types into
@@ -65,16 +75,29 @@ function PalettePanel({
   onClose,
   recents,
   onRun,
+  trigger,
+  content,
 }: {
   onClose: () => void;
   recents: string[];
   onRun: (query: string) => void;
+  trigger: RefObject<HTMLElement | null>;
+  content: RefObject<HTMLElement | null>;
 }) {
   const [line, setLine] = useState('');
   const [index, setIndex] = useState(0);
+  // Opening a result replaces the surface under the panel, and the reader
+  // resumes on that surface rather than on the header they opened the panel
+  // from, so a panel that navigated hands focus to the main landmark.
+  const navigated = useRef(false);
   // The panel covers the shell, so it owns focus while it is open and hands
-  // it back to whatever the reader was on when they pressed the shortcut.
-  const dialog = useDialogFocus<HTMLDivElement>();
+  // it back to whatever the reader was on when they pressed the shortcut. The
+  // accelerator opens it from surfaces where nothing holds focus, and focus
+  // left on the document there restarts the next Tab at the top of the page,
+  // so the header's own trigger stands in for the control there was none of.
+  const dialog = useDialogFocus<HTMLDivElement>(true, undefined, (opener) =>
+    navigated.current ? content.current : (opener ?? trigger.current),
+  );
 
   const typed = line.trim();
   const results = useAsync<SearchResponse>(
@@ -92,12 +115,14 @@ function PalettePanel({
 
   const openRow = (id: string) => {
     onRun(typed);
+    navigated.current = true;
     window.location.hash = artifactHref(id);
     onClose();
   };
 
   const openSearch = () => {
     onRun(typed);
+    navigated.current = true;
     // The whole typed line travels, filters and all. The search surface runs
     // the same parse over it, so the request it issues and the pills it
     // renders are the ones this panel typed rather than the line read back as

@@ -5,7 +5,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 
 import { Banner, Chevron, ErrorState, Loading, Magnifier, PageBanner } from './components/primitives';
 import type { DomainDescriptor } from './api';
@@ -73,6 +73,10 @@ export function App() {
   // The palette is reachable from every surface, so the shell owns whether it
   // is open and the whole page carries the accelerator that opens it.
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The two places the palette hands focus back to: the header control that
+  // advertises it, and the content region a result opened from it lands on.
+  const searchTrigger = useRef<HTMLButtonElement>(null);
+  const content = useRef<HTMLElement>(null);
   const [theme, setTheme] = useTheme();
   // A dialog that refuses every dismissal route holds the page, and the
   // accelerator below is one of the routes it is refusing.
@@ -285,6 +289,7 @@ export function App() {
         posture={posture}
         theme={theme}
         onTheme={setTheme}
+        searchTrigger={searchTrigger}
         onOpenPalette={() => {
           setPaletteOpen(true);
         }}
@@ -294,6 +299,8 @@ export function App() {
         onClose={() => {
           setPaletteOpen(false);
         }}
+        trigger={searchTrigger}
+        content={content}
       />
       {anonymous && (
         <PageBanner testID="anonymous-banner">
@@ -370,7 +377,7 @@ export function App() {
             {anonymous && <p className="quiet">Not signed in</p>}
           </div>
         </nav>
-        <main className="content" id={contentID} tabIndex={-1}>
+        <main className="content" id={contentID} ref={content} tabIndex={-1}>
           {/* The expiry transition is rendered over the page the caller was
               on, which is kept rather than cleared, so it sits above the
               surface on every route and the surface stays mounted under it.
@@ -957,11 +964,13 @@ function TopBar({
   posture,
   theme,
   onTheme,
+  searchTrigger,
   onOpenPalette,
 }: {
   posture: SessionPosture | null;
   theme: ThemePreference;
   onTheme: (next: ThemePreference) => void;
+  searchTrigger: RefObject<HTMLButtonElement | null>;
   onOpenPalette: () => void;
 }) {
   const control = authControl(posture);
@@ -975,7 +984,13 @@ function TopBar({
         {window.location.host}
       </span>
       <span className="spacer" />
-      <button type="button" className="search-trigger" data-testid="search-trigger" onClick={onOpenPalette}>
+      <button
+        type="button"
+        className="search-trigger"
+        data-testid="search-trigger"
+        ref={searchTrigger}
+        onClick={onOpenPalette}
+      >
         <Magnifier />
         Search artifacts
         <span className="mono key-hint">⌘K</span>

@@ -74,9 +74,24 @@ export function takeFocus(target: HTMLElement | null): void {
  * does not run again, and the second dialog opens with focus wherever the
  * first left it: on the document, once the submit control that held it
  * unmounted.
+ *
+ * A dialog an accelerator opens, or one that replaces the surface underneath
+ * it before it closes, passes `handBack`. It is called with the control the
+ * dialog was opened from, which is null when nothing held focus, and the
+ * element it returns takes focus instead. Returning the opener it was given
+ * keeps the default, and a target that has left the document is skipped the
+ * same way the opener is.
  */
-export function useDialogFocus<T extends HTMLElement>(active = true, identity?: unknown): RefObject<T | null> {
+export function useDialogFocus<T extends HTMLElement>(
+  active = true,
+  identity?: unknown,
+  handBack?: (opener: HTMLElement | null) => HTMLElement | null,
+): RefObject<T | null> {
   const container = useRef<T>(null);
+  // The resolver is read through a ref so a caller that rebuilds it on every
+  // render does not re-run the effect, which would re-read the opener.
+  const resolve = useRef(handBack);
+  resolve.current = handBack;
   // The control the dialog was opened from is read once for as long as the
   // dialog is open, and handing focus back is its own effect for that reason:
   // re-reading it when the identity changes would read the document, because
@@ -88,8 +103,9 @@ export function useDialogFocus<T extends HTMLElement>(active = true, identity?: 
     const held = document.activeElement;
     const opener = held instanceof HTMLElement && held !== document.body ? held : null;
     return () => {
-      if (opener !== null && opener.isConnected) {
-        opener.focus();
+      const target = resolve.current === undefined ? opener : resolve.current(opener);
+      if (target !== null && target.isConnected) {
+        target.focus();
       }
     };
   }, [active]);

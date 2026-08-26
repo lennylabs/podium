@@ -8182,6 +8182,39 @@ describe("the command palette", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  // The accelerator opens the panel from a surface where nothing holds focus,
+  // and the panel has no opening control to hand focus back to there. Focus
+  // left on the document restarts the next Tab at the top of the page, so the
+  // header's own trigger stands in. Opening a result is the other case: the
+  // reader resumes on the surface the panel navigated to rather than on the
+  // header, so focus lands on the content region.
+  it("returns focus to the trigger after ⌘K and to the content region after a result opens", async () => {
+    palettePage([{ id: "platform/review", type: "skill" }]);
+    render(<App />);
+    const trigger = await screen.findByTestId("search-trigger");
+    // Nothing holds focus, which is where the accelerator is pressed from.
+    (document.activeElement as HTMLElement | null)?.blur();
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const panel = screen.getByTestId("palette");
+    expect(document.activeElement).toBe(
+      within(panel).getByLabelText("Search artifacts"),
+    );
+    fireEvent.keyDown(panel, { key: "Escape" });
+    expect(screen.queryByTestId("palette")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    // A result opened from the panel replaces the surface underneath it, and
+    // the content region is where the reader resumes reading it.
+    fireEvent.click(trigger);
+    const reopened = screen.getByTestId("palette");
+    fireEvent.change(within(reopened).getByLabelText("Search artifacts"), {
+      target: { value: "review" },
+    });
+    await screen.findByTestId("palette-heading");
+    fireEvent.keyDown(reopened, { key: "Enter" });
+    expect(window.location.hash).toBe("#/artifact/platform%2Freview");
+    expect(document.activeElement).toBe(document.getElementById("main-content"));
+  });
+
   // The handoff carries the filters the palette parsed rather than the line
   // read back as free text: the search surface issues the request the palette
   // issued and renders the filters as the pills the syntax teaches.
