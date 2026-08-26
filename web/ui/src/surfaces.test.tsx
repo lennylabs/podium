@@ -5886,6 +5886,64 @@ describe("the layer write flows", () => {
     expect(sent.root).toBeUndefined();
   });
 
+  // A disabled submit reports no reason of its own, and the field the hold is
+  // on scrolls out of view once the body is scrolled to the submit row, so the
+  // form names the field holding the submit beside the control and marks the
+  // field itself as required.
+  it("names the field holding the register submit", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = screen.getByRole("dialog", { name: "Register a layer" });
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "git-layer" },
+    });
+    fireEvent.change(screen.getByLabelText("Repository"), {
+      target: { value: "https://github.com/alice/catalog.git" },
+    });
+    // The ref carries a visible requirement marker and the input says so to a
+    // reader who is not looking at it.
+    expect(screen.getByTestId("register-ref-required").textContent).toBe(
+      "required",
+    );
+    expect(
+      screen.getByLabelText("Ref").getAttribute("aria-required"),
+    ).toBe("true");
+    // The footer note names the ref while the submit is held, and the submit
+    // points at that note.
+    const register = within(dialog).getByRole("button", { name: "Register" });
+    const note = screen.getByTestId("register-foot-note");
+    expect(register.hasAttribute("disabled")).toBe(true);
+    expect(note.textContent).toContain("Name the ref before registering.");
+    expect(register.getAttribute("aria-describedby")).toBe(note.id);
+    // Naming the ref releases the hold, and the note goes back to stating
+    // where the registration lands.
+    fireEvent.change(screen.getByLabelText("Ref"), {
+      target: { value: "main" },
+    });
+    expect(register.hasAttribute("disabled")).toBe(false);
+    expect(register.getAttribute("aria-describedby")).toBe(null);
+    expect(screen.getByTestId("register-foot-note").textContent).toContain(
+      "Registers at the end of the order",
+    );
+    // The local arm holds on its own field and names that one instead.
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    expect(screen.getByTestId("register-local-path-required")).toBeTruthy();
+    expect(
+      screen.getByLabelText("Local path").getAttribute("aria-required"),
+    ).toBe("true");
+    expect(screen.getByTestId("register-foot-note").textContent).toContain(
+      "Name the local path before registering.",
+    );
+  });
+
   // §4.6: the git source resolves its tree at the ref and has no default, so
   // a git layer registered with the ref blank is accepted, issues its
   // one-time secret, takes a place in the order, and is then refused on

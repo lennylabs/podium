@@ -109,11 +109,21 @@ export function RegisterLayerForm({
   // default either, so the same hold applies on that arm. A registration with
   // the path blank is accepted and then refused on every ingest with
   // "local source requires path".
-  const sourceMissing =
-    sourceType === 'git' ? ref.trim() === '' : localPath.trim() === '';
-  const incomplete =
-    sourceMissing ||
-    (!userDefined && ((groupScoped && groupMembers.length === 0) || (userScoped && userMembers.length === 0)));
+  // A held submit names what is holding it. The reader is otherwise left
+  // clicking a disabled control that reports no reason, and the field the hold
+  // is on scrolls out of view once the body is scrolled to the submit row.
+  const hold = registrationHold({
+    sourceType,
+    ref,
+    localPath,
+    userDefined,
+    groupScoped,
+    groupMembers,
+    userScoped,
+    userMembers,
+  });
+  const incomplete = hold !== null;
+  const holdID = useId();
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -233,17 +243,14 @@ export function RegisterLayerForm({
               {/* The ref and the root both qualify the repository above them
                   and each holds a short value, so they share one row. */}
               <div className="field-pair">
-                <label className="field">
-                  <span className="label">Ref</span>
-                  <input
-                    type="text"
-                    value={ref}
-                    aria-required="true"
-                    onChange={(event) => {
-                      setRef(event.target.value);
-                    }}
-                  />
-                </label>
+                <RequiredField
+                  label="Ref"
+                  value={ref}
+                  testID="register-ref"
+                  onChange={(next) => {
+                    setRef(next);
+                  }}
+                />
                 <label className="field">
                   <span className="label">Root</span>
                   <input
@@ -263,17 +270,14 @@ export function RegisterLayerForm({
             </>
           ) : (
             <>
-              <label className="field">
-                <span className="label">Local path</span>
-                <input
-                  type="text"
-                  value={localPath}
-                  aria-required="true"
-                  onChange={(event) => {
-                    setLocalPath(event.target.value);
-                  }}
-                />
-              </label>
+              <RequiredField
+                label="Local path"
+                value={localPath}
+                testID="register-local-path"
+                onChange={(next) => {
+                  setLocalPath(next);
+                }}
+              />
               <p className="quiet" data-testid="register-local-note">
                 Name the directory the registry reads the artifacts from; a local layer has no default and cannot
                 ingest without one.
@@ -345,7 +349,13 @@ export function RegisterLayerForm({
           {/* The registry appends a new layer at the end of the order, and
               the panel's last row is the one that wins, so the footer states
               where this registration lands rather than a fixed number. */}
-          <span className="quiet modal-foot-note">Registers at the end of the order, where the last row wins.</span>
+          <span
+            className={hold === null ? 'quiet modal-foot-note' : 'modal-foot-note modal-foot-hold'}
+            id={holdID}
+            data-testid="register-foot-note"
+          >
+            {hold ?? 'Registers at the end of the order, where the last row wins.'}
+          </span>
           <button type="button" onClick={onClose}>
             Cancel
           </button>
@@ -354,12 +364,93 @@ export function RegisterLayerForm({
               label promising one describes a run that never happens. The
               panel's own opener carries the layer noun, so the submit inside
               the dialog the opener raised states the verb alone. */}
-          <button type="submit" className="button primary" disabled={readOnly || incomplete}>
+          <button
+            type="submit"
+            className="button primary"
+            disabled={readOnly || incomplete}
+            aria-describedby={hold === null ? undefined : holdID}
+          >
             Register
           </button>
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** registrationHold names the field the submit is held on, or null when the
+ * form is ready to send. The submit is disabled while a hold stands, and a
+ * disabled control that reports no reason leaves the reader clicking a control
+ * that does nothing, so every arm of the hold has a sentence naming the field
+ * it is on. */
+function registrationHold({
+  sourceType,
+  ref,
+  localPath,
+  userDefined,
+  groupScoped,
+  groupMembers,
+  userScoped,
+  userMembers,
+}: {
+  sourceType: string;
+  ref: string;
+  localPath: string;
+  userDefined: boolean;
+  groupScoped: boolean;
+  groupMembers: string[];
+  userScoped: boolean;
+  userMembers: string[];
+}): string | null {
+  if (sourceType === 'git' && ref.trim() === '') {
+    return 'Name the ref before registering.';
+  }
+  if (sourceType === 'local' && localPath.trim() === '') {
+    return 'Name the local path before registering.';
+  }
+  if (!userDefined && groupScoped && groupMembers.length === 0) {
+    return 'Name at least one group before registering.';
+  }
+  if (!userDefined && userScoped && userMembers.length === 0) {
+    return 'Name at least one user before registering.';
+  }
+  return null;
+}
+
+/** RequiredField is a text field the submit is held on. It carries a visible
+ * requirement marker beside its label and `aria-required` on its input, and it
+ * associates the two by id rather than by wrapping, so the marker stays out of
+ * the input's accessible name. */
+function RequiredField({
+  label,
+  value,
+  testID,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  testID: string;
+  onChange: (next: string) => void;
+}) {
+  const inputID = useId();
+  return (
+    <div className="field">
+      <span className="label">
+        <label htmlFor={inputID}>{label}</label>{' '}
+        <span className="label-required" data-testid={`${testID}-required`}>
+          required
+        </span>
+      </span>
+      <input
+        id={inputID}
+        type="text"
+        value={value}
+        aria-required="true"
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+      />
+    </div>
   );
 }
 
