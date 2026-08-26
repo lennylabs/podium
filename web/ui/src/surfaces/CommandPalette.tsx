@@ -8,7 +8,7 @@ import { useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 
 import { useDialogFocus } from '../components/focus';
-import { Badge, EmptyState, ErrorState, Loading } from '../components/primitives';
+import { EmptyState, ErrorState, Loading, TypeBadge, formatVersion } from '../components/primitives';
 import type { ArtifactDescriptor, SearchResponse } from '../api';
 import { searchArtifacts } from '../api';
 import { parseQueryLine } from '../query';
@@ -297,9 +297,9 @@ function PaletteResults({
                   the listing rows hold theirs, so the reader scans one column
                   of types instead of reading to the end of each path. */}
               <span className="palette-row-aside" data-testid="palette-row-aside">
-                <Badge>{row.type}</Badge>
+                <TypeBadge type={row.type} />
                 {row.version !== undefined && row.version !== '' && (
-                  <span className="mono quiet palette-row-version">{row.version}</span>
+                  <span className="mono quiet palette-row-version">{formatVersion(row.version)}</span>
                 )}
               </span>
             </button>

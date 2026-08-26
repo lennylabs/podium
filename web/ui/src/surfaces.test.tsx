@@ -710,7 +710,7 @@ describe("the domain browser", () => {
     // read off the surface rather than off the page.
     expect(within(browser).getByText("ci")).toBeTruthy();
     expect(screen.getByText("platform/deploy")).toBeTruthy();
-    expect(screen.getByText("curated")).toBeTruthy();
+    expect(screen.getByText("\u2605 CURATED")).toBeTruthy();
     expect(screen.getByText("Lifted from sparse subdomains")).toBeTruthy();
     // The note reaches the reader at the returned edge rather than above the
     // description, beside the count and the control that continues past it.
@@ -745,15 +745,51 @@ describe("the domain browser", () => {
     render(<App />);
     const browser = await screen.findByLabelText("Domain browser");
     const aside = within(browser).getByTestId("artifact-row-aside");
-    expect(aside.textContent).toBe("skill2.0.0");
+    expect(aside.textContent).toBe("SKILLv2.0.0");
     // The row names the artifact and states the full path beside it, and the
     // right-hand column holds neither.
     const link = within(browser).getByRole("link", { name: "deploy" });
     expect(link.getAttribute("href")).toBe("#/artifact/platform%2Fdeploy");
     const head = link.parentElement as HTMLElement;
     expect(within(head).getByText("platform/deploy")).toBeTruthy();
-    expect(within(head).getByText("curated")).toBeTruthy();
-    expect(within(head).queryByText("2.0.0")).toBeNull();
+    expect(within(head).getByText("\u2605 CURATED")).toBeTruthy();
+    expect(within(head).queryByText("v2.0.0")).toBeNull();
+  });
+
+  // Spec: §13.10 — the domain browser marks each entry. The type is a fixed
+  // vocabulary word and reads in caps, the version carries the v that names
+  // what the number measures, and the curated marker leads with a star so a
+  // reader scanning a listing finds the featured rows without reading the
+  // label on each badge.
+  it("marks a listing row with a capitalised type, a v-prefixed version, and a starred curated badge", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: [],
+          notable: [
+            {
+              id: "platform/deploy",
+              type: "context",
+              version: "0.1.0",
+              source: "featured",
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const row = within(browser).getByRole("listitem");
+    expect(within(row).getByText("CONTEXT")).toBeTruthy();
+    expect(within(row).queryByText("context")).toBeNull();
+    expect(within(row).getByText("v0.1.0")).toBeTruthy();
+    expect(within(row).queryByText("0.1.0")).toBeNull();
+    const curated = within(row).getByText("\u2605 CURATED");
+    expect(curated.className).toContain("badge-accent");
+    expect(within(row).queryByText("curated")).toBeNull();
   });
 
   // The listings are divided by labels rather than by titles, so the page
@@ -1034,7 +1070,7 @@ describe("search", () => {
     expect(screen.queryByTestId("artifact-row-aside")).toBeNull();
     const first = screen.getByRole("link", { name: "platform/review" });
     expect(
-      within(first.parentElement as HTMLElement).getByText("skill"),
+      within(first.parentElement as HTMLElement).getByText("SKILL"),
     ).toBeTruthy();
     // The classification names its axis on the row as it does in the viewer.
     expect(screen.getByText("sensitivity: internal")).toBeTruthy();
@@ -1218,8 +1254,8 @@ describe("the artifact viewer", () => {
     expect(style.fontSize).toBe("29px");
     // The badges are siblings of the heading rather than a row below it.
     const title = heading.parentElement;
-    expect(within(title as HTMLElement).getByText("skill")).toBeTruthy();
-    expect(within(title as HTMLElement).getByText("2.3.0")).toBeTruthy();
+    expect(within(title as HTMLElement).getByText("SKILL")).toBeTruthy();
+    expect(within(title as HTMLElement).getByText("v2.3.0")).toBeTruthy();
     // The whole identifier stands under the title, and the breadcrumb leads
     // back through the domains above it.
     const content = heading.closest(".artifact-content") as HTMLElement;
@@ -1267,7 +1303,7 @@ describe("the artifact viewer", () => {
     ).getAllByRole("heading", { level: 1 })[0];
     const title = heading.parentElement as HTMLElement;
     const classification = within(title).getByText("sensitivity: internal");
-    expect(within(title).getByText("skill").className).toBe(
+    expect(within(title).getByText("SKILL").className).toBe(
       classification.className,
     );
   });
@@ -3874,8 +3910,8 @@ describe("the command palette", () => {
     // The aside is the row's last element, so nothing follows the column that
     // holds the edge.
     expect(aside.parentElement?.lastElementChild).toBe(aside);
-    expect(within(aside).getByText("skill").className).toContain("badge");
-    expect(within(aside).getByText("1.2.0")).toBeTruthy();
+    expect(within(aside).getByText("SKILL").className).toContain("badge");
+    expect(within(aside).getByText("v1.2.0")).toBeTruthy();
     // The count the heading states also sits in the field row.
     expect(screen.getByTestId("palette-count").textContent).toBe("1 of 4");
     const footer = screen.getByTestId("palette-footer");

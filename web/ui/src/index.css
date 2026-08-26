@@ -440,6 +440,14 @@ h2.label {
   border-color: var(--cbd);
 }
 
+/* The curated marker is the one badge that asks to be found while scanning a
+   listing, so it carries weight and tracking the informational badges beside
+   it do not. */
+.badge-curated {
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
 .badge-quiet {
   color: var(--meta);
 }

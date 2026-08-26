@@ -15,7 +15,16 @@ import type { KeyboardEvent } from 'react';
 
 import { ArtifactBody } from '../components/ArtifactBody';
 import { Breadcrumb } from '../components/Breadcrumb';
-import { Badge, CopyButton, EmptyState, ErrorState, Loading, SensitivityBadge } from '../components/primitives';
+import {
+  Badge,
+  CopyButton,
+  EmptyState,
+  ErrorState,
+  Loading,
+  SensitivityBadge,
+  TypeBadge,
+  VersionBadge,
+} from '../components/primitives';
 import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
 import type { DependencyEdge, LargeResourceLink, LoadArtifactResponse } from '../api';
@@ -92,8 +101,8 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
         <Breadcrumb path={domainOf(body.id)} />
         <div className="page-title">
           <h1>{artifactName(body.id)}</h1>
-          <Badge>{body.type}</Badge>
-          <Badge tone="quiet">{body.version}</Badge>
+          <TypeBadge type={body.type} />
+          <VersionBadge version={body.version} />
           <SensitivityBadge sensitivity={body.sensitivity} />
         </div>
         <p className="mono quiet artifact-id-line">{body.id}</p>

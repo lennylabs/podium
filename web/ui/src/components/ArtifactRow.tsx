@@ -2,7 +2,7 @@
 // receive the same descriptor, so both render this row and neither formats
 // the same field twice.
 
-import { Badge, SensitivityBadge } from './primitives';
+import { Badge, CuratedBadge, SensitivityBadge, TypeBadge, VersionBadge, formatVersion } from './primitives';
 import type { ArtifactDescriptor } from '../api';
 import { artifactHref, artifactLeaf } from '../route';
 
@@ -94,12 +94,12 @@ export function ArtifactRow({
               them to the column at the row's right edge. */}
           {ranked && (
             <>
-              <Badge>{artifact.type}</Badge>
-              {version !== '' && <Badge tone="quiet">{version}</Badge>}
+              <TypeBadge type={artifact.type} />
+              <VersionBadge version={version} />
             </>
           )}
           <SensitivityBadge sensitivity={artifact.sensitivity} />
-          {artifact.source === 'featured' && <Badge tone="accent">curated</Badge>}
+          {artifact.source === 'featured' && <CuratedBadge />}
           {artifact.source === 'signal' && <span className="quiet label">surfaced by usage</span>}
           {artifact.folded_from !== undefined && artifact.folded_from !== '' && (
             <Badge tone="quiet">from {artifact.folded_from}</Badge>
@@ -124,8 +124,8 @@ export function ArtifactRow({
           across each row's second line. */}
       {!ranked && (
         <div className="artifact-row-aside" data-testid="artifact-row-aside">
-          <Badge>{artifact.type}</Badge>
-          {version !== '' && <span className="mono quiet artifact-version">{version}</span>}
+          <TypeBadge type={artifact.type} />
+          {version !== '' && <span className="mono quiet artifact-version">{formatVersion(version)}</span>}
         </div>
       )}
     </li>

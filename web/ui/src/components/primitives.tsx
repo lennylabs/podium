@@ -65,6 +65,54 @@ export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: R
 }
 
 /**
+ * TypeBadge names the artifact's first-class type. The type is a fixed
+ * vocabulary rather than prose, so it is set in caps to read as a marker
+ * beside the artifact's own name. The transform is applied to the text rather
+ * than in the stylesheet, so what a reader copies out of the page is what the
+ * page shows.
+ *
+ * Spec: §4.3
+ */
+export function TypeBadge({ type }: { type: string }) {
+  return <Badge>{type.toUpperCase()}</Badge>;
+}
+
+/**
+ * formatVersion prefixes a manifest version for display. A bare semver beside
+ * an artifact name reads as an unlabelled number, and the `v` names what the
+ * number measures. A version that already carries the prefix keeps the one it
+ * has.
+ */
+export function formatVersion(version: string): string {
+  if (version === '') {
+    return '';
+  }
+  return version.startsWith('v') ? version : `v${version}`;
+}
+
+/**
+ * VersionBadge renders the manifest version as a quiet badge beside the type.
+ */
+export function VersionBadge({ version }: { version: string }) {
+  const text = formatVersion(version);
+  if (text === '') {
+    return null;
+  }
+  return <Badge tone="quiet">{text}</Badge>;
+}
+
+/**
+ * CuratedBadge marks a row the domain author chose to feature. The star
+ * carries the distinction at a glance in a listing where the accent tone
+ * alone is one of several, and the label names what the star means.
+ *
+ * Spec: §13.10
+ */
+export function CuratedBadge() {
+  return <span className="badge badge-accent badge-curated">★ CURATED</span>;
+}
+
+/**
  * SensitivityBadge renders the artifact's sensitivity classification. The
  * value alone ("internal", "confidential") does not say which axis it
  * measures, so the badge names the axis and carries the same weight as the
