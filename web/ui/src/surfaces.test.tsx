@@ -4362,6 +4362,38 @@ describe("the layer write flows", () => {
     );
   });
 
+  // The write that removes the control it was started from is the one that
+  // strands a keyboard reader: the dialog closes, the row it was opened from
+  // leaves the table, and focus falls to the document body with nothing said
+  // about what happened. Focus lands on the panel heading, and the panel
+  // states the outcome the vanished row can no longer state.
+  it("hands focus to the panel heading and states the outcome when an unregister takes the row away", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "DELETE /v1/layers": { body: {} },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    await screen.findByLabelText("Unregister alice-personal");
+    fireEvent.change(screen.getByLabelText("Type the layer ID to confirm"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Unregister layer" }));
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { name: "Layers" }),
+      );
+    });
+    expect(screen.getByTestId("panel-announcement").textContent).toContain(
+      "alice-personal is unregistered.",
+    );
+  });
+
   // The row's overflow menu is a transient popup, and every other overlay in
   // the shell leaves on Escape. A popup whose only exit is its own trigger
   // strands a reader who opened it to look, and one that survives a press
@@ -5526,14 +5558,14 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    const region = screen.getByTestId("reorder-announcement");
+    const region = screen.getByTestId("panel-announcement");
     expect(region.getAttribute("aria-live")).toBe("polite");
     expect(region.textContent).toBe("");
     fireEvent.keyDown(screen.getByLabelText(moveHandleLabel("alice-personal")), {
       key: "ArrowDown",
     });
     await waitFor(() => {
-      expect(screen.getByTestId("reorder-announcement").textContent).toBe(
+      expect(screen.getByTestId("panel-announcement").textContent).toBe(
         "alice-personal moved to order 3 of 4.",
       );
     });
@@ -6128,6 +6160,37 @@ describe("the layer write flows", () => {
     // alone.
     expect(screen.getByTestId("restore-announcement").className).toContain(
       "banner",
+    );
+  });
+
+  // The Restore button leaves the table with the row it restored, so a
+  // keyboard reader who pressed it is left on the document body. Focus lands
+  // on the heading, beside the live region the restore reports itself in.
+  it("hands focus to the heading when a restore takes the row away", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer(), adminLayer()] } },
+      "/v1/layers?deleted=true": {
+        body: {
+          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+        },
+      },
+      "/v1/layers/restore": { body: { restored: "alice-personal" } },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    await screen.findByLabelText("Recently unregistered");
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    // Focus is asserted once both reads the restore issues have answered,
+    // because a surface that swaps itself out for its own loading state
+    // takes the heading with it and drops focus again on the way through.
+    await waitFor(() => {
+      expect(screen.getByTestId("restore-announcement").textContent).toContain(
+        "is restored",
+      );
+    });
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Recently unregistered" }),
     );
   });
 

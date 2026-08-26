@@ -11,11 +11,12 @@
 // window remains. A row inside the accent window says so, because that is the
 // row a reader has to act on today.
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { accentDays, daysLeft, erasesOn, recoveryDays } from './recovery';
 import { EmptyState, ErrorState, Loading } from '../components/primitives';
 import { layersHref } from '../route';
+import { takeFocus } from '../components/focus';
 import { SourceCell } from '../components/SourceCell';
 import type { LayerRecord } from '../api';
 import { ApiError, listDeletedLayers, listLayers, restoreLayer } from '../api';
@@ -29,8 +30,17 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
   // the outcome is held here and stated the way the panel states a committed
   // reorder.
   const [restored, setRestored] = useState('');
+  // The restored row leaves the table with the button that restored it, so
+  // the heading is where focus goes. Left where it was, focus falls to the
+  // document body and the reader resumes at the top of the page.
+  const heading = useRef<HTMLHeadingElement>(null);
 
-  if (deleted.loading) {
+  // The loading state stands in for the surface on the first read alone. A
+  // restore re-reads the list, and swapping the whole surface out for the
+  // reload unmounts the heading the write hands focus to and the region it
+  // reports itself in, which drops both. The surface holds the rows it
+  // already has until the reload answers.
+  if (deleted.loading && deleted.value === null) {
     return <Loading label="Loading the recoverable layers." />;
   }
   if (deleted.error !== null) {
@@ -43,6 +53,7 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
         setRefusal(null);
         deleted.reload();
         onRestored();
+        takeFocus(heading.current);
         // The restore response carries the layer ID alone, so the precedence
         // the layer came back at is read from the layer list, which is the
         // same order the panel one link away displays. A list read that
@@ -77,7 +88,7 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
           Recently unregistered
         </span>
       </nav>
-      <h1>Recently unregistered</h1>
+      <h1 ref={heading}>Recently unregistered</h1>
       <p className="lead">A layer stays restorable for {recoveryDays} days, after which it is erased.</p>
       {rows.length === 0 ? (
         <EmptyState>Nothing is waiting to be erased.</EmptyState>

@@ -32,7 +32,7 @@ import {
   Modal,
 } from "../components/primitives";
 import { SourceCell } from "../components/SourceCell";
-import { usePopupDismiss } from "../components/focus";
+import { takeFocus, usePopupDismiss } from "../components/focus";
 import type { BreakGlass, LayerRecord } from "../api";
 import {
   ApiError,
@@ -96,11 +96,16 @@ export function LayerPanel({
   const [run, setRun] = useState<Run | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
-  // What the last committed reorder did, held for the live region below the
-  // table. The only other report a move makes is the rows swapping places,
-  // which is no report at all to the operator driving the handle from the
-  // keyboard, and that path exists for the operator who cannot see the swap.
-  const [moved, setMoved] = useState("");
+  // What the last committed write did, held for the live region below the
+  // table. A reorder reports itself only by the rows swapping places, which
+  // is no report at all to the operator driving the handle from the keyboard,
+  // and an unregister takes its own row away, so neither leaves anything on
+  // the page that names what happened.
+  const [outcome, setOutcome] = useState("");
+  // The heading is where focus lands when a write removes the control it was
+  // started from. The row's controls go with the row, and focus left on the
+  // document body puts the reader back at the top of the page.
+  const heading = useRef<HTMLHeadingElement>(null);
 
   // The loading state stands in for the panel on the first read alone. A
   // write reloads the list, and the reload reports loading again, so swapping
@@ -197,7 +202,7 @@ export function LayerPanel({
       reorderLayers(order).then(
         () => {
           clearRefusal(from);
-          setMoved(movedNote(rows, order, from));
+          setOutcome(movedNote(rows, order, from));
           afterWrite();
         },
         (err: unknown) => {
@@ -229,7 +234,7 @@ export function LayerPanel({
           first row of the table asks them to infer it from the columns. */}
       <div className="panel-head">
         <div>
-          <h1>Layers</h1>
+          <h1 ref={heading}>Layers</h1>
           <p className="lead">
             Sources the catalog is composed from. When two layers carry the same
             artifact ID, the higher precedence wins.
@@ -399,6 +404,10 @@ export function LayerPanel({
                   // rather than only on the one that reopens the section.
                   recoverable.reload();
                 }}
+                onUnregistered={() => {
+                  setOutcome(unregisteredNote(layer.ID));
+                  takeFocus(heading.current);
+                }}
                 onRefusal={(err, retry) => {
                   recordRefusal(layer.ID, err, retry);
                 }}
@@ -418,9 +427,9 @@ export function LayerPanel({
         className="assistive-only"
         role="status"
         aria-live="polite"
-        data-testid="reorder-announcement"
+        data-testid="panel-announcement"
       >
-        {moved}
+        {outcome}
       </p>
       <PanelFoot rows={rows} subject={subject} />
     </section>
@@ -572,6 +581,14 @@ function movedNote(
   return `${id} moved to order ${String(position)} of ${String(rows.length)}.`;
 }
 
+/** unregisteredNote states what a committed unregister did and where the
+ * layer went, because the row that carried it is gone from the table by the
+ * time the reader hears anything. The retention window is named where the
+ * confirmation named it, so the two statements of it do not drift. */
+function unregisteredNote(id: string): string {
+  return `${id} is unregistered. It is restorable from Recently unregistered until ${erasesOn(new Date())}.`;
+}
+
 function LayerRow({
   layer,
   position,
@@ -589,6 +606,7 @@ function LayerRow({
   onReingest,
   onDismissReingest,
   onWrite,
+  onUnregistered,
   onRefusal,
   onDismissRefusal,
 }: {
@@ -608,6 +626,10 @@ function LayerRow({
   onReingest: (breakGlass?: BreakGlass) => void;
   onDismissReingest: () => void;
   onWrite: () => void;
+  /** onUnregistered reports the one write that takes this row away with it,
+   * so the panel can state what happened and take the focus the row's own
+   * controls leave behind. */
+  onUnregistered: () => void;
   onRefusal: (err: unknown, retry: () => void) => void;
   onDismissRefusal: () => void;
 }) {
@@ -635,12 +657,18 @@ function LayerRow({
   // session, because the refusal carries neither.
   // The refusal carries the write beside it, so Try again re-issues exactly
   // the action that was refused rather than a fresh guess at it.
-  const attempt = (run: () => Promise<unknown>) => {
-    run().then(onWrite, (err: unknown) => {
-      onRefusal(err, () => {
-        attempt(run);
-      });
-    });
+  const attempt = (run: () => Promise<unknown>, done?: () => void) => {
+    run().then(
+      () => {
+        onWrite();
+        done?.();
+      },
+      (err: unknown) => {
+        onRefusal(err, () => {
+          attempt(run, done);
+        });
+      },
+    );
   };
 
   const rowClass = [
@@ -792,7 +820,7 @@ function LayerRow({
             }}
             onConfirm={() => {
               setConfirming(false);
-              attempt(() => unregisterLayer(layer.ID));
+              attempt(() => unregisterLayer(layer.ID), onUnregistered);
             }}
           />
         )}

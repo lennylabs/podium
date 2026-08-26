@@ -27,6 +27,26 @@ const focusableStops = [
 ].join(', ');
 
 /**
+ * takeFocus hands focus to a landmark that never receives it by keyboard,
+ * such as a surface heading. A write that removes the control it was started
+ * from leaves focus on the document body: the next Tab restarts at the top of
+ * the page, and a screen reader is left on nothing while the row it was on
+ * disappears. The surface hands focus to its own heading instead, which is a
+ * stable place to resume from and is read out as the reader lands there.
+ *
+ * The element is made programmatically focusable, because a heading is not a
+ * tab stop and focusing one the browser does not consider focusable drops
+ * focus on the document.
+ */
+export function takeFocus(target: HTMLElement | null): void {
+  if (target === null || !target.isConnected) {
+    return;
+  }
+  target.tabIndex = -1;
+  target.focus();
+}
+
+/**
  * useDialogFocus gives a dialog the three behaviours a `role="dialog"` owes a
  * keyboard reader, for as long as `active` holds: focus moves to the first
  * control inside it that is not a dismissal when it opens, Tab and Shift+Tab
