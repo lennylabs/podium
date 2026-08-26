@@ -513,9 +513,10 @@ h2.label {
   background: var(--surf);
 }
 
-/* A row is two columns: the artifact and what it says about itself on the
-   left, and its type and version pinned to the right edge, so a reader
-   scanning a listing for a type reads one column down the page. */
+/* A row is up to three columns: a ranked row's relevance indicator at the left
+   edge, the artifact and what it says about itself in the middle, and its type
+   and version pinned to the right edge, so a reader scanning a listing for a
+   type reads one column down the page. */
 .artifact-row {
   padding: 12px 14px;
   display: flex;
@@ -537,6 +538,16 @@ h2.label {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+}
+
+/* The relevance column. The indicator leads the row so it holds one x
+   position down a result set. Drawn after the badges instead, it moves with
+   whichever of type, version, and sensitivity a row happens to carry, and the
+   bars stop reading as a column. The column is present on every ranked row,
+   including the vector-only row that draws no bars, so the row bodies align. */
+.artifact-row-relevance {
+  flex: none;
+  padding-top: 3px;
 }
 
 .artifact-row-aside {

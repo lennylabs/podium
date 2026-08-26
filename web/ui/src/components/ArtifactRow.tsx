@@ -22,12 +22,12 @@ function filledBars(score: number, topScore: number): number {
   return Math.min(Math.max(filled, 1), relevanceBars);
 }
 
-/** Relevance renders the lexical rank as bars rather than as a number, which
- * is what the row has to say about a score whose scale means nothing on its
- * own. A result matched only by vector similarity is fused in with a zero
- * score, which is a property of how it matched rather than a weak match, so
- * it draws no bars and carries a label instead. The bar column holds its
- * width on that row so the rows stay aligned.
+/** RelevanceBars renders the lexical rank as bars rather than as a number,
+ * which is what the row has to say about a score whose scale means nothing on
+ * its own. A result matched only by vector similarity is fused in with a zero
+ * score, which is a property of how it matched rather than a weak match, so it
+ * draws no bars and the row carries a label instead. The element holds its
+ * width on that row so the bars stay on one x position down the result set.
  *
  * The indicator is drawn on a ranked row alone, which is a property of the
  * surface rather than of the descriptor: the registry marshals the score with
@@ -35,18 +35,9 @@ function filledBars(score: number, topScore: number): number {
  * on the wire. A search row therefore reads an absent score as the vector-only
  * arm, and an unranked listing such as the domain browser draws no indicator
  * at all. */
-function Relevance({ ranked, score, topScore }: { ranked: boolean; score?: number; topScore: number }) {
-  if (!ranked) {
-    return null;
-  }
-  const filled = filledBars(score ?? 0, topScore);
+function RelevanceBars({ filled }: { filled: number }) {
   if (filled === 0) {
-    return (
-      <>
-        <span className="relevance" data-testid="relevance-bars" data-filled="0" aria-hidden="true" />
-        <span className="quiet label">matched by meaning</span>
-      </>
-    );
+    return <span className="relevance" data-testid="relevance-bars" data-filled="0" aria-hidden="true" />;
   }
   return (
     <span
@@ -77,8 +68,18 @@ export function ArtifactRow({
   topScore?: number;
 }) {
   const version = artifact.version !== undefined && artifact.version !== '' ? artifact.version : '';
+  const filled = ranked ? filledBars(artifact.score ?? 0, topScore) : 0;
   return (
     <li className="artifact-row">
+      {/* The relevance column. The indicator leads the row rather than
+          trailing the badges, because a badge row is as wide as the values it
+          happens to carry: drawn after it, the bars land on a different x
+          position on every row and stop reading as a column. */}
+      {ranked && (
+        <div className="artifact-row-relevance" data-testid="artifact-row-relevance">
+          <RelevanceBars filled={filled} />
+        </div>
+      )}
       <div className="artifact-row-body">
         {/* The identifying line. A listing row names the artifact and states
             its full path beside it, because the domain is already the page;
@@ -104,7 +105,7 @@ export function ArtifactRow({
           {artifact.folded_from !== undefined && artifact.folded_from !== '' && (
             <Badge tone="quiet">from {artifact.folded_from}</Badge>
           )}
-          <Relevance ranked={ranked} score={artifact.score} topScore={topScore} />
+          {ranked && filled === 0 && <span className="quiet label">matched by meaning</span>}
         </div>
         {artifact.description !== undefined && artifact.description !== '' && (
           <p className="artifact-description">{artifact.description}</p>

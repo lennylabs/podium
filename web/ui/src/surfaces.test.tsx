@@ -1085,6 +1085,18 @@ describe("search", () => {
       "0",
     ]);
     expect(indicators[2].childElementCount).toBe(0);
+    // The indicator leads the row instead of trailing the badges. A badge row
+    // is only as wide as the values that row happens to carry, so an indicator
+    // drawn after it lands on a different x position on every row.
+    for (const indicator of indicators) {
+      const column = indicator.parentElement as HTMLElement;
+      expect(column.className).toBe("artifact-row-relevance");
+      expect(column.previousElementSibling).toBeNull();
+      expect(
+        (column.nextElementSibling as HTMLElement).className,
+      ).toBe("artifact-row-body");
+      expect(indicator.closest(".artifact-row-head")).toBeNull();
+    }
     expect(screen.queryByText(/score 8/)).toBeNull();
   });
 
