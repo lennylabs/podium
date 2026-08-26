@@ -1522,7 +1522,7 @@ describe('the layer write flows', () => {
     fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'alice-personal' } });
     expect(screen.queryByLabelText('Organization')).toBeNull();
     expect(screen.queryByLabelText('Public')).toBeNull();
-    fireEvent.submit(screen.getByLabelText('Register a layer'));
+    fireEvent.submit(screen.getByTestId('register-form'));
     await waitFor(() => {
       expect(requests.some((r) => r.url === '/v1/layers' && r.method === 'POST')).toBe(true);
     });
@@ -1549,7 +1549,7 @@ describe('the layer write flows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
     fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'company' } });
     expect(screen.getByLabelText('Organization')).toBeTruthy();
-    fireEvent.submit(screen.getByLabelText('Register a layer'));
+    fireEvent.submit(screen.getByTestId('register-form'));
     await waitFor(() => {
       expect(requests.some((r) => r.url === '/v1/layers' && r.method === 'POST')).toBe(true);
     });
@@ -1604,7 +1604,7 @@ describe('the layer write flows', () => {
     fireEvent.click(screen.getByLabelText('Groups'));
     // An axis selected with no member named registers a grant admitting
     // nobody, so the write is held until each selected axis carries one.
-    expect(screen.getByRole('button', { name: 'Register' }).hasAttribute('disabled')).toBe(true);
+    expect(screen.getByRole('button', { name: 'Register and ingest' }).hasAttribute('disabled')).toBe(true);
     fireEvent.change(screen.getByLabelText('Group names, separated by commas'), {
       target: { value: 'secops, appsec' },
     });
@@ -1612,7 +1612,7 @@ describe('the layer write flows', () => {
     fireEvent.change(screen.getByLabelText('User identifiers, separated by commas'), {
       target: { value: 'carol@acme.com' },
     });
-    fireEvent.submit(screen.getByLabelText('Register a layer'));
+    fireEvent.submit(screen.getByTestId('register-form'));
     await waitFor(() => {
       expect(requests.some((r) => r.url === '/v1/layers' && r.method === 'POST')).toBe(true);
     });
@@ -1623,6 +1623,76 @@ describe('the layer write flows', () => {
     expect(sent.users).toEqual(['carol@acme.com']);
   });
 
+
+  // §13.10 puts the layer panel's writes on the panel, and a registration is
+  // reviewed before it is sent, so the form is a dialog over a scrim with the
+  // panel underneath keeping its position. The inline panel it replaced named
+  // itself nowhere, offered no way out but submitting, and left every grant
+  // as a bare word.
+  it('opens the registration as a dialog over a scrim that names itself and can be left', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
+    const dialog = screen.getByRole('dialog', { name: 'Register a layer' });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(screen.getByTestId('modal-scrim')).toBeTruthy();
+    expect(within(dialog).getByText(/A layer points at a source Podium ingests/)).toBeTruthy();
+    // A user-defined layer's visibility is fixed at registration, which is
+    // the class this caller opens on.
+    expect(screen.getByTestId('visibility-note').textContent).toBe('Visibility is fixed at registration.');
+    expect(within(dialog).getByRole('button', { name: 'Register and ingest' }).className).toContain('primary');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('dialog', { name: 'Register a layer' })).toBeNull();
+  });
+
+  // The source types are two exclusive choices that fit on one row, and the
+  // grants are terms a reader cannot act on from the axis name alone, so the
+  // source is a segmented control and each grant is a card stating who it
+  // admits with the consequence of the whole selection stated once.
+  it('draws the source as a segmented control and each grant as a described card', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ identity_provider_configured: false }) },
+      '/v1/layers': { body: { layers: [] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
+    const source = screen.getByRole('radiogroup', { name: 'Source' });
+    const git = within(source).getByRole('radio', { name: 'Git repository' });
+    const local = within(source).getByRole('radio', { name: 'Local folder' });
+    expect(git.getAttribute('aria-checked')).toBe('true');
+    fireEvent.click(local);
+    expect(local.getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByLabelText('Local path')).toBeTruthy();
+    for (const [axis, description] of [
+      ['Public', 'Anyone, signed in or not.'],
+      ['Organization', 'Everyone in this tenant.'],
+      ['Groups', 'Members of the OIDC groups you name.'],
+      ['Specific users', 'Named individuals, by email.'],
+    ]) {
+      const box = screen.getByLabelText(axis);
+      const describedBy = box.getAttribute('aria-describedby') ?? '';
+      expect(document.getElementById(describedBy)?.textContent).toBe(description);
+    }
+    // The consequence of the whole selection, stated in the reviewer's terms.
+    expect(screen.getByTestId('visibility-consequence').textContent).toBe(
+      'No grants — only you will see this layer.',
+    );
+    fireEvent.click(screen.getByLabelText('Organization'));
+    fireEvent.click(screen.getByLabelText('Groups'));
+    fireEvent.change(screen.getByLabelText('Group names, separated by commas'), {
+      target: { value: 'secops, appsec' },
+    });
+    expect(screen.getByTestId('visibility-consequence').textContent).toBe(
+      'Everyone in this tenant will see this layer — the organization grant already covers secops and appsec.',
+    );
+  });
 
   // The registration reloads the list, and the reload answers over the
   // network rather than within the batch that issued it, so the list read is
@@ -1646,7 +1716,7 @@ describe('the layer write flows', () => {
     await screen.findByLabelText('Layer panel');
     fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
     fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'alice-personal' } });
-    fireEvent.submit(screen.getByLabelText('Register a layer'));
+    fireEvent.submit(screen.getByTestId('register-form'));
     await screen.findByLabelText('Webhook secret');
     expect(screen.getByText('whsec-abc')).toBeTruthy();
     // The reload the registration triggered lands after the reveal paints,
@@ -2017,7 +2087,7 @@ describe('the layer write flows', () => {
     await screen.findByLabelText('Layer panel');
     fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
     fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'alice-extra' } });
-    fireEvent.submit(screen.getByLabelText('Register a layer'));
+    fireEvent.submit(screen.getByTestId('register-form'));
     const refusal = await screen.findByLabelText('Layer limit reached');
     expect(refusal.textContent).toContain('3 of 3');
     expect(screen.getByText('quota.layer_count_exceeded')).toBeTruthy();

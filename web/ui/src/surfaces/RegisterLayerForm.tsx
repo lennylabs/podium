@@ -1,4 +1,7 @@
-// Registering a layer. The panel serves both halves of the §13.10 role split,
+// Registering a layer. The registration is reviewed before it is sent and
+// the panel underneath keeps its position while it is, so the form is a
+// dialog over a scrim rather than a section pushed into the panel.
+// The panel serves both halves of the §13.10 role split,
 // so the form carries the layer class as a control. A user registering their
 // own layer creates a user-defined one, which is the class §7.3.1 caps per
 // user and authorizes its owner on, and the registry fixes such a layer's
@@ -10,22 +13,24 @@
 // the only places the secret is returned, so the reveal states that it is
 // shown once and stays until the reader acknowledges it.
 
-import type { FormEvent } from 'react';
-import { useState } from 'react';
+import type { FormEvent, ReactNode } from 'react';
+import { useId, useState } from 'react';
 
 import { SecretReveal } from './SecretReveal';
 import { members } from './members';
-import { ErrorState } from '../components/primitives';
+import { ErrorState, Modal } from '../components/primitives';
 import type { LayerRegistration, LayerSecretResult } from '../api';
 import { ApiError, registerLayer } from '../api';
 
 export function RegisterLayerForm({
   subject,
   onRegistered,
+  onClose,
   readOnly,
 }: {
   subject: string;
   onRegistered: () => void;
+  onClose: () => void;
   readOnly: boolean;
 }) {
   const [id, setID] = useState('');
@@ -89,170 +94,303 @@ export function RegisterLayerForm({
 
   if (result !== null) {
     return (
-      <SecretReveal
-        result={result}
-        outcome={`Layer ${result.layer.ID} is registered.`}
-        onDone={() => {
-          setResult(null);
-        }}
-      />
+      <Modal title="Layer registered" onClose={onClose}>
+        <div className="modal-body">
+          <SecretReveal result={result} outcome={`Layer ${result.layer.ID} is registered.`} onDone={onClose} />
+        </div>
+      </Modal>
     );
   }
 
   return (
-    <form className="register-form" aria-label="Register a layer" onSubmit={submit}>
-      <label className="field">
-        <span className="label">Layer ID</span>
-        <input
-          type="text"
-          value={id}
-          onChange={(event) => {
-            setID(event.target.value);
-          }}
-        />
-      </label>
-      <label className="field">
-        <span className="label">Layer class</span>
-        <select
-          value={userDefined ? 'user' : 'admin'}
-          onChange={(event) => {
-            setUserDefined(event.target.value === 'user');
-          }}
-        >
-          <option value="user">Your own layer</option>
-          <option value="admin">A layer for the whole tenant</option>
-        </select>
-      </label>
-      {userDefined && (
-        <p className="quiet">
-          A layer of your own is visible to you alone, and it counts against the layer limit an administrator sets.
-        </p>
-      )}
-      <label className="field">
-        <span className="label">Source</span>
-        <select
-          value={sourceType}
-          onChange={(event) => {
-            setSourceType(event.target.value);
-          }}
-        >
-          <option value="git">Git repository</option>
-          <option value="local">Local folder</option>
-        </select>
-      </label>
-      {sourceType === 'git' ? (
-        <>
+    <Modal
+      title="Register a layer"
+      description="A layer points at a source Podium ingests. Its place in the order decides who wins when two layers carry the same artifact ID."
+      onClose={onClose}
+    >
+      <form className="register-form modal-form" data-testid="register-form" onSubmit={submit}>
+        <div className="modal-body">
           <label className="field">
-            <span className="label">Repository</span>
+            <span className="label">Layer ID</span>
             <input
               type="text"
-              value={repo}
+              value={id}
               onChange={(event) => {
-                setRepo(event.target.value);
+                setID(event.target.value);
               }}
             />
           </label>
           <label className="field">
-            <span className="label">Ref</span>
-            <input
-              type="text"
-              value={ref}
+            <span className="label">Layer class</span>
+            <select
+              value={userDefined ? 'user' : 'admin'}
               onChange={(event) => {
-                setRef(event.target.value);
+                setUserDefined(event.target.value === 'user');
               }}
-            />
+            >
+              <option value="user">Your own layer</option>
+              <option value="admin">A layer for the whole tenant</option>
+            </select>
           </label>
-        </>
-      ) : (
-        <label className="field">
-          <span className="label">Local path</span>
-          <input
-            type="text"
-            value={localPath}
-            onChange={(event) => {
-              setLocalPath(event.target.value);
-            }}
-          />
-        </label>
-      )}
-      {!userDefined && (
-      <fieldset className="field">
-        <legend className="label">Visibility</legend>
-        <label>
-          <input
-            type="checkbox"
-            checked={isPublic}
-            onChange={(event) => {
-              setPublic(event.target.checked);
-            }}
-          />
-          Public
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={organization}
-            onChange={(event) => {
-              setOrganization(event.target.checked);
-            }}
-          />
-          Organization
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={groupScoped}
-            onChange={(event) => {
-              setGroupScoped(event.target.checked);
-            }}
-          />
-          Groups
-        </label>
-        {groupScoped && (
-          <label className="field">
-            <span className="label">Group names, separated by commas</span>
-            <input
-              type="text"
-              value={groups}
-              onChange={(event) => {
-                setGroups(event.target.value);
-              }}
-            />
-          </label>
-        )}
-        <label>
-          <input
-            type="checkbox"
-            checked={userScoped}
-            onChange={(event) => {
-              setUserScoped(event.target.checked);
-            }}
-          />
-          Specific users
-        </label>
-        {userScoped && (
-          <label className="field">
-            <span className="label">User identifiers, separated by commas</span>
-            <input
-              type="text"
-              value={users}
-              onChange={(event) => {
-                setUsers(event.target.value);
-              }}
-            />
-          </label>
-        )}
-        {/* §4.6 combines the axes as a union, so a layer carrying more than
-            one grant is visible to a caller who matches any of them. */}
-        <p className="quiet">A caller who matches any selected grant sees this layer.</p>
-      </fieldset>
-      )}
-      <button type="submit" disabled={readOnly || incomplete}>
-        Register
-      </button>
-      {refusal !== null && <RegistrationRefusal refusal={refusal} />}
-    </form>
+          {userDefined && (
+            <p className="quiet">
+              A layer of your own is visible to you alone, and it counts against the layer limit an administrator sets.
+            </p>
+          )}
+          <SourceChoice value={sourceType} onChange={setSourceType} />
+          {sourceType === 'git' ? (
+            <>
+              <label className="field">
+                <span className="label">Repository</span>
+                <input
+                  type="text"
+                  value={repo}
+                  onChange={(event) => {
+                    setRepo(event.target.value);
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span className="label">Ref</span>
+                <input
+                  type="text"
+                  value={ref}
+                  onChange={(event) => {
+                    setRef(event.target.value);
+                  }}
+                />
+              </label>
+            </>
+          ) : (
+            <label className="field">
+              <span className="label">Local path</span>
+              <input
+                type="text"
+                value={localPath}
+                onChange={(event) => {
+                  setLocalPath(event.target.value);
+                }}
+              />
+            </label>
+          )}
+          {!userDefined && (
+            <fieldset className="field visibility">
+              <legend className="label">Visibility</legend>
+              <p className="quiet visibility-lead">Grants combine, and anyone matching any of them sees the layer.</p>
+              <div className="visibility-pair">
+                <VisibilityAxis
+                  name="Public"
+                  description="Anyone, signed in or not."
+                  checked={isPublic}
+                  onChange={setPublic}
+                />
+                <VisibilityAxis
+                  name="Organization"
+                  description="Everyone in this tenant."
+                  checked={organization}
+                  onChange={setOrganization}
+                />
+              </div>
+              <VisibilityAxis
+                name="Groups"
+                description="Members of the OIDC groups you name."
+                checked={groupScoped}
+                onChange={setGroupScoped}
+              >
+                <TokenInput
+                  label="Group names, separated by commas"
+                  value={groups}
+                  onChange={setGroups}
+                  tokens={groupMembers}
+                />
+              </VisibilityAxis>
+              <VisibilityAxis
+                name="Specific users"
+                description="Named individuals, by email."
+                checked={userScoped}
+                onChange={setUserScoped}
+              >
+                <TokenInput
+                  label="User identifiers, separated by commas"
+                  value={users}
+                  onChange={setUsers}
+                  tokens={userMembers}
+                />
+              </VisibilityAxis>
+              {/* §4.6 combines the axes as a union, so the consequence is
+                  stated once over the whole selection rather than per axis. */}
+              <p className="consequence" data-testid="visibility-consequence">
+                {consequence(isPublic, organization, groupMembers, userMembers)}
+              </p>
+            </fieldset>
+          )}
+          {/* §4.6 fixes a user-defined layer's visibility at registration and
+              the registry discards a later patch of it, so the note is stated
+              on that class alone. An admin-defined layer's visibility is what
+              the update endpoint patches, and the panel's Edit control is
+              where that happens. */}
+          <p className="note" data-testid="visibility-note">
+            {userDefined ? 'Visibility is fixed at registration.' : 'Visibility can be changed later from Edit.'}
+          </p>
+          {refusal !== null && <RegistrationRefusal refusal={refusal} />}
+        </div>
+        <div className="modal-foot">
+          {/* The registry appends a new layer at the end of the order, and
+              the panel's last row is the one that wins, so the footer states
+              where this registration lands rather than a fixed number. */}
+          <span className="quiet modal-foot-note">Registers at the end of the order, where the last row wins.</span>
+          <button type="button" onClick={onClose}>
+            Cancel
+          </button>
+          <button type="submit" className="button primary" disabled={readOnly || incomplete}>
+            Register and ingest
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
+}
+
+/** SourceChoice is the source selector. The source types are two exclusive
+ * choices that fit on one row, so they are drawn as a segmented control the
+ * reader reads both options from rather than as a list they have to open. */
+function SourceChoice({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const options = [
+    { id: 'git', label: 'Git repository' },
+    { id: 'local', label: 'Local folder' },
+  ];
+  return (
+    <div className="field">
+      <span className="label" id="register-source-label">
+        Source
+      </span>
+      <div className="segmented" role="radiogroup" aria-labelledby="register-source-label">
+        {options.map((option) => (
+          <button
+            key={option.id}
+            type="button"
+            role="radio"
+            aria-checked={value === option.id}
+            className={value === option.id ? 'segment segment-on' : 'segment'}
+            onClick={() => {
+              onChange(option.id);
+            }}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** VisibilityAxis is one grant, drawn as a card carrying what the grant
+ * admits. An axis named alone reads as a term the reader has to already know,
+ * and the axes combine, so each card states who it lets in and a selected
+ * axis holds the control naming its members. */
+function VisibilityAxis({
+  name,
+  description,
+  checked,
+  onChange,
+  children,
+}: {
+  name: string;
+  description: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  children?: ReactNode;
+}) {
+  const boxID = useId();
+  const descID = useId();
+  return (
+    <div className={checked ? 'vis-card vis-card-on' : 'vis-card'}>
+      <input
+        type="checkbox"
+        id={boxID}
+        checked={checked}
+        aria-describedby={descID}
+        onChange={(event) => {
+          onChange(event.target.checked);
+        }}
+      />
+      <div className="vis-card-body">
+        <label className="vis-card-name" htmlFor={boxID}>
+          {name}
+        </label>
+        <p className="vis-card-desc" id={descID}>
+          {description}
+        </p>
+        {checked && children}
+      </div>
+    </div>
+  );
+}
+
+/** TokenInput names the members of a selected axis. The parsed members are
+ * echoed back as chips, because a comma-separated line does not show the
+ * reader how it was split and a mis-split grant admits the wrong people. */
+function TokenInput({
+  label,
+  value,
+  onChange,
+  tokens,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  tokens: string[];
+}) {
+  return (
+    <label className="field token-input">
+      <span className="label">{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(event) => {
+          onChange(event.target.value);
+        }}
+      />
+      {tokens.length > 0 && (
+        <span className="token-row">
+          {tokens.map((token) => (
+            <span className="token mono" key={token}>
+              {token}
+            </span>
+          ))}
+        </span>
+      )}
+    </label>
+  );
+}
+
+/** consequence states who the selected grants admit, in the terms the reader
+ * reviewing the registration cares about. §4.6 unions the axes, so a wider
+ * grant subsumes a narrower one and the line says so rather than listing
+ * every axis back. */
+function consequence(isPublic: boolean, organization: boolean, groups: string[], users: string[]): string {
+  const named = [...groups, ...users];
+  if (isPublic) {
+    return 'Anyone will see this layer, signed in or not.';
+  }
+  if (organization) {
+    return named.length === 0
+      ? 'Everyone in this tenant will see this layer.'
+      : `Everyone in this tenant will see this layer — the organization grant already covers ${list(named)}.`;
+  }
+  if (named.length === 0) {
+    return 'No grants — only you will see this layer.';
+  }
+  return `Only ${list(named)} will see this layer.`;
+}
+
+/** list renders a member list as written English, so the consequence line
+ * reads as a sentence rather than as the request body. */
+function list(members: string[]): string {
+  if (members.length === 1) {
+    return members[0];
+  }
+  return `${members.slice(0, -1).join(', ')} and ${members[members.length - 1]}`;
 }
 
 /** layerCapExceeded is the §6.10 code the registry refuses a registration

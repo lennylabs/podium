@@ -4,7 +4,7 @@
 // rather than rendering nothing.
 
 import type { ReactNode } from 'react';
-import { useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 
 import { ApiError } from '../api';
 
@@ -121,6 +121,64 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
             Retrying does not clear this condition.
           </p>
         ))}
+    </div>
+  );
+}
+
+/**
+ * Modal is a dialog over a scrim. A write the reader has to review before it
+ * is sent is presented over the surface that opened it rather than pushed
+ * into it, so the surface underneath keeps its position and the dialog owns
+ * the reader's attention while it is open. The scrim, Escape, and the close
+ * control all dismiss it, because a dialog that can only be left by
+ * completing the write traps a reader who opened it to look.
+ */
+export function Modal({
+  title,
+  description,
+  onClose,
+  children,
+}: {
+  title: string;
+  description?: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const headingID = useId();
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+  return (
+    <div
+      className="modal-scrim"
+      role="presentation"
+      data-testid="modal-scrim"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby={headingID}>
+        <header className="modal-head">
+          <div className="modal-title-row">
+            <h2 id={headingID}>{title}</h2>
+            <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
+              ✕
+            </button>
+          </div>
+          {description !== undefined && <p className="modal-lead">{description}</p>}
+        </header>
+        {children}
+      </div>
     </div>
   );
 }

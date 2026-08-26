@@ -937,7 +937,6 @@ button,
    its own minimum width and the column widens for as long as it is open. The
    120px hint sizes the closed row alone. */
 .row-actions .confirm,
-.row-actions .register-form,
 .row-actions .ingest-report,
 .row-actions .row-refusal,
 .row-actions .loading {
@@ -975,23 +974,231 @@ button,
   background: linear-gradient(to right, var(--acc) var(--remaining), var(--b2) var(--remaining));
 }
 
-.register-form,
 .secret-reveal {
   padding: 14px 16px;
   margin-bottom: 16px;
-  border: 1px solid var(--bd);
-  border-radius: 11px;
-  background: var(--surf);
-}
-
-.secret-reveal {
   border: 1px dashed var(--cbd);
+  border-radius: 11px;
   background: var(--wash);
 }
 
-.register-form fieldset {
-  border: 1px solid var(--b2);
-  border-radius: 8px;
+/* A write the reader reviews before sending is a dialog over a scrim. The
+   panel scrolls its own body so a long form never pushes the footer, which
+   carries the submit, past the bottom of the viewport. */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 16px;
+  background: var(--scrim);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: 680px;
+  max-width: 100%;
+  max-height: 100%;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  box-shadow: 0 30px 70px -28px var(--scrim);
+  overflow: hidden;
+}
+
+.modal-head {
+  flex: none;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--b2);
+}
+
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-title-row h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.modal-close {
+  margin-left: auto;
+  margin-right: 0;
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--meta);
+}
+
+.modal-lead {
+  margin: 7px 0 0;
+  max-width: 580px;
+  color: var(--sec);
+  text-wrap: pretty;
+}
+
+/* The form is the dialog's scrolling column: its body takes the space the
+   header and the footer leave and scrolls within it. A flex item defaults to
+   its content's height, so each level needs an explicit floor before the body
+   will scroll instead of pushing the footer, and the footer carries the
+   submit. */
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 22px 18px;
+  overflow-y: auto;
+}
+
+.modal-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--b2);
+  background: var(--surf2);
+}
+
+.modal-foot-note {
+  flex: 1;
+  font-size: 12.5px;
+}
+
+.modal-foot button {
+  margin-right: 0;
+}
+
+/* Two exclusive choices that fit on one row: both are read without opening
+   anything, which is what the source selector wants and a select does not
+   give. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  width: fit-content;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--chip);
+}
+
+.segment {
+  margin: 0;
+  padding: 7px 16px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--meta);
+  font: inherit;
+}
+
+.segment-on {
+  background: var(--surf);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.visibility {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  margin: 14px 0 0;
+}
+
+.visibility-lead {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.visibility-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+/* Each grant carries what it admits, because the axis name alone reads as a
+   term the reader has to already know and a mis-read grant admits the wrong
+   people. A selected card takes the accent so the selection is legible at a
+   glance rather than from the tick alone. */
+.vis-card {
+  display: flex;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+}
+
+.vis-card-on {
+  border-color: var(--acc-deep);
+  background: var(--wash);
+}
+
+.vis-card input[type='checkbox'] {
+  margin-top: 3px;
+  flex: none;
+}
+
+.vis-card-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.vis-card-name {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.vis-card-desc {
+  margin: 2px 0 0;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+.token-input {
+  margin: 9px 0 0;
+}
+
+.token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.token {
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--chip);
+  font-size: 12.5px;
+}
+
+.consequence {
+  margin: 4px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--cbd);
+  border-radius: 9px;
+  background: var(--wash);
+  font-size: 13px;
+}
+
+.note {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--surf2);
+  color: var(--sec);
+  font-size: 13px;
 }
 
 .copy-field {

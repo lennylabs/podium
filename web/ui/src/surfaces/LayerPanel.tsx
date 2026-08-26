@@ -164,7 +164,16 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
           Reingest all
         </button>
       </div>
-      {registering && <RegisterLayerForm subject={subject} onRegistered={layers.reload} readOnly={readOnly} />}
+      {registering && (
+        <RegisterLayerForm
+          subject={subject}
+          onRegistered={layers.reload}
+          onClose={() => {
+            setRegistering(false);
+          }}
+          readOnly={readOnly}
+        />
+      )}
       {showingDeleted && (
         <DeletedLayers
           onRestored={() => {
