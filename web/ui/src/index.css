@@ -937,7 +937,6 @@ button,
    its own minimum width and the column widens for as long as it is open. The
    120px hint sizes the closed row alone. */
 .row-actions .confirm,
-.row-actions .ingest-report,
 .row-actions .row-refusal,
 .row-actions .loading {
   min-width: 320px;

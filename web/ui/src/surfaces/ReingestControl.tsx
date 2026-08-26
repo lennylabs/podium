@@ -14,7 +14,7 @@
 
 import { useState } from 'react';
 
-import { Badge } from '../components/primitives';
+import { Badge, Modal } from '../components/primitives';
 import type { BreakGlass, IngestAdvisory, IngestConflict, IngestRejection, IngestSummary } from '../api';
 import { ApiError } from '../api';
 
@@ -60,8 +60,9 @@ export function reingestRefusal(err: unknown): ReingestState {
 
 /** ReingestButton is the trigger alone. The row's action bar holds a fixed
  * pair of controls, so the trigger and the states it opens are rendered
- * separately: the button sits in the bar and ReingestStatus draws underneath
- * the row's controls, where a report has the width to be read. */
+ * separately: the button sits in the bar, and ReingestStatus draws the states
+ * it opens, either under the row's controls or, for the finished report, over
+ * the page. */
 export function ReingestButton({
   state,
   readOnly,
@@ -116,38 +117,47 @@ export function ReingestStatus({
 /** IngestReport presents what the snapshot did. The counts come first because
  * they say whether anything needs acting on, and the itemised lists follow,
  * because a rejection carries a code and a reason and a conflict names the
- * version to bump. */
+ * version to bump.
+ *
+ * It resolves into a Modal because the report is a result the reader has to
+ * read: an artifact id, a rejection reason, and an advisory message are all
+ * full-width prose, and the row's actions cell is a fixed narrow column in a
+ * grid every other row shares. Rendered into that cell the report widened the
+ * table past its section, collapsed the source column, and clipped the
+ * advisory text off the right edge. */
 function IngestReport({ layerID, summary, onDone }: { layerID: string; summary: IngestSummary; onDone: () => void }) {
   const rejected = summary.rejected ?? [];
   const conflicts = summary.conflicts ?? [];
   const advisories = summary.advisories ?? [];
   return (
-    <div className="ingest-report" role="dialog" aria-label={`Reingest result for ${layerID}`}>
-      <p className="banner-title">Reingest finished</p>
-      <p className="mono quiet">{layerID}</p>
-      {summary.accepted === undefined ? (
-        // A registry with no ingest runner wired records the request and
-        // answers with the intent alone, so there is no summary to wait for.
-        <p data-testid="reingest-recorded">
-          The request was recorded. This registry runs no ingest pipeline inside the request, so there is no result to
-          read.
-        </p>
-      ) : (
-        <ul className="ingest-counts">
-          <li>{summary.accepted} accepted</li>
-          <li>{summary.idempotent ?? 0} unchanged</li>
-          <li>{rejected.length} rejected</li>
-          <li>{conflicts.length} conflicts</li>
-          <li>{summary.lint_failures ?? 0} lint failures</li>
-        </ul>
-      )}
-      {rejected.length > 0 && <RejectionList rejections={rejected} />}
-      {conflicts.length > 0 && <ConflictList conflicts={conflicts} />}
-      {advisories.length > 0 && <AdvisoryList advisories={advisories} />}
-      <button type="button" onClick={onDone}>
-        Done
-      </button>
-    </div>
+    <Modal title="Reingest finished" description={layerID} onClose={onDone}>
+      <section className="ingest-report modal-body" aria-label={`Reingest result for ${layerID}`}>
+        {summary.accepted === undefined ? (
+          // A registry with no ingest runner wired records the request and
+          // answers with the intent alone, so there is no summary to wait for.
+          <p data-testid="reingest-recorded">
+            The request was recorded. This registry runs no ingest pipeline inside the request, so there is no result to
+            read.
+          </p>
+        ) : (
+          <ul className="ingest-counts">
+            <li>{summary.accepted} accepted</li>
+            <li>{summary.idempotent ?? 0} unchanged</li>
+            <li>{rejected.length} rejected</li>
+            <li>{conflicts.length} conflicts</li>
+            <li>{summary.lint_failures ?? 0} lint failures</li>
+          </ul>
+        )}
+        {rejected.length > 0 && <RejectionList rejections={rejected} />}
+        {conflicts.length > 0 && <ConflictList conflicts={conflicts} />}
+        {advisories.length > 0 && <AdvisoryList advisories={advisories} />}
+      </section>
+      <div className="modal-foot">
+        <button type="button" onClick={onDone}>
+          Done
+        </button>
+      </div>
+    </Modal>
   );
 }
 

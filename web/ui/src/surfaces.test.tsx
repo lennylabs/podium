@@ -1991,6 +1991,49 @@ describe('the layer write flows', () => {
     expect(screen.queryByLabelText('Reingest result for alice-personal')).toBeNull();
   });
 
+  // A finished reingest is a result the reader has to read: an artifact id, a
+  // rejection reason, and an advisory message are all full-width prose. The
+  // layer row's actions cell is a fixed narrow column in a grid every row
+  // shares, so the report drawn into that cell widened the table past its
+  // section, collapsed the source column, and clipped the advisory text off
+  // the right edge. It resolves over the page instead.
+  it('resolves the finished reingest over the page rather than into the layer row', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+      '/v1/layers/reingest': {
+        body: {
+          layer: 'alice-personal',
+          accepted: 0,
+          idempotent: 1,
+          advisories: [
+            {
+              artifact_id: 'platform/infrastructure/kubernetes/clusters/production-cluster-runbook',
+              code: 'lint.thin_description',
+              severity: 'warning',
+              message: 'description is thin (6 chars, 2 words)',
+            },
+          ],
+        },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Reingest' }));
+    const report = await screen.findByLabelText('Reingest result for alice-personal');
+    const dialog = screen.getByRole('dialog', { name: /Reingest finished/ });
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
+    expect(screen.getByTestId('modal-scrim')).toBeTruthy();
+    // The report is carried by the dialog rather than by the row's actions
+    // cell, which is what keeps the table's columns at their own widths.
+    expect(report.closest('.modal')).toBe(dialog);
+    expect(within(dialog).getByText(/production-cluster-runbook/)).toBeTruthy();
+    // A dialog opened to be read can be left without acting on it.
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(screen.queryByLabelText('Reingest result for alice-personal')).toBeNull();
+  });
+
   // A registry with no ingest runner wired records the intent and answers
   // with no summary, so the control says the request was recorded rather than
   // presenting a summary of zeroes.
