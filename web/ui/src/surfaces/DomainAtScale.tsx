@@ -5,12 +5,17 @@
 // load_domain response either way: this module changes only how much of it a
 // screen can hold at once.
 
-import { useState } from 'react';
+import { useState } from "react";
 
-import type { ArtifactDescriptor, DomainDescriptor } from '../api';
-import { TypeBadge, formatVersion } from '../components/primitives';
-import { artifactCountLabel, artifactCounts, domainLabel, subdomainCountLabel } from '../domain';
-import { artifactHref, domainHref } from '../route';
+import type { ArtifactDescriptor, DomainDescriptor } from "../api";
+import { TypeBadge, formatVersion } from "../components/primitives";
+import {
+  artifactCountLabel,
+  artifactCounts,
+  domainLabel,
+  subdomainCountLabel,
+} from "../domain";
+import { artifactHref, domainHref } from "../route";
 
 /** tileCap is how many tiles the grid shows before the reader asks for the
  * rest, which keeps a domain with dozens of children to one screen. */
@@ -21,8 +26,8 @@ const tileCap = 12;
  * sentence-case prose the way every other segmented control in the build reads
  * (§13.10). */
 const subdomainViews = [
-  { view: 'grid', label: 'Grid' },
-  { view: 'list', label: 'List' },
+  { view: "grid", label: "Grid" },
+  { view: "list", label: "List" },
 ] as const;
 
 /** SubdomainTiles is the compact treatment: the section label carrying the
@@ -49,8 +54,8 @@ export function SubdomainTiles({
   parent: string;
   catalog: string[] | null;
 }) {
-  const [filter, setFilter] = useState('');
-  const [view, setView] = useState<'grid' | 'list'>('grid');
+  const [filter, setFilter] = useState("");
+  const [view, setView] = useState<"grid" | "list">("grid");
   const [all, setAll] = useState(false);
 
   const counts =
@@ -66,15 +71,19 @@ export function SubdomainTiles({
   const ordered =
     counts === null
       ? subdomains
-      : [...subdomains].sort((a, b) => (counts.get(b.path) ?? 0) - (counts.get(a.path) ?? 0));
+      : [...subdomains].sort(
+          (a, b) => (counts.get(b.path) ?? 0) - (counts.get(a.path) ?? 0),
+        );
 
   const needle = filter.trim().toLowerCase();
   // The filter runs over the label the tile carries, so a reader who types
   // what is on screen matches the tile they can see.
   const matched =
-    needle === ''
+    needle === ""
       ? ordered
-      : ordered.filter((child) => domainLabel(child.path, parent).toLowerCase().includes(needle));
+      : ordered.filter((child) =>
+          domainLabel(child.path, parent).toLowerCase().includes(needle),
+        );
   const shown = all ? matched : matched.slice(0, tileCap);
 
   return (
@@ -97,7 +106,9 @@ export function SubdomainTiles({
             <button
               key={choice.view}
               type="button"
-              className={view === choice.view ? 'segment segment-on' : 'segment'}
+              className={
+                view === choice.view ? "segment segment-on" : "segment"
+              }
               aria-pressed={view === choice.view}
               onClick={() => {
                 setView(choice.view);
@@ -108,18 +119,43 @@ export function SubdomainTiles({
           ))}
         </div>
       </div>
-      <ul className={view === 'grid' ? 'tile-grid' : 'tile-list'} aria-label="Subdomains">
+      <ul
+        className={view === "grid" ? "tile-grid" : "tile-list"}
+        aria-label="Subdomains"
+      >
         {shown.map((child) => {
           const count =
             counts === null
               ? subdomainCountLabel((child.subdomains ?? []).length)
               : artifactCountLabel(counts.get(child.path) ?? 0);
           return (
-            <li key={child.path} className="tile">
+            <li
+              key={child.path}
+              className={view === "grid" ? "tile" : "tile tile-row"}
+            >
               <a className="tile-name mono" href={domainHref(child.path)}>
                 {domainLabel(child.path, parent)}
               </a>
-              {count !== null && <span className="mono quiet tile-count">{count}</span>}
+              {/* The row has the width for what the tile has no room to
+                  carry, so the list arm states the child's description on the
+                  same line. The grid arm leaves it out: a six-column tile
+                  clips it to a few characters. */}
+              {view === "list" && (
+                <span
+                  className={`quiet clipped tile-description${
+                    child.description === undefined || child.description === ""
+                      ? " absent-description"
+                      : ""
+                  }`}
+                >
+                  {child.description === undefined || child.description === ""
+                    ? "No description."
+                    : child.description}
+                </span>
+              )}
+              {count !== null && (
+                <span className="mono quiet tile-count">{count}</span>
+              )}
             </li>
           );
         })}
@@ -136,7 +172,9 @@ export function SubdomainTiles({
             Show all {matched.length} subdomains
           </button>
         )}
-        {counts !== null && <span className="quiet tile-order">Sorted by artifact count.</span>}
+        {counts !== null && (
+          <span className="quiet tile-order">Sorted by artifact count.</span>
+        )}
       </div>
     </div>
   );
@@ -145,12 +183,12 @@ export function SubdomainTiles({
 /** ArtifactColumn is what the table sorts on. Every value is present on every
  * descriptor or rendered as absent, so a sort never reorders on a field half
  * the rows lack. */
-type ArtifactColumn = 'id' | 'type' | 'version';
+type ArtifactColumn = "id" | "type" | "version";
 
 const sortOptions: { key: ArtifactColumn; label: string }[] = [
-  { key: 'id', label: 'artifact' },
-  { key: 'type', label: 'type' },
-  { key: 'version', label: 'version' },
+  { key: "id", label: "artifact" },
+  { key: "type", label: "type" },
+  { key: "version", label: "version" },
 ];
 
 /** ArtifactTable is the at-scale artifact treatment: a filter over the domain's
@@ -162,10 +200,14 @@ const sortOptions: { key: ArtifactColumn; label: string }[] = [
  * The author's picks stand above the rest under every ordering. The sort
  * control chooses what orders the rows inside each block, so it names the
  * column it sorts on rather than the arrangement of the blocks. */
-export function ArtifactTable({ artifacts }: { artifacts: ArtifactDescriptor[] }) {
-  const [type, setType] = useState('');
-  const [filter, setFilter] = useState('');
-  const [column, setColumn] = useState<ArtifactColumn>('id');
+export function ArtifactTable({
+  artifacts,
+}: {
+  artifacts: ArtifactDescriptor[];
+}) {
+  const [type, setType] = useState("");
+  const [filter, setFilter] = useState("");
+  const [column, setColumn] = useState<ArtifactColumn>("id");
 
   const types = [...new Set(artifacts.map((artifact) => artifact.type))].sort();
   const needle = filter.trim().toLowerCase();
@@ -173,14 +215,15 @@ export function ArtifactTable({ artifacts }: { artifacts: ArtifactDescriptor[] }
   // reason the subdomain filter runs over the tile's own label.
   const matched = artifacts.filter(
     (artifact) =>
-      (type === '' || artifact.type === type) && (needle === '' || artifact.id.toLowerCase().includes(needle)),
+      (type === "" || artifact.type === type) &&
+      (needle === "" || artifact.id.toLowerCase().includes(needle)),
   );
   const curated = sorted(
-    matched.filter((artifact) => artifact.source === 'featured'),
+    matched.filter((artifact) => artifact.source === "featured"),
     column,
   );
   const rest = sorted(
-    matched.filter((artifact) => artifact.source !== 'featured'),
+    matched.filter((artifact) => artifact.source !== "featured"),
     column,
   );
 
@@ -204,10 +247,10 @@ export function ArtifactTable({ artifacts }: { artifacts: ArtifactDescriptor[] }
         <div className="chip-row" role="group" aria-label="Type">
           <button
             type="button"
-            className={type === '' ? 'pill pill-active' : 'pill'}
-            aria-pressed={type === ''}
+            className={type === "" ? "pill pill-active" : "pill"}
+            aria-pressed={type === ""}
             onClick={() => {
-              setType('');
+              setType("");
             }}
           >
             All
@@ -216,7 +259,7 @@ export function ArtifactTable({ artifacts }: { artifacts: ArtifactDescriptor[] }
             <button
               key={name}
               type="button"
-              className={type === name ? 'pill pill-active' : 'pill'}
+              className={type === name ? "pill pill-active" : "pill"}
               aria-pressed={type === name}
               onClick={() => {
                 setType(name);
@@ -291,8 +334,8 @@ function ArtifactRows({ rows }: { rows: ArtifactDescriptor[] }) {
               <TypeBadge type={artifact.type} />
             </td>
             <td className="mono quiet">
-              {artifact.version === undefined || artifact.version === ''
-                ? 'unversioned'
+              {artifact.version === undefined || artifact.version === ""
+                ? "unversioned"
                 : formatVersion(artifact.version)}
             </td>
             <td>
@@ -310,8 +353,10 @@ function ArtifactRows({ rows }: { rows: ArtifactDescriptor[] }) {
                 under the columns beside it and dropped the row's tag chips
                 below their neighbours' baseline. */}
             <td className="quiet">
-              <span className={`clipped${artifact.description === undefined ? ' absent-description' : ''}`}>
-                {artifact.description ?? 'No description.'}
+              <span
+                className={`clipped${artifact.description === undefined ? " absent-description" : ""}`}
+              >
+                {artifact.description ?? "No description."}
               </span>
             </td>
           </tr>
@@ -324,17 +369,22 @@ function ArtifactRows({ rows }: { rows: ArtifactDescriptor[] }) {
 /** sorted orders a row set by the chosen column. A descriptor omits a version
  * where it carries none, and an absent value sorts as the empty string rather
  * than dropping the row. */
-function sorted(rows: ArtifactDescriptor[], column: ArtifactColumn): ArtifactDescriptor[] {
-  return [...rows].sort((a, b) => valueOf(a, column).localeCompare(valueOf(b, column)));
+function sorted(
+  rows: ArtifactDescriptor[],
+  column: ArtifactColumn,
+): ArtifactDescriptor[] {
+  return [...rows].sort((a, b) =>
+    valueOf(a, column).localeCompare(valueOf(b, column)),
+  );
 }
 
 function valueOf(artifact: ArtifactDescriptor, column: ArtifactColumn): string {
   switch (column) {
-    case 'type':
+    case "type":
       return artifact.type;
-    case 'version':
-      return artifact.version ?? '';
-    case 'id':
+    case "version":
+      return artifact.version ?? "";
+    case "id":
       return artifact.id;
   }
 }

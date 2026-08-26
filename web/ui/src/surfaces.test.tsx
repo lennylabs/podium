@@ -116,7 +116,10 @@ function stubRegistry(stubs: Record<string, Stub>): void {
  * for a republished catalog is the same listing at the same length. */
 function catalogOf(count: number): { ids: string[] } {
   return {
-    ids: Array.from({ length: count }, (_, i) => `platform/svc${String(i + 1)}`),
+    ids: Array.from(
+      { length: count },
+      (_, i) => `platform/svc${String(i + 1)}`,
+    ),
   };
 }
 
@@ -305,7 +308,9 @@ describe("the application shell", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": { body: catalog },
-      "/v1/catalog": { body: { ids: ["eng/deploy", "finance/ap/pay-invoice"] } },
+      "/v1/catalog": {
+        body: { ids: ["eng/deploy", "finance/ap/pay-invoice"] },
+      },
       // Every version of eng/deploy is its own search row.
       "/v1/search_artifacts": { body: { total_matched: 6 } },
       "/v1/layers": { body: { layers: [adminLayer()] } },
@@ -1040,7 +1045,9 @@ describe("the application shell", () => {
       "/v1/catalog": { body: catalogOf(312) },
       "/v1/layers": {
         body: {
-          layers: [{ ...adminLayer(), last_ingested_at: new Date().toISOString() }],
+          layers: [
+            { ...adminLayer(), last_ingested_at: new Date().toISOString() },
+          ],
         },
       },
     });
@@ -1527,8 +1534,18 @@ describe("the domain browser", () => {
           path: "platform",
           subdomains: [],
           notable: [
-            { id: "platform/deploy", type: "skill", version: "2.0.0", source: "signal" },
-            { id: "platform/build", type: "skill", version: "1.0.0", source: "featured" },
+            {
+              id: "platform/deploy",
+              type: "skill",
+              version: "2.0.0",
+              source: "signal",
+            },
+            {
+              id: "platform/build",
+              type: "skill",
+              version: "1.0.0",
+              source: "featured",
+            },
           ],
         },
       },
@@ -1553,7 +1570,11 @@ describe("the domain browser", () => {
           path: "platform",
           subdomains: [],
           notable: [
-            { id: "platform/deploy", type: "context", description: "Deploy runbook." },
+            {
+              id: "platform/deploy",
+              type: "context",
+              description: "Deploy runbook.",
+            },
             { id: "platform/nodesc", type: "context" },
           ],
         },
@@ -1702,7 +1723,11 @@ describe("the domain browser", () => {
         body: {
           path: "",
           subdomains: [
-            { path: "finance/ap", name: "ap", description: "Accounts payable." },
+            {
+              path: "finance/ap",
+              name: "ap",
+              description: "Accounts payable.",
+            },
             { path: "vendor/ap", name: "ap", description: "Vendor payments." },
           ],
           notable: [],
@@ -1844,7 +1869,9 @@ describe("the domain browser", () => {
         "This is the top of the domain hierarchy, and every domain the registry holds sits below it.",
       ),
     ).toBeTruthy();
-    expect(screen.queryByText("This domain carries no description.")).toBeNull();
+    expect(
+      screen.queryByText("This domain carries no description."),
+    ).toBeNull();
   });
 
   // Every visible artifact sits under the root, so the entry screen's own
@@ -1867,8 +1894,9 @@ describe("the domain browser", () => {
     });
     render(<App />);
     const browser = await screen.findByLabelText("Domain browser");
-    const head = within(browser).getByRole("heading", { level: 1 })
-      .parentElement;
+    const head = within(browser).getByRole("heading", {
+      level: 1,
+    }).parentElement;
     expect(head?.textContent).toBe("All domains312 ARTIFACTS2 DOMAINS");
     // The catalog count heads the page without continuing the listing: those
     // artifacts sit under the subdomains rather than past a trimmed edge.
@@ -1915,7 +1943,9 @@ describe("the domain browser", () => {
     });
     render(<App />);
     const browser = await screen.findByLabelText("Domain browser");
-    const head = within(browser).getByRole("heading", { level: 1 }).parentElement;
+    const head = within(browser).getByRole("heading", {
+      level: 1,
+    }).parentElement;
     expect(head?.textContent).toBe("All domains1 DOMAIN");
   });
 
@@ -1957,9 +1987,9 @@ describe("search", () => {
     goTo("#/layers");
     render(<App />);
     const panel = await screen.findByLabelText("Layer panel");
-    expect(
-      within(panel).getByRole("heading", { level: 1 }).textContent,
-    ).toBe("Layers");
+    expect(within(panel).getByRole("heading", { level: 1 }).textContent).toBe(
+      "Layers",
+    );
   });
 
   it("carries the type, scope, and tag filters on the request it issues", async () => {
@@ -2225,9 +2255,9 @@ describe("search", () => {
     // printed the whole identifier alone would give the name no weight.
     const first = screen.getByRole("link", { name: "review" });
     const head = first.parentElement as HTMLElement;
-    expect(
-      within(head).getByText("platform/review").className,
-    ).toBe("mono quiet artifact-path");
+    expect(within(head).getByText("platform/review").className).toBe(
+      "mono quiet artifact-path",
+    );
     expect(
       within(first.parentElement as HTMLElement).getByText("SKILL"),
     ).toBeTruthy();
@@ -2251,9 +2281,9 @@ describe("search", () => {
       const column = indicator.parentElement as HTMLElement;
       expect(column.className).toBe("artifact-row-relevance");
       expect(column.previousElementSibling).toBeNull();
-      expect(
-        (column.nextElementSibling as HTMLElement).className,
-      ).toBe("artifact-row-body");
+      expect((column.nextElementSibling as HTMLElement).className).toBe(
+        "artifact-row-body",
+      );
       expect(indicator.closest(".artifact-row-head")).toBeNull();
     }
     expect(screen.queryByText(/score 8/)).toBeNull();
@@ -2299,7 +2329,9 @@ describe("search", () => {
     expect((await screen.findByTestId("result-count")).textContent).toBe(
       "Showing 30 of 143",
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Load 20 more" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Load 20 more" }),
+    );
     await waitFor(() => {
       expect(lastSearch().get("top_k")).toBe("50");
     });
@@ -2341,7 +2373,10 @@ describe("search", () => {
         },
       },
       "/v1/search_artifacts?query=review&type=skill&top_k=10": {
-        body: { total_matched: 4, results: [{ id: "platform/svc1", type: "skill" }] },
+        body: {
+          total_matched: 4,
+          results: [{ id: "platform/svc1", type: "skill" }],
+        },
       },
     });
     goTo("#/search/review");
@@ -2378,7 +2413,11 @@ describe("search", () => {
         body: {
           total_matched: 2,
           results: [
-            { id: "eng/deploy", type: "context", description: "Deploy runbook" },
+            {
+              id: "eng/deploy",
+              type: "context",
+              description: "Deploy runbook",
+            },
             { id: "finance/ap/pay-invoice", type: "skill" },
           ],
         },
@@ -2596,7 +2635,9 @@ describe("the artifact viewer", () => {
     expect(trail.textContent).toBe(
       "catalog/finance/accounts-payable/pay-invoice",
     );
-    expect(within(trail).queryByRole("link", { name: "pay-invoice" })).toBeNull();
+    expect(
+      within(trail).queryByRole("link", { name: "pay-invoice" }),
+    ).toBeNull();
     expect(within(content).getByText("Pay a supplier invoice.")).toBeTruthy();
     // The response carries no classification, so the badge is absent rather
     // than standing empty.
@@ -2719,8 +2760,9 @@ describe("the artifact viewer", () => {
     const groups = relations.querySelectorAll(".rail-group");
     // The outbound group leads, then one group per inbound relation, each
     // labelled in the passive direction.
-    expect([...groups].map((group) => group.querySelector("p")?.textContent))
-      .toEqual(["extends", "extended by", "delegated to by"]);
+    expect(
+      [...groups].map((group) => group.querySelector("p")?.textContent),
+    ).toEqual(["extends", "extended by", "delegated to by"]);
     expect(groups[1].querySelector("li")?.textContent).toBe(
       "finance/ap/reconcile-ledger",
     );
@@ -2818,9 +2860,7 @@ describe("the artifact viewer", () => {
       ),
     ).toEqual(["relation-dot outbound", "relation-dot inbound"]);
     // The dot stands before the id rather than after it.
-    expect(chips[0].firstElementChild?.className).toBe(
-      "relation-dot outbound",
-    );
+    expect(chips[0].firstElementChild?.className).toBe("relation-dot outbound");
   });
 
   // The rail is a fixed-width column, and provenance is a set of labelled
@@ -3387,9 +3427,9 @@ describe("the artifact viewer", () => {
     );
     // The next artifact is read at its latest version rather than at the
     // version the previous one was pinned to.
-    expect(
-      requests.some((r) => r.url.includes("id=eng%2Fxss&version=")),
-    ).toBe(false);
+    expect(requests.some((r) => r.url.includes("id=eng%2Fxss&version="))).toBe(
+      false,
+    );
   });
 
   // The registry prefixes several §6.10 messages with the code they carry, and
@@ -3428,9 +3468,8 @@ describe("the artifact viewer", () => {
     });
     pinVersion("9.9.9");
     const refusal = await screen.findByTestId("version-refused");
-    const occurrences = (refusal.textContent ?? "").split(
-      "registry.not_found",
-    ).length - 1;
+    const occurrences =
+      (refusal.textContent ?? "").split("registry.not_found").length - 1;
     expect(occurrences).toBe(1);
     // The rest of the envelope's prose survives the strip.
     expect(refusal.textContent).toContain(
@@ -3711,11 +3750,19 @@ describe("the artifact viewer", () => {
     const group = screen.getByRole("group", { name: "Frontmatter view" });
     expect(group.className.split(" ")).toContain("segmented");
     const view = within(group);
-    expect(view.getByRole("button", { name: "Table" }).className).toBe("segment segment-on");
-    expect(view.getByRole("button", { name: "Raw YAML" }).className).toBe("segment");
+    expect(view.getByRole("button", { name: "Table" }).className).toBe(
+      "segment segment-on",
+    );
+    expect(view.getByRole("button", { name: "Raw YAML" }).className).toBe(
+      "segment",
+    );
     fireEvent.click(view.getByRole("button", { name: "Raw YAML" }));
-    expect(view.getByRole("button", { name: "Raw YAML" }).className).toBe("segment segment-on");
-    expect(view.getByRole("button", { name: "Table" }).className).toBe("segment");
+    expect(view.getByRole("button", { name: "Raw YAML" }).className).toBe(
+      "segment segment-on",
+    );
+    expect(view.getByRole("button", { name: "Table" }).className).toBe(
+      "segment",
+    );
   });
 
   it("reports a frontmatter block that does not parse without affecting the rest of the viewer", async () => {
@@ -3872,9 +3919,7 @@ describe("the artifact viewer", () => {
       goTo("#/artifact/edge%2Fmany-tags");
       render(<App />);
       fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
-      expect(
-        screen.getByRole("button", { name: "Show less" }),
-      ).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
 
       stubs["/v1/load_artifact"] = viewed("edge/no-body", "No body at all.");
       goTo("#/artifact/edge%2Fno-body");
@@ -3891,9 +3936,9 @@ describe("the artifact viewer", () => {
       expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
       // The rail states the same field in its property table, whole and
       // with no control of its own.
-      expect(
-        screen.getByTestId("property-value-description").textContent,
-      ).toBe("No body at all.");
+      expect(screen.getByTestId("property-value-description").textContent).toBe(
+        "No body at all.",
+      );
       expect(
         screen.getByTestId("rail-frontmatter-table").querySelector("button"),
       ).toBeNull();
@@ -3962,9 +4007,7 @@ describe("the artifact viewer", () => {
       ).toBeNull();
       // No cell of the table carries a control of any name.
       expect(
-        screen
-          .getByTestId("rail-frontmatter-table")
-          .querySelector("button"),
+        screen.getByTestId("rail-frontmatter-table").querySelector("button"),
       ).toBeNull();
     });
 
@@ -4116,7 +4159,9 @@ describe("the layer panel", () => {
       document.querySelectorAll("table.layer-table thead th"),
     );
     expect(
-      headers.map((header) => header.querySelector(".label")?.textContent ?? ""),
+      headers.map(
+        (header) => header.querySelector(".label")?.textContent ?? "",
+      ),
     ).toEqual(["Move", "Layer", "Source", "Visibility", "Last ingest", ""]);
     expect(headers[5].textContent).toBe("");
   });
@@ -4511,7 +4556,9 @@ describe("the layer panel", () => {
     ]);
     const local = within(layerRow("alice-personal"));
     expect(local.getByText("local")).toBeTruthy();
-    expect(details(layerRow("alice-personal"))).toEqual(["/Users/alice/registry"]);
+    expect(details(layerRow("alice-personal"))).toEqual([
+      "/Users/alice/registry",
+    ]);
   });
 
   // A local path or a repository URL can be far longer than the source
@@ -4557,7 +4604,8 @@ describe("the layer panel", () => {
   // as the same string and the source column stopped telling the rows apart.
   // The segment that identifies the row is held out of the clip.
   it("holds each source path's last segment out of the clip", async () => {
-    const parent = "/var/folders/q_/df6ygvl10fj4g162_ld1tkvw0000gn/T/registries";
+    const parent =
+      "/var/folders/q_/df6ygvl10fj4g162_ld1tkvw0000gn/T/registries";
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/layers": {
@@ -4615,7 +4663,9 @@ describe("the layer panel", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     const row = layerRow("wide");
-    expect(row.querySelector(".source-detail-tail")?.textContent).toBe(longSegment);
+    expect(row.querySelector(".source-detail-tail")?.textContent).toBe(
+      longSegment,
+    );
     const line = window.getComputedStyle(
       row.querySelector(".source-detail") as Element,
     );
@@ -5197,7 +5247,11 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/load_domain": {
-        body: { path: "", subdomains: [{ path: "eng", name: "eng" }], notable: [] },
+        body: {
+          path: "",
+          subdomains: [{ path: "eng", name: "eng" }],
+          notable: [],
+        },
       },
       "/v1/catalog": { body: catalogOf(9) },
       "/v1/layers": { body: { layers: [userLayer()] } },
@@ -5598,9 +5652,7 @@ describe("the layer write flows", () => {
     // An axis selected with no member named registers a grant admitting
     // nobody, so the write is held until each selected axis carries one.
     expect(
-      screen
-        .getByRole("button", { name: "Register" })
-        .hasAttribute("disabled"),
+      screen.getByRole("button", { name: "Register" }).hasAttribute("disabled"),
     ).toBe(true);
     fireEvent.change(
       screen.getByLabelText("Group names, separated by commas"),
@@ -5848,8 +5900,7 @@ describe("the layer write flows", () => {
       "Visibility is fixed at registration.",
     );
     expect(
-      within(dialog).getByRole("button", { name: "Register" })
-        .className,
+      within(dialog).getByRole("button", { name: "Register" }).className,
     ).toContain("primary");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
     expect(
@@ -5963,7 +6014,9 @@ describe("the layer write flows", () => {
     );
     // Picking a row enters that name rather than leaving the reader to
     // finish typing it, which is what makes the list a check on the spelling.
-    fireEvent.click(within(picker).getByRole("button", { name: "platform-eng" }));
+    fireEvent.click(
+      within(picker).getByRole("button", { name: "platform-eng" }),
+    );
     expect((field as HTMLInputElement).value).toBe("platform-eng, ");
     expect(screen.getByTestId("group-picker-count").textContent).toBe(
       "3 of 4 match",
@@ -5984,8 +6037,12 @@ describe("the layer write flows", () => {
       screen.getByRole("button", { name: "Remove platform-eng" }),
     );
     expect((field as HTMLInputElement).value).toBe("platfrom");
-    expect(screen.queryByRole("button", { name: "Remove platform-eng" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Remove platfrom" })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Remove platform-eng" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Remove platfrom" }),
+    ).toBeTruthy();
   });
 
   // The registration reloads the list, and the reload answers over the
@@ -6049,9 +6106,17 @@ describe("the layer write flows", () => {
   // carried by a live region that is on the page before the copy lands.
   it("announces the one-time secret copy through a live region", async () => {
     const written: string[] = [];
-    const clipboard = { writeText: (text: string) => { written.push(text); return Promise.resolve(); } };
+    const clipboard = {
+      writeText: (text: string) => {
+        written.push(text);
+        return Promise.resolve();
+      },
+    };
     const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
-    Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+    Object.defineProperty(navigator, "clipboard", {
+      value: clipboard,
+      configurable: true,
+    });
     try {
       stubRegistry({
         "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
@@ -6101,7 +6166,9 @@ describe("the layer write flows", () => {
       expect(written).toEqual(["whsec-abc"]);
       // The visible confirmation is not read a second time beside the region.
       expect(
-        within(secretRow as HTMLElement).getByText("Copied").getAttribute("aria-hidden"),
+        within(secretRow as HTMLElement)
+          .getByText("Copied")
+          .getAttribute("aria-hidden"),
       ).toBe("true");
     } finally {
       if (original) {
@@ -6284,9 +6351,9 @@ describe("the layer write flows", () => {
       requests.filter((r) => r.url === "/v1/layers" && r.method === "POST")
         .length,
     ).toBe(1);
-    expect(
-      requests.some((r) => r.url.startsWith("/v1/layers/reingest")),
-    ).toBe(false);
+    expect(requests.some((r) => r.url.startsWith("/v1/layers/reingest"))).toBe(
+      false,
+    );
     expect(screen.getByTestId("register-ingest-note").textContent).toContain(
       "Reingest",
     );
@@ -6606,9 +6673,12 @@ describe("the layer write flows", () => {
     const region = screen.getByTestId("panel-announcement");
     expect(region.getAttribute("aria-live")).toBe("polite");
     expect(region.textContent).toBe("");
-    fireEvent.keyDown(screen.getByLabelText(moveHandleLabel("alice-personal")), {
-      key: "ArrowDown",
-    });
+    fireEvent.keyDown(
+      screen.getByLabelText(moveHandleLabel("alice-personal")),
+      {
+        key: "ArrowDown",
+      },
+    );
     await waitFor(() => {
       expect(screen.getByTestId("panel-announcement").textContent).toBe(
         "alice-personal moved to order 3 of 4.",
@@ -6629,9 +6699,12 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.keyDown(screen.getByLabelText(moveHandleLabel("alice-personal")), {
-      key: "ArrowUp",
-    });
+    fireEvent.keyDown(
+      screen.getByLabelText(moveHandleLabel("alice-personal")),
+      {
+        key: "ArrowUp",
+      },
+    );
     await waitFor(() => {
       expect(screen.getByLabelText("Layer panel")).toBeTruthy();
     });
@@ -6645,7 +6718,9 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
-      "/v1/layers/reingest?id=company": { body: { accepted: 3, idempotent: 1 } },
+      "/v1/layers/reingest?id=company": {
+        body: { accepted: 3, idempotent: 1 },
+      },
       "/v1/layers/reingest?id=alice-personal": {
         body: { accepted: 2, idempotent: 6 },
       },
@@ -6688,7 +6763,9 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
-      "/v1/layers/reingest?id=company": { body: { accepted: 3, idempotent: 1 } },
+      "/v1/layers/reingest?id=company": {
+        body: { accepted: 3, idempotent: 1 },
+      },
       "/v1/layers/reingest?id=alice-personal": {
         status: 422,
         body: {
@@ -6762,8 +6839,12 @@ describe("the layer write flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
     await screen.findByLabelText("Reingest result for alice-personal");
     const counts = screen.getByLabelText("Ingest counts");
-    expect(within(counts).getByText("accepted").previousSibling?.textContent).toBe("4");
-    expect(within(counts).getByText("unchanged").previousSibling?.textContent).toBe("2");
+    expect(
+      within(counts).getByText("accepted").previousSibling?.textContent,
+    ).toBe("4");
+    expect(
+      within(counts).getByText("unchanged").previousSibling?.textContent,
+    ).toBe("2");
     // lint_failures arrives as a bare number, so the card says the count is
     // all the response carried and opens nothing.
     expect(within(counts).getByText("count only")).toBeTruthy();
@@ -6779,7 +6860,9 @@ describe("the layer write flows", () => {
     // Only the counts the response itemises are controls: rejected and
     // conflicts open, accepted, unchanged, and lint failures do not.
     expect(within(counts).getAllByRole("button").length).toBe(2);
-    fireEvent.click(screen.getByRole("button", { name: "1 artifact rejected" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "1 artifact rejected" }),
+    );
     expect(screen.getByLabelText("Rejected artifacts")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Back to the counts" }));
     fireEvent.click(
@@ -7434,7 +7517,9 @@ describe("the layer write flows", () => {
       within(surface).getByRole("table").querySelectorAll("thead th"),
     );
     expect(
-      headers.map((header) => header.querySelector(".label")?.textContent ?? ""),
+      headers.map(
+        (header) => header.querySelector(".label")?.textContent ?? "",
+      ),
     ).toEqual(["Layer", "Source", "Unregistered", "Erased on", "Actions"]);
   });
 
@@ -7481,8 +7566,9 @@ function layerRow(id: string): HTMLElement {
 /** details is the source cell's location lines on one row, each read whole
  * across the run the cell may clip and the run it always draws. */
 function details(row: HTMLElement): string[] {
-  return Array.from(row.querySelectorAll(".source-detail"), (line) =>
-    (line.textContent ?? ""),
+  return Array.from(
+    row.querySelectorAll(".source-detail"),
+    (line) => line.textContent ?? "",
   );
 }
 
@@ -7869,9 +7955,8 @@ describe("the command palette", () => {
     // Picking one fills the field with it, which is the point of listing it.
     fireEvent.click(recent);
     expect(
-      (
-        within(panel).getByLabelText("Search artifacts") as HTMLInputElement
-      ).value,
+      (within(panel).getByLabelText("Search artifacts") as HTMLInputElement)
+        .value,
     ).toBe("review");
   });
 
@@ -7962,13 +8047,13 @@ describe("the shell’s identity cluster", () => {
     // preference is the segment raised onto the surface colour.
     const appearance = within(menu).getByRole("group", { name: "Appearance" });
     expect(appearance.className.split(" ")).toContain("segmented");
-    expect(within(appearance).getByRole("button", { name: "system" }).className).toBe(
-      "segment segment-on",
-    );
+    expect(
+      within(appearance).getByRole("button", { name: "system" }).className,
+    ).toBe("segment segment-on");
     fireEvent.click(within(menu).getByRole("button", { name: "dark" }));
-    expect(within(appearance).getByRole("button", { name: "dark" }).className).toBe(
-      "segment segment-on",
-    );
+    expect(
+      within(appearance).getByRole("button", { name: "dark" }).className,
+    ).toBe("segment segment-on");
     expect(window.document.documentElement.getAttribute("data-theme")).toBe(
       "dark",
     );
@@ -8068,7 +8153,10 @@ describe("the trimmed listing", () => {
 
   /** heldBy is the catalog a domain holding `count` artifacts answers with. */
   function heldBy(path: string, count: number): string[] {
-    return Array.from({ length: count }, (_, i) => `${path}/svc${String(i + 1)}`);
+    return Array.from(
+      { length: count },
+      (_, i) => `${path}/svc${String(i + 1)}`,
+    );
   }
 
   // The §4.5.5 notable_count cap trims the listing without a rendering note,
@@ -8094,7 +8182,9 @@ describe("the trimmed listing", () => {
     const line = await screen.findByTestId("listing-continuation");
     expect(line.textContent).toContain("10 of 24 artifacts shown.");
     expect(
-      within(line).getByRole("link", { name: "Load the rest" }).getAttribute("href"),
+      within(line)
+        .getByRole("link", { name: "Load the rest" })
+        .getAttribute("href"),
     ).toBe(searchHref("scope:platform"));
   });
 
@@ -8117,9 +8207,7 @@ describe("the trimmed listing", () => {
     await screen.findByLabelText("Domain browser");
     expect(await screen.findByText("3 ARTIFACTS")).toBeTruthy();
     await waitFor(() => {
-      expect(
-        requests.some((r) => r.url.startsWith("/v1/catalog")),
-      ).toBe(true);
+      expect(requests.some((r) => r.url.startsWith("/v1/catalog"))).toBe(true);
     });
     expect(screen.queryByText("listing trimmed")).toBeNull();
     expect(screen.queryByTestId("listing-continuation")).toBeNull();
@@ -8275,10 +8363,12 @@ describe("the trimmed listing", () => {
         .getAllByRole("button")
         .map((segment) => segment.textContent),
     ).toEqual(["Grid", "List"]);
-    expect(within(viewSwitch).getByRole("button", { name: "Grid" }).className).toBe(
-      "segment segment-on",
-    );
-    expect(within(viewSwitch).getByRole("button", { name: "List" }).className).toBe("segment");
+    expect(
+      within(viewSwitch).getByRole("button", { name: "Grid" }).className,
+    ).toBe("segment segment-on");
+    expect(
+      within(viewSwitch).getByRole("button", { name: "List" }).className,
+    ).toBe("segment");
     expect((subhead as HTMLElement).textContent).toContain("24");
     // The grid itself is not in that row.
     expect(subrow.queryByLabelText("Subdomains")).toBeNull();
@@ -8294,8 +8384,9 @@ describe("the trimmed listing", () => {
     // The artifact label carries the same row: a filter over the domain's own
     // listing, an All chip standing for the unfiltered set, one chip per
     // returned type, and the sort control.
-    const arthead = within(browser).getByRole("heading", { name: "Artifacts" })
-      .parentElement;
+    const arthead = within(browser).getByRole("heading", {
+      name: "Artifacts",
+    }).parentElement;
     const artrow = within(arthead as HTMLElement);
     expect(artrow.getByLabelText("Filter in this domain")).toBeTruthy();
     expect(artrow.getByLabelText("Sort artifacts")).toBeTruthy();
@@ -8328,8 +8419,9 @@ describe("the trimmed listing", () => {
 
     // The picks stand in their own block under a header carrying their count,
     // and the rest of the listing carries no heading of its own.
-    const curated = within(browser).getByText("Curated by the domain author")
-      .parentElement;
+    const curated = within(browser).getByText(
+      "Curated by the domain author",
+    ).parentElement;
     expect((curated as HTMLElement).textContent).toContain("1");
     expect(within(browser).queryByText("Everything else")).toBeNull();
 
@@ -8354,6 +8446,75 @@ describe("the trimmed listing", () => {
     const badge = within(cells[1]).getByText("RULE");
     expect(badge.className.split(" ")).toContain("badge");
     expect(cells[2].textContent).toBe("v1.0.0");
+  });
+
+  // The list arm is a denser row rather than the grid tile stretched across the
+  // container. A full-width tile carrying only a name and a count leaves most
+  // of every row empty and costs a card of height per child, so the row states
+  // the name, the description and the count on one line.
+  it("renders the at-scale list arm as a row carrying the description", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+            // One child carries a description and the rest carry none, which
+            // is the pair the row's absent-description treatment splits.
+            description:
+              i === 0 ? "Everything the build pipeline runs." : undefined,
+            subdomains: [],
+          })),
+          notable: [],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+
+    // The grid arm carries the name and the count alone: a six-column tile has
+    // no room for a description.
+    const tiles = within(browser).getByRole("list", { name: "Subdomains" });
+    expect(within(tiles).getAllByRole("listitem")[0].className).toBe("tile");
+    expect(tiles.textContent).not.toContain(
+      "Everything the build pipeline runs.",
+    );
+
+    fireEvent.click(
+      within(
+        within(browser).getByRole("group", { name: "Subdomain view" }),
+      ).getByRole("button", {
+        name: "List",
+      }),
+    );
+
+    // The same tile at row density, with the description on the line.
+    const rows = within(browser).getByRole("list", { name: "Subdomains" });
+    const first = within(rows).getAllByRole("listitem")[0];
+    expect(first.className.split(" ")).toContain("tile-row");
+    expect(first.textContent).toContain("Everything the build pipeline runs.");
+    // A child that carries no description states so rather than leaving the
+    // row's middle blank.
+    const second = within(rows).getAllByRole("listitem")[1];
+    expect(second.textContent).toContain("No description.");
+    expect(
+      within(second).getByText("No description.").className.split(" "),
+    ).toContain("absent-description");
+
+    // Going back to the grid drops the row density and the description with it.
+    fireEvent.click(
+      within(
+        within(browser).getByRole("group", { name: "Subdomain view" }),
+      ).getByRole("button", {
+        name: "Grid",
+      }),
+    );
+    const back = within(browser).getByRole("list", { name: "Subdomains" });
+    expect(within(back).getAllByRole("listitem")[0].className).toBe("tile");
+    expect(back.textContent).not.toContain("No description.");
   });
 
   // The compact tile exists to state a count, and the count it states is the
@@ -8405,9 +8566,7 @@ describe("the trimmed listing", () => {
     expect(listed[1]).toBe("d01 artifact");
     expect(listed[2]).toBe("d20 artifacts");
     // The caption states what ordered the grid.
-    expect(
-      within(browser).getByText("Sorted by artifact count."),
-    ).toBeTruthy();
+    expect(within(browser).getByText("Sorted by artifact count.")).toBeTruthy();
     // The count is one read over the whole domain. The shell reads the
     // unscoped catalog for its own footer, so the scoped reads are what this
     // counts.
@@ -8450,9 +8609,7 @@ describe("the trimmed listing", () => {
       );
     });
     expect(within(tiles).getAllByRole("listitem")[1].textContent).toBe("d1");
-    expect(
-      within(browser).queryByText("Sorted by artifact count."),
-    ).toBeNull();
+    expect(within(browser).queryByText("Sorted by artifact count.")).toBeNull();
     // The failed count leaves the domain browser standing.
     expect(within(browser).queryByTestId("domain-failed")).toBeNull();
   });
@@ -8971,7 +9128,11 @@ describe("keyboard semantics", () => {
     ]);
     tabs[0].focus();
     fireEvent.keyDown(list, { key: "ArrowRight" });
-    expect(screen.getByRole("tab", { name: /Frontmatter/ }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      screen
+        .getByRole("tab", { name: /Frontmatter/ })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
     expect(document.activeElement).toBe(
       screen.getByRole("tab", { name: /Frontmatter/ }),
     );
@@ -8980,10 +9141,16 @@ describe("keyboard semantics", () => {
     // the edge.
     fireEvent.keyDown(list, { key: "End" });
     expect(
-      screen.getByRole("tab", { name: "Authored source" }).getAttribute("aria-selected"),
+      screen
+        .getByRole("tab", { name: "Authored source" })
+        .getAttribute("aria-selected"),
     ).toBe("true");
     fireEvent.keyDown(list, { key: "ArrowRight" });
-    expect(screen.getByRole("tab", { name: "Rendered" }).getAttribute("aria-selected")).toBe("true");
+    expect(
+      screen
+        .getByRole("tab", { name: "Rendered" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
   });
 
   // The palette's field and result list are a combobox over a listbox, so the

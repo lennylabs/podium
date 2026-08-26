@@ -477,7 +477,7 @@ h3 {
 }
 
 .tree-leaf::before {
-  content: '\25b8';
+  content: "\25b8";
 }
 
 /* The footer is pinned to the bottom of the sidebar. */
@@ -3039,6 +3039,12 @@ label:has(> input:disabled) {
   grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
+/* The list arm packs tighter than the grid, because a row that reads at grid
+   spacing costs a screen per dozen children. */
+.tile-list {
+  gap: 4px;
+}
+
 .tile {
   display: flex;
   flex-direction: column;
@@ -3066,6 +3072,34 @@ label:has(> input:disabled) {
 
 .tile-count {
   font-size: 10.5px;
+}
+
+/* The list arm is the same tile at row density. The grid tile stretched to the
+   container width states no more than the grid did and costs a card of height
+   per child, so the row puts the name, the description and the count on one
+   line and gives the width to the description. */
+.tile-row {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 12px;
+}
+
+.tile-row .tile-name {
+  flex: none;
+  min-width: 150px;
+}
+
+.tile-row .tile-description {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  font-size: 12.5px;
+}
+
+.tile-row .tile-count {
+  flex: none;
+  margin-left: auto;
 }
 
 /* What closes the grid: the control that opens the rest of it, and the
