@@ -1333,6 +1333,72 @@ describe('the layer panel', () => {
     expect(screen.getByText('groups: secops · appsec +2')).toBeTruthy();
     expect(screen.getByText('users: carol@acme.com')).toBeTruthy();
   });
+
+  // The source cell names the type it is showing and states every source
+  // field the layer was registered with. A git layer's configured root is
+  // part of where the layer's artifacts come from, so a row that omits it
+  // describes a different source than the one the registry stored.
+  it('names the source type and states the git root and the local path', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/layers': {
+        body: {
+          layers: [
+            {
+              ID: 'acme-git-main',
+              SourceType: 'git',
+              Repo: 'git@github.com:acme/registry.git',
+              Ref: 'main',
+              Root: 'catalog',
+              Order: 1,
+            },
+            userLayer(),
+          ],
+        },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    const git = within(layerRow('acme-git-main'));
+    expect(git.getByText('git')).toBeTruthy();
+    expect(git.getByText('main')).toBeTruthy();
+    expect(git.getByText('git@github.com:acme/registry.git')).toBeTruthy();
+    expect(git.getByText('catalog/')).toBeTruthy();
+    const local = within(layerRow('alice-personal'));
+    expect(local.getByText('local')).toBeTruthy();
+    expect(local.getByText('/Users/alice/registry')).toBeTruthy();
+  });
+
+  // A source type is pluggable, so a type the panel has never seen still
+  // renders: the chip carries its name and its fields sit behind a
+  // disclosure.
+  it('renders an unknown source type as a chip with its fields behind a disclosure', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/layers': {
+        body: {
+          layers: [
+            {
+              ID: 'acme-vault',
+              SourceType: 'vault-kv',
+              Repo: 'acme/vault-artifacts',
+              Root: 'artifacts',
+              Order: 1,
+            },
+          ],
+        },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    const row = within(layerRow('acme-vault'));
+    expect(row.getByText('vault-kv')).toBeTruthy();
+    fireEvent.click(row.getByText('2 source fields'));
+    expect(row.getByText('acme/vault-artifacts')).toBeTruthy();
+    expect(row.getByText('artifacts')).toBeTruthy();
+  });
 });
 
 describe('the session-expiry transition', () => {

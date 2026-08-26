@@ -790,6 +790,56 @@ input[type='checkbox'] {
   font-size: 11.5px;
 }
 
+/* The layer table's source cell. The chip and the reference share the first
+   line, and the location details sit under them in the quiet tone, so a long
+   repository URL or absolute path wraps below the fact the reader scans for
+   rather than through it. */
+.source-cell {
+  min-width: 0;
+}
+
+.source-ref {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 3px;
+}
+
+.source-ref .badge {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.source-detail {
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.source-fields > summary {
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.source-fields dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0 8px;
+  margin: 4px 0 0;
+}
+
+.source-fields dl > div {
+  display: contents;
+}
+
+.source-fields dt::after {
+  content: ':';
+}
+
+.source-fields dd {
+  margin: 0;
+}
+
 .row-refusal {
   margin: 6px 0 0;
   color: var(--danger);
