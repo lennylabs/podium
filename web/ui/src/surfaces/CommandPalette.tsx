@@ -37,12 +37,44 @@ const filterExamples = ['type:skill', 'tag:review', 'scope:platform'];
 const optionID = (at: number) => `palette-option-${at}`;
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
+  // The queries this page has already run outlive one opening of the panel,
+  // so they are held out here where closing it cannot discard them.
+  const [recents, setRecents] = useState<string[]>([]);
+  const remember = (query: string) => {
+    if (query === '') {
+      return;
+    }
+    setRecents((held) => [query, ...held.filter((prior) => prior !== query)].slice(0, recentCap));
+  };
+
+  // The panel is mounted only while it is open, which is what discards the
+  // query with it. A panel that stays mounted reopens on the line the reader
+  // last typed with the caret at its end, so the next keystroke appends to a
+  // query they had already finished with and the just-opened state, which is
+  // where the recent queries and the filter syntax are, is never reached
+  // again.
+  if (!open) {
+    return null;
+  }
+  return <PalettePanel onClose={onClose} recents={recents} onRun={remember} />;
+}
+
+/** PalettePanel is one opening of the panel: the query the reader types into
+ * it, the row the arrows hold, and the results that line matched. */
+function PalettePanel({
+  onClose,
+  recents,
+  onRun,
+}: {
+  onClose: () => void;
+  recents: string[];
+  onRun: (query: string) => void;
+}) {
   const [line, setLine] = useState('');
   const [index, setIndex] = useState(0);
-  const [recents, setRecents] = useState<string[]>([]);
   // The panel covers the shell, so it owns focus while it is open and hands
   // it back to whatever the reader was on when they pressed the shortcut.
-  const dialog = useDialogFocus<HTMLDivElement>(open);
+  const dialog = useDialogFocus<HTMLDivElement>();
 
   const typed = line.trim();
   const results = useAsync<SearchResponse>(
@@ -58,25 +90,14 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const listed = typed !== '' && !results.loading && results.error === null && rows.length > 0;
   const at = listed ? Math.min(index, rows.length - 1) : -1;
 
-  if (!open) {
-    return null;
-  }
-
-  const remember = (query: string) => {
-    if (query === '') {
-      return;
-    }
-    setRecents((held) => [query, ...held.filter((prior) => prior !== query)].slice(0, recentCap));
-  };
-
   const openRow = (id: string) => {
-    remember(typed);
+    onRun(typed);
     window.location.hash = artifactHref(id);
     onClose();
   };
 
   const openSearch = () => {
-    remember(typed);
+    onRun(typed);
     // The whole typed line travels, filters and all. The search surface runs
     // the same parse over it, so the request it issues and the pills it
     // renders are the ones this panel typed rather than the line read back as

@@ -7257,8 +7257,8 @@ describe("the command palette", () => {
   // Closing the panel hands focus back to the header's search trigger, and a
   // ⏎ the panel leaves uncancelled then activates that trigger as the
   // browser's default action for the key: the panel reopens over the artifact
-  // or the search surface it just navigated to, still holding the query. Both
-  // arms consume the key, so both cancel it.
+  // or the search surface it just navigated to. Both arms consume the key, so
+  // both cancel it.
   it("cancels the ⏎ it consumes so the trigger it returns focus to is not activated", async () => {
     palettePage([{ id: "platform/review", type: "skill" }]);
     render(<App />);
@@ -7354,6 +7354,59 @@ describe("the command palette", () => {
     ).toBeTruthy();
     expect(within(panel).queryByText(/hidden/i)).toBeNull();
     expect(within(panel).queryByText(/permission/i)).toBeNull();
+  });
+
+  // A reopened panel is a fresh one. A panel that held the line the reader
+  // last typed puts the caret at its end with nothing selected, so the
+  // "open and type" gesture appends to a finished query and searches for the
+  // two run together, and the just-opened state is never reached again.
+  it("opens on an empty query and shows the just-opened state again", async () => {
+    palettePage([{ id: "platform/review", type: "skill" }], 1);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const field = () =>
+      within(screen.getByTestId("palette")).getByLabelText(
+        "Search artifacts",
+      ) as HTMLInputElement;
+    fireEvent.change(field(), { target: { value: "review" } });
+    await screen.findByTestId("palette-heading");
+    fireEvent.keyDown(screen.getByTestId("palette"), { key: "Escape" });
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(field().value).toBe("");
+    expect(screen.getByTestId("palette-syntax")).toBeTruthy();
+    // Typing into the reopened panel searches for what was typed rather than
+    // for it appended to the discarded line.
+    fireEvent.change(field(), { target: { value: "lint" } });
+    await waitFor(() => {
+      expect(lastSearch().get("query")).toBe("lint");
+    });
+  });
+
+  // The queries the page has run outlive the panel that ran them, because
+  // they are what the just-opened state lists.
+  it("lists a query it ran among the recent queries of a later opening", async () => {
+    palettePage([{ id: "platform/review", type: "skill" }], 1);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    fireEvent.change(
+      within(screen.getByTestId("palette")).getByLabelText("Search artifacts"),
+      { target: { value: "review" } },
+    );
+    await screen.findByTestId("palette-heading");
+    fireEvent.keyDown(screen.getByTestId("palette"), { key: "Enter" });
+    expect(window.location.hash).toBe("#/artifact/platform%2Freview");
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const panel = screen.getByTestId("palette");
+    const recent = within(panel).getByRole("button", { name: "review" });
+    // Picking one fills the field with it, which is the point of listing it.
+    fireEvent.click(recent);
+    expect(
+      (
+        within(panel).getByLabelText("Search artifacts") as HTMLInputElement
+      ).value,
+    ).toBe("review");
   });
 });
 
