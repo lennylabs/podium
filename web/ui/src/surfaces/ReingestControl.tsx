@@ -247,7 +247,10 @@ function IngestReport({
       <div className="modal-foot">
         <span className="modal-foot-note mono quiet">finished {clock(finishedAt)}</span>
         {!recorded && <CopyButton value={summaryText(layerID, summary, finishedAt)} label="Copy summary" />}
-        <button type="button" onClick={onDone}>
+        {/* Done is the press that closes the report, so it carries the primary
+            fill. Beside an identically outlined copy control neither button
+            reads as the one that dismisses the dialog. */}
+        <button type="button" className="button primary" onClick={onDone}>
           Done
         </button>
       </div>

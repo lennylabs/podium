@@ -144,6 +144,16 @@ describe('the finished reingest report', () => {
     expect(screen.getByRole('button', { name: 'Copy summary' })).toBeTruthy();
   });
 
+  // The footer holds two presses. Done closes the report and carries the
+  // primary fill; the copy control stays outlined beside it, so the dialog
+  // says which control dismisses it.
+  it('fills Done as the primary action and leaves the copy control outlined', () => {
+    report({ accepted: 184, idempotent: 97, lint_failures: 3 });
+    const done = screen.getByRole('button', { name: 'Done' });
+    expect(done.className.split(/\s+/)).toContain('primary');
+    expect(screen.getByRole('button', { name: 'Copy summary' }).className.split(/\s+/)).not.toContain('primary');
+  });
+
   // A registry with no ingest runner wired answers with the intent alone.
   // There is no outcome to card up and none to copy.
   it('presents no counts where the registry ran no pipeline inside the request', () => {
