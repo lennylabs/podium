@@ -82,6 +82,23 @@ export function replaceRoute(href: string): void {
   window.history.replaceState(null, '', href);
 }
 
+/** routeKey names the surface a route selects. `useRoute` parses a fresh
+ * object on every hash event, so the object's identity moves even when the
+ * reader stayed where they were; an effect that has to run once per entered
+ * surface keys on this instead. */
+export function routeKey(route: Route): string {
+  switch (route.name) {
+    case 'domain':
+      return `domain/${route.path}`;
+    case 'search':
+      return `search/${route.query}`;
+    case 'artifact':
+      return `artifact/${route.id}`;
+    case 'layers':
+      return route.deleted ? 'layers/deleted' : 'layers';
+  }
+}
+
 /** useRoute tracks the location hash. */
 export function useRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));

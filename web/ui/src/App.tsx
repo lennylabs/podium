@@ -23,7 +23,7 @@ import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
 import { catalogDepth, domainLabel, marksCurrentDomain } from './domain';
 import { useDismissalHeld } from './components/focus';
-import { artifactDomain, domainHref, layersHref, searchHref, useRoute } from './route';
+import { artifactDomain, domainHref, layersHref, routeKey, searchHref, useRoute } from './route';
 import { since } from './time';
 import type { ThemePreference } from './theme';
 import { useTheme } from './theme';
@@ -101,6 +101,17 @@ export function App() {
       window.removeEventListener('keydown', onKey);
     };
   }, [dismissalHeld]);
+
+  // Entering a surface closes the panel, which is what opening a result from
+  // it already does. A route change the panel did not issue leaves it
+  // covering a surface the reader deliberately entered, still listing the
+  // previous query: the browser's back step is one such change, and a history
+  // step also moves focus out of the dialog, which takes the panel's own
+  // Escape handler with it and leaves the scrim as the only way out.
+  const entered = routeKey(route);
+  useEffect(() => {
+    setPaletteOpen(false);
+  }, [entered]);
 
   // The sidebar tree is the shell's own catalog read, re-issued on each route
   // the reader enters. On the layers route it is also the panel's expiry

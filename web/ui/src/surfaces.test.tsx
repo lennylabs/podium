@@ -22,7 +22,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import { parseQueryLine } from "./query";
-import { artifactHref, domainHref, searchHref } from "./route";
+import { artifactHref, domainHref, layersHref, searchHref } from "./route";
 import type { SessionPosture } from "./session";
 // The stylesheet is imported for its own sake: the wrapping rule the rail
 // depends on is asserted from the computed style it produces.
@@ -7750,6 +7750,28 @@ describe("the command palette", () => {
         within(panel).getByLabelText("Search artifacts") as HTMLInputElement
       ).value,
     ).toBe("review");
+  });
+
+  // A route change the panel did not issue is the reader entering a surface
+  // they mean to read: the browser's back step, an address-bar edit, or a
+  // link under the scrim. The panel closes on it the way it closes on the
+  // result it opens, rather than covering the entered surface with the
+  // previous query's matches.
+  it("closes when a route change it did not issue enters another surface", async () => {
+    palettePage([{ id: "platform/review", type: "skill" }], 1);
+    goTo(artifactHref("platform/review"));
+    render(<App />);
+    await screen.findByTestId("search-trigger");
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    fireEvent.change(
+      within(screen.getByTestId("palette")).getByLabelText("Search artifacts"),
+      { target: { value: "review" } },
+    );
+    await screen.findByTestId("palette-heading");
+    goTo(layersHref);
+    await waitFor(() => {
+      expect(screen.queryByTestId("palette")).toBeNull();
+    });
   });
 });
 
