@@ -523,6 +523,43 @@ describe("the application shell", () => {
     expect(screen.getByTestId("catalog-depth").textContent).toBe("2 levels");
   });
 
+  // A catalog read that failed for a reason other than identity leaves the
+  // sidebar with no tree. The tree region says the read failed rather than
+  // rendering blank, and the footer figures and the depth marker are
+  // withdrawn, because the counts are read once for the page and a figure
+  // left standing over a registry that stopped answering states it as
+  // current.
+  it("says the catalog read failed and withdraws the counts and the depth marker", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": {
+        status: 503,
+        body: { code: "registry.unavailable", message: "down" },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 312 } },
+      "/v1/layers": {
+        body: {
+          layers: [{ ...adminLayer(), last_ingested_at: new Date().toISOString() }],
+        },
+      },
+    });
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-failed").textContent).toContain(
+        "The catalog could not be read.",
+      );
+    });
+    expect(
+      within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
+    ).toEqual([]);
+    expect(screen.queryByTestId("catalog-depth")).toBeNull();
+    expect(screen.queryByTestId("catalog-empty")).toBeNull();
+    expect(screen.getByTestId("catalog-counts").textContent).toBe(
+      "Counts unavailable",
+    );
+    expect(screen.queryByTestId("catalog-ingest")).toBeNull();
+  });
+
   // A read that returned a catalog holding no domain gets a line saying so.
   // The depth marker goes with the tree it describes, because a descent
   // stated over an empty sidebar reads as a tree that failed to render.

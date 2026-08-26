@@ -157,6 +157,11 @@ export function App() {
   // Both of those also render no node, so the empty line is gated on a read
   // that returned rather than on the node list alone.
   const catalogEmpty = !refused && !tree.loading && tree.error === null && catalogNodes.length === 0;
+  // A read that failed for a reason other than identity leaves the sidebar
+  // with nothing to render and nothing the reader can act on. Left unmarked
+  // it reads as a catalog holding no domain, while the footer figures an
+  // earlier read returned keep standing as the registry's current state.
+  const catalogFailed = !refused && !tree.loading && tree.error !== null;
 
   // The public-subset arm of the catalog-scope rule carries two pieces. The
   // sidebar footer states that the caller is not signed in, and this banner
@@ -223,9 +228,10 @@ export function App() {
                 reports. It is kept on the refused arm, because it states a
                 property of this navigation rather than anything about what
                 the catalog holds. It is dropped where the read returned no
-                domain, because there the marker stands over nothing and
-                describes a descent the reader cannot make. */}
-            {!catalogEmpty && (
+                domain and where it failed, because there the marker stands
+                over nothing and describes a descent the reader cannot
+                make. */}
+            {!catalogEmpty && !catalogFailed && (
               <span className="label" data-testid="catalog-depth">
                 {treeDepth} levels
               </span>
@@ -244,8 +250,13 @@ export function App() {
               The catalog holds no domains. Register a layer to fill it.
             </p>
           )}
+          {catalogFailed && (
+            <p className="quiet catalog-empty" data-testid="catalog-failed">
+              The catalog could not be read. The content beside this navigation carries the retry.
+            </p>
+          )}
           <div className="sidebar-footer">
-            <CatalogCounts counts={refused ? null : counts.value} />
+            <CatalogCounts counts={refused || catalogFailed ? null : counts.value} unavailable={catalogFailed} />
             {anonymous && <p className="quiet">Not signed in</p>}
           </div>
         </nav>
@@ -333,8 +344,18 @@ async function readCounts(): Promise<CatalogTotals> {
 /** CatalogCounts is the footer pinned to the bottom of the sidebar. It states
  * what the reads returned and nothing else: a read that has not answered, and
  * the refused arm, leave it standing with no counts in it rather than
- * reporting a figure no response carried. */
-function CatalogCounts({ counts }: { counts: CatalogTotals | null }) {
+ * reporting a figure no response carried. A catalog read that failed
+ * withdraws the figures and says so, because these are read once for the page
+ * and a figure left standing over a registry that stopped answering is
+ * presented as its current state. */
+function CatalogCounts({ counts, unavailable = false }: { counts: CatalogTotals | null; unavailable?: boolean }) {
+  if (unavailable) {
+    return (
+      <p className="mono quiet" data-testid="catalog-counts">
+        Counts unavailable
+      </p>
+    );
+  }
   if (counts === null) {
     return <p className="mono quiet" data-testid="catalog-counts" />;
   }
