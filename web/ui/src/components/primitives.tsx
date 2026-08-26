@@ -8,6 +8,7 @@ import { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api';
+import { useDialogFocus } from './focus';
 
 export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
 
@@ -160,7 +161,9 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
  * into it, so the surface underneath keeps its position and the dialog owns
  * the reader's attention while it is open. The scrim, Escape, and the close
  * control all dismiss it, because a dialog that can only be left by
- * completing the write traps a reader who opened it to look.
+ * completing the write traps a reader who opened it to look. Focus moves
+ * into the dialog when it opens, cycles within it, and returns to the control
+ * that opened it when it closes.
  *
  * It renders through a portal, so the dialog stands at the end of the
  * document however deep the control that opened it sits. A dialog left in
@@ -181,6 +184,7 @@ export function Modal({
   children: ReactNode;
 }) {
   const headingID = useId();
+  const dialog = useDialogFocus<HTMLDivElement>();
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -203,7 +207,7 @@ export function Modal({
         }
       }}
     >
-      <div className="modal" role="dialog" aria-modal="true" aria-labelledby={headingID}>
+      <div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby={headingID}>
         <header className="modal-head">
           <div className="modal-title-row">
             <h2 id={headingID}>{title}</h2>

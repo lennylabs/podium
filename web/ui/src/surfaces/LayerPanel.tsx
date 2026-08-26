@@ -9,7 +9,7 @@
 // and treats the local operator as the administrator, and the panel is the
 // point of that deployment.
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { DeletedLayers } from "./DeletedLayers";
 import { erasesOn, recoveryDays } from "./recovery";
@@ -465,6 +465,9 @@ function LayerRow({
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // Picking an item unmounts the menu, so the trigger takes focus back before
+  // the dialog the item opens reads what to return focus to.
+  const overflow = useRef<HTMLButtonElement>(null);
 
   // A write the panel sends can come back refused, including on a row the
   // panel presented as this caller's to manage. The refusal is drawn on the
@@ -552,6 +555,7 @@ function LayerRow({
             onStart={onReingest}
           />
           <button
+            ref={overflow}
             type="button"
             className="row-overflow"
             aria-label={`More actions for ${layer.ID}`}
@@ -569,6 +573,7 @@ function LayerRow({
               type="button"
               disabled={readOnly}
               onClick={() => {
+                overflow.current?.focus();
                 setOverflowOpen(false);
                 setEditing((open) => !open);
               }}
@@ -579,6 +584,7 @@ function LayerRow({
               type="button"
               disabled={readOnly}
               onClick={() => {
+                overflow.current?.focus();
                 setOverflowOpen(false);
                 setConfirming(true);
               }}

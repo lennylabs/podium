@@ -3,10 +3,11 @@
 // query carries the inline filter syntax the search surface exposes as pills,
 // so the same filter set §13.10 fixes reaches the same endpoint from here.
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
 import type { KeyboardEvent, ReactNode } from 'react';
 
+import { useDialogFocus } from '../components/focus';
 import { Badge, EmptyState, ErrorState, Loading } from '../components/primitives';
 import type { ArtifactDescriptor, SearchResponse } from '../api';
 import { searchArtifacts } from '../api';
@@ -26,7 +27,9 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const [line, setLine] = useState('');
   const [index, setIndex] = useState(0);
   const [recents, setRecents] = useState<string[]>([]);
-  const input = useRef<HTMLInputElement>(null);
+  // The panel covers the shell, so it owns focus while it is open and hands
+  // it back to whatever the reader was on when they pressed the shortcut.
+  const dialog = useDialogFocus<HTMLDivElement>(open);
 
   const typed = line.trim();
   const results = useAsync<SearchResponse>(
@@ -35,12 +38,6 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     [typed],
   );
   const rows = results.value?.results ?? [];
-
-  useEffect(() => {
-    if (open) {
-      input.current?.focus();
-    }
-  }, [open]);
 
   if (!open) {
     return null;
@@ -107,7 +104,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         }
       }}
     >
-      <div className="palette" role="dialog" aria-label="Command palette" data-testid="palette" onKeyDown={onKeyDown}>
+      <div ref={dialog} className="palette" role="dialog" aria-label="Command palette" data-testid="palette" onKeyDown={onKeyDown}>
         {/* The field row. The magnifier names the row as the query field, and
             the match count sits at the row's right edge, which is the edge
             the type and version columns below it also hold. */}
@@ -116,7 +113,6 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             ⌕
           </span>
           <input
-            ref={input}
             className="palette-input"
             type="search"
             aria-label="Search artifacts"

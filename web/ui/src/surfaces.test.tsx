@@ -2425,6 +2425,40 @@ describe("the layer write flows", () => {
     expect(confirm.className).toContain("danger");
   });
 
+  // A dialog that leaves focus on the surface it covers puts a keyboard
+  // reader on controls the scrim has hidden, and one that closes without
+  // handing focus back drops them at the top of the document. The row's
+  // overflow trigger is what the reader gets back, because the menu item that
+  // opened the dialog has left the document by then.
+  it("takes focus into the unregister confirmation, cycles Tab inside it, and hands focus back on cancel", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    const dialog = await screen.findByLabelText("Unregister alice-personal");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    const stops = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        "button:not([disabled]), input:not([disabled])",
+      ),
+    );
+    stops[stops.length - 1].focus();
+    fireEvent.keyDown(document, { key: "Tab" });
+    expect(document.activeElement).toBe(stops[0]);
+    fireEvent.keyDown(document, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(stops[stops.length - 1]);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Unregister alice-personal")).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "More actions for alice-personal" }),
+    );
+  });
+
   // §13.10 makes the panel the surface a user manages their own user-defined
   // layers on, which is the class §7.3.1 caps per user and authorizes its
   // owner on, so that is the class the form registers by default. The
@@ -3554,6 +3588,24 @@ describe("the command palette", () => {
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     fireEvent.keyDown(screen.getByTestId("palette"), { key: "Escape" });
     expect(screen.queryByTestId("palette")).toBeNull();
+  });
+
+  // The panel covers the shell, so it owns focus while it is open and returns
+  // it to the trigger when it closes. A reader who opened it on the keyboard
+  // otherwise resumes at the top of the document.
+  it("takes focus into the query field and returns it to the trigger on esc", async () => {
+    palettePage([]);
+    render(<App />);
+    const trigger = await screen.findByTestId("search-trigger");
+    trigger.focus();
+    fireEvent.click(trigger);
+    const panel = screen.getByTestId("palette");
+    expect(document.activeElement).toBe(
+      within(panel).getByLabelText("Search artifacts"),
+    );
+    fireEvent.keyDown(panel, { key: "Escape" });
+    expect(screen.queryByTestId("palette")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
   });
 
   // The handoff carries the filters the palette parsed rather than the line
