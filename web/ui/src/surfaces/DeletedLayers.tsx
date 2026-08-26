@@ -63,7 +63,7 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
       {rows.length === 0 ? (
         <EmptyState>Nothing is waiting to be erased.</EmptyState>
       ) : (
-        <table className="data-table">
+        <table className="data-table restore-table">
           <thead>
             <tr>
               {/* The layer panel this table sits one link away from labels its

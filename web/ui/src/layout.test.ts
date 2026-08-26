@@ -566,6 +566,72 @@ describe("layer table columns", () => {
   });
 });
 
+/** restoreTable attaches the recently-unregistered table with one header row,
+ * one source cell, and one identifier cell, and returns the table, its header
+ * cells in column order, and both cells. */
+function restoreTable(): {
+  table: HTMLTableElement;
+  headers: HTMLTableCellElement[];
+  source: HTMLTableCellElement;
+  id: HTMLTableCellElement;
+} {
+  const table = document.createElement("table");
+  table.className = "data-table restore-table";
+  const head = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  const headers: HTMLTableCellElement[] = [];
+  for (const label of ["Layer", "Source", "Unregistered", "Erased on", "Actions"]) {
+    const header = document.createElement("th");
+    header.textContent = label;
+    headRow.appendChild(header);
+    headers.push(header);
+  }
+  head.appendChild(headRow);
+  table.appendChild(head);
+  const body = document.createElement("tbody");
+  const row = document.createElement("tr");
+  const id = document.createElement("td");
+  id.className = "mono";
+  const source = document.createElement("td");
+  source.className = "source-col";
+  row.appendChild(id);
+  row.appendChild(source);
+  body.appendChild(row);
+  table.appendChild(body);
+  document.body.appendChild(table);
+  mounted.push(table);
+  return { table, headers, source, id };
+}
+
+// The restore table's columns. The row is identified by its layer name, and
+// sized from its content the source column claimed every spare pixel, which
+// left the identifier column narrow enough to break `gamma-layer` mid-token
+// over two lines and to wrap the erase countdown beside it.
+describe("restore table columns", () => {
+  it("lays the columns out to fixed proportions rather than to the content", () => {
+    expect(window.getComputedStyle(restoreTable().table).tableLayout).toBe("fixed");
+  });
+
+  it("gives the layer column more width than any other content column", () => {
+    const [layer, source, unregistered, erased] = restoreTable().headers;
+    const width = (header: HTMLTableCellElement) =>
+      Number.parseFloat(window.getComputedStyle(header).width);
+    expect(width(layer)).toBeGreaterThan(width(source));
+    expect(width(layer)).toBeGreaterThan(width(unregistered));
+    expect(width(layer)).toBeGreaterThan(width(erased));
+  });
+
+  it("drops the source cell's width claim where the table fixes its columns", () => {
+    const { source } = restoreTable();
+    expect(window.getComputedStyle(source).width).toBe("auto");
+    expect(window.getComputedStyle(source).maxWidth).toBe("none");
+  });
+
+  it("breaks a name longer than its column inside the cell", () => {
+    expect(window.getComputedStyle(restoreTable().id).overflowWrap).toBe("anywhere");
+  });
+});
+
 // A frontmatter value is authored, so it can be one unbroken token such as a
 // serialised nested map. A table takes its min-content width as an automatic
 // minimum, so a cell that cannot break sets the property table wider than the

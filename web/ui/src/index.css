@@ -1369,6 +1369,54 @@ input[type="checkbox"] {
   white-space: nowrap;
 }
 
+/* The restore table carries the same source cell and needs the same treatment.
+   Sized from its content the source column's `width: 100%` took every spare
+   pixel, the layer column collapsed to min-content, and an ordinary identifier
+   such as `gamma-layer` broke mid-token over two lines beside an ellipsised
+   path six times as wide, with the erase countdown wrapping for the same
+   reason. The proportions are the design's grid for this surface, which gives
+   the layer the widest content column and the source about two thirds of
+   it (§13.10). */
+.restore-table {
+  table-layout: fixed;
+}
+
+.restore-table th:nth-child(1) {
+  width: 30%;
+}
+
+.restore-table th:nth-child(2) {
+  width: 20%;
+}
+
+.restore-table th:nth-child(3) {
+  width: 14%;
+}
+
+.restore-table th:nth-child(4) {
+  width: 24%;
+}
+
+.restore-table th:last-child {
+  width: 120px;
+}
+
+.restore-table .source-col {
+  width: auto;
+  max-width: none;
+}
+
+.restore-table th {
+  white-space: nowrap;
+}
+
+/* The identifier column is a fixed proportion of the table, so a name longer
+   than it breaks inside the cell rather than pushing out over the source
+   beside it. */
+.restore-table td:first-child {
+  overflow-wrap: anywhere;
+}
+
 /* §4.6 visibility is a union of independent axes, so a row carries one marker
    per matching axis and they read as one cell. The markers wrap as a row
    instead of flowing as inline text: a marker that names members is long
