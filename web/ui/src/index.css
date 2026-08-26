@@ -2197,13 +2197,21 @@ label:has(> input:disabled) {
   text-align: left;
 }
 
+/* The selection is moved by the arrow keys and never by the pointer, so it
+   carries an accent bar at the row's leading edge on top of the wash tint. A
+   tint alone reads as a hover state, and hover is the one thing a keyboard
+   reader has no way to produce. */
 .palette-row-selected {
   background: var(--wash);
   border-color: var(--cbd);
+  box-shadow: inset 2px 0 var(--acc);
 }
 
+/* Every row's artifact name is the part that opens, so it is set in the link
+   colour the rest of the catalog gives an artifact name. */
 .palette-row-name {
   flex: none;
+  color: var(--link);
 }
 
 /* A path longer than the panel is clipped rather than wrapped, so every row

@@ -247,25 +247,25 @@ describe("sidebar tree row", () => {
 // border on each row instead draws the listing as a stack of loose boxes. The
 // cases pin the border to the list and the divider to the rows after the
 // first; the rendered listing is checked against a browser.
-describe("artifact listing", () => {
-  /** declaredFor returns the last value the stylesheet declares for the
-   * property on a rule the element matches. jsdom drops a border shorthand
-   * whose value carries a custom property, so the computed style reports no
-   * border at all and a border is read from the rule instead. */
-  function declaredFor(element: Element, property: string): string {
-    let value = "";
-    for (const sheet of Array.from(document.styleSheets)) {
-      for (const rule of Array.from(sheet.cssRules)) {
-        const styleRule = rule as CSSStyleRule;
-        if (typeof styleRule.selectorText !== "string") continue;
-        if (!element.matches(styleRule.selectorText)) continue;
-        const declared = styleRule.style.getPropertyValue(property);
-        if (declared !== "") value = declared;
-      }
+/** declaredFor returns the last value the stylesheet declares for the
+ * property on a rule the element matches. jsdom drops a shorthand whose value
+ * carries a custom property, so the computed style reports nothing at all and
+ * the value is read from the rule instead. */
+function declaredFor(element: Element, property: string): string {
+  let value = "";
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      const styleRule = rule as CSSStyleRule;
+      if (typeof styleRule.selectorText !== "string") continue;
+      if (!element.matches(styleRule.selectorText)) continue;
+      const declared = styleRule.style.getPropertyValue(property);
+      if (declared !== "") value = declared;
     }
-    return value;
   }
+  return value;
+}
 
+describe("artifact listing", () => {
   /** listRows attaches a listing of the given row count and returns its
    * container and its rows. */
   function listRows(count: number): { list: HTMLElement; rows: Element[] } {
@@ -300,6 +300,45 @@ describe("artifact listing", () => {
     for (const row of rows.slice(1)) {
       expect(declaredFor(row, "border")).toBe("");
       expect(declaredFor(row, "border-top")).toBe("1px solid var(--b2)");
+    }
+  });
+});
+
+// The command palette's selection is moved by the arrow keys alone, so board
+// 19a of the design pass marks the selected row with an accent bar at its
+// leading edge over the wash tint, and sets every row's artifact name in the
+// link colour. A tint on its own reads as the hover state a keyboard reader
+// cannot produce.
+describe("command palette row", () => {
+  /** paletteRow attaches a palette row carrying the given classes and returns
+   * it beside its name element. */
+  function paletteRow(className: string): { row: Element; name: Element } {
+    const row = document.createElement("button");
+    row.className = className;
+    const name = document.createElement("span");
+    name.className = "mono palette-row-name";
+    row.appendChild(name);
+    document.body.appendChild(row);
+    mounted.push(row);
+    return { row, name };
+  }
+
+  it("marks the selected row with an accent bar over the wash tint", () => {
+    const { row } = paletteRow("palette-row palette-row-selected");
+    expect(declaredFor(row, "background")).toBe("var(--wash)");
+    expect(declaredFor(row, "box-shadow")).toBe("inset 2px 0 var(--acc)");
+  });
+
+  it("leaves an unselected row unmarked", () => {
+    const { row } = paletteRow("palette-row");
+    expect(declaredFor(row, "background")).toBe("transparent");
+    expect(declaredFor(row, "box-shadow")).toBe("");
+  });
+
+  it("sets every row's artifact name in the link colour", () => {
+    for (const className of ["palette-row", "palette-row palette-row-selected"]) {
+      const { name } = paletteRow(className);
+      expect(declaredFor(name, "color")).toBe("var(--link)");
     }
   });
 });
