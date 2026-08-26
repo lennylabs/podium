@@ -8,7 +8,7 @@ import { useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 
 import { useDialogFocus } from '../components/focus';
-import { EmptyState, ErrorState, Loading, TypeBadge, formatVersion } from '../components/primitives';
+import { EmptyState, ErrorState, Loading, Magnifier, TypeBadge, formatVersion } from '../components/primitives';
 import type { ArtifactDescriptor, SearchResponse } from '../api';
 import { searchArtifacts } from '../api';
 import { parseQueryLine } from '../query';
@@ -128,8 +128,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             the match count sits at the row's right edge, which is the edge
             the type and version columns below it also hold. */}
         <div className="palette-field">
-          <span className="palette-magnifier" aria-hidden="true">
-            ⌕
+          <span className="palette-magnifier">
+            <Magnifier size={16} />
           </span>
           <input
             className="palette-input"

@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 
 import { ArtifactRow } from "../components/ArtifactRow";
-import { EmptyState, ErrorState, Loading } from "../components/primitives";
+import { EmptyState, ErrorState, Loading, Magnifier } from "../components/primitives";
 import type { SearchFilters, SearchResponse } from "../api";
 import { loadDomain, searchArtifacts } from "../api";
 import { scopePaths } from "../domain";
@@ -90,16 +90,23 @@ export function SearchSurface({
   return (
     <section className="surface" aria-label="Search">
       <h1>Search</h1>
-      <input
-        className="search-field"
-        type="search"
-        aria-label="Search artifacts"
-        value={text}
-        placeholder="Search artifacts"
-        onChange={(event) => {
-          setText(event.target.value);
-        }}
-      />
+      {/* The field is a row rather than a bare input: the magnifier names it
+          as the query field the way the top bar's trigger and the palette's
+          own field do, and the border belongs to the row so the icon sits
+          inside it. */}
+      <div className="search-field">
+        <Magnifier />
+        <input
+          className="search-input"
+          type="search"
+          aria-label="Search artifacts"
+          value={text}
+          placeholder="Search artifacts"
+          onChange={(event) => {
+            setText(event.target.value);
+          }}
+        />
+      </div>
       <div className="filter-row">
         <span className="filter-label mono">Filters</span>
         {type === "" ? (

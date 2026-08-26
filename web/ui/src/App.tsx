@@ -7,7 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import type { ReactNode } from 'react';
 
-import { Banner, ErrorState, Loading, PageBanner } from './components/primitives';
+import { Banner, ErrorState, Loading, Magnifier, PageBanner } from './components/primitives';
 import type { DomainDescriptor } from './api';
 import {
   ApiError,
@@ -739,7 +739,7 @@ function TopBar({
       </span>
       <span className="spacer" />
       <button type="button" className="search-trigger" data-testid="search-trigger" onClick={onOpenPalette}>
-        <span aria-hidden="true">⌕</span>
+        <Magnifier />
         Search artifacts
         <span className="mono key-hint">⌘K</span>
       </button>

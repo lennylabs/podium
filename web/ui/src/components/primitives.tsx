@@ -60,6 +60,24 @@ export function CopyButton({ value, label = 'Copy' }: { value: string; label?: s
   );
 }
 
+/**
+ * Magnifier is the one search icon the shell draws, rendered as inline SVG so
+ * it takes its colour from the text beside it and holds its proportions at
+ * any size. It is drawn rather than typed: the Unicode magnifier it replaces
+ * (U+2315) sets at a fraction of its nominal size in the shell's typefaces
+ * and reads as a stray mark rather than as an icon.
+ *
+ * Spec: §13.10
+ */
+export function Magnifier({ size = 13 }: { size?: number }) {
+  return (
+    <svg className="magnifier" width={size} height={size} viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+      <circle cx="5.8" cy="5.8" r="4.6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M9.4 9.4L13 13" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }

@@ -953,16 +953,49 @@ input[type="checkbox"] {
   accent-color: var(--acc);
 }
 
+/* The magnifier is drawn at whatever size its caller asks for, and it never
+   shrinks in the flex row it sits in. */
+.magnifier {
+  flex: none;
+}
+
+/* The search field is a row holding the magnifier and the query. The border
+   is the row's, so the icon reads as sitting inside the field. */
 .search-field {
   box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   width: 100%;
   height: 46px;
   padding: 0 14px;
   border: 1px solid var(--bd);
   border-radius: 8px;
   background: var(--surf);
+  color: var(--meta);
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--ink);
   font: inherit;
+}
+
+/* The focus ring belongs to the row, because the row is what the reader sees
+   as the field. The input inside it draws none of its own, which would ring
+   a transparent borderless box sitting within the ring already drawn. */
+.search-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.search-field:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
 }
 
 /* The filter row: the fixed filter set on the left and the result count at
@@ -2285,6 +2318,7 @@ label:has(> input:disabled) {
 }
 
 .palette-magnifier {
+  display: inline-flex;
   flex: none;
   color: var(--meta);
 }

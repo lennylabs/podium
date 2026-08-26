@@ -5478,6 +5478,30 @@ describe("the shell’s identity cluster", () => {
     expect(screen.getByTestId("search-trigger").textContent).toContain("⌘K");
   });
 
+  // Every place the shell says "search" draws the magnifier as inline SVG.
+  // The Unicode magnifier it replaces sets at a fraction of its nominal size
+  // and reads as a stray mark, so a text glyph in any of the three is the
+  // defect this pins.
+  it("draws the magnifier as an icon in the trigger, the palette, and the search field", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/");
+    render(<App />);
+    const surface = await screen.findByLabelText("Search");
+    expect(surface.querySelectorAll("svg.magnifier").length).toBe(1);
+
+    const trigger = screen.getByTestId("search-trigger");
+    expect(trigger.querySelectorAll("svg.magnifier").length).toBe(1);
+
+    fireEvent.click(trigger);
+    const panel = await screen.findByTestId("palette");
+    expect(panel.querySelectorAll("svg.magnifier").length).toBe(1);
+
+    expect(window.document.body.textContent).not.toContain("⌕");
+  });
+
   // The appearance preference is the client's own state, and it is applied by
   // stamping data-theme on the root element, which is what overrides the
   // visitor's prefers-color-scheme in both directions.
