@@ -19,31 +19,31 @@
    records the provenance and the licence. */
 
 @font-face {
-  font-family: 'Space Grotesk';
+  font-family: "Space Grotesk";
   font-style: normal;
   font-weight: 300 700;
   font-display: swap;
-  src: url('./fonts/space-grotesk.woff2') format('woff2');
+  src: url("./fonts/space-grotesk.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: 'JetBrains Mono';
+  font-family: "JetBrains Mono";
   font-style: normal;
   font-weight: 100 800;
   font-display: swap;
-  src: url('./fonts/jetbrains-mono.woff2') format('woff2');
+  src: url("./fonts/jetbrains-mono.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: 'Anton';
+  font-family: "Anton";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url('./fonts/anton.woff2') format('woff2');
+  src: url("./fonts/anton.woff2") format("woff2");
 }
 
 :root,
-:root[data-theme='light'] {
+:root[data-theme="light"] {
   --page: #f4f1ea;
   --surf: #ffffff;
   --surf2: #fcfbf6;
@@ -65,9 +65,9 @@
   --danger-bd: #f0c4b8;
   --on-danger: #ffffff;
   --scrim: rgba(20, 19, 15, 0.42);
-  --font-ui: 'Space Grotesk', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-  --font-display: 'Anton', var(--font-ui);
+  --font-ui: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-display: "Anton", var(--font-ui);
   color-scheme: light;
 }
 
@@ -97,7 +97,7 @@
   }
 }
 
-:root[data-theme='dark'] {
+:root[data-theme="dark"] {
   color-scheme: dark;
   --page: #0c0f16;
   --surf: #171b28;
@@ -589,7 +589,7 @@ h2.label {
   margin: 10px 0;
 }
 
-.field input:not([type='checkbox']) {
+.field input:not([type="checkbox"]) {
   padding: 8px 10px;
   border: 1px solid var(--bd);
   border-radius: 8px;
@@ -621,7 +621,7 @@ h2.label {
 }
 
 .field:has(select)::after {
-  content: '';
+  content: "";
   position: absolute;
   right: 13px;
   bottom: 16px;
@@ -633,7 +633,7 @@ h2.label {
   pointer-events: none;
 }
 
-input[type='checkbox'] {
+input[type="checkbox"] {
   width: 15px;
   height: 15px;
   margin: 0 8px 0 0;
@@ -845,7 +845,7 @@ input[type='checkbox'] {
 }
 
 .source-fields dt::after {
-  content: ':';
+  content: ":";
 }
 
 .source-fields dd {
@@ -952,8 +952,51 @@ button,
   }
 }
 
+/* The panel's head puts the title and its description on the left and the
+   actions on the same line, right-aligned, so the description sits under the
+   title rather than being pushed down the page by the controls. */
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.panel-head > :first-child {
+  min-width: 0;
+}
+
 .panel-actions {
-  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-left: auto;
+  flex: none;
+}
+
+/* The precedence label carries its winning-end qualifier on the same line,
+   in the body face, so the label states which end of the table wins. */
+.precedence-label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 20px 0 6px;
+}
+
+/* The panel's closing line: the caller's own layer count against the cap,
+   then what a reorder does, separated by a hairline. */
+.panel-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  font-size: 12.5px;
+}
+
+.foot-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--bd);
 }
 
 /* The page banner sits between the top bar and the grid, full width. */
@@ -1105,7 +1148,11 @@ button,
   height: 4px;
   margin-top: 4px;
   border-radius: 100px;
-  background: linear-gradient(to right, var(--acc) var(--remaining), var(--b2) var(--remaining));
+  background: linear-gradient(
+    to right,
+    var(--acc) var(--remaining),
+    var(--b2) var(--remaining)
+  );
 }
 
 .secret-reveal {
@@ -1286,7 +1333,7 @@ button,
   background: var(--wash);
 }
 
-.vis-card input[type='checkbox'] {
+.vis-card input[type="checkbox"] {
   margin-top: 3px;
   flex: none;
 }

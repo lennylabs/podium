@@ -9,20 +9,40 @@
 // and treats the local operator as the administrator, and the panel is the
 // point of that deployment.
 
-import { useState } from 'react';
+import { useState } from "react";
 
-import { DeletedLayers } from './DeletedLayers';
-import { erasesOn, recoveryDays } from './recovery';
-import { RegisterLayerForm } from './RegisterLayerForm';
-import type { ReingestState } from './ReingestControl';
-import { idleReingest, ReingestButton, ReingestStatus, reingestRefusal } from './ReingestControl';
-import { UpdateLayerForm } from './UpdateLayerForm';
-import { Badge, Banner, EmptyState, ErrorState, Loading, Modal } from '../components/primitives';
-import { SourceCell } from '../components/SourceCell';
-import type { BreakGlass, LayerRecord } from '../api';
-import { ApiError, listDeletedLayers, listLayers, reingestLayer, reorderLayers, unregisterLayer } from '../api';
-import { since } from '../time';
-import { useAsync } from '../useAsync';
+import { DeletedLayers } from "./DeletedLayers";
+import { erasesOn, recoveryDays } from "./recovery";
+import { RegisterLayerForm } from "./RegisterLayerForm";
+import type { ReingestState } from "./ReingestControl";
+import {
+  idleReingest,
+  ReingestButton,
+  ReingestStatus,
+  reingestRefusal,
+} from "./ReingestControl";
+import { UpdateLayerForm } from "./UpdateLayerForm";
+import {
+  Badge,
+  Banner,
+  EmptyState,
+  ErrorState,
+  Loading,
+  Modal,
+} from "../components/primitives";
+import { SourceCell } from "../components/SourceCell";
+import type { BreakGlass, LayerRecord } from "../api";
+import {
+  ApiError,
+  listDeletedLayers,
+  listLayers,
+  readQuota,
+  reingestLayer,
+  reorderLayers,
+  unregisterLayer,
+} from "../api";
+import { since } from "../time";
+import { useAsync } from "../useAsync";
 
 /** Refusal is a write the registry refused, held with the write itself so the
  * row can re-issue exactly what was attempted. */
@@ -31,7 +51,13 @@ interface Refusal {
   retry: () => void;
 }
 
-export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: boolean }) {
+export function LayerPanel({
+  subject,
+  readOnly,
+}: {
+  subject: string;
+  readOnly: boolean;
+}) {
   const layers = useAsync(() => listOrdered(), []);
   // The recoverable list is read for its count alone here. The section it
   // opens reads the list itself, so the panel holds no copy of what that
@@ -75,11 +101,14 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
   /** runReingest drives one layer's reingest and moves that layer's row
    * alone. The pipeline runs inside the request, so nothing is reported
    * until it returns and the row shows what its own response carried. */
-  const runReingest = async (id: string, breakGlass?: BreakGlass): Promise<void> => {
-    setRowReingest(id, { kind: 'running' });
+  const runReingest = async (
+    id: string,
+    breakGlass?: BreakGlass,
+  ): Promise<void> => {
+    setRowReingest(id, { kind: "running" });
     try {
       const summary = await reingestLayer(id, breakGlass);
-      setRowReingest(id, { kind: 'summary', summary });
+      setRowReingest(id, { kind: "summary", summary });
       clearRefusal(id);
       layers.reload();
     } catch (err: unknown) {
@@ -119,52 +148,66 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
 
   return (
     <section className="surface" aria-label="Layer panel">
-      <h1>Layers</h1>
+      {/* The title, what a layer is, and the panel's actions share one row:
+          the description states what the reader is looking at before the
+          first row of the table asks them to infer it from the columns. */}
+      <div className="panel-head">
+        <div>
+          <h1>Layers</h1>
+          <p className="lead">
+            Sources the catalog is composed from. When two layers carry the same
+            artifact ID, the higher precedence wins.
+          </p>
+        </div>
+        <div className="panel-actions">
+          {/* The recoverable link leads the row and states how much is still
+            restorable, because that count is the one piece of panel state
+            naming something on its way to being erased. */}
+          <button
+            type="button"
+            className="link-action"
+            data-testid="recoverable-link"
+            onClick={() => {
+              setShowingDeleted((open) => !open);
+            }}
+          >
+            ↺ Recently unregistered
+            {recoverable.value === null
+              ? ""
+              : ` · ${String(recoverable.value.length)}`}
+          </button>
+          <button
+            type="button"
+            className="button primary"
+            disabled={readOnly}
+            onClick={() => {
+              setRegistering((open) => !open);
+            }}
+          >
+            Register layer
+          </button>
+          <button
+            type="button"
+            disabled={readOnly || rows.length === 0}
+            onClick={() => {
+              void reingestAll();
+            }}
+          >
+            Reingest all
+          </button>
+        </div>
+      </div>
       {/* §13.2.1 marks a read-only registry on its read responses, so the
           state is presented once here and every write control is unavailable
           at once rather than each one failing when it is pressed. */}
       {readOnly && (
         <Banner tone="danger">
           <span data-testid="read-only-banner">
-            Something went wrong — the registry is temporarily read-only. Browsing and search still work.
+            Something went wrong — the registry is temporarily read-only.
+            Browsing and search still work.
           </span>
         </Banner>
       )}
-      <div className="panel-actions">
-        {/* The recoverable link leads the row and states how much is still
-            restorable, because that count is the one piece of panel state
-            naming something on its way to being erased. */}
-        <button
-          type="button"
-          className="link-action"
-          data-testid="recoverable-link"
-          onClick={() => {
-            setShowingDeleted((open) => !open);
-          }}
-        >
-          ↺ Recently unregistered
-          {recoverable.value === null ? '' : ` · ${String(recoverable.value.length)}`}
-        </button>
-        <button
-          type="button"
-          className="button primary"
-          disabled={readOnly}
-          onClick={() => {
-            setRegistering((open) => !open);
-          }}
-        >
-          Register layer
-        </button>
-        <button
-          type="button"
-          disabled={readOnly || rows.length === 0}
-          onClick={() => {
-            void reingestAll();
-          }}
-        >
-          Reingest all
-        </button>
-      </div>
       {registering && (
         <RegisterLayerForm
           subject={subject}
@@ -184,10 +227,16 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
           readOnly={readOnly}
         />
       )}
-      <p className="label quiet">Precedence — drag to reorder</p>
+      {/* The winning end of the order is named on the label itself. Left to
+          the reader's inference from position, a table sorted the other way
+          round reads the same. */}
+      <p className="precedence-label">
+        <span className="label">Precedence — drag to reorder</span>
+        <span className="quiet">lower row wins</span>
+      </p>
       <p className="quiet">
-        The last row wins. Every user-defined layer composes above every admin-defined layer, so a row moves within its
-        own block.
+        Every user-defined layer composes above every admin-defined layer, so a
+        row moves within its own block.
       </p>
       {rows.length === 0 ? (
         <EmptyState>No layers are registered under this tenant.</EmptyState>
@@ -256,8 +305,58 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
           </tbody>
         </table>
       )}
+      <PanelFoot rows={rows} subject={subject} />
     </section>
   );
+}
+
+/** PanelFoot closes the panel with the two facts no row carries: how many
+ * layers of the caller's own the §7.3.1 cap still leaves them, and that a
+ * reorder rewrites composition order alone. The cap comes from the §4.7.8
+ * quota read, which the registry gates on no role and the account menu takes
+ * against the same endpoint.
+ *
+ * The denominator is stated only where that read reports a positive cap. The
+ * value zero selects the deployment default and no response reports what that
+ * default resolved to, and a read that fails reports nothing, so both arms
+ * state the count alone rather than a limit no response carried. A caller who
+ * resolves no subject owns no row the panel can recognize as theirs, so that
+ * arm carries the reordering note by itself. */
+function PanelFoot({
+  rows,
+  subject,
+}: {
+  rows: LayerRecord[];
+  subject: string;
+}) {
+  const quota = useAsync(() => readQuota(), []);
+  const cap = quota.value?.limits?.MaxUserLayers;
+  const mine = rows.filter((row) => ownedByCaller(row, subject)).length;
+  return (
+    <p className="panel-foot quiet">
+      {subject !== "" && (
+        <>
+          <span data-testid="personal-layer-count">
+            {personalHolding(mine, cap)}
+          </span>
+          <span className="foot-divider" aria-hidden="true" />
+        </>
+      )}
+      <span>
+        Reordering takes effect on the next read; it does not trigger a
+        reingest.
+      </span>
+    </p>
+  );
+}
+
+/** personalHolding states how many user-defined layers the caller holds,
+ * against the cap where the quota read reported one. */
+function personalHolding(mine: number, cap: number | undefined): string {
+  if (cap !== undefined && cap > 0) {
+    return `You have ${String(mine)} of ${String(cap)} personal layers.`;
+  }
+  return `You have ${String(mine)} personal ${mine === 1 ? "layer" : "layers"}.`;
 }
 
 /** listOrdered reads the layer list in the order §4.6 composes it in. The
@@ -271,8 +370,12 @@ export function LayerPanel({ subject, readOnly }: { subject: string; readOnly: b
 async function listOrdered(): Promise<LayerRecord[]> {
   const layers = await listLayers();
   const byOrder = (a: LayerRecord, b: LayerRecord) => a.Order - b.Order;
-  const admin = layers.filter((layer) => layer.UserDefined !== true).sort(byOrder);
-  const user = layers.filter((layer) => layer.UserDefined === true).sort(byOrder);
+  const admin = layers
+    .filter((layer) => layer.UserDefined !== true)
+    .sort(byOrder);
+  const user = layers
+    .filter((layer) => layer.UserDefined === true)
+    .sort(byOrder);
   return [...admin, ...user];
 }
 
@@ -287,7 +390,9 @@ function blockOf(rows: LayerRecord[], id: string): LayerRecord[] {
   if (moving === undefined) {
     return [];
   }
-  return rows.filter((row) => (row.UserDefined === true) === (moving.UserDefined === true));
+  return rows.filter(
+    (row) => (row.UserDefined === true) === (moving.UserDefined === true),
+  );
 }
 
 /** movedOrder returns the block's resulting order after the dragged row is
@@ -306,7 +411,11 @@ function blockOf(rows: LayerRecord[], id: string): LayerRecord[] {
  * layer-write rule, and the list read is unfiltered, so a block holding a
  * layer this caller may not write has its move refused whole. The panel
  * presents that refusal on the row rather than predicting it. */
-function movedOrder(block: LayerRecord[], from: string, onto: string): string[] | null {
+function movedOrder(
+  block: LayerRecord[],
+  from: string,
+  onto: string,
+): string[] | null {
   const order = block.map((row) => row.ID);
   const at = order.indexOf(from);
   const target = order.indexOf(onto);
@@ -372,11 +481,14 @@ function LayerRow({
     });
   };
 
-  const rowClass = [dragging ? 'row-dragging' : '', over ? 'row-drop-target' : ''].filter((name) => name !== '');
+  const rowClass = [
+    dragging ? "row-dragging" : "",
+    over ? "row-drop-target" : "",
+  ].filter((name) => name !== "");
 
   return (
     <tr
-      className={rowClass.join(' ')}
+      className={rowClass.join(" ")}
       draggable={!readOnly}
       onDragStart={onDragStart}
       onDragOver={(event) => {
@@ -392,7 +504,11 @@ function LayerRow({
       onDragEnd={onDragEnd}
     >
       <td className="drag-cell">
-        <span className="drag-handle" aria-label={`Drag ${layer.ID} to reorder`} role="img">
+        <span
+          className="drag-handle"
+          aria-label={`Drag ${layer.ID} to reorder`}
+          role="img"
+        >
           ⋮⋮
         </span>
       </td>
@@ -407,7 +523,10 @@ function LayerRow({
                 states it as the field it is: no ownership language and none
                 of the marker's styling. */}
             <span className="quiet stored-owner" data-testid="stored-owner">
-              owner: {layer.Owner === undefined || layer.Owner === '' ? 'unset' : layer.Owner}
+              owner:{" "}
+              {layer.Owner === undefined || layer.Owner === ""
+                ? "unset"
+                : layer.Owner}
             </span>
           </>
         )}
@@ -427,7 +546,11 @@ function LayerRow({
             and the rest sit behind the overflow control. Stacking all three
             controls tripled the height of every row. */}
         <div className="row-action-bar">
-          <ReingestButton state={reingest} readOnly={readOnly} onStart={onReingest} />
+          <ReingestButton
+            state={reingest}
+            readOnly={readOnly}
+            onStart={onReingest}
+          />
           <button
             type="button"
             className="row-overflow"
@@ -464,7 +587,12 @@ function LayerRow({
             </button>
           </div>
         )}
-        <ReingestStatus layerID={layer.ID} state={reingest} onStart={onReingest} onDismiss={onDismissReingest} />
+        <ReingestStatus
+          layerID={layer.ID}
+          state={reingest}
+          onStart={onReingest}
+          onDismiss={onDismissReingest}
+        />
         {editing && (
           <UpdateLayerForm
             layer={layer}
@@ -490,9 +618,11 @@ function LayerRow({
         {refusal !== null && (
           <div className="row-refusal" role="alert">
             <p>
-              The registry refused that action and nothing changed.{' '}
+              The registry refused that action and nothing changed.{" "}
               <span className="mono">
-                {refusal.error instanceof ApiError ? refusal.error.code : 'registry.unavailable'}
+                {refusal.error instanceof ApiError
+                  ? refusal.error.code
+                  : "registry.unavailable"}
               </span>
             </p>
             {/* The refusal is cleared by re-issuing the write or by
@@ -533,7 +663,7 @@ function UnregisterConfirmation({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const [typed, setTyped] = useState('');
+  const [typed, setTyped] = useState("");
   const markers = visibilityMarkers(layer);
   return (
     <Modal title={`Unregister ${layer.ID}`} onClose={onCancel}>
@@ -541,7 +671,9 @@ function UnregisterConfirmation({
         {/* The reach of the write leads, in the danger tone, because it is
             the half that cannot be undone by the reader alone. */}
         <Banner tone="danger">
-          <p className="banner-title">Its artifacts disappear from every caller&rsquo;s view.</p>
+          <p className="banner-title">
+            Its artifacts disappear from every caller&rsquo;s view.
+          </p>
           <p>They leave the catalog the next time each caller syncs.</p>
         </Banner>
         {/* The recovery window is the half that limits the damage, so it is
@@ -549,8 +681,9 @@ function UnregisterConfirmation({
         <Banner>
           <p className="banner-title">Recoverable for {recoveryDays} days.</p>
           <p>
-            The layer and its artifacts are kept and can be restored from Recently unregistered until{' '}
-            {erasesOn(new Date())}, after which it is erased.
+            The layer and its artifacts are kept and can be restored from
+            Recently unregistered until {erasesOn(new Date())}, after which it
+            is erased.
           </p>
         </Banner>
         {/* What the layer grants today, so the reader confirms against the
@@ -559,7 +692,11 @@ function UnregisterConfirmation({
           <tbody>
             <tr>
               <th scope="row">visibility</th>
-              <td>{markers.length === 0 ? 'no grants — only you' : markers.join(', ')}</td>
+              <td>
+                {markers.length === 0
+                  ? "no grants — only you"
+                  : markers.join(", ")}
+              </td>
             </tr>
           </tbody>
         </table>
@@ -581,7 +718,12 @@ function UnregisterConfirmation({
         <button type="button" onClick={onCancel}>
           Cancel
         </button>
-        <button type="button" className="button danger" disabled={typed !== layer.ID} onClick={onConfirm}>
+        <button
+          type="button"
+          className="button danger"
+          disabled={typed !== layer.ID}
+          onClick={onConfirm}
+        >
           Unregister layer
         </button>
       </div>
@@ -597,7 +739,9 @@ function UnregisterConfirmation({
  * owner, because the write rule authorizes a tenant admin alone there and
  * that owner names no authorized subject. */
 function ownedByCaller(layer: LayerRecord, subject: string): boolean {
-  return layer.UserDefined === true && subject !== '' && layer.Owner === subject;
+  return (
+    layer.UserDefined === true && subject !== "" && layer.Owner === subject
+  );
 }
 
 /** LastIngestCell states when the layer was last ingested as an age, the way
@@ -607,15 +751,15 @@ function ownedByCaller(layer: LayerRecord, subject: string): boolean {
  * decode rather than a fact to scan, so the exact stamp moves to the cell's
  * title and the age is what the row displays. */
 function LastIngestCell({ layer }: { layer: LayerRecord }) {
-  const at = layer.last_ingested_at ?? '';
-  const ref = layer.LastIngestedRef ?? '';
+  const at = layer.last_ingested_at ?? "";
+  const ref = layer.LastIngestedRef ?? "";
   return (
-    <div title={at === '' ? undefined : at}>
-      <div>{at === '' ? 'never' : since(at, Date.now())}</div>
+    <div title={at === "" ? undefined : at}>
+      <div>{at === "" ? "never" : since(at, Date.now())}</div>
       {/* An em dash rather than an empty line: a source that carries no
           reference, such as a local path, keeps the row the same height as
           one that does. */}
-      <div className="quiet ingest-ref">{ref === '' ? '—' : shortRef(ref)}</div>
+      <div className="quiet ingest-ref">{ref === "" ? "—" : shortRef(ref)}</div>
     </div>
   );
 }
@@ -655,17 +799,17 @@ function visibilityMarkers(layer: LayerRecord): string[] {
   const groups = layer.Groups ?? [];
   const users = layer.Users ?? [];
   return [
-    layer.Public === true ? 'public' : '',
-    layer.Organization === true ? 'organization' : '',
-    groups.length > 0 ? `groups: ${summarize(groups)}` : '',
-    users.length > 0 ? `users: ${summarize(users)}` : '',
-  ].filter((marker) => marker !== '');
+    layer.Public === true ? "public" : "",
+    layer.Organization === true ? "organization" : "",
+    groups.length > 0 ? `groups: ${summarize(groups)}` : "",
+    users.length > 0 ? `users: ${summarize(users)}` : "",
+  ].filter((marker) => marker !== "");
 }
 
 /** summarize keeps an axis that names more members than the row can hold
  * inside its own marker, so the axis stays visible and the count is not
  * dropped to make room. */
 function summarize(members: string[]): string {
-  const shown = members.slice(0, 2).join(' · ');
+  const shown = members.slice(0, 2).join(" · ");
   return members.length > 2 ? `${shown} +${String(members.length - 2)}` : shown;
 }
