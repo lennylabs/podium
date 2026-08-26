@@ -618,6 +618,18 @@ h2.label {
   margin: 0;
 }
 
+/* The listings are ul elements, so they carry the user-agent list indent and
+   marker until they are reset. Left in place, the indent pushes a listing 40px
+   right of the section label that heads it and past the right edge of the
+   content column, and each listing draws its own left spacing from the row or
+   card inside it. */
+.artifact-list,
+.subdomain-grid,
+.relation-list {
+  padding: 0;
+  list-style: none;
+}
+
 .tag-list {
   list-style: none;
   padding: 0;

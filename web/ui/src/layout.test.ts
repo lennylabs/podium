@@ -314,6 +314,31 @@ describe("artifact listing", () => {
   });
 });
 
+// The listings are ul elements. The user-agent indent that a ul carries puts
+// the content of a listing 40px right of the section label above it and runs
+// the subdomain grid past the right edge of the content column, so board 14a's
+// flush left edge holds only once each listing resets it.
+describe("listing indent", () => {
+  /** listing attaches a ul carrying the given class and returns it. */
+  function listing(className: string): HTMLElement {
+    const list = document.createElement("ul");
+    list.className = className;
+    document.body.appendChild(list);
+    mounted.push(list);
+    return list;
+  }
+
+  for (const className of ["artifact-list", "subdomain-grid", "relation-list"]) {
+    it(`drops the user-agent list indent and marker on .${className}`, () => {
+      const list = listing(className);
+      expect(window.getComputedStyle(list).paddingLeft).toBe("0px");
+      // jsdom does not expand the list-style shorthand, so the marker is read
+      // from the rule rather than from the computed style.
+      expect(declaredFor(list, "list-style")).toBe("none");
+    });
+  }
+});
+
 // The command palette's selection is moved by the arrow keys alone, so board
 // 19a of the design pass marks the selected row with an accent bar at its
 // leading edge over the wash tint, and sets every row's artifact name in the
