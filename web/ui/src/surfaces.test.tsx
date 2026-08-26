@@ -6682,15 +6682,75 @@ describe("the trimmed listing", () => {
     note: "The listing was trimmed to fit the response budget.",
   };
 
+  /** heldBy is the catalog a domain holding `count` artifacts answers with. */
+  function heldBy(path: string, count: number): string[] {
+    return Array.from({ length: count }, (_, i) => `${path}/svc${String(i + 1)}`);
+  }
+
+  // The §4.5.5 notable_count cap trims the listing without a rendering note,
+  // because the note covers the budget and depth reductions alone. The page
+  // reads what the domain holds off the untruncated §4.5.2 catalog instead, so
+  // a listing the cap trimmed is not presented as the whole domain.
+  it("states the domain's own count where the cap trimmed the listing and the response carries no note", async () => {
+    const capped = {
+      path: "platform",
+      subdomains: [],
+      notable: heldBy("platform", 10).map((id) => ({ id, type: "skill" })),
+    };
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: capped },
+      "/v1/catalog": { body: { ids: heldBy("platform", 24) } },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    await screen.findByLabelText("Domain browser");
+    expect(await screen.findByText("listing trimmed")).toBeTruthy();
+    expect(screen.getByText("24 ARTIFACTS")).toBeTruthy();
+    const line = await screen.findByTestId("listing-continuation");
+    expect(line.textContent).toContain("10 of 24 artifacts shown.");
+    expect(
+      within(line).getByRole("link", { name: "Load the rest" }).getAttribute("href"),
+    ).toBe(searchHref("scope:platform"));
+  });
+
+  // A listing that carries everything the domain holds is not a trimmed one,
+  // and the catalog read that establishes it draws neither the pill nor the
+  // continuation line.
+  it("draws no trimmed treatment where the catalog counts what the listing carries", async () => {
+    const whole = {
+      path: "platform",
+      subdomains: [],
+      notable: heldBy("platform", 3).map((id) => ({ id, type: "skill" })),
+    };
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: whole },
+      "/v1/catalog": { body: { ids: heldBy("platform", 3) } },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    await screen.findByLabelText("Domain browser");
+    expect(await screen.findByText("3 ARTIFACTS")).toBeTruthy();
+    await waitFor(() => {
+      expect(
+        requests.some((r) => r.url.startsWith("/v1/catalog")),
+      ).toBe(true);
+    });
+    expect(screen.queryByText("listing trimmed")).toBeNull();
+    expect(screen.queryByTestId("listing-continuation")).toBeNull();
+  });
+
   // The trimmed case is a pill among the header badges and a line at the end
-  // of the list stating what is on the page against the match count, with a
-  // control that continues past the returned edge. The continuation is the
-  // scoped search the line takes its total from, because load_domain offers
-  // no lever over the notable list.
+  // of the list stating what is on the page against the domain's own count,
+  // with a control that continues past the returned edge. The continuation is
+  // a scoped search, because load_domain offers no lever over the notable
+  // list.
   it("states the shown count against the total and continues into the scoped search", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": { body: trimmed },
+      "/v1/catalog": { body: { ids: heldBy("platform", 21) } },
       "/v1/search_artifacts": { body: { total_matched: 21 } },
     });
     goTo("#/domain/platform");

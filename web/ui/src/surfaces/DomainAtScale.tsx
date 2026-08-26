@@ -8,11 +8,9 @@
 import { useState } from 'react';
 
 import type { ArtifactDescriptor, DomainDescriptor } from '../api';
-import { catalogArtifactIDs } from '../api';
 import { TypeBadge, formatVersion } from '../components/primitives';
 import { artifactCountLabel, artifactCounts, domainLabel, subdomainCountLabel } from '../domain';
 import { artifactHref, domainHref } from '../route';
-import { useAsync } from '../useAsync';
 
 /** tileCap is how many tiles the grid shows before the reader asks for the
  * rest, which keeps a domain with dozens of children to one screen. */
@@ -26,23 +24,31 @@ const tileCap = 12;
  * the reader on the busiest one first: the grid is ordered by that count, and
  * the caption under it says so. A load_domain descriptor
  * (`pkg/registry/server/server.go`, `DomainDescriptor`) carries the nested
- * subtree and no artifact count, so the count comes from one §4.5.2 catalog
- * read over this domain rather than from a scoped search behind every tile.
+ * subtree and no artifact count, so the count comes from the §4.5.2 catalog
+ * read the browser issues for the page rather than from a scoped search behind
+ * every tile.
  *
- * A catalog read that fails leaves the grid in the order the response returned
- * and the tile stating what that response reported below the child, which is
- * its subdomain count where it carries one. */
-export function SubdomainTiles({ subdomains, parent }: { subdomains: DomainDescriptor[]; parent: string }) {
+ * A catalog read that failed arrives as a null and leaves the grid in the order
+ * the response returned, with the tile stating what that response reported
+ * below the child, which is its subdomain count where it carries one. */
+export function SubdomainTiles({
+  subdomains,
+  parent,
+  catalog,
+}: {
+  subdomains: DomainDescriptor[];
+  parent: string;
+  catalog: string[] | null;
+}) {
   const [filter, setFilter] = useState('');
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [all, setAll] = useState(false);
-  const catalog = useAsync(() => catalogArtifactIDs(parent), [parent]);
 
   const counts =
-    catalog.value === null
+    catalog === null
       ? null
       : artifactCounts(
-          catalog.value,
+          catalog,
           subdomains.map((child) => child.path),
           parent,
         );

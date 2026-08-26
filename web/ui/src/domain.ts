@@ -69,6 +69,25 @@ export function artifactCounts(ids: string[], children: string[], parent: string
   return counts;
 }
 
+/** directArtifactCount is how many artifacts a §4.5.2 catalog read found
+ * directly inside `path`, rather than anywhere below it. The catalog is the
+ * whole visible set under the scope and the registry does not truncate it, so
+ * this is what the domain holds against what a `load_domain` listing returned.
+ *
+ * The count is of direct children alone, because the listing it is compared
+ * against is: an artifact one level down reaches the page as a folded entry
+ * with its own group, or not at all. */
+export function directArtifactCount(ids: string[], path: string): number {
+  let count = 0;
+  for (const id of ids) {
+    const cut = id.lastIndexOf('/');
+    if ((cut === -1 ? '' : id.slice(0, cut)) === path) {
+      count += 1;
+    }
+  }
+  return count;
+}
+
 /** scopePaths expands the subtree a load_domain response returned under
  * `parent` into every domain path a scope filter can name. Two structures put
  * a domain somewhere other than an entry's own `path`. A §4.5.5 sparse chain

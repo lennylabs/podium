@@ -7,8 +7,8 @@ import { ArtifactRow } from '../components/ArtifactRow';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge, EmptyState, ErrorPage, Loading } from '../components/primitives';
 import type { DomainDescriptor } from '../api';
-import { loadDomain, searchArtifacts } from '../api';
-import { domainLabel, subdomainCountLabel } from '../domain';
+import { catalogArtifactIDs, loadDomain } from '../api';
+import { directArtifactCount, domainLabel, subdomainCountLabel } from '../domain';
 import { domainHref, searchHref } from '../route';
 import { useAsync, useErrorReport } from '../useAsync';
 
@@ -38,6 +38,14 @@ function leafName(path: string): string {
 
 export function DomainBrowser({ path, onError }: { path: string; onError: (err: unknown) => void }) {
   const domain = useAsync(() => loadDomain(path, renderedDepth), [path]);
+  // §4.5.5 caps the notable list at the configured notable_count and surfaces
+  // a rendering note only for the two reductions the spec names, the response
+  // budget and the depth ceiling. A domain the cap trimmed therefore returns a
+  // short listing and no note, so the note alone cannot tell the page what the
+  // domain holds. The §4.5.2 catalog read can: it returns every visible ID
+  // under the scope and the registry does not truncate it. One read per domain
+  // page serves both the header count and the at-scale tile counts.
+  const catalog = useAsync(() => catalogArtifactIDs(path), [path]);
   useErrorReport(domain.error, onError);
 
   if (domain.loading) {
@@ -62,7 +70,12 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
   }
   const direct = body.notable.filter((a) => a.folded_from === undefined || a.folded_from === '');
   const folded = body.notable.filter((a) => a.folded_from !== undefined && a.folded_from !== '');
-  const trimmed = body.note !== undefined && body.note !== '';
+  // held is what the catalog reports the domain holds directly, and total is
+  // that figure once it exceeds the listing. A catalog read that failed leaves
+  // both unknown, and the page states what load_domain returned.
+  const held = catalog.value === null ? null : directArtifactCount(catalog.value, body.path);
+  const total = held !== null && held > direct.length ? held : null;
+  const trimmed = total !== null || (body.note !== undefined && body.note !== '');
   const compact = body.subdomains.length > atScale;
 
   return (
@@ -71,7 +84,12 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
       <div className="domain-head">
         <h1>{leafName(body.path)}</h1>
         <div className="domain-counts">
-          <CountBadge count={body.notable.length} noun="artifact" />
+          {/* The badge is the domain's own count rather than the listing's,
+              so a trimmed listing is not presented as the whole domain. The
+              two agree wherever nothing was trimmed, and the listing wins
+              where it carries entries the catalog does not count as direct
+              children, which is the folded group. */}
+          <CountBadge count={Math.max(body.notable.length, total ?? 0)} noun="artifact" />
           <CountBadge count={body.subdomains.length} noun="subdomain" />
           {trimmed && <Badge tone="accent">listing trimmed</Badge>}
         </div>
@@ -99,7 +117,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           The compact treatments carry their own label, because at this count
           the label shares its row with the controls over the listing. */}
       {compact && body.subdomains.length > 0 ? (
-        <SubdomainTiles subdomains={body.subdomains} parent={body.path} />
+        <SubdomainTiles subdomains={body.subdomains} parent={body.path} catalog={catalog.value} />
       ) : (
         <>
           <h2 className="label">Subdomains</h2>
@@ -129,7 +147,9 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
       )}
       {/* The trimmed listing is continued at the end of the list rather than
           announced above it: the reader meets it where the returned edge is. */}
-      {trimmed && <TrimmedListing scope={body.path} shown={direct.length} note={body.note ?? ''} />}
+      {trimmed && (
+        <TrimmedListing scope={body.path} shown={direct.length} total={total} note={body.note ?? ''} />
+      )}
 
       {folded.length > 0 && (
         <section className="folded">
@@ -163,25 +183,31 @@ function CountBadge({ count, noun }: { count: number; noun: string }) {
 }
 
 /** TrimmedListing is how a reader continues past the returned edge. The
- * response reports that it was trimmed and carries no total, so the total is
- * the match count an unfiltered search under this domain reports, which the
- * registry takes before it truncates its own result set. A count the search
- * did not return leaves the line stating what is on the page, because the
- * line reports what the reads returned rather than a figure derived from
- * neither.
+ * response reports what it returned and no total, so the total is the count
+ * the catalog read established. A total the read did not establish leaves the
+ * line stating what is on the page, because the line reports what the reads
+ * returned rather than a figure derived from neither.
  *
- * The continuation is that same scoped search rather than a deeper read of
- * this domain. `load_domain` takes the subtree depth as its only argument,
- * and the notable list is capped independently of it, so raising the depth
- * returns no artifact the reader does not already hold and can return fewer
- * once the §4.5.5 budget loop pops entries off the list. */
-function TrimmedListing({ scope, shown, note }: { scope: string; shown: number; note: string }) {
-  const total = useAsync(() => searchArtifacts({ query: '', type: '', scope, tags: [] }, 1), [scope]);
-  const matched = total.value?.total_matched ?? 0;
+ * The continuation is a scoped search rather than a deeper read of this
+ * domain. `load_domain` takes the subtree depth as its only argument, and the
+ * notable list is capped independently of it, so raising the depth returns no
+ * artifact the reader does not already hold and can return fewer once the
+ * §4.5.5 budget loop pops entries off the list. */
+function TrimmedListing({
+  scope,
+  shown,
+  total,
+  note,
+}: {
+  scope: string;
+  shown: number;
+  total: number | null;
+  note: string;
+}) {
   return (
     <div className="listing-continuation" role="status" data-testid="listing-continuation">
       <p className="quiet">
-        {matched > shown ? `${String(shown)} of ${String(matched)} artifacts shown.` : `${String(shown)} artifacts shown.`}{' '}
+        {total === null ? `${String(shown)} artifacts shown.` : `${String(shown)} of ${String(total)} artifacts shown.`}{' '}
         {note}
       </p>
       <a className="button" data-testid="listing-continue" href={scopedSearchHref(scope)}>
