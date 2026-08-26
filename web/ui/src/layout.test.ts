@@ -632,6 +632,47 @@ describe("restore table columns", () => {
   });
 });
 
+// Every data table separates its header row from the listing by drawing the
+// header on the inset tone. The layer panel and the restore table took the
+// tone from the at-scale table's column-label class, which they do not carry,
+// so their headers painted the same fill as the rows under them.
+describe("data table header row", () => {
+  it("draws the layer panel's header row on the inset tone", () => {
+    const { headers, table } = layerTable();
+    const body = table.querySelector("td") as HTMLTableCellElement;
+    expect(window.getComputedStyle(headers[1]).backgroundColor).toBe("var(--surf2)");
+    expect(window.getComputedStyle(body).backgroundColor).not.toBe("var(--surf2)");
+  });
+
+  it("draws the restore table's header row on the inset tone", () => {
+    const { headers, id } = restoreTable();
+    expect(window.getComputedStyle(headers[0]).backgroundColor).toBe("var(--surf2)");
+    expect(window.getComputedStyle(id).backgroundColor).not.toBe("var(--surf2)");
+  });
+
+  it("draws the at-scale artifact table's header row on the same tone", () => {
+    const header = document.createElement("th");
+    header.className = "column-label";
+    const table = document.createElement("table");
+    table.className = "data-table";
+    const head = document.createElement("thead");
+    const headRow = document.createElement("tr");
+    headRow.appendChild(header);
+    head.appendChild(headRow);
+    table.appendChild(head);
+    document.body.appendChild(table);
+    mounted.push(table);
+    expect(window.getComputedStyle(header).backgroundColor).toBe("var(--surf2)");
+  });
+
+  // A `th scope="row"` labels its own row from inside the body, so it belongs
+  // to the listing and takes no header fill.
+  it("leaves a row header inside the body on the listing tone", () => {
+    const key = descendantStyle("data-table property-table", "th");
+    expect(key.backgroundColor).not.toBe("var(--surf2)");
+  });
+});
+
 // A frontmatter value is authored, so it can be one unbroken token such as a
 // serialised nested map. A table takes its min-content width as an automatic
 // minimum, so a cell that cannot break sets the property table wider than the

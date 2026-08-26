@@ -1180,6 +1180,15 @@ input[type="checkbox"] {
   font-size: 13.5px;
 }
 
+/* The header row is drawn on the inset tone so it separates from the listing
+   below it. Every data table takes it from here, so the layer panel, the
+   restore table, and the at-scale artifact table read as one treatment. The
+   row-header cells inside a body row are excluded: a `th scope="row"` labels
+   its own row and belongs to the listing. */
+.data-table thead th {
+  background-color: var(--surf2);
+}
+
 /* Frontmatter is authored, so a key or a value can be one unbroken token such
    as a serialised nested map. A table takes its min-content width as an
    automatic minimum, and an unbreakable cell therefore sets the property table
@@ -2741,7 +2750,6 @@ label:has(> input:disabled) {
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--meta);
-  background: var(--surf2);
 }
 
 /* The author's own picks are a block of their own under an accent header, so
