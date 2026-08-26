@@ -54,9 +54,15 @@ interface Refusal {
 export function LayerPanel({
   subject,
   readOnly,
+  onCatalogChange,
 }: {
   subject: string;
   readOnly: boolean;
+  /** onCatalogChange tells the shell that a write moved what the catalog
+   * holds, so the counts the sidebar footer states are re-read. The panel
+   * owns no part of that footer, and without the signal it keeps the figure
+   * the page loaded with for the rest of the session. */
+  onCatalogChange: () => void;
 }) {
   const layers = useAsync(() => listOrdered(), []);
   // The recoverable list is read for its count alone here. The section it
@@ -88,6 +94,15 @@ export function LayerPanel({
   }
   const rows = layers.value ?? [];
 
+  /** afterWrite re-reads everything a layer write moves: the panel's own
+   * rows, and the shell's catalog counts. Every write path goes through it,
+   * because a register, an unregister, a restore, and a reingest each change
+   * a figure the footer states. */
+  const afterWrite = () => {
+    layers.reload();
+    onCatalogChange();
+  };
+
   const recordRefusal = (id: string, err: unknown, retry: () => void) => {
     setRefusals((prev) => ({ ...prev, [id]: { error: err, retry } }));
   };
@@ -110,7 +125,7 @@ export function LayerPanel({
       const summary = await reingestLayer(id, breakGlass);
       setRowReingest(id, { kind: "summary", summary });
       clearRefusal(id);
-      layers.reload();
+      afterWrite();
     } catch (err: unknown) {
       setRowReingest(id, reingestRefusal(err));
     }
@@ -136,7 +151,7 @@ export function LayerPanel({
       reorderLayers(order).then(
         () => {
           clearRefusal(from);
-          layers.reload();
+          afterWrite();
         },
         (err: unknown) => {
           recordRefusal(from, err, send);
@@ -225,7 +240,7 @@ export function LayerPanel({
       {registering && (
         <RegisterLayerForm
           subject={subject}
-          onRegistered={layers.reload}
+          onRegistered={afterWrite}
           onClose={() => {
             setRegistering(false);
           }}
@@ -235,7 +250,7 @@ export function LayerPanel({
       {showingDeleted && (
         <DeletedLayers
           onRestored={() => {
-            layers.reload();
+            afterWrite();
             recoverable.reload();
           }}
           readOnly={readOnly}
@@ -307,7 +322,7 @@ export function LayerPanel({
                 }}
                 onWrite={() => {
                   clearRefusal(layer.ID);
-                  layers.reload();
+                  afterWrite();
                   // An unregister moves the layer into the recoverable list,
                   // so the count the header states is re-read on every write
                   // rather than only on the one that reopens the section.

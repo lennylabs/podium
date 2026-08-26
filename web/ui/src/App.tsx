@@ -89,8 +89,10 @@ export function App() {
   // The footer counts. The layer list carries the layer count and the last
   // ingest each layer reports, and the catalog's artifact count is the match
   // count an unfiltered search reports, which the registry takes before it
-  // truncates the result set. Both are read once for the page rather than on
-  // each route, because neither depends on where the reader is.
+  // truncates the result set. Neither depends on where the reader is, so the
+  // route does not re-read them; a layer write does, through the panel's
+  // catalog-change signal, because a register or an unregister moves the very
+  // figures the footer states.
   const counts = useAsync(() => readCounts(), [catalogNonce]);
 
   useEffect(() => {
@@ -243,7 +245,13 @@ export function App() {
           {refused && !expired && route.name !== 'layers' ? (
             <RefusedCatalog error={catalogError} recovery={recovery} />
           ) : (
-            <Surface route={route} subject={subject} readOnly={readOnly} onCatalogOutcome={onCatalogOutcome} />
+            <Surface
+              route={route}
+              subject={subject}
+              readOnly={readOnly}
+              onCatalogOutcome={onCatalogOutcome}
+              onCatalogChange={counts.reload}
+            />
           )}
         </main>
       </div>
@@ -256,11 +264,13 @@ function Surface({
   subject,
   readOnly,
   onCatalogOutcome,
+  onCatalogChange,
 }: {
   route: ReturnType<typeof useRoute>;
   subject: string;
   readOnly: boolean;
   onCatalogOutcome: (err: unknown) => void;
+  onCatalogChange: () => void;
 }) {
   switch (route.name) {
     case 'search':
@@ -271,7 +281,7 @@ function Surface({
     case 'artifact':
       return <ArtifactViewer id={route.id} onError={onCatalogOutcome} />;
     case 'layers':
-      return <LayerPanel subject={subject} readOnly={readOnly} />;
+      return <LayerPanel subject={subject} readOnly={readOnly} onCatalogChange={onCatalogChange} />;
     case 'domain':
       return <DomainBrowser path={route.path} onError={onCatalogOutcome} />;
   }

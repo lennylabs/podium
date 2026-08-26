@@ -2498,6 +2498,50 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The sidebar footer states how many layers the tenant carries and how many
+  // artifacts its catalog matches, and a layer write moves both. Read once
+  // for the page, the footer kept the figures the reader arrived with for the
+  // rest of the session, so a register or an unregister left it stating a
+  // count no response carried.
+  it("re-reads the sidebar counts after a layer write", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 312 } },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-counts").textContent).toBe(
+        "2 layers · 312 artifacts",
+      );
+    });
+    // The write lands, and the registry answers every read after it with the
+    // catalog the write left behind.
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 200 } },
+      "DELETE /v1/layers": { body: {} },
+      "/v1/layers?deleted=true": { body: { layers: [userLayer()] } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+    });
+    openRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    await screen.findByLabelText("Unregister alice-personal");
+    fireEvent.change(screen.getByLabelText("Type the layer ID to confirm"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Unregister layer" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-counts").textContent).toBe(
+        "1 layers · 200 artifacts",
+      );
+    });
+  });
+
   // The confirmation is a dialog over a scrim rather than a panel inside the
   // row's actions cell. Rendered into the cell it took the column's width and
   // grew the row by several hundred pixels, which pushed every row below it
