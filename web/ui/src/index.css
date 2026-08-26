@@ -1100,6 +1100,16 @@ input[type="checkbox"] {
   accent-color: var(--acc);
 }
 
+/* Chrome draws its own clear control inside a search field, filled in a
+   saturated blue no token in the set carries, so it lands as the one
+   non-accent colour on the surface it sits in. Every search field here draws
+   the affordances it wants, the palette's magnifier and match count among
+   them, and none of them asks for a clear control. */
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
 /* The magnifier is drawn at whatever size its caller asks for, and it never
    shrinks in the flex row it sits in. */
 .magnifier {
