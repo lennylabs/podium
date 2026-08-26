@@ -369,10 +369,38 @@ h3 {
   min-width: 0;
 }
 
+/* The trail above the page title. It reads as one dimmed path in the same
+   monospace the identifiers use, so the eye takes it as position rather than
+   as a row of actions: the ancestors are muted, the slashes between them are
+   fainter still, and the segment the reader already stands on is plain ink
+   text carrying no link. */
 .breadcrumb {
   display: flex;
-  gap: 8px;
-  font-size: 12.5px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--faint);
+}
+
+.breadcrumb a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.breadcrumb a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.breadcrumb-sep {
+  color: var(--b2);
+}
+
+.breadcrumb-here {
+  color: var(--ink);
+  font-weight: 500;
 }
 
 /* The page title row. The heading names the page and the badges qualifying

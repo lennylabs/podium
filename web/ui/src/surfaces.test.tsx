@@ -937,6 +937,54 @@ describe("the domain browser", () => {
     ).toBeTruthy();
   });
 
+  // The trail reads as one path rather than as a row of links: a slash
+  // between the segments, the registry root opening it as "catalog", and the
+  // domain the reader is already on standing as plain text.
+  it("separates the breadcrumb segments and leaves the current one unlinked", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform/observability/tracing",
+          subdomains: [],
+          notable: [],
+        },
+      },
+    });
+    goTo("#/domain/platform%2Fobservability%2Ftracing");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const trail = within(browser).getByRole("navigation", {
+      name: "Breadcrumb",
+    });
+    expect(trail.textContent).toBe("catalog/platform/observability/tracing");
+    expect(within(trail).getByRole("link", { name: "catalog" })).toBeTruthy();
+    // The page's own segment carries no link, and it is the only one marked
+    // as the reader's position.
+    expect(within(trail).queryByRole("link", { name: "tracing" })).toBeNull();
+    const here = trail.querySelectorAll('[aria-current="page"]');
+    expect(here.length).toBe(1);
+    expect(here[0].textContent).toBe("tracing");
+    // The trail is set in the identifier face, at the weight that separates
+    // the reader's position from the ancestry above it.
+    expect(window.getComputedStyle(trail).fontFamily).toBe("var(--font-mono)");
+    expect(window.getComputedStyle(here[0]).fontWeight).toBe("500");
+  });
+
+  it("carries the registry root as the single word catalog", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const trail = within(browser).getByRole("navigation", {
+      name: "Breadcrumb",
+    });
+    expect(trail.textContent).toBe("catalog");
+    expect(within(trail).queryByRole("link")).toBeNull();
+  });
+
   it("titles the registry root, which has no leaf segment", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -1278,6 +1326,12 @@ describe("the artifact viewer", () => {
     expect(
       within(trail).getByText("accounts-payable").getAttribute("href"),
     ).toBe("#/domain/finance%2Faccounts-payable");
+    // The artifact itself ends the trail, as plain text rather than a link
+    // back to the page being read.
+    expect(trail.textContent).toBe(
+      "catalog/finance/accounts-payable/pay-invoice",
+    );
+    expect(within(trail).queryByRole("link", { name: "pay-invoice" })).toBeNull();
     expect(within(content).getByText("Pay a supplier invoice.")).toBeTruthy();
     // The response carries no classification, so the badge is absent rather
     // than standing empty.

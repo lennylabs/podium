@@ -98,7 +98,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   return (
     <section className="surface artifact-viewer" aria-label="Artifact viewer">
       <div className="artifact-content">
-        <Breadcrumb path={domainOf(body.id)} />
+        <Breadcrumb path={domainOf(body.id)} current={artifactName(body.id)} />
         <div className="page-title">
           <h1>{artifactName(body.id)}</h1>
           <TypeBadge type={body.type} />
