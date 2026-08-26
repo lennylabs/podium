@@ -287,11 +287,21 @@ export function LayerPanel({
               <th className="drag-cell">
                 <span className="label">Move</span>
               </th>
-              <th>Layer</th>
-              <th>Source</th>
-              <th>Visibility</th>
-              <th>Last ingest</th>
-              <th>Actions</th>
+              <th>
+                <span className="label">Layer</span>
+              </th>
+              <th>
+                <span className="label">Source</span>
+              </th>
+              <th>
+                <span className="label">Visibility</span>
+              </th>
+              <th>
+                <span className="label">Last ingest</span>
+              </th>
+              {/* The actions column carries no header, so the header row reads
+                  as the columns that name data. */}
+              <th />
             </tr>
           </thead>
           <tbody>

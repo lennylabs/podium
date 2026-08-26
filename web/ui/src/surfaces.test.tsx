@@ -2049,6 +2049,27 @@ describe("the layer panel", () => {
     expect(screen.queryByText("yours")).toBeNull();
   });
 
+  // The header row is drawn entirely in the section-label style, so the
+  // column names read as one row rather than as mono handles beside
+  // sentence-case sans text. The actions column names no data and carries
+  // no header at all.
+  it("draws every column header in the section-label style", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const headers = Array.from(
+      document.querySelectorAll("table.layer-table thead th"),
+    );
+    expect(
+      headers.map((header) => header.querySelector(".label")?.textContent ?? ""),
+    ).toEqual(["Move", "Layer", "Source", "Visibility", "Last ingest", ""]);
+    expect(headers[5].textContent).toBe("");
+  });
+
   // Every row shares one grid and the actions column is fixed width, so the
   // row's controls stay on one line: one action plus an overflow control.
   // Rendering Edit, Reingest, and Unregister side by side stacked them and
