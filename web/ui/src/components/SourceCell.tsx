@@ -22,7 +22,18 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
       <div className="source-cell">
         <div className="source-ref">
           <Badge tone="quiet">git</Badge>
-          <span className="mono">{present(layer.Ref) ? layer.Ref : 'default branch'}</span>
+          {/* §4.6: the git source resolves its tree at the ref and has no
+              default, so a row carrying none is refused on every ingest with
+              "git source requires ref". Reading the empty ref as a default
+              branch asserts a fallback the registry does not implement, and
+              the reader is left to work out from the refusal why a layer that
+              registered cleanly serves nothing. The row names the missing ref
+              instead. */}
+          {present(layer.Ref) ? (
+            <span className="mono">{layer.Ref}</span>
+          ) : (
+            <Badge tone="danger">no ref</Badge>
+          )}
         </div>
         <Detail value={layer.Repo ?? ''} />
         {present(layer.Root) && <Detail value={`${layer.Root}/`} />}

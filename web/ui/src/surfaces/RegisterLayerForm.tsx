@@ -98,8 +98,17 @@ export function RegisterLayerForm({
   // selected axis carries at least one member.
   const groupMembers = members(groups);
   const userMembers = members(users);
+  // §4.6: the git source resolves its tree at the ref, and it has no default.
+  // The registration itself is accepted with the ref blank, so a layer
+  // registered without one issues its webhook secret, takes a place in the
+  // order, and is then refused on every ingest with
+  // "git source requires ref". The form holds the write until the ref is
+  // named rather than handing the reader a layer that can never serve an
+  // artifact.
+  const refMissing = sourceType === 'git' && ref.trim() === '';
   const incomplete =
-    !userDefined && ((groupScoped && groupMembers.length === 0) || (userScoped && userMembers.length === 0));
+    refMissing ||
+    (!userDefined && ((groupScoped && groupMembers.length === 0) || (userScoped && userMembers.length === 0)));
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -224,6 +233,7 @@ export function RegisterLayerForm({
                   <input
                     type="text"
                     value={ref}
+                    aria-required="true"
                     onChange={(event) => {
                       setRef(event.target.value);
                     }}
@@ -240,8 +250,10 @@ export function RegisterLayerForm({
                   />
                 </label>
               </div>
-              <p className="quiet">
-                Leave the root empty to ingest the whole repository, or name the subdirectory the artifacts live under.
+              <p className="quiet" data-testid="register-git-note">
+                Name the branch, tag, or commit to ingest as the ref; a git layer has no default and cannot ingest
+                without one. Leave the root empty to ingest the whole repository, or name the subdirectory the
+                artifacts live under.
               </p>
             </>
           ) : (

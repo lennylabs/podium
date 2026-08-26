@@ -3892,6 +3892,82 @@ describe("the layer write flows", () => {
     expect(sent.root).toBeUndefined();
   });
 
+  // §4.6: the git source resolves its tree at the ref and has no default, so
+  // a git layer registered with the ref blank is accepted, issues its
+  // one-time secret, takes a place in the order, and is then refused on
+  // every ingest with "git source requires ref". The form holds the write
+  // until the ref is named, and a local source is unaffected by the hold.
+  it("holds a git registration until the ref is named", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = screen.getByRole("dialog", { name: "Register a layer" });
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "ops" },
+    });
+    fireEvent.change(screen.getByLabelText("Repository"), {
+      target: { value: "git@github.com:acme/ops.git" },
+    });
+    const register = within(dialog).getByRole("button", { name: "Register" });
+    expect(register.hasAttribute("disabled")).toBe(true);
+    // Whitespace names no ref either.
+    fireEvent.change(screen.getByLabelText("Ref"), { target: { value: "  " } });
+    expect(register.hasAttribute("disabled")).toBe(true);
+    // A local source reads no ref, so the hold does not reach it.
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    expect(register.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(screen.getByRole("radio", { name: "Git repository" }));
+    expect(register.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByLabelText("Ref"), {
+      target: { value: "main" },
+    });
+    expect(register.hasAttribute("disabled")).toBe(false);
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await waitFor(() => {
+      expect(
+        requests.some((r) => r.url === "/v1/layers" && r.method === "POST"),
+      ).toBe(true);
+    });
+    const sent = JSON.parse(bodies.at(-1) ?? "{}") as Record<string, unknown>;
+    expect(sent.ref).toBe("main");
+  });
+
+  // A git row carrying no ref cannot ingest at all, so the source cell names
+  // the missing ref rather than reading it as a default branch the registry
+  // does not implement.
+  it("names a git row's missing ref rather than asserting a default branch", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "ops",
+              SourceType: "git",
+              Repo: "git@github.com:acme/ops.git",
+              Ref: "",
+              Order: 1,
+              Public: true,
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const cell = layerRow("ops").querySelector(".source-cell");
+    expect(cell?.textContent).not.toContain("default branch");
+    expect(cell?.textContent).toContain("no ref");
+  });
+
   // §13.10 puts the layer panel's writes on the panel, and a registration is
   // reviewed before it is sent, so the form is a dialog over a scrim with the
   // panel underneath keeping its position. The inline panel it replaced named
