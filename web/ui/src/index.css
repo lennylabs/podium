@@ -817,6 +817,13 @@ h2.label {
   text-wrap: pretty;
 }
 
+/* The absent case. `.quiet` is declared above this block, so the description
+   colour would otherwise win over it and the placeholder would read at the
+   weight of a description the artifact does not carry. */
+.artifact-description.quiet {
+  color: var(--meta);
+}
+
 /* The three-line clip both surfaces read the same description at. The listing
    row always clips; the artifact header clips until the reader opens it. */
 .artifact-description,

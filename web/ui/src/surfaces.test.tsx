@@ -851,6 +851,35 @@ describe("the domain browser", () => {
     expect(within(row).queryByText("curated")).toBeNull();
   });
 
+  // Spec: §13.10 — a manifest carries no required description, and the row's
+  // right-hand column holds the row's height whether a description line is
+  // drawn or not. A row that omits the line therefore reads as a description
+  // that failed to render rather than as an artifact that carries none.
+  it("states the absent description on a listing row rather than leaving the line blank", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: [],
+          notable: [
+            { id: "platform/deploy", type: "context", description: "Deploy runbook." },
+            { id: "platform/nodesc", type: "context" },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const rows = within(browser).getAllByRole("listitem");
+    expect(within(rows[0]).getByText("Deploy runbook.")).toBeTruthy();
+    const absent = within(rows[1]).getByText("No description.");
+    // The placeholder reads in the meta tone, so it does not carry the weight
+    // of a description the artifact does not have.
+    expect(absent.className).toContain("quiet");
+  });
+
   // The listings are divided by labels rather than by titles, so the page
   // carries one heading at title weight and the two dividers stay quiet.
   it("divides the listings with section labels rather than with page-title-weight headings", async () => {

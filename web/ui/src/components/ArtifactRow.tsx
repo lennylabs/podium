@@ -117,8 +117,16 @@ export function ArtifactRow({
           )}
           {scored && filled === 0 && <span className="quiet label">matched by meaning</span>}
         </div>
-        {artifact.description !== undefined && artifact.description !== '' && (
+        {/* A manifest carries no required description, and the row's aside
+            column holds the row's height whether the line is drawn or not, so
+            omitting it leaves blank space under the identifier that reads as a
+            description that failed to render. The absent case therefore states
+            itself, in the quiet tone the subdomain card and the compact
+            listing already state it in. */}
+        {artifact.description !== undefined && artifact.description !== '' ? (
           <p className="artifact-description">{artifact.description}</p>
+        ) : (
+          <p className="artifact-description quiet">No description.</p>
         )}
         {artifact.tags !== undefined && artifact.tags.length > 0 && (
           <ul className="tag-list">
