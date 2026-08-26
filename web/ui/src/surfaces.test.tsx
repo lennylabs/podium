@@ -2494,6 +2494,60 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // The version the picker names belongs to the artifact it was named for. A
+  // route change from one viewer to another reuses the component, so a pin
+  // that survived it would read the next artifact at a version that artifact
+  // has no candidate for, and the viewer would report an artifact that exists
+  // as missing.
+  it("drops the version the picker named when the route opens another artifact", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact?id=eng%2Fdeploy": {
+        body: {
+          id: "eng/deploy",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Deploy\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/load_artifact?id=eng%2Fxss": {
+        body: {
+          id: "eng/xss",
+          type: "context",
+          version: "0.1.0",
+          content_hash: "sha256:def",
+          manifest_body: "# Escaping\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/eng%2Fdeploy");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    // No stub answers this version, so the registry refuses the pin.
+    fireEvent.change(screen.getByLabelText("Version"), {
+      target: { value: "9.9.9" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    await screen.findByTestId("version-refused");
+
+    goTo("#/artifact/eng%2Fxss");
+    expect(await screen.findByRole("heading", { name: "xss" })).toBeTruthy();
+    expect(screen.queryByTestId("artifact-failed")).toBeNull();
+    expect(screen.queryByTestId("version-refused")).toBeNull();
+    expect((screen.getByLabelText("Version") as HTMLInputElement).value).toBe(
+      "",
+    );
+    // The next artifact is read at its latest version rather than at the
+    // version the previous one was pinned to.
+    expect(
+      requests.some((r) => r.url.includes("id=eng%2Fxss&version=")),
+    ).toBe(false);
+  });
+
   // The registry prefixes several §6.10 messages with the code they carry, and
   // the banner already states that code on a line of its own. The prose is
   // stripped of the repetition so the reader is told the code once.

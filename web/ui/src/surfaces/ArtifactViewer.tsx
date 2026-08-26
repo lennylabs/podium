@@ -61,6 +61,19 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // it the reader loses the picker along with the rest of the surface, and
   // the route still names this artifact, so nothing is left to recover with.
   const [held, setHeld] = useState<LoadArtifactResponse | null>(null);
+  // The version the picker named belongs to the artifact it was named for. A
+  // route change from one viewer to another reuses this component rather than
+  // remounting it, so without this the next artifact is read at the previous
+  // one's pinned version, the registry answers registry.not_found, and the
+  // viewer reports an artifact that exists as missing. The pin and the latest
+  // version it is compared against both start over, the way the held response
+  // already does.
+  const [viewed, setViewed] = useState(id);
+  if (viewed !== id) {
+    setViewed(id);
+    setViewing('');
+    setLatest('');
+  }
   const artifact = useAsync(() => loadArtifact(id, viewing === '' ? undefined : viewing), [id, viewing]);
   useErrorReport(artifact.error, onError);
   if (artifact.value !== null && artifact.value !== held) {
