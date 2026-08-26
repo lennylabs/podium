@@ -1492,9 +1492,9 @@ describe('the layer write flows', () => {
     await screen.findByLabelText('Layer panel');
     openRowActions();
     fireEvent.click(screen.getByRole('button', { name: 'Unregister' }));
-    const dialog = await screen.findByLabelText('Unregister a layer');
+    const dialog = await screen.findByLabelText('Unregister alice-personal');
     expect(dialog.textContent).toContain('every caller');
-    expect(dialog.textContent).toContain('recoverable for 30 days');
+    expect(dialog.textContent).toContain('Recoverable for 30 days');
     expect(requests.some((r) => r.method === 'DELETE')).toBe(false);
     const confirm = screen.getByRole('button', { name: 'Unregister layer' });
     expect(confirm.hasAttribute('disabled')).toBe(true);
@@ -1503,6 +1503,37 @@ describe('the layer write flows', () => {
     await waitFor(() => {
       expect(requests.some((r) => r.url.startsWith('/v1/layers?') && r.method === 'DELETE')).toBe(true);
     });
+  });
+
+  // The confirmation is a dialog over a scrim rather than a panel inside the
+  // row's actions cell. Rendered into the cell it took the column's width and
+  // grew the row by several hundred pixels, which pushed every row below it
+  // down the page while the reader was deciding.
+  it('opens the unregister confirmation as a dialog over a scrim rather than inside the row', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    openRowActions();
+    fireEvent.click(screen.getByRole('button', { name: 'Unregister' }));
+    const dialog = await screen.findByLabelText('Unregister alice-personal');
+    expect(screen.getByTestId('modal-scrim').contains(dialog)).toBe(true);
+    expect(dialog.closest('tr')).toBeNull();
+    // The audience the write takes the layer from is stated beside the ID
+    // the reader types, so the confirmation names more than the ID.
+    expect(screen.getByTestId('unregister-properties').textContent).toContain('no grants');
+    // Cancel leads the footer and the destructive control carries the danger
+    // tone, so the press that reaches every caller is the one to aim for.
+    const confirm = screen.getByRole('button', { name: 'Unregister layer' });
+    const foot = confirm.parentElement as HTMLElement;
+    expect(within(foot).getAllByRole('button').map((button) => button.textContent)).toEqual([
+      'Cancel',
+      'Unregister layer',
+    ]);
+    expect(confirm.className).toContain('danger');
   });
 
   // §13.10 makes the panel the surface a user manages their own user-defined

@@ -63,6 +63,7 @@
   --danger: #b3341c;
   --danger-bg: #fdeee9;
   --danger-bd: #f0c4b8;
+  --on-danger: #ffffff;
   --scrim: rgba(20, 19, 15, 0.42);
   --font-ui: 'Space Grotesk', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -91,6 +92,7 @@
     --danger: #ff6b4a;
     --danger-bg: rgba(255, 107, 74, 0.12);
     --danger-bd: #5c2a1e;
+    --on-danger: #14130f;
     --scrim: rgba(6, 8, 13, 0.62);
   }
 }
@@ -114,6 +116,7 @@
   --danger: #ff6b4a;
   --danger-bg: rgba(255, 107, 74, 0.12);
   --danger-bd: #5c2a1e;
+  --on-danger: #14130f;
   --scrim: rgba(6, 8, 13, 0.62);
 }
 
@@ -759,6 +762,23 @@ button,
   color: var(--on-acc);
 }
 
+/* The destructive confirm. It is filled in the danger tone so the press that
+   takes a layer from every caller does not read as the press beside it that
+   dismisses the dialog, and it falls back to the outlined tone while the
+   typed gate holds it, so an unavailable control does not look pressable. */
+.button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-danger);
+}
+
+.button.danger:disabled {
+  background: var(--danger-bg);
+  border-color: var(--danger-bd);
+  color: var(--danger);
+  cursor: not-allowed;
+}
+
 :focus-visible {
   outline: none;
   border-color: var(--acc);
@@ -936,7 +956,6 @@ button,
 /* A panel a row control opens is read, filled in, or acted on, so it carries
    its own minimum width and the column widens for as long as it is open. The
    120px hint sizes the closed row alone. */
-.row-actions .confirm,
 .row-actions .row-refusal,
 .row-actions .loading {
   min-width: 320px;
@@ -1224,17 +1243,6 @@ button,
   background: var(--surf2);
   border: 1px solid var(--bd);
   border-radius: 8px;
-}
-
-/* The unregister confirmation. It sits in the row it was opened from and
-   carries the two statements plus the typed-ID gate, so it reads as a step
-   between the press and the write rather than as another row control. */
-.confirm {
-  padding: 12px 14px;
-  margin-top: 8px;
-  border: 1px solid var(--danger);
-  border-radius: 10px;
-  background: var(--surf);
 }
 
 /* The registry the page is served from, set behind the wordmark by a rule

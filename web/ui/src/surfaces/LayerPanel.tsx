@@ -17,7 +17,7 @@ import { RegisterLayerForm } from './RegisterLayerForm';
 import type { ReingestState } from './ReingestControl';
 import { idleReingest, ReingestButton, ReingestStatus, reingestRefusal } from './ReingestControl';
 import { UpdateLayerForm } from './UpdateLayerForm';
-import { Badge, Banner, EmptyState, ErrorState, Loading } from '../components/primitives';
+import { Badge, Banner, EmptyState, ErrorState, Loading, Modal } from '../components/primitives';
 import { SourceCell } from '../components/SourceCell';
 import type { BreakGlass, LayerRecord } from '../api';
 import { ApiError, listDeletedLayers, listLayers, reingestLayer, reorderLayers, unregisterLayer } from '../api';
@@ -514,6 +514,12 @@ function LayerRow({
  * and the layer stays restorable until the recovery window runs out. The
  * write is issued only once the reader has typed the layer's own ID, so the
  * action cannot be taken by a single press on the row it sits in.
+ *
+ * It is a dialog over a scrim rather than a panel inside the row's actions
+ * cell. Rendered into the cell it took the column's width, so the statements
+ * wrapped to a few words a line and ran past the edge of the table, and it
+ * grew the row it opened from by several hundred pixels, which pushed every
+ * row below it down the page while the reader was deciding.
  */
 function UnregisterConfirmation({
   layer,
@@ -525,30 +531,58 @@ function UnregisterConfirmation({
   onConfirm: () => void;
 }) {
   const [typed, setTyped] = useState('');
+  const markers = visibilityMarkers(layer);
   return (
-    <div className="confirm" role="dialog" aria-label="Unregister a layer">
-      <p className="banner-title">Unregister {layer.ID}?</p>
-      <p>Its artifacts disappear from every caller&rsquo;s view the next time they sync.</p>
-      <p>
-        The layer is recoverable for {recoveryDays} days, until {erasesOn(new Date())}, after which it is erased.
-      </p>
-      <label className="field">
-        <span className="label">Type the layer ID to confirm</span>
-        <input
-          type="text"
-          value={typed}
-          onChange={(event) => {
-            setTyped(event.target.value);
-          }}
-        />
-      </label>
-      <button type="button" disabled={typed !== layer.ID} onClick={onConfirm}>
-        Unregister layer
-      </button>
-      <button type="button" onClick={onCancel}>
-        Cancel
-      </button>
-    </div>
+    <Modal title={`Unregister ${layer.ID}`} onClose={onCancel}>
+      <div className="modal-body">
+        {/* The reach of the write leads, in the danger tone, because it is
+            the half that cannot be undone by the reader alone. */}
+        <Banner tone="danger">
+          <p className="banner-title">Its artifacts disappear from every caller&rsquo;s view.</p>
+          <p>They leave the catalog the next time each caller syncs.</p>
+        </Banner>
+        {/* The recovery window is the half that limits the damage, so it is
+            stated in the neutral tone beside it rather than buried under it. */}
+        <Banner>
+          <p className="banner-title">Recoverable for {recoveryDays} days.</p>
+          <p>
+            The layer and its artifacts are kept and can be restored from Recently unregistered until{' '}
+            {erasesOn(new Date())}, after which it is erased.
+          </p>
+        </Banner>
+        {/* What the layer grants today, so the reader confirms against the
+            audience the write takes it from rather than against its ID alone. */}
+        <table className="data-table" data-testid="unregister-properties">
+          <tbody>
+            <tr>
+              <th scope="row">visibility</th>
+              <td>{markers.length === 0 ? 'no grants — only you' : markers.join(', ')}</td>
+            </tr>
+          </tbody>
+        </table>
+        <label className="field">
+          <span className="label">Type the layer ID to confirm</span>
+          <input
+            type="text"
+            value={typed}
+            onChange={(event) => {
+              setTyped(event.target.value);
+            }}
+          />
+        </label>
+      </div>
+      {/* Cancel leads the footer and the destructive control carries the
+          danger tone, so the press that reaches every caller is the one the
+          reader has to aim for. */}
+      <div className="modal-foot">
+        <button type="button" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" className="button danger" disabled={typed !== layer.ID} onClick={onConfirm}>
+          Unregister layer
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -568,14 +602,7 @@ function ownedByCaller(layer: LayerRecord, subject: string): boolean {
  * as independent grants that combine as a union. Two layers carrying the same
  * grants therefore read identically, and no axis is dropped. */
 function VisibilityCell({ layer }: { layer: LayerRecord }) {
-  const groups = layer.Groups ?? [];
-  const users = layer.Users ?? [];
-  const markers = [
-    layer.Public === true ? 'public' : '',
-    layer.Organization === true ? 'organization' : '',
-    groups.length > 0 ? `groups: ${summarize(groups)}` : '',
-    users.length > 0 ? `users: ${summarize(users)}` : '',
-  ].filter((marker) => marker !== '');
+  const markers = visibilityMarkers(layer);
   if (markers.length === 0) {
     return <span className="quiet">no grants — only you</span>;
   }
@@ -588,6 +615,21 @@ function VisibilityCell({ layer }: { layer: LayerRecord }) {
       ))}
     </>
   );
+}
+
+/** visibilityMarkers returns one marker per matching axis. The row and the
+ * unregister confirmation both name what a layer grants, and they derive the
+ * markers here so the audience the confirmation states is the audience the
+ * row displays. */
+function visibilityMarkers(layer: LayerRecord): string[] {
+  const groups = layer.Groups ?? [];
+  const users = layer.Users ?? [];
+  return [
+    layer.Public === true ? 'public' : '',
+    layer.Organization === true ? 'organization' : '',
+    groups.length > 0 ? `groups: ${summarize(groups)}` : '',
+    users.length > 0 ? `users: ${summarize(users)}` : '',
+  ].filter((marker) => marker !== '');
 }
 
 /** summarize keeps an axis that names more members than the row can hold

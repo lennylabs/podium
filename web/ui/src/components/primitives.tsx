@@ -5,6 +5,7 @@
 
 import type { ReactNode } from 'react';
 import { useEffect, useId, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api';
 
@@ -132,6 +133,13 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
  * the reader's attention while it is open. The scrim, Escape, and the close
  * control all dismiss it, because a dialog that can only be left by
  * completing the write traps a reader who opened it to look.
+ *
+ * It renders through a portal, so the dialog stands at the end of the
+ * document however deep the control that opened it sits. A dialog left in
+ * place is laid out by whatever contains that control: opened from a table
+ * cell it takes the column's width and grows the row, and a fixed position
+ * resolves against any ancestor carrying a transform rather than against the
+ * viewport.
  */
 export function Modal({
   title,
@@ -156,7 +164,7 @@ export function Modal({
       document.removeEventListener('keydown', onKey);
     };
   }, [onClose]);
-  return (
+  return createPortal(
     <div
       className="modal-scrim"
       role="presentation"
@@ -179,6 +187,7 @@ export function Modal({
         </header>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
