@@ -22,6 +22,7 @@ import {
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
 import { domainHref, layersHref, searchHref, useRoute } from './route';
+import { since } from './time';
 import type { ThemePreference } from './theme';
 import { useTheme } from './theme';
 import { useAsync } from './useAsync';
@@ -302,26 +303,6 @@ function CatalogCounts({ counts }: { counts: CatalogTotals | null }) {
       </p>
     </>
   );
-}
-
-/** since renders an ingest timestamp as the age the footer states. A stamp
- * the browser cannot parse is reported as the stamp itself, because the
- * footer states what the response carried rather than a computed age it
- * could not derive. */
-export function since(stamp: string, now: number): string {
-  const at = Date.parse(stamp);
-  if (Number.isNaN(at)) {
-    return stamp;
-  }
-  const minutes = Math.max(Math.floor((now - at) / 60000), 0);
-  if (minutes < 60) {
-    return `${minutes}m ago`;
-  }
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) {
-    return `${hours}h ago`;
-  }
-  return `${Math.floor(hours / 24)}d ago`;
 }
 
 /** onCurrentPath reports whether `path` is the domain the reader is on or an

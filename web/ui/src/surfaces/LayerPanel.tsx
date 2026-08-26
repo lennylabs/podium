@@ -21,6 +21,7 @@ import { Badge, Banner, EmptyState, ErrorState, Loading, Modal } from '../compon
 import { SourceCell } from '../components/SourceCell';
 import type { BreakGlass, LayerRecord } from '../api';
 import { ApiError, listDeletedLayers, listLayers, reingestLayer, reorderLayers, unregisterLayer } from '../api';
+import { since } from '../time';
 import { useAsync } from '../useAsync';
 
 /** Refusal is a write the registry refused, held with the write itself so the
@@ -417,7 +418,9 @@ function LayerRow({
       <td>
         <VisibilityCell layer={layer} />
       </td>
-      <td className="mono quiet">{layer.last_ingested_at ?? 'never'}</td>
+      <td className="mono">
+        <LastIngestCell layer={layer} />
+      </td>
       <td className="row-actions">
         {/* The actions column is fixed width and every row shares one grid,
             so the bar carries the one action a reader reaches for on a row,
@@ -595,6 +598,33 @@ function UnregisterConfirmation({
  * that owner names no authorized subject. */
 function ownedByCaller(layer: LayerRecord, subject: string): boolean {
   return layer.UserDefined === true && subject !== '' && layer.Owner === subject;
+}
+
+/** LastIngestCell states when the layer was last ingested as an age, the way
+ * the sidebar footer states the same fact, with the ingest reference the run
+ * landed on beneath it. The stored stamp is a microsecond ISO-8601 string
+ * that wraps over two lines in a column this narrow and reads as a value to
+ * decode rather than a fact to scan, so the exact stamp moves to the cell's
+ * title and the age is what the row displays. */
+function LastIngestCell({ layer }: { layer: LayerRecord }) {
+  const at = layer.last_ingested_at ?? '';
+  const ref = layer.LastIngestedRef ?? '';
+  return (
+    <div title={at === '' ? undefined : at}>
+      <div>{at === '' ? 'never' : since(at, Date.now())}</div>
+      {/* An em dash rather than an empty line: a source that carries no
+          reference, such as a local path, keeps the row the same height as
+          one that does. */}
+      <div className="quiet ingest-ref">{ref === '' ? '—' : shortRef(ref)}</div>
+    </div>
+  );
+}
+
+/** shortRef abbreviates an ingest reference to what a reader compares. A
+ * commit SHA is stated at its short length, and a reference that is not a
+ * SHA, such as a branch name, is stated whole. */
+function shortRef(ref: string): string {
+  return /^[0-9a-f]{12,}$/i.test(ref) ? ref.slice(0, 7) : ref;
 }
 
 /** VisibilityCell renders one marker per matching axis, in the fixed order

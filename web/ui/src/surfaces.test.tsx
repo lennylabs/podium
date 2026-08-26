@@ -1269,6 +1269,35 @@ describe('the layer panel', () => {
     expect(stored.className).not.toContain('badge');
   });
 
+  // The row states the last ingest as an age, the way the sidebar footer
+  // states the same fact, with the ingest reference beneath it. The stored
+  // stamp is a microsecond ISO-8601 string that wraps over two lines in this
+  // column, so it is carried on the cell's title and nowhere in its text.
+  it('states the last ingest as an age over the short ingest ref', async () => {
+    const at = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': {
+        body: {
+          layers: [
+            { ...adminLayer(), last_ingested_at: at, LastIngestedRef: '4f2a1c9d8e7b6a5c4d3e2f1a0b9c8d7e6f5a4b3c' },
+            userLayer(),
+          ],
+        },
+      },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    const ingested = lastIngestCell('company');
+    expect(ingested.textContent).toBe('2h ago4f2a1c9');
+    expect(ingested.textContent).not.toContain(at);
+    expect(within(ingested).getByTitle(at)).toBeTruthy();
+    // A layer no ingest has run against says so, and a source that carries
+    // no reference keeps the row the same height as one that does.
+    expect(lastIngestCell('alice-personal').textContent).toBe('never—');
+  });
+
   it('states an unset stored owner on an admin-defined row rather than omitting the field', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
@@ -2477,6 +2506,13 @@ function layerRow(id: string): HTMLElement {
     throw new Error(`no layer row for ${id}`);
   }
   return row;
+}
+
+/** lastIngestCell is the Last ingest cell of one row, which the table
+ * positions after the drag handle, the layer, the source, and the
+ * visibility. */
+function lastIngestCell(id: string): HTMLElement {
+  return layerRow(id).querySelectorAll('td')[4] as HTMLElement;
 }
 
 function adminLayer(owner = ''): Record<string, unknown> {
