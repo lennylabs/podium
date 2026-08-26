@@ -1302,6 +1302,91 @@ describe("the domain browser", () => {
     expect(within(head).queryByText("v2.0.0")).toBeNull();
   });
 
+  // Spec: §13.10 — the domain browser is the primary navigation, so a card
+  // states how much stands behind it before the reader spends a click. The
+  // artifact figure comes from the one catalog read the page already issues,
+  // so a card for a domain holding artifacts and no subdomain still carries a
+  // count line.
+  it("states a subdomain card artifact count beside its subdomain count", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/catalog": {
+        body: {
+          ids: [
+            "platform/ci/lint",
+            "platform/ci/rules/naming",
+            "platform/release/cut",
+          ],
+        },
+      },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: [
+            {
+              path: "platform/ci",
+              name: "ci",
+              description: "Pipelines.",
+              subdomains: [{ path: "platform/ci/rules", name: "rules" }],
+            },
+            { path: "platform/release", name: "release" },
+            { path: "platform/idle", name: "idle" },
+          ],
+          notable: [],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const grid = within(browser).getByRole("list", { name: "Subdomains" });
+    const cards = within(grid).getAllByRole("listitem");
+    await waitFor(() => {
+      expect(cards[0].textContent).toContain("2 artifacts");
+    });
+    expect(cards[0].textContent).toContain("1 subdomain");
+    // A child holding one artifact and no subdomain carries a count line of
+    // its own rather than nothing at all.
+    expect(cards[1].textContent).toContain("1 artifact");
+    expect(cards[1].textContent).not.toContain("subdomain");
+    // A zero is what the catalog read returned under that child, so the card
+    // states it.
+    expect(cards[2].textContent).toContain("0 artifacts");
+  });
+
+  // A catalog read that failed establishes no artifact count, so the card
+  // states what the load_domain response reported below the child and claims
+  // nothing the page did not read.
+  it("falls back to the subdomain count alone when the catalog read is refused", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/catalog": {
+        status: 403,
+        body: { error: { code: "auth.untrusted_token", message: "no" } },
+      },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: [
+            {
+              path: "platform/ci",
+              name: "ci",
+              subdomains: [{ path: "platform/ci/rules", name: "rules" }],
+            },
+          ],
+          notable: [],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const grid = within(browser).getByRole("list", { name: "Subdomains" });
+    const card = within(grid).getAllByRole("listitem")[0];
+    expect(card.textContent).toContain("1 subdomain");
+    expect(card.textContent).not.toContain("artifact");
+  });
+
   // Spec: §13.10 — the domain browser marks each entry. The type is a fixed
   // vocabulary word and reads in caps, the version carries the v that names
   // what the number measures, and the curated marker leads with a star so a

@@ -8,7 +8,13 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge, EmptyState, ErrorPage, Loading } from '../components/primitives';
 import type { DomainDescriptor } from '../api';
 import { catalogArtifactIDs, loadDomain } from '../api';
-import { directArtifactCount, domainLabel, subdomainCountLabel } from '../domain';
+import {
+  artifactCountLabel,
+  artifactCounts,
+  directArtifactCount,
+  domainLabel,
+  subdomainCountLabel,
+} from '../domain';
 import { domainHref, searchHref } from '../route';
 import { useAsync, useErrorReport } from '../useAsync';
 
@@ -124,7 +130,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           {body.subdomains.length === 0 ? (
             <EmptyState>This domain has no subdomains.</EmptyState>
           ) : (
-            <SubdomainGrid subdomains={body.subdomains} parent={body.path} />
+            <SubdomainGrid subdomains={body.subdomains} parent={body.path} catalog={catalog.value} />
           )}
         </>
       )}
@@ -230,11 +236,33 @@ function scopedSearchHref(scope: string): string {
  * the grandchildren the request returned are counted here and drawn on the
  * page they belong to.
  *
- * The line carries the subdomain count alone. A load_domain descriptor
+ * The line carries how many artifacts stand under the child and how many
+ * subdomains the response reported below it. A load_domain descriptor
  * (`pkg/registry/server/server.go`, `DomainDescriptor`) carries the nested
- * subtree and no artifact count, and taking one scoped search per card to
- * derive that count would put a request behind every tile on the page. */
-function SubdomainGrid({ subdomains, parent }: { subdomains: DomainDescriptor[]; parent: string }) {
+ * subtree and no artifact count, so the artifact figure comes from the §4.5.2
+ * catalog read the browser already issues for the page rather than from a
+ * scoped search behind every card, which is the read the compact tile counts
+ * from as well.
+ *
+ * A catalog read that failed arrives as a null and leaves the card stating
+ * what the response reported below the child alone. */
+function SubdomainGrid({
+  subdomains,
+  parent,
+  catalog,
+}: {
+  subdomains: DomainDescriptor[];
+  parent: string;
+  catalog: string[] | null;
+}) {
+  const counts =
+    catalog === null
+      ? null
+      : artifactCounts(
+          catalog,
+          subdomains.map((child) => child.path),
+          parent,
+        );
   return (
     <ul className="subdomain-grid" aria-label="Subdomains">
       {subdomains.map((child) => (
@@ -248,23 +276,35 @@ function SubdomainGrid({ subdomains, parent }: { subdomains: DomainDescriptor[];
           ) : (
             <p className="quiet">No description.</p>
           )}
-          <SubdomainCounts subdomains={child.subdomains ?? []} />
+          <SubdomainCounts
+            subdomains={child.subdomains ?? []}
+            artifacts={counts === null ? null : (counts.get(child.path) ?? 0)}
+          />
         </li>
       ))}
     </ul>
   );
 }
 
-/** SubdomainCounts states what the response reported below a child, on the
- * card treatment. The compact tile states the same count. */
-function SubdomainCounts({ subdomains }: { subdomains: DomainDescriptor[] }) {
-  const label = subdomainCountLabel(subdomains.length);
-  if (label === null) {
+/** SubdomainCounts states what stands under a child on the card treatment: the
+ * artifact count the catalog read established, then the subdomain count the
+ * response reported. The compact tile states the same two figures. A card that
+ * establishes neither figure carries no line at all. */
+function SubdomainCounts({
+  subdomains,
+  artifacts,
+}: {
+  subdomains: DomainDescriptor[];
+  artifacts: number | null;
+}) {
+  const nested = subdomainCountLabel(subdomains.length);
+  if (artifacts === null && nested === null) {
     return null;
   }
   return (
     <div className="subdomain-counts mono quiet">
-      <span>{label}</span>
+      {artifacts !== null && <span>{artifactCountLabel(artifacts)}</span>}
+      {nested !== null && <span>{nested}</span>}
     </div>
   );
 }
