@@ -88,7 +88,7 @@ function DeletedRow({
   return (
     <tr>
       <td className="mono">{layer.ID}</td>
-      <td>
+      <td className="source-col">
         <SourceCell layer={layer} />
       </td>
       <td className="mono quiet">{window === null ? 'unreported' : window.unregistered}</td>

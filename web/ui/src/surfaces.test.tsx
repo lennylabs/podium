@@ -2332,6 +2332,41 @@ describe("the layer panel", () => {
     expect(local.getByText("/Users/alice/registry")).toBeTruthy();
   });
 
+  // A local path or a repository URL can be far longer than the source
+  // column. Wrapping it broke the string between characters and stacked one
+  // row over three or four lines, so a detail line stays on one line and
+  // repeats its whole value in the title attribute, where a reader who needs
+  // the tail of the path can still read it.
+  it("keeps a long source path on one line and states it whole in the title", async () => {
+    const longPath =
+      "/var/folders/q_/df6ygvl10fj4g162_ld1tkvw0000gn/T/tmp.8UKSGzgrdh/reg";
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "scratch",
+              SourceType: "local",
+              LocalPath: longPath,
+              Order: 1,
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const detail = layerRow("scratch").querySelector(".source-detail");
+    expect(detail?.textContent).toBe(longPath);
+    expect(detail?.getAttribute("title")).toBe(longPath);
+    const style = window.getComputedStyle(detail as Element);
+    expect(style.whiteSpace).toBe("nowrap");
+    expect(style.textOverflow).toBe("ellipsis");
+    expect(style.overflow).toBe("hidden");
+  });
+
   // A source type is pluggable, so a type the panel has never seen still
   // renders: the chip carries its name and its fields sit behind a
   // disclosure.

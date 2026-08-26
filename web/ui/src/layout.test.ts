@@ -226,3 +226,32 @@ describe("layer identifier cell", () => {
     expect(cell.getPropertyValue("gap")).toBe("7px");
   });
 });
+
+// The layer table's source cell holds an absolute path or a repository URL,
+// either of which can be several times the column's width. Wrapping one broke
+// it between characters over three or four lines and left the rows of one
+// table at unequal heights, so a detail line is clipped to one line instead.
+// The column asks the table for nothing of its own, so the clip narrows with
+// the viewport rather than pushing the columns beside it off the card.
+describe("layer source cell", () => {
+  it("clips a source detail line instead of breaking it mid-token", () => {
+    const detail = styled("source-detail");
+    expect(detail.whiteSpace).toBe("nowrap");
+    expect(detail.overflow).toBe("hidden");
+    expect(detail.textOverflow).toBe("ellipsis");
+    expect(detail.overflowWrap).not.toBe("anywhere");
+  });
+
+  it("lets the source column take the width the other columns leave", () => {
+    const column = styled("source-col");
+    expect(column.maxWidth).toBe("0");
+    expect(column.width).toBe("100%");
+  });
+
+  it("clips an unknown type's field values on the same terms", () => {
+    const value = descendantStyle("source-fields", "dd");
+    expect(value.whiteSpace).toBe("nowrap");
+    expect(value.overflow).toBe("hidden");
+    expect(value.textOverflow).toBe("ellipsis");
+  });
+});

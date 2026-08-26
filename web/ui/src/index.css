@@ -1003,7 +1003,7 @@ input[type="checkbox"] {
 
 /* The layer table's source cell. The chip and the reference share the first
    line, and the location details sit under them in the quiet tone, so a long
-   repository URL or absolute path wraps below the fact the reader scans for
+   repository URL or absolute path sits below the fact the reader scans for
    rather than through it. */
 .source-cell {
   min-width: 0;
@@ -1022,9 +1022,23 @@ input[type="checkbox"] {
   letter-spacing: 0.04em;
 }
 
+/* The source column asks the table for nothing of its own, so the columns
+   around it take their natural widths and this one takes what is left. A
+   detail line is then clipped to that width rather than broken between
+   characters: breaking an absolute path or a repository URL mid-token stacked
+   one source over three or four lines and left the rows of one table at
+   unequal heights. The title attribute keeps the whole value reachable. */
+.source-col {
+  width: 100%;
+  max-width: 0;
+}
+
 .source-detail {
+  display: block;
+  overflow: hidden;
   font-size: 11.5px;
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The layer table lays itself out from its content, and the ingest column is
@@ -1046,9 +1060,10 @@ input[type="checkbox"] {
 
 .source-fields dl {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr);
   gap: 0 8px;
   margin: 4px 0 0;
+  font-size: 11.5px;
 }
 
 .source-fields dl > div {
@@ -1059,8 +1074,14 @@ input[type="checkbox"] {
   content: ":";
 }
 
+/* An unknown type's field values are clipped on the same terms as a known
+   type's detail line, so an unfamiliar row keeps the height of a familiar
+   one. */
 .source-fields dd {
   margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .row-refusal {

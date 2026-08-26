@@ -616,7 +616,7 @@ function LayerRow({
           {orderNote(position, layer)}
         </div>
       </td>
-      <td>
+      <td className="source-col">
         <SourceCell layer={layer} />
       </td>
       <td>

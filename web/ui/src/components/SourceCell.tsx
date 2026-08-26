@@ -4,7 +4,9 @@
 // the syntax of the string beside it. The identifying reference sits on the
 // first line and the location details follow on quiet lines, because a raw
 // repository URL or an absolute filesystem path is long enough to wrap over
-// the whole cell and bury the one fact the reader is scanning for.
+// the whole cell and bury the one fact the reader is scanning for. A detail
+// line longer than the cell is clipped to one line and carries its whole value
+// in the title attribute, so every row of the table keeps the same height.
 //
 // A source type is pluggable, so a type neither table has seen still renders:
 // the chip carries its name and whatever source fields the record carries sit
@@ -22,8 +24,8 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
           <Badge tone="quiet">git</Badge>
           <span className="mono">{present(layer.Ref) ? layer.Ref : 'default branch'}</span>
         </div>
-        <div className="mono quiet source-detail">{layer.Repo}</div>
-        {present(layer.Root) && <div className="mono quiet source-detail">{`${layer.Root}/`}</div>}
+        <Detail value={layer.Repo ?? ''} />
+        {present(layer.Root) && <Detail value={`${layer.Root}/`} />}
       </div>
     );
   }
@@ -33,7 +35,7 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
         <div className="source-ref">
           <Badge tone="quiet">local</Badge>
         </div>
-        <div className="mono quiet source-detail">{layer.LocalPath}</div>
+        <Detail value={layer.LocalPath ?? ''} />
       </div>
     );
   }
@@ -48,16 +50,27 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
           <summary className="quiet">
             {fields.length} source {fields.length === 1 ? 'field' : 'fields'}
           </summary>
-          <dl className="mono quiet source-detail">
+          <dl className="mono quiet">
             {fields.map(([name, value]) => (
               <div key={name}>
                 <dt>{name}</dt>
-                <dd>{value}</dd>
+                <dd title={value}>{value}</dd>
               </div>
             ))}
           </dl>
         </details>
       )}
+    </div>
+  );
+}
+
+/** Detail is one quiet location line under the source reference. The title
+ * attribute repeats the value because the line is clipped where the column is
+ * narrower than the value. */
+function Detail({ value }: { value: string }) {
+  return (
+    <div className="mono quiet source-detail" title={value}>
+      {value}
     </div>
   );
 }
