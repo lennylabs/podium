@@ -468,6 +468,47 @@ describe('the domain browser', () => {
     expect(continuation.textContent).toContain('The listing was trimmed to fit the response budget.');
   });
 
+  // The subdomains are a card grid over the immediate children. Each card
+  // states what the response reported below that child, and the grandchildren
+  // the two-level read returned are counted rather than drawn, so the page
+  // stays one level deep however deep the tree runs.
+  it('lists the immediate subdomains as counted cards without nesting the level below', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': {
+        body: {
+          path: '',
+          subdomains: [
+            {
+              path: 'platform',
+              name: 'platform',
+              description: 'Platform engineering.',
+              subdomains: [
+                { path: 'platform/ci', name: 'ci' },
+                { path: 'platform/deploy', name: 'deploy' },
+              ],
+            },
+            { path: 'finance', name: 'finance' },
+          ],
+          notable: [],
+        },
+      },
+    });
+    render(<App />);
+    const browser = await screen.findByLabelText('Domain browser');
+    const grid = within(browser).getByRole('list', { name: 'Subdomains' });
+    const cards = within(grid).getAllByRole('listitem');
+    expect(cards.map((card) => within(card).getByRole('link').textContent)).toEqual(['platform', 'finance']);
+    // The grandchildren are the count on their parent's card and appear
+    // nowhere on the page as cards of their own.
+    expect(within(cards[0]).getByText('2 subdomains')).toBeTruthy();
+    expect(within(grid).queryByText('ci')).toBeNull();
+    expect(within(grid).queryByText('deploy')).toBeNull();
+    // A child the response reported nothing under claims no count.
+    expect(within(cards[1]).queryByText(/subdomains?$/)).toBeNull();
+    expect(within(cards[1]).getByText('No description.')).toBeTruthy();
+  });
+
   // The §6.10 envelope says whether the condition clears on its own. Where it
   // says the condition does not, offering a retry sends the reader round a
   // loop that ends the same way, so the state says so instead.

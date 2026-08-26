@@ -11,9 +11,11 @@ import { loadDomain, searchArtifacts } from '../api';
 import { domainHref, searchHref } from '../route';
 import { useAsync, useErrorReport } from '../useAsync';
 
-// The browser renders two levels of the returned tree at once and follows a
-// link for the rest, which is the depth the tree reads at without turning the
-// page into the whole hierarchy.
+// The browser lists the immediate children and follows a link for the rest,
+// and it reads the second returned level for the child's own subdomain count
+// rather than drawing it. Nesting the grandchildren inside their parent's card
+// turns one screen into the whole hierarchy, so the request stays two levels
+// deep and the page stays one.
 const renderedDepth = 2;
 
 /** atScale is the child count past which the compact treatment takes over.
@@ -70,7 +72,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
         (compact ? (
           <SubdomainTiles subdomains={body.subdomains} />
         ) : (
-          <SubdomainList subdomains={body.subdomains} depth={renderedDepth} />
+          <SubdomainGrid subdomains={body.subdomains} />
         ))}
 
       <h2>Artifacts</h2>
@@ -140,28 +142,59 @@ function scopedSearchHref(scope: string): string {
   return searchHref(scope === '' ? '' : `scope:${scope}`);
 }
 
-/** SubdomainList renders the returned subtree recursively down to the depth
- * the surface renders at once, and links past that edge rather than
- * flattening a tree the response did not return whole. */
-function SubdomainList({ subdomains, depth }: { subdomains: DomainDescriptor[]; depth: number }) {
+/** SubdomainGrid lays the immediate children out as a card grid: the name
+ * with a chevron pointing at the domain it opens, the description, and what
+ * the response reports below the child. Each card is one drill-down step, so
+ * the grandchildren the request returned are counted here and drawn on the
+ * page they belong to.
+ *
+ * The line carries the subdomain count alone. A load_domain descriptor
+ * (`pkg/registry/server/server.go`, `DomainDescriptor`) carries the nested
+ * subtree and no artifact count, and taking one scoped search per card to
+ * derive that count would put a request behind every tile on the page. */
+function SubdomainGrid({ subdomains }: { subdomains: DomainDescriptor[] }) {
   return (
-    <ul className="subdomain-list">
+    <ul className="subdomain-grid" aria-label="Subdomains">
       {subdomains.map((child) => (
         <li key={child.path} className="subdomain">
-          <a className="mono" href={domainHref(child.path)}>
-            {child.name}
+          <a className="subdomain-name mono" href={domainHref(child.path)}>
+            <span>{child.name}</span>
+            <Chevron />
           </a>
           {child.description !== undefined && child.description !== '' ? (
             <p className="quiet">{child.description}</p>
           ) : (
             <p className="quiet">No description.</p>
           )}
-          {child.subdomains !== undefined && child.subdomains.length > 0 && depth > 1 && (
-            <SubdomainList subdomains={child.subdomains} depth={depth - 1} />
-          )}
+          <SubdomainCounts subdomains={child.subdomains ?? []} />
         </li>
       ))}
     </ul>
+  );
+}
+
+/** SubdomainCounts states what the response reported below a child. An entry
+ * with an empty subtree carries no count line, because a card that reads
+ * "0 subdomains" claims a fact the descriptor omits at the deepest returned
+ * level rather than one it reports. */
+function SubdomainCounts({ subdomains }: { subdomains: DomainDescriptor[] }) {
+  if (subdomains.length === 0) {
+    return null;
+  }
+  return (
+    <div className="subdomain-counts mono quiet">
+      <span>
+        {subdomains.length} {subdomains.length === 1 ? 'subdomain' : 'subdomains'}
+      </span>
+    </div>
+  );
+}
+
+function Chevron() {
+  return (
+    <svg className="chevron" viewBox="0 0 10 10" aria-hidden="true">
+      <path d="M3 1.5L7 5l-4 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
   );
 }
 

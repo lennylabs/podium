@@ -395,7 +395,7 @@ h3 {
 }
 
 .artifact-list,
-.subdomain-list,
+.subdomain-grid,
 .relation-list,
 .tag-list {
   list-style: none;
@@ -406,10 +406,60 @@ h3 {
 .artifact-row,
 .subdomain {
   padding: 12px 14px;
-  margin-bottom: 8px;
   border: 1px solid var(--bd);
   border-radius: 9px;
   background: var(--surf);
+}
+
+.artifact-row {
+  margin-bottom: 8px;
+}
+
+/* The subdomains are a map of one level: a card per immediate child, laid out
+   across the content width so the reader takes the level in at a glance
+   instead of scrolling a column of full-width rows. */
+.subdomain-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .subdomain-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.subdomain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.subdomain > p {
+  margin: 0;
+  flex: 1;
+}
+
+.subdomain-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.subdomain-name .chevron {
+  width: 9px;
+  height: 9px;
+  margin-left: auto;
+  flex: none;
+  color: var(--faint);
+}
+
+.subdomain-counts {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
 }
 
 .artifact-meta {
