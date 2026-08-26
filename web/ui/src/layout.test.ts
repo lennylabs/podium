@@ -133,6 +133,48 @@ describe("rendered artifact body", () => {
   it("scales an oversized image down to the prose column", () => {
     expect(descendantStyle("prose", "img").maxWidth).toBe("100%");
   });
+
+  // The page title above the body is 29px/700. A body heading that inherits
+  // the global scale draws an h1 at exactly that size and weight, so the
+  // document's structure competes with the page's. The cases pin a scale
+  // whose every level is lighter than the page title and no larger than the
+  // 22px the top body level takes.
+  it("sets a body heading below the page title in size and weight", () => {
+    const title = descendantStyle("page-title", "h1");
+    expect(title.fontSize).toBe("29px");
+
+    for (const tag of ["h1", "h2", "h3", "h4", "h5", "h6"]) {
+      const heading = descendantStyle("prose", tag);
+      expect(heading.fontWeight).toBe("600");
+      const size = Number.parseFloat(heading.fontSize);
+      expect(size).toBeGreaterThan(0);
+      expect(size).toBeLessThanOrEqual(22);
+    }
+  });
+
+  // The levels step down, so a document that uses several of them reads as a
+  // hierarchy rather than as one repeated size.
+  it("steps the body heading levels down", () => {
+    const sizes = ["h1", "h2", "h3", "h4"].map((tag) =>
+      Number.parseFloat(descendantStyle("prose", tag).fontSize),
+    );
+    expect(sizes).toEqual([22, 20, 17, 15]);
+  });
+
+  // The body's leading heading sits directly under the tab strip, so it drops
+  // the top margin the levels below it carry.
+  it("drops the top margin on the body's leading heading", () => {
+    const container = document.createElement("div");
+    container.className = "prose";
+    const first = document.createElement("h2");
+    const second = document.createElement("h2");
+    container.append(first, second);
+    document.body.appendChild(container);
+    mounted.push(container);
+
+    expect(window.getComputedStyle(first).marginTop).toBe("0px");
+    expect(window.getComputedStyle(second).marginTop).toBe("26px");
+  });
 });
 
 // A listing row carries an author-controlled description of no bounded

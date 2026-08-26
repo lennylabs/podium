@@ -1338,6 +1338,53 @@ label:has(> input:disabled) {
   overflow-wrap: anywhere;
 }
 
+/* A heading inside the body is the document's structure, and the page title
+   above it is the page's. Without a scale of its own the body inherits the
+   global one, where h1 is 29px/700, so a markdown h1 draws at the size and
+   weight of the artifact's own title and the two compete. The design pass
+   fixes the body heading at 20px/600, which is the size the top authored
+   level takes here; h1 sits one step above it because a document that uses
+   both levels still needs them to differ, and the deeper levels step down.
+   Every level stays under the page title in both size and weight. */
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  margin: 26px 0 10px;
+}
+
+.prose h1:first-child,
+.prose h2:first-child,
+.prose h3:first-child,
+.prose h4:first-child,
+.prose h5:first-child,
+.prose h6:first-child {
+  margin-top: 0;
+}
+
+.prose h1 {
+  font-size: 22px;
+}
+
+.prose h2 {
+  font-size: 20px;
+}
+
+.prose h3 {
+  font-size: 17px;
+}
+
+.prose h4,
+.prose h5,
+.prose h6 {
+  font-size: 15px;
+}
+
 /* An image carries an intrinsic width the author picked and no break
    opportunity at all, so it scales down to the column instead. */
 .prose img {
