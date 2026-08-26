@@ -4285,3 +4285,112 @@ describe("a registry that did not answer", () => {
     });
   });
 });
+
+// The keyboard contract the announced roles promise. A widget that names
+// itself a tab set, a combobox, or a listbox is operated the way the WAI-ARIA
+// pattern for that role is operated, and the shell offers a way past the
+// sidebar tree that does not run through it.
+describe("keyboard semantics", () => {
+  // The tab set is one Tab stop with a roving tabindex, and the arrows move
+  // the selection inside it.
+  it("moves the artifact viewer’s tabs with the arrows over a roving tabindex", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "name: review\n",
+          skill_raw: "---\nname: review\n---\n\nAuthored skill body.\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const list = screen.getByRole("tablist");
+    const tabs = within(list).getAllByRole("tab");
+    expect(tabs.map((tab) => tab.getAttribute("tabindex"))).toEqual([
+      "0",
+      "-1",
+      "-1",
+    ]);
+    tabs[0].focus();
+    fireEvent.keyDown(list, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: /Frontmatter/ }).getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(
+      screen.getByRole("tab", { name: /Frontmatter/ }),
+    );
+    expect(screen.getByTestId("frontmatter-table")).toBeTruthy();
+    // End lands on the last tab, and the arrows wrap rather than stopping at
+    // the edge.
+    fireEvent.keyDown(list, { key: "End" });
+    expect(
+      screen.getByRole("tab", { name: "Authored source" }).getAttribute("aria-selected"),
+    ).toBe("true");
+    fireEvent.keyDown(list, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: "Rendered" }).getAttribute("aria-selected")).toBe("true");
+  });
+
+  // The palette's field and result list are a combobox over a listbox, so the
+  // highlight the arrows move is named rather than only drawn.
+  it("names the palette’s highlighted row through aria-activedescendant", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": {
+        body: {
+          total_matched: 2,
+          results: [
+            { id: "platform/review", type: "skill" },
+            { id: "platform/lint", type: "skill" },
+          ],
+        },
+      },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    const field = within(panel).getByLabelText("Search artifacts");
+    expect(field.getAttribute("role")).toBe("combobox");
+    expect(field.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.change(field, { target: { value: "review" } });
+    await screen.findByTestId("palette-heading");
+    const listbox = within(panel).getByRole("listbox");
+    expect(field.getAttribute("aria-expanded")).toBe("true");
+    expect(field.getAttribute("aria-controls")).toBe(listbox.id);
+    const options = within(listbox).getAllByRole("option");
+    expect(options.length).toBe(2);
+    expect(field.getAttribute("aria-activedescendant")).toBe(options[0].id);
+    expect(options[0].getAttribute("aria-selected")).toBe("true");
+    fireEvent.keyDown(panel, { key: "ArrowDown" });
+    expect(field.getAttribute("aria-activedescendant")).toBe(options[1].id);
+    expect(options[1].getAttribute("aria-selected")).toBe("true");
+    expect(options[0].getAttribute("aria-selected")).toBe("false");
+  });
+
+  // The shell's first Tab stop skips the sidebar tree, which otherwise sits
+  // between the top bar and the page on every route.
+  it("offers a first-stop skip link that moves focus to the content region", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    goTo("#/");
+    render(<App />);
+    const skip = await screen.findByTestId("skip-link");
+    // It is the document's first focusable element, ahead of the top bar.
+    const focusable = Array.from(
+      document.querySelectorAll<HTMLElement>(
+        "a[href], button, input, [tabindex]:not([tabindex='-1'])",
+      ),
+    );
+    expect(focusable[0]).toBe(skip);
+    fireEvent.click(skip);
+    expect(document.activeElement).toBe(screen.getByRole("main"));
+  });
+});

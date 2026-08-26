@@ -213,6 +213,23 @@ h3 {
   flex: 1;
 }
 
+/* The skip link is the first Tab stop and is drawn only while it holds focus.
+   It is moved off-screen rather than hidden, because `display: none` and
+   `visibility: hidden` take an element out of the Tab order and there would be
+   nothing to focus. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 20;
+  background: var(--surf);
+}
+
+.skip-link:focus {
+  left: 12px;
+  top: 10px;
+}
+
 /* The content column is minmax(0, 1fr) rather than 1fr because a grid track's
    automatic minimum is its min-content width, which lets a wide table or a
    long identifier push the column past the viewport and scroll the whole

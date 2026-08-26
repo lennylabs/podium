@@ -23,6 +23,13 @@ const paletteCap = 8;
 /** recentCap is how many queries the just-opened panel lists. */
 const recentCap = 5;
 
+/** listboxID names the result list the query field owns, and optionID names
+ * one row inside it. The field points at the highlighted row through
+ * `aria-activedescendant`, so the ids are the panel's own contract rather
+ * than anything derived from an artifact ID. */
+const listboxID = 'palette-listbox';
+const optionID = (at: number) => `palette-option-${at}`;
+
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [line, setLine] = useState('');
   const [index, setIndex] = useState(0);
@@ -38,6 +45,12 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     [typed],
   );
   const rows = results.value?.results ?? [];
+  // The result list is drawn only on the arm PaletteResults reaches with rows
+  // in hand. `aria-expanded` and `aria-activedescendant` state that same arm,
+  // because a field that points at an option no page holds is worse than one
+  // that points at nothing.
+  const listed = typed !== '' && !results.loading && results.error === null && rows.length > 0;
+  const at = listed ? Math.min(index, rows.length - 1) : -1;
 
   if (!open) {
     return null;
@@ -115,7 +128,16 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
           <input
             className="palette-input"
             type="search"
+            // The field and the result list are a combobox over a listbox:
+            // the arrows move a highlight the field owns, and the field names
+            // the highlighted row so a reader who cannot see it is told which
+            // row Enter opens.
+            role="combobox"
             aria-label="Search artifacts"
+            aria-autocomplete="list"
+            aria-controls={listboxID}
+            aria-expanded={listed}
+            aria-activedescendant={at < 0 ? undefined : optionID(at)}
             placeholder="Search artifacts"
             value={line}
             onChange={(event) => {
@@ -251,11 +273,19 @@ function PaletteResults({
       <p className="label" data-testid="palette-heading">
         Artifacts · {rows.length} of {results.value?.total_matched ?? rows.length}
       </p>
-      <ul className="palette-rows">
+      <ul className="palette-rows" id={listboxID} role="listbox" aria-label="Artifact results">
         {rows.map((row, at) => (
-          <li key={row.id}>
+          // The listbox owns its options directly, so the list item carries no
+          // role of its own and the row it wraps is the option.
+          <li key={row.id} role="presentation">
             <button
               type="button"
+              role="option"
+              id={optionID(at)}
+              aria-selected={at === Math.min(index, rows.length - 1)}
+              // The query field keeps focus while the arrows move the
+              // highlight, so no row is a Tab stop.
+              tabIndex={-1}
               className={at === Math.min(index, rows.length - 1) ? 'palette-row palette-row-selected' : 'palette-row'}
               onClick={() => {
                 onOpen(row.id);

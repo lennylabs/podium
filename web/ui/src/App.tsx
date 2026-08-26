@@ -38,6 +38,9 @@ import { LayerPanel } from './surfaces/LayerPanel';
  * without reading the whole of it. */
 const treeDepth = 2;
 
+/** contentID names the content region the skip link jumps to. */
+const contentID = 'main-content';
+
 export function App() {
   const route = useRoute();
   const [posture, setPosture] = useState<SessionPosture | null>(null);
@@ -162,6 +165,21 @@ export function App() {
 
   return (
     <div className="app">
+      {/* The sidebar tree stands between the top bar and the content on every
+          route, so a keyboard reader otherwise tabs through the whole
+          hierarchy to reach the page. Routing owns `location.hash`, which an
+          `href="#main"` skip link would overwrite, so the control moves focus
+          itself. */}
+      <button
+        type="button"
+        className="skip-link"
+        data-testid="skip-link"
+        onClick={() => {
+          document.getElementById(contentID)?.focus();
+        }}
+      >
+        Skip to content
+      </button>
       <TopBar
         posture={posture}
         theme={theme}
@@ -213,7 +231,7 @@ export function App() {
             {anonymous && <p className="quiet">Not signed in</p>}
           </div>
         </nav>
-        <main className="content">
+        <main className="content" id={contentID} tabIndex={-1}>
           {/* The expiry transition is rendered over the page the caller was
               on, which is kept rather than cleared, so it sits above the
               surface on every route and the surface stays mounted under it.

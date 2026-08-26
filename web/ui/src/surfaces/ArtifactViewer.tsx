@@ -11,6 +11,8 @@
 
 import { useState } from 'react';
 
+import type { KeyboardEvent } from 'react';
+
 import { ArtifactBody } from '../components/ArtifactBody';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge, CopyButton, EmptyState, ErrorState, Loading, SensitivityBadge } from '../components/primitives';
@@ -239,9 +241,39 @@ function Manifest({ artifact, document }: { artifact: LoadArtifactResponse; docu
   // manifest arrives by link and the authored source it carried is cleared.
   const open = tabs.some((entry) => entry.name === tab) ? tab : 'rendered';
 
+  // A `role="tablist"` is one stop in the Tab order, and the arrows move
+  // between the tabs inside it. Without this the widget announces itself as a
+  // tab set and then behaves as a row of buttons, which is the state a
+  // screen-reader user is left to reconcile.
+  const onArrow = (event: KeyboardEvent<HTMLDivElement>) => {
+    const at = tabs.findIndex((entry) => entry.name === open);
+    let next = at;
+    switch (event.key) {
+      case 'ArrowRight':
+        next = (at + 1) % tabs.length;
+        break;
+      case 'ArrowLeft':
+        next = (at + tabs.length - 1) % tabs.length;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = tabs.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    setTab(tabs[next].name);
+    // Selection follows focus, so the focus moves with the selection rather
+    // than staying on the tab the reader has already left.
+    event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+  };
+
   return (
     <>
-      <div className="tabs" role="tablist" aria-label="Artifact views">
+      <div className="tabs" role="tablist" aria-label="Artifact views" onKeyDown={onArrow}>
         {tabs.map((entry) => (
           <button
             key={entry.name}
@@ -250,6 +282,9 @@ function Manifest({ artifact, document }: { artifact: LoadArtifactResponse; docu
             id={`tab-${entry.name}`}
             aria-selected={open === entry.name}
             aria-controls={`panel-${entry.name}`}
+            // The roving tabindex: the tab set is one Tab stop, and the open
+            // tab is the one it lands on.
+            tabIndex={open === entry.name ? 0 : -1}
             className={open === entry.name ? 'tab tab-open' : 'tab'}
             onClick={() => {
               setTab(entry.name);
