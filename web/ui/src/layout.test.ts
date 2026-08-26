@@ -543,6 +543,26 @@ describe("command palette row", () => {
       expect(declaredFor(name, "color")).toBe("var(--link)");
     }
   });
+
+  // A long leaf name used to hold the name column at its intrinsic width, which
+  // left the path column zero pixels wide. A zero-width box renders no
+  // ellipsis, so the row showed no location at all while the row above it did.
+  // Both columns clip to an ellipsis and both keep a floor to clip inside.
+  it("clips the name and the path to an ellipsis over a floor so every row states a location", () => {
+    const { name } = paletteRow("palette-row");
+    const path = document.createElement("span");
+    path.className = "mono quiet palette-row-path";
+    document.body.appendChild(path);
+    mounted.push(path);
+
+    for (const column of [name, path]) {
+      expect(declaredFor(column, "flex")).toBe("");
+      expect(declaredFor(column, "min-width")).toBe("9ch");
+      expect(declaredFor(column, "overflow")).toBe("hidden");
+      expect(declaredFor(column, "text-overflow")).toBe("ellipsis");
+      expect(declaredFor(column, "white-space")).toBe("nowrap");
+    }
+  });
 });
 
 // The layer table's identifier cell holds the layer name and the marker

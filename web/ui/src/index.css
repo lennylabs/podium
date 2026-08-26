@@ -2772,16 +2772,23 @@ label:has(> input:disabled) {
 }
 
 /* Every row's artifact name is the part that opens, so it is set in the link
-   colour the rest of the catalog gives an artifact name. */
+   colour the rest of the catalog gives an artifact name. It shrinks alongside
+   the path: holding the name at its intrinsic width drove the path of a
+   long-named artifact to zero width, and a zero-width column renders no
+   ellipsis, so the row stated no location at all. */
 .palette-row-name {
-  flex: none;
+  min-width: 9ch;
+  overflow: hidden;
   color: var(--link);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* A path longer than the panel is clipped rather than wrapped, so every row
-   keeps one line and the column at the right edge stays where it is. */
+   keeps one line and the column at the right edge stays where it is. The floor
+   is what the clipping needs: an ellipsis has to have a box to render in. */
 .palette-row-path {
-  min-width: 0;
+  min-width: 9ch;
   overflow: hidden;
   font-size: 11.5px;
   text-overflow: ellipsis;
