@@ -696,6 +696,49 @@ describe("the application shell", () => {
     expect(screen.getByTestId("catalog-depth").textContent).toBe("2 levels");
   });
 
+  // The surface beside the sidebar owns its own read, and that read answering
+  // after one that did not is the reader's retry reaching the registry. That
+  // is the condition the sidebar reported, so the shell re-issues its own
+  // read on it and one retry recovers the whole page.
+  it("recovers the tree and the counts from the surface's own retry", async () => {
+    const stubs: Record<string, Stub> = {
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      // The registry is not answering at all, which is how it fails when it
+      // has gone away: the request never reaches it and there is no envelope.
+      "/v1/load_domain": { rejects: true },
+      "/v1/search_artifacts": { body: { total_matched: 312 } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+    };
+    stubRegistry(stubs);
+    // A domain the recovered catalog does not carry, so no node in the tree
+    // is the current one and none of them expands under it.
+    goTo(domainHref("eng"));
+    render(<App />);
+    await screen.findByTestId("domain-failed");
+    await screen.findByTestId("catalog-failed");
+    expect(screen.getByTestId("catalog-counts").textContent).toBe(
+      "Counts unavailable",
+    );
+
+    stubs["/v1/load_domain"] = { body: rootDomains };
+    // The surface's retry, and not the sidebar's. The sidebar's own control
+    // is gone once the state it is stated under clears, so pressing it after
+    // this would be pressing a control the reader no longer has.
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-failed")).toBeNull();
+    });
+    expect(
+      within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
+    ).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-counts").textContent).toBe(
+        "1 layers · 312 artifacts",
+      );
+    });
+  });
+
   // A read that returned a catalog holding no domain gets a line saying so.
   // The depth marker goes with the tree it describes, because a descent
   // stated over an empty sidebar reads as a tree that failed to render.

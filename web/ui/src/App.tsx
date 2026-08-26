@@ -3,7 +3,7 @@
 // §13.10 surfaces: the domain browser, search, the artifact viewer, and the
 // layer panel.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ReactNode } from 'react';
 
@@ -134,6 +134,25 @@ export function App() {
   const reloadCatalog = useCallback(() => {
     setCatalogNonce((nonce) => nonce + 1);
   }, []);
+
+  // A surface read that answers after one that did not is the reader's retry
+  // reaching the registry, which is the same condition the sidebar reported
+  // when its own read failed. The shell re-issues that read on the
+  // transition, so one retry recovers the page and the shell around it rather
+  // than leaving a second retry to press. The transition is what it keys on
+  // rather than a successful outcome alone, so a re-issue that fails again is
+  // left stated instead of being re-issued in a loop.
+  const priorOutcome = useRef<unknown>(null);
+  useEffect(() => {
+    const recovered = priorOutcome.current !== null && catalogError === null;
+    priorOutcome.current = catalogError;
+    // The layers route's surface reports no read of its own: the shell's read
+    // is what the panel keys on, and it carries its own retry there.
+    if (!recovered || route.name === 'layers' || tree.loading || tree.error === null) {
+      return;
+    }
+    reloadCatalog();
+  }, [catalogError, route.name, tree.loading, tree.error, reloadCatalog]);
 
   const retryCatalog = useCallback(() => {
     // The shell owns the catalog read on the layers route, so the retry
