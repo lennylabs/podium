@@ -1099,11 +1099,12 @@ describe("the artifact viewer", () => {
     );
   });
 
-  // The rail is a fixed-width column and a content hash is long by
-  // construction, so the value has to wrap inside the rail. Without a
-  // wrapping rule it runs past the panel edge and is clipped mid-string,
-  // which leaves the reader no way to read the value at all.
-  it("wraps the provenance content hash inside the rail rather than running it past the edge", async () => {
+  // The rail is a fixed-width column, and provenance is a set of labelled
+  // values rather than prose: each one stands in a property table under its
+  // own label. The content hash is 71 characters against a rail far narrower
+  // than that, so the row abbreviates it and keeps the whole value on the
+  // row's title, where the reader can still recover it.
+  it("renders provenance as a labelled property table with the content hash abbreviated", async () => {
     const contentHash =
       "sha256:ab7469fdce70f0beb8c3b4e696da5e0080f95f75a9d8b3c2e1f0a94d6c7b8e5f";
     stubRegistry({
@@ -1114,6 +1115,7 @@ describe("the artifact viewer", () => {
           type: "skill",
           version: "1.0.0",
           content_hash: contentHash,
+          layer: "acme-platform",
           manifest_body: "# Pay invoice\n",
           frontmatter: manifestDoc,
         },
@@ -1123,10 +1125,19 @@ describe("the artifact viewer", () => {
     goTo("#/artifact/finance%2Fap%2Fpay-invoice");
     render(<App />);
     const provenance = await screen.findByLabelText("Provenance");
-    const value = within(provenance).getByText(contentHash);
-    const style = window.getComputedStyle(value);
-    expect(`${style.overflowWrap} ${style.wordBreak}`).toMatch(
-      /anywhere|break-word|break-all/,
+    const table = within(provenance).getByTestId("rail-provenance-table");
+    const rows = [...table.querySelectorAll("tr")].map((row) => [
+      row.querySelector("th")?.textContent,
+      row.querySelector("td")?.textContent,
+    ]);
+    expect(rows).toEqual([
+      ["layer", "acme-platform"],
+      ["hash", "sha256:ab74…8e5f"],
+    ]);
+    // The abbreviation is a display, so the whole value is still on the row.
+    expect(within(provenance).queryByText(contentHash)).toBeNull();
+    expect(table.querySelectorAll("td")[1].getAttribute("title")).toBe(
+      contentHash,
     );
   });
 

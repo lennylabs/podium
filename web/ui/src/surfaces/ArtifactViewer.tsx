@@ -263,10 +263,30 @@ function ArtifactRail({ artifact, frontmatter }: { artifact: LoadArtifactRespons
     <aside className="artifact-rail" aria-label="Artifact details">
       <section aria-label="Provenance">
         <p className="label">Provenance</p>
-        <p className="quiet">
-          Layer <span className="mono">{layerName(artifact)}</span>
-        </p>
-        <p className="mono quiet">{artifact.content_hash}</p>
+        {/* Provenance is a property table like the frontmatter below it, so
+            the two read as one column of labelled values rather than a
+            sentence fragment followed by a bare string. The hash is
+            abbreviated because it is 71 characters against a rail that is
+            far narrower, and the full value stays on the row's title so it
+            is still recoverable. */}
+        <table className="data-table rail-properties" data-testid="rail-provenance-table">
+          <tbody>
+            <tr>
+              <th scope="row" className="mono">
+                layer
+              </th>
+              <td>{layerName(artifact)}</td>
+            </tr>
+            <tr>
+              <th scope="row" className="mono">
+                hash
+              </th>
+              <td className="mono" title={artifact.content_hash}>
+                {abbreviateHash(artifact.content_hash)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </section>
       {hasFrontmatter && (
         <section aria-label="Frontmatter">
@@ -329,6 +349,20 @@ function RailResourceGroup({ label, rows, absent }: { label: string; rows: Resou
  * standing an empty value in the section. */
 function layerName(artifact: LoadArtifactResponse): string {
   return artifact.layer === undefined || artifact.layer === '' ? 'unreported' : artifact.layer;
+}
+
+/** abbreviateHash keeps a content hash to the width of the rail. The
+ * algorithm prefix identifies what was hashed and the ends of the digest are
+ * what a reader compares against another copy, so both survive and the
+ * middle is elided. A digest short enough to stand whole is left alone. */
+function abbreviateHash(hash: string): string {
+  const separator = hash.indexOf(':');
+  const algorithm = separator === -1 ? '' : hash.slice(0, separator + 1);
+  const digest = hash.slice(separator + 1);
+  if (digest.length <= 12) {
+    return hash;
+  }
+  return `${algorithm}${digest.slice(0, 4)}…${digest.slice(-4)}`;
 }
 
 /** inboundLabel names an edge from the perspective of the artifact it ends

@@ -1024,6 +1024,18 @@ button,
   margin-bottom: 22px;
 }
 
+/* The rail's property tables carry a quiet label column, so the reader's eye
+   runs down the values rather than down the names of the fields. */
+.rail-properties th {
+  color: var(--meta);
+  font-weight: 500;
+}
+
+.rail-properties tr:last-child th,
+.rail-properties tr:last-child td {
+  border-bottom: 0;
+}
+
 .rail-list {
   list-style: none;
   padding: 0;
