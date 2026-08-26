@@ -4844,6 +4844,27 @@ describe("the command palette", () => {
     ).toBe(true);
   });
 
+  // The just-opened panel draws each filter as its own chip under a label
+  // naming what they are for. Run together as one line of prose, the three
+  // read as a sentence about filtering rather than as three things a reader
+  // can type into the query above them.
+  it("draws each inline filter as its own chip", async () => {
+    palettePage([]);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const syntax = screen.getByTestId("palette-syntax");
+    expect(syntax.textContent).toContain("Filter inline:");
+    const chips = Array.from(syntax.querySelectorAll(".palette-syntax-chip"));
+    expect(chips.map((chip) => chip.textContent)).toEqual([
+      "type:skill",
+      "tag:review",
+      "scope:platform",
+    ]);
+    // A separator between the filters is what a single run-together line
+    // needs and a set of chips does not.
+    expect(syntax.textContent).not.toContain("·");
+  });
+
   // The inline filter syntax is the palette's form of the pills the search
   // surface renders, and it reaches the same endpoint arguments.
   it("carries the inline filter syntax into the search request", async () => {

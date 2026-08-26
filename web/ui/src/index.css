@@ -2128,29 +2128,27 @@ label:has(> input:disabled) {
   width: 660px;
   max-width: calc(100% - 32px);
   height: fit-content;
-  padding: 14px;
   background: var(--surf);
   border: 1px solid var(--bd);
   border-radius: 14px;
   box-shadow: 0 30px 60px -24px var(--scrim);
+  overflow: hidden;
 }
 
 /* The field row holds the magnifier, the query, and the match count. The
    count is right-aligned onto the same edge the rows below align their type
-   and version onto. */
+   and version onto. The row is the panel's own header rather than a form
+   field set inside it: the panel is already the thing the reader is typing
+   into, so an enclosing box and a focus ring would fence off the one control
+   the panel exists for. The divider beneath it separates the query from what
+   it produced, and the accent caret is what marks the row as live. */
 .palette-field {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 12px;
-  background: var(--surf2);
-  border: 1px solid var(--bd);
-  border-radius: 8px;
-}
-
-.palette-field:focus-within {
-  border-color: var(--acc);
-  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
+  gap: 11px;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--b2);
 }
 
 .palette-magnifier {
@@ -2161,17 +2159,27 @@ label:has(> input:disabled) {
 .palette-input {
   flex: 1;
   min-width: 0;
-  padding: 10px 0;
+  padding: 0;
   background: transparent;
   border: 0;
   color: var(--ink);
   font: inherit;
+  font-size: 16px;
+  caret-color: var(--acc);
 }
 
-/* The field's own focus ring would sit inside the row's, so the row carries
-   it and the input carries none. */
+/* The row carries no ring of its own, and a ring around the field would draw
+   the box the header deliberately does without. Focus is legible from the
+   caret sitting in the query. */
 .palette-input:focus-visible {
+  outline: none;
   box-shadow: none;
+}
+
+/* The panel is full-bleed so the header divider and the footer reach both
+   edges, which means everything between them carries its own inset. */
+.palette-body {
+  padding: 8px 16px;
 }
 
 .palette-count {
@@ -2240,12 +2248,37 @@ label:has(> input:disabled) {
   font-size: 11px;
 }
 
+/* The inline filter syntax is the palette's form of the pills the search
+   surface renders, so each filter is drawn as its own chip inside a box of
+   its own. Run together as one line of prose, the three read as a sentence
+   about filtering rather than as three things that can be typed. */
+.palette-syntax {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 6px;
+  padding: 11px 13px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: var(--surf2);
+  font-size: 12px;
+}
+
+.palette-syntax-chip {
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--chip);
+  color: var(--meta);
+  font-size: 11.5px;
+}
+
 .palette-footer {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin: 10px 0 0;
-  padding-top: 10px;
+  margin: 0;
+  padding: 9px 16px;
   border-top: 1px solid var(--b2);
   font-size: 11.5px;
 }

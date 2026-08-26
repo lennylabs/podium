@@ -309,6 +309,87 @@ describe("artifact listing", () => {
 // leading edge over the wash tint, and sets every row's artifact name in the
 // link colour. A tint on its own reads as the hover state a keyboard reader
 // cannot produce.
+// The palette's query line is the panel's header rather than a form field
+// inside it. A bordered, filled box around the query, or a focus ring drawn
+// around that box, fences off the one control the panel exists for and makes
+// the panel read as a dialog holding a form. The row states itself with a
+// divider beneath it and an accent caret in the query instead.
+describe("command palette header", () => {
+  /** paletteField attaches the palette's query row and returns it beside its
+   * input. */
+  function paletteField(): { field: Element; input: Element } {
+    const field = document.createElement("div");
+    field.className = "palette-field";
+    const input = document.createElement("input");
+    input.className = "palette-input";
+    field.appendChild(input);
+    document.body.appendChild(field);
+    mounted.push(field);
+    return { field, input };
+  }
+
+  it("draws the query line on the panel rather than in a box", () => {
+    const { field } = paletteField();
+    expect(declaredFor(field, "border")).toBe("");
+    expect(declaredFor(field, "background")).toBe("");
+    expect(declaredFor(field, "border-radius")).toBe("");
+  });
+
+  it("separates the query line from its results with a divider", () => {
+    expect(declaredFor(paletteField().field, "border-bottom")).toBe(
+      "1px solid var(--b2)",
+    );
+  });
+
+  it("carries no focus ring on the query line or its field", () => {
+    const { field, input } = paletteField();
+    expect(declaredFor(field, "box-shadow")).toBe("");
+    // The focus-within rule is a state no attached element matches, so it is
+    // read from the sheet rather than from an element.
+    expect(selectors()).not.toContain(".palette-field:focus-within");
+    expect(declaredFor(input, "caret-color")).toBe("var(--acc)");
+  });
+});
+
+/** selectors is every selector the stylesheet carries, which is how a case
+ * asserts the absence of a rule for a state no attached element matches. */
+function selectors(): string[] {
+  const found: string[] = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      const styleRule = rule as CSSStyleRule;
+      if (typeof styleRule.selectorText === "string") {
+        found.push(styleRule.selectorText);
+      }
+    }
+  }
+  return found;
+}
+
+// The inline filter syntax is drawn as chips inside a box of its own, so each
+// filter reads as a thing to type rather than as one line of prose about
+// filtering.
+describe("command palette filter syntax", () => {
+  it("boxes the filter syntax off from the rest of the panel", () => {
+    const box = document.createElement("div");
+    box.className = "palette-syntax";
+    document.body.appendChild(box);
+    mounted.push(box);
+    expect(declaredFor(box, "border")).toBe("1px solid var(--b2)");
+    expect(window.getComputedStyle(box).display).toBe("flex");
+    expect(window.getComputedStyle(box).flexWrap).toBe("wrap");
+  });
+
+  it("draws each filter as its own chip", () => {
+    const chip = document.createElement("span");
+    chip.className = "mono palette-syntax-chip";
+    document.body.appendChild(chip);
+    mounted.push(chip);
+    expect(declaredFor(chip, "background")).toBe("var(--chip)");
+    expect(declaredFor(chip, "border-radius")).toBe("5px");
+  });
+});
+
 describe("command palette row", () => {
   /** paletteRow attaches a palette row carrying the given classes and returns
    * it beside its name element. */

@@ -28,6 +28,12 @@ const recentCap = 5;
  * `aria-activedescendant`, so the ids are the panel's own contract rather
  * than anything derived from an artifact ID. */
 const listboxID = 'palette-listbox';
+
+/** filterExamples is one example per filter the search surface exposes as a
+ * pill, drawn in the palette as the chips a reader can type. Each is a
+ * separate chip because the three are three things to type rather than one
+ * sentence about filtering. */
+const filterExamples = ['type:skill', 'tag:review', 'scope:platform'];
 const optionID = (at: number) => `palette-option-${at}`;
 
 export function CommandPalette({ open, onClose }: { open: boolean; onClose: () => void }) {
@@ -151,23 +157,28 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             </span>
           )}
         </div>
-        {typed === '' ? (
-          <PaletteHints
-            recents={recents}
-            onPick={(query) => {
-              setLine(query);
-            }}
-          />
-        ) : (
-          <PaletteResults
-            results={results}
-            rows={rows}
-            index={index}
-            typed={typed}
-            onOpen={openRow}
-            onSearch={openSearch}
-          />
-        )}
+        {/* The panel is full-bleed, so the header divider and the footer reach
+            both of its edges and everything between them carries its own
+            inset. */}
+        <div className="palette-body">
+          {typed === '' ? (
+            <PaletteHints
+              recents={recents}
+              onPick={(query) => {
+                setLine(query);
+              }}
+            />
+          ) : (
+            <PaletteResults
+              results={results}
+              rows={rows}
+              index={index}
+              typed={typed}
+              onOpen={openRow}
+              onSearch={openSearch}
+            />
+          )}
+        </div>
         <PaletteFooter />
       </div>
     </div>
@@ -225,10 +236,14 @@ function PaletteHints({ recents, onPick }: { recents: string[]; onPick: (query: 
           ))}
         </ul>
       )}
-      <p className="label">Filter syntax</p>
-      <p className="mono quiet" data-testid="palette-syntax">
-        type:skill · tag:review · scope:platform
-      </p>
+      <div className="palette-syntax" data-testid="palette-syntax">
+        <span className="quiet">Filter inline:</span>
+        {filterExamples.map((filter) => (
+          <span key={filter} className="mono palette-syntax-chip">
+            {filter}
+          </span>
+        ))}
+      </div>
     </div>
   );
 }
