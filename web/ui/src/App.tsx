@@ -11,11 +11,11 @@ import { Banner, ErrorState, Loading, Magnifier, PageBanner } from './components
 import type { DomainDescriptor } from './api';
 import {
   ApiError,
+  catalogArtifactIDs,
   isIdentityRefusal,
   listLayers,
   loadDomain,
   readQuota,
-  searchArtifacts,
   signOut,
   subscribeReadOnly,
 } from './api';
@@ -97,9 +97,9 @@ export function App() {
   }, [route.name, tree.loading, tree.error]);
 
   // The footer counts. The layer list carries the layer count and the last
-  // ingest each layer reports, and the catalog's artifact count is the match
-  // count an unfiltered search reports, which the registry takes before it
-  // truncates the result set. Neither depends on where the reader is, so the
+  // ingest each layer reports, and the catalog's artifact count is the length
+  // of the unscoped catalog listing, which the registry does not truncate.
+  // Neither depends on where the reader is, so the
   // route does not re-read them; a layer write does, through the panel's
   // catalog-change signal, because a register or an unregister moves the very
   // figures the footer states. That signal bumps the nonce, so the counts and
@@ -382,16 +382,18 @@ interface CatalogTotals {
 }
 
 async function readCounts(): Promise<CatalogTotals> {
-  const [layers, search] = await Promise.all([
+  const [layers, ids] = await Promise.all([
     listLayers(),
-    // The match count is taken before the result set is truncated, so a
-    // search carrying no query and no filter reports the catalog's own
-    // artifact count and one result is enough to ask for.
-    searchArtifacts({ query: '', type: '', scope: '', tags: [] }, 1),
+    // The catalog answers one canonical ID per artifact over the whole
+    // tenant, which is the figure the footer states. An unfiltered search
+    // does not answer it: its match count is one row per artifact version,
+    // so an artifact republished four times counts four times and the footer
+    // contradicts the tree beside it. Spec: §4.5.2.
+    catalogArtifactIDs(''),
   ]);
   return {
     layers: layers.length,
-    artifacts: search.total_matched,
+    artifacts: ids.length,
     lastIngest: layers.reduce((latest, layer) => {
       const at = layer.last_ingested_at ?? '';
       return at > latest ? at : latest;

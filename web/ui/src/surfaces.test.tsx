@@ -109,6 +109,16 @@ function stubRegistry(stubs: Record<string, Stub>): void {
   );
 }
 
+/** catalogOf is a §4.5.2 catalog answer holding `count` distinct artifact
+ * IDs, which is the figure the sidebar footer states. The catalog carries one
+ * ID per artifact however many versions it holds, so a fixture that stands in
+ * for a republished catalog is the same listing at the same length. */
+function catalogOf(count: number): { ids: string[] } {
+  return {
+    ids: Array.from({ length: count }, (_, i) => `platform/svc${String(i + 1)}`),
+  };
+}
+
 function posture(overrides: Partial<SessionPosture> = {}): SessionPosture {
   return {
     identity_provider_configured: true,
@@ -212,7 +222,7 @@ describe("the application shell", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": { body: catalog },
-      "/v1/search_artifacts": { body: { total_matched: 312 } },
+      "/v1/catalog": { body: catalogOf(312) },
       "/v1/layers": {
         body: {
           layers: [
@@ -258,13 +268,35 @@ describe("the application shell", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": { body: catalog },
-      "/v1/search_artifacts": { body: { total_matched: 1 } },
+      "/v1/catalog": { body: catalogOf(1) },
       "/v1/layers": { body: { layers: [adminLayer()] } },
     });
     render(<App />);
     await waitFor(() => {
       expect(screen.getByTestId("catalog-counts").textContent).toBe(
         "1 layer · 1 artifact",
+      );
+    });
+  });
+
+  // The footer states how many artifacts the catalog holds, and the §4.5.2
+  // catalog carries one canonical ID per artifact. An unfiltered search
+  // answers a different question: its match count is one row per artifact
+  // version, so a catalog of two artifacts one of which was republished four
+  // times reported six and the footer contradicted the tree beside it.
+  it("counts artifacts rather than versions in the counts footer", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: catalog },
+      "/v1/catalog": { body: { ids: ["eng/deploy", "finance/ap/pay-invoice"] } },
+      // Every version of eng/deploy is its own search row.
+      "/v1/search_artifacts": { body: { total_matched: 6 } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+    });
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-counts").textContent).toBe(
+        "1 layer · 2 artifacts",
       );
     });
   });
@@ -733,7 +765,7 @@ describe("the application shell", () => {
         status: 401,
         body: { code: "auth.untrusted_token", message: "not verified" },
       },
-      "/v1/search_artifacts": { body: { total_matched: 312 } },
+      "/v1/catalog": { body: catalogOf(312) },
       "/v1/layers": { body: { layers: [adminLayer()] } },
     });
     render(<App />);
@@ -757,7 +789,7 @@ describe("the application shell", () => {
         status: 503,
         body: { code: "registry.unavailable", message: "down" },
       },
-      "/v1/search_artifacts": { body: { total_matched: 312 } },
+      "/v1/catalog": { body: catalogOf(312) },
       "/v1/layers": {
         body: {
           layers: [{ ...adminLayer(), last_ingested_at: new Date().toISOString() }],
@@ -790,7 +822,7 @@ describe("the application shell", () => {
         status: 503,
         body: { code: "registry.unavailable", message: "down" },
       },
-      "/v1/search_artifacts": { body: { total_matched: 312 } },
+      "/v1/catalog": { body: catalogOf(312) },
       "/v1/layers": { body: { layers: [adminLayer()] } },
     };
     stubRegistry(stubs);
@@ -828,7 +860,7 @@ describe("the application shell", () => {
       // The registry is not answering at all, which is how it fails when it
       // has gone away: the request never reaches it and there is no envelope.
       "/v1/load_domain": { rejects: true },
-      "/v1/search_artifacts": { body: { total_matched: 312 } },
+      "/v1/catalog": { body: catalogOf(312) },
       "/v1/layers": { body: { layers: [adminLayer()] } },
     };
     stubRegistry(stubs);
@@ -4146,7 +4178,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/load_domain": { body: emptyDomain },
-      "/v1/search_artifacts": { body: { total_matched: 312 } },
+      "/v1/catalog": { body: catalogOf(312) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
     });
     goTo("#/layers");
@@ -4162,7 +4194,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/load_domain": { body: emptyDomain },
-      "/v1/search_artifacts": { body: { total_matched: 200 } },
+      "/v1/catalog": { body: catalogOf(200) },
       "DELETE /v1/layers": { body: {} },
       "/v1/layers?deleted=true": { body: { layers: [userLayer()] } },
       "/v1/layers": { body: { layers: [adminLayer()] } },
@@ -4191,7 +4223,7 @@ describe("the layer write flows", () => {
       "/v1/load_domain": {
         body: { path: "", subdomains: [{ path: "eng", name: "eng" }], notable: [] },
       },
-      "/v1/search_artifacts": { body: { total_matched: 9 } },
+      "/v1/catalog": { body: catalogOf(9) },
       "/v1/layers": { body: { layers: [userLayer()] } },
     });
     goTo("#/layers");
@@ -4219,7 +4251,7 @@ describe("the layer write flows", () => {
           notable: [],
         },
       },
-      "/v1/search_artifacts": { body: { total_matched: 10 } },
+      "/v1/catalog": { body: catalogOf(10) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": { body: { layer: "alice-personal", accepted: 1 } },
     });
@@ -7018,9 +7050,11 @@ describe("the trimmed listing", () => {
     expect(
       within(browser).getByText("Sorted by artifact count."),
     ).toBeTruthy();
-    // The count is one read over the whole domain.
+    // The count is one read over the whole domain. The shell reads the
+    // unscoped catalog for its own footer, so the scoped reads are what this
+    // counts.
     expect(
-      requests.filter((r) => r.url.startsWith("/v1/catalog")).length,
+      requests.filter((r) => r.url.startsWith("/v1/catalog?scope=")).length,
     ).toBe(1);
     expect(
       requests.some((r) => r.url.includes(encodeURIComponent("platform/d"))),
