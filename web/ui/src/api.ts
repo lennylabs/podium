@@ -311,9 +311,20 @@ export interface IngestSummary {
   conflicts?: IngestConflict[];
   rejected?: IngestRejection[];
   advisories?: IngestAdvisory[];
+  artifacts?: IngestedArtifact[];
   /** queued marks the arm a registry with no ingest runner wired answers
    * with: the request is recorded and there is no summary to read. */
   queued?: string;
+}
+
+/** IngestedArtifact is one (artifact_id, version) pair the snapshot left in
+ * the layer. The list covers both counts the report presents, so `status`
+ * says whether the pair was newly accepted or matched what was already
+ * stored. */
+export interface IngestedArtifact {
+  id: string;
+  version: string;
+  status?: string;
 }
 
 export interface IngestConflict {

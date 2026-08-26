@@ -124,6 +124,53 @@ func TestIngest_IdempotentOnSameContent(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 — Ingested lists every pair present in the layer after the
+// snapshot, and the two outcomes it covers are counted separately, so each
+// pair records whether this run newly stored it. A reader that itemises the
+// accepted count reads that flag.
+func TestIngest_IngestedMarksTheNewlyAcceptedPairs(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	first := fstest.MapFS{
+		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Glossary"))},
+	}
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    first,
+	}); err != nil {
+		t.Fatalf("first ingest: %v", err)
+	}
+	second := fstest.MapFS{
+		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Glossary"))},
+		"deploy-runbook/ARTIFACT.md":   &fstest.MapFile{Data: []byte(contextArtifact("Runbook"))},
+	}
+	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    second,
+	})
+	if err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+	if res.Accepted != 1 || res.Idempotent != 1 {
+		t.Fatalf("Accepted=%d Idempotent=%d, want 1 and 1", res.Accepted, res.Idempotent)
+	}
+	accepted := map[string]bool{}
+	for _, a := range res.Ingested {
+		accepted[a.ArtifactID] = a.Accepted
+	}
+	if len(accepted) != 2 {
+		t.Fatalf("Ingested = %+v, want both pairs", res.Ingested)
+	}
+	if !accepted["deploy-runbook"] {
+		t.Errorf("deploy-runbook: Accepted=false, want true (this run stored it)")
+	}
+	if accepted["company-glossary"] {
+		t.Errorf("company-glossary: Accepted=true, want false (the content was unchanged)")
+	}
+}
+
 // Spec: §7.3.1 / §6.10 — same version with different content_hash
 // surfaces as ingest.immutable_violation; existing bytes are preserved.
 // Matrix: §6.10 (ingest.immutable_violation)

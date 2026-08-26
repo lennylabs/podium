@@ -374,6 +374,12 @@ type Result struct {
 type IngestedArtifact struct {
 	ArtifactID string
 	Version    string
+	// Accepted is true when this snapshot newly stored the pair and false
+	// when the pair matched the stored content and was a no-op. The two
+	// outcomes are counted separately in Accepted and Idempotent, so a
+	// reader that wants the artifacts behind either count needs the
+	// distinction carried per pair.
+	Accepted bool
 }
 
 // EmbeddingFailure names an artifact whose post-ingest embedding
@@ -813,7 +819,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			return nil, err
 		}
 		res.Accepted++
-		res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version})
+		res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version, Accepted: true})
 
 		// §7.3.2 — artifact.deprecated fires only when a manifest update
 		// "flipped deprecated: true", i.e. a prior non-deprecated version

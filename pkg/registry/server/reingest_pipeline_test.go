@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -58,6 +59,47 @@ func TestReingest_RunsPipelineAndReturnsSummary(t *testing.T) {
 	}
 	if m["queued"] != "team-shared" {
 		t.Errorf("queued = %v, want team-shared", m["queued"])
+	}
+}
+
+// spec: §7.3.1 — the itemised artifact list covers both the newly accepted
+// pairs and the unchanged ones, so each entry states which of the two counts
+// it belongs to and a reader can itemise either count on its own.
+func TestReingest_ArtifactsCarryAcceptedOrUnchangedStatus(t *testing.T) {
+	t.Parallel()
+	runner := func(_ context.Context, _ store.LayerConfig, _ *server.BreakGlass) (*ingest.Result, error) {
+		return &ingest.Result{
+			Accepted:   1,
+			Idempotent: 1,
+			Ingested: []ingest.IngestedArtifact{
+				{ArtifactID: "platform/lint", Version: "1.4.0"},
+				{ArtifactID: "platform/deploy", Version: "2.0.0", Accepted: true},
+			},
+		}, nil
+	}
+	base, cleanup := newRunnerHarness(t, runner)
+	defer cleanup()
+
+	resp, err := http.Post(base+"/v1/layers/reingest?id=team-shared", "application/json", nil)
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	var m struct {
+		Artifacts []map[string]string `json:"artifacts"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := []map[string]string{
+		{"id": "platform/lint", "version": "1.4.0", "status": "unchanged"},
+		{"id": "platform/deploy", "version": "2.0.0", "status": "accepted"},
+	}
+	if !reflect.DeepEqual(m.Artifacts, want) {
+		t.Errorf("artifacts = %v, want %v", m.Artifacts, want)
 	}
 }
 

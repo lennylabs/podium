@@ -16,7 +16,14 @@ import { useState } from 'react';
 
 import type { Tone } from '../components/primitives';
 import { Badge, CopyButton, Modal } from '../components/primitives';
-import type { BreakGlass, IngestAdvisory, IngestConflict, IngestRejection, IngestSummary } from '../api';
+import type {
+  BreakGlass,
+  IngestAdvisory,
+  IngestConflict,
+  IngestedArtifact,
+  IngestRejection,
+  IngestSummary,
+} from '../api';
 import { ApiError } from '../api';
 import { clock, elapsed } from '../time';
 
@@ -137,7 +144,7 @@ const advisoryPreview = 2;
  * the counts first, and only the counts the response itemises open anything:
  * `lint_failures` arrives as a bare number, so it is captioned and left
  * un-openable rather than offered as a list that does not exist. */
-type IngestDetail = 'rejected' | 'conflicts' | 'advisories';
+type IngestDetail = 'accepted' | 'rejected' | 'conflicts' | 'advisories';
 
 /** IngestReport presents what the snapshot did. The counts come first
  * because they say whether anything needs acting on, and each count the
@@ -167,6 +174,11 @@ function IngestReport({
   const conflicts = summary.conflicts ?? [];
   const advisories = summary.advisories ?? [];
   const lintFailures = summary.lint_failures ?? 0;
+  // The response itemises the pairs the snapshot left in the layer, carrying
+  // both counts the report presents. Only the newly accepted ones back the
+  // accepted count, so the rest are dropped rather than shown under a number
+  // they are not part of.
+  const accepted = (summary.artifacts ?? []).filter((a) => a.status === 'accepted');
   // A registry with no ingest runner wired records the request and answers
   // with the intent alone, so there is no summary to present.
   const recorded = summary.accepted === undefined;
@@ -187,7 +199,18 @@ function IngestReport({
         {!recorded && detail === null && (
           <>
             <div className="stats" aria-label="Ingest counts">
-              <Stat label="accepted" count={summary.accepted ?? 0} />
+              <Stat
+                label="accepted"
+                count={summary.accepted ?? 0}
+                tone="ok"
+                onOpen={
+                  accepted.length > 0
+                    ? () => {
+                        setDetail('accepted');
+                      }
+                    : undefined
+                }
+              />
               <Stat label="unchanged" count={summary.idempotent ?? 0} />
               <Stat
                 label="rejected"
@@ -238,6 +261,7 @@ function IngestReport({
             >
               Back to the counts
             </button>
+            {detail === 'accepted' && <AcceptedList artifacts={accepted} />}
             {detail === 'rejected' && <RejectionList rejections={rejected} />}
             {detail === 'conflicts' && <ConflictList conflicts={conflicts} />}
             {detail === 'advisories' && <AdvisoryList advisories={advisories} total={advisories.length} />}
@@ -258,6 +282,11 @@ function IngestReport({
   );
 }
 
+/** StatTone is the tone a count carries. It extends the shared tones with
+ * the success tone, which only a count has a use for: a badge marks a state
+ * that needs reading, and a snapshot that accepted artifacts needs none. */
+type StatTone = Tone | 'ok';
+
 /** Stat is one count. A count the response itemises carries a control that
  * opens that list; a count it does not carries a caption saying so, because
  * a number that looks like every other number and opens nothing reads as a
@@ -272,7 +301,7 @@ function Stat({
 }: {
   label: string;
   count: number;
-  tone?: Tone;
+  tone?: StatTone;
   caption?: string;
   onOpen?: () => void;
 }) {
@@ -375,6 +404,27 @@ export function summaryText(layerID: string, summary: IngestSummary, finishedAt:
     lines.push(`${advisory.severity} ${advisory.artifact_id} ${advisory.code}: ${advisory.message}`);
   }
   return lines.join('\n');
+}
+
+/** AcceptedList names the (artifact_id, version) pairs the snapshot newly
+ * stored. It is what the accepted count opens, because "184 accepted" does
+ * not say which versions are now live and the reader's next action is to
+ * check one of them. */
+function AcceptedList({ artifacts }: { artifacts: IngestedArtifact[] }) {
+  return (
+    <section aria-label="Accepted artifacts">
+      <p className="label">Accepted · {artifacts.length}</p>
+      <ul>
+        {artifacts.map((artifact) => (
+          <li key={`${artifact.id}:${artifact.version}`}>
+            <span className="mono">
+              {artifact.id}@{artifact.version}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
 }
 
 function RejectionList({ rejections }: { rejections: IngestRejection[] }) {

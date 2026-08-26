@@ -1113,10 +1113,17 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// §0 quickstart: report the (artifact_id, version) pairs the snapshot
-	// produced so the CLI can print the per-artifact confirmation line.
+	// produced so the CLI can print the per-artifact confirmation line. The
+	// list covers both the newly accepted pairs and the unchanged ones, so
+	// each entry carries the status that says which count it belongs to and
+	// a reader can itemise either one.
 	arts := make([]map[string]string, 0, len(res.Ingested))
 	for _, a := range res.Ingested {
-		arts = append(arts, map[string]string{"id": a.ArtifactID, "version": a.Version})
+		status := "unchanged"
+		if a.Accepted {
+			status = "accepted"
+		}
+		arts = append(arts, map[string]string{"id": a.ArtifactID, "version": a.Version, "status": status})
 	}
 	// spec: §4.6 / §3.3 — surface the non-blocking ingest advisories (e.g. the
 	// cross-layer license change) so a publisher reingesting at

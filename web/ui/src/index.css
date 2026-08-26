@@ -64,6 +64,7 @@
   --danger-bg: #fdeee9;
   --danger-bd: #f0c4b8;
   --on-danger: #ffffff;
+  --ok: #3f8f66;
   --scrim: rgba(20, 19, 15, 0.42);
   --font-ui: "Space Grotesk", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
@@ -93,6 +94,7 @@
     --danger-bg: rgba(255, 107, 74, 0.12);
     --danger-bd: #5c2a1e;
     --on-danger: #14130f;
+    --ok: #5fbf8f;
     --scrim: rgba(6, 8, 13, 0.62);
   }
 }
@@ -117,6 +119,7 @@
   --danger-bg: rgba(255, 107, 74, 0.12);
   --danger-bd: #5c2a1e;
   --on-danger: #14130f;
+  --ok: #5fbf8f;
   --scrim: rgba(6, 8, 13, 0.62);
 }
 
@@ -2955,6 +2958,14 @@ label:has(> input:disabled) {
 
 .stat-accent .stat-count {
   color: var(--link);
+}
+
+/* A snapshot that accepted something is the one outcome the report reads as
+   good, so the count carries the success token. The card itself stays
+   neutral: tinting it would put a fourth ground in a row of five cards and
+   compete with the two tints that mean something needs acting on. */
+.stat-ok .stat-count {
+  color: var(--ok);
 }
 
 /* A count the response itemises opens that list, so it is a control. It is

@@ -79,7 +79,42 @@ describe('the finished reingest report', () => {
     // two the reader has to act on.
     expect(within(counts).getByText('rejected').parentElement?.className).toContain('stat-danger');
     expect(within(counts).getByText('conflicts').parentElement?.className).toContain('stat-accent');
+    // A snapshot that accepted artifacts is the one outcome the report reads
+    // as good, so the accepted count carries the success tone. This response
+    // itemised no artifacts, so the count opens nothing.
+    expect(within(counts).getByText('accepted').parentElement?.className).toContain('stat-ok');
+  });
+
+  // The response itemises the pairs the snapshot left in the layer and marks
+  // which of them it newly stored, so the accepted count opens its own list
+  // rather than the unchanged ones alongside it.
+  it('opens the accepted count onto the artifacts the snapshot newly stored', () => {
+    report({
+      accepted: 2,
+      idempotent: 1,
+      artifacts: [
+        { id: 'platform/deploy', version: '2.0.0', status: 'accepted' },
+        { id: 'platform/lint', version: '1.4.0', status: 'unchanged' },
+        { id: 'platform/release', version: '3.1.0', status: 'accepted' },
+      ],
+    });
+    const counts = screen.getByLabelText('Ingest counts');
+    fireEvent.click(within(counts).getByRole('button', { name: '2' }));
+    const listed = within(screen.getByLabelText('Accepted artifacts')).getAllByRole('listitem');
+    expect(listed.map((item) => item.textContent)).toEqual(['platform/deploy@2.0.0', 'platform/release@3.1.0']);
+  });
+
+  // Nothing accepted is nothing to open, and nothing to tone as an outcome
+  // the reader can read as good.
+  it('leaves an accepted count of zero inert and untoned', () => {
+    report({
+      accepted: 0,
+      idempotent: 1,
+      artifacts: [{ id: 'platform/lint', version: '1.4.0', status: 'unchanged' }],
+    });
+    const counts = screen.getByLabelText('Ingest counts');
     expect(within(counts).getByText('accepted').parentElement?.className).toContain('stat-neutral');
+    expect(within(counts).queryAllByRole('button').length).toBe(0);
   });
 
   // The counts say how many; the block beside them says what to do about it,
