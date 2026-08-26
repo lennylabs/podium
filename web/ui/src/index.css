@@ -3012,6 +3012,8 @@ button.stat-open {
 }
 
 .attention-row {
+  display: flex;
+  gap: 11px;
   padding: 12px 14px;
   border: 1px solid var(--b2);
   border-radius: 9px;
@@ -3021,9 +3023,24 @@ button.stat-open {
   color: var(--sec);
 }
 
+.attention-glyph {
+  flex: none;
+  color: var(--faint);
+}
+
+.attention-text {
+  min-width: 0;
+  margin: 0;
+}
+
 .attention-danger {
   border-color: var(--danger-bd);
   background: var(--danger-bg);
+}
+
+.attention-danger .attention-glyph {
+  color: var(--danger);
+  font-weight: 700;
 }
 
 .attention-danger button.stat-open {
@@ -3034,6 +3051,11 @@ button.stat-open {
 .attention-accent {
   border-color: var(--cbd);
   background: var(--wash);
+}
+
+.attention-accent .attention-glyph {
+  color: var(--link);
+  font-weight: 700;
 }
 
 .attention-accent button.stat-open {

@@ -144,6 +144,34 @@ describe('the finished reingest report', () => {
     expect(screen.getByText('platform/lint@1.0.0')).toBeTruthy();
   });
 
+  // The count is a control and the remedy is prose, so an em dash separates
+  // them. Abutting the two runs them together into one broken sentence.
+  it('separates each attention count from its remedy with an em dash', () => {
+    report({
+      accepted: 0,
+      idempotent: 1,
+      rejected: [{ artifact_id: 'platform/deploy', code: 'ingest.sensitivity_floor', reason: 'above the floor' }],
+      conflicts: [
+        {
+          artifact_id: 'platform/lint',
+          version: '1.0.0',
+          old_hash: 'sha256:aaa',
+          new_hash: 'sha256:bbb',
+          code: 'ingest.immutable_violation',
+        },
+      ],
+    });
+    const attention = screen.getByLabelText('Needs attention');
+    const rows = attention.querySelectorAll('.attention-row');
+    expect(rows.length).toBe(2);
+    expect(rows[0].textContent).toBe(
+      '!1 artifact rejected — each carries its code and its reason.',
+    );
+    expect(rows[1].textContent).toBe(
+      '⇄1 immutability conflict — a published version was republished with different content. Bump the version and reingest.',
+    );
+  });
+
   // A clean snapshot needs nothing, so nothing is drawn asking for it.
   it('draws no attention block where the snapshot rejected and conflicted on nothing', () => {
     report({ accepted: 2, idempotent: 0, lint_failures: 0 });

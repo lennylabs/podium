@@ -324,7 +324,10 @@ function Stat({
 /** NeedsAttention states what the counts mean for the reader's next action.
  * A rejection and a conflict have different remedies, and lint failures have
  * no list to open, so each is named rather than left as a number in a row of
- * numbers. Nothing is drawn when the snapshot needs nothing. */
+ * numbers. Nothing is drawn when the snapshot needs nothing. Each row leads
+ * with a glyph in its own gutter and separates the count from the remedy with
+ * an em dash, because the two clauses otherwise abut and read as one broken
+ * sentence. */
 function NeedsAttention({
   rejected,
   conflicts,
@@ -344,38 +347,54 @@ function NeedsAttention({
       <p className="label">Needs attention</p>
       {rejected > 0 && (
         <div className="attention-row attention-danger">
-          <button
-            type="button"
-            className="stat-open"
-            onClick={() => {
-              onOpen('rejected');
-            }}
-          >
-            {rejected} {rejected === 1 ? 'artifact' : 'artifacts'} rejected
-          </button>{' '}
-          Each carries its code and its reason.
+          <span className="attention-glyph" aria-hidden="true">
+            !
+          </span>
+          <p className="attention-text">
+            <button
+              type="button"
+              className="stat-open"
+              onClick={() => {
+                onOpen('rejected');
+              }}
+            >
+              {rejected} {rejected === 1 ? 'artifact' : 'artifacts'} rejected
+            </button>
+            {' — '}each carries its code and its reason.
+          </p>
         </div>
       )}
       {conflicts > 0 && (
         <div className="attention-row attention-accent">
-          <button
-            type="button"
-            className="stat-open"
-            onClick={() => {
-              onOpen('conflicts');
-            }}
-          >
-            {conflicts} immutability {conflicts === 1 ? 'conflict' : 'conflicts'}
-          </button>{' '}
-          A published version was republished with different content. Bump the version and reingest.
+          <span className="attention-glyph" aria-hidden="true">
+            ⇄
+          </span>
+          <p className="attention-text">
+            <button
+              type="button"
+              className="stat-open"
+              onClick={() => {
+                onOpen('conflicts');
+              }}
+            >
+              {conflicts} immutability {conflicts === 1 ? 'conflict' : 'conflicts'}
+            </button>
+            {' — '}a published version was republished with different content. Bump the version
+            and reingest.
+          </p>
         </div>
       )}
       {lintFailures > 0 && (
         <div className="attention-row">
-          <strong>
-            {lintFailures} lint {lintFailures === 1 ? 'failure' : 'failures'}.
-          </strong>{' '}
-          The response carries the count alone. The ingest log names them.
+          <span className="attention-glyph" aria-hidden="true">
+            ◎
+          </span>
+          <p className="attention-text">
+            <strong>
+              {lintFailures} lint {lintFailures === 1 ? 'failure' : 'failures'}.
+            </strong>{' '}
+            The response carries the count alone. The ingest log names them.
+          </p>
         </div>
       )}
     </section>
