@@ -90,3 +90,62 @@ export function useDialogFocus<T extends HTMLElement>(active = true): RefObject<
   }, [active]);
   return container;
 }
+
+/**
+ * usePopupDismiss gives a transient popup the dismissal paths every overlay
+ * in this shell owes a reader: Escape closes it and hands focus back to the
+ * control that opened it, a pointer press anywhere outside it closes it, and
+ * focus landing outside it closes it. The last two also make the popups
+ * exclusive, because opening a second one presses or focuses outside the
+ * first. A popup whose only exit is its own trigger strands a reader who
+ * opened it to look, and leaves stale menus stacked over the surface.
+ *
+ * Attach the returned ref to the popup element and pass the trigger's ref.
+ * The trigger counts as inside, so the press that toggles the popup shut is
+ * not also read as an outside press, which would close and reopen it.
+ */
+export function usePopupDismiss<T extends HTMLElement>(
+  open: boolean,
+  onClose: () => void,
+  trigger: RefObject<HTMLElement | null>,
+): RefObject<T | null> {
+  const popup = useRef<T>(null);
+  // The close callback is read through a ref so a caller that rebuilds it on
+  // every render does not tear the listeners down and set them up again.
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const outside = (target: EventTarget | null) => {
+      if (!(target instanceof Node)) {
+        return true;
+      }
+      return !(popup.current?.contains(target) ?? false) && !(trigger.current?.contains(target) ?? false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      close.current();
+      trigger.current?.focus();
+    };
+    const onOutside = (event: Event) => {
+      if (outside(event.target)) {
+        close.current();
+      }
+    };
+    document.addEventListener('keydown', onKeyDown);
+    // Capture, so a press on a control that unmounts itself still reports a
+    // target the popup can compare against.
+    document.addEventListener('pointerdown', onOutside, true);
+    document.addEventListener('focusin', onOutside, true);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.removeEventListener('pointerdown', onOutside, true);
+      document.removeEventListener('focusin', onOutside, true);
+    };
+  }, [open, trigger]);
+  return popup;
+}

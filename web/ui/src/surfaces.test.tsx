@@ -3446,6 +3446,50 @@ describe("the layer write flows", () => {
     );
   });
 
+  // The row's overflow menu is a transient popup, and every other overlay in
+  // the shell leaves on Escape. A popup whose only exit is its own trigger
+  // strands a reader who opened it to look, and one that survives a press
+  // elsewhere leaves stale menus stacked over rows the reader has moved on
+  // from.
+  it("dismisses the row actions on Escape, on an outside press, and when another row's actions open", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    const trigger = screen.getByRole("button", {
+      name: "More actions for alice-personal",
+    });
+    // The trigger carries the same label as the menu it opens, so the open
+    // menus are read off the popups themselves.
+    const openMenus = () =>
+      Array.from(document.querySelectorAll(".row-menu")).map((menu) =>
+        menu.getAttribute("aria-label"),
+      );
+
+    openRowActions();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(openMenus()).toEqual([]);
+    expect(document.activeElement).toBe(trigger);
+
+    openRowActions();
+    fireEvent.pointerDown(panel);
+    expect(openMenus()).toEqual([]);
+
+    // Only one row's actions are open at a time: the press that opens the
+    // second row's menu is a press outside the first.
+    openRowActions();
+    const other = screen.getByRole("button", {
+      name: "More actions for company",
+    });
+    fireEvent.pointerDown(other);
+    fireEvent.click(other);
+    expect(openMenus()).toEqual(["More actions for company"]);
+  });
+
   // A dialog opens with focus on the field the reader has to fill in. Opening
   // focus on the dismissal ✕ made the first Enter close the dialog the reader
   // had just opened, and put the destructive confirmation's opening focus on

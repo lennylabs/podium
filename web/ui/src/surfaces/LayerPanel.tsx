@@ -31,6 +31,7 @@ import {
   Modal,
 } from "../components/primitives";
 import { SourceCell } from "../components/SourceCell";
+import { usePopupDismiss } from "../components/focus";
 import type { BreakGlass, LayerRecord } from "../api";
 import {
   ApiError,
@@ -567,6 +568,16 @@ function LayerRow({
   // Picking an item unmounts the menu, so the trigger takes focus back before
   // the dialog the item opens reads what to return focus to.
   const overflow = useRef<HTMLButtonElement>(null);
+  // The menu is a transient popup, so it dismisses on Escape and on a press
+  // or a focus move outside itself, which is also what keeps one row's
+  // actions from staying open behind another row's.
+  const menu = usePopupDismiss<HTMLDivElement>(
+    overflowOpen,
+    () => {
+      setOverflowOpen(false);
+    },
+    overflow,
+  );
 
   // A write the panel sends can come back refused, including on a row the
   // panel presented as this caller's to manage. The refusal is drawn on the
@@ -689,7 +700,7 @@ function LayerRow({
           </button>
         </div>
         {overflowOpen && (
-          <div className="row-menu" aria-label={`More actions for ${layer.ID}`}>
+          <div ref={menu} className="row-menu" aria-label={`More actions for ${layer.ID}`}>
             <button
               type="button"
               disabled={readOnly}
