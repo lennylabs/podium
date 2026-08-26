@@ -6461,6 +6461,58 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The browser's Back gesture is the dismissal route the dialog cannot see:
+  // it fires no key and no press, and leaving the layers route unmounts the
+  // panel the reveal is rendered from. It discards the same credential Escape
+  // and the scrim are refused for, so the shell refuses it the same way and
+  // pins the route the reveal opened on back onto the address bar.
+  it("holds the secret reveal against a history step and restores the route", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "git",
+            Order: 1,
+            UserDefined: true,
+          },
+          webhook_url:
+            "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+          webhook_secret: "whsec-abc",
+        },
+      },
+    });
+    goTo(layersHref);
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByLabelText("Webhook secret");
+    // The step the reader's Back gesture lands on: the hash moves off the
+    // layers route and the shell is told about it.
+    window.location.hash = searchHref("zzqqnomatch");
+    fireEvent(window, new HashChangeEvent("hashchange"));
+    expect(screen.getByText("whsec-abc")).toBeTruthy();
+    expect(window.location.hash).toBe(layersHref);
+    // The acknowledgement remains the way out, and the shell follows a route
+    // change again once the reveal is gone.
+    fireEvent.click(screen.getByLabelText("I have stored the secret."));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Webhook secret")).toBeNull();
+    });
+    window.location.hash = searchHref("zzqqnomatch");
+    fireEvent(window, new HashChangeEvent("hashchange"));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Layer panel")).toBeNull();
+    });
+  });
+
   // The reveal refuses Escape, the scrim, and every control behind it because
   // the secret is unrecoverable, so the accelerator that opens the command
   // palette has to refuse it too: a palette over the reveal takes focus, and

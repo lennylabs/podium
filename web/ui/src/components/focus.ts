@@ -197,11 +197,14 @@ export function usePopupDismiss<T extends HTMLElement>(
   return popup;
 }
 
-// holds counts the dialogs on the page that refuse every dismissal route. It is
-// module state because the accelerators that open an overlay live in the shell,
-// above whatever surface opened the dialog, and a dialog does not know what is
-// listening for a key it has no way to see.
-let holds = 0;
+// holds carries one entry per dialog on the page that refuses every dismissal
+// route, each recording the location hash the dialog opened on. It is module
+// state because the accelerators that open an overlay live in the shell, above
+// whatever surface opened the dialog, and a dialog does not know what is
+// listening for a key it has no way to see. The recorded hash is what the
+// shell pins the address bar back to, because a history step tears down the
+// surface underneath the dialog and takes the dialog with it.
+const holds: { hash: string }[] = [];
 const heldListeners = new Set<() => void>();
 
 function publishHeld(): void {
@@ -219,7 +222,8 @@ function publishHeld(): void {
  * take focus and discard the credential when the reader followed it.
  */
 export function holdDismissal(): () => void {
-  holds += 1;
+  const entry = { hash: window.location.hash };
+  holds.push(entry);
   publishHeld();
   let released = false;
   return () => {
@@ -227,9 +231,26 @@ export function holdDismissal(): () => void {
       return;
     }
     released = true;
-    holds -= 1;
+    const at = holds.indexOf(entry);
+    if (at >= 0) {
+      holds.splice(at, 1);
+    }
     publishHeld();
   };
+}
+
+/**
+ * heldRoute is the location hash the innermost such dialog opened on, or null
+ * when no dialog holds. The browser's Back gesture is the dismissal route a
+ * dialog cannot refuse for itself: it fires no key event and no press the
+ * dialog can see, and it unmounts the surface that renders the dialog. The
+ * shell reads this on a hash change and pins the address bar back, so a
+ * credential shown once survives the gesture and the acknowledgement stays
+ * the one way out.
+ */
+export function heldRoute(): string | null {
+  const held = holds.at(-1);
+  return held === undefined ? null : held.hash;
 }
 
 /**
@@ -245,7 +266,7 @@ export function useDismissalHeld(): boolean {
         heldListeners.delete(listener);
       };
     },
-    () => holds > 0,
+    () => holds.length > 0,
     () => false,
   );
 }

@@ -5,6 +5,8 @@
 
 import { useEffect, useState } from 'react';
 
+import { heldRoute } from './components/focus';
+
 export type Route =
   | { name: 'domain'; path: string }
   | { name: 'search'; query: string }
@@ -110,11 +112,25 @@ export function routeKey(route: Route): string {
   }
 }
 
-/** useRoute tracks the location hash. */
+/** useRoute tracks the location hash. A dialog that withholds every dismissal
+ * route withholds the history step with it: the reader's Back gesture fires no
+ * key and no press the dialog can see, and leaving the route unmounts the
+ * surface the dialog is rendered from, which for the one-time webhook secret
+ * discards a credential recoverable only by rotating it. While such a dialog
+ * holds, the route it opened on is written back over the entry the gesture
+ * landed on and the shell stays where it was. `replaceState` fires no
+ * `hashchange`, so the correction does not re-enter this handler. */
 export function useRoute(): Route {
   const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
   useEffect(() => {
     const onChange = () => {
+      const held = heldRoute();
+      if (held !== null) {
+        if (window.location.hash !== held) {
+          window.history.replaceState(null, '', held === '' ? '#/' : held);
+        }
+        return;
+      }
       setRoute(parseRoute(window.location.hash));
     };
     window.addEventListener('hashchange', onChange);
