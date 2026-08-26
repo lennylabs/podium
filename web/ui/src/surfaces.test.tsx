@@ -8272,6 +8272,13 @@ describe("the shell’s identity cluster", () => {
 
     fireEvent.click(screen.getByTestId("appearance-trigger"));
     const menu = screen.getByTestId("appearance-menu");
+    // The popover carries the segmented control and nothing else. A
+    // role="menu" over three toggle buttons is announced as a menu holding no
+    // items, so the popover claims no role and the group stands on the
+    // control, which is the pattern the rest of the shell uses.
+    expect(menu.getAttribute("role")).toBeNull();
+    const appearance = within(menu).getByRole("group", { name: "Appearance" });
+    expect(appearance.className.split(" ")).toContain("segmented");
     fireEvent.click(within(menu).getByRole("button", { name: "light" }));
     expect(window.document.documentElement.getAttribute("data-theme")).toBe(
       "light",

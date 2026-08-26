@@ -1122,6 +1122,12 @@ function AppearanceSwitch({
  * predicts no server outcome, which is why the shell renders it on every
  * deployment that renders no identity cluster.
  *
+ * The popover holds the segmented control and nothing else, so it declares no
+ * role of its own. A role="menu" whose children are ordinary toggle buttons
+ * rather than menu items is announced as a menu holding no items, and the
+ * pinned preference then reads as a pressed toggle instead of the selected
+ * member of its group. The group and its label stand on the control itself.
+ *
  * Spec: §13.10
  */
 function AppearanceMenu({
@@ -1146,7 +1152,7 @@ function AppearanceMenu({
         Appearance
       </button>
       {open && (
-        <div className="account-menu" role="menu" aria-label="Appearance" data-testid="appearance-menu" ref={menu}>
+        <div className="account-menu" data-testid="appearance-menu" ref={menu}>
           <AppearanceSwitch theme={theme} onTheme={onTheme} />
         </div>
       )}
