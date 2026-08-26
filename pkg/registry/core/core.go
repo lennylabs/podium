@@ -1206,6 +1206,14 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		filtered = append(filtered, m)
 	}
 
+	// spec: §4.7.6 — search ranks artifacts, so each canonical ID contributes
+	// one document at its latest version. Without this collapse a stored
+	// version history scores once per version: the returned list repeats the
+	// same artifact, and total_matched counts versions the reranks below
+	// (which key on the canonical ID) then dedupe away, so a caller reads a
+	// remainder no filter can reach.
+	filtered = dedupeLatest(filtered)
+
 	// Lexical: BM25 over manifest text. Empty query returns matched
 	// records with score 0 (alphabetical by id).
 	scored := scoreBM25(filtered, opts.Query)
