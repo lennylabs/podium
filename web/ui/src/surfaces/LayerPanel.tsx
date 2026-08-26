@@ -146,6 +146,20 @@ export function LayerPanel({
     send();
   };
 
+  /** moveBy walks one layer a step through its own class block. It is the
+   * keyboard path to the reorder a drag commits, so the handle is a control a
+   * keyboard-only operator can reach and the arrow keys drive the same
+   * request the drop sends. */
+  const moveBy = (id: string, delta: number) => {
+    const block = blockOf(rows, id);
+    const at = block.findIndex((row) => row.ID === id);
+    const onto = block[at + delta];
+    if (at < 0 || onto === undefined) {
+      return;
+    }
+    commitMove(id, onto.ID);
+  };
+
   return (
     <section className="surface" aria-label="Layer panel">
       {/* The title, what a layer is, and the panel's actions share one row:
@@ -231,7 +245,9 @@ export function LayerPanel({
           the reader's inference from position, a table sorted the other way
           round reads the same. */}
       <p className="precedence-label">
-        <span className="label">Precedence — drag to reorder</span>
+        <span className="label">
+          Precedence — drag or press the arrow keys on a handle to reorder
+        </span>
         <span className="quiet">lower row wins</span>
       </p>
       <p className="quiet">
@@ -279,6 +295,9 @@ export function LayerPanel({
                 onDragEnd={() => {
                   setDragging(null);
                   setOver(null);
+                }}
+                onMove={(delta) => {
+                  moveBy(layer.ID, delta);
                 }}
                 onReingest={(breakGlass) => {
                   void runReingest(layer.ID, breakGlass);
@@ -439,6 +458,7 @@ function LayerRow({
   onDragOver,
   onDrop,
   onDragEnd,
+  onMove,
   onReingest,
   onDismissReingest,
   onWrite,
@@ -456,6 +476,7 @@ function LayerRow({
   onDragOver: () => void;
   onDrop: () => void;
   onDragEnd: () => void;
+  onMove: (delta: number) => void;
   onReingest: (breakGlass?: BreakGlass) => void;
   onDismissReingest: () => void;
   onWrite: () => void;
@@ -507,13 +528,28 @@ function LayerRow({
       onDragEnd={onDragEnd}
     >
       <td className="drag-cell">
-        <span
+        {/* The handle is a button so the reorder has an input path that is
+            not a pointer drag. A keyboard-only operator focuses it and the
+            arrow keys move the row through its block, which sends the same
+            request a drop sends. */}
+        <button
+          type="button"
           className="drag-handle"
-          aria-label={`Drag ${layer.ID} to reorder`}
-          role="img"
+          aria-label={`Move ${layer.ID}: press the up or down arrow key`}
+          disabled={readOnly}
+          draggable={!readOnly}
+          onKeyDown={(event) => {
+            if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
+              return;
+            }
+            // The arrows scroll the page otherwise, which moves the row out
+            // from under the operator driving it.
+            event.preventDefault();
+            onMove(event.key === "ArrowUp" ? -1 : 1);
+          }}
         >
           ⋮⋮
-        </span>
+        </button>
       </td>
       <td className="mono">
         {layer.ID}

@@ -2064,8 +2064,9 @@ describe("the layer panel", () => {
     );
     // The qualifier sits on the label's own line rather than in a paragraph
     // below the label.
-    const label = panel.getByText("Precedence — drag to reorder")
-      .parentElement as HTMLElement;
+    const label = panel.getByText(
+      "Precedence — drag or press the arrow keys on a handle to reorder",
+    ).parentElement as HTMLElement;
     expect(within(label).getByText("lower row wins")).toBeTruthy();
     expect(
       (await screen.findByTestId("personal-layer-count")).textContent,
@@ -2359,10 +2360,12 @@ describe("read-only mode", () => {
         expect(control.hasAttribute("disabled")).toBe(true);
       }
     }
-    // Reordering is a write too, so the rows carry no drag on a read-only
-    // registry rather than committing a move the registry would refuse.
-    for (const row of screen.getAllByLabelText(/Drag .* to reorder/)) {
-      expect(row.closest("tr")?.getAttribute("draggable")).toBe("false");
+    // Reordering is a write too, so the rows carry no drag and the handles
+    // take no key on a read-only registry rather than committing a move the
+    // registry would refuse.
+    for (const handle of screen.getAllByLabelText(/^Move .*arrow key$/)) {
+      expect(handle.closest("tr")?.getAttribute("draggable")).toBe("false");
+      expect(handle.hasAttribute("disabled")).toBe(true);
     }
   });
 
@@ -3113,6 +3116,67 @@ describe("the layer write flows", () => {
     expect(requests.some((r) => r.url === "/v1/layers/reorder")).toBe(false);
   });
 
+  // Precedence is the panel's one ordering write, and a pointer drag is the
+  // only way to issue it unless the handle is a control the keyboard can
+  // reach. The handle takes focus and the arrow keys walk the row through its
+  // block, sending the request a drop sends.
+  it("reorders from the keyboard when the handle takes an arrow key", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
+        },
+      },
+      "/v1/layers/reorder": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const handle = screen.getByLabelText(
+      moveHandleLabel("alice-personal"),
+    ) as HTMLButtonElement;
+    handle.focus();
+    expect(document.activeElement).toBe(handle);
+    fireEvent.keyDown(handle, { key: "ArrowDown" });
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (r) => r.url === "/v1/layers/reorder" && r.method === "POST",
+        ),
+      ).toBe(true);
+    });
+    // A step down the block is the move a drop onto the next row commits, and
+    // the request names the whole block for the same reason.
+    expect(bodies.at(-1)).toBe(
+      JSON.stringify({
+        order: ["alice-scratch", "alice-personal", "bob-personal"],
+      }),
+    );
+  });
+
+  // A step off the end of the block names no move §4.6 would compose, so the
+  // key does what a drop across the class boundary does and sends nothing.
+  it("sends no reorder where an arrow key steps off the end of the block", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layers: [adminLayer(), userLayer(), scratchLayer()] },
+      },
+      "/v1/layers/reorder": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.keyDown(screen.getByLabelText(moveHandleLabel("alice-personal")), {
+      key: "ArrowUp",
+    });
+    await waitFor(() => {
+      expect(screen.getByLabelText("Layer panel")).toBeTruthy();
+    });
+    expect(requests.some((r) => r.url === "/v1/layers/reorder")).toBe(false);
+  });
+
   // The fan-out issues one request per layer in sequence. A row changes only
   // when its own request returns, so the panel fabricates no progress and a
   // row shows what its own response carried.
@@ -3489,6 +3553,11 @@ describe("the layer write flows", () => {
   });
 });
 
+/** moveHandleLabel is the accessible name of one row's reorder handle. */
+function moveHandleLabel(id: string): string {
+  return `Move ${id}: press the up or down arrow key`;
+}
+
 /** dragRowOnto drives the panel's drag-to-reorder: the row is picked up by
  * its handle and dropped onto another row, and the move commits on the drop.
  */
@@ -3501,7 +3570,7 @@ function dragRowOnto(from: string, onto: string): void {
 }
 
 function layerRow(id: string): HTMLElement {
-  const row = screen.getByLabelText(`Drag ${id} to reorder`).closest("tr");
+  const row = screen.getByLabelText(moveHandleLabel(id)).closest("tr");
   if (row === null) {
     throw new Error(`no layer row for ${id}`);
   }

@@ -1260,9 +1260,28 @@ label:has(> input:disabled) {
   min-width: 320px;
 }
 
+/* The handle is a button so the reorder is reachable from the keyboard, and
+   it is drawn as the glyph it was rather than as a bordered control. */
 .drag-handle {
+  padding: 2px 4px;
+  margin-right: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
   color: var(--faint);
+  font: inherit;
+  line-height: 1;
   cursor: grab;
+}
+
+.drag-handle:hover:not(:disabled) {
+  color: var(--meta);
+}
+
+.drag-handle:disabled {
+  border-color: transparent;
+  background: none;
+  cursor: default;
 }
 
 /* Drag to reorder: the row lifts with an accent border and the row it would
