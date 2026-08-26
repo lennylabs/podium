@@ -2328,6 +2328,34 @@ describe("the layer panel", () => {
     expect(lastIngestCell("alice-personal").textContent).toBe("never—");
   });
 
+  // A local source records the directory it read as its ingest reference, so
+  // after a reingest the stored reference is the layer's own path. The Source
+  // column two cells to the left already states that path, and repeating it
+  // here wraps over several lines, so a non-git layer displays no reference.
+  it("displays no ingest ref on a local layer whose stored ref is its own path", async () => {
+    const at = new Date(Date.now() - 4 * 60 * 1000).toISOString();
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ...userLayer(),
+              last_ingested_at: at,
+              LastIngestedRef: "/Users/alice/registry",
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const ingested = lastIngestCell("alice-personal");
+    expect(ingested.textContent).toBe("4m ago—");
+    expect(ingested.textContent).not.toContain("/Users/alice/registry");
+  });
+
   // A layer carrying no stored owner states its position alone. Appending an
   // empty owner clause would read as a field the reader could set from here.
   it("states the position alone on a row whose stored owner is unset", async () => {

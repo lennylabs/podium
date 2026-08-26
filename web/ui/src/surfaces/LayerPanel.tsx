@@ -880,16 +880,27 @@ function ownedByCaller(layer: LayerRecord, subject: string): boolean {
  * title and the age is what the row displays. */
 function LastIngestCell({ layer }: { layer: LayerRecord }) {
   const at = layer.last_ingested_at ?? "";
-  const ref = layer.LastIngestedRef ?? "";
+  const ref = ingestRef(layer);
   return (
     <div title={at === "" ? undefined : at}>
       <div>{at === "" ? "never" : since(at, Date.now())}</div>
-      {/* An em dash rather than an empty line: a source that carries no
-          reference, such as a local path, keeps the row the same height as
-          one that does. */}
+      {/* An em dash rather than an empty line: a row that displays no
+          reference keeps the same height as one that does. */}
       <div className="quiet ingest-ref">{ref === "" ? "—" : shortRef(ref)}</div>
     </div>
   );
+}
+
+/** ingestRef is the reference the cell displays beneath the age. A git source
+ * records the commit the run landed on, which is the fact a reader compares
+ * across runs. A local source records the directory it read, which the Source
+ * column two cells to the left already states, and which wraps over several
+ * lines in a column this narrow, so a non-git layer displays no reference. */
+function ingestRef(layer: LayerRecord): string {
+  if (layer.SourceType !== "git") {
+    return "";
+  }
+  return layer.LastIngestedRef ?? "";
 }
 
 /** shortRef abbreviates an ingest reference to what a reader compares. A
