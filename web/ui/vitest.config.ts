@@ -8,6 +8,10 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: 'jsdom',
+    // The stylesheet is processed and injected into the test document, so a
+    // case can assert a layout rule the surfaces depend on against the CSS
+    // the bundle ships rather than against a class name.
+    css: true,
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     restoreMocks: true,
   },

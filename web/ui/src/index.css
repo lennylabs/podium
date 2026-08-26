@@ -132,6 +132,17 @@ pre {
   font-size: 13px;
 }
 
+/* An identifier set in mono is user-authored and unbounded, and a content
+   hash is long by construction, so it wraps inside whatever holds it rather
+   than running past the edge. The value is break-word rather than anywhere
+   because anywhere also shrinks a column's intrinsic width, which breaks a
+   table timestamp that would otherwise fit. Preformatted blocks keep their
+   own horizontal scroll, so they are excluded. */
+.mono,
+code {
+  overflow-wrap: break-word;
+}
+
 a {
   color: var(--link);
 }

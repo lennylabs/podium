@@ -15,6 +15,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from './App';
 import { searchHref } from './route';
 import type { SessionPosture } from './session';
+// The stylesheet is imported for its own sake: the wrapping rule the rail
+// depends on is asserted from the computed style it produces.
+import './index.css';
 
 /** Stub is one registry response: the status and the JSON body a path
  * answers with. */
@@ -665,6 +668,34 @@ describe('the artifact viewer', () => {
     expect(rows[1].textContent).toBe('delegated to by finance/ap/close-books');
     // The bare edge kind beside the link is the inverted reading.
     expect(relations.querySelector('.label.quiet')?.textContent).not.toBe('extends');
+  });
+
+  // The rail is a fixed-width column and a content hash is long by
+  // construction, so the value has to wrap inside the rail. Without a
+  // wrapping rule it runs past the panel edge and is clipped mid-string,
+  // which leaves the reader no way to read the value at all.
+  it('wraps the provenance content hash inside the rail rather than running it past the edge', async () => {
+    const contentHash = 'sha256:ab7469fdce70f0beb8c3b4e696da5e0080f95f75a9d8b3c2e1f0a94d6c7b8e5f';
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'finance/ap/pay-invoice',
+          type: 'skill',
+          version: '1.0.0',
+          content_hash: contentHash,
+          manifest_body: '# Pay invoice\n',
+          frontmatter: manifestDoc,
+        },
+      },
+      '/v1/dependents': { body: { edges: [] } },
+    });
+    goTo('#/artifact/finance%2Fap%2Fpay-invoice');
+    render(<App />);
+    const provenance = await screen.findByLabelText('Provenance');
+    const value = within(provenance).getByText(contentHash);
+    const style = window.getComputedStyle(value);
+    expect(`${style.overflowWrap} ${style.wordBreak}`).toMatch(/anywhere|break-word|break-all/);
   });
 
   // The viewer is two columns with a tab set over the content one. The
