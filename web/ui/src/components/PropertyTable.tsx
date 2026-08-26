@@ -11,11 +11,13 @@
 import { useState } from 'react';
 
 import { parseFrontmatter, splitDocument } from '../frontmatter';
+import { ClampedText } from './ClampedText';
 
 export function PropertyTable({
   raw,
   testID = 'frontmatter-table',
   offerRaw = false,
+  clampValues = false,
 }: {
   raw: string;
   testID?: string;
@@ -24,6 +26,14 @@ export function PropertyTable({
    * lines that state where the pairs came from and how their values are
    * shown, which belong to the panel and not to the rail's narrow column. */
   offerRaw?: boolean;
+  /** clampValues clips each value to three lines with a control that opens
+   * it, which the rail takes and the full-width panel does not. The rail is
+   * a single scrolling column with the relation links under this table, so a
+   * description running to a couple of thousand characters puts those links
+   * thousands of pixels below the fold (§13.10). The panel has nothing under
+   * it to bury and states that its values are shown verbatim, so it keeps
+   * them whole. */
+  clampValues?: boolean;
 }) {
   // The value the response carries is a whole manifest document on the
   // load path and a bare block on the search path, so the block is taken
@@ -96,7 +106,18 @@ export function PropertyTable({
                 <th scope="row" className="mono">
                   {property.key}
                 </th>
-                <td>{property.value}</td>
+                <td>
+                  {clampValues ? (
+                    <ClampedText
+                      text={property.value}
+                      className="property-value"
+                      testID={`property-value-${property.key}`}
+                      moreLabel={`Show the whole ${property.key} value`}
+                    />
+                  ) : (
+                    property.value
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

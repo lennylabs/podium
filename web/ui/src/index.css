@@ -442,9 +442,9 @@ h3 {
   text-wrap: pretty;
 }
 
-/* The control that opens a clipped header description. It sits on its own row
-   under the text so it does not narrow the measure. */
-.lead-more {
+/* The control that opens a clipped field. It sits on its own row under the
+   text so it does not narrow the measure. */
+.clamp-more {
   display: block;
   margin: 6px 0 0;
   padding: 2px 8px;
@@ -600,6 +600,12 @@ h2.label {
 .artifact-list,
 .subdomain-grid,
 .relation-list,
+/* A clipped property value in the rail. The paragraph carries the table
+   cell's own spacing, so it adds none of its own. */
+.property-value {
+  margin: 0;
+}
+
 .tag-list {
   list-style: none;
   padding: 0;
@@ -824,10 +830,11 @@ h2.label {
   color: var(--meta);
 }
 
-/* The three-line clip both surfaces read the same description at. The listing
-   row always clips; the artifact header clips until the reader opens it. */
+/* The three-line clip every surface reads a description at. The listing row
+   always clips; the artifact header and the rail's property values clip until
+   the reader opens them. */
 .artifact-description,
-.lead-clamped {
+.clamped {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;

@@ -195,11 +195,21 @@ describe("artifact row description", () => {
   // tabs, and the body, so it reads at the same clip until the reader opens
   // it.
   it("clips the header description to the same three lines", () => {
-    const lead = styled("lead lead-clamped");
+    const lead = styled("lead clamped");
     expect(lead.getPropertyValue("-webkit-line-clamp")).toBe("3");
     expect(lead.display).toBe("-webkit-box");
     expect(lead.overflow).toBe("hidden");
     expect(lead.maxWidth).toBe("720px");
+  });
+
+  // The rail states the same field again in its property table, above the
+  // relation links, so an unclipped value there pushes the links off the
+  // page even though the header beside it reads clipped.
+  it("clips a rail property value to the same three lines", () => {
+    const value = styled("property-value clamped");
+    expect(value.getPropertyValue("-webkit-line-clamp")).toBe("3");
+    expect(value.display).toBe("-webkit-box");
+    expect(value.overflow).toBe("hidden");
   });
 });
 

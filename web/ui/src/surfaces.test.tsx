@@ -2327,7 +2327,7 @@ describe("the artifact viewer", () => {
       Object.defineProperty(HTMLParagraphElement.prototype, "scrollHeight", {
         configurable: true,
         get(this: HTMLParagraphElement) {
-          return this.classList.contains("lead-clamped")
+          return this.classList.contains("clamped")
             ? scrollHeight
             : clientHeight;
         },
@@ -2369,19 +2369,19 @@ describe("the artifact viewer", () => {
       stubViewer("The invoice approval path routes each document.");
       await screen.findByLabelText("Artifact viewer");
       const lead = screen.getByTestId("artifact-lead");
-      expect(lead.classList.contains("lead-clamped")).toBe(true);
+      expect(lead.classList.contains("clamped")).toBe(true);
       const more = await screen.findByRole("button", { name: "Show more" });
       expect(more.getAttribute("aria-expanded")).toBe("false");
       fireEvent.click(more);
       expect(
-        screen.getByTestId("artifact-lead").classList.contains("lead-clamped"),
+        screen.getByTestId("artifact-lead").classList.contains("clamped"),
       ).toBe(false);
       const less = screen.getByRole("button", { name: "Show less" });
       expect(less.getAttribute("aria-expanded")).toBe("true");
       // Collapsing restores the clip, so the control is not a one-way door.
       fireEvent.click(less);
       expect(
-        screen.getByTestId("artifact-lead").classList.contains("lead-clamped"),
+        screen.getByTestId("artifact-lead").classList.contains("clamped"),
       ).toBe(true);
     });
 
@@ -2393,6 +2393,52 @@ describe("the artifact viewer", () => {
         "Pay a supplier invoice.",
       );
       expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    });
+
+    // The rail states the same field again, and the relation links §13.10
+    // requires stand under it in the same scrolling column, so an unclipped
+    // value there pushes those links off the page.
+    // Spec: §13.10
+    it("clips the same description in the rail's property table", async () => {
+      stubHeights(900);
+      stubViewer("The invoice approval path routes each document.");
+      await screen.findByLabelText("Artifact viewer");
+      const value = screen.getByTestId("property-value-description");
+      expect(value.classList.contains("clamped")).toBe(true);
+      // The rail's control names the property it opens, because a reader
+      // running down the rows meets it away from the value it belongs to.
+      const more = screen.getByRole("button", {
+        name: "Show the whole description value",
+      });
+      expect(more.getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(more);
+      expect(
+        screen
+          .getByTestId("property-value-description")
+          .classList.contains("clamped"),
+      ).toBe(false);
+      fireEvent.click(
+        screen.getByRole("button", {
+          name: "Show the whole description value",
+        }),
+      );
+      expect(
+        screen
+          .getByTestId("property-value-description")
+          .classList.contains("clamped"),
+      ).toBe(true);
+    });
+
+    // The full-width Frontmatter panel states that its values are shown
+    // verbatim, and it carries nothing under the table to bury, so it keeps
+    // them whole.
+    it("leaves the full-width frontmatter panel unclipped", async () => {
+      stubHeights(900);
+      stubViewer("The invoice approval path routes each document.");
+      await screen.findByLabelText("Artifact viewer");
+      fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+      const panel = screen.getByTestId("frontmatter-table");
+      expect(panel.querySelector(".clamped")).toBeNull();
     });
   });
 });

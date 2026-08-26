@@ -6,45 +6,11 @@
 // clips the field to the same three lines a listing row reads at (§13.10) and
 // carries a control that opens the rest in place.
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { ClampedText } from './ClampedText';
 
 /** Lead renders an artifact's description under its title, clipped to three
- * lines until the reader opens it. The control appears only where the text
- * actually overruns the clip, because whether three lines hold a given string
- * is a layout fact that depends on the rendered width and the typeface: it is
- * measured against the clipped element rather than guessed at from the
- * string's length. The measurement runs while the element is clipped, so
- * expanding it does not read as the overrun having gone away. */
+ * lines until the reader opens it. The header carries one such control, so
+ * the button reads as its own label. */
 export function Lead({ text }: { text: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const [overrun, setOverrun] = useState(false);
-  const paragraph = useRef<HTMLParagraphElement>(null);
-
-  useLayoutEffect(() => {
-    const node = paragraph.current;
-    if (node === null || expanded) {
-      return;
-    }
-    setOverrun(node.scrollHeight > node.clientHeight);
-  }, [text, expanded]);
-
-  return (
-    <>
-      <p ref={paragraph} className={expanded ? 'lead' : 'lead lead-clamped'} data-testid="artifact-lead">
-        {text}
-      </p>
-      {overrun && (
-        <button
-          type="button"
-          className="lead-more"
-          aria-expanded={expanded}
-          onClick={() => {
-            setExpanded(!expanded);
-          }}
-        >
-          {expanded ? 'Show less' : 'Show more'}
-        </button>
-      )}
-    </>
-  );
+  return <ClampedText text={text} className="lead" testID="artifact-lead" />;
 }
