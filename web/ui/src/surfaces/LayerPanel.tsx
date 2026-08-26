@@ -525,7 +525,18 @@ function LayerRow({
     over ? "row-drop-target" : "",
   ].filter((name) => name !== "");
 
+  // A refusal is full-width prose: a code, the envelope's own message, its
+  // remediation, and the controls that clear it. The actions column is a
+  // fixed narrow column in a grid every row shares, so a card drawn inside it
+  // stretched the row to the height of the card, left the other cells empty
+  // over that height, and pushed the row's own controls apart. The card is
+  // drawn in a full-width row directly under the layer's own row instead,
+  // which keeps it on the row it belongs to and leaves every cell and every
+  // control where the reader left them.
+  const detail = reingest.kind !== "idle" || refusal !== null;
+
   return (
+    <>
     <tr
       className={rowClass.join(" ")}
       draggable={!readOnly}
@@ -644,12 +655,6 @@ function LayerRow({
             </button>
           </div>
         )}
-        <ReingestStatus
-          layerID={layer.ID}
-          state={reingest}
-          onStart={onReingest}
-          onDismiss={onDismissReingest}
-        />
         {editing && (
           <UpdateLayerForm
             layer={layer}
@@ -672,28 +677,41 @@ function LayerRow({
             }}
           />
         )}
-        {refusal !== null && (
-          <div className="row-refusal" role="alert">
-            <p>
-              The registry refused that action and nothing changed.{" "}
-              <span className="mono">
-                {refusal.error instanceof ApiError
-                  ? refusal.error.code
-                  : "registry.unavailable"}
-              </span>
-            </p>
-            {/* The refusal is cleared by re-issuing the write or by
-                dismissing it. Every other control on the row stays live. */}
-            <button type="button" onClick={refusal.retry}>
-              Try again
-            </button>
-            <button type="button" onClick={onDismissRefusal}>
-              Dismiss
-            </button>
-          </div>
-        )}
       </td>
     </tr>
+    {detail && (
+      <tr className="row-detail">
+        <td colSpan={6}>
+          <ReingestStatus
+            layerID={layer.ID}
+            state={reingest}
+            onStart={onReingest}
+            onDismiss={onDismissReingest}
+          />
+          {refusal !== null && (
+            <div className="row-refusal" role="alert">
+              <p>
+                The registry refused that action and nothing changed.{" "}
+                <span className="mono">
+                  {refusal.error instanceof ApiError
+                    ? refusal.error.code
+                    : "registry.unavailable"}
+                </span>
+              </p>
+              {/* The refusal is cleared by re-issuing the write or by
+                  dismissing it. Every other control on the row stays live. */}
+              <button type="button" onClick={refusal.retry}>
+                Try again
+              </button>
+              <button type="button" onClick={onDismissRefusal}>
+                Dismiss
+              </button>
+            </div>
+          )}
+        </td>
+      </tr>
+    )}
+    </>
   );
 }
 

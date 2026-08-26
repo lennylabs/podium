@@ -1947,6 +1947,45 @@ describe("the layer panel", () => {
     ).toBe(false);
   });
 
+  // The refusal is full-width prose and the actions column is a fixed narrow
+  // column in a grid every row shares, so the card is drawn in a row of its
+  // own under the layer rather than inside that cell. Drawn inside it the
+  // card stretched the layer's row to its own height, emptied every other
+  // cell over that height, and pushed the row's controls apart.
+  it("draws a refusal under the row rather than inside the actions cell", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers/reingest": {
+        status: 403,
+        body: {
+          code: "auth.forbidden",
+          message: "not permitted",
+          retryable: false,
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    const card = await screen.findByLabelText("Reingest refused");
+    const cell = card.closest("td");
+    expect(cell).not.toBeNull();
+    expect(cell?.className).not.toContain("row-actions");
+    // The card spans the table in a row of its own, which is what leaves the
+    // layer's own cells at their own height.
+    expect((cell as HTMLTableCellElement).colSpan).toBe(6);
+    const detail = cell?.closest("tr");
+    expect(detail?.className).toContain("row-detail");
+    // The layer's own row keeps its cells and its action cluster.
+    const row = layerRow("alice-personal");
+    expect(row.querySelectorAll("td").length).toBe(6);
+    expect(row.contains(card)).toBe(false);
+    const bar = row.querySelector(".row-action-bar");
+    expect(bar?.querySelectorAll("button").length).toBe(2);
+  });
+
   it("renders one marker per matching visibility axis and summarises an axis that overflows", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },

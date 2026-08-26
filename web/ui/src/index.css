@@ -1269,11 +1269,28 @@ label:has(> input:disabled) {
   text-align: left;
 }
 
+/* A panel a row control opens is read or acted on, so it is drawn across the
+   whole table in a row of its own directly under the layer it belongs to.
+   Drawn inside the fixed-width actions column it stretched the row to the
+   height of the panel and emptied every other cell over that height. */
+.row-detail > td {
+  padding-top: 0;
+}
+
+/* The detail row belongs to the row above it, so the rule between the two is
+   dropped and the pair reads as one row. */
+.layer-table tr:has(+ .row-detail) > td {
+  border-bottom: 0;
+}
+
+.row-detail .banner {
+  margin: 0 0 6px;
+}
+
 /* A panel a row control opens is read, filled in, or acted on, so it carries
    its own minimum width and the column widens for as long as it is open. The
    120px hint sizes the closed row alone. */
-.row-actions .row-refusal,
-.row-actions .loading {
+.row-actions .register-form {
   min-width: 320px;
 }
 
