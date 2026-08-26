@@ -1696,6 +1696,34 @@ describe("the artifact viewer", () => {
     expect(screen.queryByLabelText("Authored source")).toBeNull();
   });
 
+  it("states the absent body where the manifest carries frontmatter and nothing else", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/bare",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "",
+          frontmatter: manifestDoc,
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Fbare");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    // The loading and failure states are settled before the panel is drawn,
+    // so the empty panel would otherwise read as a load that failed.
+    expect(screen.queryByTestId("artifact-body")).toBeNull();
+    expect(screen.getByText("This artifact has no body.")).toBeTruthy();
+    // The rest of the viewer still reads as a finished document.
+    expect(screen.getByTestId("rail-frontmatter-table").textContent).toContain(
+      "name",
+    );
+  });
+
   it("drops the rail’s frontmatter section where the response yields no pairs", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
