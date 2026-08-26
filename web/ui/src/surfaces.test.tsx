@@ -526,6 +526,34 @@ describe('the domain browser', () => {
     expect(screen.getByText('registry.invalid_argument')).toBeTruthy();
   });
 
+  // The breadcrumb above the title carries the ancestry, so the title names the
+  // domain the page is on and nothing above it.
+  it('titles a deep domain with its leaf name rather than the whole path', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': {
+        body: { path: 'platform/observability/tracing', subdomains: [], notable: [] },
+      },
+    });
+    goTo('#/domain/platform%2Fobservability%2Ftracing');
+    render(<App />);
+    const browser = await screen.findByLabelText('Domain browser');
+    expect(within(browser).getByRole('heading', { level: 1 }).textContent).toBe('tracing');
+    // The ancestry is still reachable, as the trail above the title.
+    const trail = within(browser).getByRole('navigation', { name: 'Breadcrumb' });
+    expect(within(trail).getByRole('link', { name: 'observability' })).toBeTruthy();
+  });
+
+  it('titles the registry root, which has no leaf segment', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': { body: emptyDomain },
+    });
+    render(<App />);
+    const browser = await screen.findByLabelText('Domain browser');
+    expect(within(browser).getByRole('heading', { level: 1 }).textContent).toBe('Registry root');
+  });
+
   it('renders a domain that carries neither subdomains nor artifacts as a finished page', async () => {
     stubRegistry({
       '/v1/ui/session': { body: posture({ public_mode: true }) },

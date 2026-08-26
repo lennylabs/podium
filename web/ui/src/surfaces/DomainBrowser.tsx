@@ -23,6 +23,18 @@ const renderedDepth = 2;
  * subdomains become count tiles and the artifacts a sortable table. */
 const atScale = 20;
 
+/** leafName is what the page is titled. The breadcrumb above the title already
+ * carries the ancestry, so repeating the whole slash-separated path in the h1
+ * states the reader's position twice and runs the title off the content column
+ * on a deep domain. The registry root has no leaf and is named instead. */
+function leafName(path: string): string {
+  if (path === '') {
+    return 'Registry root';
+  }
+  const segments = path.split('/');
+  return segments[segments.length - 1];
+}
+
 export function DomainBrowser({ path, onError }: { path: string; onError: (err: unknown) => void }) {
   const domain = useAsync(() => loadDomain(path, renderedDepth), [path]);
   useErrorReport(domain.error, onError);
@@ -45,7 +57,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
   return (
     <section className="surface" aria-label="Domain browser">
       <Breadcrumb path={body.path} />
-      <h1>{body.path === '' ? 'Registry root' : body.path}</h1>
+      <h1>{leafName(body.path)}</h1>
       <div className="artifact-meta">
         <Badge tone="quiet">{body.subdomains.length} subdomains</Badge>
         <Badge tone="quiet">{body.notable.length} artifacts</Badge>
