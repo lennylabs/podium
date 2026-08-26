@@ -3008,6 +3008,20 @@ button.stat-open {
   color: var(--link);
 }
 
+/* The fan-out's per-layer rows. Each states what one layer's own response
+   carried, under the run's combined counts, so the run is read as one result
+   and a layer that needs acting on is still named. */
+.run-layers {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 9px 0 0;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .advisories ul {
   list-style: none;
   display: flex;

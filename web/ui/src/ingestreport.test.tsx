@@ -8,7 +8,9 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { IngestSummary } from './api';
-import { ReingestStatus, summaryText } from './surfaces/ReingestControl';
+import { ApiError } from './api';
+import type { ReingestOutcome } from './surfaces/ReingestControl';
+import { ReingestRunReport, ReingestStatus, runText, summaryText } from './surfaces/ReingestControl';
 import { clock, elapsed } from './time';
 
 const startedAt = Date.UTC(2026, 7, 26, 14, 3, 34);
@@ -206,5 +208,66 @@ describe('the report clock', () => {
 
   it('states the wall clock in UTC', () => {
     expect(clock(Date.UTC(2026, 7, 26, 4, 6, 2))).toBe('04:06:02 UTC');
+  });
+});
+
+
+/** runOutcomes is a fan-out over three layers: two the registry ran and one
+ * it refused. */
+const runOutcomes: ReingestOutcome[] = [
+  { layerID: 'acme/platform-artifacts', kind: 'summary', summary: { accepted: 12, idempotent: 3, lint_failures: 2 } },
+  {
+    layerID: 'acme/finance',
+    kind: 'summary',
+    summary: {
+      accepted: 4,
+      idempotent: 1,
+      rejected: [{ artifact_id: 'finance/pay', code: 'ingest.sensitivity_floor', reason: 'above the floor' }],
+    },
+  },
+  {
+    layerID: 'acme/ops',
+    kind: 'refused',
+    error: new ApiError(422, 'registry.invalid_config', 'source: invalid_config: git source requires ref', false, ''),
+  },
+];
+
+describe('the finished fan-out report', () => {
+  // The fan-out is one press, so it answers with one surface: the run's own
+  // counts, added up across the layers that answered with a summary.
+  it('states the run and adds the counts up across every layer', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    const dialog = screen.getByRole('dialog', { name: /Reingest all finished/ });
+    expect(dialog.textContent).toContain('3 layers');
+    expect(dialog.textContent).toContain(elapsed(finishedAt - startedAt));
+    const counts = within(dialog).getByLabelText('Ingest counts across the run');
+    expect(within(counts).getByText('16')).toBeTruthy();
+    expect(within(counts).getByText('4')).toBeTruthy();
+    expect(within(counts).getByText('2')).toBeTruthy();
+    // Each layer states what its own response carried.
+    const layers = within(dialog).getByLabelText('What each layer returned');
+    expect(layers.textContent).toContain('12 accepted · 3 unchanged · 0 rejected · 0 conflicts');
+  });
+
+  // A refused layer is part of the run's result rather than a banner behind
+  // it, and it is named with the code and the message its envelope carried.
+  it('names the refused layers with their code and message', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    const refused = screen.getByLabelText('Refused layers');
+    expect(refused.textContent).toContain('acme/ops');
+    expect(refused.textContent).toContain('registry.invalid_config');
+    expect(refused.textContent).toContain('git source requires ref');
+  });
+
+  it('copies the whole run out, layer by layer', () => {
+    const text = runText(runOutcomes, finishedAt);
+    expect(text).toContain('Reingest all finished 14:06:22 UTC: 3 layers');
+    expect(text).toContain('16 accepted, 4 unchanged, 1 rejected, 0 conflicts, 2 lint failures');
+    expect(text).toContain('refused acme/ops registry.invalid_config: source: invalid_config: git source requires ref');
+    expect(text).toContain('Reingest acme/finance finished');
   });
 });

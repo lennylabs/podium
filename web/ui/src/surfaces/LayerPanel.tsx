@@ -14,10 +14,11 @@ import { useRef, useState } from "react";
 import { grantedGroups } from "./members";
 import { erasesOn, recoveryDays } from "./recovery";
 import { RegisterLayerForm } from "./RegisterLayerForm";
-import type { ReingestState } from "./ReingestControl";
+import type { ReingestOutcome, ReingestState } from "./ReingestControl";
 import {
   idleReingest,
   ReingestButton,
+  ReingestRunReport,
   ReingestStatus,
   reingestRefusal,
 } from "./ReingestControl";
@@ -53,6 +54,16 @@ interface Refusal {
   retry: () => void;
 }
 
+/** Run is one "Reingest all" press: when it started, what each layer
+ * answered, and when the last answer came back. The run reports nothing
+ * until it ends, because the registry runs each layer's pipeline inside its
+ * own request and a run that is still issuing them has no result to state. */
+interface Run {
+  startedAt: number;
+  outcomes: ReingestOutcome[];
+  finishedAt: number | null;
+}
+
 export function LayerPanel({
   subject,
   readOnly,
@@ -79,6 +90,10 @@ export function LayerPanel({
   // Each row's reingest state is driven by that row's own response, which is
   // what lets the fan-out leave every row it has not heard from untouched.
   const [reingest, setReingest] = useState<Record<string, ReingestState>>({});
+  // The fan-out is one press, so it answers with one report. Each layer's
+  // answer is collected here and the whole run is presented once it ends,
+  // rather than resolving every layer into a dialog of its own.
+  const [run, setRun] = useState<Run | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
   // What the last committed reorder did, held for the live region below the
@@ -144,12 +159,31 @@ export function LayerPanel({
   };
 
   /** reingestAll is the fan-out. It issues one request per layer in
-   * sequence, so a row changes only when its own request returns and no row
-   * shows progress the registry has not reported. */
+   * sequence, so a row shows it is running only while its own request is
+   * open and no row shows progress the registry has not reported. What each
+   * layer answered is collected into the run and reported once, because the
+   * reader pressed one control: a report per layer stacked one dialog per
+   * layer over the page, each naming a single layer and none stating the
+   * run, and a refused layer sat behind that stack. */
   const reingestAll = async (): Promise<void> => {
-    for (const row of rows) {
-      await runReingest(row.ID);
+    const targets = rows.map((row) => row.ID);
+    setRun({ startedAt: Date.now(), outcomes: [], finishedAt: null });
+    const outcomes: ReingestOutcome[] = [];
+    for (const id of targets) {
+      setRowReingest(id, { kind: "running" });
+      try {
+        const summary = await reingestLayer(id);
+        outcomes.push({ layerID: id, kind: "summary", summary });
+        clearRefusal(id);
+      } catch (err: unknown) {
+        outcomes.push({ layerID: id, kind: "refused", error: err });
+      }
+      setRowReingest(id, idleReingest);
     }
+    setRun((prev) =>
+      prev === null ? prev : { ...prev, outcomes, finishedAt: Date.now() },
+    );
+    afterWrite();
   };
 
   const commitMove = (from: string, onto: string) => {
@@ -230,7 +264,11 @@ export function LayerPanel({
           </button>
           <button
             type="button"
-            disabled={readOnly || rows.length === 0}
+            disabled={
+              readOnly ||
+              rows.length === 0 ||
+              (run !== null && run.finishedAt === null)
+            }
             onClick={() => {
               void reingestAll();
             }}
@@ -239,6 +277,16 @@ export function LayerPanel({
           </button>
         </div>
       </div>
+      {run !== null && run.finishedAt !== null && (
+        <ReingestRunReport
+          outcomes={run.outcomes}
+          startedAt={run.startedAt}
+          finishedAt={run.finishedAt}
+          onDone={() => {
+            setRun(null);
+          }}
+        />
+      )}
       {/* §13.2.1 marks a read-only registry on its read responses, so the
           state is presented once here and every write control is unavailable
           at once rather than each one failing when it is pressed. */}

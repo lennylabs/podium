@@ -591,3 +591,152 @@ function ReingestRefused({ error, onRetry, onDone }: { error: unknown; onRetry: 
     </div>
   );
 }
+
+/** ReingestOutcome is what one layer's request in a fan-out returned. The
+ * fan-out reports the whole run at once, so each layer's answer is collected
+ * rather than resolved into a report of its own. */
+export type ReingestOutcome =
+  | { layerID: string; kind: 'summary'; summary: IngestSummary }
+  | { layerID: string; kind: 'refused'; error: unknown };
+
+/** counted adds up what the run's summaries carried. A layer the registry
+ * only recorded contributes nothing, because it reports no counts. */
+function counted(outcomes: ReingestOutcome[]) {
+  let accepted = 0;
+  let idempotent = 0;
+  let rejected = 0;
+  let conflicts = 0;
+  let lintFailures = 0;
+  for (const outcome of outcomes) {
+    if (outcome.kind !== 'summary') {
+      continue;
+    }
+    accepted += outcome.summary.accepted ?? 0;
+    idempotent += outcome.summary.idempotent ?? 0;
+    rejected += (outcome.summary.rejected ?? []).length;
+    conflicts += (outcome.summary.conflicts ?? []).length;
+    lintFailures += outcome.summary.lint_failures ?? 0;
+  }
+  return { accepted, idempotent, rejected, conflicts, lintFailures };
+}
+
+/** ReingestRunReport is what "Reingest all" resolves into. The fan-out issues
+ * one request per layer, and reporting each one in its own dialog stacked N
+ * dialogs over the page, each naming a single layer and none saying which of
+ * how many, with a refused layer left as a banner under the stack. The run is
+ * one press, so it answers with one surface: the combined counts, a row per
+ * layer with what its own response carried, and the layers the registry
+ * refused. A refusal that takes a further decision, such as a freeze window,
+ * is named here and reingested from its own row, where that decision has its
+ * confirmation. */
+export function ReingestRunReport({
+  outcomes,
+  startedAt,
+  finishedAt,
+  onDone,
+}: {
+  outcomes: ReingestOutcome[];
+  startedAt: number;
+  finishedAt: number;
+  onDone: () => void;
+}) {
+  const totals = counted(outcomes);
+  const refused = outcomes.filter((outcome) => outcome.kind === 'refused');
+  const layerWord = outcomes.length === 1 ? 'layer' : 'layers';
+  return (
+    <Modal
+      title="Reingest all finished"
+      description={`${String(outcomes.length)} ${layerWord} · ${elapsed(finishedAt - startedAt)}`}
+      onClose={onDone}
+    >
+      <section className="ingest-report modal-body" aria-label="Reingest all result">
+        <div className="stats" aria-label="Ingest counts across the run">
+          <Stat label="accepted" count={totals.accepted} />
+          <Stat label="unchanged" count={totals.idempotent} />
+          <Stat label="rejected" count={totals.rejected} tone="danger" />
+          <Stat label="conflicts" count={totals.conflicts} tone="accent" />
+          <Stat label="lint failures" count={totals.lintFailures} caption="count only" />
+        </div>
+        {refused.length > 0 && (
+          <section className="attention" aria-label="Refused layers">
+            <p className="label">Refused · {refused.length}</p>
+            {refused.map((outcome) => (
+              <div key={outcome.layerID} className="attention-row attention-danger">
+                <span className="mono">{outcome.layerID}</span> <Badge tone="quiet">{refusalCode(outcome)}</Badge>{' '}
+                {refusalMessage(outcome)}
+              </div>
+            ))}
+            <p className="quiet">
+              Reingest a refused layer from its own row, which carries the remediation its refusal states.
+            </p>
+          </section>
+        )}
+        <section aria-label="What each layer returned">
+          <p className="label">Layers · {outcomes.length}</p>
+          <ul className="run-layers">
+            {outcomes.map((outcome) => (
+              <li key={outcome.layerID}>
+                <span className="mono">{outcome.layerID}</span> <span className="quiet">{layerLine(outcome)}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      </section>
+      <div className="modal-foot">
+        <span className="modal-foot-note mono quiet">finished {clock(finishedAt)}</span>
+        <CopyButton value={runText(outcomes, finishedAt)} label="Copy summary" />
+        <button type="button" className="button primary" onClick={onDone}>
+          Done
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+/** refusalCode and refusalMessage read a refused layer's envelope. A refusal
+ * that carries no envelope is a transport failure, which is the code the API
+ * surface answers with for one. */
+function refusalCode(outcome: ReingestOutcome): string {
+  const envelope = outcome.kind === 'refused' && outcome.error instanceof ApiError ? outcome.error : null;
+  return envelope?.code ?? 'registry.unavailable';
+}
+
+function refusalMessage(outcome: ReingestOutcome): string {
+  if (outcome.kind !== 'refused') {
+    return '';
+  }
+  return outcome.error instanceof ApiError ? outcome.error.message : String(outcome.error);
+}
+
+/** layerLine states what one layer's response carried, in the same words the
+ * single-layer report's cards use. */
+function layerLine(outcome: ReingestOutcome): string {
+  if (outcome.kind === 'refused') {
+    return 'refused';
+  }
+  if (outcome.summary.accepted === undefined) {
+    return 'recorded · this registry runs no pipeline inside the request';
+  }
+  const summary = outcome.summary;
+  return `${String(summary.accepted)} accepted · ${String(summary.idempotent ?? 0)} unchanged · ${String((summary.rejected ?? []).length)} rejected · ${String((summary.conflicts ?? []).length)} conflicts`;
+}
+
+/** runText is the whole run as plain text, for a reader who carries the
+ * outcome into an issue or a chat message. Each layer contributes what the
+ * single-layer copy states, and a refused layer contributes its code and its
+ * message. */
+export function runText(outcomes: ReingestOutcome[], finishedAt: number): string {
+  const totals = counted(outcomes);
+  const lines = [
+    `Reingest all finished ${clock(finishedAt)}: ${String(outcomes.length)} ${outcomes.length === 1 ? 'layer' : 'layers'}`,
+    `${String(totals.accepted)} accepted, ${String(totals.idempotent)} unchanged, ${String(totals.rejected)} rejected, ${String(totals.conflicts)} conflicts, ${String(totals.lintFailures)} lint failures`,
+  ];
+  for (const outcome of outcomes) {
+    if (outcome.kind === 'refused') {
+      lines.push(`refused ${outcome.layerID} ${refusalCode(outcome)}: ${refusalMessage(outcome)}`);
+      continue;
+    }
+    lines.push(summaryText(outcome.layerID, outcome.summary, finishedAt));
+  }
+  return lines.join('\n');
+}

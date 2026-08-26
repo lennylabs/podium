@@ -4952,31 +4952,81 @@ describe("the layer write flows", () => {
     expect(requests.some((r) => r.url === "/v1/layers/reorder")).toBe(false);
   });
 
-  // The fan-out issues one request per layer in sequence. A row changes only
-  // when its own request returns, so the panel fabricates no progress and a
-  // row shows what its own response carried.
-  it("reingests every layer in sequence and moves each row on its own response", async () => {
+  // The fan-out issues one request per layer in sequence, and the press is
+  // one press, so the run answers with one report: the combined counts, a row
+  // per layer, and no dialog naming a single layer.
+  it("reingests every layer in sequence and reports the run once", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
-      "/v1/layers/reingest": { body: { accepted: 1, idempotent: 0 } },
+      "/v1/layers/reingest?id=company": { body: { accepted: 3, idempotent: 1 } },
+      "/v1/layers/reingest?id=alice-personal": {
+        body: { accepted: 2, idempotent: 6 },
+      },
     });
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
     fireEvent.click(screen.getByRole("button", { name: "Reingest all" }));
-    await waitFor(() => {
-      expect(screen.getByLabelText("Reingest result for company")).toBeTruthy();
-      expect(
-        screen.getByLabelText("Reingest result for alice-personal"),
-      ).toBeTruthy();
-    });
+    const report = await screen.findByLabelText("Reingest all result");
     const reingests = requests.filter((r) =>
       r.url.startsWith("/v1/layers/reingest"),
     );
     expect(reingests.length).toBe(2);
     expect(reingests[0].url).toContain("id=company");
     expect(reingests[1].url).toContain("id=alice-personal");
+    // One dialog for the whole run, naming how many layers it covered.
+    expect(screen.getAllByRole("dialog").length).toBe(1);
+    expect(
+      screen.getByRole("dialog", { name: /Reingest all finished/ }).textContent,
+    ).toContain("2 layers");
+    expect(screen.queryByLabelText("Reingest result for company")).toBeNull();
+    expect(
+      screen.queryByLabelText("Reingest result for alice-personal"),
+    ).toBeNull();
+    // The counts are the run's, not one layer's.
+    const counts = within(report).getByLabelText(
+      "Ingest counts across the run",
+    );
+    expect(within(counts).getByText("5")).toBeTruthy();
+    expect(within(counts).getByText("accepted")).toBeTruthy();
+    expect(within(counts).getByText("unchanged")).toBeTruthy();
+    expect(report.textContent).toContain("company");
+    expect(report.textContent).toContain("alice-personal");
+  });
+
+  // A layer the registry refused is part of the run's result. Reported on the
+  // row alone it sat behind the reports of every other layer, so the roll-up
+  // names it with the code and the message its envelope carried.
+  it("names a refused layer in the run report", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+      "/v1/layers/reingest?id=company": { body: { accepted: 3, idempotent: 1 } },
+      "/v1/layers/reingest?id=alice-personal": {
+        status: 422,
+        body: {
+          code: "registry.invalid_config",
+          message: "source: invalid_config: git source requires ref",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Reingest all" }));
+    await screen.findByLabelText("Reingest all result");
+    const refused = screen.getByLabelText("Refused layers");
+    expect(refused.textContent).toContain("alice-personal");
+    expect(refused.textContent).toContain("registry.invalid_config");
+    expect(refused.textContent).toContain("git source requires ref");
+    // The refusal is in the run's report rather than under the row, where the
+    // report stack hid it.
+    expect(screen.queryByLabelText("Reingest refused")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Reingest all result")).toBeNull();
+    });
   });
 
   // The reingest call runs the whole pipeline inside the request and answers
