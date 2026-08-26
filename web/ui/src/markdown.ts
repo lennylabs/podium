@@ -214,6 +214,67 @@ function routeArtifactReferences(root: DocumentFragment, resources: ReadonlySet<
   }
 }
 
+// A table and a code fence are the two constructs a body renders into a box
+// that scrolls sideways rather than wrapping, so the columns past the box's
+// edge and the rest of a long command are reachable only by scrolling that
+// box. A pointer scrolls it; a keyboard reaches it only when the box is in
+// the tab order, which is what the layer panel's `.table-scroll` container
+// already does for the same reason. So each one is made focusable and named,
+// and the arrow keys scroll it once it holds focus (WCAG 2.1.1).
+//
+// The name is derived rather than fixed, because a body can render several
+// of these boxes and a reader tabbing through them is told which one holds
+// focus. A fence carries its language in the `language-*` class the renderer
+// writes on the inner `code` element.
+const languageClass = /^language-([a-z0-9+#.\-]+)$/i;
+
+/** codeBlockLabel names one code fence by the language it declares. */
+function codeBlockLabel(pre: Element): string {
+  const code = pre.querySelector('code');
+  for (const name of code?.classList ?? []) {
+    const match = languageClass.exec(name);
+    if (match !== null) {
+      return `${match[1]} code block`;
+    }
+  }
+  return 'Code block';
+}
+
+/** tableLabel names one table by its first header row, so the reader tabbing
+ * into it is told what it holds rather than only that it is a table. */
+function tableLabel(table: Element): string {
+  const headers = [...table.querySelectorAll('th')]
+    .map((header) => header.textContent?.trim() ?? '')
+    .filter((text) => text !== '');
+  return headers.length === 0 ? 'Table' : `Table: ${headers.join(', ')}`;
+}
+
+/** markScrollableRegions puts every sideways-scrolling box in the rendered
+ * body into the tab order under a name. */
+function markScrollableRegions(root: DocumentFragment): void {
+  for (const table of root.querySelectorAll('table')) {
+    // The table is wrapped rather than named in place, because `role="region"`
+    // on the element itself replaces the table semantics a screen reader
+    // navigates the cells by. The wrapper is the scroll container, which is
+    // what `.prose .table-scroll` styles.
+    const wrapper = document.createElement('div');
+    wrapper.className = 'table-scroll';
+    nameRegion(wrapper, tableLabel(table));
+    table.replaceWith(wrapper);
+    wrapper.append(table);
+  }
+  for (const pre of root.querySelectorAll('pre')) {
+    nameRegion(pre, codeBlockLabel(pre));
+  }
+}
+
+/** nameRegion makes one element a focusable, named region. */
+function nameRegion(element: Element, label: string): void {
+  element.setAttribute('tabindex', '0');
+  element.setAttribute('role', 'region');
+  element.setAttribute('aria-label', label);
+}
+
 /**
  * renderArtifactBody renders an artifact's markdown body to sanitized markup.
  * The return value is the only markup this UI hands to the browser as markup,
@@ -245,6 +306,7 @@ export function renderArtifactBody(body: string, resources: readonly string[] = 
   });
   replaceStrippedImages(sanitized);
   routeArtifactReferences(sanitized, new Set(resources));
+  markScrollableRegions(sanitized);
   const holder = document.createElement('div');
   holder.append(sanitized);
   return holder.innerHTML;

@@ -1930,12 +1930,16 @@ label:has(> input:disabled) {
 }
 
 /* A table has a min-content width of its own that no wrapping brings under
-   the column width, so it scrolls inside its own box. `display: block` is what
-   gives the element a scroll container; the rows still lay out as a table. */
-.prose table {
-  display: block;
+   the column width, so it scrolls sideways inside the container the rendering
+   path wraps it in. The container carries the scrolling rather than the table
+   itself, because a focusable named region on the table element replaces the
+   table semantics a screen reader navigates the cells by. */
+.prose .table-scroll {
   max-width: 100%;
   overflow-x: auto;
+}
+
+.prose table {
   border-collapse: collapse;
 }
 

@@ -146,11 +146,21 @@ describe("rendered artifact body", () => {
     expect(prose.minWidth).toBe("0");
   });
 
-  it("scrolls a wide table inside its own box", () => {
-    const table = descendantStyle("prose", "table");
-    expect(table.overflowX).toBe("auto");
-    expect(table.display).toBe("block");
-    expect(table.maxWidth).toBe("100%");
+  // The rendering path wraps a body table in the scroll container, so the
+  // container carries the scrolling and the table keeps its own semantics.
+  it("scrolls a wide table inside the container it is wrapped in", () => {
+    const prose = document.createElement("div");
+    prose.className = "prose";
+    const wrapper = document.createElement("div");
+    wrapper.className = "table-scroll";
+    wrapper.appendChild(document.createElement("table"));
+    prose.appendChild(wrapper);
+    document.body.appendChild(prose);
+    mounted.push(prose);
+
+    const scroller = window.getComputedStyle(wrapper);
+    expect(scroller.overflowX).toBe("auto");
+    expect(scroller.maxWidth).toBe("100%");
   });
 
   it("keeps a table cell's break from squeezing its column", () => {

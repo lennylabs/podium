@@ -273,3 +273,36 @@ describe('a cross-artifact prose reference in the body', () => {
     expect(container.querySelector('a')?.getAttribute('href')).toBe('../elsewhere');
   });
 });
+
+// A table and a code fence render into a box that scrolls sideways rather
+// than wrapping, and a reader with no pointer reaches the columns and the
+// command text past the box's edge only when the box is in the tab order
+// under a name (WCAG 2.1.1).
+describe("a body's sideways-scrolling regions", () => {
+  it('wraps a table in a focusable region named by its headers', () => {
+    const container = renderBody('| Layer | Scope |\n| --- | --- |\n| base | org |\n');
+    const region = container.querySelector('.table-scroll');
+    expect(region?.getAttribute('tabindex')).toBe('0');
+    expect(region?.getAttribute('role')).toBe('region');
+    expect(region?.getAttribute('aria-label')).toBe('Table: Layer, Scope');
+    // The table keeps its own semantics inside the region.
+    expect(region?.querySelector('table')).not.toBeNull();
+    expect(container.querySelector('table')?.getAttribute('role')).toBeNull();
+  });
+
+  it('makes a code fence a focusable region named by its language', () => {
+    const container = renderBody('```bash\npodium serve --standalone\n```\n');
+    const pre = container.querySelector('pre');
+    expect(pre?.getAttribute('tabindex')).toBe('0');
+    expect(pre?.getAttribute('role')).toBe('region');
+    expect(pre?.getAttribute('aria-label')).toBe('bash code block');
+  });
+
+  it('names a fence that declares no language and a table that carries no header', () => {
+    const fence = renderBody('```\nplain text\n```\n');
+    expect(fence.querySelector('pre')?.getAttribute('aria-label')).toBe('Code block');
+
+    const table = renderBody('<table><tr><td>cell</td></tr></table>\n');
+    expect(table.querySelector('.table-scroll')?.getAttribute('aria-label')).toBe('Table');
+  });
+});
