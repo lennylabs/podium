@@ -2,7 +2,7 @@
 // receive the same descriptor, so both render this row and neither formats
 // the same field twice.
 
-import { Badge, CuratedBadge, SensitivityBadge, TypeBadge, VersionBadge, formatVersion } from './primitives';
+import { Badge, CuratedBadge, SensitivityBadge, TypeBadge, formatVersion } from './primitives';
 import type { ArtifactDescriptor } from '../api';
 import { artifactHref, artifactLeaf } from '../route';
 
@@ -79,6 +79,18 @@ export function ArtifactRow({
   const version = artifact.version !== undefined && artifact.version !== '' ? artifact.version : '';
   const scored = ranked && topScore > 0;
   const filled = scored ? filledBars(artifact.score ?? 0, topScore) : 0;
+  /* The type and the version are drawn once here and placed twice below, so a
+     row states them the same way wherever the surface puts them. The type is
+     one of a closed vocabulary and carries the badge outline; the version is a
+     number the reader reads off the row rather than scans for, so it stays
+     bare mono meta. Boxing it too gives a row three equal-weight pills and
+     makes the version read as another classification. */
+  const marks = (
+    <>
+      <TypeBadge type={artifact.type} />
+      {version !== '' && <span className="mono quiet artifact-version">{formatVersion(version)}</span>}
+    </>
+  );
   return (
     <li className="artifact-row">
       {/* The relevance column. The indicator leads the row rather than
@@ -105,12 +117,7 @@ export function ArtifactRow({
           {/* A ranked row keeps its type and version inline, beside the
               identifier its relevance is measured on. A listing row moves
               them to the column at the row's right edge. */}
-          {ranked && (
-            <>
-              <TypeBadge type={artifact.type} />
-              <VersionBadge version={version} />
-            </>
-          )}
+          {ranked && marks}
           <SensitivityBadge sensitivity={artifact.sensitivity} />
           {/* The notable source is drawn on its "featured" arm alone. The
               registry tags every entry the domain's featured: list does not
@@ -152,8 +159,7 @@ export function ArtifactRow({
           across each row's second line. */}
       {!ranked && (
         <div className="artifact-row-aside" data-testid="artifact-row-aside">
-          <TypeBadge type={artifact.type} />
-          {version !== '' && <span className="mono quiet artifact-version">{formatVersion(version)}</span>}
+          {marks}
         </div>
       )}
     </li>

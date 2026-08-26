@@ -150,17 +150,6 @@ export function formatVersion(version: string): string {
 }
 
 /**
- * VersionBadge renders the manifest version as a quiet badge beside the type.
- */
-export function VersionBadge({ version }: { version: string }) {
-  const text = formatVersion(version);
-  if (text === '') {
-    return null;
-  }
-  return <Badge tone="quiet">{text}</Badge>;
-}
-
-/**
  * CuratedBadge marks a row the domain author chose to feature. The star
  * carries the distinction at a glance in a listing where the accent tone
  * alone is one of several, and the label names what the star means.

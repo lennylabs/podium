@@ -2220,6 +2220,7 @@ describe("search", () => {
             {
               id: "platform/review",
               type: "skill",
+              version: "2.0.0",
               score: 8.5,
               sensitivity: "internal",
             },
@@ -2250,6 +2251,14 @@ describe("search", () => {
     // A ranked row keeps its type and version beside the identifier rather
     // than in the listing's right-hand column.
     expect(screen.queryByTestId("artifact-row-aside")).toBeNull();
+    // The version reads as meta beside the type rather than as a third badge.
+    // The type is one of a closed vocabulary and carries the outline; boxing
+    // the version too gives the row three equal-weight pills, and the same
+    // artifact in the domain listing draws its version bare, so the two
+    // surfaces would state one field two ways.
+    expect(screen.getByText("v2.0.0").className).toBe(
+      "mono quiet artifact-version",
+    );
     // The row names the artifact and states its full path beside it, which is
     // the same identifying line the domain listing draws. A ranked row that
     // printed the whole identifier alone would give the name no weight.
