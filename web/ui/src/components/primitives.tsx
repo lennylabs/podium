@@ -233,7 +233,7 @@ export function EmptyState({ children }: { children: ReactNode }) {
  * nothing, the registry did not answer, or it refused for some other reason.
  * Not-found and not-permitted deliberately land on the same kind, because a
  * page that told them apart would disclose that an artifact the caller may
- * not see exists.
+ * not see exists. `concealRefusal` below is what puts a refusal on this arm.
  *
  * Spec: §13.10
  */
@@ -250,6 +250,29 @@ function errorPageKind(error: unknown): ErrorPageKind {
     return 'notFound';
   }
   return error.code === 'registry.unavailable' ? 'unavailable' : 'failed';
+}
+
+/** permissionCodes are the §6.10 codes that report a permission decision on a
+ * read: an authorization refusal, and the batch path's per-item visibility
+ * denial, which `docs/reference/error-codes.md` records as mirroring a
+ * not-found result. */
+const permissionCodes: ReadonlySet<string> = new Set<string>(['auth.forbidden', 'visibility.denied']);
+
+/** concealRefusal replaces a read's permission refusal with the not-found
+ * envelope, so the page it renders is the one an artifact that does not exist
+ * renders, down to the code at its foot. The single-artifact read conceals the
+ * denial in the registry today (`pkg/registry/core`), and the concealment §13.10
+ * requires is a property of the page rather than of that invariant: a read route
+ * that later answered a refusal directly would otherwise disclose, through the
+ * eyebrow, the message, and the code, that an artifact the caller may not see
+ * exists.
+ *
+ * Spec: §13.10 */
+function concealRefusal(error: unknown): unknown {
+  if (!(error instanceof ApiError) || !permissionCodes.has(error.code)) {
+    return error;
+  }
+  return new ApiError(404, 'registry.not_found', 'The registry has no record of it.', false, '');
 }
 
 /** envelopeMessage is the envelope's prose with a leading repetition of its
@@ -291,8 +314,9 @@ export function ErrorPage({
   onRetry?: () => void;
   testID?: string;
 }) {
-  const envelope = error instanceof ApiError ? error : null;
-  const kind = errorPageKind(error);
+  const shown = concealRefusal(error);
+  const envelope = shown instanceof ApiError ? shown : null;
+  const kind = errorPageKind(shown);
   const label = kind === 'notFound' ? 'NOT FOUND' : kind === 'unavailable' ? 'REGISTRY UNREACHABLE' : 'REFUSED';
   const heading = kind === 'unavailable' ? "Can't reach the registry" : title;
   const offerRetry = onRetry !== undefined && (envelope === null || envelope.retryable);

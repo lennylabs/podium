@@ -7374,6 +7374,60 @@ describe("a whole-surface failure", () => {
     ).toBeTruthy();
     expect(page.textContent).toContain("registry.unavailable · retryable");
   });
+
+  // §13.10 requires an artifact the caller may not see to be indistinguishable
+  // from one that does not exist. The registry conceals the single-artifact
+  // denial today, so the page is the second place that property holds, and it
+  // holds without resting on that: a read route that answered a refusal
+  // directly renders the not-found page down to the code at its foot.
+  it("draws a refused artifact read as the not-found page", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_artifact": {
+        status: 403,
+        body: {
+          code: "auth.forbidden",
+          message: "The caller is not permitted to read this artifact.",
+          retryable: false,
+        },
+      },
+    });
+    goTo("#/artifact/eng%2Fdeploy%2Fno-desc");
+    render(<App />);
+    const page = await screen.findByTestId("artifact-failed");
+    expect(
+      within(page).getByRole("heading", { name: "No such artifact" }),
+    ).toBeTruthy();
+    expect(page.textContent).toContain("NOT FOUND");
+    expect(page.textContent).not.toContain("REFUSED");
+    expect(page.textContent).toContain("eng/deploy/no-desc does not resolve.");
+    expect(page.textContent).not.toContain("not permitted");
+    expect(page.textContent).toContain("registry.not_found · not retryable");
+    expect(page.textContent).not.toContain("auth.forbidden");
+  });
+
+  // The batch path reports its per-item visibility denial under its own code,
+  // which the error-code reference records as mirroring a not-found result.
+  // The page collapses it the same way.
+  it("draws a visibility denial as the not-found page", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_artifact": {
+        status: 403,
+        body: {
+          code: "visibility.denied",
+          message: "visibility.denied: caller lacks visibility",
+          retryable: false,
+        },
+      },
+    });
+    goTo("#/artifact/eng%2Fdeploy%2Fno-desc");
+    render(<App />);
+    const page = await screen.findByTestId("artifact-failed");
+    expect(page.textContent).toContain("NOT FOUND");
+    expect(page.textContent).not.toContain("visibility.denied");
+    expect(page.textContent).toContain("registry.not_found · not retryable");
+  });
 });
 
 // The keyboard contract the announced roles promise. A widget that names
