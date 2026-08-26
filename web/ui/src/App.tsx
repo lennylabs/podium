@@ -201,7 +201,11 @@ export function App() {
           </p>
           {/* The refused arm has no catalog to navigate, so the tree and the
               counts are empty rather than absent. */}
-          <CatalogTree nodes={refused ? [] : (tree.value?.subdomains ?? [])} onOutcome={onCatalogOutcome} />
+          <CatalogTree
+            nodes={refused ? [] : (tree.value?.subdomains ?? [])}
+            current={route.name === 'domain' && route.path !== '' ? route.path : null}
+            onOutcome={onCatalogOutcome}
+          />
           <div className="sidebar-footer">
             <CatalogCounts counts={refused ? null : counts.value} />
             {anonymous && <p className="quiet">Not signed in</p>}
@@ -320,14 +324,38 @@ export function since(stamp: string, now: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+/** onCurrentPath reports whether `path` is the domain the reader is on or an
+ * ancestor of it. A §4.2 domain path is `/`-separated, and a sparse chain is
+ * collapsed into one entry by the server, so a node's path is compared whole
+ * rather than segment by segment. */
+function onCurrentPath(path: string, current: string | null): boolean {
+  if (current === null || path === '') {
+    return false;
+  }
+  return current === path || current.startsWith(`${path}/`);
+}
+
 /** CatalogTree is the sidebar's navigation over the §4.2 domain hierarchy.
  * The levels the eager read returned are rendered at once and a deeper level
- * is read when the reader expands the node it hangs under. */
-function CatalogTree({ nodes, onOutcome }: { nodes: DomainDescriptor[]; onOutcome: (err: unknown) => void }) {
+ * is read when the reader expands the node it hangs under.
+ *
+ * `current` is the domain the page is showing, or null on a route that is not
+ * a domain. The tree resolves the ancestry down to it and marks it, so a
+ * reader who arrived by a link or a breadcrumb sees where in the hierarchy
+ * the page sits instead of a row of collapsed roots. */
+function CatalogTree({
+  nodes,
+  current,
+  onOutcome,
+}: {
+  nodes: DomainDescriptor[];
+  current: string | null;
+  onOutcome: (err: unknown) => void;
+}) {
   return (
     <ul className="catalog-tree" aria-label="Catalog">
       {nodes.map((node) => (
-        <TreeNode key={node.path} node={node} onOutcome={onOutcome} />
+        <TreeNode key={node.path} node={node} current={current} onOutcome={onOutcome} />
       ))}
     </ul>
   );
@@ -346,29 +374,55 @@ function CatalogTree({ nodes, onOutcome }: { nodes: DomainDescriptor[]; onOutcom
  * caller cannot open it. Every other failure is the surface's own error
  * state, so the domain stays enterable, the node states that the level did
  * not load, and a later expansion re-issues the read. */
-function TreeNode({ node, onOutcome }: { node: DomainDescriptor; onOutcome: (err: unknown) => void }) {
-  const [open, setOpen] = useState(false);
+function TreeNode({
+  node,
+  current,
+  onOutcome,
+}: {
+  node: DomainDescriptor;
+  current: string | null;
+  onOutcome: (err: unknown) => void;
+}) {
+  const ancestor = onCurrentPath(node.path, current);
+  const [open, setOpen] = useState(ancestor);
   const [loaded, setLoaded] = useState<DomainDescriptor[] | null>(null);
   const [restricted, setRestricted] = useState(false);
   const [failed, setFailed] = useState(false);
   const eager = node.subdomains;
   const children = eager ?? loaded;
+  const isCurrent = node.path === current;
 
-  const expand = () => {
-    const opening = !open;
-    setOpen(opening);
-    // Only an expansion reads a level, and only the authorization refusal
-    // latches: a level that did not load for any other reason is read again
-    // the next time the reader asks for it.
-    if (!opening || eager !== undefined || loaded !== null || restricted) {
+  // A route that moves onto this node's ancestry opens it. The tree is not
+  // remounted when the reader follows a link, so the ancestry has to reach an
+  // already-mounted node rather than only its initial state. Opening is all
+  // this does: a node the reader closed by hand off the current path stays
+  // closed.
+  useEffect(() => {
+    if (ancestor) {
+      setOpen(true);
+    }
+  }, [ancestor]);
+
+  // An open node reads its own level when the eager read did not carry it,
+  // whether the reader expanded it or the route did. Only the authorization
+  // refusal latches: a level that did not load for any other reason is read
+  // again the next time the node opens.
+  useEffect(() => {
+    if (!open || eager !== undefined || loaded !== null || restricted) {
       return;
     }
+    let live = true;
     setFailed(false);
     loadDomain(node.path, treeDepth).then(
       (level) => {
-        setLoaded(level.subdomains);
+        if (live) {
+          setLoaded(level.subdomains);
+        }
       },
       (err: unknown) => {
+        if (!live) {
+          return;
+        }
         if (isIdentityRefusal(err)) {
           onOutcome(err);
           return;
@@ -380,34 +434,43 @@ function TreeNode({ node, onOutcome }: { node: DomainDescriptor; onOutcome: (err
         setFailed(true);
       },
     );
-  };
+    return () => {
+      live = false;
+    };
+  }, [open, eager, loaded, restricted, node.path, onOutcome]);
 
   return (
     <li className="catalog-node">
-      <button type="button" className="tree-toggle" aria-expanded={open} onClick={expand}>
-        {open ? '▾' : '▸'}
-      </button>
-      {restricted ? (
-        <>
-          <span className="mono">{node.name}</span>
-          <span className="label" data-testid="restricted-domain">
-            restricted
+      {/* The row is its own element so the current domain's fill stops at the
+          row rather than running down the nested level under it. */}
+      <div className={isCurrent ? 'catalog-row catalog-row-current' : 'catalog-row'}>
+        <button type="button" className="tree-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {open ? '▾' : '▸'}
+        </button>
+        {restricted ? (
+          <>
+            <span className="mono">{node.name}</span>
+            <span className="label" data-testid="restricted-domain">
+              restricted
+            </span>
+          </>
+        ) : (
+          <a className="mono" href={domainHref(node.path)} aria-current={isCurrent ? 'page' : undefined}>
+            {node.name}
+          </a>
+        )}
+        {/* The failed arm states that this level did not load and claims
+            nothing about what the caller may see. Expanding the node again is
+            what retries it. */}
+        {failed && (
+          <span className="label" data-testid="unavailable-domain">
+            did not load
           </span>
-        </>
-      ) : (
-        <a className="mono" href={domainHref(node.path)}>
-          {node.name}
-        </a>
+        )}
+      </div>
+      {open && children !== null && children.length > 0 && (
+        <CatalogTree nodes={children} current={current} onOutcome={onOutcome} />
       )}
-      {/* The failed arm states that this level did not load and claims
-          nothing about what the caller may see. Expanding the node again is
-          what retries it. */}
-      {failed && (
-        <span className="label" data-testid="unavailable-domain">
-          did not load
-        </span>
-      )}
-      {open && children !== null && children.length > 0 && <CatalogTree nodes={children} onOutcome={onOutcome} />}
     </li>
   );
 }

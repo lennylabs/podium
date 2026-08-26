@@ -261,15 +261,29 @@ h3 {
 }
 
 .catalog-node {
+  font-size: 13px;
+}
+
+.catalog-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 4px;
-  font-size: 13px;
+  padding: 2px 8px 2px 0;
+  border-radius: 0 6px 6px 0;
 }
 
-.catalog-node > ul {
-  flex-basis: 100%;
+/* The domain the page is showing is filled with the accent wash and carries
+   an inset accent bar, which is what states the reader's position in a tree
+   whose rows are otherwise uniform. */
+.catalog-row-current {
+  background: linear-gradient(90deg, var(--wash), transparent);
+  box-shadow: inset 3px 0 var(--acc);
+  font-weight: 600;
+}
+
+.catalog-row-current a {
+  color: var(--ink);
 }
 
 .tree-toggle {

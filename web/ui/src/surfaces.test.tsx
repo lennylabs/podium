@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from './App';
 import { parseQueryLine } from './query';
-import { searchHref } from './route';
+import { domainHref, searchHref } from './route';
 import type { SessionPosture } from './session';
 // The stylesheet is imported for its own sake: the wrapping rule the rail
 // depends on is asserted from the computed style it produces.
@@ -184,6 +184,41 @@ describe('the application shell', () => {
     await waitFor(() => {
       expect(requests.some((r) => r.url.includes('path=platform%2Fci'))).toBe(true);
     });
+  });
+
+  // The tree is the shell's statement of where the reader is in the §4.2
+  // hierarchy, so the ancestry of the domain on screen is resolved down to it
+  // and that domain is marked. A reader who arrived by a link or a breadcrumb
+  // would otherwise face a row of collapsed roots with nothing indicating the
+  // page's position.
+  it('expands the tree to the domain on screen and marks it as the current page', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      // The eager read stops at platform/ci, so the level holding the current
+      // domain is one the tree has to read for itself.
+      '/v1/load_domain?path=platform%2Fci&depth=2': {
+        body: { path: 'platform/ci', subdomains: [{ path: 'platform/ci/lint', name: 'lint' }], notable: [] },
+      },
+      '/v1/load_domain?path=platform%2Fci%2Flint&depth=2': {
+        body: { path: 'platform/ci/lint', subdomains: [], notable: [] },
+      },
+      '/v1/load_domain': { body: catalog },
+      '/v1/search_artifacts': { body: { total_matched: 0 } },
+      '/v1/layers': { body: { layers: [] } },
+    });
+    goTo(domainHref('platform/ci/lint'));
+    render(<App />);
+    // The whole sidebar is the query root, because the resolved ancestry
+    // renders a nested level of the tree under the top one.
+    const tree = within(await screen.findByLabelText('Sections'));
+    const current = await tree.findByRole('link', { name: 'lint' });
+    expect(current.getAttribute('aria-current')).toBe('page');
+    expect(current.closest('.catalog-row')?.className).toContain('catalog-row-current');
+    // The ancestry and the domain itself opened, and no ancestor claims to
+    // be the page.
+    expect(tree.getAllByRole('button', { expanded: true }).length).toBe(3);
+    expect(tree.getByRole('link', { name: 'platform' }).getAttribute('aria-current')).toBeNull();
+    expect(tree.getByRole('link', { name: 'ci' }).getAttribute('aria-current')).toBeNull();
   });
 
   // The wordmark is the mark the design pass fixed, drawn inline beside the
