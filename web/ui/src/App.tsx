@@ -21,6 +21,7 @@ import {
 } from './api';
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
+import { domainLabel } from './domain';
 import { domainHref, layersHref, searchHref, useRoute } from './route';
 import { since } from './time';
 import type { ThemePreference } from './theme';
@@ -373,18 +374,6 @@ function CatalogTree({
   );
 }
 
-/** treeLabel is the label a tree row carries under `parent`. A §4.5.5 sparse
- * chain is collapsed by the server into one entry whose path holds every
- * segment it crossed while its name holds only the last one, so a row drawn
- * from the name puts `support/escalations` on screen as `escalations` under
- * the root and states a position in the hierarchy that domain does not hold.
- * The label is the whole stretch of path the row navigates across, which
- * leaves an unfolded row on its own segment. */
-function treeLabel(path: string, parent: string): string {
-  const prefix = parent === '' ? '' : `${parent}/`;
-  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
-}
-
 /** TreeNode is one domain in the sidebar tree. A node whose children came
  * with the eager read renders them from it, and a node at the read's edge
  * reads its own level when it is expanded.
@@ -415,7 +404,7 @@ function TreeNode({
   const [restricted, setRestricted] = useState(false);
   const [failed, setFailed] = useState(false);
   const eager = node.subdomains;
-  const label = treeLabel(node.path, parent);
+  const label = domainLabel(node.path, parent);
   const children = eager ?? loaded;
   const isCurrent = node.path === current;
 
@@ -497,6 +486,15 @@ function TreeNode({
       </div>
       {open && children !== null && children.length > 0 && (
         <CatalogTree nodes={children} parent={node.path} current={current} onOutcome={onOutcome} />
+      )}
+      {/* A node the reader expanded onto an empty level states that the level
+          is empty. Drawing nothing there leaves the press with no outcome on
+          screen and reads as an expansion that failed, which is the one thing
+          the row is not. */}
+      {open && children !== null && children.length === 0 && (
+        <p className="catalog-empty quiet" data-testid="empty-domain">
+          No subdomains.
+        </p>
       )}
     </li>
   );

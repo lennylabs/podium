@@ -8,6 +8,7 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge, EmptyState, ErrorState, Loading } from '../components/primitives';
 import type { DomainDescriptor } from '../api';
 import { loadDomain, searchArtifacts } from '../api';
+import { domainLabel } from '../domain';
 import { domainHref, searchHref } from '../route';
 import { useAsync, useErrorReport } from '../useAsync';
 
@@ -86,9 +87,9 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
       {body.subdomains.length === 0 && <EmptyState>This domain has no subdomains.</EmptyState>}
       {body.subdomains.length > 0 &&
         (compact ? (
-          <SubdomainTiles subdomains={body.subdomains} />
+          <SubdomainTiles subdomains={body.subdomains} parent={body.path} />
         ) : (
-          <SubdomainGrid subdomains={body.subdomains} />
+          <SubdomainGrid subdomains={body.subdomains} parent={body.path} />
         ))}
 
       <h2 className="label">Artifacts in this domain</h2>
@@ -168,13 +169,13 @@ function scopedSearchHref(scope: string): string {
  * (`pkg/registry/server/server.go`, `DomainDescriptor`) carries the nested
  * subtree and no artifact count, and taking one scoped search per card to
  * derive that count would put a request behind every tile on the page. */
-function SubdomainGrid({ subdomains }: { subdomains: DomainDescriptor[] }) {
+function SubdomainGrid({ subdomains, parent }: { subdomains: DomainDescriptor[]; parent: string }) {
   return (
     <ul className="subdomain-grid" aria-label="Subdomains">
       {subdomains.map((child) => (
         <li key={child.path} className="subdomain">
           <a className="subdomain-name mono" href={domainHref(child.path)}>
-            <span>{child.name}</span>
+            <span>{domainLabel(child.path, parent)}</span>
             <Chevron />
           </a>
           {child.description !== undefined && child.description !== '' ? (

@@ -343,6 +343,37 @@ describe("the application shell", () => {
     expect(within(tree).getByRole("link", { name: "paging" })).toBeTruthy();
   });
 
+  // Expanding a node whose level came back empty has to put something on
+  // screen. Drawing nothing leaves the press with no outcome and reads as an
+  // expansion that failed.
+  it("states an expanded level the registry reported as empty", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [{ path: "finance", name: "finance" }],
+          notable: [],
+        },
+      },
+      // The expanded node is at the eager read's edge, so it reads its own
+      // level and the registry reports nothing under it.
+      "/v1/load_domain?path=finance&depth=2": {
+        body: { path: "finance", subdomains: [], notable: [] },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    expect(within(tree).queryByTestId("empty-domain")).toBeNull();
+    fireEvent.click(
+      within(tree).getAllByRole("button", { expanded: false })[0],
+    );
+    const empty = await within(tree).findByTestId("empty-domain");
+    expect(empty.textContent).toBe("No subdomains.");
+  });
+
   // A domain the registry refuses to open stays in the hierarchy and is not
   // enterable, which is what the reader is owed: the tree lists it and the
   // link is gone.
@@ -771,6 +802,34 @@ describe("the domain browser", () => {
     // A child the response reported nothing under claims no count.
     expect(within(cards[1]).queryByText(/subdomains?$/)).toBeNull();
     expect(within(cards[1]).getByText("No description.")).toBeTruthy();
+  });
+
+  // A §4.5.5 sparse chain arrives collapsed into one entry whose path holds
+  // every segment it crossed and whose name holds only the last one. A card
+  // drawn from the name puts finance/ap on screen as ap under the root, which
+  // states a position in the hierarchy that domain does not hold and makes two
+  // domains ending in the same segment indistinguishable.
+  it("names a folded subdomain card by the stretch of path it navigates across", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            { path: "finance/ap", name: "ap", description: "Accounts payable." },
+            { path: "vendor/ap", name: "ap", description: "Vendor payments." },
+          ],
+          notable: [],
+        },
+      },
+    });
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const grid = within(browser).getByRole("list", { name: "Subdomains" });
+    const cards = within(grid).getAllByRole("listitem");
+    expect(
+      cards.map((card) => within(card).getByRole("link").textContent),
+    ).toEqual(["finance/ap", "vendor/ap"]);
   });
 
   // The §6.10 envelope says whether the condition clears on its own. Where it

@@ -8,6 +8,7 @@
 import { useState } from 'react';
 
 import type { ArtifactDescriptor, DomainDescriptor } from '../api';
+import { domainLabel } from '../domain';
 import { artifactHref, domainHref } from '../route';
 
 /** tileCap is how many tiles the grid shows before the reader asks for the
@@ -17,13 +18,18 @@ const tileCap = 12;
 /** SubdomainTiles is the compact treatment: a filter over the names, a
  * grid-or-list toggle, and one tile per child carrying the number of children
  * the response reported under it. */
-export function SubdomainTiles({ subdomains }: { subdomains: DomainDescriptor[] }) {
+export function SubdomainTiles({ subdomains, parent }: { subdomains: DomainDescriptor[]; parent: string }) {
   const [filter, setFilter] = useState('');
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [all, setAll] = useState(false);
 
   const needle = filter.trim().toLowerCase();
-  const matched = needle === '' ? subdomains : subdomains.filter((child) => child.name.toLowerCase().includes(needle));
+  // The filter runs over the label the tile carries, so a reader who types
+  // what is on screen matches the tile they can see.
+  const matched =
+    needle === ''
+      ? subdomains
+      : subdomains.filter((child) => domainLabel(child.path, parent).toLowerCase().includes(needle));
   const shown = all ? matched : matched.slice(0, tileCap);
 
   return (
@@ -59,7 +65,7 @@ export function SubdomainTiles({ subdomains }: { subdomains: DomainDescriptor[] 
         {shown.map((child) => (
           <li key={child.path} className="tile">
             <a className="mono" href={domainHref(child.path)}>
-              {child.name}
+              {domainLabel(child.path, parent)}
             </a>
             <span className="mono quiet">{(child.subdomains ?? []).length} below</span>
           </li>

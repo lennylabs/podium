@@ -308,6 +308,14 @@ h3 {
   color: var(--ink);
 }
 
+/* The empty level sits where a nested tree would, indented to the level the
+   expansion opened so it reads as this node's content. */
+.catalog-empty {
+  margin: 0;
+  padding: 2px 0 2px 24px;
+  font-size: 12px;
+}
+
 .tree-toggle {
   padding: 0 4px;
   margin: 0;
