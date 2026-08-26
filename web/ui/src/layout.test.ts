@@ -895,14 +895,17 @@ describe("frontmatter property table", () => {
     expect(value.fontSize).toBe("13.5px");
   });
 
-  // A value wraps, and a description wraps over several lines, so the row rule
-  // on its own leaves the reader tracking a key down a tall band of one fill.
-  // Every other row takes the second surface, which banks the pairs.
-  it("fills every other row so a wrapped value stays one row", () => {
-    const rows = propertyRows(3);
-    expect(getComputedStyle(rows[0]).backgroundColor).not.toBe("var(--surf2)");
-    expect(getComputedStyle(rows[1]).backgroundColor).toBe("var(--surf2)");
-    expect(getComputedStyle(rows[2]).backgroundColor).not.toBe("var(--surf2)");
+  // The design draws the property table on one surface in both themes and
+  // separates the pairs with the row rule alone. Filling every other row turns
+  // the rail table and the frontmatter tab into a zebra-striped grid, which is
+  // a treatment the design does not carry (§13.10).
+  it("draws every row on the same surface", () => {
+    const rows = propertyRows(4);
+    const first = getComputedStyle(rows[0]).backgroundColor;
+    for (const row of rows) {
+      expect(getComputedStyle(row).backgroundColor).toBe(first);
+      expect(getComputedStyle(row).backgroundColor).not.toBe("var(--surf2)");
+    }
   });
 });
 

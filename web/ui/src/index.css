@@ -1316,14 +1316,6 @@ input[type="checkbox"] {
   color: var(--faint);
 }
 
-/* A frontmatter value wraps to several lines, and a description runs to
-   several more, so the row rule alone leaves the reader tracking a key across
-   a tall band of the table's own fill. Filling every other row banks the pairs
-   so the key and the value stay one row at a glance (§13.10). */
-.property-table tbody tr:nth-child(even) {
-  background-color: var(--surf2);
-}
-
 /* A view switch that rides on a toolbar row is smaller than the one in a
    form, so the track and its segments tighten. The fills stay the shared
    ones, because a reader who learns the control on the register form reads
