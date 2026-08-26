@@ -4925,6 +4925,75 @@ describe("the layer write flows", () => {
     ).toBe(false);
   });
 
+  // The secret is served once, so the copy is the one action in the panel a
+  // reader cannot repeat. A confirmation that only paints beside the control
+  // reaches nobody driving the panel by screen reader, so the outcome is
+  // carried by a live region that is on the page before the copy lands.
+  it("announces the one-time secret copy through a live region", async () => {
+    const written: string[] = [];
+    const clipboard = { writeText: (text: string) => { written.push(text); return Promise.resolve(); } };
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", { value: clipboard, configurable: true });
+    try {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+        "/v1/layers": { body: { layers: [] } },
+        "POST /v1/layers": {
+          body: {
+            layer: {
+              ID: "alice-personal",
+              SourceType: "git",
+              Order: 1,
+              UserDefined: true,
+            },
+            webhook_url:
+              "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+            webhook_secret: "whsec-abc",
+          },
+        },
+      });
+      goTo("#/layers");
+      render(<App />);
+      await screen.findByLabelText("Layer panel");
+      fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+      fireEvent.change(screen.getByLabelText("Layer ID"), {
+        target: { value: "alice-personal" },
+      });
+      fireEvent.submit(screen.getByTestId("register-form"));
+      await screen.findByLabelText("Webhook secret");
+      // The region is mounted and empty before the copy, so the text arrives
+      // as a change to a region already in the accessibility tree.
+      const regions = screen.getAllByTestId("copy-announcement");
+      expect(regions.length).toBe(2);
+      for (const region of regions) {
+        expect(region.getAttribute("aria-live")).toBe("polite");
+        expect(region.textContent).toBe("");
+      }
+      const secretRow = screen.getByText("whsec-abc").closest(".copy-field");
+      const copy = within(secretRow as HTMLElement).getByRole("button", {
+        name: "Copy",
+      });
+      fireEvent.click(copy);
+      await waitFor(() => {
+        expect(
+          within(secretRow as HTMLElement).getByTestId("copy-announcement")
+            .textContent,
+        ).toBe("Webhook secret copied to clipboard.");
+      });
+      expect(written).toEqual(["whsec-abc"]);
+      // The visible confirmation is not read a second time beside the region.
+      expect(
+        within(secretRow as HTMLElement).getByText("Copied").getAttribute("aria-hidden"),
+      ).toBe("true");
+    } finally {
+      if (original) {
+        Object.defineProperty(navigator, "clipboard", original);
+      } else {
+        delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+      }
+    }
+  });
+
   // The secret is served once and is unrecoverable, so the reveal gates its
   // own dismissal behind an acknowledgement. A dialog that also closed on
   // Escape or on a scrim click would discard the credential around that

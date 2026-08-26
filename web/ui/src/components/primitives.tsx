@@ -24,7 +24,7 @@ export function CopyField({ label, value, block = false }: { label: string; valu
     <div className="copy-field">
       <span className="label quiet">{label}</span>
       {block ? <pre className="mono copy-value">{value}</pre> : <span className="mono copy-value">{value}</span>}
-      <CopyButton value={value} />
+      <CopyButton value={value} subject={label} />
     </div>
   );
 }
@@ -35,8 +35,25 @@ export function CopyField({ label, value, block = false }: { label: string; valu
  * itself, because a browser that exposes no clipboard leaves the value on the
  * page to be selected and the control must not claim a copy that did not
  * occur.
+ *
+ * The outcome is also carried by a live region, held on the page from the
+ * first render and empty until a copy lands. The visible confirmation alone
+ * announces nothing, and the one value that cannot be copied twice is the
+ * one-time webhook secret the register dialog destroys on dismissal. A caller
+ * that knows what the value is names it in `subject`, so the announcement
+ * says which of several values on the surface was taken.
+ *
+ * Spec: §13.10
  */
-export function CopyButton({ value, label = 'Copy' }: { value: string; label?: string }) {
+export function CopyButton({
+  value,
+  label = 'Copy',
+  subject,
+}: {
+  value: string;
+  label?: string;
+  subject?: string;
+}) {
   const [copied, setCopied] = useState(false);
   return (
     <>
@@ -55,7 +72,14 @@ export function CopyButton({ value, label = 'Copy' }: { value: string; label?: s
       >
         {label}
       </button>
-      {copied && <span className="quiet">Copied</span>}
+      {copied && (
+        <span className="quiet" aria-hidden="true">
+          Copied
+        </span>
+      )}
+      <span className="assistive-only" role="status" aria-live="polite" data-testid="copy-announcement">
+        {copied ? (subject ? `${subject} copied to clipboard.` : 'Copied to clipboard.') : ''}
+      </span>
     </>
   );
 }
