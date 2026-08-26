@@ -221,6 +221,11 @@ export interface LoadArtifactResponse {
   resources_base64?: boolean;
   large_resources?: Record<string, LargeResourceLink>;
   manifest_body_url?: LargeResourceLink;
+  /** raw_frontmatter carries the pre-merge manifest document on a response
+   * whose frontmatter was re-serialized with a hidden parent stripped
+   * (§4.6). It is the only place the artifact's own `extends:` reference
+   * survives such a response. */
+  raw_frontmatter?: string;
 }
 
 /** DependencyEdge is one graph edge served by the dependents endpoint. */

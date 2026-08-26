@@ -1142,14 +1142,62 @@ describe("the artifact viewer", () => {
     goTo("#/artifact/finance%2Fap%2Fpay-invoice");
     render(<App />);
     const relations = await screen.findByLabelText("Relations");
-    const rows = relations.querySelectorAll("li");
-    expect(rows.length).toBe(2);
-    expect(rows[0].textContent).toBe("extended by finance/ap/reconcile-ledger");
-    expect(rows[1].textContent).toBe("delegated to by finance/ap/close-books");
-    // The bare edge kind beside the link is the inverted reading.
-    expect(relations.querySelector(".label.quiet")?.textContent).not.toBe(
-      "extends",
+    const groups = relations.querySelectorAll(".rail-group");
+    // The outbound group leads, then one group per inbound relation, each
+    // labelled in the passive direction.
+    expect([...groups].map((group) => group.querySelector("p")?.textContent))
+      .toEqual(["extends", "extended by", "delegated to by"]);
+    expect(groups[1].querySelector("li")?.textContent).toBe(
+      "finance/ap/reconcile-ledger",
     );
+    expect(groups[2].querySelector("li")?.textContent).toBe(
+      "finance/ap/close-books",
+    );
+  });
+
+  // Spec: §13.10 — the viewer links to extending or dependent artifacts. The
+  // dependents endpoint serves the reverse index alone, so the artifact's own
+  // outbound extends reaches the rail from the manifest. A merged response
+  // strips the parent from the frontmatter it re-serializes and carries the
+  // pre-merge document beside it, which is where the reference survives.
+  it("splits the rail's relations into the artifact's own extends and the artifacts extending it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "finance/ap/three-way-match",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Three-way match\n",
+          frontmatter: "---\ntype: skill\nversion: 1.0.0\n---\n",
+          manifest_merged: true,
+          raw_frontmatter:
+            "---\ntype: skill\nversion: 1.0.0\nextends: finance/ap/pay-invoice@1.2.0\n---\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/finance%2Fap%2Fthree-way-match");
+    render(<App />);
+    const relations = await screen.findByLabelText("Relations");
+    // The direction the artifact declares is a group of its own, and the
+    // chip keeps the authored reference while the link drops the version
+    // constraint, which can name a range rather than a stored version.
+    const declared = within(relations).getByText(
+      "finance/ap/pay-invoice@1.2.0",
+    );
+    expect(declared.getAttribute("href")).toBe(
+      "#/artifact/finance%2Fap%2Fpay-invoice",
+    );
+    // The other direction has no members, and says so on its own group
+    // rather than leaving the reader to read the absence off the first.
+    expect(
+      within(relations).getByText("Nothing extends this artifact."),
+    ).toBeTruthy();
+    expect(
+      within(relations).queryByText("This artifact extends nothing."),
+    ).toBeNull();
   });
 
   // The rail is a fixed-width column, and provenance is a set of labelled
@@ -1520,8 +1568,9 @@ describe("the artifact viewer", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
     expect(screen.getByText("No frontmatter on this artifact.")).toBeTruthy();
     expect(
-      await screen.findByText("Nothing extends or depends on this artifact."),
+      await screen.findByText("Nothing extends this artifact."),
     ).toBeTruthy();
+    expect(screen.getByText("This artifact extends nothing.")).toBeTruthy();
   });
 
   it("reports a frontmatter block that does not parse without affecting the rest of the viewer", async () => {

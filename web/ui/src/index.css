@@ -1676,6 +1676,22 @@ button,
   margin-top: 8px;
 }
 
+/* A relation names one artifact and leads to it, so each one stands on its
+   own bordered row inside its direction's group rather than wrapping into a
+   paragraph of links. The identifier can be longer than the rail is wide and
+   breaks inside itself. */
+.relation-chip {
+  padding: 8px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  margin-bottom: 6px;
+}
+
+.relation-chip a {
+  word-break: break-all;
+}
+
 /* The authored source panel. The lede and the take-away controls sit on one
    line above the block, and the block states the file and its extent in a
    header over a numbered gutter. The gutter and the code share one

@@ -16,7 +16,7 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge, CopyButton, EmptyState, ErrorState, Loading } from '../components/primitives';
 import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
-import type { LargeResourceLink, LoadArtifactResponse } from '../api';
+import type { DependencyEdge, LargeResourceLink, LoadArtifactResponse } from '../api';
 import { dependentsOf, loadArtifact } from '../api';
 import { artifactHref } from '../route';
 import { useAsync, useErrorReport } from '../useAsync';
@@ -348,7 +348,7 @@ function ArtifactRail({ artifact, frontmatter }: { artifact: LoadArtifactRespons
           <PropertyTable raw={frontmatter} testID="rail-frontmatter-table" />
         </section>
       )}
-      <Relations id={artifact.id} />
+      <Relations artifact={artifact} frontmatter={frontmatter} />
       <section aria-label="Bundled resources">
         <p className="label">Resources</p>
         {resources.length === 0 ? (
@@ -440,30 +440,101 @@ function inboundLabel(kind: string): string {
   }
 }
 
-/** Relations lists the artifacts that extend or otherwise depend on this
- * one. The edges arrive on their own request, so an artifact with no edges
- * is a state of this section rather than of the page. */
-function Relations({ id }: { id: string }) {
-  const edges = useAsync(() => dependentsOf(id), [id]);
+/** RelationChip is one artifact named by a relation group: the reference as
+ * the manifest or the edge states it, and the viewer route it opens. */
+interface RelationChip {
+  href: string;
+  text: string;
+}
+
+/** RailRelationGroup draws one direction of the relation graph. The two
+ * directions are separate groups because a single merged list leaves the
+ * reader unable to tell whether this artifact extends the one named or is
+ * extended by it, and each group states its own absence so a direction with
+ * no members reads as empty rather than as missing. The count stands beside
+ * the label once a group holds more than one member, where a single chip
+ * already counts itself. */
+function RailRelationGroup({ label, chips, absent }: { label: string; chips: RelationChip[]; absent: string }) {
+  return (
+    <div className="rail-group">
+      <p className="label quiet">{chips.length > 1 ? `${label} · ${chips.length}` : label}</p>
+      {chips.length === 0 ? (
+        <EmptyState>{absent}</EmptyState>
+      ) : (
+        <ul className="relation-list">
+          {chips.map((chip) => (
+            <li key={chip.text} className="relation-chip">
+              <a className="mono" href={chip.href}>
+                {chip.text}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** referenceID strips the version constraint from an `extends:` reference
+ * (§4.4). The constraint can be a range rather than a stored version, so the
+ * link opens the artifact the reference names and the chip keeps the
+ * reference the author wrote. */
+function referenceID(reference: string): string {
+  const at = reference.indexOf('@');
+  return at === -1 ? reference : reference.slice(0, at);
+}
+
+/** declaredExtends reads the artifact's own outbound `extends:` reference.
+ * The dependents endpoint serves the reverse index alone (§4.7.3), so this
+ * direction reaches the rail only from the manifest. A merged response
+ * re-serializes the manifest with the hidden parent stripped (§4.6) and
+ * carries the pre-merge document beside it, which is where the authored
+ * reference survives. */
+function declaredExtends(artifact: LoadArtifactResponse, frontmatter: string): string {
+  const raw = artifact.raw_frontmatter ?? '';
+  const source = raw === '' ? frontmatter : raw;
+  const found = parseFrontmatter(source).properties.find((property) => property.key === 'extends');
+  return found === undefined ? '' : found.value.trim();
+}
+
+/** inboundGroups splits the reverse-index edges into one group per relation,
+ * in the order the registry served them. The extends group is always drawn,
+ * because §13.10 puts the extending artifacts on this surface and a reader
+ * has to be told when there are none; a relation nobody declared stands no
+ * group of its own. */
+function inboundGroups(edges: DependencyEdge[]): { label: string; chips: RelationChip[]; absent: string }[] {
+  const groups = new Map<string, RelationChip[]>([['extended by', []]]);
+  for (const edge of edges) {
+    const label = inboundLabel(edge.kind);
+    const chips = groups.get(label) ?? [];
+    chips.push({ href: artifactHref(edge.from), text: edge.from });
+    groups.set(label, chips);
+  }
+  return [...groups].map(([label, chips]) => ({
+    label,
+    chips,
+    absent: label === 'extended by' ? 'Nothing extends this artifact.' : `Nothing is ${label} this artifact.`,
+  }));
+}
+
+/** Relations lists the artifacts this one extends and the artifacts that
+ * extend or otherwise depend on it. The reverse-index edges arrive on their
+ * own request, so an artifact with no edges is a state of that group rather
+ * than of the page, and the outbound group comes from the manifest already
+ * in hand and renders while the request is in flight. */
+function Relations({ artifact, frontmatter }: { artifact: LoadArtifactResponse; frontmatter: string }) {
+  const edges = useAsync(() => dependentsOf(artifact.id), [artifact.id]);
+  const declared = declaredExtends(artifact, frontmatter);
+  const outbound = declared === '' ? [] : [{ href: artifactHref(referenceID(declared)), text: declared }];
   return (
     <section aria-label="Relations">
       <p className="label">Relations</p>
+      <RailRelationGroup label="extends" chips={outbound} absent="This artifact extends nothing." />
       {edges.loading && <Loading label="Loading relations." />}
       {edges.error !== null && <ErrorState error={edges.error} onRetry={edges.reload} />}
       {edges.value !== null &&
-        (edges.value.length === 0 ? (
-          <EmptyState>Nothing extends or depends on this artifact.</EmptyState>
-        ) : (
-          <ul className="relation-list">
-            {edges.value.map((edge) => (
-              <li key={edge.kind + edge.from}>
-                <span className="label quiet">{inboundLabel(edge.kind)}</span>{' '}
-                <a className="mono" href={artifactHref(edge.from)}>
-                  {edge.from}
-                </a>
-              </li>
-            ))}
-          </ul>
+        inboundGroups(edges.value).map((group) => (
+          <RailRelationGroup key={group.label} label={group.label} chips={group.chips} absent={group.absent} />
         ))}
     </section>
   );
