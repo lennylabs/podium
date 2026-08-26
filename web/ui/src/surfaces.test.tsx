@@ -5680,6 +5680,56 @@ describe("the layer write flows", () => {
     expect(sent.users).toEqual(["carol@acme.com"]);
   });
 
+  // §13.10: a registration that names no grant is not stored ungranted. The
+  // registry stamps the deployment's default visibility, which is public on a
+  // standalone with no identity provider, so the dialog must not promise the
+  // reader an owner-only layer before the row underneath reports `public`.
+  it("names the stamped default where an admin-defined registration grants nobody", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ identity_provider_configured: false }),
+      },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "local", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const line = screen.getByTestId("visibility-consequence");
+    expect(line.textContent).toBe(
+      "No grants — the registry stamps this deployment's default visibility, " +
+        "which is public on a standalone with no identity provider. The registered row states what it applied.",
+    );
+    expect(line.textContent).not.toContain("only you");
+    // The line describes the write the form is about to send: no axis is
+    // carried, which is the request the registry applies the default to.
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "ops" },
+    });
+    fireEvent.click(
+      within(screen.getByRole("radiogroup", { name: "Source" })).getByRole(
+        "radio",
+        { name: "Local folder" },
+      ),
+    );
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "/srv/ops" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await waitFor(() => {
+      expect(
+        requests.some((r) => r.url === "/v1/layers" && r.method === "POST"),
+      ).toBe(true);
+    });
+    const sent = JSON.parse(bodies.at(-1) ?? "{}") as Record<string, unknown>;
+    expect(sent.public).toBe(false);
+    expect(sent.organization).toBe(false);
+    expect(sent.groups).toBeUndefined();
+    expect(sent.users).toBeUndefined();
+  });
+
   // A git layer whose artifacts live under a subdirectory is registered by
   // naming that subtree as the root, which is the field the git source reads
   // to scope the fetch. Without the control on the form such a repository
@@ -5944,7 +5994,8 @@ describe("the layer write flows", () => {
     }
     // The consequence of the whole selection, stated in the reviewer's terms.
     expect(screen.getByTestId("visibility-consequence").textContent).toBe(
-      "No grants — only you will see this layer.",
+      "No grants — the registry stamps this deployment's default visibility, " +
+        "which is public on a standalone with no identity provider. The registered row states what it applied.",
     );
     fireEvent.click(screen.getByLabelText("Organization"));
     fireEvent.click(screen.getByLabelText("Groups"));

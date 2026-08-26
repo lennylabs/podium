@@ -574,7 +574,17 @@ function consequence(isPublic: boolean, organization: boolean, groups: string[],
       : `Everyone in this tenant will see this layer — the organization grant already covers ${list(named)}.`;
   }
   if (named.length === 0) {
-    return 'No grants — only you will see this layer.';
+    // Spec: §13.10 / §13.12 — a registration that carries no visibility does
+    // not store an ungranted layer. The registry stamps the deployment's
+    // fallback, which resolves to public on a standalone with no identity
+    // provider, to private once one gates access, and to whatever
+    // PODIUM_DEFAULT_LAYER_VISIBILITY names when the operator set it. The
+    // form reads none of those, so the line states the rule and points at the
+    // registered row, which carries what the registry actually applied.
+    return (
+      "No grants — the registry stamps this deployment's default visibility, " +
+      'which is public on a standalone with no identity provider. The registered row states what it applied.'
+    );
   }
   return `Only ${list(named)} will see this layer.`;
 }
