@@ -21,7 +21,7 @@ import {
 } from './api';
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
-import { domainLabel } from './domain';
+import { domainLabel, marksCurrentDomain } from './domain';
 import { artifactDomain, domainHref, layersHref, searchHref, useRoute } from './route';
 import { since } from './time';
 import type { ThemePreference } from './theme';
@@ -625,7 +625,11 @@ function TreeNode({
   const eager = node.subdomains;
   const label = domainLabel(node.path, parent);
   const children = eager ?? loaded;
-  const isCurrent = node.path === current;
+  // The row is marked for the domain the reader is on and for every level a
+  // collapsed chain swallowed into it, because those levels have no row of
+  // their own to carry the marker.
+  const isCurrent = marksCurrentDomain(node.path, parent, current);
+  const isCurrentPath = node.path === current;
   // A node the eager read already reported empty is a leaf, so the row draws
   // the blank marker in the toggle's slot and keeps the label aligned with
   // its siblings. The reader never had a toggle there to press.
@@ -741,8 +745,13 @@ function TreeNode({
             title={label}
             // The domain holding an open artifact is where the page sits in
             // the hierarchy without being the page, so it takes the location
-            // marker there and the page marker on a domain route.
-            aria-current={isCurrent ? (currentIsPage ? 'page' : 'location') : undefined}
+            // marker there and the page marker on a domain route. A chain
+            // entry standing in for a level it swallowed takes the location
+            // marker too: the link navigates to the chain's endpoint rather
+            // than to the domain the reader is on.
+            aria-current={
+              isCurrent ? (currentIsPage && isCurrentPath ? 'page' : 'location') : undefined
+            }
           >
             {label}
           </a>

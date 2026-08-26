@@ -15,6 +15,24 @@ export function domainLabel(path: string, parent: string): string {
   return path.startsWith(prefix) ? path.slice(prefix.length) : path;
 }
 
+/** marksCurrentDomain reports whether the tree entry at `path` under `parent`
+ * is the row that holds the domain the reader is on. A §4.5.5 sparse chain is
+ * collapsed by the server into one entry, so the levels between `parent` and
+ * `path` have no row of their own: a route onto one of them belongs to the
+ * chain entry that swallowed it, which is the only row on screen that states
+ * where the reader is. Without this the sidebar marks nothing at all on those
+ * levels while the chain's own endpoint marks correctly. */
+export function marksCurrentDomain(path: string, parent: string, current: string | null): boolean {
+  if (current === null) {
+    return false;
+  }
+  if (current === path) {
+    return true;
+  }
+  const prefix = parent === '' ? '' : `${parent}/`;
+  return path.startsWith(`${current}/`) && current.startsWith(prefix) && current !== parent;
+}
+
 /** subdomainCountLabel states what a response reported below a child. An entry
  * with an empty subtree carries no line at all, because a card that reads
  * "0 subdomains" claims a fact the descriptor omits at the deepest returned

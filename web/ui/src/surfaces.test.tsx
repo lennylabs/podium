@@ -393,6 +393,56 @@ describe("the application shell", () => {
     ).toBeNull();
   });
 
+  // A §4.5.5 sparse chain is collapsed into one tree entry, so the levels it
+  // swallowed have no row of their own. A route onto one of them is marked on
+  // the entry that swallowed it, because otherwise the sidebar states no
+  // position at all while the chain's own endpoint marks correctly.
+  it("marks the collapsed chain entry for a domain inside the chain", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain?path=legal%2Fcontracts%2Fnda%2Ftemplates&depth=2": {
+        body: {
+          path: "legal/contracts/nda/templates",
+          subdomains: [
+            { path: "legal/contracts/nda/templates/mutual", name: "mutual" },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            { path: "eng", name: "eng" },
+            {
+              path: "legal/contracts/nda/templates/mutual",
+              name: "mutual",
+            },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/catalog": { body: { ids: [] } },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo(domainHref("legal/contracts/nda/templates"));
+    render(<App />);
+    const tree = within(await screen.findByLabelText("Sections"));
+    const chain = await tree.findByRole("link", {
+      name: "legal/contracts/nda/templates/mutual",
+    });
+    expect(chain.closest(".catalog-row")?.className).toContain(
+      "catalog-row-current",
+    );
+    // The entry links to the chain's endpoint rather than to the domain the
+    // reader is on, so it states position rather than claiming to be the page.
+    expect(chain.getAttribute("aria-current")).toBe("location");
+    expect(
+      tree.getByRole("link", { name: "eng" }).getAttribute("aria-current"),
+    ).toBeNull();
+  });
+
   // The sidebar's section rows are the shell's statement of which §13.10
   // surface the page is. An implementation that renders the three rows
   // identically on every route leaves the reader with nothing in the shell
