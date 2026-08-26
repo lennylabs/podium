@@ -13,7 +13,7 @@ import { useState } from 'react';
 
 import { ArtifactBody } from '../components/ArtifactBody';
 import { Breadcrumb } from '../components/Breadcrumb';
-import { Badge, CopyButton, EmptyState, ErrorState, Loading } from '../components/primitives';
+import { Badge, CopyButton, EmptyState, ErrorState, Loading, SensitivityBadge } from '../components/primitives';
 import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
 import type { DependencyEdge, LargeResourceLink, LoadArtifactResponse } from '../api';
@@ -82,7 +82,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           <h1>{artifactName(body.id)}</h1>
           <Badge>{body.type}</Badge>
           <Badge tone="quiet">{body.version}</Badge>
-          {body.sensitivity !== undefined && body.sensitivity !== '' && <Badge tone="quiet">{body.sensitivity}</Badge>}
+          <SensitivityBadge sensitivity={body.sensitivity} />
         </div>
         <p className="mono quiet artifact-id-line">{body.id}</p>
         {description !== '' && <p className="lead">{description}</p>}

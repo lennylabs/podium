@@ -909,7 +909,8 @@ describe("search", () => {
     expect(
       within(first.parentElement as HTMLElement).getByText("skill"),
     ).toBeTruthy();
-    expect(screen.getByText("internal")).toBeTruthy();
+    // The classification names its axis on the row as it does in the viewer.
+    expect(screen.getByText("sensitivity: internal")).toBeTruthy();
     expect(screen.getByText("matched by meaning")).toBeTruthy();
     // Relevance is drawn as bars ranked against the strongest score in the
     // set, and no row states a score. The vector-only row draws no bars and
@@ -1103,6 +1104,45 @@ describe("the artifact viewer", () => {
       within(trail).getByText("accounts-payable").getAttribute("href"),
     ).toBe("#/domain/finance%2Faccounts-payable");
     expect(within(content).getByText("Pay a supplier invoice.")).toBeTruthy();
+    // The response carries no classification, so the badge is absent rather
+    // than standing empty.
+    expect(within(title as HTMLElement).queryByText(/sensitivity/)).toBeNull();
+  });
+
+  // A classification value states a level and never the axis it measures, so
+  // "internal" beside the type and the version reads as one more unnamed
+  // property of the artifact. The badge names the axis and carries the weight
+  // of the badges it sits with, because the classification is informational
+  // rather than an alert.
+  //
+  // Spec: §4.3
+  it("names the axis the sensitivity badge measures at the weight of the badges beside it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "finance/accounts-payable/pay-invoice",
+          type: "skill",
+          version: "2.3.0",
+          sensitivity: "internal",
+          content_hash: "sha256:abc",
+          manifest_body: "# Pay an invoice\n",
+          frontmatter: "---\nname: pay-invoice\nsensitivity: internal\n---\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/finance%2Faccounts-payable%2Fpay-invoice");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const heading = within(
+      screen.getByLabelText("Artifact viewer"),
+    ).getAllByRole("heading", { level: 1 })[0];
+    const title = heading.parentElement as HTMLElement;
+    const classification = within(title).getByText("sensitivity: internal");
+    expect(within(title).getByText("skill").className).toBe(
+      classification.className,
+    );
   });
 
   // Spec: §13.10 — the viewer links to extending or dependent artifacts.

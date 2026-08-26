@@ -2,7 +2,7 @@
 // receive the same descriptor, so both render this row and neither formats
 // the same field twice.
 
-import { Badge } from './primitives';
+import { Badge, SensitivityBadge } from './primitives';
 import type { ArtifactDescriptor } from '../api';
 import { artifactHref, artifactLeaf } from '../route';
 
@@ -98,9 +98,7 @@ export function ArtifactRow({
               {version !== '' && <Badge tone="quiet">{version}</Badge>}
             </>
           )}
-          {artifact.sensitivity !== undefined && artifact.sensitivity !== '' && (
-            <Badge tone="quiet">{artifact.sensitivity}</Badge>
-          )}
+          <SensitivityBadge sensitivity={artifact.sensitivity} />
           {artifact.source === 'featured' && <Badge tone="accent">curated</Badge>}
           {artifact.source === 'signal' && <span className="quiet label">surfaced by usage</span>}
           {artifact.folded_from !== undefined && artifact.folded_from !== '' && (

@@ -63,6 +63,22 @@ export function Badge({ tone = 'neutral', children }: { tone?: Tone; children: R
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
 
+/**
+ * SensitivityBadge renders the artifact's sensitivity classification. The
+ * value alone ("internal", "confidential") does not say which axis it
+ * measures, so the badge names the axis and carries the same weight as the
+ * type and version badges beside it: the classification is informational and
+ * never an alert. The badge is absent on an unclassified artifact.
+ *
+ * Spec: §4.3
+ */
+export function SensitivityBadge({ sensitivity }: { sensitivity?: string }) {
+  if (sensitivity === undefined || sensitivity === '') {
+    return null;
+  }
+  return <Badge>sensitivity: {sensitivity}</Badge>;
+}
+
 export function Banner({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
   return (
     <div className={`banner banner-${tone}`} role="status">
