@@ -709,6 +709,17 @@ h2.label {
   font-weight: 600;
 }
 
+/* A sparse chain arrives folded into one entry, so a card title can be a long
+   slash-separated path. A slash offers no break opportunity, and the `.mono`
+   break-word rule leaves the flex item's intrinsic minimum at its max-content
+   width, so without a zero minimum the title runs past the card, widens the
+   grid track, and scrolls the whole document sideways. The break value is
+   anywhere, which lowers that minimum, and the path wraps inside the card. */
+.subdomain-name > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .subdomain-name .chevron {
   width: 9px;
   height: 9px;

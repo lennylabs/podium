@@ -63,6 +63,16 @@ describe("shell layout", () => {
     expect(descendantStyle("domain-head", "h1").marginTop).toBe("0px");
   });
 
+  // A folded sparse chain gives a subdomain card a long slash-separated title,
+  // and a slash offers no break opportunity. Without a zero minimum on the
+  // title the card's grid track takes that string's width and the whole
+  // document scrolls sideways.
+  it("breaks a subdomain title the card is too narrow to hold", () => {
+    const name = descendantStyle("subdomain-name", "span");
+    expect(name.minWidth).toBe("0");
+    expect(name.overflowWrap).toBe("anywhere");
+  });
+
   it("gives the artifact viewer's prose column a zero minimum", () => {
     expect(styled("artifact-viewer").gridTemplateColumns).toBe(
       "minmax(0, 1fr) 316px",
