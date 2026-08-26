@@ -54,6 +54,15 @@ describe("shell layout", () => {
     expect(styled("panel-head").flexWrap).toBe("wrap");
   });
 
+  // The domain title and its counts are one row, and it wraps so a long leaf
+  // name does not push the counts off the content column.
+  it("lays the domain title and its counts out on one wrapping row", () => {
+    const head = styled("domain-head");
+    expect(head.display).toBe("flex");
+    expect(head.flexWrap).toBe("wrap");
+    expect(descendantStyle("domain-head", "h1").marginTop).toBe("0px");
+  });
+
   it("gives the artifact viewer's prose column a zero minimum", () => {
     expect(styled("artifact-viewer").gridTemplateColumns).toBe(
       "minmax(0, 1fr) 316px",

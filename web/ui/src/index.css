@@ -646,6 +646,31 @@ h2.label {
   margin: 4px 0;
 }
 
+/* The domain title and what the response counted sit on one line: the counts
+   qualify the name, and a line of their own under the h1 reads as a second
+   claim about the domain. The counts align to the title's baseline rather
+   than its box, which is what the top offset buys, and the row wraps so a
+   long leaf name keeps them from being pushed off the content column. */
+.domain-head {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 0 0 8px;
+}
+
+.domain-head h1 {
+  margin: 0;
+}
+
+.domain-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 9px;
+}
+
 /* The relevance indicator. The four bars rise left to right, and the
    container holds its width where a row draws none, so a vector-only match
    keeps its row aligned with the ranked rows above it. */

@@ -58,11 +58,13 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
   return (
     <section className="surface" aria-label="Domain browser">
       <Breadcrumb path={body.path} />
-      <h1>{leafName(body.path)}</h1>
-      <div className="artifact-meta">
-        <Badge tone="quiet">{body.subdomains.length} subdomains</Badge>
-        <Badge tone="quiet">{body.notable.length} artifacts</Badge>
-        {trimmed && <Badge tone="accent">listing trimmed</Badge>}
+      <div className="domain-head">
+        <h1>{leafName(body.path)}</h1>
+        <div className="domain-counts">
+          <CountBadge count={body.notable.length} noun="artifact" />
+          <CountBadge count={body.subdomains.length} noun="subdomain" />
+          {trimmed && <Badge tone="accent">listing trimmed</Badge>}
+        </div>
       </div>
       {body.description !== undefined && body.description !== '' ? (
         <p className="lead">{body.description}</p>
@@ -121,6 +123,22 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
       )}
     </section>
   );
+}
+
+/** CountBadge states one of the two figures the domain response reports, as a
+ * marker beside the domain name rather than as a sentence under it. The count
+ * is set in caps for the same reason a type is (`components/primitives.tsx`,
+ * `TypeBadge`), in the text rather than in the stylesheet.
+ *
+ * A zero draws nothing. The listing below the header already states an empty
+ * one in prose, so a "0 ARTIFACTS" marker beside the title repeats it in the
+ * position the page reserves for what the domain holds. */
+function CountBadge({ count, noun }: { count: number; noun: string }) {
+  if (count === 0) {
+    return null;
+  }
+  const label = count === 1 ? noun : `${noun}s`;
+  return <Badge tone="quiet">{`${String(count)} ${label}`.toUpperCase()}</Badge>;
 }
 
 /** TrimmedListing is how a reader continues past the returned edge. The

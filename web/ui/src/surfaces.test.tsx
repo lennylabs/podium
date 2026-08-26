@@ -997,6 +997,50 @@ describe("the domain browser", () => {
     );
   });
 
+  // The counts qualify the domain name, so they sit on the title's line in
+  // the marker casing a badge carries, with what the domain holds read first.
+  it("sets the counts beside the domain name in caps, artifacts first", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: [{ path: "platform/ci", name: "ci" }],
+          notable: [
+            { id: "platform/deploy", type: "skill" },
+            { id: "platform/build", type: "skill" },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const heading = within(browser).getByRole("heading", { level: 1 });
+    const head = heading.parentElement;
+    expect(head).not.toBeNull();
+    expect(head?.textContent).toBe("platform2 ARTIFACTS1 SUBDOMAIN");
+  });
+
+  // A count of zero states nothing the empty listing below does not already
+  // state in prose, so it draws no marker at all.
+  it("draws no count badge for a domain that holds none of that thing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [{ path: "eng", name: "eng" }],
+          notable: [],
+        },
+      },
+    });
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const head = within(browser).getByRole("heading", { level: 1 }).parentElement;
+    expect(head?.textContent).toBe("Registry root1 SUBDOMAIN");
+  });
+
   it("renders a domain that carries neither subdomains nor artifacts as a finished page", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
