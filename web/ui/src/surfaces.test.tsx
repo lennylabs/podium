@@ -7215,6 +7215,33 @@ describe("the command palette", () => {
     expect(syntax.textContent).not.toContain("·");
   });
 
+  // The panel covers the shell, so Tab has to cycle inside it. Its result
+  // rows carry tabIndex -1, because the arrows move the highlight while the
+  // query field keeps focus, and a trap that counted them as Tab stops never
+  // saw focus reach the stop it treats as the last one: Tab from the field
+  // walked out onto the sidebar behind the scrim.
+  it("keeps Tab and Shift+Tab inside the panel when the rows hold no Tab stop", async () => {
+    palettePage([
+      { id: "platform/review", type: "skill", version: "1.2.0" },
+      { id: "platform/lint", type: "skill", version: "1.0.0" },
+    ]);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    const field = within(panel).getByLabelText("Search artifacts");
+    fireEvent.change(field, { target: { value: "platform" } });
+    await within(panel).findByTestId("palette-heading");
+    field.focus();
+    for (const shiftKey of [false, true]) {
+      const tab = createEvent.keyDown(document, { key: "Tab", shiftKey });
+      fireEvent(document, tab);
+      // The panel cancels the key, so the browser's own Tab order never runs
+      // and focus stays on the field the panel wrapped it back to.
+      expect(tab.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(field);
+    }
+  });
+
   // The inline filter syntax is the palette's form of the pills the search
   // surface renders, and it reaches the same endpoint arguments.
   it("carries the inline filter syntax into the search request", async () => {

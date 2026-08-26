@@ -16,15 +16,24 @@ import type { RefObject } from 'react';
  */
 export const dismissAttribute = 'data-dialog-dismiss';
 
-/** focusableStops matches the controls a dialog can hand focus to. */
+/**
+ * focusableStops matches the controls a dialog can hand focus to. Every arm
+ * excludes `tabindex="-1"`, because a control carrying it is reachable by
+ * script alone and the browser's own Tab order walks past it. A dialog that
+ * counted one as a stop, such as a row of a roving-tabindex list, never saw
+ * focus reach the stop it treats as the last one, so the wrap below never
+ * fired and Tab walked out onto the surface the scrim covers.
+ */
 const focusableStops = [
   'a[href]',
   'button:not([disabled])',
   'input:not([disabled])',
   'select:not([disabled])',
   'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(', ');
+  '[tabindex]',
+]
+  .map((stop) => `${stop}:not([tabindex="-1"])`)
+  .join(', ');
 
 /**
  * takeFocus hands focus to a landmark that never receives it by keyboard,
