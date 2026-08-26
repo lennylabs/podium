@@ -731,7 +731,7 @@ export function ReingestRunReport({
     >
       <section className="ingest-report modal-body" aria-label="Reingest all result">
         <div className="stats" aria-label="Ingest counts across the run">
-          <Stat label="accepted" count={totals.accepted} />
+          <Stat label="accepted" count={totals.accepted} tone="ok" />
           <Stat label="unchanged" count={totals.idempotent} />
           <Stat label="rejected" count={totals.rejected} tone="danger" />
           <Stat label="conflicts" count={totals.conflicts} tone="accent" />

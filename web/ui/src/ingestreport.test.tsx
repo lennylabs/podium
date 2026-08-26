@@ -326,6 +326,21 @@ describe('the finished fan-out report', () => {
     expect(layers.textContent).toContain('12 accepted · 3 unchanged · 0 rejected · 0 conflicts');
   });
 
+  // One run reads the same whichever button started it: the fan-out's counts
+  // carry the tones the single-layer report gives them, so an accepted count
+  // is not drawn like the unchanged count beside it.
+  it('tones the run counts the way the single-layer report tones them', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    const counts = within(screen.getByRole('dialog', { name: /Reingest all finished/ })).getByLabelText(
+      'Ingest counts across the run',
+    );
+    expect(within(counts).getByText('accepted').parentElement?.className).toContain('stat-ok');
+    expect(within(counts).getByText('unchanged').parentElement?.className).toContain('stat-neutral');
+    expect(within(counts).getByText('rejected').parentElement?.className).toContain('stat-danger');
+  });
+
   // A refused layer is part of the run's result rather than a banner behind
   // it, and it is named with the code and the message its envelope carried.
   it('names the refused layers with their code and message', () => {
