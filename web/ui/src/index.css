@@ -1748,6 +1748,35 @@ label:has(> input:disabled) {
   border-bottom: 0;
 }
 
+/* Provenance stands as a borderless list of labelled values, so the bordered
+   tables and cards below it read as the sections the rail is built around.
+   The key column is fixed so the values line up down one edge. */
+.rail-facts {
+  margin: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.rail-fact {
+  display: flex;
+  gap: 10px;
+}
+
+.rail-fact dt {
+  flex: none;
+  width: 88px;
+  color: var(--meta);
+  font-size: 11px;
+}
+
+.rail-fact dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 12.5px;
+  word-break: break-word;
+}
+
 .rail-list {
   list-style: none;
   padding: 0;

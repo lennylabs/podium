@@ -1798,11 +1798,13 @@ describe("the artifact viewer", () => {
   });
 
   // The rail is a fixed-width column, and provenance is a set of labelled
-  // values rather than prose: each one stands in a property table under its
-  // own label. The content hash is 71 characters against a rail far narrower
-  // than that, so the row abbreviates it and keeps the whole value on the
-  // row's title, where the reader can still recover it.
-  it("renders provenance as a labelled property table with the content hash abbreviated", async () => {
+  // values rather than prose: each one stands in a borderless list under its
+  // own section label, so the bordered frontmatter and relations sections
+  // beneath it stay the objects the rail is built around. The content hash is
+  // 71 characters against a rail far narrower than that, so the row
+  // abbreviates it and keeps the whole value on the row's title, where the
+  // reader can still recover it.
+  it("renders provenance as a borderless labelled list with the content hash abbreviated", async () => {
     const contentHash =
       "sha256:ab7469fdce70f0beb8c3b4e696da5e0080f95f75a9d8b3c2e1f0a94d6c7b8e5f";
     stubRegistry({
@@ -1823,18 +1825,22 @@ describe("the artifact viewer", () => {
     goTo("#/artifact/finance%2Fap%2Fpay-invoice");
     render(<App />);
     const provenance = await screen.findByLabelText("Provenance");
-    const table = within(provenance).getByTestId("rail-provenance-table");
-    const rows = [...table.querySelectorAll("tr")].map((row) => [
-      row.querySelector("th")?.textContent,
-      row.querySelector("td")?.textContent,
+    const facts = within(provenance).getByTestId("rail-provenance");
+    const rows = [...facts.querySelectorAll(".rail-fact")].map((row) => [
+      row.querySelector("dt")?.textContent,
+      row.querySelector("dd")?.textContent,
     ]);
     expect(rows).toEqual([
       ["layer", "acme-platform"],
       ["hash", "sha256:ab74…8e5f"],
     ]);
+    // The section carries no table and no bordered container of its own, so
+    // it does not read as a second copy of the frontmatter table below it.
+    expect(provenance.querySelector("table")).toBeNull();
+    expect(provenance.querySelector(".data-table")).toBeNull();
     // The abbreviation is a display, so the whole value is still on the row.
     expect(within(provenance).queryByText(contentHash)).toBeNull();
-    expect(table.querySelectorAll("td")[1].getAttribute("title")).toBe(
+    expect(facts.querySelectorAll("dd")[1].getAttribute("title")).toBe(
       contentHash,
     );
   });

@@ -441,30 +441,25 @@ function ArtifactRail({
     <aside className="artifact-rail" aria-label="Artifact details">
       <section aria-label="Provenance">
         <p className="label">Provenance</p>
-        {/* Provenance is a property table like the frontmatter below it, so
-            the two read as one column of labelled values rather than a
-            sentence fragment followed by a bare string. The hash is
-            abbreviated because it is 71 characters against a rail that is
-            far narrower, and the full value stays on the row's title so it
-            is still recoverable. */}
-        <table className="data-table rail-properties" data-testid="rail-provenance-table">
-          <tbody>
-            <tr>
-              <th scope="row" className="mono">
-                layer
-              </th>
-              <td>{layerName(artifact)}</td>
-            </tr>
-            <tr>
-              <th scope="row" className="mono">
-                hash
-              </th>
-              <td className="mono" title={artifact.content_hash}>
-                {abbreviateHash(artifact.content_hash)}
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        {/* Provenance is a borderless label and value list, so the bordered
+            containers below it carry the sections the reader opens and
+            closes. Drawing it as a table like the frontmatter beneath makes
+            the two sections read as the same kind of object and flattens the
+            rail. The hash is abbreviated because it is 71 characters against
+            a rail that is far narrower, and the full value stays on the
+            row's title so it is still recoverable. */}
+        <dl className="rail-facts" data-testid="rail-provenance">
+          <div className="rail-fact">
+            <dt className="mono">layer</dt>
+            <dd>{layerName(artifact)}</dd>
+          </div>
+          <div className="rail-fact">
+            <dt className="mono">hash</dt>
+            <dd className="mono" title={artifact.content_hash}>
+              {abbreviateHash(artifact.content_hash)}
+            </dd>
+          </div>
+        </dl>
       </section>
       {hasFrontmatter && (
         <section aria-label="Frontmatter">
