@@ -145,3 +145,23 @@ export function scopePaths(
   walk(subdomains);
   return options;
 }
+
+/** catalogDepth is how many levels of §4.2 domain the catalog runs to, read
+ * from the canonical IDs a §4.5.2 catalog answered. The last segment of an ID
+ * names the artifact, so the segments before it are the domains that hold it
+ * and the deepest such chain is the depth of the hierarchy.
+ *
+ * The figure comes from the catalog listing rather than from the sidebar tree
+ * because that listing is the whole visible set under the scope and the
+ * registry does not truncate it, while the tree is eager to a fixed number of
+ * levels and reports the prefetch depth instead of the catalog's. */
+export function catalogDepth(ids: string[]): number {
+  let deepest = 0;
+  for (const id of ids) {
+    const levels = id.split('/').length - 1;
+    if (levels > deepest) {
+      deepest = levels;
+    }
+  }
+  return deepest;
+}

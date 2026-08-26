@@ -21,7 +21,7 @@ import {
 } from './api';
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
-import { domainLabel, marksCurrentDomain } from './domain';
+import { catalogDepth, domainLabel, marksCurrentDomain } from './domain';
 import { artifactDomain, domainHref, layersHref, searchHref, useRoute } from './route';
 import { since } from './time';
 import type { ThemePreference } from './theme';
@@ -296,14 +296,16 @@ export function App() {
           <SectionLink href={layersHref} current={route.name === 'layers' ? 'page' : false}>
             Layers
           </SectionLink>
-          {/* The label carries no depth marker beside it. The sidebar once
-              printed the prefetch depth here, which is a constant of this
-              navigation and never varies with the catalog it sits over, so a
-              hierarchy running six levels deep read "2 levels" beside a tree
-              holding the deeper node. No response reports how deep the
-              catalog runs, so the marker is dropped rather than restated. */}
+          {/* The label carries the depth of the catalog beside it. The figure
+              is read from the untruncated §4.5.2 catalog listing the footer
+              already reads, so it states how deep this hierarchy runs. The
+              sidebar once printed the prefetch depth here instead, which is a
+              constant of this navigation and never varies with the catalog it
+              sits over, so a hierarchy running six levels deep read
+              "2 levels" beside a tree holding the deeper node. */}
           <p className="catalog-label">
             <span className="label">Catalog</span>
+            <CatalogDepth counts={refused || catalogFailed ? null : counts.value} />
           </p>
           {/* The refused arm has no catalog to navigate, so the tree and the
               counts are empty rather than absent. */}
@@ -406,12 +408,15 @@ function Surface({
   }
 }
 
-/** CatalogTotals is what the sidebar footer states: how many layers the
- * tenant carries, how many artifacts its catalog matches, and when a layer
- * was last ingested. */
+/** CatalogTotals is what the sidebar states about the catalog as a whole: how
+ * many layers the tenant carries, how many artifacts its catalog matches, how
+ * deep the hierarchy runs, and when a layer was last ingested. The counts and
+ * the ingest line stand in the footer, and the depth stands beside the catalog
+ * label, because all four come from the same pair of reads. */
 interface CatalogTotals {
   layers: number;
   artifacts: number;
+  depth: number;
   lastIngest: string;
 }
 
@@ -428,11 +433,28 @@ async function readCounts(): Promise<CatalogTotals> {
   return {
     layers: layers.length,
     artifacts: ids.length,
+    depth: catalogDepth(ids),
     lastIngest: layers.reduce((latest, layer) => {
       const at = layer.last_ingested_at ?? '';
       return at > latest ? at : latest;
     }, ''),
   };
+}
+
+/** CatalogDepth is the marker beside the catalog label. It states how many
+ * levels of §4.2 domain the catalog runs to, which is what the tree below it
+ * navigates. It follows the footer's discipline: a read that has not
+ * answered, a read that failed, and the refused arm leave the marker off
+ * rather than standing a figure beside a tree no response described. */
+function CatalogDepth({ counts }: { counts: CatalogTotals | null }) {
+  if (counts === null) {
+    return null;
+  }
+  return (
+    <span className="mono quiet catalog-depth" data-testid="catalog-depth">
+      {counts.depth} {counts.depth === 1 ? 'level' : 'levels'}
+    </span>
+  );
 }
 
 /** CatalogCounts is the footer pinned to the bottom of the sidebar. It states

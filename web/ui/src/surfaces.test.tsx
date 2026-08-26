@@ -318,11 +318,11 @@ describe("the application shell", () => {
     });
   });
 
-  // No response reports how deep the §4.2 hierarchy runs, so the sidebar
-  // states nothing about it. The label once carried the prefetch depth, a
-  // constant of this navigation, which read "2 levels" beside a tree holding
-  // a chain five segments long.
-  it("states no catalog depth beside the label", async () => {
+  // The label states how deep the §4.2 hierarchy runs. The figure is read
+  // from the untruncated §4.5.2 catalog listing rather than from the tree,
+  // whose eager read stops at the prefetch depth: a marker drawn from the
+  // tree read "2 levels" beside a catalog holding a chain five domains long.
+  it("states the catalog's own depth beside the label", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": {
@@ -332,13 +332,45 @@ describe("the application shell", () => {
           notable: [],
         },
       },
-      "/v1/search_artifacts": { body: { total_matched: 1 } },
+      "/v1/catalog": { body: { ids: ["a/one", "a/b/c/d/e/deep"] } },
       "/v1/layers": { body: { layers: [adminLayer()] } },
     });
     render(<App />);
-    const sidebar = await screen.findByLabelText("Sections");
-    expect(within(sidebar).getByText("a/b/c/d/e")).toBeTruthy();
-    expect(within(sidebar).queryByText(/levels/)).toBeNull();
+    const sidebar = within(await screen.findByLabelText("Sections"));
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-depth").textContent).toBe("5 levels");
+    });
+    expect(sidebar.getByText("a/b/c/d/e")).toBeTruthy();
+  });
+
+  // The depth is stated in the singular at one, the way every other figure
+  // the sidebar carries is.
+  it("states a catalog depth of one in the singular", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: catalog },
+      "/v1/catalog": { body: { ids: ["eng/deploy"] } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+    });
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-depth").textContent).toBe("1 level");
+    });
+  });
+
+  // A read that did not answer leaves the marker off. A figure standing
+  // beside a tree no response described states a hierarchy the registry did
+  // not report.
+  it("states no catalog depth where the catalog read failed", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { status: 500, body: { code: "INTERNAL" } },
+      "/v1/catalog": { body: { ids: ["a/b/c/deep"] } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+    });
+    render(<App />);
+    expect(await screen.findByTestId("catalog-failed")).toBeTruthy();
+    expect(screen.queryByTestId("catalog-depth")).toBeNull();
   });
 
   // The tree is the shell's statement of where the reader is in the §4.2

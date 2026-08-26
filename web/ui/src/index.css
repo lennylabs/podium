@@ -319,9 +319,19 @@ h3 {
   font-weight: 600;
 }
 
-/* The catalog section label heads the tree below it. */
+/* The catalog section label heads the tree below it, with the depth of the
+   hierarchy the tree navigates pushed to the far edge of the sidebar. The two
+   sit on a common baseline so the label and the figure read as one line. */
 .catalog-label {
   margin: 18px 0 6px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.catalog-depth {
+  margin-left: auto;
+  font-size: 10.5px;
 }
 
 .catalog-tree,
