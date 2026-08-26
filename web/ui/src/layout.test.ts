@@ -586,4 +586,17 @@ describe("frontmatter property table", () => {
   it("keeps a share of the table for the key column", () => {
     expect(descendantStyle("property-table", "th").width).toBe("40%");
   });
+
+  // The share alone is measured against the table, and the table inside the
+  // 316px rail is narrow enough that 40% of it holds about ten mono
+  // characters. `description` and `review_cadence` then break mid-word. The
+  // floor is stated in `ch` of the key's own face, so it holds a key of
+  // ordinary length on one line at whatever size that face is set at.
+  it("floors the key column at a width an ordinary key fits on one line", () => {
+    const key = descendantStyle("property-table", "th");
+    expect(key.minWidth).toBe("16ch");
+    expect(Number.parseInt(key.minWidth, 10)).toBeGreaterThanOrEqual(
+      "review_cadence".length,
+    );
+  });
 });

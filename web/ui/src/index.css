@@ -1165,8 +1165,15 @@ input[type="checkbox"] {
   overflow-wrap: anywhere;
 }
 
+/* A share of the table is not enough on its own. The rail is a 316px column,
+   so 40% of the table inside it is about 108px, and an ordinary key such as
+   `description` or `review_cadence` then breaks mid-word across two lines.
+   The floor is stated in `ch` of the key's own mono face, so a key of up to
+   16 characters sits on one line at whatever size the face is set at, and
+   only a key longer than that falls back to the break above. */
 .property-table th {
   width: 40%;
+  min-width: 16ch;
 }
 
 .view-toggle {
