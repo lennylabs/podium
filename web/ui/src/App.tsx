@@ -245,7 +245,7 @@ export function App() {
                 over nothing and describes a descent the reader cannot
                 make. */}
             {!catalogEmpty && !catalogFailed && (
-              <span className="label" data-testid="catalog-depth">
+              <span className="catalog-depth" data-testid="catalog-depth">
                 {treeDepth} levels
               </span>
             )}

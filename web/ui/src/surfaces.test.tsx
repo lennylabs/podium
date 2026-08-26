@@ -224,7 +224,11 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    expect(screen.getByTestId("catalog-depth").textContent).toBe("2 levels");
+    const depth = screen.getByTestId("catalog-depth");
+    expect(depth.textContent).toBe("2 levels");
+    // The marker annotates the Catalog label rather than repeating it, so it
+    // carries its own class and not the uppercased, tracked section label.
+    expect(depth.className).toBe("catalog-depth");
     // Both eager levels are in the response, so the second one is rendered
     // from it rather than read again.
     fireEvent.click(
