@@ -1171,9 +1171,17 @@ input[type="checkbox"] {
    The floor is stated in `ch` of the key's own mono face, so a key of up to
    16 characters sits on one line at whatever size the face is set at, and
    only a key longer than that falls back to the break above. */
+/* The key is the label of the row and the value is its content, so the key is
+   set quiet and small while the value keeps the table's own size in `--ink`.
+   A user agent renders a `th` bold and in the body colour, which puts the
+   heavier half of the row on the field name and runs the reader's eye down
+   the names rather than down the values (§13.10). */
 .property-table th {
   width: 40%;
   min-width: 16ch;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--faint);
 }
 
 .view-toggle {
@@ -1776,18 +1784,6 @@ label:has(> input:disabled) {
 
 .artifact-rail section {
   margin-bottom: 22px;
-}
-
-/* The rail's property tables carry a quiet label column, so the reader's eye
-   runs down the values rather than down the names of the fields. */
-.rail-properties th {
-  color: var(--meta);
-  font-weight: 500;
-}
-
-.rail-properties tr:last-child th,
-.rail-properties tr:last-child td {
-  border-bottom: 0;
 }
 
 /* Provenance stands as a borderless list of labelled values, so the bordered

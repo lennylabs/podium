@@ -599,4 +599,16 @@ describe("frontmatter property table", () => {
       "review_cadence".length,
     );
   });
+
+  // The key labels the row and the value carries the content, so the key is
+  // the quiet half. A user agent renders a `th` bold and in the body colour,
+  // which reverses that and runs the reader's eye down the field names.
+  it("sets the key quieter and smaller than the value beside it", () => {
+    const key = descendantStyle("data-table property-table", "th");
+    const value = descendantStyle("data-table property-table", "td");
+    expect(key.fontWeight).toBe("400");
+    expect(key.color).toBe("var(--faint)");
+    expect(key.fontSize).toBe("11.5px");
+    expect(value.fontSize).toBe("13.5px");
+  });
 });
