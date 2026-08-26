@@ -2827,6 +2827,20 @@ label:has(> input:disabled) {
   font-size: 10.5px;
 }
 
+/* What closes the grid: the control that opens the rest of it, and the
+   caption stating what ordered it. Both read as notes about the listing, so
+   they share one row under it rather than stacking into two. */
+.tile-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.tile-order {
+  font-size: 12px;
+}
+
 .clipped {
   display: block;
   max-width: 420px;

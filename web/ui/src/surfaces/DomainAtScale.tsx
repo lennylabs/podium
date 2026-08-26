@@ -8,9 +8,11 @@
 import { useState } from 'react';
 
 import type { ArtifactDescriptor, DomainDescriptor } from '../api';
+import { catalogArtifactIDs } from '../api';
 import { TypeBadge, formatVersion } from '../components/primitives';
-import { domainLabel, subdomainCountLabel } from '../domain';
+import { artifactCountLabel, artifactCounts, domainLabel, subdomainCountLabel } from '../domain';
 import { artifactHref, domainHref } from '../route';
+import { useAsync } from '../useAsync';
 
 /** tileCap is how many tiles the grid shows before the reader asks for the
  * rest, which keeps a domain with dozens of children to one screen. */
@@ -20,23 +22,44 @@ const tileCap = 12;
  * child count, a filter over the names and a grid-or-list toggle on the same
  * row, and one tile per child.
  *
- * The tile states what the response reported below the child. A load_domain
- * descriptor (`pkg/registry/server/server.go`, `DomainDescriptor`) carries the
- * nested subtree and no artifact count, so the tile counts subdomains, and a
- * child whose subtree came back empty carries no count line rather than
- * claiming a zero the descriptor omits at the deepest returned level. */
+ * The tile states how many artifacts stand under the child, which is what puts
+ * the reader on the busiest one first: the grid is ordered by that count, and
+ * the caption under it says so. A load_domain descriptor
+ * (`pkg/registry/server/server.go`, `DomainDescriptor`) carries the nested
+ * subtree and no artifact count, so the count comes from one §4.5.2 catalog
+ * read over this domain rather than from a scoped search behind every tile.
+ *
+ * A catalog read that fails leaves the grid in the order the response returned
+ * and the tile stating what that response reported below the child, which is
+ * its subdomain count where it carries one. */
 export function SubdomainTiles({ subdomains, parent }: { subdomains: DomainDescriptor[]; parent: string }) {
   const [filter, setFilter] = useState('');
   const [view, setView] = useState<'grid' | 'list'>('grid');
   const [all, setAll] = useState(false);
+  const catalog = useAsync(() => catalogArtifactIDs(parent), [parent]);
+
+  const counts =
+    catalog.value === null
+      ? null
+      : artifactCounts(
+          catalog.value,
+          subdomains.map((child) => child.path),
+          parent,
+        );
+  // The busiest child leads, and children that hold the same number keep the
+  // path order the response returned them in.
+  const ordered =
+    counts === null
+      ? subdomains
+      : [...subdomains].sort((a, b) => (counts.get(b.path) ?? 0) - (counts.get(a.path) ?? 0));
 
   const needle = filter.trim().toLowerCase();
   // The filter runs over the label the tile carries, so a reader who types
   // what is on screen matches the tile they can see.
   const matched =
     needle === ''
-      ? subdomains
-      : subdomains.filter((child) => domainLabel(child.path, parent).toLowerCase().includes(needle));
+      ? ordered
+      : ordered.filter((child) => domainLabel(child.path, parent).toLowerCase().includes(needle));
   const shown = all ? matched : matched.slice(0, tileCap);
 
   return (
@@ -72,7 +95,10 @@ export function SubdomainTiles({ subdomains, parent }: { subdomains: DomainDescr
       </div>
       <ul className={view === 'grid' ? 'tile-grid' : 'tile-list'} aria-label="Subdomains">
         {shown.map((child) => {
-          const count = subdomainCountLabel((child.subdomains ?? []).length);
+          const count =
+            counts === null
+              ? subdomainCountLabel((child.subdomains ?? []).length)
+              : artifactCountLabel(counts.get(child.path) ?? 0);
           return (
             <li key={child.path} className="tile">
               <a className="tile-name mono" href={domainHref(child.path)}>
@@ -83,17 +109,20 @@ export function SubdomainTiles({ subdomains, parent }: { subdomains: DomainDescr
           );
         })}
       </ul>
-      {!all && matched.length > shown.length && (
-        <button
-          type="button"
-          data-testid="show-all-subdomains"
-          onClick={() => {
-            setAll(true);
-          }}
-        >
-          Show all {matched.length} subdomains
-        </button>
-      )}
+      <div className="tile-foot">
+        {!all && matched.length > shown.length && (
+          <button
+            type="button"
+            data-testid="show-all-subdomains"
+            onClick={() => {
+              setAll(true);
+            }}
+          >
+            Show all {matched.length} subdomains
+          </button>
+        )}
+        {counts !== null && <span className="quiet tile-order">Sorted by artifact count.</span>}
+      </div>
     </div>
   );
 }

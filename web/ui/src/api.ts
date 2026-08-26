@@ -10,6 +10,7 @@ export const paths = {
   session: '/v1/ui/session',
   loadDomain: '/v1/load_domain',
   searchArtifacts: '/v1/search_artifacts',
+  catalog: '/v1/catalog',
   loadArtifact: '/v1/load_artifact',
   dependents: '/v1/dependents',
   layers: '/v1/layers',
@@ -372,6 +373,16 @@ export function searchArtifacts(filters: SearchFilters, topK?: number): Promise<
         top_k: topK,
       }),
   );
+}
+
+/** catalogArtifactIDs reads the §4.5.2 catalog under a scope: the canonical ID
+ * of every artifact the caller can see below it, in one response the registry
+ * does not truncate. It is how a listing states an artifact count per child
+ * without a scoped search behind every entry, because `load_domain` reports
+ * the subtree and no count. */
+export async function catalogArtifactIDs(scope: string): Promise<string[]> {
+  const body = await request<{ ids?: string[] | null }>(paths.catalog + query({ scope }));
+  return body.ids ?? [];
 }
 
 export function loadArtifact(id: string, version?: string): Promise<LoadArtifactResponse> {

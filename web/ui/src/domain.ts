@@ -26,6 +26,49 @@ export function subdomainCountLabel(count: number): string | null {
   return `${String(count)} ${count === 1 ? 'subdomain' : 'subdomains'}`;
 }
 
+/** artifactCountLabel states how many artifacts a catalog read found under a
+ * child. A zero is reported rather than dropped: the catalog is the whole
+ * visible set under the scope, so an empty child is a fact the read returned
+ * rather than one it left out. */
+export function artifactCountLabel(count: number): string {
+  return `${String(count)} ${count === 1 ? 'artifact' : 'artifacts'}`;
+}
+
+/** artifactCounts attributes every catalog ID under `parent` to the child it
+ * falls beneath, so one catalog read counts the whole grid. A count covers the
+ * child's entire subtree, because a tile that counted only the artifacts
+ * directly inside the child would read as zero for a domain that carries all
+ * of its artifacts one level down.
+ *
+ * The walk descends the ID's own segments and stops at the first child path it
+ * matches, which is what makes a §4.5.5 collapsed chain countable: such a child
+ * carries every segment it crossed in its path, and no ancestor of it appears
+ * in the grid. The last segment of an ID names the artifact rather than a
+ * domain, so it is never matched. */
+export function artifactCounts(ids: string[], children: string[], parent: string): Map<string, number> {
+  const target = new Set(children);
+  const counts = new Map<string, number>();
+  for (const child of children) {
+    counts.set(child, 0);
+  }
+  const prefix = parent === '' ? '' : `${parent}/`;
+  for (const id of ids) {
+    if (!id.startsWith(prefix)) {
+      continue;
+    }
+    const segments = id.slice(prefix.length).split('/');
+    let held = parent;
+    for (const segment of segments.slice(0, -1)) {
+      held = held === '' ? segment : `${held}/${segment}`;
+      if (target.has(held)) {
+        counts.set(held, (counts.get(held) ?? 0) + 1);
+        break;
+      }
+    }
+  }
+  return counts;
+}
+
 /** scopePaths expands the subtree a load_domain response returned under
  * `parent` into every domain path a scope filter can name. Two structures put
  * a domain somewhere other than an entry's own `path`. A §4.5.5 sparse chain

@@ -6609,6 +6609,105 @@ describe("the trimmed listing", () => {
     expect(cells[2].textContent).toBe("v1.0.0");
   });
 
+  // The compact tile exists to state a count, and the count it states is the
+  // artifacts standing under the child. load_domain reports no such figure, so
+  // it comes from one catalog read over the domain rather than from a scoped
+  // search behind every tile.
+  it("counts the artifacts under each at-scale subdomain tile", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: [],
+        },
+      },
+      "/v1/catalog": {
+        body: {
+          ids: [
+            // d1 holds its artifacts one level down, so a count taken from
+            // the direct children alone would read as zero.
+            "platform/d1/deep/one",
+            "platform/d1/deep/two",
+            "platform/d1/three",
+            "platform/d0/only",
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const tiles = await within(browser).findByRole("list", {
+      name: "Subdomains",
+    });
+    await waitFor(() => {
+      expect(within(tiles).getAllByRole("listitem")[0].textContent).toBe(
+        "d13 artifacts",
+      );
+    });
+    // The busiest child leads, the rest keep the order the response returned,
+    // and a child the catalog found nothing under states that.
+    const listed = within(tiles)
+      .getAllByRole("listitem")
+      .map((tile) => tile.textContent);
+    expect(listed[1]).toBe("d01 artifact");
+    expect(listed[2]).toBe("d20 artifacts");
+    // The caption states what ordered the grid.
+    expect(
+      within(browser).getByText("Sorted by artifact count."),
+    ).toBeTruthy();
+    // The count is one read over the whole domain.
+    expect(
+      requests.filter((r) => r.url.startsWith("/v1/catalog")).length,
+    ).toBe(1);
+    expect(
+      requests.some((r) => r.url.includes(encodeURIComponent("platform/d"))),
+    ).toBe(false);
+  });
+
+  // A catalog read that fails leaves the grid as the domain response returned
+  // it, and the tile falls back to what that response reported below the child.
+  it("keeps the response order when the at-scale catalog read fails", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+            subdomains:
+              i === 0 ? [{ path: "platform/d0/one", name: "one" }] : [],
+          })),
+          notable: [],
+        },
+      },
+      "/v1/catalog": { rejects: true },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const tiles = await within(browser).findByRole("list", {
+      name: "Subdomains",
+    });
+    await waitFor(() => {
+      expect(within(tiles).getAllByRole("listitem")[0].textContent).toBe(
+        "d01 subdomain",
+      );
+    });
+    expect(within(tiles).getAllByRole("listitem")[1].textContent).toBe("d1");
+    expect(
+      within(browser).queryByText("Sorted by artifact count."),
+    ).toBeNull();
+    // The failed count leaves the domain browser standing.
+    expect(within(browser).queryByTestId("domain-failed")).toBeNull();
+  });
+
   // A descriptor that carries no version still fills the column, because a
   // blank cell in a sortable table reads as a load that did not finish.
   it("states an absent version in the at-scale table", async () => {
