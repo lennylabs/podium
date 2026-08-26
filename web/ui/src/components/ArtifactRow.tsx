@@ -4,7 +4,7 @@
 
 import { Badge } from './primitives';
 import type { ArtifactDescriptor } from '../api';
-import { artifactHref } from '../route';
+import { artifactHref, artifactLeaf } from '../route';
 
 /** relevanceBars is how many bars the indicator draws. */
 const relevanceBars = 4;
@@ -76,35 +76,59 @@ export function ArtifactRow({
   ranked?: boolean;
   topScore?: number;
 }) {
+  const version = artifact.version !== undefined && artifact.version !== '' ? artifact.version : '';
   return (
     <li className="artifact-row">
-      <a className="mono artifact-id" href={artifactHref(artifact.id)}>
-        {artifact.id}
-      </a>
-      <div className="artifact-meta">
-        <Badge>{artifact.type}</Badge>
-        {artifact.version !== undefined && artifact.version !== '' && <Badge tone="quiet">{artifact.version}</Badge>}
-        {artifact.sensitivity !== undefined && artifact.sensitivity !== '' && (
-          <Badge tone="quiet">{artifact.sensitivity}</Badge>
+      <div className="artifact-row-body">
+        {/* The identifying line. A listing row names the artifact and states
+            its full path beside it, because the domain is already the page;
+            a ranked row leads with the whole identifier, because a result
+            set spans domains and the path is what distinguishes two rows. */}
+        <div className="artifact-row-head">
+          <a className="mono artifact-id" href={artifactHref(artifact.id)}>
+            {ranked ? artifact.id : artifactLeaf(artifact.id)}
+          </a>
+          {!ranked && <span className="mono quiet artifact-path">{artifact.id}</span>}
+          {/* A ranked row keeps its type and version inline, beside the
+              identifier its relevance is measured on. A listing row moves
+              them to the column at the row's right edge. */}
+          {ranked && (
+            <>
+              <Badge>{artifact.type}</Badge>
+              {version !== '' && <Badge tone="quiet">{version}</Badge>}
+            </>
+          )}
+          {artifact.sensitivity !== undefined && artifact.sensitivity !== '' && (
+            <Badge tone="quiet">{artifact.sensitivity}</Badge>
+          )}
+          {artifact.source === 'featured' && <Badge tone="accent">curated</Badge>}
+          {artifact.source === 'signal' && <span className="quiet label">surfaced by usage</span>}
+          {artifact.folded_from !== undefined && artifact.folded_from !== '' && (
+            <Badge tone="quiet">from {artifact.folded_from}</Badge>
+          )}
+          <Relevance ranked={ranked} score={artifact.score} topScore={topScore} />
+        </div>
+        {artifact.description !== undefined && artifact.description !== '' && (
+          <p className="artifact-description">{artifact.description}</p>
         )}
-        {artifact.source === 'featured' && <Badge tone="accent">curated</Badge>}
-        {artifact.source === 'signal' && <span className="quiet label">surfaced by usage</span>}
-        {artifact.folded_from !== undefined && artifact.folded_from !== '' && (
-          <Badge tone="quiet">from {artifact.folded_from}</Badge>
+        {artifact.tags !== undefined && artifact.tags.length > 0 && (
+          <ul className="tag-list">
+            {artifact.tags.map((tag) => (
+              <li key={tag} className="tag">
+                {tag}
+              </li>
+            ))}
+          </ul>
         )}
-        <Relevance ranked={ranked} score={artifact.score} topScore={topScore} />
       </div>
-      {artifact.description !== undefined && artifact.description !== '' && (
-        <p className="artifact-description">{artifact.description}</p>
-      )}
-      {artifact.tags !== undefined && artifact.tags.length > 0 && (
-        <ul className="tag-list">
-          {artifact.tags.map((tag) => (
-            <li key={tag} className="tag">
-              {tag}
-            </li>
-          ))}
-        </ul>
+      {/* The right-hand column. Type and version sit at a fixed edge down
+          the listing, so the reader scans one column instead of reading
+          across each row's second line. */}
+      {!ranked && (
+        <div className="artifact-row-aside" data-testid="artifact-row-aside">
+          <Badge>{artifact.type}</Badge>
+          {version !== '' && <span className="mono quiet artifact-version">{version}</span>}
+        </div>
       )}
     </li>
   );

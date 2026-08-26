@@ -39,6 +39,13 @@ export function artifactHref(id: string): string {
   return `#/artifact/${encodeURIComponent(id)}`;
 }
 
+/** artifactLeaf is the artifact's own name inside its §4.2 path, which is
+ * what a row states when the domains above it are already on the page. */
+export function artifactLeaf(id: string): string {
+  const cut = id.lastIndexOf('/');
+  return cut < 0 ? id : id.slice(cut + 1);
+}
+
 export function searchHref(query: string): string {
   return `#/search/${encodeURIComponent(query)}`;
 }

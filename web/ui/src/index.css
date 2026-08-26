@@ -423,8 +423,39 @@ h2.label {
   background: var(--surf);
 }
 
+/* A row is two columns: the artifact and what it says about itself on the
+   left, and its type and version pinned to the right edge, so a reader
+   scanning a listing for a type reads one column down the page. */
 .artifact-row {
   margin-bottom: 8px;
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.artifact-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.artifact-row-aside {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.artifact-path,
+.artifact-version {
+  font-size: 12.5px;
 }
 
 /* The subdomains are a map of one level: a card per immediate child, laid out

@@ -468,6 +468,35 @@ describe('the domain browser', () => {
     expect(continuation.textContent).toContain('The listing was trimmed to fit the response budget.');
   });
 
+  // A listing row is two columns. The reader scanning for a type or a
+  // version reads one column at the row's right edge rather than reading
+  // across the second line of every row.
+  it('puts a listing row type and version in a right-hand column beside the named artifact', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': {
+        body: {
+          path: 'platform',
+          subdomains: [],
+          notable: [{ id: 'platform/deploy', type: 'skill', version: '2.0.0', source: 'featured' }],
+        },
+      },
+    });
+    goTo('#/domain/platform');
+    render(<App />);
+    const browser = await screen.findByLabelText('Domain browser');
+    const aside = within(browser).getByTestId('artifact-row-aside');
+    expect(aside.textContent).toBe('skill2.0.0');
+    // The row names the artifact and states the full path beside it, and the
+    // right-hand column holds neither.
+    const link = within(browser).getByRole('link', { name: 'deploy' });
+    expect(link.getAttribute('href')).toBe('#/artifact/platform%2Fdeploy');
+    const head = link.parentElement as HTMLElement;
+    expect(within(head).getByText('platform/deploy')).toBeTruthy();
+    expect(within(head).getByText('curated')).toBeTruthy();
+    expect(within(head).queryByText('2.0.0')).toBeNull();
+  });
+
   // The listings are divided by labels rather than by titles, so the page
   // carries one heading at title weight and the two dividers stay quiet.
   it('divides the listings with section labels rather than with page-title-weight headings', async () => {
@@ -643,6 +672,12 @@ describe('search', () => {
     goTo('#/search/review');
     render(<App />);
     expect((await screen.findByTestId('result-count')).textContent).toBe('Showing 3 of 143');
+    // A result set spans domains, so a ranked row leads with the whole
+    // identifier and keeps its type and version beside it rather than in the
+    // listing's right-hand column.
+    expect(screen.queryByTestId('artifact-row-aside')).toBeNull();
+    const first = screen.getByRole('link', { name: 'platform/review' });
+    expect(within(first.parentElement as HTMLElement).getByText('skill')).toBeTruthy();
     expect(screen.getByText('internal')).toBeTruthy();
     expect(screen.getByText('matched by meaning')).toBeTruthy();
     // Relevance is drawn as bars ranked against the strongest score in the
