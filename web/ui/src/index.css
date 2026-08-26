@@ -1127,6 +1127,14 @@ button,
   gap: 8px;
 }
 
+/* Two short fields that qualify the field above them share a row, so the
+   pair reads as one setting rather than as two unrelated inputs. */
+.field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
 /* Each grant carries what it admits, because the axis name alone reads as a
    term the reader has to already know and a mis-read grant admits the wrong
    people. A selected card takes the accent so the selection is legible at a

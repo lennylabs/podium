@@ -1623,6 +1623,56 @@ describe('the layer write flows', () => {
     expect(sent.users).toEqual(['carol@acme.com']);
   });
 
+  // A git layer whose artifacts live under a subdirectory is registered by
+  // naming that subtree as the root, which is the field the git source reads
+  // to scope the fetch. Without the control on the form such a repository
+  // cannot be registered from the browser at all.
+  it('registers a git layer under the subtree the root names', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layer: { ID: 'catalog', SourceType: 'git', Order: 1 } } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
+    fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'catalog' } });
+    fireEvent.change(screen.getByLabelText('Repository'), { target: { value: 'git@github.com:acme/catalog.git' } });
+    fireEvent.change(screen.getByLabelText('Ref'), { target: { value: 'main' } });
+    fireEvent.change(screen.getByLabelText('Root'), { target: { value: 'artifacts' } });
+    fireEvent.submit(screen.getByTestId('register-form'));
+    await waitFor(() => {
+      expect(requests.some((r) => r.url === '/v1/layers' && r.method === 'POST')).toBe(true);
+    });
+    const sent = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
+    expect(sent.repo).toBe('git@github.com:acme/catalog.git');
+    expect(sent.ref).toBe('main');
+    expect(sent.root).toBe('artifacts');
+  });
+
+  // The root qualifies a git repository alone, so a local source offers no
+  // such field and sends none.
+  it('offers no root on a local source', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layer: { ID: 'alice-personal', SourceType: 'local', Order: 1 } } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Local folder' }));
+    expect(screen.queryByLabelText('Root')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Layer ID'), { target: { value: 'alice-personal' } });
+    fireEvent.change(screen.getByLabelText('Local path'), { target: { value: '/Users/alice/reg' } });
+    fireEvent.submit(screen.getByTestId('register-form'));
+    await waitFor(() => {
+      expect(requests.some((r) => r.url === '/v1/layers' && r.method === 'POST')).toBe(true);
+    });
+    const sent = JSON.parse(bodies.at(-1) ?? '{}') as Record<string, unknown>;
+    expect(sent.root).toBeUndefined();
+  });
+
 
   // §13.10 puts the layer panel's writes on the panel, and a registration is
   // reviewed before it is sent, so the form is a dialog over a scrim with the

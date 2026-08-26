@@ -37,6 +37,10 @@ export function RegisterLayerForm({
   const [sourceType, setSourceType] = useState('git');
   const [repo, setRepo] = useState('');
   const [ref, setRef] = useState('');
+  // Only the git source reads the root: it names the subtree the layer's
+  // artifacts live under, and a repository holding them below its top level
+  // cannot be registered without it.
+  const [root, setRoot] = useState('');
   const [localPath, setLocalPath] = useState('');
   // The class defaults to the one the caller can register. A user-defined
   // layer's owner is derived from the caller's own subject and the registry
@@ -69,6 +73,7 @@ export function RegisterLayerForm({
       source_type: sourceType,
       repo: sourceType === 'git' ? repo : undefined,
       ref: sourceType === 'git' ? ref : undefined,
+      root: sourceType === 'git' ? root : undefined,
       local_path: sourceType === 'local' ? localPath : undefined,
       user_defined: userDefined,
       // The registry derives a user-defined layer's visibility from the
@@ -150,16 +155,33 @@ export function RegisterLayerForm({
                   }}
                 />
               </label>
-              <label className="field">
-                <span className="label">Ref</span>
-                <input
-                  type="text"
-                  value={ref}
-                  onChange={(event) => {
-                    setRef(event.target.value);
-                  }}
-                />
-              </label>
+              {/* The ref and the root both qualify the repository above them
+                  and each holds a short value, so they share one row. */}
+              <div className="field-pair">
+                <label className="field">
+                  <span className="label">Ref</span>
+                  <input
+                    type="text"
+                    value={ref}
+                    onChange={(event) => {
+                      setRef(event.target.value);
+                    }}
+                  />
+                </label>
+                <label className="field">
+                  <span className="label">Root</span>
+                  <input
+                    type="text"
+                    value={root}
+                    onChange={(event) => {
+                      setRoot(event.target.value);
+                    }}
+                  />
+                </label>
+              </div>
+              <p className="quiet">
+                Leave the root empty to ingest the whole repository, or name the subdirectory the artifacts live under.
+              </p>
             </>
           ) : (
             <label className="field">
