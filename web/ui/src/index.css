@@ -344,6 +344,15 @@ h3 {
   color: var(--faint);
 }
 
+/* A heading in the section-label role keeps the label typography and the
+   heading's own vertical rhythm. The weight is stated because a heading
+   element defaults to bold, which puts the label back in competition with
+   the page title the label sits under. */
+h2.label {
+  font-weight: 600;
+  margin: 26px 0 12px;
+}
+
 .badge {
   display: inline-block;
   padding: 1px 7px;

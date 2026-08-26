@@ -468,6 +468,31 @@ describe('the domain browser', () => {
     expect(continuation.textContent).toContain('The listing was trimmed to fit the response budget.');
   });
 
+  // The listings are divided by labels rather than by titles, so the page
+  // carries one heading at title weight and the two dividers stay quiet.
+  it('divides the listings with section labels rather than with page-title-weight headings', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_domain': {
+        body: {
+          path: 'platform',
+          subdomains: [{ path: 'platform/ci', name: 'ci' }],
+          notable: [{ id: 'platform/deploy', type: 'skill' }],
+        },
+      },
+    });
+    goTo('#/domain/platform');
+    render(<App />);
+    const browser = await screen.findByLabelText('Domain browser');
+    const labels = within(browser)
+      .getAllByRole('heading', { level: 2 })
+      .map((heading) => [heading.textContent, heading.className]);
+    expect(labels).toEqual([
+      ['Subdomains', 'label'],
+      ['Artifacts in this domain', 'label'],
+    ]);
+  });
+
   // The subdomains are a card grid over the immediate children. Each card
   // states what the response reported below that child, and the grandchildren
   // the two-level read returned are counted rather than drawn, so the page

@@ -78,7 +78,11 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
         </ul>
       )}
 
-      <h2>Subdomains</h2>
+      {/* The two listings are labelled rather than titled. A heading at the
+          h2 display size competes with the domain name above it and reads as
+          a third peer section, so both carry the section-label role the
+          design pass fixed for a quiet divider over a list. */}
+      <h2 className="label">Subdomains</h2>
       {body.subdomains.length === 0 && <EmptyState>This domain has no subdomains.</EmptyState>}
       {body.subdomains.length > 0 &&
         (compact ? (
@@ -87,7 +91,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           <SubdomainGrid subdomains={body.subdomains} />
         ))}
 
-      <h2>Artifacts</h2>
+      <h2 className="label">Artifacts in this domain</h2>
       {direct.length === 0 && <EmptyState>This domain lists no artifacts.</EmptyState>}
       {direct.length > 0 &&
         (compact ? (
