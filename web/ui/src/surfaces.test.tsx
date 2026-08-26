@@ -3446,6 +3446,36 @@ describe("the command palette", () => {
     expect(screen.getByTestId("palette")).toBeTruthy();
   });
 
+  // The type and the version hold the row's right edge rather than running on
+  // as prose after the path, the field row states the count on that same edge,
+  // and each keystroke in the footer is drawn as the key it names.
+  it("aligns the type and version on the row's right edge and counts the matches in the field", async () => {
+    palettePage(
+      [{ id: "platform/review", type: "skill", version: "1.2.0" }],
+      4,
+    );
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "review" },
+    });
+    const aside = await within(panel).findByTestId("palette-row-aside");
+    // The aside is the row's last element, so nothing follows the column that
+    // holds the edge.
+    expect(aside.parentElement?.lastElementChild).toBe(aside);
+    expect(within(aside).getByText("skill").className).toContain("badge");
+    expect(within(aside).getByText("1.2.0")).toBeTruthy();
+    // The count the heading states also sits in the field row.
+    expect(screen.getByTestId("palette-count").textContent).toBe("1 of 4");
+    const footer = screen.getByTestId("palette-footer");
+    expect(
+      within(footer)
+        .getAllByText(/^(↑|↓|⏎|⌘⏎|esc)$/)
+        .every((key) => key.className.includes("key-cap")),
+    ).toBe(true);
+  });
+
   // The inline filter syntax is the palette's form of the pills the search
   // surface renders, and it reaches the same endpoint arguments.
   it("carries the inline filter syntax into the search request", async () => {

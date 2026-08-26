@@ -1558,15 +1558,48 @@ button,
   box-shadow: 0 30px 60px -24px var(--scrim);
 }
 
-.palette-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 10px 12px;
+/* The field row holds the magnifier, the query, and the match count. The
+   count is right-aligned onto the same edge the rows below align their type
+   and version onto. */
+.palette-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
   background: var(--surf2);
   border: 1px solid var(--bd);
   border-radius: 8px;
+}
+
+.palette-field:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
+}
+
+.palette-magnifier {
+  flex: none;
+  color: var(--meta);
+}
+
+.palette-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 0;
+  background: transparent;
+  border: 0;
   color: var(--ink);
   font: inherit;
+}
+
+/* The field's own focus ring would sit inside the row's, so the row carries
+   it and the input carries none. */
+.palette-input:focus-visible {
+  box-shadow: none;
+}
+
+.palette-count {
+  flex: none;
+  font-size: 11px;
 }
 
 .palette-rows,
@@ -1578,7 +1611,7 @@ button,
 
 .palette-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 10px;
   width: 100%;
   margin: 0;
@@ -1592,15 +1625,59 @@ button,
   border-color: var(--cbd);
 }
 
+.palette-row-name {
+  flex: none;
+}
+
+/* A path longer than the panel is clipped rather than wrapped, so every row
+   keeps one line and the column at the right edge stays where it is. */
 .palette-row-path {
+  min-width: 0;
+  overflow: hidden;
   font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-row-aside {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.palette-row-aside .badge {
+  margin-right: 0;
+}
+
+.palette-row-version {
+  font-size: 11px;
 }
 
 .palette-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin: 10px 0 0;
   padding-top: 10px;
   border-top: 1px solid var(--b2);
-  font-size: 10.5px;
+  font-size: 11.5px;
+}
+
+/* One keystroke drawn as the key it names. */
+.key-cap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--surf);
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  color: var(--meta);
+  font-size: 10px;
 }
 
 /* The end-of-list continuation for a trimmed listing. It reads as a system

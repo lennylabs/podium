@@ -5,9 +5,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, ReactNode } from 'react';
 
-import { EmptyState, ErrorState, Loading } from '../components/primitives';
+import { Badge, EmptyState, ErrorState, Loading } from '../components/primitives';
 import type { ArtifactDescriptor, SearchResponse } from '../api';
 import { searchArtifacts } from '../api';
 import { parseQueryLine } from '../query';
@@ -108,18 +108,31 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
       }}
     >
       <div className="palette" role="dialog" aria-label="Command palette" data-testid="palette" onKeyDown={onKeyDown}>
-        <input
-          ref={input}
-          className="palette-input"
-          type="search"
-          aria-label="Search artifacts"
-          placeholder="Search artifacts"
-          value={line}
-          onChange={(event) => {
-            setLine(event.target.value);
-            setIndex(0);
-          }}
-        />
+        {/* The field row. The magnifier names the row as the query field, and
+            the match count sits at the row's right edge, which is the edge
+            the type and version columns below it also hold. */}
+        <div className="palette-field">
+          <span className="palette-magnifier" aria-hidden="true">
+            ⌕
+          </span>
+          <input
+            ref={input}
+            className="palette-input"
+            type="search"
+            aria-label="Search artifacts"
+            placeholder="Search artifacts"
+            value={line}
+            onChange={(event) => {
+              setLine(event.target.value);
+              setIndex(0);
+            }}
+          />
+          {typed !== '' && !results.loading && results.error === null && rows.length > 0 && (
+            <span className="mono quiet palette-count" data-testid="palette-count">
+              {rows.length} of {results.value?.total_matched ?? rows.length}
+            </span>
+          )}
+        </div>
         {typed === '' ? (
           <PaletteHints
             recents={recents}
@@ -137,9 +150,35 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
             onSearch={openSearch}
           />
         )}
-        <p className="palette-footer mono quiet">↑↓ navigate · ⏎ open · ⌘⏎ all results · esc close</p>
+        <PaletteFooter />
       </div>
     </div>
+  );
+}
+
+/** KeyCap draws one keystroke as the key it names. The footer states four of
+ * them, and a key rendered as running prose reads as part of the sentence
+ * beside it rather than as the key to press. */
+function KeyCap({ children }: { children: ReactNode }) {
+  return <span className="mono key-cap">{children}</span>;
+}
+
+/** PaletteFooter is the keyboard legend. Escape sits at the right edge on its
+ * own, because it leaves the panel rather than acting inside it. */
+function PaletteFooter() {
+  return (
+    <p className="palette-footer quiet" data-testid="palette-footer">
+      <KeyCap>↑</KeyCap>
+      <KeyCap>↓</KeyCap>
+      <span>navigate</span>
+      <KeyCap>⏎</KeyCap>
+      <span>open</span>
+      <KeyCap>⌘⏎</KeyCap>
+      <span>all results</span>
+      <span className="spacer" />
+      <KeyCap>esc</KeyCap>
+      <span>close</span>
+    </p>
   );
 }
 
@@ -228,9 +267,14 @@ function PaletteResults({
             >
               <span className="mono palette-row-name">{leafOf(row.id)}</span>
               <span className="mono quiet palette-row-path">{row.id}</span>
-              <span className="quiet">
-                {row.type}
-                {row.version === undefined || row.version === '' ? '' : ` · ${row.version}`}
+              {/* The right-hand column, held at the panel's right edge the way
+                  the listing rows hold theirs, so the reader scans one column
+                  of types instead of reading to the end of each path. */}
+              <span className="palette-row-aside" data-testid="palette-row-aside">
+                <Badge>{row.type}</Badge>
+                {row.version !== undefined && row.version !== '' && (
+                  <span className="mono quiet palette-row-version">{row.version}</span>
+                )}
               </span>
             </button>
           </li>
