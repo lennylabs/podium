@@ -259,6 +259,15 @@ describe("artifact row description", () => {
     expect(value.overflow).not.toBe("hidden");
     expect(value.getPropertyValue("overflow-wrap")).toBe("anywhere");
   });
+
+  // A frontmatter value can be authored across several lines: a YAML block
+  // scalar, or a nested mapping the table shows as its own source. Collapsing
+  // its line breaks runs those lines into one and contradicts the panel's own
+  // line saying the values are shown verbatim.
+  it("keeps the line breaks of a value the author wrote across several lines", () => {
+    const value = styled("property-value");
+    expect(value.getPropertyValue("white-space")).toBe("pre-wrap");
+  });
 });
 
 // A sidebar tree label is the whole folded stretch of path a §4.5.5 sparse

@@ -719,6 +719,12 @@ h2.label {
    that row apart from the rows around it. */
 .property-value {
   margin: 0;
+  /* A value the author wrote across several lines, a YAML block scalar or a
+     nested mapping, keeps its line breaks: collapsing them runs the lines
+     into one and contradicts the panel's own line saying the values are
+     shown verbatim. The indent a nested key sits at is part of that
+     structure, so spaces are kept too, and the text still wraps. */
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 

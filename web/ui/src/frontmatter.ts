@@ -9,7 +9,7 @@
 // file. Both are split here before either half is used, so the parser is
 // handed a YAML mapping and the body is handed to the rendering path.
 
-import { parseDocument } from 'yaml';
+import { isMap, isScalar, isSeq, parseDocument, type Node } from 'yaml';
 
 /** Property is one row of the frontmatter property table. The value is text:
  * it is rendered as text and never as markup. */
@@ -84,11 +84,11 @@ export function parseFrontmatter(text: string): ParsedFrontmatter {
     const failure = doc.errors[0];
     return { properties: [], error: describe(failure), line: failure.linePos?.[0].line ?? 0 };
   }
-  const value: unknown = doc.toJS();
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+  const contents = doc.contents;
+  if (!isMap(contents)) {
     return { properties: [], error: 'The frontmatter block is not a mapping.', line: 0 };
   }
-  const properties = Object.entries(value as Record<string, unknown>).map(([key, entry]) => row(key, entry));
+  const properties = contents.items.map((pair) => row(raw, pair.key, pair.value as unknown));
   return { properties, error: '', line: 0 };
 }
 
@@ -103,29 +103,50 @@ function describe(err: { message: string; linePos?: [{ line: number; col: number
 /** row builds one table row from a frontmatter pair. A sequence keeps its
  * entries apart so the table renders them as separate lines, and every other
  * value is one piece of text. */
-function row(key: string, entry: unknown): Property {
-  if (Array.isArray(entry)) {
-    return { key, value: '', items: entry.map(stringify) };
+function row(source: string, key: unknown, value: unknown): Property {
+  const name = isScalar(key) ? String(key.value ?? '') : '';
+  if (isSeq(value)) {
+    return { key: name, value: '', items: value.items.map((item) => valueText(source, item)) };
   }
-  return { key, value: stringify(entry), items: [] };
+  return { key: name, value: valueText(source, value), items: [] };
 }
 
-/** stringify renders one frontmatter value as the text the table shows. A
- * nested value is shown as JSON so a reader sees its structure without the
- * table growing a second layout. */
-function stringify(value: unknown): string {
-  if (value === null || value === undefined) {
+/** valueText renders one frontmatter value as the text the table shows. The panel
+ * states that its values are shown verbatim, so a scalar is its own resolved
+ * text, line breaks in a block scalar included, and a nested mapping or
+ * sequence is the source the author wrote rather than a re-serialization in
+ * another notation (§13.10). Trailing blank lines are dropped, because a
+ * block scalar chomps to a newline the table would otherwise render as an
+ * empty line of its own. */
+function valueText(source: string, value: unknown): string {
+  if (isScalar(value)) {
+    const resolved = value.value;
+    if (resolved === null || resolved === undefined) {
+      return '';
+    }
+    return String(resolved).replace(/\s+$/, '');
+  }
+  const range = (value as Node | null | undefined)?.range;
+  if (range === null || range === undefined) {
     return '';
   }
-  if (typeof value === 'string') {
-    return value;
+  return dedent(source, range[0], source.slice(range[0], range[1]).replace(/\s+$/, ''));
+}
+
+/** dedent strips the indent a nested block sits at from every line after its
+ * first. The slice starts at the value's first character, so the opening line
+ * carries no indent while the lines under it carry the block's full one, and
+ * the value would otherwise read as a staircase rather than as the block the
+ * author wrote. */
+function dedent(source: string, start: number, block: string): string {
+  if (!block.includes('\n')) {
+    return block;
   }
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
+  const column = start - (source.lastIndexOf('\n', start - 1) + 1);
+  if (column === 0) {
+    return block;
   }
-  // A sequence reaches this only nested inside another value, because a
-  // top-level one is kept as separate entries by row above. It is shown as
-  // JSON alongside the other nested values rather than flattened into a
-  // comma-joined line that reads as text the author wrote.
-  return JSON.stringify(value);
+  const strip = new RegExp(`^[ ]{0,${String(column)}}`);
+  const [first, ...rest] = block.split('\n');
+  return [first, ...rest.map((line) => line.replace(strip, ''))].join('\n');
 }

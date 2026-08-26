@@ -3596,6 +3596,40 @@ describe("the artifact viewer", () => {
     expect(table.textContent).toContain('{"nested":{"deeper":[1,2,3]}}');
   });
 
+  // The panel states that its values are shown verbatim, so a value the
+  // author wrote as a YAML block keeps that block: a nested mapping reads as
+  // the key and value lines under it, and a literal block scalar keeps the
+  // line breaks that are the whole reason it was written as one. Rendering
+  // either as a JSON literal or on one line shows the author a document they
+  // did not write (§13.10).
+  it("shows a nested mapping and a block scalar as the YAML the author wrote", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "eng/yamly",
+          type: "context",
+          version: "0.1.0",
+          content_hash: "sha256:abc",
+          manifest_body: "Body.\n",
+          frontmatter:
+            "---\ntype: context\nmapping:\n  inner_key: inner value\n  other: 2\nnotes: |\n  A literal block\n  across two lines\n---\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/eng%2Fyamly");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    expect(screen.getByTestId("property-value-mapping").textContent).toBe(
+      "inner_key: inner value\nother: 2",
+    );
+    expect(screen.getByTestId("property-value-notes").textContent).toBe(
+      "A literal block\nacross two lines",
+    );
+  });
+
   it("drops the rail’s frontmatter section where the response yields no pairs", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
