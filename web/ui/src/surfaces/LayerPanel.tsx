@@ -80,6 +80,11 @@ export function LayerPanel({
   const [reingest, setReingest] = useState<Record<string, ReingestState>>({});
   const [dragging, setDragging] = useState<string | null>(null);
   const [over, setOver] = useState<string | null>(null);
+  // What the last committed reorder did, held for the live region below the
+  // table. The only other report a move makes is the rows swapping places,
+  // which is no report at all to the operator driving the handle from the
+  // keyboard, and that path exists for the operator who cannot see the swap.
+  const [moved, setMoved] = useState("");
 
   // The loading state stands in for the panel on the first read alone. A
   // write reloads the list, and the reload reports loading again, so swapping
@@ -151,6 +156,7 @@ export function LayerPanel({
       reorderLayers(order).then(
         () => {
           clearRefusal(from);
+          setMoved(movedNote(rows, order, from));
           afterWrite();
         },
         (err: unknown) => {
@@ -359,6 +365,18 @@ export function LayerPanel({
           </tbody>
         </table>
       )}
+      {/* The live region is rendered on every state of the panel, empty until
+          a move lands. A region mounted at the moment its text arrives is not
+          in the accessibility tree when the change happens, and the
+          announcement is dropped. */}
+      <p
+        className="assistive-only"
+        role="status"
+        aria-live="polite"
+        data-testid="reorder-announcement"
+      >
+        {moved}
+      </p>
       <PanelFoot rows={rows} subject={subject} />
     </section>
   );
@@ -491,6 +509,22 @@ function movedOrder(
   order.splice(at, 1);
   order.splice(target, 0, from);
   return order;
+}
+
+/** movedNote states where a committed reorder left the layer, in the same
+ * terms the row itself carries: the position counted down the whole table,
+ * which is the precedence order the panel is about. The moved block is the
+ * contiguous run of one class, so the block's first row holds the offset the
+ * new in-block index is counted from. */
+function movedNote(
+  rows: LayerRecord[],
+  order: string[],
+  id: string,
+): string {
+  const offset = rows.findIndex((row) => order.includes(row.ID));
+  const at = order.indexOf(id);
+  const position = offset + at + 1;
+  return `${id} moved to order ${String(position)} of ${String(rows.length)}.`;
 }
 
 function LayerRow({

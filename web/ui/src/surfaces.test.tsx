@@ -3893,6 +3893,35 @@ describe("the layer write flows", () => {
     );
   });
 
+  // The keyboard path is there for an operator who cannot see the rows swap,
+  // so the move states where the layer landed in a polite live region rather
+  // than reporting itself by the swap alone.
+  it("announces where a committed move left the layer", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
+        },
+      },
+      "/v1/layers/reorder": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const region = screen.getByTestId("reorder-announcement");
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    expect(region.textContent).toBe("");
+    fireEvent.keyDown(screen.getByLabelText(moveHandleLabel("alice-personal")), {
+      key: "ArrowDown",
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("reorder-announcement").textContent).toBe(
+        "alice-personal moved to order 3 of 4.",
+      );
+    });
+  });
+
   // A step off the end of the block names no move §4.6 would compose, so the
   // key does what a drop across the class boundary does and sends nothing.
   it("sends no reorder where an arrow key steps off the end of the block", async () => {
