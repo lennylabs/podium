@@ -703,10 +703,11 @@ h2.label {
 .artifact-list,
 .subdomain-grid,
 .relation-list,
-/* A clipped property value in the rail. The paragraph carries the table
-   cell's own spacing, so it adds none of its own. */
+/* A frontmatter value in the property table. It wraps whole in both sites,
+   so a value with no spaces in it breaks inside the cell rather than widening
+   the rail. */
 .property-value {
-  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 /* The em dash standing for a key the author left empty. It is the absence
@@ -970,9 +971,8 @@ h2.label {
   font-style: italic;
 }
 
-/* The three-line clip every surface reads a description at. The listing row
-   always clips; the artifact header and the rail's property values clip until
-   the reader opens them. */
+/* The three-line clip a description reads at. The listing row always clips,
+   and the artifact header clips until the reader opens it. */
 .artifact-description,
 .clamped {
   display: -webkit-box;

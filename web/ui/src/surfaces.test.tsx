@@ -3795,11 +3795,13 @@ describe("the artifact viewer", () => {
       ).toBe(true);
       expect(screen.queryByRole("button", { name: "Show less" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
-      // The rail states the same field, and its own control goes with it.
+      // The rail states the same field in its property table, whole and
+      // with no control of its own.
       expect(
-        screen.queryByRole("button", {
-          name: "Show the whole description value",
-        }),
+        screen.getByTestId("property-value-description").textContent,
+      ).toBe("No body at all.");
+      expect(
+        screen.getByTestId("rail-frontmatter-table").querySelector("button"),
       ).toBeNull();
     });
 
@@ -3813,38 +3815,30 @@ describe("the artifact viewer", () => {
       expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
     });
 
-    // The rail states the same field again, and the relation links §13.10
-    // requires stand under it in the same scrolling column, so an unclipped
-    // value there pushes those links off the page.
+    // The property table is rows of key and value. A long value states what
+    // the author wrote in full: clipping it behind an opener hides part of
+    // the frontmatter and stretches that one row past the rows around it.
     // Spec: §13.10
-    it("clips the same description in the rail's property table", async () => {
+    it("states a long property value whole in the rail's table", async () => {
       stubHeights(900);
       stubViewer("The invoice approval path routes each document.");
       await screen.findByLabelText("Artifact viewer");
       const value = screen.getByTestId("property-value-description");
-      expect(value.classList.contains("clamped")).toBe(true);
-      // The rail's control names the property it opens, because a reader
-      // running down the rows meets it away from the value it belongs to.
-      const more = screen.getByRole("button", {
-        name: "Show the whole description value",
-      });
-      expect(more.getAttribute("aria-expanded")).toBe("false");
-      fireEvent.click(more);
+      expect(value.textContent).toBe(
+        "The invoice approval path routes each document.",
+      );
+      expect(value.classList.contains("clamped")).toBe(false);
       expect(
-        screen
-          .getByTestId("property-value-description")
-          .classList.contains("clamped"),
-      ).toBe(false);
-      fireEvent.click(
-        screen.getByRole("button", {
+        screen.queryByRole("button", {
           name: "Show the whole description value",
         }),
-      );
+      ).toBeNull();
+      // No cell of the table carries a control of any name.
       expect(
         screen
-          .getByTestId("property-value-description")
-          .classList.contains("clamped"),
-      ).toBe(true);
+          .getByTestId("rail-frontmatter-table")
+          .querySelector("button"),
+      ).toBeNull();
     });
 
     // The full-width Frontmatter panel states that its values are shown
@@ -3875,14 +3869,9 @@ describe("the artifact viewer", () => {
       expect(railValue.getAttribute("aria-label")).toBe(
         "description has no value",
       );
-      // The clip's control belongs to a value there is something to open,
-      // and an absent one carries none.
+      // The em dash stands in place of the value, so the cell carries no
+      // value element beside it.
       expect(screen.queryByTestId("property-value-description")).toBeNull();
-      expect(
-        screen.queryByRole("button", {
-          name: "Show the whole description value",
-        }),
-      ).toBeNull();
       // The neighbouring pair still states its own value.
       expect(
         screen.getByTestId("rail-frontmatter-table").textContent,

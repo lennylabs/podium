@@ -559,7 +559,7 @@ function ArtifactRail({
           {/* The rail clips each value, because the relation links stand
               under this table in the same scrolling column and a long
               description would otherwise push them far below the fold. */}
-          <PropertyTable raw={frontmatter} testID="rail-frontmatter-table" clampValues />
+          <PropertyTable raw={frontmatter} testID="rail-frontmatter-table" />
         </section>
       )}
       <Relations artifact={artifact} frontmatter={frontmatter} />

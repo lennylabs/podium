@@ -230,14 +230,16 @@ describe("artifact row description", () => {
     expect(lead.maxWidth).toBe("720px");
   });
 
-  // The rail states the same field again in its property table, above the
-  // relation links, so an unclipped value there pushes the links off the
-  // page even though the header beside it reads clipped.
-  it("clips a rail property value to the same three lines", () => {
-    const value = styled("property-value clamped");
-    expect(value.getPropertyValue("-webkit-line-clamp")).toBe("3");
-    expect(value.display).toBe("-webkit-box");
-    expect(value.overflow).toBe("hidden");
+  // The property table is rows of key and value. A value states what the
+  // author wrote in full, so it takes none of the clip the header reads at:
+  // a clipped cell hides part of the frontmatter and stands taller than the
+  // rows around it.
+  it("states a property value whole rather than clipping it", () => {
+    const value = styled("property-value");
+    expect(value.getPropertyValue("-webkit-line-clamp")).toBe("");
+    expect(value.display).not.toBe("-webkit-box");
+    expect(value.overflow).not.toBe("hidden");
+    expect(value.getPropertyValue("overflow-wrap")).toBe("anywhere");
   });
 });
 
