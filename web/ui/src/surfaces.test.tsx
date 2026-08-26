@@ -1181,6 +1181,33 @@ describe("the domain browser", () => {
     expect(within(row).queryByText("curated")).toBeNull();
   });
 
+  // Spec: \u00a74.5.5 \u2014 the registry tags every notable entry the domain's
+  // featured: list does not name as "signal", whether or not a usage signal
+  // contributed to it. A marker naming usage on those rows lands on every row
+  // of a registry that has served no traffic and states a reason the response
+  // does not report, so the listing marks the featured rows alone.
+  it("marks a non-featured listing row with no source claim at all", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: [],
+          notable: [
+            { id: "platform/deploy", type: "skill", version: "2.0.0", source: "signal" },
+            { id: "platform/build", type: "skill", version: "1.0.0", source: "featured" },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    expect(within(browser).queryByText("surfaced by usage")).toBeNull();
+    // The distinction the response does draw survives beside it.
+    expect(within(browser).getAllByText("\u2605 CURATED")).toHaveLength(1);
+  });
+
   // Spec: §13.10 — a manifest carries no required description, and the row's
   // right-hand column holds the row's height whether a description line is
   // drawn or not. A row that omits the line therefore reads as a description

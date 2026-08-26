@@ -110,8 +110,15 @@ export function ArtifactRow({
             </>
           )}
           <SensitivityBadge sensitivity={artifact.sensitivity} />
+          {/* The notable source is drawn on its "featured" arm alone. The
+              registry tags every entry the domain's featured: list does not
+              name as "signal" (§4.5.5), whether or not any usage signal
+              contributed to it, so a "surfaced by usage" marker lands on every
+              row of a registry that has served no traffic and states a reason
+              the response does not report. The row therefore distinguishes
+              what the response distinguishes, which is featured against the
+              rest. */}
           {artifact.source === 'featured' && <CuratedBadge />}
-          {artifact.source === 'signal' && <span className="quiet label">surfaced by usage</span>}
           {artifact.folded_from !== undefined && artifact.folded_from !== '' && (
             <Badge tone="quiet">from {artifact.folded_from}</Badge>
           )}
