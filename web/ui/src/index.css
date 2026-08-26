@@ -1790,6 +1790,27 @@ label:has(> input:disabled) {
   color: var(--meta);
 }
 
+/* A quoted aside carries no marker of its own once the user-agent indent is
+   dropped, so the rule on the left is what separates it from the paragraph
+   above it, and the quieter ink is what marks it as borrowed rather than
+   authored here. The user-agent default indents symmetrically by 40px and
+   leaves the ink at body colour, which reads as a paragraph the author
+   mysteriously indented. */
+.prose blockquote {
+  margin: 16px 0;
+  padding: 4px 0 4px 16px;
+  border-left: 2px solid var(--b2);
+  color: var(--sec);
+}
+
+.prose blockquote > :first-child {
+  margin-top: 0;
+}
+
+.prose blockquote > :last-child {
+  margin-bottom: 0;
+}
+
 .prose pre {
   padding: 12px;
   overflow-x: auto;

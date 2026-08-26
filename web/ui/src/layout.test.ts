@@ -203,6 +203,24 @@ describe("rendered artifact body", () => {
     expect(window.getComputedStyle(first).marginTop).toBe("0px");
     expect(window.getComputedStyle(second).marginTop).toBe("26px");
   });
+
+  // Left at the user-agent default a blockquote draws at body ink with a 40px
+  // symmetric indent and no rule, so a quoted aside reads as a paragraph the
+  // author indented for no reason. The case pins the rule and the quieter ink
+  // that mark it as a quotation.
+  it("marks a body blockquote with a left rule and quieter ink", () => {
+    const container = document.createElement("div");
+    container.className = "prose";
+    const quote = document.createElement("blockquote");
+    container.appendChild(quote);
+    document.body.appendChild(container);
+    mounted.push(container);
+
+    expect(declaredFor(quote, "border-left")).toBe("2px solid var(--b2)");
+    expect(declaredFor(quote, "color")).toBe("var(--sec)");
+    expect(declaredFor(quote, "padding")).toBe("4px 0 4px 16px");
+    expect(declaredFor(quote, "margin")).toBe("16px 0");
+  });
 });
 
 // A listing row carries an author-controlled description of no bounded
