@@ -4816,6 +4816,25 @@ describe("the layer write flows", () => {
     );
   });
 
+  // The restore table and the layer table are one link apart, so this table's
+  // column names read in the same section-label style rather than as
+  // sentence-case sans beside the panel's mono headers.
+  it("draws every column header in the section-label style", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    const surface = await screen.findByLabelText("Recently unregistered");
+    const headers = Array.from(
+      within(surface).getByRole("table").querySelectorAll("thead th"),
+    );
+    expect(
+      headers.map((header) => header.querySelector(".label")?.textContent ?? ""),
+    ).toEqual(["Layer", "Source", "Unregistered", "Erased on", "Actions"]);
+  });
+
   // A record carrying no tombstone time states that rather than computing a
   // date from a value it does not hold.
   it("states no erase date where the record carries no unregistered time", async () => {

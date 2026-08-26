@@ -66,11 +66,26 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
         <table className="data-table">
           <thead>
             <tr>
-              <th>Layer</th>
-              <th>Source</th>
-              <th>Unregistered</th>
-              <th>Erased</th>
-              <th>Actions</th>
+              {/* The layer panel this table sits one link away from labels its
+                  own columns in the section-label style, so these carry the
+                  same treatment. Sentence-case sans headers here put two
+                  tables the reader crosses in one step into two type
+                  systems. */}
+              <th>
+                <span className="label">Layer</span>
+              </th>
+              <th>
+                <span className="label">Source</span>
+              </th>
+              <th>
+                <span className="label">Unregistered</span>
+              </th>
+              <th>
+                <span className="label">Erased on</span>
+              </th>
+              <th>
+                <span className="label">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
