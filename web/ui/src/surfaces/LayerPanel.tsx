@@ -853,6 +853,16 @@ function UnregisterConfirmation({
             onChange={(event) => {
               setTyped(event.target.value);
             }}
+            // A single-field entry control takes Enter as its commit, the same
+            // way the version picker does, because a reader who has typed the
+            // ID reaches for the return key before the adjacent button. Enter
+            // commits only on the match the button gates on, so it cannot
+            // issue the write from a half-typed ID.
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && typed === layer.ID) {
+                onConfirm();
+              }
+            }}
           />
         </label>
       </div>

@@ -3669,6 +3669,39 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The confirmation's single field commits on Enter, the way the version
+  // picker's does, so the reader who has typed the ID does not have to reach
+  // for the pointer. A half-typed ID leaves Enter inert, on the same match
+  // the confirm button gates on.
+  it("submits the unregister on Enter once the typed ID matches", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    await screen.findByLabelText("Unregister alice-personal");
+    const field = screen.getByLabelText("Type the layer ID to confirm");
+    fireEvent.change(field, { target: { value: "alice-pers" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(requests.some((r) => r.method === "DELETE")).toBe(false);
+    fireEvent.change(field, { target: { value: "alice-personal" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (r) => r.url.startsWith("/v1/layers?") && r.method === "DELETE",
+        ),
+      ).toBe(true);
+    });
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Unregister alice-personal")).toBe(null);
+    });
+  });
+
   // The sidebar footer states how many layers the tenant carries and how many
   // artifacts its catalog matches, and a layer write moves both. Read once
   // for the page, the footer kept the figures the reader arrived with for the
