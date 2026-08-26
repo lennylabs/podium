@@ -486,7 +486,6 @@ h2.label {
   margin: 10px 0;
 }
 
-.artifact-row,
 .subdomain {
   padding: 12px 14px;
   border: 1px solid var(--bd);
@@ -494,14 +493,30 @@ h2.label {
   background: var(--surf);
 }
 
+/* The border belongs to the listing rather than to each entry: a domain's
+   artifacts and a result set are one bordered container whose rows are
+   separated by a hairline, so a listing reads as a single table instead of a
+   stack of loose boxes. overflow hidden keeps the first and last rows inside
+   the container's rounded corners. */
+.artifact-list {
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--surf);
+}
+
 /* A row is two columns: the artifact and what it says about itself on the
    left, and its type and version pinned to the right edge, so a reader
    scanning a listing for a type reads one column down the page. */
 .artifact-row {
-  margin-bottom: 8px;
+  padding: 12px 14px;
   display: flex;
   gap: 18px;
   align-items: flex-start;
+}
+
+.artifact-row + .artifact-row {
+  border-top: 1px solid var(--b2);
 }
 
 .artifact-row-body {

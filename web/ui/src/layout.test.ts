@@ -142,3 +142,65 @@ describe("sidebar tree row", () => {
     expect(rowChild("span", "label").flex).toBe("0 0 auto");
   });
 });
+
+// A domain's artifacts and a search's results are one bordered container with
+// a hairline between rows, per boards 14a, 14b, and 20a of the design pass. A
+// border on each row instead draws the listing as a stack of loose boxes. The
+// cases pin the border to the list and the divider to the rows after the
+// first; the rendered listing is checked against a browser.
+describe("artifact listing", () => {
+  /** declaredFor returns the last value the stylesheet declares for the
+   * property on a rule the element matches. jsdom drops a border shorthand
+   * whose value carries a custom property, so the computed style reports no
+   * border at all and a border is read from the rule instead. */
+  function declaredFor(element: Element, property: string): string {
+    let value = "";
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules)) {
+        const styleRule = rule as CSSStyleRule;
+        if (typeof styleRule.selectorText !== "string") continue;
+        if (!element.matches(styleRule.selectorText)) continue;
+        const declared = styleRule.style.getPropertyValue(property);
+        if (declared !== "") value = declared;
+      }
+    }
+    return value;
+  }
+
+  /** listRows attaches a listing of the given row count and returns its
+   * container and its rows. */
+  function listRows(count: number): { list: HTMLElement; rows: Element[] } {
+    const list = document.createElement("ul");
+    list.className = "artifact-list";
+    for (let i = 0; i < count; i++) {
+      const row = document.createElement("li");
+      row.className = "artifact-row";
+      list.appendChild(row);
+    }
+    document.body.appendChild(list);
+    mounted.push(list);
+    return { list, rows: Array.from(list.children) };
+  }
+
+  it("draws one border around the whole listing", () => {
+    const { list } = listRows(2);
+    expect(declaredFor(list, "border")).toBe("1px solid var(--bd)");
+    expect(declaredFor(list, "border-radius")).toBe("9px");
+    expect(window.getComputedStyle(list).overflow).toBe("hidden");
+  });
+
+  it("gives a row no border and no gap of its own", () => {
+    const { rows } = listRows(2);
+    expect(declaredFor(rows[0], "border")).toBe("");
+    expect(declaredFor(rows[0], "border-top")).toBe("");
+    expect(window.getComputedStyle(rows[0]).marginBottom).toBe("");
+  });
+
+  it("separates the rows with a hairline instead of a gap", () => {
+    const { rows } = listRows(3);
+    for (const row of rows.slice(1)) {
+      expect(declaredFor(row, "border")).toBe("");
+      expect(declaredFor(row, "border-top")).toBe("1px solid var(--b2)");
+    }
+  });
+});
