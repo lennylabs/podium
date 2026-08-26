@@ -7717,6 +7717,60 @@ describe("the trimmed listing", () => {
     expect(within(cells[1]).getByText("RULE")).toBeTruthy();
     expect(cells[2].textContent).toBe("unversioned");
   });
+
+  // Spec: §13.10 — the at-scale artifact table is a map of the domain, so a
+  // row reads as one band: one separator across every column, and the type
+  // badge, the version, and the tag chips on a common baseline. Clipping the
+  // description to one line needs a block display, and putting that on the
+  // cell takes it out of the row's cell layout, which lifted the description
+  // column's rule above the rule under the columns beside it. The clip
+  // therefore sits on an element inside the cell.
+  it("keeps the clipped description cell in the row's cell layout", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: [
+            {
+              id: "platform/lint",
+              type: "rule",
+              description:
+                "A lint rule with a description far longer than the column it stands in.",
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const table = within(browser).getByLabelText("Artifacts");
+    const cells = within(within(table).getAllByRole("row")[1]).getAllByRole(
+      "cell",
+    );
+    for (const cell of cells) {
+      expect(window.getComputedStyle(cell).display).toBe("table-cell");
+    }
+    const description = cells[cells.length - 1];
+    const clip = description.querySelector(".clipped");
+    expect(clip).not.toBeNull();
+    expect(clip?.textContent).toBe(
+      "A lint rule with a description far longer than the column it stands in.",
+    );
+    const clipped = window.getComputedStyle(clip as Element);
+    expect(clipped.whiteSpace).toBe("nowrap");
+    expect(clipped.textOverflow).toBe("ellipsis");
+    // The tag chips stand in the band with the text beside them, so the tag
+    // list drops the block margin it carries under a card.
+    const tags = cells[3].querySelector(".tag-list");
+    expect(tags).not.toBeNull();
+    expect(window.getComputedStyle(tags as Element).marginTop).toBe("0px");
+  });
 });
 
 describe("the anonymous framing", () => {

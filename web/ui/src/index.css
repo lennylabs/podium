@@ -2945,12 +2945,24 @@ label:has(> input:disabled) {
   font-size: 12px;
 }
 
+/* A one-line clip. It goes on an element inside a table cell rather than on
+   the cell itself, because the block display a text-overflow clip needs takes
+   a cell out of the row's layout and staggers the row's separator and
+   baselines column by column. */
 .clipped {
   display: block;
   max-width: 420px;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+/* A tag list standing in a table cell is one column of a row rather than a
+   block under a card, so it drops the block margin the card treatment carries.
+   The margin pushed the row's chips a line below the text in the cells beside
+   them. */
+.data-table td .tag-list {
+  margin: 0;
 }
 
 /* The resource table's selected row and the card it drives. */

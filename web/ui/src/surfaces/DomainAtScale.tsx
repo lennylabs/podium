@@ -295,7 +295,14 @@ function ArtifactRows({ rows }: { rows: ArtifactDescriptor[] }) {
                 ))}
               </span>
             </td>
-            <td className="clipped quiet">{artifact.description ?? 'No description.'}</td>
+            {/* The clip sits on an inner element rather than on the cell.
+                A `display: block` cell leaves the row's cell layout, which
+                broke the rule under the description column away from the rule
+                under the columns beside it and dropped the row's tag chips
+                below their neighbours' baseline. */}
+            <td className="quiet">
+              <span className="clipped">{artifact.description ?? 'No description.'}</span>
+            </td>
           </tr>
         ))}
       </tbody>
