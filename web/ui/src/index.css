@@ -257,6 +257,32 @@ h3 {
   min-height: calc(100vh - 52px);
 }
 
+/* The sidebar is a fixed 268px, so under about 900px of viewport the column
+   beside it holds less than 600px and a surface's own header runs out of it:
+   the layer panel's actions were cut off at the right edge of the content
+   column. Below that width the sidebar becomes a band above the content and
+   carries its divider on its bottom edge, so the surface holds the whole
+   viewport. */
+@media (max-width: 900px) {
+  /* The band takes the height its own rows need and the surface takes the
+     rest. Left to the grid's automatic tracks the leftover height is shared
+     between them, which opened a gap under the tree and pushed the page title
+     down the viewport. */
+  .app-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--bd);
+  }
+
+  .content {
+    padding: 22px 18px 36px;
+  }
+}
+
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -1339,6 +1365,20 @@ input[type="checkbox"] {
    source and the visibility and 0.9fr for the ingest time. */
 .layer-table {
   table-layout: fixed;
+  min-width: 860px;
+}
+
+/* The fixed proportions are read off the table's own width, so a container
+   narrower than the widths they add up to drives every column below the
+   min-content of the token inside it: at a 700px viewport an identifier
+   rendered one character to the line and the row grew to several hundred
+   pixels, and at 900px the visibility markers clipped part-way through
+   "organization". The table keeps its designed widths down to a floor and
+   scrolls sideways inside this container below it, so every cell stays on the
+   one line the design draws it on (§13.10). The container is focusable
+   because a region that scrolls must be reachable from the keyboard. */
+.table-scroll {
+  overflow-x: auto;
 }
 
 .layer-table th:nth-child(2) {

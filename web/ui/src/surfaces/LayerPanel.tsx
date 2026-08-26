@@ -338,87 +338,93 @@ export function LayerPanel({
       {rows.length === 0 ? (
         <EmptyState>No layers are registered under this tenant.</EmptyState>
       ) : (
-        <table className="data-table layer-table">
-          <thead>
-            <tr>
-              <th className="drag-cell">
-                <span className="label">Move</span>
-              </th>
-              <th>
-                <span className="label">Layer</span>
-              </th>
-              <th>
-                <span className="label">Source</span>
-              </th>
-              <th>
-                <span className="label">Visibility</span>
-              </th>
-              <th>
-                <span className="label">Last ingest</span>
-              </th>
-              {/* The actions column carries no header, so the header row reads
-                  as the columns that name data. */}
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((layer, index) => (
-              <LayerRow
-                key={layer.ID}
-                layer={layer}
-                position={index + 1}
-                subject={subject}
-                readOnly={readOnly}
-                refusal={refusals[layer.ID] ?? null}
-                reingest={reingest[layer.ID] ?? idleReingest}
-                dragging={dragging === layer.ID}
-                over={over === layer.ID}
-                onDragStart={() => {
-                  setDragging(layer.ID);
-                }}
-                onDragOver={() => {
-                  setOver(layer.ID);
-                }}
-                onDrop={() => {
-                  if (dragging !== null) {
-                    commitMove(dragging, layer.ID);
-                  }
-                }}
-                onDragEnd={() => {
-                  setDragging(null);
-                  setOver(null);
-                }}
-                onMove={(delta) => {
-                  moveBy(layer.ID, delta);
-                }}
-                onReingest={(breakGlass) => {
-                  void runReingest(layer.ID, breakGlass);
-                }}
-                onDismissReingest={() => {
-                  setRowReingest(layer.ID, idleReingest);
-                }}
-                onWrite={() => {
-                  clearRefusal(layer.ID);
-                  afterWrite();
-                  // An unregister moves the layer into the recoverable list,
-                  // so the count the header states is re-read on every write
-                  // rather than only on the one that reopens the section.
-                  recoverable.reload();
-                }}
-                onUnregistered={() => {
-                  setOutcome(unregisteredNote(layer.ID));
-                  takeFocus(heading.current);
-                }}
-                onRefusal={(err, retry) => {
-                  recordRefusal(layer.ID, err, retry);
-                }}
-                onDismissRefusal={() => {
-                  clearRefusal(layer.ID);
-                }}
-              />
-            ))}
-          </tbody>
-        </table>
+        // The table keeps its designed column widths down to a floor and
+        // scrolls sideways inside its own container below that, so a narrow
+        // viewport never squeezes a cell into one character to the line. The
+        // container is focusable so a keyboard reaches the scroll it owns.
+        <div className="table-scroll" tabIndex={0} role="region" aria-label="Layers">
+          <table className="data-table layer-table">
+            <thead>
+              <tr>
+                <th className="drag-cell">
+                  <span className="label">Move</span>
+                </th>
+                <th>
+                  <span className="label">Layer</span>
+                </th>
+                <th>
+                  <span className="label">Source</span>
+                </th>
+                <th>
+                  <span className="label">Visibility</span>
+                </th>
+                <th>
+                  <span className="label">Last ingest</span>
+                </th>
+                {/* The actions column carries no header, so the header row reads
+                    as the columns that name data. */}
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((layer, index) => (
+                <LayerRow
+                  key={layer.ID}
+                  layer={layer}
+                  position={index + 1}
+                  subject={subject}
+                  readOnly={readOnly}
+                  refusal={refusals[layer.ID] ?? null}
+                  reingest={reingest[layer.ID] ?? idleReingest}
+                  dragging={dragging === layer.ID}
+                  over={over === layer.ID}
+                  onDragStart={() => {
+                    setDragging(layer.ID);
+                  }}
+                  onDragOver={() => {
+                    setOver(layer.ID);
+                  }}
+                  onDrop={() => {
+                    if (dragging !== null) {
+                      commitMove(dragging, layer.ID);
+                    }
+                  }}
+                  onDragEnd={() => {
+                    setDragging(null);
+                    setOver(null);
+                  }}
+                  onMove={(delta) => {
+                    moveBy(layer.ID, delta);
+                  }}
+                  onReingest={(breakGlass) => {
+                    void runReingest(layer.ID, breakGlass);
+                  }}
+                  onDismissReingest={() => {
+                    setRowReingest(layer.ID, idleReingest);
+                  }}
+                  onWrite={() => {
+                    clearRefusal(layer.ID);
+                    afterWrite();
+                    // An unregister moves the layer into the recoverable list,
+                    // so the count the header states is re-read on every write
+                    // rather than only on the one that reopens the section.
+                    recoverable.reload();
+                  }}
+                  onUnregistered={() => {
+                    setOutcome(unregisteredNote(layer.ID));
+                    takeFocus(heading.current);
+                  }}
+                  onRefusal={(err, retry) => {
+                    recordRefusal(layer.ID, err, retry);
+                  }}
+                  onDismissRefusal={() => {
+                    clearRefusal(layer.ID);
+                  }}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {/* The live region is rendered on every state of the panel, empty until
           a move lands. A region mounted at the moment its text arrives is not

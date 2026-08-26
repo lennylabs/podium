@@ -41,6 +41,21 @@ function descendantStyle(className: string, tag: string): CSSStyleDeclaration {
   return window.getComputedStyle(child);
 }
 
+/** mediaBlock returns the text of every rule the stylesheet declares under the
+ * given media condition. jsdom applies no media query to a computed style, so
+ * a case pinning a breakpoint reads the rules the condition holds. */
+function mediaBlock(condition: string): string {
+  const rules: string[] = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      if (rule instanceof CSSMediaRule && rule.conditionText === condition) {
+        rules.push(...Array.from(rule.cssRules, (inner) => inner.cssText));
+      }
+    }
+  }
+  return rules.join("\n");
+}
+
 describe("shell layout", () => {
   it("gives the content column a zero minimum", () => {
     expect(styled("app-body").gridTemplateColumns).toBe("268px minmax(0, 1fr)");
@@ -48,6 +63,19 @@ describe("shell layout", () => {
 
   it("lets the content element shrink below its content width", () => {
     expect(styled("content").minWidth).toBe("0");
+  });
+
+  // The sidebar is a fixed 268px, so under about 900px of viewport the column
+  // beside it holds less than 600px and a surface's own header runs out of it:
+  // the layer panel's actions were cut off at the right edge. Below that width
+  // the shell is one column and the sidebar is a band above the content. jsdom
+  // evaluates no media query, so the case reads the declaration out of the
+  // stylesheet the browser applies at that width.
+  it("drops the sidebar out of the grid below a narrow viewport", () => {
+    const narrow = mediaBlock("(max-width: 900px)");
+    expect(narrow).toContain(".app-body");
+    expect(narrow).toContain("minmax(0, 1fr)");
+    expect(narrow).not.toContain("268px");
   });
 
   it("wraps a panel head the column is too narrow to hold on one line", () => {
@@ -563,6 +591,24 @@ describe("layer table columns", () => {
 
   it("breaks a name longer than its column inside the cell", () => {
     expect(styled("layer-id-cell").overflowWrap).toBe("anywhere");
+  });
+
+  // The proportions are read off the table's own width, so a container
+  // narrower than the widths they add up to drives every column below the
+  // min-content of the token inside it: at a 700px viewport the layer
+  // identifier rendered one character to the line and at 900px the visibility
+  // markers clipped part-way through "organization". The floor plus the
+  // sideways scroll of the container keep every cell on one line at every
+  // viewport.
+  it("floors the table at the width its columns are drawn at", () => {
+    const floor = Number.parseFloat(
+      window.getComputedStyle(layerTable().table).minWidth,
+    );
+    expect(floor).toBeGreaterThanOrEqual(860);
+  });
+
+  it("scrolls the table sideways inside its own container", () => {
+    expect(styled("table-scroll").overflowX).toBe("auto");
   });
 });
 

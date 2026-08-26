@@ -3324,6 +3324,25 @@ describe("the layer panel", () => {
     expect(headers[5].textContent).toBe("");
   });
 
+  // The table's columns are fixed proportions floored at the width they are
+  // drawn at, so a viewport too narrow to hold them scrolls the table
+  // sideways rather than squeezing a cell into one character to the line. The
+  // container is a focusable region so a keyboard reaches the scroll.
+  it("puts the table in a container that scrolls sideways", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const table = document.querySelector("table.layer-table") as HTMLElement;
+    const container = table.parentElement as HTMLElement;
+    expect(container.classList.contains("table-scroll")).toBe(true);
+    expect(container.tabIndex).toBe(0);
+    expect(container.getAttribute("aria-label")).toBe("Layers");
+  });
+
   // Every row shares one grid and the actions column is fixed width, so the
   // row's controls stay on one line: one action plus an overflow control.
   // Rendering Edit, Reingest, and Unregister side by side stacked them and
