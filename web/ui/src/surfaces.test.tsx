@@ -2206,9 +2206,17 @@ describe("search", () => {
     });
     goTo("#/search/review");
     render(<App />);
-    expect((await screen.findByTestId("result-count")).textContent).toBe(
-      "Showing 3 of 143",
-    );
+    const count = await screen.findByTestId("result-count");
+    expect(count.textContent).toBe("Showing 3 of 143");
+    // The inline count is set in the proportional face with the two numerals
+    // lifted out of the quiet surrounding words. The mono variant belongs to
+    // a count that sits inside a field.
+    expect(count.className).not.toContain("mono");
+    expect(
+      Array.from(count.querySelectorAll("strong")).map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["3", "143"]);
     // A ranked row keeps its type and version beside the identifier rather
     // than in the listing's right-hand column.
     expect(screen.queryByTestId("artifact-row-aside")).toBeNull();

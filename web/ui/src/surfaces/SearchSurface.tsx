@@ -186,8 +186,9 @@ export function SearchSurface({
         {/* The match count is taken before the cap truncates the list, so
             fewer results than matches is the ordinary outcome. */}
         {body !== null && (
-          <p className="result-count quiet mono" data-testid="result-count">
-            Showing {(body.results ?? []).length} of {body.total_matched}
+          <p className="result-count quiet" data-testid="result-count">
+            Showing <strong>{(body.results ?? []).length}</strong> of{" "}
+            <strong>{body.total_matched}</strong>
           </p>
         )}
       </div>

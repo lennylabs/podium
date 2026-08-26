@@ -1149,6 +1149,15 @@ input[type="checkbox"] {
 
 .result-count {
   margin: 0 0 0 auto;
+  font-size: 12.5px;
+}
+
+/* The count reads as one sentence with the two numerals carrying it, so the
+   words stay at the quiet tone the paragraph sets and only the numbers lift
+   to ink. */
+.result-count strong {
+  color: var(--ink);
+  font-weight: 600;
 }
 
 /* The row names itself, so a reader arriving at a filtered search reads what
