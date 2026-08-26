@@ -2643,6 +2643,20 @@ label:has(> input:disabled) {
   margin: 10px 0;
 }
 
+/* The appearance trigger the shell renders where no identity cluster stands.
+   It reads as the shell's other quiet controls rather than as a button. */
+.appearance-trigger {
+  gap: 6px;
+  padding: 5px 8px;
+  color: var(--meta);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.appearance-trigger .contrast-disc {
+  flex: none;
+}
+
 /* The command palette sits over a scrim, 96px from the top, on whatever page
    it was opened from. */
 .palette-scrim {

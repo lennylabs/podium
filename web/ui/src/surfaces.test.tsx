@@ -7708,6 +7708,28 @@ describe("the shell’s identity cluster", () => {
     );
   });
 
+  // A deployment that resolves no subject renders no identity cluster, and
+  // the appearance preference is client state that predicts no server
+  // outcome, so the shell stands it on its own there. Without it the reader
+  // on a standalone registry is pinned to prefers-color-scheme.
+  it("offers the appearance preference where no subject resolves", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture() },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    expect(await screen.findByTestId("registry-host")).toBeTruthy();
+    expect(screen.queryByTestId("account-trigger")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("appearance-trigger"));
+    const menu = screen.getByTestId("appearance-menu");
+    fireEvent.click(within(menu).getByRole("button", { name: "light" }));
+    expect(window.document.documentElement.getAttribute("data-theme")).toBe(
+      "light",
+    );
+    expect(window.localStorage.getItem("podium.theme")).toBe("light");
+  });
+
   // The menu carries the layer quota, read from the §4.7.8 endpoint the
   // registry gates on no role, so the caller sees the cap on how many layers
   // of their own they may hold.

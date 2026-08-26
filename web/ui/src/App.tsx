@@ -943,14 +943,20 @@ function TopBar({
       {/* The cluster stands wherever a subject resolved, and the sign-out
           entry point inside it is what the sign-in control rule gates: a
           subject that resolved on a deployment running no browser flow gets
-          the menu without it. */}
-      {subject !== '' && (
+          the menu without it. Where no subject resolves, which is the default
+          standalone deployment, the appearance preference stands on its own
+          instead: it is the client's own state, it predicts no server
+          outcome, and leaving it inside the identity cluster would pin every
+          reader on that deployment to prefers-color-scheme. */}
+      {subject !== '' ? (
         <AccountMenu
           subject={subject}
           theme={theme}
           onTheme={onTheme}
           signOutPath={control.kind === 'sign-out' ? control.path : null}
         />
+      ) : (
+        <AppearanceMenu theme={theme} onTheme={onTheme} />
       )}
     </header>
   );
@@ -993,27 +999,95 @@ function AccountMenu({
       {open && (
         <div className="account-menu" role="menu" aria-label="Account" data-testid="account-menu">
           <p className="mono quiet">{subject}</p>
-          <p className="label">Appearance</p>
-          <div className="segmented" role="group" aria-label="Appearance">
-            {(['system', 'light', 'dark'] as ThemePreference[]).map((choice) => (
-              <button
-                key={choice}
-                type="button"
-                className={theme === choice ? 'segment segment-on' : 'segment'}
-                aria-pressed={theme === choice}
-                onClick={() => {
-                  onTheme(choice);
-                }}
-              >
-                {choice}
-              </button>
-            ))}
-          </div>
+          <AppearanceSwitch theme={theme} onTheme={onTheme} />
           <LayerQuota />
           {signOutPath !== null && <SignOutButton path={signOutPath} />}
         </div>
       )}
     </div>
+  );
+}
+
+/** AppearanceSwitch is the segmented control that pins the appearance
+ * preference. It is the same control wherever it stands, so the identity
+ * cluster and the shell's own appearance menu carry one implementation. */
+function AppearanceSwitch({
+  theme,
+  onTheme,
+}: {
+  theme: ThemePreference;
+  onTheme: (next: ThemePreference) => void;
+}) {
+  return (
+    <>
+      <p className="label">Appearance</p>
+      <div className="segmented" role="group" aria-label="Appearance">
+        {(['system', 'light', 'dark'] as ThemePreference[]).map((choice) => (
+          <button
+            key={choice}
+            type="button"
+            className={theme === choice ? 'segment segment-on' : 'segment'}
+            aria-pressed={theme === choice}
+            onClick={() => {
+              onTheme(choice);
+            }}
+          >
+            {choice}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/** AppearanceMenu is where the appearance preference stands on a deployment
+ * that resolves no subject. The preference is held in the browser and applied
+ * by stamping the root element, so the control reads no posture field and
+ * predicts no server outcome, which is why the shell renders it on every
+ * deployment that renders no identity cluster.
+ *
+ * Spec: §13.10
+ */
+function AppearanceMenu({
+  theme,
+  onTheme,
+}: {
+  theme: ThemePreference;
+  onTheme: (next: ThemePreference) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="account">
+      <button
+        type="button"
+        className="account-trigger appearance-trigger"
+        data-testid="appearance-trigger"
+        aria-expanded={open}
+        onClick={() => {
+          setOpen((prior) => !prior);
+        }}
+      >
+        <ContrastDisc />
+        Appearance
+      </button>
+      {open && (
+        <div className="account-menu" role="menu" aria-label="Appearance" data-testid="appearance-menu">
+          <AppearanceSwitch theme={theme} onTheme={onTheme} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** ContrastDisc is the appearance trigger's icon: a circle with one half
+ * filled, drawn as inline SVG so it takes its colour from the label beside
+ * it. */
+function ContrastDisc() {
+  return (
+    <svg className="contrast-disc" width="13" height="13" viewBox="0 0 14 14" aria-hidden="true" focusable="false">
+      <circle cx="7" cy="7" r="5.8" fill="none" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M7 1.2A5.8 5.8 0 0 1 7 12.8z" fill="currentColor" />
+    </svg>
   );
 }
 
