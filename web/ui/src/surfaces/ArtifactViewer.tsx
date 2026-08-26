@@ -298,7 +298,7 @@ function VersionPicker({
     <span className="version-picker">
       <button
         type="button"
-        className="badge badge-quiet version-picker-open"
+        className="badge badge-soft version-picker-open"
         aria-expanded={open}
         aria-label={`Version ${label === '' ? 'unstated' : label}. Read another version.`}
         onClick={() => {

@@ -606,6 +606,26 @@ describe("command palette row", () => {
 // qualifying it. A badge declares a trailing margin and no leading one, so the
 // cell's own row supplies the space before the marker; without it the name and
 // the marker touch.
+// The badge carries two neutral weights. The outline tone is bordered, and
+// the soft tone is a filled chip with no visible edge, which is how a
+// secondary fact beside a badge reads as the lighter of the two. Given one
+// treatment for both, every neutral badge in a row renders alike and the
+// weight the design separates them by is lost.
+describe("badge tones", () => {
+  it("draws the soft tone as a filled chip with no visible edge", () => {
+    const soft = styled("badge badge-soft");
+    expect(soft.background).toBe("var(--chip)");
+    expect(soft.borderTopColor).toBe("rgba(0, 0, 0, 0)");
+  });
+
+  it("keeps the soft tone distinct from the outlined badge beside it", () => {
+    const outline = styled("badge");
+    const soft = styled("badge badge-soft");
+    expect(soft.background).not.toBe(outline.background);
+    expect(soft.borderTopColor).not.toBe(outline.borderTopColor);
+  });
+});
+
 describe("layer identifier cell", () => {
   it("lays the layer name and its markers out on one wrapping row with a gap", () => {
     const cell = styled("layer-id-cell");

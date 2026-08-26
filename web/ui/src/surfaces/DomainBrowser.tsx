@@ -208,7 +208,7 @@ function CountBadge({ count, noun }: { count: number; noun: string }) {
     return null;
   }
   const label = count === 1 ? noun : `${noun}s`;
-  return <Badge tone="quiet">{`${String(count)} ${label}`.toUpperCase()}</Badge>;
+  return <Badge tone="soft">{`${String(count)} ${label}`.toUpperCase()}</Badge>;
 }
 
 /** TrimmedListing is how a reader continues past the returned edge. The

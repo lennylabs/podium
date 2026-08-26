@@ -21,7 +21,7 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
     return (
       <div className="source-cell">
         <div className="source-ref">
-          <Badge tone="quiet">git</Badge>
+          <Badge tone="soft">git</Badge>
           {/* §4.6: the git source resolves its tree at the ref and has no
               default, so a row carrying none is refused on every ingest with
               "git source requires ref". Reading the empty ref as a default
@@ -44,7 +44,7 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
     return (
       <div className="source-cell">
         <div className="source-ref">
-          <Badge tone="quiet">local</Badge>
+          <Badge tone="soft">local</Badge>
         </div>
         <Detail value={layer.LocalPath ?? ''} />
       </div>
@@ -54,7 +54,7 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
   return (
     <div className="source-cell">
       <div className="source-ref">
-        <Badge tone="quiet">{layer.SourceType}</Badge>
+        <Badge tone="soft">{layer.SourceType}</Badge>
       </div>
       {fields.length > 0 && (
         <details className="source-fields">

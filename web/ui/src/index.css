@@ -645,6 +645,19 @@ h2.label {
   color: var(--meta);
 }
 
+/* The soft tone is the badge's second neutral. It is drawn as a filled chip
+   with no visible edge, so a badge carrying a secondary fact (a version, a
+   count, a source type) reads at a lower weight than the outlined badge
+   standing next to it. Without it every neutral badge takes the outline and
+   the two weights the design separates render alike. The border is declared
+   transparent rather than removed, so a soft badge and an outlined badge in
+   the same row keep the same box and sit on one baseline. */
+.badge-soft {
+  border-color: transparent;
+  background: var(--chip);
+  color: var(--meta);
+}
+
 .badge-danger {
   background: var(--danger-bg);
   border-color: var(--danger-bd);

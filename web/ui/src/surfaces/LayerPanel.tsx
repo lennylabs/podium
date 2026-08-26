@@ -1141,7 +1141,7 @@ function VisibilityCell({ layer }: { layer: LayerRecord }) {
   return (
     <div className="visibility-markers">
       {markers.map((marker) => (
-        <Badge key={marker.named} tone="quiet">
+        <Badge key={marker.named} tone="soft">
           {/* The names are the half the cell may clip, and the remainder
               count is the half it may not: a marker cut off mid-list without
               its count states neither who is granted nor how many are. */}

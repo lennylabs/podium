@@ -2037,6 +2037,14 @@ describe("the domain browser", () => {
     const head = heading.parentElement;
     expect(head).not.toBeNull();
     expect(head?.textContent).toBe("platform2 ARTIFACTS1 SUBDOMAIN");
+    // A count qualifies the name it sits beside, so it takes the badge's
+    // soft tone. Drawn outlined it competes with the type badges the listing
+    // below the heading is scanned by.
+    for (const count of ["2 ARTIFACTS", "1 SUBDOMAIN"]) {
+      expect(
+        within(head as HTMLElement).getByText(count).className.split(" "),
+      ).toContain("badge-soft");
+    }
   });
 
   // A count of zero states nothing the empty listing below does not already
@@ -2739,6 +2747,17 @@ describe("the artifact viewer", () => {
     const title = heading.parentElement;
     expect(within(title as HTMLElement).getByText("SKILL")).toBeTruthy();
     expect(within(title as HTMLElement).getByText("v2.3.0")).toBeTruthy();
+    // The type and the version are the two badge weights the header holds
+    // apart: the type takes the outlined badge, and the version the filled
+    // soft one. Drawn in one treatment they read as a row of identical pills
+    // and the reader is given no order to read them in.
+    const type = within(title as HTMLElement).getByText("SKILL");
+    expect(type.className.split(" ")).toContain("badge");
+    expect(type.className.split(" ")).not.toContain("badge-soft");
+    const version = within(title as HTMLElement)
+      .getByText("v2.3.0")
+      .closest(".badge");
+    expect(version?.className.split(" ")).toContain("badge-soft");
     // The breadcrumb is the one place the header states the path. A mono
     // line spelling the whole identifier under the badges repeats the trail
     // three lines above it, so the content column states the path once.
@@ -4668,6 +4687,10 @@ describe("the layer panel", () => {
     const cell = screen.getByText("public").closest(".visibility-markers");
     expect(cell).toBeTruthy();
     expect(cell?.querySelectorAll(".badge").length).toBe(4);
+    // A marker states a grant the row already carries rather than asking to
+    // be found, so it takes the badge's soft tone and the outlined badges in
+    // the table read above it.
+    expect(cell?.querySelectorAll(".badge-soft").length).toBe(4);
     for (const marker of [
       "organization",
       "group: secops · appsec",
@@ -4763,6 +4786,12 @@ describe("the layer panel", () => {
     expect(details(layerRow("alice-personal"))).toEqual([
       "/Users/alice/registry",
     ]);
+    // The chip names the source type at the weight of a qualifier, so it
+    // takes the badge's soft tone rather than the outline the layer's own
+    // markers carry.
+    for (const chip of [git.getByText("git"), local.getByText("local")]) {
+      expect(chip.className.split(" ")).toContain("badge-soft");
+    }
   });
 
   // A local path or a repository URL can be far longer than the source
