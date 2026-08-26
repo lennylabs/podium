@@ -6,14 +6,14 @@
 // and still answers success, so that class displays its visibility rather
 // than editing it.
 
-import type { FormEvent } from 'react';
-import { useState } from 'react';
+import type { FormEvent } from "react";
+import { useState } from "react";
 
-import { SecretReveal } from './SecretReveal';
-import { members } from './members';
-import { Badge, ErrorState } from '../components/primitives';
-import type { LayerRecord, LayerSecretResult, LayerUpdate } from '../api';
-import { updateLayer } from '../api';
+import { SecretReveal, revealsSecret } from "./SecretReveal";
+import { members } from "./members";
+import { Badge, ErrorState, Modal } from "../components/primitives";
+import type { LayerRecord, LayerSecretResult, LayerUpdate } from "../api";
+import { updateLayer } from "../api";
 
 export function UpdateLayerForm({
   layer,
@@ -26,17 +26,17 @@ export function UpdateLayerForm({
   onUpdated: () => void;
   onClose: () => void;
 }) {
-  const git = layer.SourceType === 'git';
-  const [ref, setRef] = useState(layer.Ref ?? '');
-  const [root, setRoot] = useState(layer.Root ?? '');
-  const [localPath, setLocalPath] = useState(layer.LocalPath ?? '');
-  const [policy, setPolicy] = useState(layer.force_push_policy ?? 'tolerant');
+  const git = layer.SourceType === "git";
+  const [ref, setRef] = useState(layer.Ref ?? "");
+  const [root, setRoot] = useState(layer.Root ?? "");
+  const [localPath, setLocalPath] = useState(layer.LocalPath ?? "");
+  const [policy, setPolicy] = useState(layer.force_push_policy ?? "tolerant");
   const [rotate, setRotate] = useState(false);
   const editableVisibility = layer.UserDefined !== true;
   const [isPublic, setPublic] = useState(layer.Public === true);
   const [organization, setOrganization] = useState(layer.Organization === true);
-  const [groups, setGroups] = useState((layer.Groups ?? []).join(', '));
-  const [users, setUsers] = useState((layer.Users ?? []).join(', '));
+  const [groups, setGroups] = useState((layer.Groups ?? []).join(", "));
+  const [users, setUsers] = useState((layer.Users ?? []).join(", "));
   const [result, setResult] = useState<LayerSecretResult | null>(null);
   const [refusal, setRefusal] = useState<unknown>(null);
 
@@ -74,163 +74,211 @@ export function UpdateLayerForm({
     send();
   };
 
+  const done = () => {
+    setResult(null);
+    onClose();
+  };
+
   if (result !== null) {
     // A rotation returns the fresh secret once, on the same terms as
-    // registration, so the reveal is the one the register flow uses.
+    // registration, so the reveal is the one the register flow uses, and
+    // while a secret is on screen the dialog closes only through the reveal's
+    // own acknowledgement. Escape, the scrim, and the close control would
+    // discard a credential the reader can then recover only by rotating it
+    // again.
     return (
-      <SecretReveal
-        result={result}
-        outcome={`Layer ${layer.ID} is updated.`}
-        onDone={() => {
-          setResult(null);
-          onClose();
-        }}
-      />
+      <Modal
+        title="Layer updated"
+        onClose={done}
+        dismissible={!revealsSecret(result)}
+      >
+        <div className="modal-body">
+          <SecretReveal
+            result={result}
+            outcome={`Layer ${layer.ID} is updated.`}
+            onDone={done}
+          />
+        </div>
+      </Modal>
     );
   }
 
   return (
-    <form className="register-form" aria-label={`Update ${layer.ID}`} onSubmit={submit}>
-      {git ? (
-        <>
+    // The update is reviewed before it is sent, on the same terms as the
+    // register and the unregister writes, so it is presented over the panel
+    // rather than pushed into the row that opened it. Left inside the actions
+    // cell it took that column's width, which is too narrow for a filesystem
+    // path, and grew the row enough to reflow its neighbours.
+    <Modal title={`Edit ${layer.ID}`} onClose={onClose}>
+      <form
+        className="register-form modal-form"
+        aria-label={`Update ${layer.ID}`}
+        onSubmit={submit}
+      >
+        <div className="modal-body">
+          {git ? (
+            <>
+              <label className="field">
+                <span className="label">Ref</span>
+                <input
+                  type="text"
+                  value={ref}
+                  onChange={(event) => {
+                    setRef(event.target.value);
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span className="label">Force-push policy</span>
+                <select
+                  value={policy}
+                  onChange={(event) => {
+                    setPolicy(event.target.value);
+                  }}
+                >
+                  <option value="tolerant">
+                    Tolerant: ingest a rewritten history
+                  </option>
+                  <option value="strict">
+                    Strict: reject a rewritten history
+                  </option>
+                </select>
+              </label>
+            </>
+          ) : (
+            <label className="field">
+              <span className="label">Local path</span>
+              <input
+                type="text"
+                value={localPath}
+                onChange={(event) => {
+                  setLocalPath(event.target.value);
+                }}
+              />
+            </label>
+          )}
           <label className="field">
-            <span className="label">Ref</span>
+            <span className="label">Root</span>
             <input
               type="text"
-              value={ref}
+              value={root}
               onChange={(event) => {
-                setRef(event.target.value);
+                setRoot(event.target.value);
               }}
             />
           </label>
-          <label className="field">
-            <span className="label">Force-push policy</span>
-            <select
-              value={policy}
-              onChange={(event) => {
-                setPolicy(event.target.value);
-              }}
-            >
-              <option value="tolerant">Tolerant: ingest a rewritten history</option>
-              <option value="strict">Strict: reject a rewritten history</option>
-            </select>
-          </label>
-        </>
-      ) : (
-        <label className="field">
-          <span className="label">Local path</span>
-          <input
-            type="text"
-            value={localPath}
-            onChange={(event) => {
-              setLocalPath(event.target.value);
-            }}
-          />
-        </label>
-      )}
-      <label className="field">
-        <span className="label">Root</span>
-        <input
-          type="text"
-          value={root}
-          onChange={(event) => {
-            setRoot(event.target.value);
-          }}
-        />
-      </label>
-      {editableVisibility ? (
-        <fieldset className="field">
-          <legend className="label">Visibility</legend>
+          {editableVisibility ? (
+            <fieldset className="field">
+              <legend className="label">Visibility</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={isPublic}
+                  disabled={layer.Public === true}
+                  onChange={(event) => {
+                    setPublic(event.target.checked);
+                  }}
+                />
+                Public
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={organization}
+                  disabled={layer.Organization === true}
+                  onChange={(event) => {
+                    setOrganization(event.target.checked);
+                  }}
+                />
+                Organization
+              </label>
+              <label className="field">
+                <span className="label">Group names, separated by commas</span>
+                <input
+                  type="text"
+                  value={groups}
+                  onChange={(event) => {
+                    setGroups(event.target.value);
+                  }}
+                />
+              </label>
+              <label className="field">
+                <span className="label">
+                  User identifiers, separated by commas
+                </span>
+                <input
+                  type="text"
+                  value={users}
+                  onChange={(event) => {
+                    setUsers(event.target.value);
+                  }}
+                />
+              </label>
+              {/* The endpoint grants on each axis and revokes on none, so a grant
+                already stored cannot be taken back here and its control says so
+                rather than offering a change the registry would answer success
+                to without making. */}
+              <p className="quiet">
+                An axis already granted stays granted. Unregister the layer to
+                withdraw it.
+              </p>
+            </fieldset>
+          ) : (
+            <div className="field">
+              <span className="label">Visibility</span>
+              <Badge tone="quiet">you alone</Badge>
+              <p className="quiet">
+                A layer of your own is fixed to you at registration and cannot
+                be widened.
+              </p>
+            </div>
+          )}
+          {/* Only a git source carries a webhook secret, so the control stays on
+            the row of a layer that has none and reports why it cannot be
+            taken rather than disappearing between source types. */}
           <label>
             <input
               type="checkbox"
-              checked={isPublic}
-              disabled={layer.Public === true}
+              checked={rotate}
+              disabled={!git}
               onChange={(event) => {
-                setPublic(event.target.checked);
+                setRotate(event.target.checked);
               }}
             />
-            Public
+            Rotate the webhook secret
           </label>
-          <label>
-            <input
-              type="checkbox"
-              checked={organization}
-              disabled={layer.Organization === true}
-              onChange={(event) => {
-                setOrganization(event.target.checked);
-              }}
-            />
-            Organization
-          </label>
-          <label className="field">
-            <span className="label">Group names, separated by commas</span>
-            <input
-              type="text"
-              value={groups}
-              onChange={(event) => {
-                setGroups(event.target.value);
-              }}
-            />
-          </label>
-          <label className="field">
-            <span className="label">User identifiers, separated by commas</span>
-            <input
-              type="text"
-              value={users}
-              onChange={(event) => {
-                setUsers(event.target.value);
-              }}
-            />
-          </label>
-          {/* The endpoint grants on each axis and revokes on none, so a grant
-              already stored cannot be taken back here and its control says so
-              rather than offering a change the registry would answer success
-              to without making. */}
-          <p className="quiet">An axis already granted stays granted. Unregister the layer to withdraw it.</p>
-        </fieldset>
-      ) : (
-        <div className="field">
-          <span className="label">Visibility</span>
-          <Badge tone="quiet">you alone</Badge>
-          <p className="quiet">A layer of your own is fixed to you at registration and cannot be widened.</p>
+          {!git && (
+            <p className="quiet">Only a git layer carries a webhook secret.</p>
+          )}
+          {rotate && (
+            <p className="quiet">
+              The new secret is shown once. The old one stops working
+              immediately.
+            </p>
+          )}
+          {refusal !== null && (
+            <>
+              <ErrorState error={refusal} onRetry={send} />
+              <button
+                type="button"
+                onClick={() => {
+                  setRefusal(null);
+                }}
+              >
+                Dismiss
+              </button>
+            </>
+          )}
         </div>
-      )}
-      {/* Only a git source carries a webhook secret, so the control stays on
-          the row of a layer that has none and reports why it cannot be
-          taken rather than disappearing between source types. */}
-      <label>
-        <input
-          type="checkbox"
-          checked={rotate}
-          disabled={!git}
-          onChange={(event) => {
-            setRotate(event.target.checked);
-          }}
-        />
-        Rotate the webhook secret
-      </label>
-      {!git && <p className="quiet">Only a git layer carries a webhook secret.</p>}
-      {rotate && <p className="quiet">The new secret is shown once. The old one stops working immediately.</p>}
-      <button type="submit" disabled={readOnly}>
-        Save changes
-      </button>
-      <button type="button" onClick={onClose}>
-        Cancel
-      </button>
-      {refusal !== null && (
-        <>
-          <ErrorState error={refusal} onRetry={send} />
-          <button
-            type="button"
-            onClick={() => {
-              setRefusal(null);
-            }}
-          >
-            Dismiss
+        <div className="modal-foot">
+          <button type="button" onClick={onClose}>
+            Cancel
           </button>
-        </>
-      )}
-    </form>
+          <button type="submit" className="button primary" disabled={readOnly}>
+            Save changes
+          </button>
+        </div>
+      </form>
+    </Modal>
   );
 }

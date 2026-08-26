@@ -1541,13 +1541,6 @@ label:has(> input:disabled) {
   margin: 0 0 6px;
 }
 
-/* A panel a row control opens is read, filled in, or acted on, so it carries
-   its own minimum width and the column widens for as long as it is open. The
-   120px hint sizes the closed row alone. */
-.row-actions .register-form {
-  min-width: 320px;
-}
-
 /* The handle is a button so the reorder is reachable from the keyboard, and
    it is drawn as the glyph it was rather than as a bordered control. */
 .drag-handle {

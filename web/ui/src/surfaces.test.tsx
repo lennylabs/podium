@@ -3729,6 +3729,38 @@ describe("the layer write flows", () => {
     ).toBeTruthy();
   });
 
+  // The update is reviewed before it is sent, on the same terms as the
+  // register and the unregister writes, so it opens over the panel. Left
+  // inside the row's actions cell it was laid out by that fixed-width column,
+  // which is too narrow for a filesystem path, and it grew the row enough to
+  // reflow its neighbours.
+  it("opens the edit form as a dialog over the panel", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update alice-personal");
+    const dialog = form.closest('[role="dialog"]');
+    expect(dialog).toBeTruthy();
+    expect(dialog?.getAttribute("aria-modal")).toBe("true");
+    expect(screen.getByTestId("modal-scrim")).toBeTruthy();
+    // The dialog stands at the end of the document rather than inside the
+    // cell that opened it, so no ancestor of the panel's table lays it out.
+    expect(form.closest("td")).toBeNull();
+    expect(form.closest("table")).toBeNull();
+    // The scrim dismisses it, which is the treatment the sibling dialogs
+    // carry, so a reader who opened the form to look can leave it.
+    fireEvent.click(screen.getByTestId("modal-scrim"));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Update alice-personal")).toBeNull();
+    });
+  });
+
   // §4.6 composes every user-defined layer above every admin-defined one
   // whatever the stored order values are, so a move runs inside the moving
   // layer's own class and the request names that class block. The endpoint
