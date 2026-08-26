@@ -3242,11 +3242,12 @@ describe("the layer panel", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     expect(screen.getAllByRole("button", { name: "Reingest" }).length).toBe(2);
+    // One row's actions are open at a time, so each row's menu is read on its
+    // own turn.
     openRowActions("company");
+    expect(screen.getByRole("menuitem", { name: "Unregister" })).toBeTruthy();
     openRowActions();
-    expect(screen.getAllByRole("button", { name: "Unregister" }).length).toBe(
-      2,
-    );
+    expect(screen.getByRole("menuitem", { name: "Unregister" })).toBeTruthy();
     expect(screen.queryByText("yours")).toBeNull();
   });
 
@@ -3291,11 +3292,11 @@ describe("the layer panel", () => {
         .getAllByRole("button")
         .map((button) => button.textContent),
     ).toEqual(["Reingest", "⋯"]);
-    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Unregister" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Unregister" })).toBeNull();
     openRowActions();
-    expect(screen.getByRole("button", { name: "Edit" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Unregister" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Unregister" })).toBeTruthy();
   });
 
   // The ownership marker is a property of a user-defined row alone. An
@@ -3464,7 +3465,7 @@ describe("the layer panel", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
     fireEvent.change(screen.getByLabelText("Type the layer ID to confirm"), {
       target: { value: "alice-personal" },
     });
@@ -3473,7 +3474,7 @@ describe("the layer panel", () => {
     expect(screen.getByText("auth.forbidden")).toBeTruthy();
     openRowActions();
     expect(
-      screen.getByRole("button", { name: "Edit" }).hasAttribute("disabled"),
+      screen.getByRole("menuitem", { name: "Edit" }).hasAttribute("disabled"),
     ).toBe(false);
   });
 
@@ -4011,14 +4012,13 @@ describe("read-only mode", () => {
     await screen.findByTestId("read-only-banner");
     openRowActions("company");
     openRowActions();
-    for (const name of [
-      "Register layer",
-      "Reingest all",
-      "Reingest",
-      "Unregister",
-      "Edit",
-    ]) {
+    for (const name of ["Register layer", "Reingest all", "Reingest"]) {
       for (const control of screen.getAllByRole("button", { name })) {
+        expect(control.hasAttribute("disabled")).toBe(true);
+      }
+    }
+    for (const name of ["Unregister", "Edit"]) {
+      for (const control of screen.getAllByRole("menuitem", { name })) {
         expect(control.hasAttribute("disabled")).toBe(true);
       }
     }
@@ -4143,7 +4143,7 @@ describe("the layer write flows", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
     const dialog = await screen.findByLabelText("Unregister alice-personal");
     expect(dialog.textContent).toContain("every caller");
     expect(dialog.textContent).toContain("Recoverable for 30 days");
@@ -4176,7 +4176,7 @@ describe("the layer write flows", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
     await screen.findByLabelText("Unregister alice-personal");
     const field = screen.getByLabelText("Type the layer ID to confirm");
     fireEvent.change(field, { target: { value: "alice-pers" } });
@@ -4227,7 +4227,7 @@ describe("the layer write flows", () => {
       "/v1/layers": { body: { layers: [adminLayer()] } },
     });
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
     await screen.findByLabelText("Unregister alice-personal");
     fireEvent.change(screen.getByLabelText("Type the layer ID to confirm"), {
       target: { value: "alice-personal" },
@@ -4307,7 +4307,7 @@ describe("the layer write flows", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
     const dialog = await screen.findByLabelText("Unregister alice-personal");
     expect(screen.getByTestId("modal-scrim").contains(dialog)).toBe(true);
     expect(dialog.closest("tr")).toBeNull();
@@ -4342,7 +4342,7 @@ describe("the layer write flows", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
     const dialog = await screen.findByLabelText("Unregister alice-personal");
     expect(dialog.contains(document.activeElement)).toBe(true);
     const stops = Array.from(
@@ -4378,7 +4378,7 @@ describe("the layer write flows", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
     await screen.findByLabelText("Unregister alice-personal");
     fireEvent.change(screen.getByLabelText("Type the layer ID to confirm"), {
       target: { value: "alice-personal" },
@@ -4438,6 +4438,57 @@ describe("the layer write flows", () => {
     expect(openMenus()).toEqual(["More actions for company"]);
   });
 
+  // A control that reports aria-expanded has to say what it expands, and the
+  // popup behind it has to carry the semantics that make its label readable.
+  // A bare div holding two plain buttons announces as neither a menu nor a
+  // set of items, drops the label it states, and leaves a forward Tab as the
+  // only route into a popup the reader has just opened.
+  it("opens the row actions as a menu, with focus on the first item and the arrows moving between them", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const trigger = screen.getByRole("button", {
+      name: "More actions for alice-personal",
+    });
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+
+    openRowActions();
+    const menu = screen.getByRole("menu", {
+      name: "More actions for alice-personal",
+    });
+    const items = within(menu).getAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual([
+      "Edit",
+      "Unregister",
+    ]);
+    // The menu is one Tab stop and opens inside itself.
+    expect(document.activeElement).toBe(items[0]);
+    expect(items.map((item) => item.getAttribute("tabindex"))).toEqual([
+      "0",
+      "-1",
+    ]);
+
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[1]);
+    expect(items.map((item) => item.getAttribute("tabindex"))).toEqual([
+      "-1",
+      "0",
+    ]);
+    // The arrows wrap, so neither end of the menu is a dead stop.
+    fireEvent.keyDown(menu, { key: "ArrowDown" });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(items[1]);
+    fireEvent.keyDown(menu, { key: "Home" });
+    expect(document.activeElement).toBe(items[0]);
+    fireEvent.keyDown(menu, { key: "End" });
+    expect(document.activeElement).toBe(items[1]);
+  });
+
   // A dialog opens with focus on the field the reader has to fill in. Opening
   // focus on the dismissal ✕ made the first Enter close the dialog the reader
   // had just opened, and put the destructive confirmation's opening focus on
@@ -4458,7 +4509,7 @@ describe("the layer write flows", () => {
     expect(close.hasAttribute("disabled")).toBe(false);
     fireEvent.click(close);
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
     const dialog = await screen.findByLabelText("Unregister alice-personal");
     expect(document.activeElement).toBe(
       within(dialog).getByLabelText("Type the layer ID to confirm"),
@@ -5316,7 +5367,7 @@ describe("the layer write flows", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     openRowActions("company");
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const form = await screen.findByLabelText("Update company");
     // The endpoint applies a visibility patch on an admin-defined layer, so
     // the form carries the axes and the patch carries what they name. It
@@ -5369,7 +5420,7 @@ describe("the layer write flows", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const form = await screen.findByLabelText("Update alice-personal");
     const rotate = screen.getByLabelText("Rotate the webhook secret");
     expect(rotate.hasAttribute("disabled")).toBe(true);
@@ -5420,7 +5471,7 @@ describe("the layer write flows", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const form = await screen.findByLabelText("Update alice-personal");
     const dialog = form.closest('[role="dialog"]');
     expect(dialog).toBeTruthy();
@@ -7336,7 +7387,7 @@ describe("a refused layer write", () => {
   async function refuseAnUnregister(): Promise<void> {
     await screen.findByLabelText("Layer panel");
     openRowActions();
-    fireEvent.click(screen.getByRole("button", { name: "Unregister" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
     fireEvent.change(screen.getByLabelText("Type the layer ID to confirm"), {
       target: { value: "alice-personal" },
     });
@@ -7383,7 +7434,7 @@ describe("a refused layer write", () => {
     // Every other control on the row stayed live throughout.
     openRowActions();
     expect(
-      screen.getByRole("button", { name: "Edit" }).hasAttribute("disabled"),
+      screen.getByRole("menuitem", { name: "Edit" }).hasAttribute("disabled"),
     ).toBe(false);
   });
 

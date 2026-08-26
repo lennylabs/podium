@@ -9,7 +9,8 @@
 // and treats the local operator as the administrator, and the panel is the
 // point of that deployment.
 
-import { useRef, useState } from "react";
+import type { KeyboardEvent, RefObject } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { grantedGroups } from "./members";
 import { erasesOn, recoveryDays } from "./recovery";
@@ -768,6 +769,7 @@ function LayerRow({
             type="button"
             className="row-overflow"
             aria-label={`More actions for ${layer.ID}`}
+            aria-haspopup="menu"
             aria-expanded={overflowOpen}
             onClick={() => {
               setOverflowOpen((open) => !open);
@@ -777,30 +779,30 @@ function LayerRow({
           </button>
         </div>
         {overflowOpen && (
-          <div ref={menu} className="row-menu" aria-label={`More actions for ${layer.ID}`}>
-            <button
-              type="button"
-              disabled={readOnly}
-              onClick={() => {
-                overflow.current?.focus();
-                setOverflowOpen(false);
-                setEditing((open) => !open);
-              }}
-            >
-              Edit
-            </button>
-            <button
-              type="button"
-              disabled={readOnly}
-              onClick={() => {
-                overflow.current?.focus();
-                setOverflowOpen(false);
-                setConfirming(true);
-              }}
-            >
-              Unregister
-            </button>
-          </div>
+          <RowMenu
+            menuRef={menu}
+            label={`More actions for ${layer.ID}`}
+            items={[
+              {
+                label: "Edit",
+                disabled: readOnly,
+                onSelect: () => {
+                  overflow.current?.focus();
+                  setOverflowOpen(false);
+                  setEditing((open) => !open);
+                },
+              },
+              {
+                label: "Unregister",
+                disabled: readOnly,
+                onSelect: () => {
+                  overflow.current?.focus();
+                  setOverflowOpen(false);
+                  setConfirming(true);
+                },
+              },
+            ]}
+          />
         )}
         {editing && (
           <UpdateLayerForm
@@ -859,6 +861,86 @@ function LayerRow({
       </tr>
     )}
     </>
+  );
+}
+
+/** RowMenu is the popup behind a row's overflow control. It carries menu
+ * semantics, so an assistive technology announces it as a menu and its
+ * entries as menu items, and the label the popup states is read rather than
+ * dropped, which is what a bare div does with an aria-label.
+ *
+ * The keyboard treatment is the roving tabindex the artifact viewer's tab set
+ * already uses: the menu is one Tab stop, it opens with focus on its first
+ * item, and the arrow keys move between items. Leaving focus on the trigger
+ * made a forward Tab the only route into a popup the reader had just opened,
+ * and past the last item on the row after that. */
+function RowMenu({
+  menuRef,
+  label,
+  items,
+}: {
+  menuRef: RefObject<HTMLDivElement | null>;
+  label: string;
+  items: { label: string; disabled: boolean; onSelect: () => void }[];
+}) {
+  const [active, setActive] = useState(0);
+  const focusItem = (container: HTMLElement | null, index: number) => {
+    container
+      ?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
+      [index]?.focus();
+  };
+  useEffect(() => {
+    focusItem(menuRef.current, 0);
+  }, [menuRef]);
+
+  const onArrow = (event: KeyboardEvent<HTMLDivElement>) => {
+    let next = active;
+    switch (event.key) {
+      case "ArrowDown":
+        next = (active + 1) % items.length;
+        break;
+      case "ArrowUp":
+        next = (active - 1 + items.length) % items.length;
+        break;
+      case "Home":
+        next = 0;
+        break;
+      case "End":
+        next = items.length - 1;
+        break;
+      default:
+        return;
+    }
+    // The arrows scroll the page otherwise, which moves the menu out from
+    // under the reader driving it.
+    event.preventDefault();
+    setActive(next);
+    focusItem(event.currentTarget, next);
+  };
+
+  return (
+    <div
+      ref={menuRef}
+      className="row-menu"
+      role="menu"
+      aria-label={label}
+      onKeyDown={onArrow}
+    >
+      {items.map((item, index) => (
+        <button
+          key={item.label}
+          type="button"
+          role="menuitem"
+          // The roving tabindex: the menu is one Tab stop, and the item the
+          // arrows last moved to is the one it lands on.
+          tabIndex={index === active ? 0 : -1}
+          disabled={item.disabled}
+          onClick={item.onSelect}
+        >
+          {item.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
