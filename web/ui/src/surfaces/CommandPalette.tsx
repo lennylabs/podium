@@ -153,7 +153,18 @@ function PalettePanel({
         }
       }}
     >
-      <div ref={dialog} className="palette" role="dialog" aria-label="Command palette" data-testid="palette" onKeyDown={onKeyDown}>
+      {/* aria-modal matches the focus trap below: while the palette is open,
+          focus cannot leave it, so a reader is told the rest of the page is
+          inert rather than being invited to walk into it. */}
+      <div
+        ref={dialog}
+        className="palette"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        data-testid="palette"
+        onKeyDown={onKeyDown}
+      >
         {/* The field row. The magnifier names the row as the query field, and
             the match count sits at the row's right edge, which is the edge
             the type and version columns below it also hold. */}

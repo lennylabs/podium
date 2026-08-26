@@ -8046,6 +8046,10 @@ describe("the command palette", () => {
     expect(document.activeElement).toBe(
       within(panel).getByLabelText("Search artifacts"),
     );
+    // The trap is announced as well as implemented: a reader is told the shell
+    // behind the panel is inert, which is what the layer modals declare too.
+    expect(panel.getAttribute("role")).toBe("dialog");
+    expect(panel.getAttribute("aria-modal")).toBe("true");
     fireEvent.keyDown(panel, { key: "Escape" });
     expect(screen.queryByTestId("palette")).toBeNull();
     expect(document.activeElement).toBe(trigger);
