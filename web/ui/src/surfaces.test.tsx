@@ -1390,6 +1390,71 @@ describe("search", () => {
     });
   });
 
+  // The root read expands more than one level, so an unfolded top-level
+  // domain carries its children in its own `subdomains` rather than at the
+  // top level. Each child is a page the browser navigates to and a prefix the
+  // search matches, so the surface reads the tree at the depth the sidebar
+  // opens at and the dropdown offers the whole returned subtree.
+  it("offers a nested subdomain the root read returned as a scope", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      // The registry answers a shallower read with the top-level entries
+      // alone, the way a depth of 1 does, so a surface that asks for less
+      // than the tree it walks is told apart from one that asks for the
+      // whole subtree.
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            { path: "edge", name: "edge" },
+            { path: "platform", name: "platform" },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/load_domain?depth=2": {
+        body: {
+          path: "",
+          subdomains: [
+            {
+              path: "edge",
+              name: "edge",
+              subdomains: [
+                {
+                  path: "edge/child-one",
+                  name: "child-one",
+                  subdomains: [{ path: "edge/child-one/leaf", name: "leaf" }],
+                },
+              ],
+            },
+            { path: "platform", name: "platform" },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    await screen.findByLabelText("Search");
+    const scope = await screen.findByLabelText("Filter by scope");
+    expect(
+      within(scope)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual([
+      "scope: all",
+      "scope: edge",
+      "scope: edge/child-one",
+      "scope: edge/child-one/leaf",
+      "scope: platform",
+    ]);
+    selectFilter("scope", "edge/child-one");
+    await waitFor(() => {
+      expect(lastSearch().get("scope")).toBe("edge/child-one");
+    });
+  });
+
   // The match count is taken before the cap truncates the list, so fewer
   // results than matches is the ordinary outcome and reads as one. The two
   // optional result fields are driven present and absent in the same case.

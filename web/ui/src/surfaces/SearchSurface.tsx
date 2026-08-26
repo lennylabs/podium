@@ -23,6 +23,13 @@ import { useAsync, useErrorReport } from "../useAsync";
 
 const resultCap = 10;
 
+/** scopeDepth is how deep the scope dropdown reads the domain tree. It is the
+ * depth the sidebar tree opens at, so every domain the reader can see without
+ * expanding a node can also be named as a scope. A depth of 1 returns the
+ * top-level entries with empty subtrees, which offered fewer scopes than the
+ * tree beside it already listed. */
+const scopeDepth = 2;
+
 /** firstClassTypes are the §4.3 types every registry carries, which is what
  * the type dropdown can offer. An extension type registers through the
  * TypeProvider SPI and no response enumerates the registered set, so a filter
@@ -57,19 +64,17 @@ export function SearchSurface({
   const [tags, setTags] = useState<string[]>(seed.tags);
   const [text, setText] = useState(seed.query);
 
-  // A scope is a §4.2 domain path, so the dropdown offers the registry's
-  // top-level domains, and every segment a §4.5.5 folded chain crossed on the
-  // way to one: a scope matches by prefix and the browser navigates to each of
-  // those segments, so listing only the folded entry would hide a domain that
-  // both surfaces answer for. The read is an enhancement to the row rather
-  // than the surface's own catalog read: a failure leaves the dropdown
-  // offering the unscoped search alone and is neither reported to the shell
-  // nor drawn, because the search itself still answers.
-  const domains = useAsync(() => loadDomain("", 1), []);
-  const scopeOptions = scopePaths(
-    (domains.value?.subdomains ?? []).map((domain) => domain.path),
-    "",
-  );
+  // A scope is a §4.2 domain path, so the dropdown offers every domain the
+  // root read describes: its top-level entries, the subdomains those entries
+  // carry, and every segment a §4.5.5 folded chain crossed on the way to one.
+  // A scope matches by prefix and the browser navigates to each of those
+  // domains, so a list drawn from the top-level entry paths alone would hide a
+  // domain that both surfaces answer for. The read is an enhancement to the
+  // row rather than the surface's own catalog read: a failure leaves the
+  // dropdown offering the unscoped search alone and is neither reported to the
+  // shell nor drawn, because the search itself still answers.
+  const domains = useAsync(() => loadDomain("", scopeDepth), []);
+  const scopeOptions = scopePaths(domains.value?.subdomains ?? [], "");
 
   const filters: SearchFilters = { query: text, type, scope, tags };
   const key = JSON.stringify(filters);

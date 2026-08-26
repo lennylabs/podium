@@ -1,5 +1,7 @@
 // Labelling a §4.2 domain the catalog reports.
 
+import type { DomainDescriptor } from './api';
+
 /** domainLabel is the label an entry under `parent` carries. A §4.5.5 sparse
  * chain is collapsed by the server into one entry whose path holds every
  * segment it crossed while its name holds only the last one, so a label drawn
@@ -24,32 +26,42 @@ export function subdomainCountLabel(count: number): string | null {
   return `${String(count)} ${count === 1 ? 'subdomain' : 'subdomains'}`;
 }
 
-/** scopePaths expands the entries a load_domain response returned under
- * `parent` into every domain path a scope filter can name. A §4.5.5 sparse
- * chain arrives folded into one entry, so a list drawn from the entries alone
- * offers `finance/ap` and never `finance`, leaving a domain the browser
- * navigates to and the search matches by prefix unreachable as a filter. Each
- * folded entry contributes its intermediate segments as well as itself, in
- * root-to-leaf order and without repeating a path two entries share. */
-export function scopePaths(paths: string[], parent: string): string[] {
+/** scopePaths expands the subtree a load_domain response returned under
+ * `parent` into every domain path a scope filter can name. Two structures put
+ * a domain somewhere other than an entry's own `path`. A §4.5.5 sparse chain
+ * arrives folded into one entry, so a list drawn from the entry paths alone
+ * offers `finance/ap` and never `finance`; and an entry that expanded carries
+ * its children in its own `subdomains`, so a list drawn from the top level
+ * alone offers `edge` and never `edge/child-one`. Both are domains the browser
+ * navigates to and the search matches by prefix, so the walk descends into
+ * every entry's subtree and each entry contributes its intermediate segments
+ * as well as itself, in root-to-leaf order and without repeating a path two
+ * entries share. */
+export function scopePaths(
+  subdomains: DomainDescriptor[],
+  parent: string,
+): string[] {
   const prefix = parent === '' ? '' : `${parent}/`;
   const seen = new Set<string>();
   const options: string[] = [];
-  for (const path of paths) {
-    if (!path.startsWith(prefix)) {
-      continue;
-    }
-    let held = parent;
-    for (const segment of path.slice(prefix.length).split('/')) {
-      if (segment === '') {
-        continue;
+  const walk = (entries: DomainDescriptor[]): void => {
+    for (const entry of entries) {
+      if (entry.path.startsWith(prefix)) {
+        let held = parent;
+        for (const segment of entry.path.slice(prefix.length).split('/')) {
+          if (segment === '') {
+            continue;
+          }
+          held = held === '' ? segment : `${held}/${segment}`;
+          if (!seen.has(held)) {
+            seen.add(held);
+            options.push(held);
+          }
+        }
       }
-      held = held === '' ? segment : `${held}/${segment}`;
-      if (!seen.has(held)) {
-        seen.add(held);
-        options.push(held);
-      }
+      walk(entry.subdomains ?? []);
     }
-  }
+  };
+  walk(subdomains);
   return options;
 }
