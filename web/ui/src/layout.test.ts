@@ -274,9 +274,36 @@ describe("sidebar tree row", () => {
     expect(label.whiteSpace).toBe("nowrap");
   });
 
-  it("keeps the toggle and the state marker at their own width", () => {
+  it("keeps the toggle at its own width", () => {
     expect(rowChild("button", "tree-toggle").flex).toBe("0 0 auto");
-    expect(rowChild("span", "label").flex).toBe("0 0 auto");
+  });
+
+  // The marker annotating a row competes with the name for the same 268px.
+  // Set in the section-label type it took enough of the row that
+  // `legal/contracts` rendered as `legal/cont…` beside `NO SUBDOMAINS`, so it
+  // is drawn in the smaller quiet type the design pass gives the slot.
+  it("draws a row marker smaller and quieter than a section label", () => {
+    const marker = rowChild("span", "catalog-marker");
+    const label = rowChild("span", "label");
+    expect(Number.parseFloat(marker.fontSize)).toBeLessThan(
+      Number.parseFloat(label.fontSize),
+    );
+    expect(marker.textTransform).not.toBe("uppercase");
+    expect(marker.letterSpacing).not.toBe(label.letterSpacing);
+  });
+
+  // The name is what the row is for, so the marker is the item the row takes
+  // its shortfall out of.
+  it("takes the row's shortfall out of the marker before the name", () => {
+    const marker = rowChild("span", "catalog-marker");
+    const name = rowChild("a", "mono");
+    expect(Number.parseFloat(marker.flexShrink)).toBeGreaterThan(
+      Number.parseFloat(name.flexShrink || "1"),
+    );
+    expect(marker.minWidth).toBe("0");
+    expect(marker.overflow).toBe("hidden");
+    expect(marker.textOverflow).toBe("ellipsis");
+    expect(marker.whiteSpace).toBe("nowrap");
   });
 });
 
@@ -856,3 +883,4 @@ function propertyRows(count: number): HTMLTableRowElement[] {
   mounted.push(table);
   return rows;
 }
+

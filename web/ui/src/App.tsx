@@ -734,7 +734,7 @@ function TreeNode({
             <span className="mono" title={label}>
               {label}
             </span>
-            <span className="label" data-testid="restricted-domain">
+            <span className="catalog-marker" title="restricted" data-testid="restricted-domain">
               restricted
             </span>
           </>
@@ -761,7 +761,7 @@ function TreeNode({
             retries it, and so does a retry beside it that reaches the
             registry. */}
         {failed && (
-          <span className="label" data-testid="unavailable-domain">
+          <span className="catalog-marker" title="did not load" data-testid="unavailable-domain">
             did not load
           </span>
         )}
@@ -769,7 +769,12 @@ function TreeNode({
             on screen, and it is a status so the outcome reaches a reader who
             pressed the toggle and cannot see the row. */}
         {emptied && (
-          <span className="label" role="status" data-testid="empty-domain">
+          <span
+            className="catalog-marker"
+            title="no subdomains"
+            role="status"
+            data-testid="empty-domain"
+          >
             no subdomains
           </span>
         )}

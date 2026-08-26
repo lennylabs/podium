@@ -782,6 +782,9 @@ describe("the application shell", () => {
     const marker = within(tree).getByTestId("empty-domain");
     expect(marker.getAttribute("role")).toBe("status");
     expect(marker.textContent).toBe("no subdomains");
+    // The marker is drawn in the row's own quiet type. In the section-label
+    // type it was wide enough to push the name it annotates out of the row.
+    expect(marker.className).toBe("catalog-marker");
     expect(within(tree).getByRole("link", { name: "finance" })).toBeTruthy();
     expect(tree.querySelectorAll("p")).toHaveLength(0);
   });
