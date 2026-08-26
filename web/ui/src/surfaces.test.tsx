@@ -21,7 +21,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
 import { parseQueryLine } from "./query";
-import { domainHref, searchHref } from "./route";
+import { artifactHref, domainHref, searchHref } from "./route";
 import type { SessionPosture } from "./session";
 // The stylesheet is imported for its own sake: the wrapping rule the rail
 // depends on is asserted from the computed style it produces.
@@ -420,6 +420,95 @@ describe("the application shell", () => {
       }
       cleanup();
     }
+  });
+
+  // An artifact is reached from the domain browser and lives inside the
+  // hierarchy that section navigates. A shell that marks nothing on an
+  // artifact route leaves the reader with a sidebar saying nothing about
+  // where the open artifact sits, and fails here.
+  it("marks the browse section and the artifact's own domain on an artifact route", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      // The domain holding the artifact sits at the eager read's edge, so the
+      // tree reads its own level once the route opens it.
+      "/v1/load_domain?path=platform%2Fci&depth=2": {
+        body: {
+          path: "platform/ci",
+          subdomains: [{ path: "platform/ci/rules", name: "rules" }],
+          notable: [],
+        },
+      },
+      "/v1/load_domain": { body: catalog },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/ci/lint",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Lint\n",
+          frontmatter: manifestDoc,
+          layer: "platform",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo(artifactHref("platform/ci/lint"));
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const nav = within(screen.getByLabelText("Sections"));
+    // Browse is filled, and it carries the containing marker rather than the
+    // page marker, because the page is the artifact.
+    const browse = nav.getByRole("link", { name: "Browse" });
+    expect(browse.className).toContain("section-link-current");
+    expect(browse.getAttribute("aria-current")).toBe("true");
+    // The tree opened down to the domain holding the artifact and marked it.
+    const domain = await nav.findByRole("link", { name: "ci" });
+    expect(domain.closest(".catalog-row")?.className).toContain(
+      "catalog-row-current",
+    );
+    expect(domain.getAttribute("aria-current")).toBe("location");
+    expect(
+      nav.getByRole("link", { name: "platform" }).getAttribute("aria-current"),
+    ).toBeNull();
+    // The ancestry down to that domain opened, so its own level is on screen
+    // rather than folded behind a collapsed root.
+    expect(nav.getAllByRole("button", { expanded: true }).length).toBe(2);
+    expect(nav.getByRole("link", { name: "rules" })).toBeTruthy();
+  });
+
+  // An artifact registered at the registry root has no domain above it, so
+  // the tree has no row to mark and the section row carries the position on
+  // its own.
+  it("marks the browse section alone for an artifact at the registry root", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: catalog },
+      "/v1/load_artifact": {
+        body: {
+          id: "review",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: manifestDoc,
+          layer: "platform",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo(artifactHref("review"));
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const nav = within(screen.getByLabelText("Sections"));
+    expect(nav.getByRole("link", { name: "Browse" }).className).toContain(
+      "section-link-current",
+    );
+    expect(
+      nav.getByRole("link", { name: "platform" }).getAttribute("aria-current"),
+    ).toBeNull();
+    expect(document.querySelector(".catalog-row-current")).toBeNull();
   });
 
   // The wordmark is the mark the design pass fixed, drawn inline beside the

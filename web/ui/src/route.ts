@@ -50,6 +50,14 @@ export function artifactLeaf(id: string): string {
   return cut < 0 ? id : id.slice(cut + 1);
 }
 
+/** artifactDomain is the §4.2 domain the artifact hangs under, which is where
+ * the sidebar tree puts an open artifact. An artifact registered at the root
+ * carries no domain above it, so the answer there is the empty path. */
+export function artifactDomain(id: string): string {
+  const cut = id.lastIndexOf('/');
+  return cut < 0 ? '' : id.slice(0, cut);
+}
+
 export function searchHref(query: string): string {
   return `#/search/${encodeURIComponent(query)}`;
 }

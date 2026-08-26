@@ -22,7 +22,7 @@ import {
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
 import { domainLabel } from './domain';
-import { domainHref, layersHref, searchHref, useRoute } from './route';
+import { artifactDomain, domainHref, layersHref, searchHref, useRoute } from './route';
 import { since } from './time';
 import type { ThemePreference } from './theme';
 import { useTheme } from './theme';
@@ -229,6 +229,19 @@ export function App() {
   // on the read, so that arm renders neither of them.
   const anonymous = scope === 'public-subset' && subject === '';
 
+  // The sidebar states where the page sits in the §4.2 hierarchy, and an
+  // artifact sits under the domain that holds it. Without this the artifact
+  // viewer draws a sidebar carrying no marked row at all, so nothing on the
+  // left says where the open artifact lives.
+  const treePath =
+    route.name === 'domain'
+      ? route.path
+      : route.name === 'artifact'
+        ? artifactDomain(route.id)
+        : '';
+  const browseState: SectionState =
+    route.name === 'domain' ? 'page' : route.name === 'artifact' ? 'containing' : false;
+
   return (
     <div className="app">
       {/* The sidebar tree stands between the top bar and the content on every
@@ -267,16 +280,20 @@ export function App() {
       )}
       <div className="app-body">
         <nav className="sidebar" aria-label="Sections">
-          <SectionLink href={domainHref('')} current={route.name === 'domain'}>
+          {/* An artifact is reached from the domain browser and hangs inside
+              the hierarchy that section navigates, so its route keeps the
+              Browse row filled. The row carries the containing marker there
+              rather than the page marker, because the page is the artifact. */}
+          <SectionLink href={domainHref('')} current={browseState}>
             Browse
           </SectionLink>
-          <SectionLink href={searchHref('')} current={route.name === 'search'}>
+          <SectionLink href={searchHref('')} current={route.name === 'search' ? 'page' : false}>
             Search
           </SectionLink>
           {/* The layer panel is reachable for every caller on every
               deployment. The nav reads no posture field and predicts no
               outcome the server decides. */}
-          <SectionLink href={layersHref} current={route.name === 'layers'}>
+          <SectionLink href={layersHref} current={route.name === 'layers' ? 'page' : false}>
             Layers
           </SectionLink>
           {/* The label carries no depth marker beside it. The sidebar once
@@ -293,7 +310,8 @@ export function App() {
           <CatalogTree
             nodes={catalogNodes}
             parent=""
-            current={route.name === 'domain' && route.path !== '' ? route.path : null}
+            current={treePath === '' ? null : treePath}
+            currentIsPage={route.name === 'domain'}
             onOutcome={onCatalogOutcome}
             reach={reachNonce}
           />
@@ -448,25 +466,34 @@ function CatalogCounts({ counts, unavailable = false }: { counts: CatalogTotals 
   );
 }
 
+/** SectionState is how a section row stands to the page. `page` is the row
+ * whose surface the page is, `containing` is the row whose surface holds the
+ * page without being it, which is what the artifact viewer stands to the
+ * domain browser, and `false` is every other row. */
+type SectionState = 'page' | 'containing' | false;
+
 /** SectionLink is one row of the sidebar's section navigation. The row for
  * the surface the reader is on is filled and carries `aria-current`, so the
- * shell states which of the §13.10 surfaces the page is, in the sidebar's own
- * terms rather than only in the content beside it. The artifact viewer is
- * reached from a surface rather than being one, so no row is current there. */
+ * shell states which of the §13.10 surfaces the page belongs to, in the
+ * sidebar's own terms rather than only in the content beside it. */
 function SectionLink({
   href,
   current,
   children,
 }: {
   href: string;
-  current: boolean;
+  current: SectionState;
   children: ReactNode;
 }) {
   return (
     <a
       href={href}
-      className={current ? 'section-link section-link-current' : 'section-link'}
-      aria-current={current ? 'page' : undefined}
+      className={current === false ? 'section-link' : 'section-link section-link-current'}
+      // The containing row is not the page, so it takes the set-membership
+      // marker rather than the page marker. A row claiming to be the page
+      // while the reader is on an artifact states something false to a
+      // screen reader the fill says nothing to.
+      aria-current={current === 'page' ? 'page' : current === 'containing' ? true : undefined}
     >
       {children}
     </a>
@@ -488,10 +515,12 @@ function onCurrentPath(path: string, current: string | null): boolean {
  * The levels the eager read returned are rendered at once and a deeper level
  * is read when the reader expands the node it hangs under.
  *
- * `current` is the domain the page is showing, or null on a route that is not
- * a domain. The tree resolves the ancestry down to it and marks it, so a
- * reader who arrived by a link or a breadcrumb sees where in the hierarchy
- * the page sits instead of a row of collapsed roots.
+ * `current` is the domain the page sits at: the one it shows on a domain
+ * route, and the one holding the open artifact on an artifact route. The tree
+ * resolves the ancestry down to it and marks it, so a reader who arrived by a
+ * link or a breadcrumb sees where in the hierarchy the page sits instead of a
+ * row of collapsed roots. `currentIsPage` separates the two: an artifact's
+ * domain is where the page sits without being the page.
  *
  * A level wider than the cap keeps the remainder behind one row. A domain
  * that carries a couple of dozen children otherwise draws a couple of dozen
@@ -502,12 +531,14 @@ function CatalogTree({
   nodes,
   parent,
   current,
+  currentIsPage,
   onOutcome,
   reach,
 }: {
   nodes: DomainDescriptor[];
   parent: string;
   current: string | null;
+  currentIsPage: boolean;
   onOutcome: (err: unknown) => void;
   reach: number;
 }) {
@@ -529,6 +560,7 @@ function CatalogTree({
           node={node}
           parent={parent}
           current={current}
+          currentIsPage={currentIsPage}
           onOutcome={onOutcome}
           reach={reach}
         />
@@ -571,12 +603,14 @@ function TreeNode({
   node,
   parent,
   current,
+  currentIsPage,
   onOutcome,
   reach,
 }: {
   node: DomainDescriptor;
   parent: string;
   current: string | null;
+  currentIsPage: boolean;
   onOutcome: (err: unknown) => void;
   /** reach counts the reads that reached the registry after one that did
    * not. A bump re-issues this node's level, so a node whose read failed
@@ -705,7 +739,10 @@ function TreeNode({
             className="mono"
             href={domainHref(node.path)}
             title={label}
-            aria-current={isCurrent ? 'page' : undefined}
+            // The domain holding an open artifact is where the page sits in
+            // the hierarchy without being the page, so it takes the location
+            // marker there and the page marker on a domain route.
+            aria-current={isCurrent ? (currentIsPage ? 'page' : 'location') : undefined}
           >
             {label}
           </a>
@@ -733,6 +770,7 @@ function TreeNode({
           nodes={children}
           parent={node.path}
           current={current}
+          currentIsPage={currentIsPage}
           onOutcome={onOutcome}
           reach={reach}
         />
