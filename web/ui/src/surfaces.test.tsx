@@ -3669,6 +3669,86 @@ describe("the layer write flows", () => {
     );
   });
 
+  // §4.6 grants to a group name the identity provider supplies and the
+  // registry accepts any string, so a mistyped name registers a layer that
+  // silently admits nobody and no refusal ever names it. No response
+  // enumerates the provider's groups, so the check the form can make is
+  // against the names already granted on the layers the caller can see: the
+  // group axis narrows them as the reader types, states how many of them
+  // match, and enters one on a click. Each entered member removes itself.
+  it("offers the group names already granted, with a match count, and lets an entered group be removed", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ identity_provider_configured: false }),
+      },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ...adminLayer(),
+              // The blank and the repeat are what the panel actually holds:
+              // the names come from several layers' grants, so the list is
+              // deduplicated and an empty entry is dropped rather than
+              // offered as a name.
+              Groups: ["platform-oncall", "secops", " "],
+            },
+            {
+              ...adminLayer(),
+              ID: "compliance",
+              Order: 2,
+              Groups: ["secops", "appsec", "platform-eng"],
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.click(screen.getByLabelText("Groups"));
+    const field = screen.getByLabelText("Group names, separated by commas");
+    const picker = screen.getByTestId("group-picker");
+    // Nothing typed yet, so every known name is on offer.
+    expect(screen.getByTestId("group-picker-count").textContent).toBe(
+      "4 of 4 match",
+    );
+    expect(
+      within(picker)
+        .getAllByRole("button")
+        .map((row) => row.textContent),
+    ).toEqual(["appsec", "platform-eng", "platform-oncall", "secops"]);
+    fireEvent.change(field, { target: { value: "plat" } });
+    expect(screen.getByTestId("group-picker-count").textContent).toBe(
+      "2 of 4 match",
+    );
+    // Picking a row enters that name rather than leaving the reader to
+    // finish typing it, which is what makes the list a check on the spelling.
+    fireEvent.click(within(picker).getByRole("button", { name: "platform-eng" }));
+    expect((field as HTMLInputElement).value).toBe("platform-eng, ");
+    expect(screen.getByTestId("group-picker-count").textContent).toBe(
+      "3 of 4 match",
+    );
+    // The caret returns to the line the pick extended, so naming a second
+    // group is typing rather than a click back into the field.
+    expect(document.activeElement).toBe(field);
+    // A name matching nothing known is drawn as such, because the registry
+    // will accept it without complaint.
+    fireEvent.change(field, {
+      target: { value: "platform-eng, platfrom" },
+    });
+    expect(screen.getByTestId("group-picker-empty").textContent).toBe(
+      "No group granted elsewhere matches “platfrom”.",
+    );
+    // Each member is a token that drops itself from the line.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove platform-eng" }),
+    );
+    expect((field as HTMLInputElement).value).toBe("platfrom");
+    expect(screen.queryByRole("button", { name: "Remove platform-eng" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Remove platfrom" })).toBeTruthy();
+  });
+
   // The registration reloads the list, and the reload answers over the
   // network rather than within the batch that issued it, so the list read is
   // deferred here. The panel must hold the reveal across a reload that

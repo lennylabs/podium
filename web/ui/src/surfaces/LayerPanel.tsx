@@ -11,6 +11,7 @@
 
 import { useRef, useState } from "react";
 
+import { grantedGroups } from "./members";
 import { erasesOn, recoveryDays } from "./recovery";
 import { RegisterLayerForm } from "./RegisterLayerForm";
 import type { ReingestState } from "./ReingestControl";
@@ -251,6 +252,7 @@ export function LayerPanel({
       {registering && (
         <RegisterLayerForm
           subject={subject}
+          knownGroups={grantedGroups(rows)}
           onRegistered={afterWrite}
           onClose={() => {
             setRegistering(false);

@@ -1990,6 +1990,74 @@ label:has(> input:disabled) {
   font-size: 12.5px;
 }
 
+/* A token removes the member it names, so it carries the remove glyph inside
+   itself rather than beside it: the whole token is one target, which is the
+   size a reader clicking a 12px chip needs. */
+.token-drop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--bd);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.token-drop:hover {
+  border-color: var(--acc-deep);
+}
+
+/* The group typeahead sits in the flow under the input rather than over it,
+   so the dialog does not have to grow around an overlay. Three rows are
+   visible and the rest scroll, which bounds the dialog whatever the registry
+   holds. */
+.picker {
+  margin: 8px 0 0;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf2);
+}
+
+.picker-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--bd);
+}
+
+.picker-count {
+  color: var(--sec);
+}
+
+.picker-empty {
+  margin: 0;
+  padding: 9px 10px;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+.picker-rows {
+  max-height: 96px;
+  overflow-y: auto;
+}
+
+.picker-row {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker-row:hover {
+  background: var(--wash);
+}
+
 .consequence {
   margin: 4px 0 0;
   padding: 12px 14px;

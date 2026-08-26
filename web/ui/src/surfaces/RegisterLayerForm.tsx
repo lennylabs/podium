@@ -17,18 +17,23 @@ import type { FormEvent, ReactNode } from 'react';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { revealsSecret, SecretReveal } from './SecretReveal';
-import { members } from './members';
+import { fragment, matchGroups, members, replaceFragment, without } from './members';
 import { ErrorState, Modal } from '../components/primitives';
 import type { LayerRegistration, LayerSecretResult } from '../api';
 import { ApiError, registerLayer } from '../api';
 
 export function RegisterLayerForm({
   subject,
+  knownGroups,
   onRegistered,
   onClose,
   readOnly,
 }: {
   subject: string;
+  /** knownGroups are the group names already granted on the layers the caller
+   * can see. They back the group axis's typeahead, which is the only check the
+   * form can offer on a name before it is sent. */
+  knownGroups: string[];
   onRegistered: () => void;
   onClose: () => void;
   readOnly: boolean;
@@ -259,6 +264,7 @@ export function RegisterLayerForm({
                   value={groups}
                   onChange={setGroups}
                   tokens={groupMembers}
+                  known={knownGroups}
                 />
               </VisibilityAxis>
               <VisibilityAxis
@@ -389,23 +395,40 @@ function VisibilityAxis({
 }
 
 /** TokenInput names the members of a selected axis. The parsed members are
- * echoed back as chips, because a comma-separated line does not show the
- * reader how it was split and a mis-split grant admits the wrong people. */
+ * echoed back as tokens, because a comma-separated line does not show the
+ * reader how it was split and a mis-split grant admits the wrong people. Each
+ * token removes itself, so a member entered by mistake is dropped from the
+ * grant without editing a separator out of the line by hand.
+ *
+ * An axis carrying a list of known names also draws the picker over them. The
+ * field is a text input rather than a wrapping label because the tokens and
+ * the picker rows are controls, and a control inside a label steals the
+ * label's click. */
 function TokenInput({
   label,
   value,
   onChange,
   tokens,
+  known,
 }: {
   label: string;
   value: string;
   onChange: (next: string) => void;
   tokens: string[];
+  /** known is the set of names a value can be checked against. An axis with
+   * no such set, or a set that is empty, draws the input alone. */
+  known?: string[];
 }) {
+  const inputID = useId();
+  const inputRef = useRef<HTMLInputElement | null>(null);
   return (
-    <label className="field token-input">
-      <span className="label">{label}</span>
+    <div className="field token-input">
+      <label className="label" htmlFor={inputID}>
+        {label}
+      </label>
       <input
+        id={inputID}
+        ref={inputRef}
         type="text"
         value={value}
         onChange={(event) => {
@@ -415,13 +438,79 @@ function TokenInput({
       {tokens.length > 0 && (
         <span className="token-row">
           {tokens.map((token) => (
-            <span className="token mono" key={token}>
+            <button
+              type="button"
+              className="token mono token-drop"
+              key={token}
+              aria-label={`Remove ${token}`}
+              onClick={() => {
+                onChange(without(tokens, token).join(', '));
+              }}
+            >
               {token}
-            </span>
+              <span aria-hidden="true">✕</span>
+            </button>
           ))}
         </span>
       )}
-    </label>
+      {known !== undefined && known.length > 0 && (
+        <GroupPicker
+          known={known}
+          value={value}
+          onChange={(next) => {
+            onChange(next);
+            // A pick leaves the caret where the reader was typing. Focus
+            // stays on the row that was clicked otherwise, and the next
+            // characters go nowhere.
+            inputRef.current?.focus();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** GroupPicker is the typeahead the group axis draws under its input. A grant
+ * to a group nobody is in admits nobody, and the refusal for it never comes:
+ * the registry accepts any name, so a typo is a layer that silently serves no
+ * one. The picker states how many known names the part-way entry matches and
+ * enters a match on a click, which is the check the form can make before the
+ * registration is sent. It renders in flow rather than as an overlay so the
+ * dialog does not have to grow around it. */
+function GroupPicker({ known, value, onChange }: { known: string[]; value: string; onChange: (next: string) => void }) {
+  const matches = matchGroups(known, value);
+  const query = fragment(value);
+  return (
+    <div className="picker" data-testid="group-picker">
+      <p className="picker-head">
+        <span className="label">Groups already granted</span>
+        <span className="label picker-count" data-testid="group-picker-count">
+          {matches.length} of {known.length} match
+        </span>
+      </p>
+      {matches.length === 0 ? (
+        <p className="picker-empty" data-testid="group-picker-empty">
+          {query === ''
+            ? 'Every group granted elsewhere is already named here.'
+            : `No group granted elsewhere matches “${query}”.`}
+        </p>
+      ) : (
+        <div className="picker-rows">
+          {matches.map((name) => (
+            <button
+              type="button"
+              className="picker-row mono"
+              key={name}
+              onClick={() => {
+                onChange(replaceFragment(value, name));
+              }}
+            >
+              {name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
