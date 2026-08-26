@@ -251,6 +251,24 @@ describe("the application shell", () => {
     });
   });
 
+  // The footer states a figure, and a figure of one is stated in the singular
+  // the way every other count on the page is. A registry holding one layer
+  // reading "1 layers" is the shell mis-stating what it read.
+  it("states a count of one in the singular in the counts footer", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: catalog },
+      "/v1/search_artifacts": { body: { total_matched: 1 } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+    });
+    render(<App />);
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-counts").textContent).toBe(
+        "1 layer · 1 artifact",
+      );
+    });
+  });
+
   // No response reports how deep the §4.2 hierarchy runs, so the sidebar
   // states nothing about it. The label once carried the prefetch depth, a
   // constant of this navigation, which read "2 levels" beside a tree holding
@@ -796,7 +814,7 @@ describe("the application shell", () => {
       within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
     ).toHaveLength(2);
     expect(screen.getByTestId("catalog-counts").textContent).toBe(
-      "1 layers · 312 artifacts",
+      "1 layer · 312 artifacts",
     );
   });
 
@@ -838,7 +856,7 @@ describe("the application shell", () => {
     ).toHaveLength(2);
     await waitFor(() => {
       expect(screen.getByTestId("catalog-counts").textContent).toBe(
-        "1 layers · 312 artifacts",
+        "1 layer · 312 artifacts",
       );
     });
   });
@@ -4158,7 +4176,7 @@ describe("the layer write flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Unregister layer" }));
     await waitFor(() => {
       expect(screen.getByTestId("catalog-counts").textContent).toBe(
-        "1 layers · 200 artifacts",
+        "1 layer · 200 artifacts",
       );
     });
   });
@@ -4213,7 +4231,7 @@ describe("the layer write flows", () => {
       ).toBeTruthy();
     });
     expect(screen.getByTestId("catalog-counts").textContent).toBe(
-      "1 layers · 10 artifacts",
+      "1 layer · 10 artifacts",
     );
   });
 

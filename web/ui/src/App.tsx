@@ -420,7 +420,8 @@ function CatalogCounts({ counts, unavailable = false }: { counts: CatalogTotals 
   return (
     <>
       <p className="mono quiet" data-testid="catalog-counts">
-        {counts.layers} layers · {counts.artifacts} artifacts
+        {counts.layers} {counts.layers === 1 ? 'layer' : 'layers'} · {counts.artifacts}{' '}
+        {counts.artifacts === 1 ? 'artifact' : 'artifacts'}
       </p>
       <p className="mono quiet" data-testid="catalog-ingest">
         {counts.lastIngest === '' ? 'never ingested' : `ingested ${since(counts.lastIngest, Date.now())}`}
