@@ -369,6 +369,53 @@ describe("the application shell", () => {
     expect(wordmark.textContent).toBe("Podium");
   });
 
+  // Every toggle draws the same glyph, so the accessible name is the only
+  // thing that separates one row's toggle from the next one's. A reader
+  // moving through the tree by keyboard is owed the domain each toggle opens,
+  // and the name states whether pressing it opens or closes that level.
+  it("names each subtree toggle after the domain it expands", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            {
+              path: "finance",
+              name: "finance",
+              subdomains: [{ path: "finance/ap", name: "ap" }],
+            },
+            {
+              path: "eng",
+              name: "eng",
+              subdomains: [{ path: "eng/deploy", name: "deploy" }],
+            },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    const finance = within(tree).getByRole("button", {
+      name: "Expand finance",
+    });
+    expect(
+      within(tree).getByRole("button", { name: "Expand eng" }),
+    ).toBeTruthy();
+    fireEvent.click(finance);
+    expect(
+      within(tree).getByRole("button", { name: "Collapse finance" }),
+    ).toBeTruthy();
+    // The name is the row's own label, so the level the toggle opened carries
+    // named toggles of its own.
+    expect(
+      within(tree).getByRole("button", { name: "Expand ap" }),
+    ).toBeTruthy();
+  });
+
   // A §4.5.5 sparse chain arrives collapsed into one entry whose path holds
   // every segment it crossed and whose name holds only the last one. The row
   // states the stretch of path it navigates across, because a row drawn from

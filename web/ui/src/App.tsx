@@ -567,7 +567,17 @@ function TreeNode({
         {leaf ? (
           <span className="tree-leaf" aria-hidden="true" />
         ) : (
-          <button type="button" className="tree-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
+          // The glyph is the same character on every row, so the toggle takes
+          // its name from the domain it opens. Without it a reader arriving by
+          // keyboard or screen reader meets a run of identically named buttons
+          // and cannot tell which level each one expands.
+          <button
+            type="button"
+            className="tree-toggle"
+            aria-expanded={open}
+            aria-label={`${open ? 'Collapse' : 'Expand'} ${label}`}
+            onClick={() => setOpen(!open)}
+          >
             {open ? '▾' : '▸'}
           </button>
         )}
