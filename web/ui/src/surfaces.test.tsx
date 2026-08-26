@@ -7031,7 +7031,7 @@ describe("the layer write flows", () => {
     );
     expect(surface.textContent).toContain(erasesOn);
     const left = screen.getByTestId("days-left-alice-personal");
-    expect(left.textContent).toBe("1 days left");
+    expect(left.textContent).toBe("2 days left");
     expect(left.className).toContain("accent");
     // The source is on the same record, so the row names where the layer
     // came from rather than its identifier alone.
@@ -7202,14 +7202,41 @@ describe("the layer write flows", () => {
       document.querySelectorAll(".depleting"),
     );
     expect(screen.getByTestId("days-left-alice-roomy").textContent).toBe(
-      "29 days left",
+      "30 days left",
     );
     expect(roomy.className).not.toContain("depleting-urgent");
 
     expect(screen.getByTestId("days-left-alice-expiring").textContent).toBe(
-      "1 days left",
+      "2 days left",
     );
     expect(expiring.className).toContain("depleting-urgent");
+  });
+
+  // The unregister confirmation promises the full §8.4 window and names the
+  // erase date. A layer unregistered moments ago has a fraction of a day
+  // already spent, so a count that dropped the part-day reported one day less
+  // than both the promise and the erase date in its own row.
+  it("reports the whole window on the day the layer is unregistered", async () => {
+    const unregisteredAt = new Date(Date.now() - 30 * 1000);
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }],
+        },
+      },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    const surface = await screen.findByLabelText("Recently unregistered");
+    expect(screen.getByTestId("days-left-alice-personal").textContent).toBe(
+      "30 days left",
+    );
+    expect(surface.textContent).toContain(
+      new Date(unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10),
+    );
   });
 
   // The recovery surface is a page of its own under the panel. It carries a

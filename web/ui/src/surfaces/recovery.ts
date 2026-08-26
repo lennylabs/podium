@@ -16,12 +16,15 @@ export function erasesOn(unregisteredAt: Date): string {
   return new Date(unregisteredAt.getTime() + recoveryDays * dayMillis).toISOString().slice(0, 10);
 }
 
-/** daysLeft returns whole days remaining before erasure, floored at zero. A
- * layer past its window is one the purge job has not reached yet, and the
- * surface reports no time left rather than a negative count. */
+/** daysLeft returns whole days remaining before erasure, floored at zero. The
+ * count rounds a part-day up, so a layer unregistered moments ago reports the
+ * full window the unregister confirmation promised rather than one day less,
+ * and the count agrees with the erase date the same row states. A layer past
+ * its window is one the purge job has not reached yet, and the surface reports
+ * no time left rather than a negative count. */
 export function daysLeft(unregisteredAt: Date, now: number): number {
   const remaining = unregisteredAt.getTime() + recoveryDays * dayMillis - now;
-  return remaining <= 0 ? 0 : Math.floor(remaining / dayMillis);
+  return remaining <= 0 ? 0 : Math.ceil(remaining / dayMillis);
 }
 
 const dayMillis = 24 * 60 * 60 * 1000;
