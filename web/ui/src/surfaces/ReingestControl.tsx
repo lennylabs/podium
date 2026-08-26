@@ -514,7 +514,7 @@ function AdvisoryList({
         {advisories.map((advisory) => (
           <li key={`${advisory.artifact_id}:${advisory.code}`}>
             <p className="advisory-head">
-              <Badge tone={severityTone(advisory.severity)}>{advisory.severity.toUpperCase()}</Badge>{' '}
+              <Badge tone={severityTone(advisory.severity)}>{severityLabel(advisory.severity)}</Badge>{' '}
               <span className="mono">{advisory.artifact_id}</span>{' '}
               <span className="mono quiet">{advisory.code}</span>
             </p>
@@ -524,6 +524,17 @@ function AdvisoryList({
       </ul>
     </section>
   );
+}
+
+/** severityLabel is what the severity badge reads. The pipeline names its
+ * severities in full and the badge is a fixed narrow marker beside a
+ * full-width artifact id, so `warning` is abbreviated to the WARN the rest of
+ * the surface uses. A severity with no abbreviation is uppercased as it
+ * stands, which keeps a severity the linter gains readable without a change
+ * here. */
+function severityLabel(severity: string): string {
+  const abbreviated: Record<string, string> = { warning: 'WARN' };
+  return abbreviated[severity.toLowerCase()] ?? severity.toUpperCase();
 }
 
 /** severityTone marks a warning apart from the rest. The pipeline raises

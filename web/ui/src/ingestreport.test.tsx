@@ -187,9 +187,21 @@ describe('the finished reingest report', () => {
     const listed = () => within(screen.getByLabelText('Advisories')).getAllByRole('listitem');
     expect(listed().length).toBe(2);
     // The severity leads each row, so an advisory is not read as a rejection.
-    expect(within(screen.getByLabelText('Advisories')).getByText('WARNING')).toBeTruthy();
+    expect(within(screen.getByLabelText('Advisories')).getByText('WARN')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'See all 14' }));
     expect(listed().length).toBe(14);
+  });
+
+  // The badge is a fixed narrow marker beside a full-width artifact id, and
+  // the pipeline names its severities in full. The badge therefore reads WARN
+  // rather than the WARNING the response carries, and a severity with no
+  // abbreviation is drawn as it stands.
+  it('abbreviates the warning severity badge and leaves the rest as they stand', () => {
+    report({ accepted: 1, idempotent: 0, advisories: advisories(2) });
+    const list = within(screen.getByLabelText('Advisories'));
+    expect(list.getByText('WARN')).toBeTruthy();
+    expect(list.queryByText('WARNING')).toBeNull();
+    expect(list.getByText('INFO')).toBeTruthy();
   });
 
   // A list that fits needs no control offering the rest of it.
