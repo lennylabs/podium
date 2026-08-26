@@ -15,6 +15,7 @@ import type { KeyboardEvent } from 'react';
 
 import { ArtifactBody } from '../components/ArtifactBody';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { Lead } from '../components/Lead';
 import {
   Badge,
   CopyButton,
@@ -117,7 +118,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           <SensitivityBadge sensitivity={body.sensitivity} />
         </div>
         <p className="mono quiet artifact-id-line">{body.id}</p>
-        {description !== '' && <p className="lead">{description}</p>}
+        {description !== '' && <Lead text={description} />}
         <div className="artifact-meta">
           <VersionPicker
             key={viewing}

@@ -138,6 +138,17 @@ describe("artifact row description", () => {
     expect(description.overflow).toBe("hidden");
     expect(description.maxWidth).toBe("720px");
   });
+
+  // The artifact header states the same field above the version picker, the
+  // tabs, and the body, so it reads at the same clip until the reader opens
+  // it.
+  it("clips the header description to the same three lines", () => {
+    const lead = styled("lead lead-clamped");
+    expect(lead.getPropertyValue("-webkit-line-clamp")).toBe("3");
+    expect(lead.display).toBe("-webkit-box");
+    expect(lead.overflow).toBe("hidden");
+    expect(lead.maxWidth).toBe("720px");
+  });
 });
 
 // A sidebar tree label is the whole folded stretch of path a §4.5.5 sparse

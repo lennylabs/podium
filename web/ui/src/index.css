@@ -442,6 +442,15 @@ h3 {
   text-wrap: pretty;
 }
 
+/* The control that opens a clipped header description. It sits on its own row
+   under the text so it does not narrow the measure. */
+.lead-more {
+  display: block;
+  margin: 6px 0 0;
+  padding: 2px 8px;
+  font-size: 12.5px;
+}
+
 .quiet {
   color: var(--meta);
 }
@@ -795,6 +804,12 @@ h2.label {
   color: var(--sec);
   max-width: 720px;
   text-wrap: pretty;
+}
+
+/* The three-line clip both surfaces read the same description at. The listing
+   row always clips; the artifact header clips until the reader opens it. */
+.artifact-description,
+.lead-clamped {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;

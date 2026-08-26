@@ -1502,7 +1502,7 @@ describe("the artifact viewer", () => {
     ).getAllByRole("heading", { level: 1 })[0];
     const content = heading.closest(".artifact-content") as HTMLElement;
     const lead = within(content).getByText("Pay a supplier invoice.");
-    expect(lead.className).toBe("lead");
+    expect(lead.classList.contains("lead")).toBe(true);
     // The description stands between the identifier line and the version
     // picker, which is where the header states it for every other type.
     const identifier = within(content).getByText(
@@ -2146,6 +2146,90 @@ describe("the artifact viewer", () => {
     expect(screen.getAllByTestId("offending-line")[0].textContent).toContain(
       "bad: tab",
     );
+  });
+
+  // A description is author-controlled and carries no length bound, and the
+  // header states it above the version picker, the tabs, and the body. Left
+  // unclipped, a description of several hundred words pushes all of them
+  // below the fold and the artifact reads as empty until the reader scrolls,
+  // while the listing row that linked to the page clips the same string.
+  // jsdom performs no layout, so the two heights the control reads are
+  // stubbed and the clip itself is pinned in the layout case set.
+  describe("the header description", () => {
+    /** stubHeights makes a clipped paragraph report the overrun a browser
+     * would measure on it, and an opened one report none. */
+    function stubHeights(scrollHeight: number) {
+      const clientHeight = 60;
+      Object.defineProperty(HTMLParagraphElement.prototype, "scrollHeight", {
+        configurable: true,
+        get(this: HTMLParagraphElement) {
+          return this.classList.contains("lead-clamped")
+            ? scrollHeight
+            : clientHeight;
+        },
+      });
+      Object.defineProperty(HTMLParagraphElement.prototype, "clientHeight", {
+        configurable: true,
+        get: () => clientHeight,
+      });
+    }
+
+    afterEach(() => {
+      delete (HTMLParagraphElement.prototype as { scrollHeight?: number })
+        .scrollHeight;
+      delete (HTMLParagraphElement.prototype as { clientHeight?: number })
+        .clientHeight;
+    });
+
+    function stubViewer(description: string) {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": {
+          body: {
+            id: "edge/many-tags",
+            type: "context",
+            version: "0.1.0",
+            content_hash: "sha256:abc",
+            manifest_body: "# Many tags\n",
+            frontmatter: `---\nname: many-tags\ndescription: ${description}\n---\n`,
+          },
+        },
+        "/v1/dependents": { body: { edges: [] } },
+      });
+      goTo("#/artifact/edge%2Fmany-tags");
+      render(<App />);
+    }
+
+    it("clips a long description and opens it on request", async () => {
+      stubHeights(900);
+      stubViewer("The invoice approval path routes each document.");
+      await screen.findByLabelText("Artifact viewer");
+      const lead = screen.getByTestId("artifact-lead");
+      expect(lead.classList.contains("lead-clamped")).toBe(true);
+      const more = await screen.findByRole("button", { name: "Show more" });
+      expect(more.getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(more);
+      expect(
+        screen.getByTestId("artifact-lead").classList.contains("lead-clamped"),
+      ).toBe(false);
+      const less = screen.getByRole("button", { name: "Show less" });
+      expect(less.getAttribute("aria-expanded")).toBe("true");
+      // Collapsing restores the clip, so the control is not a one-way door.
+      fireEvent.click(less);
+      expect(
+        screen.getByTestId("artifact-lead").classList.contains("lead-clamped"),
+      ).toBe(true);
+    });
+
+    it("offers no control for a description the clip already holds", async () => {
+      stubHeights(60);
+      stubViewer("Pay a supplier invoice.");
+      await screen.findByLabelText("Artifact viewer");
+      expect(screen.getByTestId("artifact-lead").textContent).toBe(
+        "Pay a supplier invoice.",
+      );
+      expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    });
   });
 });
 
