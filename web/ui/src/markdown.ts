@@ -8,11 +8,10 @@
 // the renderer passes through as markup is neutralized. No executable node
 // and no event-handler attribute survives, and the allowlist admits no URL
 // scheme other than http, https, and mailto on any attribute it keeps.
-// Beyond that rule, the path drops the form controls and holds every
-// attribute the browser fetches on its own to the registry's own origin, so
-// an author can neither prompt a reader for a credential on the origin the
-// session cookie is scoped to nor turn a view of an artifact into a request
-// to a host the author picked.
+// Beyond that rule, the path drops the form controls and drops every
+// attribute the browser fetches on its own, so an author can neither prompt a
+// reader for a credential on the origin the session cookie is scoped to nor
+// turn a view of an artifact into a request the reader never asked for.
 //
 // Frontmatter does not reach this path. It is parsed into a property table
 // whose values render as text.
@@ -41,18 +40,31 @@ const allowedURI = /^(?:(?:https?|mailto):|(?![a-z][a-z0-9+.\-]*:))/i;
 // of them is re-tested against the allowlist below.
 const linkAttributes = ['href', 'action', 'formaction'];
 
-// The attributes that carry a single URL the browser fetches on its own as it
-// lays the document out. A fetch the reader never asked for reaches the host
-// it names with the reader's IP address, User-Agent, and Referer, so an
-// author-controlled body does not get to name a foreign host on one of them.
-const fetchAttributes = ['src', 'xlink:href', 'background', 'poster'];
-
-// The attributes that carry a candidate list rather than a single URL, each
-// of them a fetching attribute. A candidate is a URL followed by an optional
-// descriptor, and the candidates are separated by commas, so a test that
-// reads the whole value inspects the leading candidate alone and keeps every
-// later one verbatim.
-const candidateListAttributes = ['srcset', 'imagesrcset'];
+// The attributes the browser fetches on its own as it lays the document out,
+// whether they carry a single URL or a comma-separated candidate list. None
+// of them survives, whatever URL it carries.
+//
+// A fetch the reader never asked for reaches a foreign host with the reader's
+// IP address, User-Agent, and Referer. A same-origin one is worse rather than
+// safer: the registry serves its API on the origin the UI is served from, so
+// a body carrying `<img src="/v1/catalog?probe=1">` makes every reader's
+// browser issue an author-chosen credentialed GET against the API, carrying
+// whatever session cookie that reader holds. Confining these attributes to an
+// asset prefix that cannot reach `/v1/` would need such a prefix to exist,
+// and the registry serves no per-artifact asset route, so a body has nothing
+// legitimate to name on one of them and the whole class is dropped.
+//
+// A link attribute is a different case and keeps its allowlist test above:
+// following one takes a deliberate act by the reader, and the destination is
+// visible before the act.
+const fetchAttributes = [
+  'src',
+  'xlink:href',
+  'background',
+  'poster',
+  'srcset',
+  'imagesrcset',
+];
 
 // A browser ignores leading and embedded whitespace and control characters
 // when it resolves a URL's scheme, so the test runs on the value with those
@@ -66,47 +78,18 @@ function allows(url: string): boolean {
   return allowedURI.test(url.replace(attributeWhitespace, ''));
 }
 
-// A URL that names a host resolves to a foreign origin, whether it spells the
-// scheme out or leaves it to the document in the scheme-relative form. The
-// two productions are the whole of what a value has to avoid to resolve
-// against the registry's own origin.
-const hostBearingURL = /^(?:[a-z][a-z0-9+.\-]*:|\/\/)/i;
-
-/** allowsLocal reports whether one URL passes the allowlist and resolves
- * against the registry's own origin. It governs the attributes a browser
- * fetches without the reader acting, so a body cannot turn a view of an
- * artifact into a request to a host the author picked. */
-function allowsLocal(url: string): boolean {
-  const value = url.replace(attributeWhitespace, '');
-  return allows(value) && !hostBearingURL.test(value);
-}
-
-/** allowsEveryCandidate reports whether every candidate in a candidate list
- * passes the test a fetching attribute carries, because every candidate list
- * is one. A candidate's descriptor is separated from its URL by
- * whitespace, which the test removes, so the descriptor joins the relative
- * path it follows and changes no verdict. A URL that itself carries a comma
- * splits into fragments that are each tested, so a data: URL whose payload
- * carries one fails on its own scheme-bearing fragment. The attribute is
- * dropped whole when any candidate fails, so a list is never rewritten into a
- * shorter one the author did not write. */
-function allowsEveryCandidate(value: string): boolean {
-  const candidates = value.split(',').filter((candidate) => candidate.trim() !== '');
-  return candidates.length > 0 && candidates.every(allowsLocal);
-}
-
 // The allowlist above is expressed to the sanitizer as its URI pattern, but
 // that pattern is one of several branches the sanitizer admits a URL on: it
 // keeps a data: URL on a media element's source attribute whatever the
 // pattern says, and it tests a candidate list by its leading candidate alone.
 // The rule admits no scheme other than http, https, and mailto on any
-// attribute the sanitizer keeps, so this hook re-tests every URL attribute
+// attribute the sanitizer keeps, so this hook re-tests every link attribute
 // that survived and drops the ones no scheme in the allowlist covers. It
 // closes the element branches at once rather than naming the media elements,
 // so a sanitizer release that adds one does not reopen them. The hook also
-// holds the fetching attributes to the registry's own origin, which the
-// sanitizer's URI pattern cannot express because it runs on every attribute
-// alike and a link to a foreign host stays legitimate.
+// drops the fetching attributes outright, which the sanitizer's URI pattern
+// cannot express because it runs on every attribute alike and a link the
+// reader chooses to follow stays legitimate.
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {
   if (!(node instanceof Element)) {
     return;
@@ -118,16 +101,7 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
     }
   }
   for (const name of fetchAttributes) {
-    const value = node.getAttribute(name);
-    if (value !== null && !allowsLocal(value)) {
-      node.removeAttribute(name);
-    }
-  }
-  for (const name of candidateListAttributes) {
-    const value = node.getAttribute(name);
-    if (value !== null && !allowsEveryCandidate(value)) {
-      node.removeAttribute(name);
-    }
+    node.removeAttribute(name);
   }
   clearMarkers(node);
   markStrippedLink(node);
@@ -142,8 +116,8 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 const strippedLinkClass = 'link-stripped';
 
 // The class the note left in place of an image carries. An image whose source
-// the allowlist refused has nothing left to draw, and the element on its own
-// draws the browser's broken-image placeholder, which tells the reader that
+// the hook removed has nothing left to draw, and the element on its own draws
+// the browser's broken-image placeholder, which tells the reader that
 // something failed rather than that the viewer refused the source. The note
 // names the removal in the same terms the stripped link uses.
 const strippedImageClass = 'image-stripped';

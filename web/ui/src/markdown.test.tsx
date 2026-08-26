@@ -151,12 +151,34 @@ describe('the sanitized artifact-body rendering path', () => {
     }
   });
 
+  // A fetching attribute that resolves against this origin is the dangerous
+  // case rather than the safe one. The registry serves its API on the origin
+  // the UI is served from, so a body that names an API path on one makes
+  // every reader's browser issue an author-chosen credentialed request
+  // against the API. A relative source with no path at all resolves against
+  // the UI mount and reaches the binary just the same. Neither survives.
+  it('keeps no fetching attribute that resolves against this origin', () => {
+    const bodies = [
+      '![probe](/v1/catalog?authorprobe=1)\n',
+      '<img src="/v1/catalog?authorprobe=1" alt="probe">\n',
+      '<img src="x" alt="probe">\n',
+      '<img srcset="/v1/catalog?authorprobe=1 1x" alt="probe">\n',
+      '<img src="/assets/x.png" alt="probe">\n',
+      '<video poster="/v1/catalog?authorprobe=1"></video>\n',
+    ];
+    for (const body of bodies) {
+      const container = renderBody(body);
+      expect(attributeValues(container).some((value) => value.includes('authorprobe'))).toBe(false);
+      expect(container.querySelector('[src], [srcset], [poster]')).toBeNull();
+    }
+  });
+
   // A link is followed by the reader rather than by the browser, so it keeps
-  // its host, and an image that resolves against this origin keeps its URL.
-  it('keeps a link to a foreign host and an image on this origin', () => {
-    const container = renderBody('[Go](https://example.com/a)\n\n![x](/assets/x.png)\n');
-    expect(container.querySelector('a')?.getAttribute('href')).toBe('https://example.com/a');
-    expect(container.querySelector('img')?.getAttribute('src')).toBe('/assets/x.png');
+  // its host, and a relative link keeps its destination.
+  it('keeps a link to a foreign host and a link on this origin', () => {
+    const container = renderBody('[Go](https://example.com/a)\n\n[Here](/ui/#/layers)\n');
+    const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href'));
+    expect(hrefs).toEqual(['https://example.com/a', '/ui/#/layers']);
   });
 
   // An anchor whose destination the allowlist refused keeps its element and
@@ -182,16 +204,18 @@ describe('the sanitized artifact-body rendering path', () => {
     expect(live?.classList.contains('link-stripped')).toBe(false);
   });
 
-  // An image whose source the allowlist refused has nothing left to draw, and
-  // the element on its own draws the browser's broken-image placeholder. The
-  // rendering path replaces it with a note carrying its alt text, which the
-  // stylesheet names the removal beside. The marker is stripped from every
-  // node the body writes it on, so a body cannot pass an image of its own off
-  // as a neutralized one.
+  // An image whose source the rendering path removed has nothing left to
+  // draw, and the element on its own draws the browser's broken-image
+  // placeholder. The path replaces it with a note carrying its alt text,
+  // which the stylesheet names the removal beside. The marker is stripped
+  // from every node the body writes it on, so a body cannot pass an element
+  // of its own off as a neutralized one.
   it('replaces an image whose source it removed with a note', () => {
     const stripped = [
       '<img src="https://example.com/track.gif?u=1" alt="a beacon" width="10">\n',
       '<img srcset="https://example.com/track.gif?u=1 1x" alt="a beacon">\n',
+      '<img src="/v1/catalog?authorprobe=1" alt="a beacon">\n',
+      '<img src="x" alt="a beacon">\n',
     ];
     for (const body of stripped) {
       const container = renderBody(body);
@@ -200,8 +224,8 @@ describe('the sanitized artifact-body rendering path', () => {
       expect(note?.textContent).toBe('a beacon');
     }
 
-    const live = renderBody('<img class="image-stripped" src="/assets/x.png" alt="local">\n');
-    expect(live.querySelector('img')?.getAttribute('src')).toBe('/assets/x.png');
+    const live = renderBody('<p class="image-stripped">local</p>\n');
+    expect(live.querySelector('p')?.textContent).toBe('local');
     expect(live.querySelector('.image-stripped')).toBeNull();
   });
 
