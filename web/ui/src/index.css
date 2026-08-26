@@ -293,21 +293,9 @@ h3 {
   font-weight: 600;
 }
 
-/* The catalog section label carries the depth marker at its right. */
+/* The catalog section label heads the tree below it. */
 .catalog-label {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
   margin: 18px 0 6px;
-}
-
-/* The depth marker is an annotation on the Catalog label rather than a second
-   section label, so it drops the uppercasing and the tracking that would put
-   it in competition with the label it sits beside. */
-.catalog-depth {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--faint);
 }
 
 .catalog-tree,

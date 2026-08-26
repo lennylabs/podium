@@ -204,10 +204,10 @@ describe("the application shell", () => {
     notable: [],
   };
 
-  // The shell is one layout on every screen: the nav, the catalog label with
-  // its depth marker, the tree, and the counts footer pinned under it. The
-  // tree is eager to two levels and reads a deeper level when the reader
-  // expands the node it hangs under.
+  // The shell is one layout on every screen: the nav, the catalog label, the
+  // tree, and the counts footer pinned under it. The tree is eager to two
+  // levels and reads a deeper level when the reader expands the node it
+  // hangs under.
   it("renders the catalog tree, reads a deeper level on expand, and states the counts", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -224,11 +224,6 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    const depth = screen.getByTestId("catalog-depth");
-    expect(depth.textContent).toBe("2 levels");
-    // The marker annotates the Catalog label rather than repeating it, so it
-    // carries its own class and not the uppercased, tracked section label.
-    expect(depth.className).toBe("catalog-depth");
     // Both eager levels are in the response, so the second one is rendered
     // from it rather than read again.
     fireEvent.click(
@@ -254,6 +249,29 @@ describe("the application shell", () => {
         true,
       );
     });
+  });
+
+  // No response reports how deep the §4.2 hierarchy runs, so the sidebar
+  // states nothing about it. The label once carried the prefetch depth, a
+  // constant of this navigation, which read "2 levels" beside a tree holding
+  // a chain five segments long.
+  it("states no catalog depth beside the label", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [{ path: "a/b/c/d/e", name: "e" }],
+          notable: [],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 1 } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+    });
+    render(<App />);
+    const sidebar = await screen.findByLabelText("Sections");
+    expect(within(sidebar).getByText("a/b/c/d/e")).toBeTruthy();
+    expect(within(sidebar).queryByText(/levels/)).toBeNull();
   });
 
   // The tree is the shell's statement of where the reader is in the §4.2
@@ -689,9 +707,7 @@ describe("the application shell", () => {
   });
 
   // The refused arm has no catalog to navigate. The tree and the counts are
-  // emptied rather than left standing with what an earlier read returned,
-  // and the depth marker is kept, because it states a property of this
-  // navigation rather than of the catalog.
+  // emptied rather than left standing with what an earlier read returned.
   it("empties the tree and the counts where the catalog read is refused", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture() },
@@ -709,16 +725,14 @@ describe("the application shell", () => {
     ).toEqual([]);
     expect(screen.getByTestId("catalog-counts").textContent).toBe("");
     expect(screen.queryByTestId("catalog-ingest")).toBeNull();
-    expect(screen.getByTestId("catalog-depth").textContent).toBe("2 levels");
   });
 
   // A catalog read that failed for a reason other than identity leaves the
   // sidebar with no tree. The tree region says the read failed rather than
-  // rendering blank, and the footer figures and the depth marker are
-  // withdrawn, because the counts are read once for the page and a figure
-  // left standing over a registry that stopped answering states it as
-  // current.
-  it("says the catalog read failed and withdraws the counts and the depth marker", async () => {
+  // rendering blank, and the footer figures are withdrawn, because the
+  // counts are read once for the page and a figure left standing over a
+  // registry that stopped answering states it as current.
+  it("says the catalog read failed and withdraws the counts", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/load_domain": {
@@ -741,7 +755,6 @@ describe("the application shell", () => {
     expect(
       within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
     ).toEqual([]);
-    expect(screen.queryByTestId("catalog-depth")).toBeNull();
     expect(screen.queryByTestId("catalog-empty")).toBeNull();
     expect(screen.getByTestId("catalog-counts").textContent).toBe(
       "Counts unavailable",
@@ -785,7 +798,6 @@ describe("the application shell", () => {
     expect(screen.getByTestId("catalog-counts").textContent).toBe(
       "1 layers · 312 artifacts",
     );
-    expect(screen.getByTestId("catalog-depth").textContent).toBe("2 levels");
   });
 
   // The surface beside the sidebar owns its own read, and that read answering
@@ -832,9 +844,7 @@ describe("the application shell", () => {
   });
 
   // A read that returned a catalog holding no domain gets a line saying so.
-  // The depth marker goes with the tree it describes, because a descent
-  // stated over an empty sidebar reads as a tree that failed to render.
-  it("states that the catalog holds no domains and drops the depth marker", async () => {
+  it("states that the catalog holds no domains", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/load_domain": { body: emptyDomain },
@@ -848,7 +858,6 @@ describe("the application shell", () => {
         "The catalog holds no domains.",
       );
     });
-    expect(screen.queryByTestId("catalog-depth")).toBeNull();
   });
 });
 

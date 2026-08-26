@@ -264,21 +264,14 @@ export function App() {
           <SectionLink href={layersHref} current={route.name === 'layers'}>
             Layers
           </SectionLink>
+          {/* The label carries no depth marker beside it. The sidebar once
+              printed the prefetch depth here, which is a constant of this
+              navigation and never varies with the catalog it sits over, so a
+              hierarchy running six levels deep read "2 levels" beside a tree
+              holding the deeper node. No response reports how deep the
+              catalog runs, so the marker is dropped rather than restated. */}
           <p className="catalog-label">
             <span className="label">Catalog</span>
-            {/* The depth marker names how deep the sidebar resolves the tree
-                rather than how deep the catalog runs, which no response
-                reports. It is kept on the refused arm, because it states a
-                property of this navigation rather than anything about what
-                the catalog holds. It is dropped where the read returned no
-                domain and where it failed, because there the marker stands
-                over nothing and describes a descent the reader cannot
-                make. */}
-            {!catalogEmpty && !catalogFailed && (
-              <span className="catalog-depth" data-testid="catalog-depth">
-                {treeDepth} levels
-              </span>
-            )}
           </p>
           {/* The refused arm has no catalog to navigate, so the tree and the
               counts are empty rather than absent. */}
