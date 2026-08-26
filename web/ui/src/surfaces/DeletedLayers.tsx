@@ -1,7 +1,10 @@
 // What is still recoverable. Unregistering a layer removes its artifacts from
 // every caller's effective view at once and soft-deletes the layer for a
 // retention window, so the panel carries a surface for the layers that have
-// not been erased.
+// not been erased. It is a page of its own rather than a section inside the
+// panel, because it carries a table and the panel carries another: rendered
+// together, the reader gets two stacked tables and the precedence label and
+// the layer rows are pushed down by the height of this one.
 //
 // The question this surface answers is how long is left, so every row states
 // the date it was unregistered, the date it is erased on, and how much of the
@@ -12,6 +15,7 @@ import { useState } from 'react';
 
 import { accentDays, daysLeft, erasesOn, recoveryDays } from './recovery';
 import { EmptyState, ErrorState, Loading } from '../components/primitives';
+import { layersHref } from '../route';
 import { SourceCell } from '../components/SourceCell';
 import type { LayerRecord } from '../api';
 import { ApiError, listDeletedLayers, restoreLayer } from '../api';
@@ -42,9 +46,20 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
   };
 
   return (
-    <section aria-label="Recently unregistered">
-      <h2>Recently unregistered</h2>
-      <p className="quiet">A layer stays restorable for {recoveryDays} days, after which it is erased.</p>
+    <section className="surface" aria-label="Recently unregistered">
+      {/* The trail leads back to the panel, which is where the reader came
+          from and where the layer this surface restores is listed again. */}
+      <nav className="breadcrumb" aria-label="Breadcrumb">
+        <a href={layersHref}>Layers</a>
+        <span className="breadcrumb-sep" aria-hidden="true">
+          /
+        </span>
+        <span className="breadcrumb-here" aria-current="page">
+          Recently unregistered
+        </span>
+      </nav>
+      <h1>Recently unregistered</h1>
+      <p className="lead">A layer stays restorable for {recoveryDays} days, after which it is erased.</p>
       {rows.length === 0 ? (
         <EmptyState>Nothing is waiting to be erased.</EmptyState>
       ) : (
@@ -71,6 +86,13 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
           <span className="mono">{refusal instanceof ApiError ? refusal.code : 'registry.unavailable'}</span>
         </p>
       )}
+      {/* What a restore does, stated where the reader decides to press it.
+          The precedence it returns to and the ID collision that refuses it
+          are both outcomes the button alone does not name. */}
+      <p className="quiet">
+        Restoring puts the layer back at its previous precedence. Where an artifact ID it carries now exists in another
+        layer, the restore is refused and names it.
+      </p>
     </section>
   );
 }

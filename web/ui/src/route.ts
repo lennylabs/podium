@@ -9,7 +9,11 @@ export type Route =
   | { name: 'domain'; path: string }
   | { name: 'search'; query: string }
   | { name: 'artifact'; id: string }
-  | { name: 'layers' };
+  // deleted selects the recovery surface, which is a page of its own under
+  // the panel rather than a section inside it: it carries its own table, and
+  // stacking that table above the panel's pushes the precedence label and the
+  // layer rows off the first screen.
+  | { name: 'layers'; deleted: boolean };
 
 export function parseRoute(hash: string): Route {
   const raw = hash.replace(/^#\/?/, '');
@@ -21,7 +25,7 @@ export function parseRoute(hash: string): Route {
     case 'artifact':
       return { name: 'artifact', id: tail };
     case 'layers':
-      return { name: 'layers' };
+      return { name: 'layers', deleted: tail === 'deleted' };
     case 'domain':
       return { name: 'domain', path: tail };
     default:
@@ -51,6 +55,10 @@ export function searchHref(query: string): string {
 }
 
 export const layersHref = '#/layers';
+
+/** deletedLayersHref addresses the recovery surface. It hangs under the panel
+ * because a restore is a layer write and the trail above it leads back there. */
+export const deletedLayersHref = '#/layers/deleted';
 
 /**
  * replaceRoute rewrites the current history entry to `href` without pushing a

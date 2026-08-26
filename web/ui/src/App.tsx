@@ -32,6 +32,7 @@ import { DomainBrowser } from './surfaces/DomainBrowser';
 import { SearchSurface } from './surfaces/SearchSurface';
 import { ArtifactViewer } from './surfaces/ArtifactViewer';
 import { LayerPanel } from './surfaces/LayerPanel';
+import { DeletedLayers } from './surfaces/DeletedLayers';
 
 /** treeDepth is how many levels of the domain hierarchy the sidebar tree
  * resolves eagerly. A level below that edge is read when the reader expands
@@ -308,7 +309,13 @@ function Surface({
     case 'artifact':
       return <ArtifactViewer id={route.id} onError={onCatalogOutcome} />;
     case 'layers':
-      return <LayerPanel subject={subject} readOnly={readOnly} onCatalogChange={onCatalogChange} />;
+      // A restore moves the same figures the sidebar footer states, so the
+      // recovery surface reports it the way every other layer write does.
+      return route.deleted ? (
+        <DeletedLayers onRestored={onCatalogChange} readOnly={readOnly} />
+      ) : (
+        <LayerPanel subject={subject} readOnly={readOnly} onCatalogChange={onCatalogChange} />
+      );
     case 'domain':
       return <DomainBrowser path={route.path} onError={onCatalogOutcome} />;
   }

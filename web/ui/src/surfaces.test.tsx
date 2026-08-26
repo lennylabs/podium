@@ -3109,8 +3109,11 @@ describe("read-only mode", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     await screen.findByTestId("read-only-banner");
-    fireEvent.click(screen.getByTestId("recoverable-link"));
-    await screen.findByLabelText("Recently unregistered");
+    // The panel's own recoverable count is a second layer read, and it
+    // carries the marker on no mode either.
+    await waitFor(() => {
+      expect(requests.some((r) => r.url.includes("deleted=true"))).toBe(true);
+    });
     expect(screen.getByTestId("read-only-banner")).toBeTruthy();
   });
 
@@ -4516,16 +4519,6 @@ describe("the layer write flows", () => {
   // and how much of the §8.4 window remains. A row inside the accent window
   // says so, because that is the row to act on today.
   it("lists what is still recoverable with its erase date and restores it", async () => {
-    stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
-      "/v1/layers": { body: { layers: [] } },
-      "/v1/layers/restore": { body: {} },
-    });
-    goTo("#/layers");
-    render(<App />);
-    await screen.findByLabelText("Layer panel");
-    // The deleted read answers on the same path with a query argument, so
-    // the stub is swapped once the panel is up.
     const unregisteredAt = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
@@ -4536,7 +4529,8 @@ describe("the layer write flows", () => {
       },
       "/v1/layers/restore": { body: {} },
     });
-    fireEvent.click(screen.getByTestId("recoverable-link"));
+    goTo("#/layers/deleted");
+    render(<App />);
     const surface = await screen.findByLabelText("Recently unregistered");
     const erasesOn = new Date(
       unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000,
@@ -4563,6 +4557,63 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The recovery surface is a page of its own under the panel. It carries a
+  // table and the panel carries another, so rendered together the reader gets
+  // two stacked tables and the precedence label and the layer rows are pushed
+  // down by the height of this one. The panel's link is what leads there, and
+  // the trail above the surface leads back.
+  it("gives the recovery surface a page of its own under the panel", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": {
+        body: {
+          layers: [
+            {
+              ...userLayer(),
+              ID: "alice-old",
+              DeletedAt: new Date().toISOString(),
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    const link = screen.getByTestId("recoverable-link");
+    await waitFor(() => {
+      expect(link.textContent).toBe("\u21ba Recently unregistered \u00b7 1");
+    });
+    // The link leads to the surface rather than opening it inside the panel,
+    // so the panel carries its own table alone.
+    expect(link.getAttribute("href")).toBe("#/layers/deleted");
+    expect(screen.queryByLabelText("Recently unregistered")).toBe(null);
+    expect(within(panel).getAllByRole("table")).toHaveLength(1);
+
+    goTo("#/layers/deleted");
+    const surface = await screen.findByLabelText("Recently unregistered");
+    // The layer table is not on this screen.
+    expect(screen.queryByLabelText("Layer panel")).toBe(null);
+    expect(document.body.textContent).not.toContain(
+      "drag or press the arrow keys",
+    );
+    expect(
+      within(surface).getByRole("heading", { name: "Recently unregistered" })
+        .tagName,
+    ).toBe("H1");
+    const trail = within(surface).getByLabelText("Breadcrumb");
+    expect(trail.textContent).toBe("Layers/Recently unregistered");
+    expect(
+      within(trail).getByRole("link", { name: "Layers" }).getAttribute("href"),
+    ).toBe("#/layers");
+    // What a restore does closes the page, because the button alone names
+    // neither the precedence it returns to nor the refusal it can meet.
+    expect(surface.textContent).toContain(
+      "Restoring puts the layer back at its previous precedence.",
+    );
+  });
+
   // A record carrying no tombstone time states that rather than computing a
   // date from a value it does not hold.
   it("states no erase date where the record carries no unregistered time", async () => {
@@ -4570,10 +4621,8 @@ describe("the layer write flows", () => {
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": { body: { layers: [{ ...userLayer(), DeletedAt: null }] } },
     });
-    goTo("#/layers");
+    goTo("#/layers/deleted");
     render(<App />);
-    await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByTestId("recoverable-link"));
     const surface = await screen.findByLabelText("Recently unregistered");
     expect(surface.textContent).toContain(
       "The registry reported no erase date.",
@@ -5378,10 +5427,10 @@ describe("a refused layer write", () => {
     });
     // It is the first control in the action row, ahead of the primary
     // Register layer and the secondary Reingest all.
-    const actions = within(link.parentElement as HTMLElement).getAllByRole(
-      "button",
-    );
-    expect(actions.map((button) => button.textContent?.slice(0, 8))).toEqual([
+    const actions = Array.from(
+      (link.parentElement as HTMLElement).children,
+    ) as HTMLElement[];
+    expect(actions.map((control) => control.textContent?.slice(0, 8))).toEqual([
       "↺ Recent",
       "Register",
       "Reingest",

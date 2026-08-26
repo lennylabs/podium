@@ -11,7 +11,6 @@
 
 import { useRef, useState } from "react";
 
-import { DeletedLayers } from "./DeletedLayers";
 import { erasesOn, recoveryDays } from "./recovery";
 import { RegisterLayerForm } from "./RegisterLayerForm";
 import type { ReingestState } from "./ReingestControl";
@@ -41,6 +40,7 @@ import {
   reorderLayers,
   unregisterLayer,
 } from "../api";
+import { deletedLayersHref } from "../route";
 import { since } from "../time";
 import { useAsync } from "../useAsync";
 
@@ -70,7 +70,6 @@ export function LayerPanel({
   // section renders.
   const recoverable = useAsync(() => listDeletedLayers(), []);
   const [registering, setRegistering] = useState(false);
-  const [showingDeleted, setShowingDeleted] = useState(false);
   // A write's refusal is drawn on the row it was attempted on. The panel
   // holds the map because a reorder is committed by a drop on another row
   // and its refusal belongs to the row that moved.
@@ -207,19 +206,16 @@ export function LayerPanel({
             only where there is something to recover: a zero beside the link
             reads as a figure the operator has to act on, and the surface
             behind the link already states that nothing is recoverable. */}
-          <button
-            type="button"
-            className="link-action"
+          <a
+            className="button link-action"
             data-testid="recoverable-link"
-            onClick={() => {
-              setShowingDeleted((open) => !open);
-            }}
+            href={deletedLayersHref}
           >
             ↺ Recently unregistered
             {recoverable.value === null || recoverable.value.length === 0
               ? ""
               : ` · ${String(recoverable.value.length)}`}
-          </button>
+          </a>
           <button
             type="button"
             className="button primary"
@@ -258,15 +254,6 @@ export function LayerPanel({
           onRegistered={afterWrite}
           onClose={() => {
             setRegistering(false);
-          }}
-          readOnly={readOnly}
-        />
-      )}
-      {showingDeleted && (
-        <DeletedLayers
-          onRestored={() => {
-            afterWrite();
-            recoverable.reload();
           }}
           readOnly={readOnly}
         />
