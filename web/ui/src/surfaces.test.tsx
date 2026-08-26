@@ -4577,8 +4577,12 @@ describe("the layer write flows", () => {
     // Whitespace names no ref either.
     fireEvent.change(screen.getByLabelText("Ref"), { target: { value: "  " } });
     expect(register.hasAttribute("disabled")).toBe(true);
-    // A local source reads no ref, so the hold does not reach it.
+    // A local source reads no ref, so the ref the git arm holds on does not
+    // travel with the reader; the local arm holds on its own field instead.
     fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "/Users/alice/reg" },
+    });
     expect(register.hasAttribute("disabled")).toBe(false);
     fireEvent.click(screen.getByRole("radio", { name: "Git repository" }));
     expect(register.hasAttribute("disabled")).toBe(true);
@@ -4594,6 +4598,48 @@ describe("the layer write flows", () => {
     });
     const sent = JSON.parse(bodies.at(-1) ?? "{}") as Record<string, unknown>;
     expect(sent.ref).toBe("main");
+  });
+
+  // §4.6: a local source reads its tree from the named directory and has no
+  // default, so a local layer registered with the path blank is accepted,
+  // takes a place in the order, and is then refused on every ingest with
+  // "local source requires path". The form holds the write until the path is
+  // named, on the same terms as the git arm's ref.
+  it("holds a local registration until the path is named", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "local", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = screen.getByRole("dialog", { name: "Register a layer" });
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "ops" },
+    });
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    const register = within(dialog).getByRole("button", { name: "Register" });
+    expect(register.hasAttribute("disabled")).toBe(true);
+    // Whitespace names no directory either.
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "  " },
+    });
+    expect(register.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "/Users/alice/reg" },
+    });
+    expect(register.hasAttribute("disabled")).toBe(false);
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await waitFor(() => {
+      expect(
+        requests.some((r) => r.url === "/v1/layers" && r.method === "POST"),
+      ).toBe(true);
+    });
+    const sent = JSON.parse(bodies.at(-1) ?? "{}") as Record<string, unknown>;
+    expect(sent.local_path).toBe("/Users/alice/reg");
   });
 
   // A git row carrying no ref cannot ingest at all, so the source cell names

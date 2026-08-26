@@ -105,9 +105,14 @@ export function RegisterLayerForm({
   // "git source requires ref". The form holds the write until the ref is
   // named rather than handing the reader a layer that can never serve an
   // artifact.
-  const refMissing = sourceType === 'git' && ref.trim() === '';
+  // §4.6: a local source reads its tree from the named directory and has no
+  // default either, so the same hold applies on that arm. A registration with
+  // the path blank is accepted and then refused on every ingest with
+  // "local source requires path".
+  const sourceMissing =
+    sourceType === 'git' ? ref.trim() === '' : localPath.trim() === '';
   const incomplete =
-    refMissing ||
+    sourceMissing ||
     (!userDefined && ((groupScoped && groupMembers.length === 0) || (userScoped && userMembers.length === 0)));
 
   const submit = (event: FormEvent) => {
@@ -257,16 +262,23 @@ export function RegisterLayerForm({
               </p>
             </>
           ) : (
-            <label className="field">
-              <span className="label">Local path</span>
-              <input
-                type="text"
-                value={localPath}
-                onChange={(event) => {
-                  setLocalPath(event.target.value);
-                }}
-              />
-            </label>
+            <>
+              <label className="field">
+                <span className="label">Local path</span>
+                <input
+                  type="text"
+                  value={localPath}
+                  aria-required="true"
+                  onChange={(event) => {
+                    setLocalPath(event.target.value);
+                  }}
+                />
+              </label>
+              <p className="quiet" data-testid="register-local-note">
+                Name the directory the registry reads the artifacts from; a local layer has no default and cannot
+                ingest without one.
+              </p>
+            </>
           )}
           {!userDefined && (
             <fieldset className="field visibility">
