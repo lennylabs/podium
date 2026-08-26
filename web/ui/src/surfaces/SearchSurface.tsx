@@ -15,6 +15,7 @@ import { ArtifactRow } from "../components/ArtifactRow";
 import { EmptyState, ErrorState, Loading } from "../components/primitives";
 import type { SearchFilters, SearchResponse } from "../api";
 import { loadDomain, searchArtifacts } from "../api";
+import { scopePaths } from "../domain";
 import { formatQueryLine, parseQueryLine } from "../query";
 import { replaceRoute, searchHref } from "../route";
 import type { Async } from "../useAsync";
@@ -57,13 +58,17 @@ export function SearchSurface({
   const [text, setText] = useState(seed.query);
 
   // A scope is a §4.2 domain path, so the dropdown offers the registry's
-  // top-level domains. The read is an enhancement to the row rather than the
-  // surface's own catalog read: a failure leaves the dropdown offering the
-  // unscoped search alone and is neither reported to the shell nor drawn,
-  // because the search itself still answers.
+  // top-level domains, and every segment a §4.5.5 folded chain crossed on the
+  // way to one: a scope matches by prefix and the browser navigates to each of
+  // those segments, so listing only the folded entry would hide a domain that
+  // both surfaces answer for. The read is an enhancement to the row rather
+  // than the surface's own catalog read: a failure leaves the dropdown
+  // offering the unscoped search alone and is neither reported to the shell
+  // nor drawn, because the search itself still answers.
   const domains = useAsync(() => loadDomain("", 1), []);
-  const scopeOptions = (domains.value?.subdomains ?? []).map(
-    (domain) => domain.path,
+  const scopeOptions = scopePaths(
+    (domains.value?.subdomains ?? []).map((domain) => domain.path),
+    "",
   );
 
   const filters: SearchFilters = { query: text, type, scope, tags };

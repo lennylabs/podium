@@ -1184,6 +1184,47 @@ describe("search", () => {
     });
   });
 
+  // A §4.5.5 sparse chain reaches the root listing folded into one entry, so
+  // the domains it crossed appear in no response field of their own. Each is
+  // a page the browser navigates to and a prefix the search matches, so the
+  // dropdown offers every segment rather than the folded label alone.
+  it("offers each segment of a folded domain chain as a scope", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            { path: "finance/ap", name: "ap" },
+            { path: "finance/ar", name: "ar" },
+            { path: "platform", name: "platform" },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    await screen.findByLabelText("Search");
+    const scope = await screen.findByLabelText("Filter by scope");
+    expect(
+      within(scope)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual([
+      "scope: all",
+      "scope: finance",
+      "scope: finance/ap",
+      "scope: finance/ar",
+      "scope: platform",
+    ]);
+    selectFilter("scope", "finance");
+    await waitFor(() => {
+      expect(lastSearch().get("scope")).toBe("finance");
+    });
+  });
+
   // The match count is taken before the cap truncates the list, so fewer
   // results than matches is the ordinary outcome and reads as one. The two
   // optional result fields are driven present and absent in the same case.
