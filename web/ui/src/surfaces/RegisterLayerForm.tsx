@@ -124,6 +124,11 @@ export function RegisterLayerForm({
   });
   const incomplete = hold !== null;
   const holdID = useId();
+  // A hold is stated in the footer, and a reader who moves into the field it
+  // is on never reaches that line. The field the hold names therefore points
+  // at the same sentence and reports itself invalid, so the refusal arrives
+  // where it applies rather than only beside the submit.
+  const heldOn = (field: HoldField) => (hold !== null && hold.field === field ? holdID : undefined);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -247,6 +252,7 @@ export function RegisterLayerForm({
                   label="Ref"
                   value={ref}
                   testID="register-ref"
+                  held={heldOn('ref')}
                   onChange={(next) => {
                     setRef(next);
                   }}
@@ -274,6 +280,7 @@ export function RegisterLayerForm({
                 label="Local path"
                 value={localPath}
                 testID="register-local-path"
+                held={heldOn('local-path')}
                 onChange={(next) => {
                   setLocalPath(next);
                 }}
@@ -312,6 +319,7 @@ export function RegisterLayerForm({
                   label="Group names, separated by commas"
                   value={groups}
                   onChange={edited(setGroups)}
+                  held={heldOn('groups')}
                   tokens={groupMembers}
                   known={knownGroups}
                 />
@@ -326,6 +334,7 @@ export function RegisterLayerForm({
                   label="User identifiers, separated by commas"
                   value={users}
                   onChange={edited(setUsers)}
+                  held={heldOn('users')}
                   tokens={userMembers}
                 />
               </VisibilityAxis>
@@ -354,7 +363,7 @@ export function RegisterLayerForm({
             id={holdID}
             data-testid="register-foot-note"
           >
-            {hold ?? 'Registers at the end of the order, where the last row wins.'}
+            {hold?.message ?? 'Registers at the end of the order, where the last row wins.'}
           </span>
           <button type="button" onClick={onClose}>
             Cancel
@@ -377,6 +386,10 @@ export function RegisterLayerForm({
     </Modal>
   );
 }
+
+/** HoldField identifies the field a registration hold stands on, so the field
+ * itself can be marked invalid and pointed at the sentence stating the hold. */
+type HoldField = 'ref' | 'local-path' | 'groups' | 'users';
 
 /** registrationHold names the field the submit is held on, or null when the
  * form is ready to send. The submit is disabled while a hold stands, and a
@@ -401,18 +414,18 @@ function registrationHold({
   groupMembers: string[];
   userScoped: boolean;
   userMembers: string[];
-}): string | null {
+}): { field: HoldField; message: string } | null {
   if (sourceType === 'git' && ref.trim() === '') {
-    return 'Name the ref before registering.';
+    return { field: 'ref', message: 'Name the ref before registering.' };
   }
   if (sourceType === 'local' && localPath.trim() === '') {
-    return 'Name the local path before registering.';
+    return { field: 'local-path', message: 'Name the local path before registering.' };
   }
   if (!userDefined && groupScoped && groupMembers.length === 0) {
-    return 'Name at least one group before registering.';
+    return { field: 'groups', message: 'Name at least one group before registering.' };
   }
   if (!userDefined && userScoped && userMembers.length === 0) {
-    return 'Name at least one user before registering.';
+    return { field: 'users', message: 'Name at least one user before registering.' };
   }
   return null;
 }
@@ -420,16 +433,19 @@ function registrationHold({
 /** RequiredField is a text field the submit is held on. It carries a visible
  * requirement marker beside its label and `aria-required` on its input, and it
  * associates the two by id rather than by wrapping, so the marker stays out of
- * the input's accessible name. */
+ * the input's accessible name. When the hold stands on this field, `held`
+ * carries the id of the element stating it. */
 function RequiredField({
   label,
   value,
   testID,
+  held,
   onChange,
 }: {
   label: string;
   value: string;
   testID: string;
+  held?: string;
   onChange: (next: string) => void;
 }) {
   const inputID = useId();
@@ -446,6 +462,8 @@ function RequiredField({
         type="text"
         value={value}
         aria-required="true"
+        aria-invalid={held === undefined ? undefined : true}
+        aria-describedby={held}
         onChange={(event) => {
           onChange(event.target.value);
         }}
@@ -546,11 +564,15 @@ function TokenInput({
   onChange,
   tokens,
   known,
+  held,
 }: {
   label: string;
   value: string;
   onChange: (next: string) => void;
   tokens: string[];
+  /** held carries the id of the element stating the hold when the submit is
+   * held on this field, and is absent otherwise. */
+  held?: string;
   /** known is the set of names a value can be checked against. An axis with
    * no such set, or a set that is empty, draws the input alone. */
   known?: string[];
@@ -567,6 +589,8 @@ function TokenInput({
         ref={inputRef}
         type="text"
         value={value}
+        aria-invalid={held === undefined ? undefined : true}
+        aria-describedby={held}
         onChange={(event) => {
           onChange(event.target.value);
         }}

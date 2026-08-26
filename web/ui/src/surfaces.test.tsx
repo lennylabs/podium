@@ -6020,6 +6020,55 @@ describe("the layer write flows", () => {
     );
   });
 
+  // The sentence stating the hold sits in the footer, and a reader who tabs
+  // into the field it names never reaches it. The field the hold stands on
+  // therefore reports itself invalid and points at that same sentence, so the
+  // refusal arrives on the control it applies to.
+  it("marks the field holding the register submit invalid", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const note = screen.getByTestId("register-foot-note");
+    const ref = screen.getByLabelText("Ref");
+    expect(ref.getAttribute("aria-invalid")).toBe("true");
+    expect(ref.getAttribute("aria-describedby")).toBe(note.id);
+    // Naming the ref releases the hold, and the field stops reporting itself
+    // as the one refused.
+    fireEvent.change(ref, { target: { value: "main" } });
+    expect(ref.getAttribute("aria-invalid")).toBe(null);
+    expect(ref.getAttribute("aria-describedby")).toBe(null);
+    // The local arm carries the same association on its own field.
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    const localPath = screen.getByLabelText("Local path");
+    expect(localPath.getAttribute("aria-invalid")).toBe("true");
+    expect(localPath.getAttribute("aria-describedby")).toBe(
+      screen.getByTestId("register-foot-note").id,
+    );
+    // A selected visibility axis with no member named holds the submit on its
+    // member field, and that field carries the association too.
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "/Users/alice/reg" },
+    });
+    fireEvent.change(screen.getByLabelText("Layer class"), {
+      target: { value: "admin" },
+    });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Groups" }));
+    const groupField = screen.getByLabelText(
+      "Group names, separated by commas",
+    );
+    expect(groupField.getAttribute("aria-invalid")).toBe("true");
+    expect(groupField.getAttribute("aria-describedby")).toBe(
+      screen.getByTestId("register-foot-note").id,
+    );
+  });
+
   // §4.6: the git source resolves its tree at the ref and has no default, so
   // a git layer registered with the ref blank is accepted, issues its
   // one-time secret, takes a place in the order, and is then refused on
