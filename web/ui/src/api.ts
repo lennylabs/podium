@@ -358,8 +358,45 @@ export interface SearchFilters {
   tags: string[];
 }
 
+interface DomainRead {
+  body: Promise<LoadDomainResponse>;
+}
+
+/** domainReads holds the `load_domain` answers issued for the route the reader
+ * is on, keyed by the URL they were issued against. Two independent parts of
+ * the shell read the same level of the §4.2 hierarchy on a domain route: the
+ * panel reads the domain it renders, and the sidebar tree reads that same
+ * node's level when the eager tree read did not carry it. The tree's read is
+ * issued once the root read resolves, which is after the panel's request has
+ * left, so sharing only what is still in flight would still cost two round
+ * trips. The map is dropped whenever the reader enters a route and whenever a
+ * write moves the catalog, so it never answers for a page the registry has
+ * since changed under. */
+const domainReads = new Map<string, DomainRead>();
+
+/** invalidateDomainReads drops every held `load_domain` answer. The shell runs
+ * it on entering a route and on a layer write, and the test suite runs it
+ * between cases because the map outlives a render. */
+export function invalidateDomainReads(): void {
+  domainReads.clear();
+}
+
 export function loadDomain(path: string, depth?: number): Promise<LoadDomainResponse> {
-  return request<LoadDomainResponse>(paths.loadDomain + query({ path, depth }));
+  const url = paths.loadDomain + query({ path, depth });
+  const held = domainReads.get(url);
+  if (held !== undefined) {
+    return held.body;
+  }
+  const body = request<LoadDomainResponse>(url);
+  domainReads.set(url, { body });
+  // A failed read is not held: the surfaces offer a retry of it, and a held
+  // failure would answer that retry without reaching the registry.
+  void body.catch(() => {
+    if (domainReads.get(url)?.body === body) {
+      domainReads.delete(url);
+    }
+  });
+  return body;
 }
 
 export function searchArtifacts(filters: SearchFilters, topK?: number): Promise<SearchResponse> {

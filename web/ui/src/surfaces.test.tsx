@@ -21,6 +21,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { App } from "./App";
+import { invalidateDomainReads } from "./api";
 import { parseQueryLine } from "./query";
 import { artifactHref, domainHref, layersHref, searchHref } from "./route";
 import type { SessionPosture } from "./session";
@@ -207,6 +208,9 @@ function pinVersion(version: string): void {
 }
 
 beforeEach(() => {
+  // The held load_domain answers outlive a render, so a case starts against a
+  // registry it stubbed itself rather than against the previous case's.
+  invalidateDomainReads();
   requests.length = 0;
   bodies.length = 0;
   scrolledIntoView.length = 0;
@@ -428,6 +432,46 @@ describe("the application shell", () => {
     expect(
       tree.getByRole("link", { name: "ci" }).getAttribute("aria-current"),
     ).toBeNull();
+  });
+
+  // The panel and the sidebar tree read the same level of the §4.2 hierarchy
+  // on a domain route: the panel reads the domain it renders, and the tree
+  // reads that node's level because the eager read stopped above it. The two
+  // are the same request, and the page issues it once.
+  it("reads each domain level once on a domain route", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain?path=platform%2Fci&depth=2": {
+        body: {
+          path: "platform/ci",
+          subdomains: [{ path: "platform/ci/lint", name: "lint" }],
+          notable: [],
+        },
+      },
+      "/v1/load_domain?path=platform%2Fci%2Flint&depth=2": {
+        body: {
+          path: "platform/ci/lint",
+          subdomains: [{ path: "platform/ci/lint/rules", name: "rules" }],
+          notable: [],
+        },
+      },
+      "/v1/load_domain": { body: catalog },
+      "/v1/catalog": { body: { ids: [] } },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo(domainHref("platform/ci/lint"));
+    render(<App />);
+    // Both readers have answered: the panel heads the domain, and the tree
+    // renders the level under the node the route opened.
+    await screen.findByRole("heading", { name: "lint" });
+    const tree = within(await screen.findByLabelText("Sections"));
+    await tree.findByRole("link", { name: "rules" });
+    const reads = requests
+      .filter((r) => r.url.startsWith("/v1/load_domain"))
+      .map((r) => r.url);
+    expect(reads).toContain("/v1/load_domain?path=platform%2Fci%2Flint&depth=2");
+    expect([...new Set(reads)]).toEqual(reads);
   });
 
   // A §4.5.5 sparse chain is collapsed into one tree entry, so the levels it

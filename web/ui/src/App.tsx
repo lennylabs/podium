@@ -12,6 +12,7 @@ import type { DomainDescriptor } from './api';
 import {
   ApiError,
   catalogArtifactIDs,
+  invalidateDomainReads,
   isIdentityRefusal,
   listLayers,
   loadDomain,
@@ -117,6 +118,17 @@ export function App() {
     setPaletteOpen(false);
   }, [entered]);
 
+  // The held domain answers cover the route the reader is on, and they are
+  // dropped here rather than in an effect: an effect runs after the surfaces
+  // below have mounted and issued their reads, so it would drop the answer
+  // the sidebar tree is about to share and restore the second round trip the
+  // map exists to remove.
+  const readRoute = useRef<string | null>(null);
+  if (readRoute.current !== entered) {
+    readRoute.current = entered;
+    invalidateDomainReads();
+  }
+
   // The sidebar tree is the shell's own catalog read, re-issued on each route
   // the reader enters. On the layers route it is also the panel's expiry
   // signal: a layer write's refusal carries no session information, so without
@@ -174,6 +186,9 @@ export function App() {
   // The sidebar tree and the footer counts are the shell's own reads on every
   // route, so re-issuing them is a bump of the nonce wherever the reader is.
   const reloadCatalog = useCallback(() => {
+    // A layer write moves the catalog under the held domain answers, so they
+    // are dropped before the re-read rather than answering it.
+    invalidateDomainReads();
     setCatalogNonce((nonce) => nonce + 1);
   }, []);
 
