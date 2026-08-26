@@ -220,6 +220,9 @@ interface ManifestHalves {
  * registry does not serve. */
 function VersionPicker({ viewing, onView }: { viewing: string; onView: (version: string) => void }) {
   const [typed, setTyped] = useState(viewing);
+  const view = () => {
+    onView(typed.trim());
+  };
   return (
     <span className="version-picker">
       <label className="label" htmlFor="version-picker-input">
@@ -233,13 +236,16 @@ function VersionPicker({ viewing, onView }: { viewing: string; onView: (version:
         onChange={(event) => {
           setTyped(event.target.value);
         }}
-      />
-      <button
-        type="button"
-        onClick={() => {
-          onView(typed.trim());
+        // A single-field entry control takes Enter as its commit, because a
+        // reader who typed a version reaches for the return key before the
+        // adjacent button.
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            view();
+          }
         }}
-      >
+      />
+      <button type="button" onClick={view}>
         View
       </button>
     </span>

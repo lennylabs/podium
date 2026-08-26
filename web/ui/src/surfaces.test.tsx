@@ -1919,6 +1919,50 @@ describe("the artifact viewer", () => {
     expect(requests.some((r) => r.url.includes("version=1.0.0"))).toBe(true);
   });
 
+  // The picker is a single entry field beside its own button, and Enter in
+  // such a field commits it. A reader who types a version and presses return
+  // gets the same read the button performs.
+  it("reads the version the picker names when Enter commits the field", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:old",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    fireEvent.change(screen.getByLabelText("Version"), {
+      target: { value: "1.0.0" },
+    });
+    fireEvent.keyDown(screen.getByLabelText("Version"), { key: "Enter" });
+    const notice = await screen.findByTestId("older-version");
+    expect(notice.textContent).toContain("1.0.0");
+    expect(requests.some((r) => r.url.includes("version=1.0.0"))).toBe(true);
+  });
+
   // A version the registry cannot resolve is refused, and the picker that
   // asked for it lives in the viewer's own header. The refusal is presented
   // beside that control and the page it stands on is kept, because the route
