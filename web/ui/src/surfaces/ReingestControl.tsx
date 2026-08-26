@@ -14,9 +14,11 @@
 
 import { useState } from 'react';
 
-import { Badge, Modal } from '../components/primitives';
+import type { Tone } from '../components/primitives';
+import { Badge, CopyButton, Modal } from '../components/primitives';
 import type { BreakGlass, IngestAdvisory, IngestConflict, IngestRejection, IngestSummary } from '../api';
 import { ApiError } from '../api';
+import { clock, elapsed } from '../time';
 
 /** immutableViolation is the §6.10 code the registry answers with when every
  * artifact in the snapshot collided with a published version. Nothing was
@@ -34,7 +36,10 @@ const frozen = 'ingest.frozen';
 export type ReingestState =
   | { kind: 'idle' }
   | { kind: 'running' }
-  | { kind: 'summary'; summary: IngestSummary }
+  // The summary arm carries when the request opened and when it returned:
+  // the pipeline runs inside the request, so how long the reader waited and
+  // when the run finished are facts only the caller holds.
+  | { kind: 'summary'; summary: IngestSummary; startedAt: number; finishedAt: number }
   | { kind: 'rejected'; error: ApiError }
   | { kind: 'frozen'; error: ApiError }
   | { kind: 'refused'; error: unknown };
@@ -104,7 +109,15 @@ export function ReingestStatus({
           Reingesting {layerID}. The registry runs the whole pipeline before it answers.
         </p>
       )}
-      {state.kind === 'summary' && <IngestReport layerID={layerID} summary={state.summary} onDone={onDismiss} />}
+      {state.kind === 'summary' && (
+        <IngestReport
+          layerID={layerID}
+          summary={state.summary}
+          startedAt={state.startedAt}
+          finishedAt={state.finishedAt}
+          onDone={onDismiss}
+        />
+      )}
       {state.kind === 'rejected' && <SnapshotRejected error={state.error} onDone={onDismiss} />}
       {state.kind === 'frozen' && (
         <BreakGlassConfirmation layerID={layerID} error={state.error} onOverride={onStart} onCancel={onDismiss} />
@@ -114,10 +127,22 @@ export function ReingestStatus({
   );
 }
 
-/** IngestReport presents what the snapshot did. The counts come first because
- * they say whether anything needs acting on, and the itemised lists follow,
- * because a rejection carries a code and a reason and a conflict names the
- * version to bump.
+/** advisoryPreview is how many advisories the report lists before it holds
+ * the rest behind "See all". A snapshot raises an advisory per artifact, so
+ * the list is unbounded and an uncapped one buries the counts and the
+ * rejections under it. */
+const advisoryPreview = 2;
+
+/** IngestDetail is the itemised list the reader opened. The report presents
+ * the counts first, and only the counts the response itemises open anything:
+ * `lint_failures` arrives as a bare number, so it is captioned and left
+ * un-openable rather than offered as a list that does not exist. */
+type IngestDetail = 'rejected' | 'conflicts' | 'advisories';
+
+/** IngestReport presents what the snapshot did. The counts come first
+ * because they say whether anything needs acting on, and each count the
+ * response itemises opens its own list, because a rejection carries a code
+ * and a reason and a conflict names the version to bump.
  *
  * It resolves into a Modal because the report is a result the reader has to
  * read: an artifact id, a rejection reason, and an advisory message are all
@@ -125,40 +150,228 @@ export function ReingestStatus({
  * grid every other row shares. Rendered into that cell the report widened the
  * table past its section, collapsed the source column, and clipped the
  * advisory text off the right edge. */
-function IngestReport({ layerID, summary, onDone }: { layerID: string; summary: IngestSummary; onDone: () => void }) {
+function IngestReport({
+  layerID,
+  summary,
+  startedAt,
+  finishedAt,
+  onDone,
+}: {
+  layerID: string;
+  summary: IngestSummary;
+  startedAt: number;
+  finishedAt: number;
+  onDone: () => void;
+}) {
   const rejected = summary.rejected ?? [];
   const conflicts = summary.conflicts ?? [];
   const advisories = summary.advisories ?? [];
+  const lintFailures = summary.lint_failures ?? 0;
+  // A registry with no ingest runner wired records the request and answers
+  // with the intent alone, so there is no summary to present.
+  const recorded = summary.accepted === undefined;
+  const [detail, setDetail] = useState<IngestDetail | null>(null);
   return (
-    <Modal title="Reingest finished" description={layerID} onClose={onDone}>
+    <Modal
+      title="Reingest finished"
+      description={`${layerID} · ${elapsed(finishedAt - startedAt)}`}
+      onClose={onDone}
+    >
       <section className="ingest-report modal-body" aria-label={`Reingest result for ${layerID}`}>
-        {summary.accepted === undefined ? (
-          // A registry with no ingest runner wired records the request and
-          // answers with the intent alone, so there is no summary to wait for.
+        {recorded && (
           <p data-testid="reingest-recorded">
             The request was recorded. This registry runs no ingest pipeline inside the request, so there is no result to
             read.
           </p>
-        ) : (
-          <ul className="ingest-counts">
-            <li>{summary.accepted} accepted</li>
-            <li>{summary.idempotent ?? 0} unchanged</li>
-            <li>{rejected.length} rejected</li>
-            <li>{conflicts.length} conflicts</li>
-            <li>{summary.lint_failures ?? 0} lint failures</li>
-          </ul>
         )}
-        {rejected.length > 0 && <RejectionList rejections={rejected} />}
-        {conflicts.length > 0 && <ConflictList conflicts={conflicts} />}
-        {advisories.length > 0 && <AdvisoryList advisories={advisories} />}
+        {!recorded && detail === null && (
+          <>
+            <div className="stats" aria-label="Ingest counts">
+              <Stat label="accepted" count={summary.accepted ?? 0} />
+              <Stat label="unchanged" count={summary.idempotent ?? 0} />
+              <Stat
+                label="rejected"
+                count={rejected.length}
+                tone="danger"
+                onOpen={() => {
+                  setDetail('rejected');
+                }}
+              />
+              <Stat
+                label="conflicts"
+                count={conflicts.length}
+                tone="accent"
+                onOpen={() => {
+                  setDetail('conflicts');
+                }}
+              />
+              <Stat label="lint failures" count={lintFailures} caption="count only" />
+            </div>
+            <NeedsAttention
+              rejected={rejected.length}
+              conflicts={conflicts.length}
+              lintFailures={lintFailures}
+              onOpen={setDetail}
+            />
+            {advisories.length > 0 && (
+              <AdvisoryList
+                advisories={advisories.slice(0, advisoryPreview)}
+                total={advisories.length}
+                onSeeAll={
+                  advisories.length > advisoryPreview
+                    ? () => {
+                        setDetail('advisories');
+                      }
+                    : undefined
+                }
+              />
+            )}
+          </>
+        )}
+        {detail !== null && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setDetail(null);
+              }}
+            >
+              Back to the counts
+            </button>
+            {detail === 'rejected' && <RejectionList rejections={rejected} />}
+            {detail === 'conflicts' && <ConflictList conflicts={conflicts} />}
+            {detail === 'advisories' && <AdvisoryList advisories={advisories} total={advisories.length} />}
+          </>
+        )}
       </section>
       <div className="modal-foot">
+        <span className="modal-foot-note mono quiet">finished {clock(finishedAt)}</span>
+        {!recorded && <CopyButton value={summaryText(layerID, summary, finishedAt)} label="Copy summary" />}
         <button type="button" onClick={onDone}>
           Done
         </button>
       </div>
     </Modal>
   );
+}
+
+/** Stat is one count. A count the response itemises carries a control that
+ * opens that list; a count it does not carries a caption saying so, because
+ * a number that looks like every other number and opens nothing reads as a
+ * dead control. A tone is applied only where the count is non-zero, so a
+ * clean snapshot is not tinted as though it needed acting on. */
+function Stat({
+  label,
+  count,
+  tone = 'neutral',
+  caption,
+  onOpen,
+}: {
+  label: string;
+  count: number;
+  tone?: Tone;
+  caption?: string;
+  onOpen?: () => void;
+}) {
+  const applied = count > 0 ? tone : 'neutral';
+  return (
+    <div className={`stat stat-${applied}`}>
+      {onOpen !== undefined && count > 0 ? (
+        <button type="button" className="stat-count stat-open" onClick={onOpen}>
+          {count}
+        </button>
+      ) : (
+        <span className="stat-count">{count}</span>
+      )}
+      <span className="stat-label">{label}</span>
+      {caption !== undefined && <span className="stat-caption">{caption}</span>}
+    </div>
+  );
+}
+
+/** NeedsAttention states what the counts mean for the reader's next action.
+ * A rejection and a conflict have different remedies, and lint failures have
+ * no list to open, so each is named rather than left as a number in a row of
+ * numbers. Nothing is drawn when the snapshot needs nothing. */
+function NeedsAttention({
+  rejected,
+  conflicts,
+  lintFailures,
+  onOpen,
+}: {
+  rejected: number;
+  conflicts: number;
+  lintFailures: number;
+  onOpen: (detail: IngestDetail) => void;
+}) {
+  if (rejected === 0 && conflicts === 0 && lintFailures === 0) {
+    return null;
+  }
+  return (
+    <section className="attention" aria-label="Needs attention">
+      <p className="label">Needs attention</p>
+      {rejected > 0 && (
+        <div className="attention-row attention-danger">
+          <button
+            type="button"
+            className="stat-open"
+            onClick={() => {
+              onOpen('rejected');
+            }}
+          >
+            {rejected} {rejected === 1 ? 'artifact' : 'artifacts'} rejected
+          </button>{' '}
+          Each carries its code and its reason.
+        </div>
+      )}
+      {conflicts > 0 && (
+        <div className="attention-row attention-accent">
+          <button
+            type="button"
+            className="stat-open"
+            onClick={() => {
+              onOpen('conflicts');
+            }}
+          >
+            {conflicts} immutability {conflicts === 1 ? 'conflict' : 'conflicts'}
+          </button>{' '}
+          A published version was republished with different content. Bump the version and reingest.
+        </div>
+      )}
+      {lintFailures > 0 && (
+        <div className="attention-row">
+          <strong>
+            {lintFailures} lint {lintFailures === 1 ? 'failure' : 'failures'}.
+          </strong>{' '}
+          The response carries the count alone. The ingest log names them.
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** summaryText is the report as plain text, for a reader who carries the
+ * outcome into an issue or a chat message. It states the counts and itemises
+ * what the response itemised, so the copied text says what the surface says
+ * rather than a subset of it. */
+export function summaryText(layerID: string, summary: IngestSummary, finishedAt: number): string {
+  const rejected = summary.rejected ?? [];
+  const conflicts = summary.conflicts ?? [];
+  const advisories = summary.advisories ?? [];
+  const lines = [
+    `Reingest ${layerID} finished ${clock(finishedAt)}`,
+    `${summary.accepted ?? 0} accepted, ${summary.idempotent ?? 0} unchanged, ${rejected.length} rejected, ${conflicts.length} conflicts, ${summary.lint_failures ?? 0} lint failures, ${advisories.length} advisories`,
+  ];
+  for (const rejection of rejected) {
+    lines.push(`rejected ${rejection.artifact_id} ${rejection.code}: ${rejection.reason}`);
+  }
+  for (const conflict of conflicts) {
+    lines.push(`conflict ${conflict.artifact_id}@${conflict.version} ${conflict.code}`);
+  }
+  for (const advisory of advisories) {
+    lines.push(`${advisory.severity} ${advisory.artifact_id} ${advisory.code}: ${advisory.message}`);
+  }
+  return lines.join('\n');
 }
 
 function RejectionList({ rejections }: { rejections: IngestRejection[] }) {
@@ -200,22 +413,52 @@ function ConflictList({ conflicts }: { conflicts: IngestConflict[] }) {
 }
 
 /** AdvisoryList carries the flags the pipeline raised without blocking the
- * snapshot, each with its severity, so a reader can tell an advisory apart
- * from a rejection. */
-function AdvisoryList({ advisories }: { advisories: IngestAdvisory[] }) {
+ * snapshot. The severity leads each row so a reader can tell an advisory
+ * apart from a rejection, the artifact id and the code sit on their own line
+ * above the message, and the caller decides how many rows to pass. */
+function AdvisoryList({
+  advisories,
+  total,
+  onSeeAll,
+}: {
+  advisories: IngestAdvisory[];
+  total: number;
+  onSeeAll?: () => void;
+}) {
   return (
-    <section aria-label="Advisories">
-      <p className="label">Advisories · {advisories.length}</p>
+    <section className="advisories" aria-label="Advisories">
+      <p className="label">
+        Advisories · non-blocking · {total}
+        {onSeeAll !== undefined && (
+          <>
+            {' '}
+            <button type="button" className="stat-open" onClick={onSeeAll}>
+              See all {total}
+            </button>
+          </>
+        )}
+      </p>
       <ul>
         {advisories.map((advisory) => (
           <li key={`${advisory.artifact_id}:${advisory.code}`}>
-            <Badge tone="quiet">{advisory.severity}</Badge> <span className="mono">{advisory.artifact_id}</span>{' '}
-            <span className="mono">{advisory.code}</span> {advisory.message}
+            <p className="advisory-head">
+              <Badge tone={severityTone(advisory.severity)}>{advisory.severity.toUpperCase()}</Badge>{' '}
+              <span className="mono">{advisory.artifact_id}</span>{' '}
+              <span className="mono quiet">{advisory.code}</span>
+            </p>
+            <p className="advisory-message">{advisory.message}</p>
           </li>
         ))}
       </ul>
     </section>
   );
+}
+
+/** severityTone marks a warning apart from the rest. The pipeline raises
+ * advisories at more than one severity and only a warning asks the reader to
+ * look, so anything else is drawn quiet. */
+function severityTone(severity: string): Tone {
+  return severity.toLowerCase().startsWith('warn') ? 'accent' : 'quiet';
 }
 
 /** SnapshotRejected is the 409 arm: every artifact collided with a published

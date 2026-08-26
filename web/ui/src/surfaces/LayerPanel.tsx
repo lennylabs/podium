@@ -125,10 +125,16 @@ export function LayerPanel({
     id: string,
     breakGlass?: BreakGlass,
   ): Promise<void> => {
+    const startedAt = Date.now();
     setRowReingest(id, { kind: "running" });
     try {
       const summary = await reingestLayer(id, breakGlass);
-      setRowReingest(id, { kind: "summary", summary });
+      setRowReingest(id, {
+        kind: "summary",
+        summary,
+        startedAt,
+        finishedAt: Date.now(),
+      });
       clearRefusal(id);
       afterWrite();
     } catch (err: unknown) {

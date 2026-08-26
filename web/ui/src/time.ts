@@ -22,3 +22,29 @@ export function since(stamp: string, now: number): string {
   }
   return `${Math.floor(hours / 24)}d ago`;
 }
+
+/** elapsed renders how long a request was open, in the words the reingest
+ * report states it in. The registry runs the whole §7.3.1 pipeline inside
+ * the request, so a reader who waited minutes for the answer is told how
+ * long that was rather than being left to guess. */
+export function elapsed(ms: number): string {
+  const seconds = Math.max(Math.round(ms / 1000), 0);
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  const secondPart = `${rest} ${rest === 1 ? 'second' : 'seconds'}`;
+  if (minutes === 0) {
+    return secondPart;
+  }
+  const minutePart = `${minutes} ${minutes === 1 ? 'minute' : 'minutes'}`;
+  return rest === 0 ? minutePart : `${minutePart} ${secondPart}`;
+}
+
+/** clock renders a wall-clock stamp in UTC, which is what a report of a
+ * finished run states. The zone is named rather than left to the reader's
+ * locale, because the stamp is quoted into an issue or a chat message
+ * alongside the registry's own logs. */
+export function clock(at: number): string {
+  const when = new Date(at);
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${pad(when.getUTCHours())}:${pad(when.getUTCMinutes())}:${pad(when.getUTCSeconds())} UTC`;
+}

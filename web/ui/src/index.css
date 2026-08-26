@@ -2437,3 +2437,182 @@ label:has(> input:disabled) {
   line-height: var(--source-line);
   white-space: pre;
 }
+
+/* The finished reingest report. The counts lead, because they say whether
+   anything needs acting on, and each is a card rather than a bullet so the
+   number is read before the word beside it. A tone is carried only by a
+   non-zero rejected or conflicts count, which is what the reader has to act
+   on; everything else stays neutral. */
+.ingest-report {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 16px;
+}
+
+.ingest-report > button {
+  align-self: flex-start;
+  margin: 0;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.stat {
+  flex: 1 1 0;
+  min-width: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 13px 14px;
+  border: 1px solid var(--b2);
+  border-radius: 10px;
+  background: var(--surf2);
+}
+
+.stat-danger {
+  border-color: var(--danger-bd);
+  background: var(--danger-bg);
+}
+
+.stat-accent {
+  border-color: var(--cbd);
+  background: var(--wash);
+}
+
+.stat-count {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.stat-danger .stat-count {
+  color: var(--danger);
+}
+
+.stat-accent .stat-count {
+  color: var(--link);
+}
+
+/* A count the response itemises opens that list, so it is a control. It is
+   drawn as the number itself with an underline, because a button chrome in a
+   row of five cards competes with the counts it sits among. */
+button.stat-open {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+}
+
+.stat-count.stat-open {
+  align-self: flex-start;
+}
+
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.stat-caption {
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.attention {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.attention > .label {
+  margin: 0;
+}
+
+.attention-row {
+  padding: 12px 14px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: var(--surf2);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--sec);
+}
+
+.attention-danger {
+  border-color: var(--danger-bd);
+  background: var(--danger-bg);
+}
+
+.attention-danger button.stat-open {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.attention-accent {
+  border-color: var(--cbd);
+  background: var(--wash);
+}
+
+.attention-accent button.stat-open {
+  color: var(--link);
+  font-weight: 600;
+}
+
+.advisories > .label {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0 0 9px;
+}
+
+.advisories button.stat-open {
+  margin-left: auto;
+  color: var(--link);
+}
+
+.advisories ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+}
+
+.advisories li {
+  padding: 11px 13px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: var(--surf2);
+}
+
+.advisory-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 0 0 3px;
+  font-size: 12.5px;
+}
+
+.advisory-message {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--sec);
+}

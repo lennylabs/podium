@@ -36,7 +36,7 @@ export function CopyField({ label, value, block = false }: { label: string; valu
  * page to be selected and the control must not claim a copy that did not
  * occur.
  */
-export function CopyButton({ value }: { value: string }) {
+export function CopyButton({ value, label = 'Copy' }: { value: string; label?: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <>
@@ -53,7 +53,7 @@ export function CopyButton({ value }: { value: string }) {
           );
         }}
       >
-        Copy
+        {label}
       </button>
       {copied && <span className="quiet">Copied</span>}
     </>

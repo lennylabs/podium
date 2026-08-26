@@ -4169,8 +4169,8 @@ describe("the layer write flows", () => {
 
   // The reingest call runs the whole pipeline inside the request and answers
   // with a summary the reader has to act on, so the control presents the
-  // counts and the itemised rejections and conflicts rather than returning
-  // the row to rest.
+  // counts and, behind the count that carries the list, the itemised
+  // rejections and conflicts rather than returning the row to rest.
   it("presents what the reingest snapshot accepted, rejected, and conflicted on", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
@@ -4213,12 +4213,32 @@ describe("the layer write flows", () => {
     await screen.findByLabelText("Layer panel");
     fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
     await screen.findByLabelText("Reingest result for alice-personal");
-    expect(screen.getByText("4 accepted")).toBeTruthy();
-    expect(screen.getByText("2 unchanged")).toBeTruthy();
-    expect(screen.getByText("1 lint failures")).toBeTruthy();
-    expect(screen.getByLabelText("Rejected artifacts")).toBeTruthy();
-    expect(screen.getByText("platform/lint@1.0.0")).toBeTruthy();
+    const counts = screen.getByLabelText("Ingest counts");
+    expect(within(counts).getByText("accepted").previousSibling?.textContent).toBe("4");
+    expect(within(counts).getByText("unchanged").previousSibling?.textContent).toBe("2");
+    // lint_failures arrives as a bare number, so the card says the count is
+    // all the response carried and opens nothing.
+    expect(within(counts).getByText("count only")).toBeTruthy();
+    // The pipeline ran inside the request, so the panel's own clock is what
+    // says how long the reader waited and when the run finished.
+    expect(
+      screen.getByText(/^alice-personal · \d+ (second|minute)/),
+    ).toBeTruthy();
+    expect(screen.getByText(/^finished \d\d:\d\d:\d\d UTC$/)).toBeTruthy();
     expect(screen.getByLabelText("Advisories")).toBeTruthy();
+    // The itemised lists sit behind the counts that carry them.
+    expect(screen.queryByLabelText("Rejected artifacts")).toBeNull();
+    // Only the counts the response itemises are controls: rejected and
+    // conflicts open, accepted, unchanged, and lint failures do not.
+    expect(within(counts).getAllByRole("button").length).toBe(2);
+    fireEvent.click(screen.getByRole("button", { name: "1 artifact rejected" }));
+    expect(screen.getByLabelText("Rejected artifacts")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to the counts" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "1 immutability conflict" }),
+    );
+    expect(screen.getByText("platform/lint@1.0.0")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Back to the counts" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(
       screen.queryByLabelText("Reingest result for alice-personal"),
