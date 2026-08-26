@@ -72,6 +72,7 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
+    color-scheme: dark;
     --page: #0c0f16;
     --surf: #171b28;
     --surf2: #141824;
@@ -458,13 +459,56 @@ h3 {
   margin: 10px 0;
 }
 
-.field input {
+.field input:not([type='checkbox']) {
   padding: 8px 10px;
   border: 1px solid var(--bd);
   border-radius: 8px;
   background: var(--surf);
   color: var(--ink);
   font: inherit;
+}
+
+/* A select and a checkbox are drawn by the browser from the operating
+   system palette unless the page overrides it, which is how the register
+   form ended up with a white select and a white checkbox on a dark
+   surface. The color-scheme declaration on each theme arm settles the parts
+   the page cannot reach, the popup list and the checkbox tick, and the rules
+   below give the closed control the same border, radius, and type the text
+   inputs carry so one form reads as one set of controls. The native
+   indicator goes with the appearance, so the field draws its own chevron. */
+.field select {
+  appearance: none;
+  padding: 8px 30px 8px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  color: var(--ink);
+  font: inherit;
+}
+
+.field:has(select) {
+  position: relative;
+}
+
+.field:has(select)::after {
+  content: '';
+  position: absolute;
+  right: 13px;
+  bottom: 16px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--meta);
+  border-bottom: 1.5px solid var(--meta);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  margin: 0 8px 0 0;
+  vertical-align: -2px;
+  accent-color: var(--acc);
 }
 
 .search-field {

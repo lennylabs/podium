@@ -1416,6 +1416,35 @@ describe('the layer write flows', () => {
     expect(sent.user_defined).toBe(false);
   });
 
+  // A browser draws a select and a checkbox from the operating system
+  // palette unless the page overrides it, which left the register form with
+  // a white select and a white checkbox on a dark surface. The design brief
+  // requires every surface to read in both themes off one token set, so the
+  // select carries the same border treatment as the text input beside it and
+  // the checkbox takes its tick from the accent token.
+  it('draws the register form’s select and checkboxes off the token set rather than as native widgets', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layer: { ID: 'company', SourceType: 'local', Order: 1 } } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    fireEvent.click(screen.getByRole('button', { name: 'Register layer' }));
+    fireEvent.change(screen.getByLabelText('Layer class'), { target: { value: 'admin' } });
+    const text = window.getComputedStyle(screen.getByLabelText('Layer ID'));
+    const select = window.getComputedStyle(screen.getByLabelText('Layer class'));
+    expect(select.borderRadius).toBe(text.borderRadius);
+    expect(select.borderTopWidth).toBe(text.borderTopWidth);
+    expect(select.appearance).toBe('none');
+    const box = window.getComputedStyle(screen.getByLabelText('Organization'));
+    expect(box.accentColor).toBe('var(--acc)');
+    // The text-input rule pads and fills the control, which is the wrong
+    // treatment for a checkbox and is what it used to inherit here.
+    expect(box.padding).not.toBe(text.padding);
+    expect(box.width).toBe('15px');
+  });
+
   // §4.6 defines visibility as independent grants that combine as a union.
   // They are honoured on an admin-defined layer, which is the class the form
   // offers them on.
