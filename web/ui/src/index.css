@@ -570,9 +570,22 @@ h2.label {
   background: var(--acc);
 }
 
+/* A description is an author-controlled field with no length bound, and a row
+   is a listing element: one artifact whose description runs to several
+   hundred words would otherwise take the height of a screen and push every
+   other row below the fold. The row therefore clips the description to three
+   lines over the same 720px measure the domain header reads at, and the
+   artifact's own page carries the whole field. */
 .artifact-description {
   margin: 4px 0 0;
   color: var(--sec);
+  max-width: 720px;
+  text-wrap: pretty;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
 }
 
 .tag-list {

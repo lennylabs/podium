@@ -88,3 +88,18 @@ describe("rendered artifact body", () => {
     expect(descendantStyle("prose", "img").maxWidth).toBe("100%");
   });
 });
+
+// A listing row carries an author-controlled description of no bounded
+// length. Without a clip, one artifact whose description runs to several
+// hundred words takes the height of a screen and pushes the rest of the
+// listing below the fold. jsdom performs no layout, so the case pins the
+// declarations that clip it; the rendered height is checked in a browser.
+describe("artifact row description", () => {
+  it("clips a row description to three lines over a 720px measure", () => {
+    const description = styled("artifact-description");
+    expect(description.getPropertyValue("-webkit-line-clamp")).toBe("3");
+    expect(description.display).toBe("-webkit-box");
+    expect(description.overflow).toBe("hidden");
+    expect(description.maxWidth).toBe("720px");
+  });
+});
