@@ -3180,7 +3180,7 @@ describe("the layer write flows", () => {
     // nobody, so the write is held until each selected axis carries one.
     expect(
       screen
-        .getByRole("button", { name: "Register and ingest" })
+        .getByRole("button", { name: "Register" })
         .hasAttribute("disabled"),
     ).toBe(true);
     fireEvent.change(
@@ -3307,7 +3307,7 @@ describe("the layer write flows", () => {
       "Visibility is fixed at registration.",
     );
     expect(
-      within(dialog).getByRole("button", { name: "Register and ingest" })
+      within(dialog).getByRole("button", { name: "Register" })
         .className,
     ).toContain("primary");
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
@@ -3503,6 +3503,58 @@ describe("the layer write flows", () => {
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).toBeNull();
     });
+  });
+
+  // §7.3.1 runs no ingest on a registration: a git source stays at its
+  // initial commit until a webhook delivery or the first manual reingest,
+  // and a local source is read at that reingest too. The submit therefore
+  // promises the registration alone, and the outcome names the ingest as the
+  // next thing to run so the row it just added, which reads "never", is not
+  // left as a layer the reader believes carries its artifacts.
+  it("promises the registration alone and names the ingest as the next step", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "local",
+            Order: 1,
+            UserDefined: true,
+          },
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = screen.getByRole("dialog", { name: "Register a layer" });
+    expect(
+      within(dialog).queryByRole("button", { name: /ingest/i }),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "/Users/alice/reg" },
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Register" }));
+    await screen.findByText("Layer alice-personal is registered.");
+    // The registration sends the register call and nothing else, so a reader
+    // who acts on the outcome is the one who runs the ingest.
+    expect(
+      requests.filter((r) => r.url === "/v1/layers" && r.method === "POST")
+        .length,
+    ).toBe(1);
+    expect(
+      requests.some((r) => r.url.startsWith("/v1/layers/reingest")),
+    ).toBe(false);
+    expect(screen.getByTestId("register-ingest-note").textContent).toContain(
+      "Reingest",
+    );
   });
 
   // The update is a partial patch and a rotation returns the fresh secret

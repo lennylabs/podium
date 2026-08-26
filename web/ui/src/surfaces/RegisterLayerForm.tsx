@@ -122,6 +122,16 @@ export function RegisterLayerForm({
       <Modal title="Layer registered" onClose={onClose} dismissible={!revealsSecret(result)}>
         <div className="modal-body">
           <SecretReveal result={result} outcome={`Layer ${result.layer.ID} is registered.`} onDone={onClose} />
+          {/* §7.3.1: registration runs no ingest, and a git source stays at
+              its initial commit until a webhook delivery or the first manual
+              reingest. The row the registration adds therefore reads "never"
+              and serves none of the layer's artifacts, so the outcome names
+              the ingest as the next thing to run and names the control that
+              runs it. */}
+          <p className="note" data-testid="register-ingest-note">
+            Registering does not ingest. The layer serves no artifacts until its first ingest, which the Reingest
+            control on its row runs.
+          </p>
         </div>
       </Modal>
     );
@@ -288,8 +298,13 @@ export function RegisterLayerForm({
           <button type="button" onClick={onClose}>
             Cancel
           </button>
+          {/* The control registers the layer and nothing else. §7.3.1 leaves
+              the ingest to a webhook delivery or a manual reingest, so a
+              label promising one describes a run that never happens. The
+              panel's own opener carries the layer noun, so the submit inside
+              the dialog the opener raised states the verb alone. */}
           <button type="submit" className="button primary" disabled={readOnly || incomplete}>
-            Register and ingest
+            Register
           </button>
         </div>
       </form>
