@@ -14,7 +14,7 @@
 // shown once and stays until the reader acknowledges it.
 
 import type { FormEvent, ReactNode } from 'react';
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 import { revealsSecret, SecretReveal } from './SecretReveal';
 import { members } from './members';
@@ -57,6 +57,22 @@ export function RegisterLayerForm({
   const [users, setUsers] = useState('');
   const [result, setResult] = useState<LayerSecretResult | null>(null);
   const [refusal, setRefusal] = useState<unknown>(null);
+  const refusalRef = useRef<HTMLDivElement | null>(null);
+
+  // The form is taller than the dialog and the body scrolls, so a refusal
+  // appended under the last field lands below the fold and the submit reads
+  // as a control that did nothing. It is drawn at the head of the body, and
+  // on arrival it is scrolled to and takes focus, which puts it where the
+  // reader is looking wherever the body was scrolled to and announces it to
+  // a reader who is not looking at the dialog at all.
+  useEffect(() => {
+    const banner = refusalRef.current;
+    if (refusal === null || banner === null) {
+      return;
+    }
+    banner.scrollIntoView({ block: 'nearest' });
+    banner.focus();
+  }, [refusal]);
 
   // An axis the reader turned on with no member named would register a
   // grant that admits nobody, so the form holds the write until each
@@ -119,6 +135,11 @@ export function RegisterLayerForm({
     >
       <form className="register-form modal-form" data-testid="register-form" onSubmit={submit}>
         <div className="modal-body">
+          {refusal !== null && (
+            <div ref={refusalRef} tabIndex={-1} data-testid="register-refusal">
+              <RegistrationRefusal refusal={refusal} />
+            </div>
+          )}
           <label className="field">
             <span className="label">Layer ID</span>
             <input
@@ -258,7 +279,6 @@ export function RegisterLayerForm({
           <p className="note" data-testid="visibility-note">
             {userDefined ? 'Visibility is fixed at registration.' : 'Visibility can be changed later from Edit.'}
           </p>
-          {refusal !== null && <RegistrationRefusal refusal={refusal} />}
         </div>
         <div className="modal-foot">
           {/* The registry appends a new layer at the end of the order, and

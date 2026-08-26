@@ -170,9 +170,19 @@ function selectFilter(label: string, value: string): void {
   });
 }
 
+/** scrolledIntoView records what a surface scrolled to. jsdom implements no
+ * scrolling and leaves `scrollIntoView` undefined, so the method is installed
+ * here and a case that asserts a control was brought into view reads what it
+ * was called on. */
+const scrolledIntoView: Element[] = [];
+
 beforeEach(() => {
   requests.length = 0;
   bodies.length = 0;
+  scrolledIntoView.length = 0;
+  Element.prototype.scrollIntoView = function record(this: Element) {
+    scrolledIntoView.push(this);
+  };
   goTo("#/");
 });
 
@@ -4034,6 +4044,39 @@ describe("the layer write flows", () => {
     const refusal = await screen.findByLabelText("Layer limit reached");
     expect(refusal.textContent).toContain("3 of 3");
     expect(screen.getByText("quota.layer_count_exceeded")).toBeTruthy();
+  });
+
+  // The register form is taller than the dialog and its body scrolls, so a
+  // refusal drawn under the last field lands below the fold and the submit
+  // reads as a control that did nothing. The refusal is drawn ahead of the
+  // fields, is scrolled to, and takes focus.
+  it("puts a refused registration ahead of the form fields, scrolls to it, and gives it focus", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "POST /v1/layers": {
+        status: 400,
+        body: {
+          code: "registry.invalid_argument",
+          message: "id and source_type are required",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.submit(screen.getByTestId("register-form"));
+    const refusal = await screen.findByTestId("register-refusal");
+    expect(refusal.textContent).toContain("registry.invalid_argument");
+    // DOCUMENT_POSITION_FOLLOWING: the field comes after the refusal, so the
+    // refusal is above the fields rather than under them.
+    expect(
+      refusal.compareDocumentPosition(screen.getByLabelText("Layer ID")) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(scrolledIntoView).toContain(refusal);
+    expect(document.activeElement).toBe(refusal);
   });
 
   // The recovery surface answers how long is left before erasure, so every
