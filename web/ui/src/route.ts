@@ -39,6 +39,17 @@ export function domainHref(path: string): string {
   return path === '' ? '#/' : `#/domain/${encodeURIComponent(path)}`;
 }
 
+/** atCatalogRoute reports whether `hash` already addresses the registry root,
+ * which is where `domainHref('')` leads. A control that offers the reader the
+ * catalog from the catalog navigates to where they are and leaves the screen
+ * unchanged, which reads as an action that failed. The registry root is
+ * addressed by more than one hash, so the answer comes from the parsed route
+ * rather than from a string comparison against `#/`. */
+export function atCatalogRoute(hash: string): boolean {
+  const route = parseRoute(hash);
+  return route.name === 'domain' && route.path === '';
+}
+
 export function artifactHref(id: string): string {
   return `#/artifact/${encodeURIComponent(id)}`;
 }

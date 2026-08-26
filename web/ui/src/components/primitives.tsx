@@ -8,6 +8,7 @@ import { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api';
+import { atCatalogRoute, domainHref } from '../route';
 import { dismissAttribute, holdDismissal, useDialogFocus } from './focus';
 
 export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
@@ -318,10 +319,11 @@ function envelopeMessage(error: ApiError): string {
  * ErrorPage is a whole-surface failure, as opposed to the ErrorState banner a
  * surface that is still standing renders inside itself. It is a centered card
  * carrying the kind of failure, what did not load, one sentence naming what
- * the route asked for, and the way on. A dead surface always offers a way off
- * it, because the route still names something that did not load and the
- * reader is otherwise left on a page with nothing on it; the retry sits beside
- * that where the envelope says the condition clears on its own. The code is
+ * the route asked for, and the way on. A dead surface offers a way off it
+ * wherever there is one, because the route still names something that did not
+ * load and the reader is otherwise left on a page with nothing on it; the
+ * retry sits beside that where the envelope says the condition clears on its
+ * own, and on the catalog route itself the retry is the only action. The code is
  * stated once and quietly at the foot, where whoever has to report it can
  * find it without it being the first thing the page says.
  */
@@ -347,6 +349,11 @@ export function ErrorPage({
   const label = kind === 'notFound' ? 'NOT FOUND' : kind === 'unavailable' ? 'REGISTRY UNREACHABLE' : 'REFUSED';
   const heading = kind === 'unavailable' ? "Can't reach the registry" : title;
   const offerRetry = onRetry !== undefined && (envelope === null || envelope.retryable);
+  // The way off is omitted on the route it leads to. The catalog read can fail
+  // at the registry root, and there the link navigates to the route already on
+  // screen: the panel stays exactly as it is, which reads as a second failed
+  // attempt rather than as a link that had nowhere to go.
+  const offerBack = !atCatalogRoute(window.location.hash);
   return (
     <section className="surface error-page" role="alert" aria-label="Failed" data-testid={testID}>
       <div className="error-card">
@@ -366,16 +373,20 @@ export function ErrorPage({
         {envelope !== null && envelope.suggestedAction !== '' && (
           <p className="error-lead quiet">{envelope.suggestedAction}</p>
         )}
-        <div className="error-actions">
-          {offerRetry && (
-            <button type="button" className="button primary" onClick={onRetry}>
-              Retry
-            </button>
-          )}
-          <a className={offerRetry ? 'button' : 'button primary'} href="#/">
-            Back to catalog
-          </a>
-        </div>
+        {(offerRetry || offerBack) && (
+          <div className="error-actions">
+            {offerRetry && (
+              <button type="button" className="button primary" onClick={onRetry}>
+                Retry
+              </button>
+            )}
+            {offerBack && (
+              <a className={offerRetry ? 'button' : 'button primary'} href={domainHref('')}>
+                Back to catalog
+              </a>
+            )}
+          </div>
+        )}
         {envelope !== null && (
           <p className="mono error-code">
             {envelope.code} · {envelope.retryable ? 'retryable' : 'not retryable'}

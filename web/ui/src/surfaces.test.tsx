@@ -9312,6 +9312,27 @@ describe("a whole-surface failure", () => {
     expect(page.textContent).toContain("registry.unavailable · retryable");
   });
 
+  // The way off is only a way off where it leads somewhere else. At the
+  // registry root the link's target is the route already on screen, so
+  // following it would leave the same panel standing and read as a second
+  // failed attempt.
+  it("omits the way back on the catalog route, leaving the retry alone", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { rejects: true },
+    });
+    goTo("#/");
+    render(<App />);
+    const page = await screen.findByTestId("domain-failed");
+    expect(
+      within(page).getByRole("heading", { name: "Can't reach the registry" }),
+    ).toBeTruthy();
+    expect(within(page).getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(
+      within(page).queryByRole("link", { name: "Back to catalog" }),
+    ).toBeNull();
+  });
+
   // §13.10 requires an artifact the caller may not see to be indistinguishable
   // from one that does not exist. The registry conceals the single-artifact
   // denial today, so the page is the second place that property holds, and it
