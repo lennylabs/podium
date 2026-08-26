@@ -1558,29 +1558,41 @@ input[type="search"]::-webkit-search-cancel-button {
    reason. The proportions are the design's grid for this surface, which gives
    the layer the widest content column and the source about two thirds of
    it (§13.10). The proportions are read off the table's own width, so the
-   table keeps them down to the same floor the layer table uses and scrolls
-   sideways inside `.table-scroll` below it: at a 1000px viewport the
+   table keeps them down to a floor wide enough for its six columns and
+   scrolls sideways inside `.table-scroll` below it: at a 1000px viewport the
    "Unregistered" header ran out of its cell and abutted "Erased on", and the
    header row read as one token. */
 .restore-table {
   table-layout: fixed;
-  min-width: 860px;
+  min-width: 960px;
 }
 
 .restore-table th:nth-child(1) {
-  width: 30%;
+  width: 24%;
 }
 
 .restore-table th:nth-child(2) {
-  width: 20%;
+  width: 16%;
 }
 
+/* The artifact-count column is the design's narrow column between the source
+   and the dates. It is wide enough for its own header and for the marker that
+   states the count is unreported, which broke over two lines in a column
+   sized to the count alone. */
 .restore-table th:nth-child(3) {
-  width: 14%;
+  width: 12%;
+}
+
+.restore-table td:nth-child(3) {
+  white-space: nowrap;
 }
 
 .restore-table th:nth-child(4) {
-  width: 24%;
+  width: 13%;
+}
+
+.restore-table th:nth-child(5) {
+  width: 22%;
 }
 
 .restore-table th:last-child {

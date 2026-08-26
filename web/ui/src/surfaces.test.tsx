@@ -7757,7 +7757,38 @@ describe("the layer write flows", () => {
       headers.map(
         (header) => header.querySelector(".label")?.textContent ?? "",
       ),
-    ).toEqual(["Layer", "Source", "Unregistered", "Erased on", "Actions"]);
+    ).toEqual([
+      "Layer",
+      "Source",
+      "Artifacts",
+      "Unregistered",
+      "Erased on",
+      "Actions",
+    ]);
+  });
+
+  // How much comes back on a restore is the second question this surface
+  // answers, so the artifact count has a column of its own. No layer read
+  // carries the count, so the column states it is unreported on every row
+  // rather than being left out: a column that is not drawn reads as a datum
+  // that does not exist.
+  it("carries an artifact-count column that states the count is unreported", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    const surface = await screen.findByLabelText("Recently unregistered");
+    const headers = Array.from(
+      within(surface).getByRole("table").querySelectorAll("thead th"),
+    ).map((header) => header.querySelector(".label")?.textContent ?? "");
+    const at = headers.indexOf("Artifacts");
+    expect(at).toBeGreaterThan(-1);
+    const row = within(surface).getByRole("table").querySelector("tbody tr");
+    const cells = Array.from(row?.querySelectorAll("td") ?? []);
+    expect(cells).toHaveLength(headers.length);
+    expect(cells[at].textContent).toBe("unreported");
   });
 
   // A record carrying no tombstone time states that rather than computing a

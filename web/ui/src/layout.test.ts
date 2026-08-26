@@ -746,13 +746,21 @@ function restoreTable(): {
   headers: HTMLTableCellElement[];
   source: HTMLTableCellElement;
   id: HTMLTableCellElement;
+  count: HTMLTableCellElement;
 } {
   const table = document.createElement("table");
   table.className = "data-table restore-table";
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
   const headers: HTMLTableCellElement[] = [];
-  for (const label of ["Layer", "Source", "Unregistered", "Erased on", "Actions"]) {
+  for (const label of [
+    "Layer",
+    "Source",
+    "Artifacts",
+    "Unregistered",
+    "Erased on",
+    "Actions",
+  ]) {
     const header = document.createElement("th");
     header.textContent = label;
     headRow.appendChild(header);
@@ -766,13 +774,16 @@ function restoreTable(): {
   id.className = "mono";
   const source = document.createElement("td");
   source.className = "source-col";
+  const count = document.createElement("td");
+  count.className = "mono quiet";
   row.appendChild(id);
   row.appendChild(source);
+  row.appendChild(count);
   body.appendChild(row);
   table.appendChild(body);
   document.body.appendChild(table);
   mounted.push(table);
-  return { table, headers, source, id };
+  return { table, headers, source, id, count };
 }
 
 // The restore table's columns. The row is identified by its layer name, and
@@ -785,10 +796,12 @@ describe("restore table columns", () => {
   });
 
   it("gives the layer column more width than any other content column", () => {
-    const [layer, source, unregistered, erased] = restoreTable().headers;
+    const [layer, source, artifacts, unregistered, erased] =
+      restoreTable().headers;
     const width = (header: HTMLTableCellElement) =>
       Number.parseFloat(window.getComputedStyle(header).width);
     expect(width(layer)).toBeGreaterThan(width(source));
+    expect(width(layer)).toBeGreaterThan(width(artifacts));
     expect(width(layer)).toBeGreaterThan(width(unregistered));
     expect(width(layer)).toBeGreaterThan(width(erased));
   });
@@ -803,6 +816,13 @@ describe("restore table columns", () => {
     expect(window.getComputedStyle(restoreTable().id).overflowWrap).toBe("anywhere");
   });
 
+  // The artifact-count cell states that the count is unreported, and that
+  // marker is longer than the count it stands in for. Wrapped, it broke over
+  // two lines and took the row's height with it.
+  it("keeps the artifact-count cell on one line", () => {
+    expect(window.getComputedStyle(restoreTable().count).whiteSpace).toBe("nowrap");
+  });
+
   // The proportions are read off the table's own width, so a container
   // narrower than the widths they add up to drives every column below the
   // min-content of the label inside it: at a 1000px viewport the
@@ -813,7 +833,7 @@ describe("restore table columns", () => {
     const floor = Number.parseFloat(
       window.getComputedStyle(restoreTable().table).minWidth,
     );
-    expect(floor).toBeGreaterThanOrEqual(860);
+    expect(floor).toBeGreaterThanOrEqual(960);
   });
 });
 

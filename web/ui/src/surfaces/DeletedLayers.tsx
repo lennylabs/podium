@@ -114,6 +114,16 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
                 <th>
                   <span className="label">Source</span>
                 </th>
+                {/* How much comes back on a restore is the second question
+                    this surface answers, so the count has a column of its
+                    own. No layer read carries it, so every cell states that
+                    it is unreported rather than the column being left out:
+                    a missing column reads as a datum that does not exist,
+                    and an unreported cell reads as one the registry did not
+                    send. */}
+                <th>
+                  <span className="label">Artifacts</span>
+                </th>
                 <th>
                   <span className="label">Unregistered</span>
                 </th>
@@ -195,6 +205,13 @@ function DeletedRow({
       <td className="mono">{layer.ID}</td>
       <td className="source-col">
         <SourceCell layer={layer} />
+      </td>
+      {/* The layer read the surface is built on carries no artifact count on
+          an active or a tombstoned layer, so the cell states the datum is
+          unreported the way the unregistered date does where the record
+          carries no tombstone time. */}
+      <td className="mono quiet" data-testid={`artifact-count-${layer.ID}`}>
+        unreported
       </td>
       <td className="mono quiet">{window === null ? 'unreported' : window.unregistered}</td>
       <td>
