@@ -121,6 +121,17 @@ const emptyDomain = {
   notable: [],
 };
 
+/** rootDomains is the registry root as the filter row reads it: the top-level
+ * domains are what the scope dropdown offers. */
+const rootDomains = {
+  path: "",
+  subdomains: [
+    { path: "platform", name: "platform" },
+    { path: "finance", name: "finance" },
+  ],
+  notable: [],
+};
+
 function goTo(hash: string): void {
   window.location.hash = hash;
 }
@@ -134,14 +145,22 @@ function lastSearch(): URLSearchParams {
   return new URLSearchParams(last.split("?")[1] ?? "");
 }
 
-/** addToken drives the filter row's token entry, which is how a tag, a scope,
- * and a type the row does not offer as a pill are added. */
+/** addToken drives the filter row's token entry, which is how a tag is
+ * added. */
 function addToken(label: string, value: string): void {
   fireEvent.click(screen.getByRole("button", { name: `+ ${label}` }));
   fireEvent.change(screen.getByLabelText(`Add a ${label} filter`), {
     target: { value },
   });
   fireEvent.click(screen.getByRole("button", { name: "Add" }));
+}
+
+/** selectFilter drives the filter row's dropdown, which is how the two
+ * enumerable filters, the type and the scope, are applied. */
+function selectFilter(label: string, value: string): void {
+  fireEvent.change(screen.getByLabelText(`Filter by ${label}`), {
+    target: { value },
+  });
 }
 
 beforeEach(() => {
@@ -783,20 +802,17 @@ describe("search", () => {
   it("carries the type, scope, and tag filters on the request it issues", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
       "/v1/search_artifacts": { body: { total_matched: 0 } },
     });
     goTo("#/search/review");
     render(<App />);
     await screen.findByLabelText("Search");
-    // The filter row is pills rather than text boxes: a type is selected from
-    // the offered set, and a scope and a tag are added through the row's
+    // The filter row is pills rather than text boxes: the type and the scope
+    // are chosen from their dropdowns, and a tag is added through the row's
     // token entry.
-    fireEvent.click(
-      within(screen.getByRole("group", { name: "Type" })).getByRole("button", {
-        name: "skill",
-      }),
-    );
-    addToken("scope", "platform");
+    selectFilter("type", "skill");
+    selectFilter("scope", "platform");
     addToken("tag", "review");
     addToken("tag", "security");
     await waitFor(() => {
@@ -808,6 +824,47 @@ describe("search", () => {
       expect(query.get("type")).toBe("skill");
       expect(query.get("scope")).toBe("platform");
       expect(query.get("tags")).toBe("review,security");
+    });
+  });
+
+  // The row states what it is and carries one control per filter. It offers
+  // no chip per artifact type, because a row that spends its width on the
+  // unapplied values of one filter states the filter set less clearly than
+  // the label and the dropdown do.
+  it("names the filter row and offers one control per filter rather than a chip per type", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    await screen.findByLabelText("Search");
+    expect(screen.getByText("Filters")).toBeTruthy();
+    for (const name of ["skill", "agent", "context", "mcp-server"]) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+    }
+    expect(screen.queryByRole("button", { name: "+ type" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "+ scope" })).toBeNull();
+    expect(screen.getByRole("button", { name: "+ tag" })).toBeTruthy();
+    // The scope dropdown offers the registry's own top-level domains, since a
+    // scope is a domain path rather than a value the reader invents.
+    const scope = await screen.findByLabelText("Filter by scope");
+    expect(
+      within(scope)
+        .getAllByRole("option")
+        .map((option) => option.textContent),
+    ).toEqual(["scope: all", "scope: platform", "scope: finance"]);
+    // An applied filter names the filter it applies and carries its own
+    // remove control, and the dropdown it replaces is gone.
+    selectFilter("type", "skill");
+    expect(await screen.findByText("type: skill")).toBeTruthy();
+    expect(screen.queryByLabelText("Filter by type")).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Remove the skill filter" }),
+    );
+    await waitFor(() => {
+      expect(screen.getByLabelText("Filter by type")).toBeTruthy();
     });
   });
 
@@ -906,11 +963,7 @@ describe("search", () => {
     await waitFor(() => {
       expect(window.location.hash).toBe(searchHref("deploy"));
     });
-    fireEvent.click(
-      within(screen.getByRole("group", { name: "Type" })).getByRole("button", {
-        name: "skill",
-      }),
-    );
+    selectFilter("type", "skill");
     addToken("tag", "security");
     await waitFor(() => {
       expect(window.location.hash).toBe(
@@ -3367,9 +3420,7 @@ describe("the command palette", () => {
     expect(lastSearch().get("scope")).toBe("platform");
     // The parsed filters are the pills the surface opens with, so the reader
     // can drop one from the row the palette's syntax taught.
-    expect(
-      within(screen.getByLabelText("Scope")).getByText("platform"),
-    ).toBeTruthy();
+    expect(screen.getByText("scope: platform")).toBeTruthy();
     expect(screen.getByLabelText("Remove the review filter")).toBeTruthy();
     expect(screen.getByLabelText("Remove the skill filter")).toBeTruthy();
   });

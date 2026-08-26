@@ -3,34 +3,50 @@
 // those and no others. Every argument is optional, so a request with no query
 // text is a browse over the filters.
 //
-// The filters are drawn as the design pass fixed them: an active filter is a
-// filled pill carrying its own remove control, an inactive one is outlined,
-// and a filter whose values cannot be enumerated is added through a token
-// entry. The result count sits at the right of the same row.
+// The row is drawn as the design pass fixed it: the label names the row, an
+// applied filter is a filled pill carrying its own remove control, a filter
+// whose values the registry can enumerate is added from an outlined dropdown,
+// and one whose values it cannot is added through a token entry. The result
+// count sits at the right of the same row.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
-import { ArtifactRow } from '../components/ArtifactRow';
-import { EmptyState, ErrorState, Loading } from '../components/primitives';
-import type { SearchFilters, SearchResponse } from '../api';
-import { searchArtifacts } from '../api';
-import { formatQueryLine, parseQueryLine } from '../query';
-import { replaceRoute, searchHref } from '../route';
-import type { Async } from '../useAsync';
-import { useAsync, useErrorReport } from '../useAsync';
+import { ArtifactRow } from "../components/ArtifactRow";
+import { EmptyState, ErrorState, Loading } from "../components/primitives";
+import type { SearchFilters, SearchResponse } from "../api";
+import { loadDomain, searchArtifacts } from "../api";
+import { formatQueryLine, parseQueryLine } from "../query";
+import { replaceRoute, searchHref } from "../route";
+import type { Async } from "../useAsync";
+import { useAsync, useErrorReport } from "../useAsync";
 
 const resultCap = 10;
 
 /** firstClassTypes are the §4.3 types every registry carries, which is what
- * the row can offer as pills. An extension type registers through the
- * TypeProvider SPI and no response enumerates the registered set, so the row
- * also takes a typed value rather than confining the filter to these. */
-const firstClassTypes = ['skill', 'agent', 'context', 'command', 'rule', 'hook', 'mcp-server'];
+ * the type dropdown can offer. An extension type registers through the
+ * TypeProvider SPI and no response enumerates the registered set, so a filter
+ * on one arrives through the palette's `type:` syntax or through the route,
+ * and the row renders it as the pill any applied type takes. */
+const firstClassTypes = [
+  "skill",
+  "agent",
+  "context",
+  "command",
+  "rule",
+  "hook",
+  "mcp-server",
+];
 
-export function SearchSurface({ query, onError }: { query: string; onError: (err: unknown) => void }) {
+export function SearchSurface({
+  query,
+  onError,
+}: {
+  query: string;
+  onError: (err: unknown) => void;
+}) {
   // The route query carries the same line the palette types, so the surface
   // runs the palette's own parse over it. A query arriving as
-  // "type:skill auth" opens with the skill pill filled and "auth" in the
+  // "type:skill auth" opens with the skill pill applied and "auth" in the
   // field, which is the request the palette issued and the result set it
   // listed. The shell remounts the surface on each query, so the parse seeds
   // the state once per query and the reader's later edits stand.
@@ -39,6 +55,16 @@ export function SearchSurface({ query, onError }: { query: string; onError: (err
   const [scope, setScope] = useState(seed.scope);
   const [tags, setTags] = useState<string[]>(seed.tags);
   const [text, setText] = useState(seed.query);
+
+  // A scope is a §4.2 domain path, so the dropdown offers the registry's
+  // top-level domains. The read is an enhancement to the row rather than the
+  // surface's own catalog read: a failure leaves the dropdown offering the
+  // unscoped search alone and is neither reported to the shell nor drawn,
+  // because the search itself still answers.
+  const domains = useAsync(() => loadDomain("", 1), []);
+  const scopeOptions = (domains.value?.subdomains ?? []).map(
+    (domain) => domain.path,
+  );
 
   const filters: SearchFilters = { query: text, type, scope, tags };
   const key = JSON.stringify(filters);
@@ -70,62 +96,53 @@ export function SearchSurface({ query, onError }: { query: string; onError: (err
         }}
       />
       <div className="filter-row">
-        <div className="filter-group" role="group" aria-label="Type">
-          {firstClassTypes.map((name) => (
-            <FilterPill
-              key={name}
-              label={name}
-              active={type === name}
-              onSelect={() => {
-                setType(name);
-              }}
-              onRemove={() => {
-                setType('');
-              }}
-            />
-          ))}
-          {type !== '' && !firstClassTypes.includes(type) && (
-            <FilterPill
-              label={type}
-              active
-              onRemove={() => {
-                setType('');
-              }}
-            />
-          )}
-          <TokenEntry label="type" onAdd={setType} />
-        </div>
-        <div className="filter-group" role="group" aria-label="Scope">
-          {scope === '' ? (
-            <TokenEntry label="scope" onAdd={setScope} />
-          ) : (
-            <FilterPill
-              label={scope}
-              active
-              onRemove={() => {
-                setScope('');
-              }}
-            />
-          )}
-        </div>
-        <div className="filter-group" role="group" aria-label="Tags">
-          {tags.map((tag) => (
-            <FilterPill
-              key={tag}
-              label={tag}
-              active
-              onRemove={() => {
-                setTags(tags.filter((held) => held !== tag));
-              }}
-            />
-          ))}
-          <TokenEntry
-            label="tag"
-            onAdd={(tag) => {
-              setTags((held) => (held.includes(tag) ? held : [...held, tag]));
+        <span className="filter-label mono">Filters</span>
+        {type === "" ? (
+          <FilterSelect
+            label="type"
+            options={firstClassTypes}
+            onSelect={setType}
+          />
+        ) : (
+          <FilterPill
+            label="type"
+            value={type}
+            onRemove={() => {
+              setType("");
             }}
           />
-        </div>
+        )}
+        {scope === "" ? (
+          <FilterSelect
+            label="scope"
+            options={scopeOptions}
+            onSelect={setScope}
+          />
+        ) : (
+          <FilterPill
+            label="scope"
+            value={scope}
+            onRemove={() => {
+              setScope("");
+            }}
+          />
+        )}
+        {tags.map((tag) => (
+          <FilterPill
+            key={tag}
+            label="tag"
+            value={tag}
+            onRemove={() => {
+              setTags(tags.filter((held) => held !== tag));
+            }}
+          />
+        ))}
+        <TokenEntry
+          label="tag"
+          onAdd={(tag) => {
+            setTags((held) => (held.includes(tag) ? held : [...held, tag]));
+          }}
+        />
         {/* The match count is taken before the cap truncates the list, so
             fewer results than matches is the ordinary outcome. */}
         {body !== null && (
@@ -139,52 +156,84 @@ export function SearchSurface({ query, onError }: { query: string; onError: (err
   );
 }
 
-/** FilterPill is one filter value. An active value is filled and carries the
- * control that removes it; an inactive one is outlined and selects on a
- * press, so both states are one press away from the other. */
+/** FilterPill is one applied filter. It names the filter it applies as well
+ * as the value, so a row carrying several reads as the request it issues, and
+ * it carries the control that removes it. */
 function FilterPill({
   label,
-  active,
-  onSelect,
+  value,
   onRemove,
 }: {
   label: string;
-  active: boolean;
-  /** onSelect activates an inactive value. An active pill offers removal
-   * alone, so it carries none. */
-  onSelect?: () => void;
+  value: string;
   onRemove: () => void;
 }) {
-  if (!active) {
-    return (
-      <button type="button" className="pill" onClick={onSelect}>
-        {label}
-      </button>
-    );
-  }
   return (
     <span className="pill pill-active">
-      {label}
-      <button type="button" className="pill-remove" aria-label={`Remove the ${label} filter`} onClick={onRemove}>
+      {label}: {value}
+      <button
+        type="button"
+        className="pill-remove"
+        aria-label={`Remove the ${value} filter`}
+        onClick={onRemove}
+      >
         ✕
       </button>
     </span>
   );
 }
 
-/** TokenEntry adds a filter value the row cannot offer as a pill, which is
- * every tag, every scope, and a type the registry carries through the
- * TypeProvider SPI. It opens on a press, takes one value, and closes. */
-function TokenEntry({ label, onAdd }: { label: string; onAdd: (value: string) => void }) {
+/** FilterSelect applies a filter whose values are enumerable, which is the
+ * type and the scope. It reads as the unapplied state of the pill that
+ * replaces it: the closed control names the filter and the unfiltered read it
+ * currently stands for. */
+function FilterSelect({
+  label,
+  options,
+  onSelect,
+}: {
+  label: string;
+  options: string[];
+  onSelect: (value: string) => void;
+}) {
+  return (
+    <span className="pill pill-select">
+      <select
+        aria-label={`Filter by ${label}`}
+        value=""
+        onChange={(event) => {
+          onSelect(event.target.value);
+        }}
+      >
+        <option value="">{label}: all</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {label}: {option}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
+/** TokenEntry adds a filter value the registry cannot enumerate, which is
+ * every tag. It opens on a press, takes one value, and closes. */
+function TokenEntry({
+  label,
+  onAdd,
+}: {
+  label: string;
+  onAdd: (value: string) => void;
+}) {
   const [open, setOpen] = useState(false);
-  const [typed, setTyped] = useState('');
+  const [typed, setTyped] = useState("");
 
   const commit = () => {
     const value = typed.trim();
-    if (value !== '') {
+    if (value !== "") {
       onAdd(value);
     }
-    setTyped('');
+    setTyped("");
     setOpen(false);
   };
 
@@ -212,7 +261,7 @@ function TokenEntry({ label, onAdd }: { label: string; onAdd: (value: string) =>
           setTyped(event.target.value);
         }}
         onKeyDown={(event) => {
-          if (event.key === 'Enter') {
+          if (event.key === "Enter") {
             commit();
           }
         }}
@@ -237,22 +286,35 @@ function SearchResults({ search }: { search: Async<SearchResponse> }) {
   }
   const results = body.results ?? [];
   if (results.length === 0) {
-    return <EmptyState>Nothing matched. Widen the query or clear a filter.</EmptyState>;
+    return (
+      <EmptyState>
+        Nothing matched. Widen the query or clear a filter.
+      </EmptyState>
+    );
   }
   // A lexical score is comparable only inside the result set it came back in,
   // so the relevance indicator ranks each row against the strongest score
   // here rather than against a fixed scale.
-  const topScore = results.reduce((top, artifact) => Math.max(top, artifact.score ?? 0), 0);
+  const topScore = results.reduce(
+    (top, artifact) => Math.max(top, artifact.score ?? 0),
+    0,
+  );
   return (
     <>
       {results.length < body.total_matched && (
         <p className="quiet">
-          Narrow the result set with a filter, drill into a subdomain, or run a more specific query.
+          Narrow the result set with a filter, drill into a subdomain, or run a
+          more specific query.
         </p>
       )}
       <ul className="artifact-list">
         {results.map((artifact) => (
-          <ArtifactRow key={artifact.id} artifact={artifact} ranked topScore={topScore} />
+          <ArtifactRow
+            key={artifact.id}
+            artifact={artifact}
+            ranked
+            topScore={topScore}
+          />
         ))}
       </ul>
     </>
