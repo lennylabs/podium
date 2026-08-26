@@ -22,7 +22,7 @@ import {
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
 import { catalogDepth, domainLabel, marksCurrentDomain } from './domain';
-import { useDismissalHeld } from './components/focus';
+import { useDismissalHeld, usePopupDismiss } from './components/focus';
 import { artifactDomain, domainHref, layersHref, routeKey, searchHref, useRoute } from './route';
 import { since } from './time';
 import type { ThemePreference } from './theme';
@@ -1006,6 +1006,39 @@ function TopBar({
   );
 }
 
+/** useTopbarMenu holds one topbar popover open and gives it the dismissal
+ * paths every transient overlay in this shell owes a reader: Escape closes it
+ * and hands focus back to the trigger, a press or a focus move outside it
+ * closes it, and entering another surface closes it. Without the last one the
+ * menu stands over a surface the reader deliberately entered, which is the
+ * same leak the palette closes on a route change.
+ *
+ * Spec: §13.10
+ */
+function useTopbarMenu() {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const menu = usePopupDismiss<HTMLDivElement>(
+    open,
+    () => {
+      setOpen(false);
+    },
+    trigger,
+  );
+  const entered = routeKey(useRoute());
+  useEffect(() => {
+    setOpen(false);
+  }, [entered]);
+  return {
+    open,
+    trigger,
+    menu,
+    toggle: () => {
+      setOpen((prior) => !prior);
+    },
+  };
+}
+
 /** AccountMenu is the identity cluster and the menu behind it. It carries the
  * caller's own subject, the appearance preference, the layer quota, and the
  * sign-out entry point where the deployment runs one. It carries no role
@@ -1023,7 +1056,7 @@ function AccountMenu({
   onTheme: (next: ThemePreference) => void;
   signOutPath: string | null;
 }) {
-  const [open, setOpen] = useState(false);
+  const { open, trigger, menu, toggle } = useTopbarMenu();
   return (
     <div className="account">
       <button
@@ -1031,9 +1064,8 @@ function AccountMenu({
         className="account-trigger"
         data-testid="account-trigger"
         aria-expanded={open}
-        onClick={() => {
-          setOpen((prior) => !prior);
-        }}
+        ref={trigger}
+        onClick={toggle}
       >
         <span className="mono avatar" aria-hidden="true">
           {initialsOf(subject)}
@@ -1041,7 +1073,7 @@ function AccountMenu({
         <span className="mono subject">{subject}</span>
       </button>
       {open && (
-        <div className="account-menu" role="menu" aria-label="Account" data-testid="account-menu">
+        <div className="account-menu" role="menu" aria-label="Account" data-testid="account-menu" ref={menu}>
           <p className="mono quiet">{subject}</p>
           <AppearanceSwitch theme={theme} onTheme={onTheme} />
           <LayerQuota />
@@ -1099,7 +1131,7 @@ function AppearanceMenu({
   theme: ThemePreference;
   onTheme: (next: ThemePreference) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const { open, trigger, menu, toggle } = useTopbarMenu();
   return (
     <div className="account">
       <button
@@ -1107,15 +1139,14 @@ function AppearanceMenu({
         className="account-trigger appearance-trigger"
         data-testid="appearance-trigger"
         aria-expanded={open}
-        onClick={() => {
-          setOpen((prior) => !prior);
-        }}
+        ref={trigger}
+        onClick={toggle}
       >
         <ContrastDisc />
         Appearance
       </button>
       {open && (
-        <div className="account-menu" role="menu" aria-label="Appearance" data-testid="appearance-menu">
+        <div className="account-menu" role="menu" aria-label="Appearance" data-testid="appearance-menu" ref={menu}>
           <AppearanceSwitch theme={theme} onTheme={onTheme} />
         </div>
       )}

@@ -8137,6 +8137,55 @@ describe("the shell’s identity cluster", () => {
     expect(window.localStorage.getItem("podium.theme")).toBe("light");
   });
 
+  // The topbar menus are transient popovers, and every other overlay in the
+  // shell leaves on Escape and on a press outside it. One whose only exit is
+  // its own trigger stands over the surface for the rest of the session, and
+  // one that survives the reader entering another surface covers a surface
+  // they deliberately opened.
+  it("dismisses the appearance menu on Escape, on an outside press, and on a route change", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture() },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    render(<App />);
+    const trigger = await screen.findByTestId("appearance-trigger");
+
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("appearance-menu")).toBeNull();
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(trigger);
+
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByTestId("appearance-menu")).toBeNull();
+
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("appearance-menu")).toBeTruthy();
+    goTo(searchHref("deploy"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("appearance-menu")).toBeNull();
+    });
+  });
+
+  // The identity cluster's menu is the same popover behind a different
+  // trigger, so it carries the same dismissal paths.
+  it("dismisses the account menu on Escape", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const trigger = await screen.findByTestId("account-trigger");
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("account-menu")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByTestId("account-menu")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
   // The menu carries the layer quota, read from the §4.7.8 endpoint the
   // registry gates on no role, so the caller sees the cap on how many layers
   // of their own they may hold.
