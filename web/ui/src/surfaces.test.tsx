@@ -2687,6 +2687,39 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // Every exclusive one-row choice in the build is the same segmented control,
+  // so the chosen segment is raised onto the surface colour over a chip track.
+  // A switch that fills the chosen segment with the track colour instead
+  // inverts the control and reads as the unchosen view being the live one.
+  it("draws the frontmatter view switch as the shared segmented control", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "Body.\n",
+          frontmatter: "---\nname: review\n---\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    const group = screen.getByRole("group", { name: "Frontmatter view" });
+    expect(group.className.split(" ")).toContain("segmented");
+    const view = within(group);
+    expect(view.getByRole("button", { name: "Table" }).className).toBe("segment segment-on");
+    expect(view.getByRole("button", { name: "Raw YAML" }).className).toBe("segment");
+    fireEvent.click(view.getByRole("button", { name: "Raw YAML" }));
+    expect(view.getByRole("button", { name: "Raw YAML" }).className).toBe("segment segment-on");
+    expect(view.getByRole("button", { name: "Table" }).className).toBe("segment");
+  });
+
   it("reports a frontmatter block that does not parse without affecting the rest of the viewer", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -6170,7 +6203,17 @@ describe("the shell’s identity cluster", () => {
     expect(cluster.textContent).toContain("alice@acme.com");
     fireEvent.click(cluster);
     const menu = screen.getByTestId("account-menu");
+    // The appearance switch is that same segmented control, so the pinned
+    // preference is the segment raised onto the surface colour.
+    const appearance = within(menu).getByRole("group", { name: "Appearance" });
+    expect(appearance.className.split(" ")).toContain("segmented");
+    expect(within(appearance).getByRole("button", { name: "system" }).className).toBe(
+      "segment segment-on",
+    );
     fireEvent.click(within(menu).getByRole("button", { name: "dark" }));
+    expect(within(appearance).getByRole("button", { name: "dark" }).className).toBe(
+      "segment segment-on",
+    );
     expect(window.document.documentElement.getAttribute("data-theme")).toBe(
       "dark",
     );
@@ -6384,7 +6427,15 @@ describe("the trimmed listing", () => {
     expect(subhead).not.toBeNull();
     const subrow = within(subhead as HTMLElement);
     expect(subrow.getByLabelText("Filter subdomains")).toBeTruthy();
-    expect(subrow.getByRole("group", { name: "Subdomain view" })).toBeTruthy();
+    // The switch is the segmented control the register form uses, so the
+    // chosen view is the segment raised onto the surface colour rather than
+    // the one filled with the track colour.
+    const viewSwitch = subrow.getByRole("group", { name: "Subdomain view" });
+    expect(viewSwitch.className.split(" ")).toContain("segmented");
+    expect(within(viewSwitch).getByRole("button", { name: "grid" }).className).toBe(
+      "segment segment-on",
+    );
+    expect(within(viewSwitch).getByRole("button", { name: "list" }).className).toBe("segment");
     expect((subhead as HTMLElement).textContent).toContain("24");
     // The grid itself is not in that row.
     expect(subrow.queryByLabelText("Subdomains")).toBeNull();

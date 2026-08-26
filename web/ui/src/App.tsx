@@ -839,12 +839,12 @@ function AccountMenu({
         <div className="account-menu" role="menu" aria-label="Account" data-testid="account-menu">
           <p className="mono quiet">{subject}</p>
           <p className="label">Appearance</p>
-          <div className="view-toggle" role="group" aria-label="Appearance">
+          <div className="segmented" role="group" aria-label="Appearance">
             {(['system', 'light', 'dark'] as ThemePreference[]).map((choice) => (
               <button
                 key={choice}
                 type="button"
-                className={theme === choice ? 'toggle toggle-open' : 'toggle'}
+                className={theme === choice ? 'segment segment-on' : 'segment'}
                 aria-pressed={theme === choice}
                 onClick={() => {
                   onTheme(choice);

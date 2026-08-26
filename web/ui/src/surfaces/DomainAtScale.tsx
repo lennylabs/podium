@@ -53,12 +53,12 @@ export function SubdomainTiles({ subdomains, parent }: { subdomains: DomainDescr
             setFilter(event.target.value);
           }}
         />
-        <div className="view-toggle" role="group" aria-label="Subdomain view">
+        <div className="segmented" role="group" aria-label="Subdomain view">
           {(['grid', 'list'] as const).map((choice) => (
             <button
               key={choice}
               type="button"
-              className={view === choice ? 'toggle toggle-open' : 'toggle'}
+              className={view === choice ? 'segment segment-on' : 'segment'}
               aria-pressed={view === choice}
               onClick={() => {
                 setView(choice);

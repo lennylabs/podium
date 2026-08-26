@@ -1192,40 +1192,27 @@ input[type="checkbox"] {
   background-color: var(--surf2);
 }
 
-.view-toggle {
-  display: flex;
-  gap: 0;
-  margin: 10px 0;
+/* A view switch that rides on a toolbar row is smaller than the one in a
+   form, so the track and its segments tighten. The fills stay the shared
+   ones, because a reader who learns the control on the register form reads
+   the same selection here. */
+.source-actions .segmented,
+.section-head .segmented {
+  padding: 2px;
+  border-radius: 8px;
 }
 
-.toggle {
-  margin: 0;
-  border-radius: 0;
-}
-
-/* The toggle sits on the panel's opening row beside the line that states
-   where the pairs came from, so it carries no margin of its own there. */
-.source-actions .view-toggle {
-  margin: 0;
+.source-actions .segment,
+.section-head .segment {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
 }
 
 .property-note {
   max-width: 840px;
   margin-top: 14px;
   font-size: 12.5px;
-}
-
-.toggle:first-child {
-  border-radius: 8px 0 0 8px;
-}
-
-.toggle:last-child {
-  border-radius: 0 8px 8px 0;
-}
-
-.toggle-open {
-  background: var(--chip);
-  font-weight: 600;
 }
 
 .raw-line {
@@ -2094,9 +2081,11 @@ label:has(> input:disabled) {
   margin-right: 0;
 }
 
-/* Two exclusive choices that fit on one row: both are read without opening
-   anything, which is what the source selector wants and a select does not
-   give. */
+/* A short set of exclusive choices that fits on one row: every choice is read
+   without opening anything, which is what the source selector, the appearance
+   switch, and the in-page view switches want and a select does not give. The
+   track carries the chip fill and the chosen segment is raised onto the
+   surface, so the selection reads as the segment standing above the rest. */
 .segmented {
   display: flex;
   gap: 2px;
@@ -2395,6 +2384,12 @@ label:has(> input:disabled) {
   box-shadow: 0 30px 60px -24px var(--scrim);
 }
 
+/* The appearance switch stands between the label above it and the quota
+   below, so it carries the row spacing the menu's paragraphs carry. */
+.account-menu .segmented {
+  margin: 10px 0;
+}
+
 /* The command palette sits over a scrim, 96px from the top, on whatever page
    it was opened from. */
 .palette-scrim {
@@ -2617,10 +2612,6 @@ label:has(> input:disabled) {
    closes with its filter and the view toggle beside it, and the artifact row
    closes with the sort control, because the chips it filters by belong beside
    the label they narrow. */
-.section-head .view-toggle {
-  margin: 0;
-}
-
 .section-head .sort-control,
 .subdomain-tiles .section-head .filter-field {
   margin-left: auto;

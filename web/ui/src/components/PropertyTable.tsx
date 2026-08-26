@@ -72,11 +72,11 @@ export function PropertyTable({
           <span className="source-lede">
             Parsed from the artifact&apos;s manifest. Unknown keys are preserved and shown as authored.
           </span>
-          <div className="view-toggle" role="group" aria-label="Frontmatter view">
+          <div className="segmented" role="group" aria-label="Frontmatter view">
             <button
             type="button"
             aria-pressed={!rawView}
-            className={rawView ? 'toggle' : 'toggle toggle-open'}
+            className={rawView ? 'segment' : 'segment segment-on'}
             onClick={() => {
               setRawView(false);
             }}
@@ -86,7 +86,7 @@ export function PropertyTable({
           <button
             type="button"
             aria-pressed={rawView}
-            className={rawView ? 'toggle toggle-open' : 'toggle'}
+            className={rawView ? 'segment segment-on' : 'segment'}
             onClick={() => {
               setRawView(true);
             }}
