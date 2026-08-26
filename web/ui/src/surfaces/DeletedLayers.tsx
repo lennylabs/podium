@@ -18,12 +18,17 @@ import { EmptyState, ErrorState, Loading } from '../components/primitives';
 import { layersHref } from '../route';
 import { SourceCell } from '../components/SourceCell';
 import type { LayerRecord } from '../api';
-import { ApiError, listDeletedLayers, restoreLayer } from '../api';
+import { ApiError, listDeletedLayers, listLayers, restoreLayer } from '../api';
 import { useAsync } from '../useAsync';
 
 export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void; readOnly: boolean }) {
   const deleted = useAsync(() => listDeletedLayers(), []);
   const [refusal, setRefusal] = useState<unknown>(null);
+  // What the last restore did. A restored row leaves the table, and the empty
+  // state that follows reports nothing about the write that emptied it, so
+  // the outcome is held here and stated the way the panel states a committed
+  // reorder.
+  const [restored, setRestored] = useState('');
 
   if (deleted.loading) {
     return <Loading label="Loading the recoverable layers." />;
@@ -38,8 +43,22 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
         setRefusal(null);
         deleted.reload();
         onRestored();
+        // The restore response carries the layer ID alone, so the precedence
+        // the layer came back at is read from the layer list, which is the
+        // same order the panel one link away displays. A list read that
+        // fails reports the restore without a position rather than turning a
+        // committed write into a refusal.
+        listLayers().then(
+          (layers) => {
+            setRestored(restoredNote(id, layers));
+          },
+          () => {
+            setRestored(restoredNote(id, null));
+          },
+        );
       },
       (err: unknown) => {
+        setRestored('');
         setRefusal(err);
       },
     );
@@ -95,6 +114,19 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
           </tbody>
         </table>
       )}
+      {/* The live region is rendered on every state of the surface, empty
+          until a restore lands, and it becomes the visible outcome banner
+          when it carries text. A region mounted at the moment its text
+          arrives is not in the accessibility tree when the change happens,
+          and the announcement is dropped. */}
+      <p
+        className={restored === '' ? 'assistive-only' : 'banner banner-accent'}
+        role="status"
+        aria-live="polite"
+        data-testid="restore-announcement"
+      >
+        {restored}
+      </p>
       {refusal !== null && (
         <p className="row-refusal" role="alert">
           The registry refused that action and nothing changed.{' '}
@@ -110,6 +142,23 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
       </p>
     </section>
   );
+}
+
+/** restoredNote states what a committed restore did, in the same terms the
+ * layer panel states a committed reorder: the layer, and its position counted
+ * down the whole table, which is the precedence order the panel is about. The
+ * layer list is the order the catalog composes in, so the restored layer's
+ * index in it is the precedence it came back at. A list the read did not
+ * return, or one the layer is absent from, leaves the position unstated. */
+function restoredNote(id: string, layers: LayerRecord[] | null): string {
+  if (layers === null) {
+    return `${id} is restored.`;
+  }
+  const at = layers.findIndex((layer) => layer.ID === id);
+  if (at < 0) {
+    return `${id} is restored.`;
+  }
+  return `${id} is restored at order ${String(at + 1)} of ${String(layers.length)}.`;
 }
 
 function DeletedRow({

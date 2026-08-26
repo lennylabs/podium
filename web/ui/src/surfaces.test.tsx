@@ -6006,6 +6006,74 @@ describe("the layer write flows", () => {
     });
   });
 
+  // A restore is a write like every other write in the panel, so it reports
+  // what it did. The restored row leaves the table and the empty state that
+  // replaces it names no layer, so the outcome is stated in a live region
+  // that names the layer and the precedence it came back at.
+  it("reports a committed restore with the precedence it returned to", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      // The list read answers with the restored layer back in it, which is
+      // where the announced precedence is read from.
+      "/v1/layers": { body: { layers: [userLayer(), adminLayer()] } },
+      "/v1/layers?deleted=true": {
+        body: {
+          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+        },
+      },
+      "/v1/layers/restore": { body: { restored: "alice-personal" } },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    await screen.findByLabelText("Recently unregistered");
+    // The region is mounted before the write lands, so the announcement is
+    // in the accessibility tree at the moment its text arrives.
+    const region = screen.getByTestId("restore-announcement");
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.textContent).toBe("");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("restore-announcement").textContent).toBe(
+        "alice-personal is restored at order 1 of 2.",
+      );
+    });
+    // Reported on the page as well, rather than to assistive technology
+    // alone.
+    expect(screen.getByTestId("restore-announcement").className).toContain(
+      "banner",
+    );
+  });
+
+  // A refused restore reports the refusal alone. Where a successful restore
+  // came first, its outcome is dropped rather than left standing beside a
+  // refusal of the next one.
+  it("drops the restore outcome when a later restore is refused", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": {
+        body: {
+          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+        },
+      },
+      "/v1/layers/restore": {
+        status: 409,
+        body: {
+          code: "registry.conflict",
+          message: "artifact ID already exists",
+        },
+      },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    await screen.findByLabelText("Recently unregistered");
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    const refusal = await screen.findByRole("alert");
+    expect(refusal.textContent).toContain("registry.conflict");
+    expect(screen.getByTestId("restore-announcement").textContent).toBe("");
+  });
+
   // The accent is what the surface reserves for a layer about to be erased,
   // so a row with most of its window left draws its bar in the neutral tone
   // and only a row inside the threshold turns the date, the count, and the
