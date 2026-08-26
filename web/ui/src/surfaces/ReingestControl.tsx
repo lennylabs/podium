@@ -58,30 +58,45 @@ export function reingestRefusal(err: unknown): ReingestState {
   return { kind: 'refused', error: err };
 }
 
-export function ReingestControl({
-  layerID,
+/** ReingestButton is the trigger alone. The row's action bar holds a fixed
+ * pair of controls, so the trigger and the states it opens are rendered
+ * separately: the button sits in the bar and ReingestStatus draws underneath
+ * the row's controls, where a report has the width to be read. */
+export function ReingestButton({
   state,
   readOnly,
+  onStart,
+}: {
+  state: ReingestState;
+  readOnly: boolean;
+  onStart: (breakGlass?: BreakGlass) => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={readOnly || state.kind === 'running'}
+      onClick={() => {
+        onStart();
+      }}
+    >
+      Reingest
+    </button>
+  );
+}
+
+export function ReingestStatus({
+  layerID,
+  state,
   onStart,
   onDismiss,
 }: {
   layerID: string;
   state: ReingestState;
-  readOnly: boolean;
   onStart: (breakGlass?: BreakGlass) => void;
   onDismiss: () => void;
 }) {
   return (
     <>
-      <button
-        type="button"
-        disabled={readOnly || state.kind === 'running'}
-        onClick={() => {
-          onStart();
-        }}
-      >
-        Reingest
-      </button>
       {state.kind === 'running' && (
         <p className="loading" role="status" data-testid={`reingest-running-${layerID}`}>
           <span className="spinner" aria-hidden="true" />

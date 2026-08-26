@@ -1097,8 +1097,31 @@ describe('the layer panel', () => {
     render(<App />);
     await screen.findByLabelText('Layer panel');
     expect(screen.getAllByRole('button', { name: 'Reingest' }).length).toBe(2);
+    openRowActions('company');
+    openRowActions();
     expect(screen.getAllByRole('button', { name: 'Unregister' }).length).toBe(2);
     expect(screen.queryByText('yours')).toBeNull();
+  });
+
+  // Every row shares one grid and the actions column is fixed width, so the
+  // row's controls stay on one line: one action plus an overflow control.
+  // Rendering Edit, Reingest, and Unregister side by side stacked them and
+  // tripled the height of every row.
+  it('keeps the row to one action and an overflow control', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ subject: 'alice@acme.com' }) },
+      '/v1/layers': { body: { layers: [userLayer()] } },
+    });
+    goTo('#/layers');
+    render(<App />);
+    await screen.findByLabelText('Layer panel');
+    const cell = screen.getByRole('button', { name: 'Reingest' }).closest('td') as HTMLElement;
+    expect(within(cell).getAllByRole('button').map((button) => button.textContent)).toEqual(['Reingest', '⋯']);
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Unregister' })).toBeNull();
+    openRowActions();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Unregister' })).toBeTruthy();
   });
 
   // The ownership marker is a property of a user-defined row alone. An
@@ -1148,11 +1171,13 @@ describe('the layer panel', () => {
     goTo('#/layers');
     render(<App />);
     await screen.findByLabelText('Layer panel');
+    openRowActions();
     fireEvent.click(screen.getByRole('button', { name: 'Unregister' }));
     fireEvent.change(screen.getByLabelText('Type the layer ID to confirm'), { target: { value: 'alice-personal' } });
     fireEvent.click(screen.getByRole('button', { name: 'Unregister layer' }));
     expect(await screen.findByText(/nothing changed/)).toBeTruthy();
     expect(screen.getByText('auth.forbidden')).toBeTruthy();
+    openRowActions();
     expect(screen.getByRole('button', { name: 'Edit' }).hasAttribute('disabled')).toBe(false);
   });
 
@@ -1364,6 +1389,8 @@ describe('read-only mode', () => {
     render(<App />);
     await screen.findByLabelText('Layer panel');
     await screen.findByTestId('read-only-banner');
+    openRowActions('company');
+    openRowActions();
     for (const name of ['Register layer', 'Reingest all', 'Reingest', 'Unregister', 'Edit']) {
       for (const control of screen.getAllByRole('button', { name })) {
         expect(control.hasAttribute('disabled')).toBe(true);
@@ -1463,6 +1490,7 @@ describe('the layer write flows', () => {
     goTo('#/layers');
     render(<App />);
     await screen.findByLabelText('Layer panel');
+    openRowActions();
     fireEvent.click(screen.getByRole('button', { name: 'Unregister' }));
     const dialog = await screen.findByLabelText('Unregister a layer');
     expect(dialog.textContent).toContain('every caller');
@@ -1656,6 +1684,7 @@ describe('the layer write flows', () => {
     goTo('#/layers');
     render(<App />);
     await screen.findByLabelText('Layer panel');
+    openRowActions('company');
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const form = await screen.findByLabelText('Update company');
     // The endpoint applies a visibility patch on an admin-defined layer, so
@@ -1695,6 +1724,7 @@ describe('the layer write flows', () => {
     goTo('#/layers');
     render(<App />);
     await screen.findByLabelText('Layer panel');
+    openRowActions();
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
     const form = await screen.findByLabelText('Update alice-personal');
     const rotate = screen.getByLabelText('Rotate the webhook secret');
@@ -2088,6 +2118,12 @@ function userLayer(owner = 'alice@acme.com'): Record<string, unknown> {
     UserDefined: true,
     Owner: owner,
   };
+}
+
+/** openRowActions opens one row's overflow control, which is where Edit and
+ * Unregister live so that every row keeps to a single line. */
+function openRowActions(layerID = 'alice-personal'): void {
+  fireEvent.click(screen.getByRole('button', { name: `More actions for ${layerID}` }));
 }
 
 /** bobLayer is a user-defined layer another subject owns. The list read is
@@ -2501,6 +2537,7 @@ describe('a refused layer write', () => {
 
   async function refuseAnUnregister(): Promise<void> {
     await screen.findByLabelText('Layer panel');
+    openRowActions();
     fireEvent.click(screen.getByRole('button', { name: 'Unregister' }));
     fireEvent.change(screen.getByLabelText('Type the layer ID to confirm'), { target: { value: 'alice-personal' } });
     fireEvent.click(screen.getByRole('button', { name: 'Unregister layer' }));
@@ -2534,6 +2571,7 @@ describe('a refused layer write', () => {
     });
     expect(requests.filter((r) => r.method === 'DELETE').length).toBe(sent);
     // Every other control on the row stayed live throughout.
+    openRowActions();
     expect(screen.getByRole('button', { name: 'Edit' }).hasAttribute('disabled')).toBe(false);
   });
 

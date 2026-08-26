@@ -892,6 +892,58 @@ button,
   width: 34px;
 }
 
+/* The layer row's actions. The column holds one action and an overflow
+   control on a single line, which is what keeps every row on one grid; the
+   panels a control opens are drawn under the bar. */
+.row-actions {
+  width: 120px;
+}
+
+.row-action-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.row-action-bar button {
+  margin-right: 0;
+  white-space: nowrap;
+}
+
+.row-overflow {
+  padding: 6px 9px;
+  color: var(--meta);
+}
+
+.row-menu {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 6px;
+  margin-top: 6px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf2);
+}
+
+.row-menu button {
+  margin-right: 0;
+  text-align: left;
+}
+
+/* A panel a row control opens is read, filled in, or acted on, so it carries
+   its own minimum width and the column widens for as long as it is open. The
+   120px hint sizes the closed row alone. */
+.row-actions .confirm,
+.row-actions .register-form,
+.row-actions .ingest-report,
+.row-actions .row-refusal,
+.row-actions .loading {
+  min-width: 320px;
+}
+
 .drag-handle {
   color: var(--faint);
   cursor: grab;

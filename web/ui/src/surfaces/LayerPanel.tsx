@@ -15,7 +15,7 @@ import { DeletedLayers } from './DeletedLayers';
 import { erasesOn, recoveryDays } from './recovery';
 import { RegisterLayerForm } from './RegisterLayerForm';
 import type { ReingestState } from './ReingestControl';
-import { idleReingest, ReingestControl, reingestRefusal } from './ReingestControl';
+import { idleReingest, ReingestButton, ReingestStatus, reingestRefusal } from './ReingestControl';
 import { UpdateLayerForm } from './UpdateLayerForm';
 import { Badge, Banner, EmptyState, ErrorState, Loading } from '../components/primitives';
 import { SourceCell } from '../components/SourceCell';
@@ -345,6 +345,7 @@ function LayerRow({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
 
   // A write the panel sends can come back refused, including on a row the
   // panel presented as this caller's to manage. The refusal is drawn on the
@@ -408,32 +409,50 @@ function LayerRow({
         <VisibilityCell layer={layer} />
       </td>
       <td className="mono quiet">{layer.last_ingested_at ?? 'never'}</td>
-      <td>
-        <button
-          type="button"
-          disabled={readOnly}
-          onClick={() => {
-            setEditing((open) => !open);
-          }}
-        >
-          Edit
-        </button>
-        <ReingestControl
-          layerID={layer.ID}
-          state={reingest}
-          readOnly={readOnly}
-          onStart={onReingest}
-          onDismiss={onDismissReingest}
-        />
-        <button
-          type="button"
-          disabled={readOnly}
-          onClick={() => {
-            setConfirming(true);
-          }}
-        >
-          Unregister
-        </button>
+      <td className="row-actions">
+        {/* The actions column is fixed width and every row shares one grid,
+            so the bar carries the one action a reader reaches for on a row,
+            and the rest sit behind the overflow control. Stacking all three
+            controls tripled the height of every row. */}
+        <div className="row-action-bar">
+          <ReingestButton state={reingest} readOnly={readOnly} onStart={onReingest} />
+          <button
+            type="button"
+            className="row-overflow"
+            aria-label={`More actions for ${layer.ID}`}
+            aria-expanded={overflowOpen}
+            onClick={() => {
+              setOverflowOpen((open) => !open);
+            }}
+          >
+            ⋯
+          </button>
+        </div>
+        {overflowOpen && (
+          <div className="row-menu" aria-label={`More actions for ${layer.ID}`}>
+            <button
+              type="button"
+              disabled={readOnly}
+              onClick={() => {
+                setOverflowOpen(false);
+                setEditing((open) => !open);
+              }}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              disabled={readOnly}
+              onClick={() => {
+                setOverflowOpen(false);
+                setConfirming(true);
+              }}
+            >
+              Unregister
+            </button>
+          </div>
+        )}
+        <ReingestStatus layerID={layer.ID} state={reingest} onStart={onReingest} onDismiss={onDismissReingest} />
         {editing && (
           <UpdateLayerForm
             layer={layer}
