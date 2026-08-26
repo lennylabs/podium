@@ -171,6 +171,109 @@ export function EmptyState({ children }: { children: ReactNode }) {
   return <p className="empty">{children}</p>;
 }
 
+/** ErrorPageKind is what a whole-surface failure was: the read resolved
+ * nothing, the registry did not answer, or it refused for some other reason.
+ * Not-found and not-permitted deliberately land on the same kind, because a
+ * page that told them apart would disclose that an artifact the caller may
+ * not see exists.
+ *
+ * Spec: §13.10
+ */
+type ErrorPageKind = 'notFound' | 'unavailable' | 'failed';
+
+/** errorPageKind reads the kind off the §6.10 envelope. A failure carrying no
+ * envelope at all never reached the registry, which is the unreachable case
+ * rather than a refusal. */
+function errorPageKind(error: unknown): ErrorPageKind {
+  if (!(error instanceof ApiError)) {
+    return 'unavailable';
+  }
+  if (error.code.endsWith('.not_found')) {
+    return 'notFound';
+  }
+  return error.code === 'registry.unavailable' ? 'unavailable' : 'failed';
+}
+
+/** envelopeMessage is the envelope's prose with a leading repetition of its
+ * own code removed. The registry prefixes several messages with the code they
+ * carry ("registry.not_found: artifact eng/deploy"), and the page states the
+ * code once on a line of its own, so the prefix would print it twice. */
+function envelopeMessage(error: ApiError): string {
+  const prefix = `${error.code}: `;
+  return error.message.startsWith(prefix) ? error.message.slice(prefix.length) : error.message;
+}
+
+/**
+ * ErrorPage is a whole-surface failure, as opposed to the ErrorState banner a
+ * surface that is still standing renders inside itself. It is a centered card
+ * carrying the kind of failure, what did not load, one sentence naming what
+ * the route asked for, and the way on. A dead surface always offers a way off
+ * it, because the route still names something that did not load and the
+ * reader is otherwise left on a page with nothing on it; the retry sits beside
+ * that where the envelope says the condition clears on its own. The code is
+ * stated once and quietly at the foot, where whoever has to report it can
+ * find it without it being the first thing the page says.
+ */
+export function ErrorPage({
+  error,
+  title,
+  subject,
+  onRetry,
+  testID,
+}: {
+  error: unknown;
+  /** What did not load, in the page's own words: "No such artifact". */
+  title: string;
+  /** The domain path or artifact ID the route named. The sentence under the
+   * title states it, so the reader sees what was asked for. */
+  subject?: string;
+  onRetry?: () => void;
+  testID?: string;
+}) {
+  const envelope = error instanceof ApiError ? error : null;
+  const kind = errorPageKind(error);
+  const label = kind === 'notFound' ? 'NOT FOUND' : kind === 'unavailable' ? 'REGISTRY UNREACHABLE' : 'REFUSED';
+  const heading = kind === 'unavailable' ? "Can't reach the registry" : title;
+  const offerRetry = onRetry !== undefined && (envelope === null || envelope.retryable);
+  return (
+    <section className="surface error-page" role="alert" aria-label="Failed" data-testid={testID}>
+      <div className="error-card">
+        <p className="mono error-kind">{label}</p>
+        <h1 className="error-title">{heading}</h1>
+        <p className="error-lead">
+          {kind === 'notFound' && subject !== undefined ? (
+            <>
+              <span className="mono">{subject}</span> does not resolve.
+            </>
+          ) : envelope !== null ? (
+            envelopeMessage(envelope)
+          ) : (
+            'The page loaded but the registry did not answer. Nothing has changed.'
+          )}
+        </p>
+        {envelope !== null && envelope.suggestedAction !== '' && (
+          <p className="error-lead quiet">{envelope.suggestedAction}</p>
+        )}
+        <div className="error-actions">
+          {offerRetry && (
+            <button type="button" className="button primary" onClick={onRetry}>
+              Retry
+            </button>
+          )}
+          <a className={offerRetry ? 'button' : 'button primary'} href="#/">
+            Back to catalog
+          </a>
+        </div>
+        {envelope !== null && (
+          <p className="mono error-code">
+            {envelope.code} · {envelope.retryable ? 'retryable' : 'not retryable'}
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
 /**
  * ErrorState presents a §6.10 envelope: the code the page branches on, the
  * prose message, the remediation hint where the code carries one, and the

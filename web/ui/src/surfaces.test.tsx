@@ -909,9 +909,11 @@ describe("the domain browser", () => {
       },
     });
     render(<App />);
-    expect(await screen.findByTestId("not-retryable")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
-    expect(screen.getByText("registry.invalid_argument")).toBeTruthy();
+    const page = await screen.findByTestId("domain-failed");
+    expect(within(page).queryByRole("button", { name: "Retry" })).toBeNull();
+    expect(page.textContent).toContain(
+      "registry.invalid_argument · not retryable",
+    );
   });
 
   // The breadcrumb above the title carries the ancestry, so the title names the
@@ -4770,12 +4772,66 @@ describe("a registry that did not answer", () => {
     const sent = requests.filter((r) =>
       r.url.startsWith("/v1/load_domain"),
     ).length;
-    fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+    fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
     await waitFor(() => {
       expect(
         requests.filter((r) => r.url.startsWith("/v1/load_domain")).length,
       ).toBe(sent + 1);
     });
+  });
+});
+
+// A read that resolved nothing leaves no surface to stand a banner over, so
+// §13.10's domain browser and artifact viewer render the failure as the page:
+// what kind of failure it was, what did not load, one sentence naming what
+// the route asked for, and the way off a dead surface. The code is stated
+// once, at the foot.
+describe("a whole-surface failure", () => {
+  it("draws a failed artifact read as an error page with a way back", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 404,
+        body: {
+          code: "registry.not_found",
+          message: "registry.not_found: artifact eng/deploy/no-desc",
+        },
+      },
+    });
+    goTo("#/artifact/eng%2Fdeploy%2Fno-desc");
+    render(<App />);
+    const page = await screen.findByTestId("artifact-failed");
+    expect(
+      within(page).getByRole("heading", { name: "No such artifact" }),
+    ).toBeTruthy();
+    expect(page.textContent).toContain("NOT FOUND");
+    expect(page.textContent).toContain("eng/deploy/no-desc does not resolve.");
+    // The way off the dead surface, and the code once rather than twice.
+    const back = within(page).getByRole("link", { name: "Back to catalog" });
+    expect(back.getAttribute("href")).toBe(domainHref(""));
+    expect(page.textContent?.match(/registry\.not_found/g)?.length).toBe(1);
+    expect(page.textContent).toContain("registry.not_found · not retryable");
+    // The condition does not clear on its own, so no retry is offered.
+    expect(within(page).queryByRole("button", { name: "Retry" })).toBeNull();
+  });
+
+  it("draws a failed domain read the same way, with a retry where the condition clears", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { rejects: true },
+    });
+    goTo("#/domain/platform%2Fci");
+    render(<App />);
+    const page = await screen.findByTestId("domain-failed");
+    expect(
+      within(page).getByRole("heading", { name: "Can't reach the registry" }),
+    ).toBeTruthy();
+    expect(page.textContent).toContain("REGISTRY UNREACHABLE");
+    expect(within(page).getByRole("button", { name: "Retry" })).toBeTruthy();
+    expect(
+      within(page).getByRole("link", { name: "Back to catalog" }),
+    ).toBeTruthy();
+    expect(page.textContent).toContain("registry.unavailable · retryable");
   });
 });
 

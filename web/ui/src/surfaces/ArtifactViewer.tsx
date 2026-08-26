@@ -19,6 +19,7 @@ import {
   Badge,
   CopyButton,
   EmptyState,
+  ErrorPage,
   ErrorState,
   Loading,
   SensitivityBadge,
@@ -72,7 +73,17 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
 
   if (body === null) {
     if (artifact.error !== null) {
-      return <ErrorState error={artifact.error} onRetry={artifact.reload} />;
+      // Nothing of this surface loaded, so the failure is the page rather
+      // than a banner over a page that is still there.
+      return (
+        <ErrorPage
+          error={artifact.error}
+          title="No such artifact"
+          subject={id}
+          onRetry={artifact.reload}
+          testID="artifact-failed"
+        />
+      );
     }
     return artifact.loading ? <Loading label="Loading the artifact." /> : null;
   }

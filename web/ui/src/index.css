@@ -524,6 +524,70 @@ h2.label {
   color: var(--danger);
 }
 
+/* A whole-surface failure is a card the reader lands on rather than a strip
+   pinned to the top of an otherwise empty column, so it is centered in the
+   content area and drawn in the surface tone: the page did not go wrong, the
+   thing the route named is not there. The danger tone is reserved for a
+   failure that sits beside content it is about. */
+.error-page {
+  display: flex;
+  justify-content: center;
+  padding-top: 48px;
+}
+
+.error-card {
+  width: 100%;
+  max-width: 560px;
+  padding: 34px 26px;
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  background: var(--surf);
+  text-align: center;
+}
+
+.error-kind {
+  margin: 0 0 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--faint);
+}
+
+.error-title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.error-lead {
+  margin: 0 auto 16px;
+  max-width: 400px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--sec);
+}
+
+.error-actions {
+  display: flex;
+  gap: 9px;
+  justify-content: center;
+}
+
+/* The row spaces itself, so the trailing margin every control carries would
+   sit the pair off-center. */
+.error-actions button,
+.error-actions .button {
+  margin-right: 0;
+}
+
+/* The code is what a reader quotes in a bug report and nothing they act on,
+   so it sits under the action at the smallest size the page uses. */
+.error-code {
+  margin: 14px 0 0;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
 .artifact-list,
 .subdomain-grid,
 .relation-list,

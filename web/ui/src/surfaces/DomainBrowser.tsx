@@ -5,7 +5,7 @@
 import { ArtifactTable, SubdomainTiles } from './DomainAtScale';
 import { ArtifactRow } from '../components/ArtifactRow';
 import { Breadcrumb } from '../components/Breadcrumb';
-import { Badge, EmptyState, ErrorState, Loading } from '../components/primitives';
+import { Badge, EmptyState, ErrorPage, Loading } from '../components/primitives';
 import type { DomainDescriptor } from '../api';
 import { loadDomain, searchArtifacts } from '../api';
 import { domainLabel } from '../domain';
@@ -44,7 +44,17 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
     return <Loading label="Loading the domain." />;
   }
   if (domain.error !== null) {
-    return <ErrorState error={domain.error} onRetry={domain.reload} />;
+    // The browser has no header, no listing, and no breadcrumb left standing
+    // around a banner, so a failed read is the whole surface.
+    return (
+      <ErrorPage
+        error={domain.error}
+        title="No such domain"
+        subject={path === '' ? undefined : path}
+        onRetry={domain.reload}
+        testID="domain-failed"
+      />
+    );
   }
   const body = domain.value;
   if (body === null) {
