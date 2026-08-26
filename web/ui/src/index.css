@@ -301,6 +301,29 @@ h3 {
   font-size: 12.5px;
 }
 
+/* The page title row. The heading names the page and the badges qualifying
+   it sit beside it on the same line, aligned on the heading's baseline, so
+   the title is the first large text a reader meets. The heading's own margin
+   is dropped here because the row carries the spacing under it. */
+.page-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin: 6px 0 4px;
+}
+
+.page-title h1 {
+  margin: 0;
+}
+
+/* The full identifier under an artifact's title. It repeats what the
+   breadcrumb and the title say together, because the identifier is what a
+   reader copies into the CLI or an SDK call. */
+.artifact-id-line {
+  margin: 0 0 10px;
+}
+
 .lead {
   max-width: 720px;
   text-wrap: pretty;

@@ -12,6 +12,7 @@
 import { useState } from 'react';
 
 import { ArtifactBody } from '../components/ArtifactBody';
+import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge, CopyField, EmptyState, ErrorState, Loading } from '../components/primitives';
 import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
@@ -71,14 +72,21 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
       ? { body: body.manifest_body, frontmatter: body.frontmatter }
       : { body: split.body, frontmatter: body.frontmatter === '' ? split.frontmatter : body.frontmatter };
 
+  const description = descriptionOf(document.frontmatter);
+
   return (
     <section className="surface artifact-viewer" aria-label="Artifact viewer">
       <div className="artifact-content">
-        <h1 className="mono">{body.id}</h1>
-        <div className="artifact-meta">
+        <Breadcrumb path={domainOf(body.id)} />
+        <div className="page-title">
+          <h1>{artifactName(body.id)}</h1>
           <Badge>{body.type}</Badge>
           <Badge tone="quiet">{body.version}</Badge>
           {body.sensitivity !== undefined && body.sensitivity !== '' && <Badge tone="quiet">{body.sensitivity}</Badge>}
+        </div>
+        <p className="mono quiet artifact-id-line">{body.id}</p>
+        {description !== '' && <p className="lead">{description}</p>}
+        <div className="artifact-meta">
           <VersionPicker
             viewing={viewing}
             onView={(version) => {
@@ -110,6 +118,31 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
       <ArtifactRail artifact={body} frontmatter={document.frontmatter} />
     </section>
   );
+}
+
+/** artifactName is the page title: the last segment of the artifact's §4.2
+ * path, which is what names the artifact itself. The domains above it are
+ * the breadcrumb's, and the whole identifier stands under the title. */
+function artifactName(id: string): string {
+  const cut = id.lastIndexOf('/');
+  return cut < 0 ? id : id.slice(cut + 1);
+}
+
+/** domainOf is the domain the artifact sits in, which is where the
+ * breadcrumb above the title leads. An identifier carrying no separator sits
+ * at the registry root. */
+function domainOf(id: string): string {
+  const cut = id.lastIndexOf('/');
+  return cut < 0 ? '' : id.slice(0, cut);
+}
+
+/** descriptionOf is the artifact's own description, which the header states
+ * under the title. load_artifact reports no description field of its own, so
+ * it is read from the frontmatter the response carries, and a block that
+ * declares none yields nothing rather than a placeholder. */
+function descriptionOf(frontmatter: string): string {
+  const found = parseFrontmatter(frontmatter).properties.find((property) => property.key === 'description');
+  return found?.value ?? '';
 }
 
 /** ManifestHalves is the manifest document split into the half the rendering

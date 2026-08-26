@@ -660,6 +660,51 @@ describe('the artifact viewer', () => {
     expect(relation.getAttribute('href')).toBe('#/artifact/platform%2Freview-strict');
   });
 
+  // The header names the artifact. The heading carries the artifact's own
+  // name at the page-title role, the badges qualifying it sit beside it on
+  // the same line, and the breadcrumb above it leads back through the
+  // domains. A heading set at the mono-body role leaves the markdown body's
+  // own first heading as the largest text on the page.
+  it('names the artifact in a page title with the badges beside it', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'finance/accounts-payable/pay-invoice',
+          type: 'skill',
+          version: '2.3.0',
+          content_hash: 'sha256:abc',
+          manifest_body: '# Pay an invoice\n',
+          frontmatter: '---\nname: pay-invoice\ndescription: Pay a supplier invoice.\n---\n',
+        },
+      },
+      '/v1/dependents': { body: { edges: [] } },
+    });
+    goTo('#/artifact/finance%2Faccounts-payable%2Fpay-invoice');
+    render(<App />);
+    await screen.findByLabelText('Artifact viewer');
+    // The markdown body carries a heading of its own, so the assertion is
+    // that the first one on the page is the artifact's name.
+    const headings = within(screen.getByLabelText('Artifact viewer')).getAllByRole('heading', { level: 1 });
+    const heading = headings[0];
+    expect(heading.textContent).toBe('pay-invoice');
+    const style = window.getComputedStyle(heading);
+    expect(style.fontSize).toBe('29px');
+    // The badges are siblings of the heading rather than a row below it.
+    const title = heading.parentElement;
+    expect(within(title as HTMLElement).getByText('skill')).toBeTruthy();
+    expect(within(title as HTMLElement).getByText('2.3.0')).toBeTruthy();
+    // The whole identifier stands under the title, and the breadcrumb leads
+    // back through the domains above it.
+    const content = heading.closest('.artifact-content') as HTMLElement;
+    expect(within(content).getByText('finance/accounts-payable/pay-invoice')).toBeTruthy();
+    const trail = screen.getByLabelText('Breadcrumb');
+    expect(within(trail).getByText('accounts-payable').getAttribute('href')).toBe(
+      '#/domain/finance%2Faccounts-payable',
+    );
+    expect(within(content).getByText('Pay a supplier invoice.')).toBeTruthy();
+  });
+
   // Spec: §13.10 — the viewer links to extending or dependent artifacts.
   // Every edge the dependents endpoint serves ends at the artifact on the
   // page, so the label reads in the passive direction. Labelling the row

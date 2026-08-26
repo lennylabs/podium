@@ -4,6 +4,7 @@
 
 import { ArtifactTable, SubdomainTiles } from './DomainAtScale';
 import { ArtifactRow } from '../components/ArtifactRow';
+import { Breadcrumb } from '../components/Breadcrumb';
 import { Badge, EmptyState, ErrorState, Loading } from '../components/primitives';
 import type { DomainDescriptor } from '../api';
 import { loadDomain, searchArtifacts } from '../api';
@@ -164,16 +165,3 @@ function SubdomainList({ subdomains, depth }: { subdomains: DomainDescriptor[]; 
   );
 }
 
-function Breadcrumb({ path }: { path: string }) {
-  const segments = path === '' ? [] : path.split('/');
-  return (
-    <nav className="breadcrumb" aria-label="Breadcrumb">
-      <a href={domainHref('')}>root</a>
-      {segments.map((segment, index) => (
-        <a key={segment + String(index)} href={domainHref(segments.slice(0, index + 1).join('/'))}>
-          {segment}
-        </a>
-      ))}
-    </nav>
-  );
-}
