@@ -133,7 +133,7 @@ export function ArtifactRow({
         {artifact.description !== undefined && artifact.description !== '' ? (
           <p className="artifact-description">{artifact.description}</p>
         ) : (
-          <p className="artifact-description quiet">No description.</p>
+          <p className="artifact-description quiet absent-description">No description.</p>
         )}
         {artifact.tags !== undefined && artifact.tags.length > 0 && (
           <ul className="tag-list">

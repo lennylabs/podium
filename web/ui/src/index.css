@@ -945,6 +945,15 @@ h2.label {
   color: var(--meta);
 }
 
+/* The placeholder that stands where an artifact or a subdomain carries no
+   description. Colour alone does not separate it from a real description: set
+   upright beside siblings that carry one, it reads as a description whose text
+   happens to say "No description." The italic marks it as prose the interface
+   wrote rather than a field the author filled in. */
+.absent-description {
+  font-style: italic;
+}
+
 /* The three-line clip every surface reads a description at. The listing row
    always clips; the artifact header and the rail's property values clip until
    the reader opens them. */

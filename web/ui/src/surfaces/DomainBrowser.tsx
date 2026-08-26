@@ -274,7 +274,7 @@ function SubdomainGrid({
           {child.description !== undefined && child.description !== '' ? (
             <p className="quiet">{child.description}</p>
           ) : (
-            <p className="quiet">No description.</p>
+            <p className="quiet absent-description">No description.</p>
           )}
           <SubdomainCounts
             subdomains={child.subdomains ?? []}

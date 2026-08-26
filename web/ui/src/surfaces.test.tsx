@@ -1479,6 +1479,58 @@ describe("the domain browser", () => {
     expect(absent.className).toContain("quiet");
   });
 
+  // Colour alone does not separate the placeholder from a description. Set
+  // upright at the size of the rows around it, "No description." reads as a
+  // description whose text happens to say that. The placeholder is therefore
+  // italic on every surface that draws one: the listing row, the subdomain
+  // card, and the compact table.
+  it("sets the absent-description placeholder in italic on every surface that draws one", async () => {
+    const wide = Array.from({ length: 21 }, (_, i) => ({
+      path: `platform/sub${String(i)}`,
+      name: `sub${String(i)}`,
+      subdomains: [],
+    }));
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: [{ path: "platform/ci", name: "ci" }],
+          notable: [{ id: "platform/nodesc", type: "context" }],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    const comfortable = render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    // One placeholder stands on the subdomain card and one on the artifact
+    // row, and both are asserted.
+    const placeholders = within(browser).getAllByText("No description.");
+    expect(placeholders.length).toBe(2);
+    for (const placeholder of placeholders) {
+      expect(window.getComputedStyle(placeholder).fontStyle).toBe("italic");
+    }
+    comfortable.unmount();
+
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: wide,
+          notable: [{ id: "platform/nodesc", type: "context" }],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const table = await screen.findByRole("table", { name: "Artifacts" });
+    expect(
+      window.getComputedStyle(within(table).getByText("No description."))
+        .fontStyle,
+    ).toBe("italic");
+  });
+
   // The listings are divided by labels rather than by titles, so the page
   // carries one heading at title weight and the two dividers stay quiet.
   it("divides the listings with section labels rather than with page-title-weight headings", async () => {

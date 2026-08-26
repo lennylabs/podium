@@ -301,7 +301,9 @@ function ArtifactRows({ rows }: { rows: ArtifactDescriptor[] }) {
                 under the columns beside it and dropped the row's tag chips
                 below their neighbours' baseline. */}
             <td className="quiet">
-              <span className="clipped">{artifact.description ?? 'No description.'}</span>
+              <span className={`clipped${artifact.description === undefined ? ' absent-description' : ''}`}>
+                {artifact.description ?? 'No description.'}
+              </span>
             </td>
           </tr>
         ))}
