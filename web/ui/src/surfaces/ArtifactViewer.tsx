@@ -298,6 +298,27 @@ function layerName(artifact: LoadArtifactResponse): string {
   return artifact.layer === undefined || artifact.layer === '' ? 'unreported' : artifact.layer;
 }
 
+/** inboundLabel names an edge from the perspective of the artifact it ends
+ * at. Every edge the dependents endpoint serves arrives at this artifact
+ * (§4.7.3: the reverse index holds the edges whose `to` is this artifact,
+ * and `from` is the artifact that declared the relation), so the raw edge
+ * kind beside the `from` link would state the relationship backwards: it
+ * would read as this artifact extending the one that extends it. Each label
+ * therefore reads in the passive direction, and an edge kind this UI does
+ * not know still reads inbound rather than inverted. */
+function inboundLabel(kind: string): string {
+  switch (kind) {
+    case 'extends':
+      return 'extended by';
+    case 'delegates_to':
+      return 'delegated to by';
+    case 'mcpServers':
+      return 'referenced by';
+    default:
+      return `${kind} by`;
+  }
+}
+
 /** Relations lists the artifacts that extend or otherwise depend on this
  * one. The edges arrive on their own request, so an artifact with no edges
  * is a state of this section rather than of the page. */
@@ -315,7 +336,7 @@ function Relations({ id }: { id: string }) {
           <ul className="relation-list">
             {edges.value.map((edge) => (
               <li key={edge.kind + edge.from}>
-                <span className="label quiet">{edge.kind}</span>{' '}
+                <span className="label quiet">{inboundLabel(edge.kind)}</span>{' '}
                 <a className="mono" href={artifactHref(edge.from)}>
                   {edge.from}
                 </a>

@@ -630,6 +630,43 @@ describe('the artifact viewer', () => {
     expect(relation.getAttribute('href')).toBe('#/artifact/platform%2Freview-strict');
   });
 
+  // Spec: §13.10 — the viewer links to extending or dependent artifacts.
+  // Every edge the dependents endpoint serves ends at the artifact on the
+  // page, so the label reads in the passive direction. Labelling the row
+  // with the raw edge kind states the relationship backwards.
+  it('labels each graph edge as inbound rather than inverting the relationship', async () => {
+    stubRegistry({
+      '/v1/ui/session': { body: posture({ public_mode: true }) },
+      '/v1/load_artifact': {
+        body: {
+          id: 'finance/ap/pay-invoice',
+          type: 'skill',
+          version: '1.0.0',
+          content_hash: 'sha256:abc',
+          manifest_body: '# Pay invoice\n',
+          frontmatter: manifestDoc,
+        },
+      },
+      '/v1/dependents': {
+        body: {
+          edges: [
+            { from: 'finance/ap/reconcile-ledger', to: 'finance/ap/pay-invoice', kind: 'extends' },
+            { from: 'finance/ap/close-books', to: 'finance/ap/pay-invoice', kind: 'delegates_to' },
+          ],
+        },
+      },
+    });
+    goTo('#/artifact/finance%2Fap%2Fpay-invoice');
+    render(<App />);
+    const relations = await screen.findByLabelText('Relations');
+    const rows = relations.querySelectorAll('li');
+    expect(rows.length).toBe(2);
+    expect(rows[0].textContent).toBe('extended by finance/ap/reconcile-ledger');
+    expect(rows[1].textContent).toBe('delegated to by finance/ap/close-books');
+    // The bare edge kind beside the link is the inverted reading.
+    expect(relations.querySelector('.label.quiet')?.textContent).not.toBe('extends');
+  });
+
   // The viewer is two columns with a tab set over the content one. The
   // resource tab carries the count of what the artifact bundles, and a tab
   // whose artifact carries nothing for it is not drawn at all rather than
