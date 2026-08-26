@@ -8,7 +8,7 @@
 import { useState } from "react";
 
 import type { ArtifactDescriptor, DomainDescriptor } from "../api";
-import { TypeBadge, formatVersion } from "../components/primitives";
+import { EmptyState, TypeBadge, formatVersion } from "../components/primitives";
 import {
   artifactCountLabel,
   artifactCounts,
@@ -90,7 +90,11 @@ export function SubdomainTiles({
     <div className="subdomain-tiles">
       <div className="section-head">
         <h2 className="label">Subdomains</h2>
-        <span className="mono quiet section-count">{subdomains.length}</span>
+        {/* The count states the listing under it rather than the domain's
+            own total, so a filter that narrows the grid narrows the figure
+            with it. The header badge beside the domain name is where the
+            unfiltered total is read. */}
+        <span className="mono quiet section-count">{matched.length}</span>
         <input
           className="filter-field"
           type="search"
@@ -119,47 +123,57 @@ export function SubdomainTiles({
           ))}
         </div>
       </div>
-      <ul
-        className={view === "grid" ? "tile-grid" : "tile-list"}
-        aria-label="Subdomains"
-      >
-        {shown.map((child) => {
-          const count =
-            counts === null
-              ? subdomainCountLabel((child.subdomains ?? []).length)
-              : artifactCountLabel(counts.get(child.path) ?? 0);
-          return (
-            <li
-              key={child.path}
-              className={view === "grid" ? "tile" : "tile tile-row"}
-            >
-              <a className="tile-name mono" href={domainHref(child.path)}>
-                {domainLabel(child.path, parent)}
-              </a>
-              {/* The row has the width for what the tile has no room to
+      {/* A filter that matches nothing states the outcome. Dropping the grid
+          and leaving the controls over blank space reads as a listing that
+          failed to load (§13.10). */}
+      {matched.length === 0 ? (
+        <EmptyState>
+          Nothing matched. Clear the filter to see every subdomain.
+        </EmptyState>
+      ) : (
+        <ul
+          className={view === "grid" ? "tile-grid" : "tile-list"}
+          aria-label="Subdomains"
+        >
+          {shown.map((child) => {
+            const count =
+              counts === null
+                ? subdomainCountLabel((child.subdomains ?? []).length)
+                : artifactCountLabel(counts.get(child.path) ?? 0);
+            return (
+              <li
+                key={child.path}
+                className={view === "grid" ? "tile" : "tile tile-row"}
+              >
+                <a className="tile-name mono" href={domainHref(child.path)}>
+                  {domainLabel(child.path, parent)}
+                </a>
+                {/* The row has the width for what the tile has no room to
                   carry, so the list arm states the child's description on the
                   same line. The grid arm leaves it out: a six-column tile
                   clips it to a few characters. */}
-              {view === "list" && (
-                <span
-                  className={`quiet clipped tile-description${
-                    child.description === undefined || child.description === ""
-                      ? " absent-description"
-                      : ""
-                  }`}
-                >
-                  {child.description === undefined || child.description === ""
-                    ? "No description."
-                    : child.description}
-                </span>
-              )}
-              {count !== null && (
-                <span className="mono quiet tile-count">{count}</span>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                {view === "list" && (
+                  <span
+                    className={`quiet clipped tile-description${
+                      child.description === undefined ||
+                      child.description === ""
+                        ? " absent-description"
+                        : ""
+                    }`}
+                  >
+                    {child.description === undefined || child.description === ""
+                      ? "No description."
+                      : child.description}
+                  </span>
+                )}
+                {count !== null && (
+                  <span className="mono quiet tile-count">{count}</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       <div className="tile-foot">
         {!all && matched.length > shown.length && (
           <button
@@ -172,7 +186,7 @@ export function SubdomainTiles({
             Show all {matched.length} subdomains
           </button>
         )}
-        {counts !== null && (
+        {counts !== null && matched.length > 0 && (
           <span className="quiet tile-order">Sorted by artifact count.</span>
         )}
       </div>
@@ -286,6 +300,13 @@ export function ArtifactTable({
           </select>
         </label>
       </div>
+      {/* Same reason as the tiles above: the filters and the type chips stay
+          on screen, so the region under them says why it holds no rows. */}
+      {matched.length === 0 && (
+        <EmptyState>
+          Nothing matched. Clear the filter or pick another type.
+        </EmptyState>
+      )}
       {curated.length > 0 && (
         <div className="curated-block">
           <div className="curated-head">

@@ -5957,9 +5957,9 @@ describe("the layer write flows", () => {
     expect(screen.getByTestId("register-ref-required").textContent).toBe(
       "required",
     );
-    expect(
-      screen.getByLabelText("Ref").getAttribute("aria-required"),
-    ).toBe("true");
+    expect(screen.getByLabelText("Ref").getAttribute("aria-required")).toBe(
+      "true",
+    );
     // The footer note names the ref while the submit is held, and the submit
     // points at that note.
     const register = within(dialog).getByRole("button", { name: "Register" });
@@ -8701,6 +8701,74 @@ describe("the trimmed listing", () => {
     expect(
       within(tables[0]).getByRole("link", { name: "platform/deploy" }),
     ).toBeTruthy();
+  });
+
+  // A filter that matches nothing on the at-scale surface states the outcome
+  // the way every other zero-result listing in the build does, and the section
+  // count reports the filtered listing rather than the unfiltered total.
+  it("states the outcome when an at-scale filter matches nothing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: [
+            { id: "platform/deploy", type: "skill", version: "2.0.0" },
+            { id: "platform/lint", type: "rule", version: "1.0.0" },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+
+    const subhead = within(browser).getByRole("heading", {
+      name: "Subdomains",
+    }).parentElement as HTMLElement;
+    expect(subhead.textContent).toContain("24");
+    fireEvent.change(within(subhead).getByLabelText("Filter subdomains"), {
+      target: { value: "zzz" },
+    });
+    expect(
+      within(browser).getByText(
+        "Nothing matched. Clear the filter to see every subdomain.",
+      ),
+    ).toBeTruthy();
+    // The grid is gone, the caption that describes its ordering goes with it,
+    // and the section count reports the filtered listing.
+    expect(
+      within(browser).queryByRole("list", { name: "Subdomains" }),
+    ).toBeNull();
+    expect(within(browser).queryByText("Sorted by artifact count.")).toBeNull();
+    expect(subhead.textContent).not.toContain("24");
+    expect(subhead.textContent).toContain("0");
+
+    const arthead = within(browser).getByRole("heading", {
+      name: "Artifacts",
+    }).parentElement as HTMLElement;
+    fireEvent.change(within(arthead).getByLabelText("Filter in this domain"), {
+      target: { value: "qqq" },
+    });
+    expect(
+      within(browser).getByText(
+        "Nothing matched. Clear the filter or pick another type.",
+      ),
+    ).toBeTruthy();
+    expect(within(browser).queryByLabelText("Artifacts")).toBeNull();
+
+    // Clearing the filter restores the listing and the count.
+    fireEvent.change(within(subhead).getByLabelText("Filter subdomains"), {
+      target: { value: "" },
+    });
+    expect(
+      within(browser).getByRole("list", { name: "Subdomains" }),
+    ).toBeTruthy();
+    expect(subhead.textContent).toContain("24");
   });
 
   // The compact treatment is the one the design pass fixed for this count: the
