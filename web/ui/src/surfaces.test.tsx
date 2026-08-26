@@ -6781,6 +6781,30 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The restore table's columns are fixed proportions floored at the width
+  // they are drawn at, so a content column narrower than its header ran the
+  // "Unregistered" label out of its cell and into "Erased on". The table
+  // scrolls sideways inside its own container the way the layer panel's does.
+  it("puts the restore table in a container that scrolls sideways", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/layers?deleted=true": {
+        body: {
+          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+        },
+      },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    await screen.findByLabelText("Recently unregistered");
+    const table = document.querySelector("table.restore-table") as HTMLElement;
+    const container = table.parentElement as HTMLElement;
+    expect(container.classList.contains("table-scroll")).toBe(true);
+    expect(container.tabIndex).toBe(0);
+    expect(container.getAttribute("aria-label")).toBe("Recoverable layers");
+  });
+
   // A restore is a write like every other write in the panel, so it reports
   // what it did. The restored row leaves the table and the empty state that
   // replaces it names no layer, so the outcome is stated in a live region

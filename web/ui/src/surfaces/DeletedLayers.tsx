@@ -93,37 +93,45 @@ export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void
       {rows.length === 0 ? (
         <EmptyState>Nothing is waiting to be erased.</EmptyState>
       ) : (
-        <table className="data-table restore-table">
-          <thead>
-            <tr>
-              {/* The layer panel this table sits one link away from labels its
-                  own columns in the section-label style, so these carry the
-                  same treatment. Sentence-case sans headers here put two
-                  tables the reader crosses in one step into two type
-                  systems. */}
-              <th>
-                <span className="label">Layer</span>
-              </th>
-              <th>
-                <span className="label">Source</span>
-              </th>
-              <th>
-                <span className="label">Unregistered</span>
-              </th>
-              <th>
-                <span className="label">Erased on</span>
-              </th>
-              <th>
-                <span className="label">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((layer) => (
-              <DeletedRow key={layer.ID} layer={layer} readOnly={readOnly} onRestore={restore} />
-            ))}
-          </tbody>
-        </table>
+        // The table keeps its designed column widths down to a floor and
+        // scrolls sideways inside its own container below that, the way the
+        // layer panel's table does. Squeezed below that floor, the
+        // "Unregistered" header ran out of its cell and abutted "Erased on",
+        // and the header row read as one token. The container is focusable so
+        // a keyboard reaches the scroll it owns.
+        <div className="table-scroll" tabIndex={0} role="region" aria-label="Recoverable layers">
+          <table className="data-table restore-table">
+            <thead>
+              <tr>
+                {/* The layer panel this table sits one link away from labels its
+                    own columns in the section-label style, so these carry the
+                    same treatment. Sentence-case sans headers here put two
+                    tables the reader crosses in one step into two type
+                    systems. */}
+                <th>
+                  <span className="label">Layer</span>
+                </th>
+                <th>
+                  <span className="label">Source</span>
+                </th>
+                <th>
+                  <span className="label">Unregistered</span>
+                </th>
+                <th>
+                  <span className="label">Erased on</span>
+                </th>
+                <th>
+                  <span className="label">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((layer) => (
+                <DeletedRow key={layer.ID} layer={layer} readOnly={readOnly} onRestore={restore} />
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       {/* The live region is rendered on every state of the surface, empty
           until a restore lands, and it becomes the visible outcome banner

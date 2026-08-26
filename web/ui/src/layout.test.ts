@@ -726,6 +726,19 @@ describe("restore table columns", () => {
   it("breaks a name longer than its column inside the cell", () => {
     expect(window.getComputedStyle(restoreTable().id).overflowWrap).toBe("anywhere");
   });
+
+  // The proportions are read off the table's own width, so a container
+  // narrower than the widths they add up to drives every column below the
+  // min-content of the label inside it: at a 1000px viewport the
+  // "Unregistered" header ran out of its cell and abutted "Erased on", and the
+  // header row read as one token. The floor plus the sideways scroll of the
+  // container keep every header and every cell on one line at every viewport.
+  it("floors the table at the width its columns are drawn at", () => {
+    const floor = Number.parseFloat(
+      window.getComputedStyle(restoreTable().table).minWidth,
+    );
+    expect(floor).toBeGreaterThanOrEqual(860);
+  });
 });
 
 // Every data table separates its header row from the listing by drawing the

@@ -1473,9 +1473,14 @@ input[type="checkbox"] {
    path six times as wide, with the erase countdown wrapping for the same
    reason. The proportions are the design's grid for this surface, which gives
    the layer the widest content column and the source about two thirds of
-   it (§13.10). */
+   it (§13.10). The proportions are read off the table's own width, so the
+   table keeps them down to the same floor the layer table uses and scrolls
+   sideways inside `.table-scroll` below it: at a 1000px viewport the
+   "Unregistered" header ran out of its cell and abutted "Erased on", and the
+   header row read as one token. */
 .restore-table {
   table-layout: fixed;
+  min-width: 860px;
 }
 
 .restore-table th:nth-child(1) {
