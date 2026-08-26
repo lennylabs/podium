@@ -548,15 +548,28 @@ function list(members: string[]): string {
  * caller's current count. */
 const layerCapExceeded = 'quota.layer_count_exceeded';
 
+/** registryUnavailable is the §6.10 code a call that never reached the
+ * registry takes, which is the one failure the registry did not answer. */
+const registryUnavailable = 'registry.unavailable';
+
 /**
  * RegistrationRefusal presents what the registry refused. The cap refusal is
  * the one the reader can act on, and this is where they created the layer, so
  * it renders the limit and their current count here rather than arriving as
  * the generic failure every other refusal gets.
+ *
+ * Every other refusal carries a §6.10 envelope the registry wrote, so the
+ * banner says the registry refused the registration and names what it did not
+ * create. The default title is the wording for the failure the registry did
+ * not answer at all, and a refusal titled that way tells the reader the
+ * registry never answered when it answered with a code and a message.
  */
 function RegistrationRefusal({ refusal }: { refusal: unknown }) {
-  if (!(refusal instanceof ApiError) || refusal.code !== layerCapExceeded) {
+  if (!(refusal instanceof ApiError) || refusal.code === registryUnavailable) {
     return <ErrorState error={refusal} />;
+  }
+  if (refusal.code !== layerCapExceeded) {
+    return <ErrorState error={refusal} title="The registry refused this registration and no layer was created." />;
   }
   return (
     <div className="banner banner-danger" role="alert" aria-label="Layer limit reached">

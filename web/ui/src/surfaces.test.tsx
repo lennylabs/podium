@@ -4763,6 +4763,50 @@ describe("the layer write flows", () => {
     expect(document.activeElement).toBe(refusal);
   });
 
+  // A refusal carrying a §6.10 envelope is an answer from the registry, so
+  // the banner heads it as a refusal and names what was not created. The
+  // heading for a failure carrying no envelope stays with the transport
+  // failure, which is the one where the registry really did not answer.
+  it("heads a refused registration as a refusal and a transport failure as no answer", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "POST /v1/layers": {
+        status: 400,
+        body: {
+          code: "registry.invalid_argument",
+          message: "id and source_type are required",
+        },
+      },
+    });
+    goTo("#/layers");
+    const refused = render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.submit(screen.getByTestId("register-form"));
+    const refusal = await screen.findByTestId("register-refusal");
+    expect(refusal.textContent).toContain(
+      "The registry refused this registration and no layer was created.",
+    );
+    expect(refusal.textContent).not.toContain("did not answer");
+    refused.unmount();
+
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "POST /v1/layers": { rejects: true },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.submit(screen.getByTestId("register-form"));
+    const unreachable = await screen.findByTestId("register-refusal");
+    expect(unreachable.textContent).toContain(
+      "The registry did not answer this request.",
+    );
+  });
+
   // The recovery surface answers how long is left before erasure, so every
   // row states when the layer was unregistered, the date it is erased on,
   // and how much of the §8.4 window remains. A row inside the accent window
