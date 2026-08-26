@@ -924,10 +924,42 @@ button,
   color: var(--on-danger);
 }
 
+/* A control the registry will refuse reads as unavailable before it is
+   pressed. Two states depend on it: a read-only registry mutes every write
+   control at once rather than answering a failure per press, and a gated
+   dialog holds its confirm until the gate is satisfied. Without the muted
+   tone the accent fill stays on a dead button and the only feedback for a
+   press is silence. The rule sits after .button.primary and .button.danger
+   so it overrides their fills, and before .button.danger:disabled, which is
+   more specific and keeps the destructive confirm in its own quiet tone. */
+button:disabled,
+.button:disabled,
+input:not([type="checkbox"]):not([type="radio"]):disabled,
+select:disabled,
+textarea:disabled {
+  background: var(--chip);
+  border-color: var(--b2);
+  color: var(--faint);
+  cursor: not-allowed;
+}
+
+/* A checkbox draws itself from accent-color, and the browser already greys
+   the box when it is disabled, so it takes the pointer alone. */
+input:disabled {
+  cursor: not-allowed;
+}
+
 .button.danger:disabled {
   background: var(--danger-bg);
   border-color: var(--danger-bd);
   color: var(--danger);
+  cursor: not-allowed;
+}
+
+/* A checkbox carries its meaning in the text beside it, so the label mutes
+   with the box it labels. */
+label:has(> input:disabled) {
+  color: var(--faint);
   cursor: not-allowed;
 }
 
