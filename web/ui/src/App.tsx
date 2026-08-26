@@ -222,12 +222,18 @@ export function App() {
       )}
       <div className="app-body">
         <nav className="sidebar" aria-label="Sections">
-          <a href={domainHref('')}>Browse</a>
-          <a href={searchHref('')}>Search</a>
+          <SectionLink href={domainHref('')} current={route.name === 'domain'}>
+            Browse
+          </SectionLink>
+          <SectionLink href={searchHref('')} current={route.name === 'search'}>
+            Search
+          </SectionLink>
           {/* The layer panel is reachable for every caller on every
               deployment. The nav reads no posture field and predicts no
               outcome the server decides. */}
-          <a href={layersHref}>Layers</a>
+          <SectionLink href={layersHref} current={route.name === 'layers'}>
+            Layers
+          </SectionLink>
           <p className="catalog-label">
             <span className="label">Catalog</span>
             {/* The depth marker names how deep the sidebar resolves the tree
@@ -397,6 +403,31 @@ function CatalogCounts({ counts, unavailable = false }: { counts: CatalogTotals 
         {counts.lastIngest === '' ? 'never ingested' : `ingested ${since(counts.lastIngest, Date.now())}`}
       </p>
     </>
+  );
+}
+
+/** SectionLink is one row of the sidebar's section navigation. The row for
+ * the surface the reader is on is filled and carries `aria-current`, so the
+ * shell states which of the §13.10 surfaces the page is, in the sidebar's own
+ * terms rather than only in the content beside it. The artifact viewer is
+ * reached from a surface rather than being one, so no row is current there. */
+function SectionLink({
+  href,
+  current,
+  children,
+}: {
+  href: string;
+  current: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <a
+      href={href}
+      className={current ? 'section-link section-link-current' : 'section-link'}
+      aria-current={current ? 'page' : undefined}
+    >
+      {children}
+    </a>
   );
 }
 

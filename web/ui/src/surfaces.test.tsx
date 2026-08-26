@@ -304,6 +304,52 @@ describe("the application shell", () => {
     ).toBeNull();
   });
 
+  // The sidebar's section rows are the shell's statement of which §13.10
+  // surface the page is. An implementation that renders the three rows
+  // identically on every route leaves the reader with nothing in the shell
+  // naming where they are, and fails here.
+  it("marks the section row of the surface the reader is on", async () => {
+    const stubs = {
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: catalog },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    };
+    const rows = (): Record<string, HTMLElement> => {
+      const nav = within(screen.getByLabelText("Sections"));
+      return {
+        Browse: nav.getByRole("link", { name: "Browse" }),
+        Search: nav.getByRole("link", { name: "Search" }),
+        Layers: nav.getByRole("link", { name: "Layers" }),
+      };
+    };
+    // Each route marks its own row and only its own. The assertion reads the
+    // filled class as well as the marker, because the marker alone is
+    // invisible and the fill is what the reader sees.
+    const cases: { hash: string; landmark: string; current: string }[] = [
+      { hash: domainHref(""), landmark: "Domain browser", current: "Browse" },
+      { hash: searchHref(""), landmark: "Search", current: "Search" },
+      { hash: "#/layers", landmark: "Layer panel", current: "Layers" },
+    ];
+    for (const { hash, landmark, current } of cases) {
+      stubRegistry(stubs);
+      goTo(hash);
+      render(<App />);
+      await screen.findByLabelText(landmark);
+      for (const [name, row] of Object.entries(rows())) {
+        expect([name, row.getAttribute("aria-current")]).toEqual([
+          name,
+          name === current ? "page" : null,
+        ]);
+        expect([name, row.className.includes("section-link-current")]).toEqual([
+          name,
+          name === current,
+        ]);
+      }
+      cleanup();
+    }
+  });
+
   // The wordmark is the mark the design pass fixed, drawn inline beside the
   // name, so it resolves from the bundle like the rest of the page.
   it("renders the wordmark as an inline mark beside the name", async () => {

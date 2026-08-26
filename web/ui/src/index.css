@@ -262,6 +262,21 @@ h3 {
   background: var(--chip);
 }
 
+/* The section rows are otherwise uniform, so the surface the reader is on is
+   stated by filling its row and setting it apart in weight. The inactive rows
+   step back to the secondary ink, which is what makes the fill read as a
+   position rather than as a hover that stuck. */
+.sidebar a.section-link {
+  color: var(--sec);
+  padding: 8px 10px;
+}
+
+.sidebar a.section-link-current {
+  background: var(--chip);
+  color: var(--ink);
+  font-weight: 600;
+}
+
 /* The catalog section label carries the depth marker at its right. */
 .catalog-label {
   display: flex;
