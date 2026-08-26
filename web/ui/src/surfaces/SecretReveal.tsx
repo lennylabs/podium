@@ -9,6 +9,16 @@ import { Banner, CopyField } from '../components/primitives';
 import type { LayerSecretResult } from '../api';
 
 /**
+ * revealsSecret reports whether a response carries a credential the reader
+ * has to take away. The register and rotate flows ask before they present
+ * the reveal, because a response that carries no secret leaves nothing to
+ * acknowledge and the dialog around it stays ordinarily dismissible.
+ */
+export function revealsSecret(result: LayerSecretResult): boolean {
+  return result.webhook_secret !== undefined && result.webhook_secret !== '';
+}
+
+/**
  * SecretReveal draws the credential the registry returned once. A response
  * that carries no secret (a local-path source, or an update with no rotation)
  * carries no reveal, so the component renders the outcome banner instead and
@@ -24,7 +34,7 @@ export function SecretReveal({
   onDone: () => void;
 }) {
   const [acknowledged, setAcknowledged] = useState(false);
-  if (result.webhook_secret === undefined || result.webhook_secret === '') {
+  if (!revealsSecret(result)) {
     return <Banner tone="accent">{outcome}</Banner>;
   }
   return (

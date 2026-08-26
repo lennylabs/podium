@@ -3412,6 +3412,89 @@ describe("the layer write flows", () => {
     ).toBe(false);
   });
 
+  // The secret is served once and is unrecoverable, so the reveal gates its
+  // own dismissal behind an acknowledgement. A dialog that also closed on
+  // Escape or on a scrim click would discard the credential around that
+  // gate, and the reader's only way back would be a rotation.
+  it("holds the secret reveal against Escape, the scrim, and a close control", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "git",
+            Order: 1,
+            UserDefined: true,
+          },
+          webhook_url:
+            "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+          webhook_secret: "whsec-abc",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByLabelText("Webhook secret");
+    // The dialog offers no close control while the secret is unacknowledged,
+    // so the acknowledgement is the only route out.
+    expect(screen.queryByRole("button", { name: "Close" })).toBeNull();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.getByText("whsec-abc")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("modal-scrim"));
+    expect(screen.getByText("whsec-abc")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("I have stored the secret."));
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Webhook secret")).toBeNull();
+    });
+  });
+
+  // A local source returns no secret, so the registration outcome carries
+  // nothing the reader has to take away and the dialog dismisses the way
+  // every other dialog does.
+  it("leaves a secretless registration outcome dismissible", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "local",
+            Order: 1,
+            UserDefined: true,
+          },
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "/Users/alice/reg" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByText("Layer alice-personal is registered.");
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).toBeNull();
+    });
+  });
+
   // The update is a partial patch and a rotation returns the fresh secret
   // once, on the same terms as registration, so the rotation runs through the
   // same reveal rather than through a second treatment.

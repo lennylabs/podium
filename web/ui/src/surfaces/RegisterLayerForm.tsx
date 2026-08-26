@@ -16,7 +16,7 @@
 import type { FormEvent, ReactNode } from 'react';
 import { useId, useState } from 'react';
 
-import { SecretReveal } from './SecretReveal';
+import { revealsSecret, SecretReveal } from './SecretReveal';
 import { members } from './members';
 import { ErrorState, Modal } from '../components/primitives';
 import type { LayerRegistration, LayerSecretResult } from '../api';
@@ -98,8 +98,12 @@ export function RegisterLayerForm({
   };
 
   if (result !== null) {
+    // The secret is returned on this response and nowhere else, so while it
+    // is on screen the dialog closes only through the reveal's own
+    // acknowledgement. Escape, the scrim, and the close control would
+    // discard a credential the reader can then recover only by rotating it.
     return (
-      <Modal title="Layer registered" onClose={onClose}>
+      <Modal title="Layer registered" onClose={onClose} dismissible={!revealsSecret(result)}>
         <div className="modal-body">
           <SecretReveal result={result} outcome={`Layer ${result.layer.ID} is registered.`} onDone={onClose} />
         </div>

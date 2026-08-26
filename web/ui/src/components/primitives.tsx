@@ -330,7 +330,11 @@ export function ErrorState({
  * into it, so the surface underneath keeps its position and the dialog owns
  * the reader's attention while it is open. The scrim, Escape, and the close
  * control all dismiss it, because a dialog that can only be left by
- * completing the write traps a reader who opened it to look. Focus moves
+ * completing the write traps a reader who opened it to look. A dialog the
+ * caller marks undismissible withholds all three, which is for content the
+ * reader cannot get back once it is gone: the one-time webhook secret is
+ * shown once and is unrecoverable, so leaving that dialog by any route other
+ * than its own acknowledgement discards the credential. Focus moves
  * into the dialog when it opens, cycles within it, and returns to the control
  * that opened it when it closes.
  *
@@ -345,16 +349,21 @@ export function Modal({
   title,
   description,
   onClose,
+  dismissible = true,
   children,
 }: {
   title: string;
   description?: string;
   onClose: () => void;
+  dismissible?: boolean;
   children: ReactNode;
 }) {
   const headingID = useId();
   const dialog = useDialogFocus<HTMLDivElement>();
   useEffect(() => {
+    if (!dismissible) {
+      return;
+    }
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose();
@@ -364,14 +373,14 @@ export function Modal({
     return () => {
       document.removeEventListener('keydown', onKey);
     };
-  }, [onClose]);
+  }, [dismissible, onClose]);
   return createPortal(
     <div
       className="modal-scrim"
       role="presentation"
       data-testid="modal-scrim"
       onClick={(event) => {
-        if (event.target === event.currentTarget) {
+        if (dismissible && event.target === event.currentTarget) {
           onClose();
         }
       }}
@@ -380,9 +389,11 @@ export function Modal({
         <header className="modal-head">
           <div className="modal-title-row">
             <h2 id={headingID}>{title}</h2>
-            <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
-              ✕
-            </button>
+            {dismissible && (
+              <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
+                ✕
+              </button>
+            )}
           </div>
           {description !== undefined && <p className="modal-lead">{description}</p>}
         </header>
