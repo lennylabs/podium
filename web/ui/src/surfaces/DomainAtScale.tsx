@@ -8,6 +8,7 @@
 import { useState } from 'react';
 
 import type { ArtifactDescriptor, DomainDescriptor } from '../api';
+import { TypeBadge, formatVersion } from '../components/primitives';
 import { domainLabel, subdomainCountLabel } from '../domain';
 import { artifactHref, domainHref } from '../route';
 
@@ -237,8 +238,19 @@ function ArtifactRows({ rows }: { rows: ArtifactDescriptor[] }) {
             <td className="mono">
               <a href={artifactHref(artifact.id)}>{artifact.id}</a>
             </td>
-            <td>{artifact.type}</td>
-            <td className="mono quiet">{artifact.version ?? 'unversioned'}</td>
+            {/* The type and the version are the same two markers the compact
+                listing and the viewer carry, so the cell renders the shared
+                badge and the shared `v` prefix rather than the raw field: a
+                table that prints them bare reads as a different component
+                for the same pair of values. */}
+            <td>
+              <TypeBadge type={artifact.type} />
+            </td>
+            <td className="mono quiet">
+              {artifact.version === undefined || artifact.version === ''
+                ? 'unversioned'
+                : formatVersion(artifact.version)}
+            </td>
             <td>
               <span className="tag-list">
                 {(artifact.tags ?? []).map((tag) => (

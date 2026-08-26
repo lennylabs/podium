@@ -6502,6 +6502,42 @@ describe("the trimmed listing", () => {
       "Description",
     ]);
     expect(within(columns[0]).queryByRole("button")).toBeNull();
+
+    // The type and version cells carry the same two markers every other
+    // listing carries: the type as the shared badge in caps, and the version
+    // with the `v` prefix that names what the number measures.
+    const row = within(rest).getAllByRole("row")[1];
+    const cells = within(row).getAllByRole("cell");
+    const badge = within(cells[1]).getByText("RULE");
+    expect(badge.className.split(" ")).toContain("badge");
+    expect(cells[2].textContent).toBe("v1.0.0");
+  });
+
+  // A descriptor that carries no version still fills the column, because a
+  // blank cell in a sortable table reads as a load that did not finish.
+  it("states an absent version in the at-scale table", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: [{ id: "platform/lint", type: "rule" }],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const table = within(browser).getByLabelText("Artifacts");
+    const cells = within(within(table).getAllByRole("row")[1]).getAllByRole(
+      "cell",
+    );
+    expect(within(cells[1]).getByText("RULE")).toBeTruthy();
+    expect(cells[2].textContent).toBe("unversioned");
   });
 });
 
