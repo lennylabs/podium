@@ -205,3 +205,45 @@ func bundleStylesheets(t *testing.T, srv *serverProc, index string) []string {
 	}
 	return sheets
 }
+
+// securityHeaders are the hardening headers every response from the running
+// binary carries, listed with the value the response has to send.
+var securityHeaders = map[string]string{
+	"X-Content-Type-Options": "nosniff",
+	"X-Frame-Options":        "DENY",
+	"Referrer-Policy":        "no-referrer",
+}
+
+// Spec: §13.10 — the origin that serves the UI document also holds the
+// browser session cookie, so the running binary sends the hardening headers
+// on the UI document and on the API responses the page makes alongside it.
+// The client-side markdown sanitizer is otherwise the only barrier between an
+// artifact body and that origin, and the panel's destructive controls are
+// otherwise framable by any page.
+func TestWebUI_ServedResponsesCarrySecurityHeaders(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"my-skill/ARTIFACT.md": smallteamLowArtifact("ui artifact"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_WEB_UI=true"},
+		"serve", "--standalone", "--web-ui", "--layer-path", reg)
+
+	for _, path := range []string{"/ui/", "/v1/ui/session"} {
+		resp, err := httpClient.Get(srv.BaseURL + path)
+		if err != nil {
+			t.Fatalf("GET %s: %v\nlog:\n%s", path, err, srv.log())
+		}
+		_ = resp.Body.Close()
+		for header, want := range securityHeaders {
+			if got := resp.Header.Get(header); got != want {
+				t.Errorf("GET %s: %s = %q, want %q", path, header, got, want)
+			}
+		}
+		csp := resp.Header.Get("Content-Security-Policy")
+		for _, directive := range []string{"default-src 'self'", "frame-ancestors 'none'", "form-action 'self'"} {
+			if !strings.Contains(csp, directive) {
+				t.Errorf("GET %s: Content-Security-Policy %q omits %q", path, csp, directive)
+			}
+		}
+	}
+}

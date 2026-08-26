@@ -1496,7 +1496,10 @@ func run(ctx context.Context, stop func()) error {
 	// catch-all passes it once. Installed inside Server.Handler() it would
 	// cover the catch-all alone and miss exactly the writes it exists to
 	// protect.
-	handler := otelhttp.NewHandler(server.BrowserOriginGate(mux), "podium-registry",
+	// §13.10: the security headers wrap the gate, so a refusal the gate
+	// writes carries them too. Installed inside the gate they would be
+	// absent from exactly the responses a cross-site attempt produces.
+	handler := otelhttp.NewHandler(server.SecurityHeaders(server.BrowserOriginGate(mux)), "podium-registry",
 		otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 			if op := server.OperationName(r.URL.Path); op != "" {
 				return op
