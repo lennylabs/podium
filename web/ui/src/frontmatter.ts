@@ -15,7 +15,16 @@ import { parseDocument } from 'yaml';
  * it is rendered as text and never as markup. */
 export interface Property {
   key: string;
+  /** value is the text a scalar renders as. It is empty on a sequence, whose
+   * entries are carried by items. */
   value: string;
+  /** items are the entries of a sequence, each rendered on its own line.
+   * Joining them into one line collides with an entry's own punctuation: a
+   * sequence of sentences reads as `invoice., A purchase order`, where the
+   * separator is indistinguishable from the text (§13.10). It is empty on a
+   * scalar and on an empty sequence, which the table shows as an absent
+   * value. */
+  items: string[];
 }
 
 /** ParsedFrontmatter is either the pairs to render or the parse failure to
@@ -79,10 +88,7 @@ export function parseFrontmatter(text: string): ParsedFrontmatter {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return { properties: [], error: 'The frontmatter block is not a mapping.', line: 0 };
   }
-  const properties = Object.entries(value as Record<string, unknown>).map(([key, entry]) => ({
-    key,
-    value: stringify(entry),
-  }));
+  const properties = Object.entries(value as Record<string, unknown>).map(([key, entry]) => row(key, entry));
   return { properties, error: '', line: 0 };
 }
 
@@ -92,6 +98,16 @@ function describe(err: { message: string; linePos?: [{ line: number; col: number
     return err.message;
   }
   return `${err.message} (line ${at.line}, column ${at.col})`;
+}
+
+/** row builds one table row from a frontmatter pair. A sequence keeps its
+ * entries apart so the table renders them as separate lines, and every other
+ * value is one piece of text. */
+function row(key: string, entry: unknown): Property {
+  if (Array.isArray(entry)) {
+    return { key, value: '', items: entry.map(stringify) };
+  }
+  return { key, value: stringify(entry), items: [] };
 }
 
 /** stringify renders one frontmatter value as the text the table shows. A
@@ -107,8 +123,9 @@ function stringify(value: unknown): string {
   if (typeof value === 'number' || typeof value === 'boolean') {
     return String(value);
   }
-  if (Array.isArray(value)) {
-    return value.map(stringify).join(', ');
-  }
+  // A sequence reaches this only nested inside another value, because a
+  // top-level one is kept as separate entries by row above. It is shown as
+  // JSON alongside the other nested values rather than flattened into a
+  // comma-joined line that reads as text the author wrote.
   return JSON.stringify(value);
 }

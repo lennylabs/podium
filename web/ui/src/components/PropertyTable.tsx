@@ -10,7 +10,7 @@
 
 import { useState } from 'react';
 
-import { parseFrontmatter, splitDocument } from '../frontmatter';
+import { parseFrontmatter, splitDocument, type Property } from '../frontmatter';
 
 export function PropertyTable({
   raw,
@@ -97,19 +97,7 @@ export function PropertyTable({
                   {property.key}
                 </th>
                 <td>
-                  {property.value.trim() === '' ? (
-                    <AbsentValue keyName={property.key} />
-                  ) : (
-                    // Every value wraps whole in both sites. A value cell
-                    // states the pair the author wrote and carries no control
-                    // of its own: a clip with an opener hides part of the
-                    // frontmatter behind a button and stretches its row well
-                    // past the rest, which breaks the table's even rows of
-                    // key and value (§13.10).
-                    <span className="property-value" data-testid={`property-value-${property.key}`}>
-                      {property.value}
-                    </span>
-                  )}
+                  <PropertyValue property={property} />
                 </td>
               </tr>
             ))}
@@ -122,6 +110,38 @@ export function PropertyTable({
         </p>
       )}
     </>
+  );
+}
+
+/** PropertyValue is the content of one value cell. Every value wraps whole in
+ * both sites. A value cell states the pair the author wrote and carries no
+ * control of its own: a clip with an opener hides part of the frontmatter
+ * behind a button and stretches its row well past the rest, which breaks the
+ * table's even rows of key and value (§13.10). */
+function PropertyValue({ property }: { property: Property }) {
+  if (property.items.length > 0) {
+    // A sequence keeps its entries apart. Joined into one line, an entry that
+    // ends in a full stop runs into the separator and reads as `invoice., A
+    // purchase order`, where the reader cannot tell the separator from the
+    // author's own punctuation. Each entry is a list item, so a wrapped entry
+    // stays one entry (§13.10).
+    return (
+      <ul className="property-items" data-testid={`property-value-${property.key}`}>
+        {property.items.map((item, index) => (
+          <li key={`${String(index)}:${item}`} className="property-value">
+            {item.trim() === '' ? <AbsentValue keyName={`${property.key}-${String(index)}`} /> : item}
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (property.value.trim() === '') {
+    return <AbsentValue keyName={property.key} />;
+  }
+  return (
+    <span className="property-value" data-testid={`property-value-${property.key}`}>
+      {property.value}
+    </span>
   );
 }
 

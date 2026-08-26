@@ -3949,6 +3949,67 @@ describe("the artifact viewer", () => {
           .querySelector(".property-absent")?.textContent,
       ).toBe("—");
     });
+
+    // A sequence value is several entries, and an entry is often a sentence.
+    // Joined into one line, the separator runs into the entry's own full stop
+    // and the cell reads as "invoice., A purchase order", where the reader
+    // cannot tell where one entry ends. Each entry stands on its own line in
+    // both the rail and the full-width panel.
+    // Spec: §13.10
+    it("states each entry of a sequence value on its own line", async () => {
+      stubHeights(60);
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": {
+          body: {
+            id: "finance/pay-invoice",
+            type: "context",
+            version: "0.1.0",
+            content_hash: "sha256:abc",
+            manifest_body: "# Pay invoice\n",
+            frontmatter:
+              "---\nname: pay-invoice\ntags: [finance, ap]\nwhen_to_use:\n" +
+              "  - The user asks to pay a vendor invoice.\n" +
+              "  - A purchase order needs matching against a received invoice.\n---\n",
+          },
+        },
+        "/v1/dependents": { body: { edges: [] } },
+      });
+      goTo("#/artifact/finance%2Fpay-invoice");
+      render(<App />);
+      await screen.findByLabelText("Artifact viewer");
+
+      const uses = screen.getByTestId("property-value-when_to_use");
+      const entries = Array.from(uses.querySelectorAll("li")).map(
+        (item) => item.textContent,
+      );
+      expect(entries).toEqual([
+        "The user asks to pay a vendor invoice.",
+        "A purchase order needs matching against a received invoice.",
+      ]);
+      // No separator stands between an entry's full stop and the next entry.
+      expect(uses.textContent).not.toContain("invoice., A");
+      // A tag list is entries too, so it is read the same way rather than
+      // being flattened into one line.
+      expect(
+        Array.from(
+          screen.getByTestId("property-value-tags").querySelectorAll("li"),
+        ).map((item) => item.textContent),
+      ).toEqual(["finance", "ap"]);
+
+      fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+      const panel = screen.getByTestId("frontmatter-table");
+      expect(
+        Array.from(
+          panel.querySelectorAll(
+            '[data-testid="property-value-when_to_use"] li',
+          ),
+        ).map((item) => item.textContent),
+      ).toEqual([
+        "The user asks to pay a vendor invoice.",
+        "A purchase order needs matching against a received invoice.",
+      ]);
+    });
   });
 });
 

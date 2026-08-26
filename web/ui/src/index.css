@@ -720,6 +720,27 @@ h2.label {
   overflow-wrap: anywhere;
 }
 
+/* A sequence value renders one entry per line. The user-agent list indent and
+   marker are dropped, as they are on the other listings, and a marker is put
+   back only where the sequence carries more than one entry: entries that are
+   sentences wrap across several lines each, so a line break alone does not
+   say where one entry ends and the next begins. A single-entry sequence reads
+   as one value and takes no marker. */
+.property-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.property-items li + li {
+  margin-top: 4px;
+}
+
+.property-items:has(li + li) {
+  padding-left: 15px;
+  list-style: disc outside;
+}
+
 /* The em dash standing for a key the author left empty. It is the absence
    itself rather than a value, so it takes the de-emphasized tone the other
    absent states use. */
