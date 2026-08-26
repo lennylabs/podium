@@ -103,3 +103,42 @@ describe("artifact row description", () => {
     expect(description.maxWidth).toBe("720px");
   });
 });
+
+// A sidebar tree label is the whole folded stretch of path a §4.5.5 sparse
+// chain collapsed into one entry, so it runs wider than the 268px sidebar. A
+// wrapping row breaks the toggle away from the label, drops the label onto the
+// next line at the sidebar's left padding, and cuts it mid-segment against the
+// sidebar's border. The cases pin the declarations that keep the row on one
+// line and take the shortfall out of the label; the rendered row is checked
+// against a browser.
+describe("sidebar tree row", () => {
+  /** rowChild attaches an element carrying the given tag and classes inside a
+   * tree row and returns the style the stylesheet computes for it. */
+  function rowChild(tag: string, className: string): CSSStyleDeclaration {
+    const row = document.createElement("div");
+    row.className = "catalog-row";
+    const child = document.createElement(tag);
+    child.className = className;
+    row.appendChild(child);
+    document.body.appendChild(row);
+    mounted.push(row);
+    return window.getComputedStyle(child);
+  }
+
+  it("keeps the row on one line", () => {
+    expect(styled("catalog-row").flexWrap).toBe("nowrap");
+  });
+
+  it("clips a label wider than the row to an ellipsis inside it", () => {
+    const label = rowChild("a", "mono");
+    expect(label.minWidth).toBe("0");
+    expect(label.overflow).toBe("hidden");
+    expect(label.textOverflow).toBe("ellipsis");
+    expect(label.whiteSpace).toBe("nowrap");
+  });
+
+  it("keeps the toggle and the state marker at their own width", () => {
+    expect(rowChild("button", "tree-toggle").flex).toBe("0 0 auto");
+    expect(rowChild("span", "label").flex).toBe("0 0 auto");
+  });
+});

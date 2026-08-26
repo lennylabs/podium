@@ -478,15 +478,25 @@ function TreeNode({
         <button type="button" className="tree-toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? '▾' : '▸'}
         </button>
+        {/* The label is the whole folded stretch of path the entry navigates
+            across, and the row clips it to the sidebar's width, so it carries
+            the label as its title for a reader whose row is too narrow. */}
         {restricted ? (
           <>
-            <span className="mono">{label}</span>
+            <span className="mono" title={label}>
+              {label}
+            </span>
             <span className="label" data-testid="restricted-domain">
               restricted
             </span>
           </>
         ) : (
-          <a className="mono" href={domainHref(node.path)} aria-current={isCurrent ? 'page' : undefined}>
+          <a
+            className="mono"
+            href={domainHref(node.path)}
+            title={label}
+            aria-current={isCurrent ? 'page' : undefined}
+          >
             {label}
           </a>
         )}
