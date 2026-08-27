@@ -13,7 +13,7 @@
 // the only places the secret is returned, so the reveal states that it is
 // shown once and stays until the reader acknowledges it.
 
-import type { FormEvent, ReactNode } from 'react';
+import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { revealsSecret, SecretReveal } from './SecretReveal';
@@ -667,6 +667,12 @@ function TokenInput({
   const inputID = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const { invalid, onBlur } = useHeldInvalid(held);
+  const picker = useGroupPicker(known, value, (next) => {
+    onChange(next);
+    // A pick leaves the caret where the reader was typing. Focus stays on the
+    // row that was clicked otherwise, and the next characters go nowhere.
+    inputRef.current?.focus();
+  });
   return (
     <div className="field token-input">
       <label className="label" htmlFor={inputID}>
@@ -680,6 +686,7 @@ function TokenInput({
         aria-invalid={invalid}
         aria-describedby={held}
         onBlur={onBlur}
+        onKeyDown={picker.onKeyDown}
         onChange={(event) => {
           onChange(event.target.value);
         }}
@@ -703,17 +710,7 @@ function TokenInput({
         </span>
       )}
       {known !== undefined && known.length > 0 && (
-        <GroupPicker
-          known={known}
-          value={value}
-          onChange={(next) => {
-            onChange(next);
-            // A pick leaves the caret where the reader was typing. Focus
-            // stays on the row that was clicked otherwise, and the next
-            // characters go nowhere.
-            inputRef.current?.focus();
-          }}
-        />
+        <GroupPicker known={known} value={value} matches={picker.matches} at={picker.at} onPick={picker.pick} />
       )}
     </div>
   );
@@ -726,6 +723,51 @@ function TokenInput({
  * which is what actually bounds the box. */
 const pickerVisibleRows = 3;
 
+/** useGroupPicker holds the picker's highlighted row and the key handling the
+ * input needs to drive it. The picker is a typeahead under a text field, so
+ * the keys belong on the field the reader is typing into: reaching a row by
+ * tabbing means tabbing back out of the list to keep typing, and the reader
+ * who is entering names by hand never leaves the keyboard. ⏎ is consumed
+ * whenever a row is highlighted, because the field sits in a form and an
+ * uncancelled ⏎ there submits the registration instead of entering the
+ * name. */
+function useGroupPicker(known: string[] | undefined, value: string, onChange: (next: string) => void) {
+  const [highlighted, setHighlighted] = useState(0);
+  const matches = known === undefined ? [] : matchGroups(known, value);
+  // Typing narrows the list under the highlight, so the stored index can name
+  // a row that is no longer drawn. Clamping on read keeps the highlight on a
+  // drawn row without re-running state for every keystroke.
+  const at = matches.length === 0 ? 0 : Math.min(highlighted, matches.length - 1);
+  const pick = (name: string) => {
+    onChange(replaceFragment(value, name));
+    // The picked name leaves the list, so the highlight returns to the top of
+    // what remains rather than to whatever slid into the vacated index.
+    setHighlighted(0);
+  };
+  const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (matches.length === 0) {
+      return;
+    }
+    switch (event.key) {
+      case 'ArrowDown':
+        event.preventDefault();
+        setHighlighted((at + 1) % matches.length);
+        return;
+      case 'ArrowUp':
+        event.preventDefault();
+        setHighlighted((at + matches.length - 1) % matches.length);
+        return;
+      case 'Enter':
+        event.preventDefault();
+        pick(matches[at]);
+        return;
+      default:
+        return;
+    }
+  };
+  return { matches, at, pick, onKeyDown };
+}
+
 /** GroupPicker is the typeahead the group axis draws under its input. A grant
  * to a group nobody is in admits nobody, and the refusal for it never comes:
  * the registry accepts any name, so a typo is a layer that silently serves no
@@ -733,10 +775,29 @@ const pickerVisibleRows = 3;
  * enters a match on a click, which is the check the form can make before the
  * registration is sent. It renders in flow rather than as an overlay so the
  * dialog does not have to grow around it. */
-function GroupPicker({ known, value, onChange }: { known: string[]; value: string; onChange: (next: string) => void }) {
-  const matches = matchGroups(known, value);
+function GroupPicker({
+  known,
+  value,
+  matches,
+  at,
+  onPick,
+}: {
+  known: string[];
+  value: string;
+  matches: string[];
+  /** at is the index of the highlighted row, which the arrow keys move. */
+  at: number;
+  onPick: (name: string) => void;
+}) {
   const query = fragment(value);
   const scrolls = matches.length > pickerVisibleRows;
+  const highlightedRef = useRef<HTMLButtonElement | null>(null);
+  // The box draws three rows and scrolls the rest, so the highlight can move
+  // onto a row nobody can see. Following it keeps the arrow keys legible on a
+  // list longer than the box.
+  useEffect(() => {
+    highlightedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [at]);
   return (
     <div className="picker" data-testid="group-picker">
       <p className="picker-head">
@@ -752,20 +813,30 @@ function GroupPicker({ known, value, onChange }: { known: string[]; value: strin
             : `No group granted elsewhere matches “${query}”.`}
         </p>
       ) : (
-        <div className={scrolls ? 'picker-rows picker-rows-scrolls' : 'picker-rows'} data-testid="group-picker-rows">
-          {matches.map((name) => (
-            <button
-              type="button"
-              className="picker-row mono"
-              key={name}
-              onClick={() => {
-                onChange(replaceFragment(value, name));
-              }}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
+        <>
+          <div className={scrolls ? 'picker-rows picker-rows-scrolls' : 'picker-rows'} data-testid="group-picker-rows">
+            {matches.map((name, row) => (
+              <button
+                type="button"
+                className={row === at ? 'picker-row picker-row-on mono' : 'picker-row mono'}
+                key={name}
+                ref={row === at ? highlightedRef : undefined}
+                aria-current={row === at ? true : undefined}
+                onClick={() => {
+                  onPick(name);
+                }}
+              >
+                {name}
+              </button>
+            ))}
+          </div>
+          {/* The keys are stated rather than left to be discovered, because
+              nothing about a list under a text field says the arrows reach
+              it. */}
+          <p className="picker-foot" data-testid="group-picker-keys">
+            Type to narrow. ↑↓ to move, ⏎ to select.
+          </p>
+        </>
       )}
     </div>
   );

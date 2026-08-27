@@ -8402,6 +8402,69 @@ describe("the layer write flows", () => {
     ).toBeTruthy();
   });
 
+  // The picker is a typeahead under the field the reader is typing into, so
+  // it is reached with the arrows rather than by tabbing out of the line and
+  // back into it. The footer states the keys, because nothing about a list
+  // drawn under a text field says the arrows reach it. ⏎ enters the
+  // highlighted name, and the field sits in a form, so it has to be consumed:
+  // an uncancelled ⏎ there submits the registration instead.
+  it("moves the group picker with the arrow keys and enters the highlighted name on return", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ identity_provider_configured: false }),
+      },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ...adminLayer(),
+              Groups: ["appsec", "platform-eng", "platform-oncall", "secops"],
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.click(screen.getByLabelText("Groups"));
+    const field = screen.getByLabelText("Group names, separated by commas");
+    const picker = screen.getByTestId("group-picker");
+    expect(screen.getByTestId("group-picker-keys").textContent).toBe(
+      "Type to narrow. \u2191\u2193 to move, \u23ce to select.",
+    );
+    const highlighted = () =>
+      within(picker)
+        .getAllByRole("button")
+        .filter((row) => row.className.split(" ").includes("picker-row-on"))
+        .map((row) => row.textContent);
+    // The top row is highlighted before a key is pressed, so ⏎ enters a name
+    // without an arrow first.
+    expect(highlighted()).toEqual(["appsec"]);
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    expect(highlighted()).toEqual(["platform-eng"]);
+    fireEvent.keyDown(field, { key: "ArrowUp" });
+    fireEvent.keyDown(field, { key: "ArrowUp" });
+    // The movement wraps, so the last row is one key from the first.
+    expect(highlighted()).toEqual(["secops"]);
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect((field as HTMLInputElement).value).toBe("secops, ");
+    // The entered name leaves the list and the highlight returns to the top
+    // of what is left rather than to whatever slid into its index.
+    expect(highlighted()).toEqual(["appsec"]);
+    // ⏎ entered a name rather than sending the registration.
+    expect(requests.some((r) => r.method === "POST")).toBe(false);
+    expect(screen.queryByTestId("group-picker")).toBeTruthy();
+    // Typing narrows the list under the highlight, so an index past the end
+    // of what is left lands on a drawn row instead of on nothing.
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    fireEvent.keyDown(field, { key: "ArrowDown" });
+    expect(highlighted()).toEqual(["platform-oncall"]);
+    fireEvent.change(field, { target: { value: "secops, app" } });
+    expect(highlighted()).toEqual(["appsec"]);
+  });
+
   // The box bounds the dialog at three whole rows, so a longer list is cut
   // off. A cut with nothing marking it contradicts the count in the header,
   // which tells the reader six matched while three are drawn. The header says

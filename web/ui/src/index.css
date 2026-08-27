@@ -3166,6 +3166,24 @@ label:has(> input:disabled) {
   background: var(--wash);
 }
 
+/* The row the arrow keys are on. It is drawn the same way a hover is, because
+   the pointer and the keyboard are selecting the same thing. */
+.picker-row-on {
+  background: var(--wash);
+}
+
+/* The footer states the keys. It sits on the inset tone under a divider so it
+   reads as a note about the list rather than as another row in it. */
+.picker-foot {
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--bd);
+  border-radius: 0 0 7px 7px;
+  background: var(--page);
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
 .consequence {
   display: flex;
   gap: 11px;
