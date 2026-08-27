@@ -236,7 +236,11 @@ function PalettePanel({
               setIndex(0);
             }}
           />
-          {typed !== '' && !results.loading && results.error === null && rows.length > 0 && (
+          {/* The count is drawn on every settled read, a match and a no match
+              alike. A count that appears only when something matched leaves
+              the arm that most needs it, the one with an empty panel under
+              the field, stating nothing about how many rows it looked at. */}
+          {typed !== '' && !results.loading && results.error === null && (
             <span className="mono quiet palette-count" data-testid="palette-count">
               {rows.length} of {results.value?.total_matched ?? rows.length}
             </span>
@@ -271,7 +275,7 @@ function PalettePanel({
         <p className="assistive-only" role="status" aria-live="polite" data-testid="palette-announcement">
           {announcement}
         </p>
-        <PaletteFooter />
+        <PaletteFooter searchOnly={offersSearch} />
       </div>
     </div>
   );
@@ -304,8 +308,22 @@ function KeyCap({ children }: { children: ReactNode }) {
 }
 
 /** PaletteFooter is the keyboard legend. Escape sits at the right edge on its
- * own, because it leaves the panel rather than acting inside it. */
-function PaletteFooter() {
+ * own, because it leaves the panel rather than acting inside it. On an arm
+ * with no row to open, the legend states the one key that acts, because
+ * naming ↑↓ and ⏎ over a panel holding no rows advertises keys nothing
+ * answers. */
+function PaletteFooter({ searchOnly }: { searchOnly: boolean }) {
+  if (searchOnly) {
+    return (
+      <p className="palette-footer quiet" data-testid="palette-footer">
+        <KeyCap>⏎</KeyCap>
+        <span>search anyway</span>
+        <span className="spacer" />
+        <KeyCap>esc</KeyCap>
+        <span>close</span>
+      </p>
+    );
+  }
   return (
     <p className="palette-footer quiet" data-testid="palette-footer">
       <KeyCap>↑</KeyCap>
@@ -395,15 +413,23 @@ function PaletteResults({
     );
   }
   if (rows.length === 0) {
+    // The arm states the outcome as a heading, then what the query ran
+    // against, then the one action left. Drawn as a single quiet sentence it
+    // collapsed the panel to a line under the field and named neither how
+    // many rows the query reached nor what search looks at, so a reader had
+    // no way to tell a misspelling from a term the registry does not index.
     // The query is quoted so a reader can see where it ends, and the advice to
     // drop a filter is drawn only when the line carries one to drop.
     const filtered = hasFilters(parseQueryLine(typed));
     return (
-      <div className="palette-empty">
-        <EmptyState scope="inline">
-          Nothing matched “{typed}”.{' '}
-          {filtered ? 'Check the spelling, or drop a filter from the line.' : 'Check the spelling.'}
-        </EmptyState>
+      <div className="palette-empty" data-testid="palette-empty">
+        <p className="palette-empty-heading">Nothing matched “{typed}”</p>
+        <p className="quiet palette-empty-body">
+          {filtered
+            ? 'Try fewer words, or drop a filter from the line.'
+            : 'Try fewer words, or check the spelling.'}{' '}
+          Search covers artifact names, descriptions, and tags.
+        </p>
         <button type="button" onClick={onSearch}>
           Run it on the search surface
         </button>

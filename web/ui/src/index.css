@@ -3372,6 +3372,31 @@ label:has(> input:disabled) {
   font-size: 11.5px;
 }
 
+/* The no-match arm holds the panel open at the height the result list would
+   have taken, centred under the field, so a query that matched nothing does
+   not shrink the panel to a single line. */
+.palette-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 34px 24px 30px;
+  text-align: center;
+}
+
+.palette-empty-heading {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.palette-empty-body {
+  margin: 0;
+  max-width: 400px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .palette-footer {
   display: flex;
   align-items: center;

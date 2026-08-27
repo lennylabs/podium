@@ -10190,7 +10190,7 @@ describe("the command palette", () => {
     fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
       target: { value: "zzzznotathing" },
     });
-    await within(panel).findByText(/Check the spelling/);
+    await within(panel).findByText(/Nothing matched “zzzznotathing”/);
     expect(region.textContent).toBe(
       "No artifact matched \u201czzzznotathing\u201d.",
     );
@@ -10251,16 +10251,51 @@ describe("the command palette", () => {
     const panel = screen.getByTestId("palette");
     const field = within(panel).getByLabelText("Search artifacts");
     fireEvent.change(field, { target: { value: "the" } });
-    const plain = await screen.findByText(/Nothing matched \u201cthe\u201d\./);
-    expect(plain.textContent).toBe(
-      "Nothing matched \u201cthe\u201d. Check the spelling.",
+    const plain = await screen.findByText(/Nothing matched \u201cthe\u201d/);
+    expect(plain.textContent).toBe("Nothing matched \u201cthe\u201d");
+    expect(
+      within(panel).getByText(/Try fewer words/).textContent,
+    ).toBe(
+      "Try fewer words, or check the spelling. Search covers artifact names, descriptions, and tags.",
     );
     // The same line with a filter on it gains the advice to drop one.
     fireEvent.change(field, { target: { value: "type:skill the" } });
     const filtered = await screen.findByText(/drop a filter from the line/);
     expect(filtered.textContent).toBe(
-      "Nothing matched \u201ctype:skill the\u201d. Check the spelling, or drop a filter from the line.",
+      "Try fewer words, or drop a filter from the line. Search covers artifact names, descriptions, and tags.",
     );
+  });
+
+  // A query that matched nothing is a result the panel states as fully as a
+  // query that matched something: the field carries "0 of 0", the arm names
+  // the query at heading weight, and a quiet line says what search looked at.
+  // Drawn as one sentence with no count, the panel collapsed under the field
+  // and told a reader neither how many rows the query reached nor why.
+  it("counts, names, and explains the query that matched nothing", async () => {
+    palettePage([], 0);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "span covrage" },
+    });
+    const empty = await within(panel).findByTestId("palette-empty");
+    // The count sits on the field's right edge, the same edge it holds when
+    // rows came back.
+    expect(within(panel).getByTestId("palette-count").textContent).toBe(
+      "0 of 0",
+    );
+    const heading = within(empty).getByText(
+      "Nothing matched \u201cspan covrage\u201d",
+    );
+    expect(heading.className).toContain("palette-empty-heading");
+    expect(
+      within(empty).getByText(/Search covers artifact names/).className,
+    ).toContain("palette-empty-body");
+    // \u2191\u2193 and \u23ce-to-open name keys no row answers here, so the legend reduces
+    // to the handoff and the way out.
+    const footer = within(panel).getByTestId("palette-footer");
+    expect(footer.textContent).toBe("\u23cesearch anywayescclose");
   });
 
   // A reopened panel is a fresh one. A panel that held the line the reader
