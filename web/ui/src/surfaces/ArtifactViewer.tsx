@@ -883,11 +883,11 @@ function ResourceTable({ rows }: { rows: ResourceRow[] }) {
       <table className="data-table" aria-label="Resources">
         <thead>
           <tr>
-            <th>File</th>
-            <th>Format</th>
-            <th>Size</th>
-            <th>Delivery</th>
-            <th>Action</th>
+            <th className="column-label">File</th>
+            <th className="column-label">Format</th>
+            <th className="column-label">Size</th>
+            <th className="column-label">Delivery</th>
+            <th className="column-label">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -902,10 +902,12 @@ function ResourceTable({ rows }: { rows: ResourceRow[] }) {
               <td className="mono">{row.name}</td>
               <td className="mono">{row.format}</td>
               <td className="mono">{formatSize(row.size)}</td>
-              <td>{row.delivery}</td>
               <td>
-                <a href={row.href} download={row.name}>
-                  Download
+                <span className="badge badge-quiet">{row.delivery}</span>
+              </td>
+              <td>
+                <a className="button" href={row.href} download={row.name}>
+                  Download ↓
                 </a>
               </td>
             </tr>

@@ -3436,7 +3436,9 @@ describe("the artifact viewer", () => {
       "4 B",
       "inline, base64",
     ]);
-    const download = within(rows[0]).getByRole("link", { name: "Download" });
+    const download = within(rows[0]).getByRole("link", {
+      name: "Download ↓",
+    });
     expect(download.getAttribute("href")).toBe(
       "data:application/octet-stream;base64,AAECAw==",
     );
@@ -3452,7 +3454,7 @@ describe("the artifact viewer", () => {
     ]);
     expect(
       within(rows[1])
-        .getByRole("link", { name: "Download" })
+        .getByRole("link", { name: "Download ↓" })
         .getAttribute("href"),
     ).toBe("https://objects.acme.com/corpus");
   });
@@ -10018,6 +10020,30 @@ describe("the artifact viewer’s resources", () => {
     expect(size).toBe("2.0 MB");
     fireEvent.click(rows[1]);
     expect(screen.getByTestId("resource-detail").textContent).toContain(size);
+  });
+
+  // The resource table is one of the UI's data tables, so its column headers
+  // take the same mono label treatment the at-scale artifact table uses, its
+  // delivery value reads as a badge rather than as body text, and its row
+  // action reads as a bordered control. Without this the tab drew three
+  // treatments the rest of the build does not use.
+  it("labels its columns, badges the delivery, and draws the row action as a control", async () => {
+    resourcePage();
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Resources/ }));
+    const table = screen.getByLabelText("Resources");
+    for (const header of within(table).getAllByRole("columnheader")) {
+      expect(header.className).toContain("column-label");
+    }
+    const rows = within(table).getAllByRole("row").slice(1);
+    for (const row of rows) {
+      const delivery = within(row).getAllByRole("cell")[3];
+      expect(delivery.querySelector(".badge")).not.toBeNull();
+      expect(
+        within(row).getByRole("link", { name: "Download ↓" }).className,
+      ).toContain("button");
+    }
   });
 });
 
