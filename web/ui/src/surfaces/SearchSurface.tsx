@@ -9,9 +9,10 @@
 // and one whose values it cannot is added through a token entry. The result
 // count sits at the right of the same row.
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ArtifactRow } from "../components/ArtifactRow";
+import { usePopupDismiss } from "../components/focus";
 import { Chevron, EmptyState, ErrorState, Loading, Magnifier } from "../components/primitives";
 import type { SearchFilters, SearchResponse } from "../api";
 import { loadDomain, searchArtifacts } from "../api";
@@ -284,6 +285,32 @@ function TokenEntry({
 }) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState("");
+  const trigger = useRef<HTMLButtonElement>(null);
+  // The entry is a transient popup, so it dismisses on Escape and on a press
+  // or a focus move outside itself. Without that, a reader who opened it to
+  // look loses the add control for the rest of the session, because the
+  // field stands in the button's place until a value is submitted.
+  const dismissed = useRef(false);
+  const entry = usePopupDismiss<HTMLSpanElement>(
+    open,
+    () => {
+      dismissed.current = true;
+      setTyped("");
+      setOpen(false);
+    },
+    trigger,
+  );
+  // usePopupDismiss hands focus back to the trigger, but the trigger is
+  // unmounted while the field stands in its place, so the focus lands on
+  // nothing. The dismissal records that it asked for it and the button takes
+  // it once it is back.
+  useEffect(() => {
+    if (open || !dismissed.current) {
+      return;
+    }
+    dismissed.current = false;
+    trigger.current?.focus();
+  }, [open]);
 
   const commit = () => {
     const value = typed.trim();
@@ -299,6 +326,7 @@ function TokenEntry({
       <button
         type="button"
         className="pill pill-add"
+        ref={trigger}
         onClick={() => {
           setOpen(true);
         }}
@@ -308,7 +336,7 @@ function TokenEntry({
     );
   }
   return (
-    <span className="pill pill-entry">
+    <span className="pill pill-entry" ref={entry}>
       <input
         type="text"
         aria-label={`Add a ${label} filter`}

@@ -2304,6 +2304,41 @@ describe("search", () => {
     });
   });
 
+  // The tag entry stands in the add control's place while it is open, so a
+  // reader who opened it to look and then moved on loses the control for the
+  // rest of the session unless it dismisses itself. It carries the paths
+  // every other transient popup in the shell carries.
+  it("dismisses the tag entry on Escape and on an outside press", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    await screen.findByLabelText("Search");
+
+    const open = () => screen.getByRole("button", { name: "+ tag" });
+    fireEvent.click(open());
+    expect(screen.getByLabelText("Add a tag filter")).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByLabelText("Add a tag filter")).toBeNull();
+    expect(document.activeElement).toBe(open());
+
+    fireEvent.click(open());
+    // Text the reader abandoned does not come back with the field.
+    fireEvent.change(screen.getByLabelText("Add a tag filter"), {
+      target: { value: "review" },
+    });
+    fireEvent.pointerDown(document.body);
+    expect(screen.queryByLabelText("Add a tag filter")).toBeNull();
+    expect(screen.queryByText("tag: review")).toBeNull();
+    fireEvent.click(open());
+    expect(
+      (screen.getByLabelText("Add a tag filter") as HTMLInputElement).value,
+    ).toBe("");
+  });
+
   // A native select is as wide as its widest option, so a catalog carrying a
   // deep domain path stretched the scope control to that path and left a gap
   // between the label and the indicator. The closed pill draws its own label,
