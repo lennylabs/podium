@@ -1508,23 +1508,41 @@ input[type="search"]::-webkit-search-cancel-button {
   overflow-wrap: anywhere;
 }
 
-/* A share of the table is not enough on its own. The rail is a 316px column,
-   so 40% of the table inside it is about 108px, and an ordinary key such as
-   `description` or `review_cadence` then breaks mid-word across two lines.
-   The floor is stated in `ch` of the key's own mono face, so a key of up to
-   16 characters sits on one line at whatever size the face is set at, and
-   only a key longer than that falls back to the break above. */
+/* The design lays the frontmatter rows out on a fixed 180px key column beside
+   a value column that takes the rest, so a key such as `type` stands beside
+   what it labels at every table width. Automatic table layout hands a column
+   whatever surplus the table has left over, and a key column stated only as a
+   share of the table therefore grows with the table: across the full main
+   column the frontmatter tab put a three-character key more than 300px from
+   its value. The value asks for the whole table, which sends the surplus there
+   and holds the key at the width stated below (§13.10).
+   The width is a floor rather than a preference, because the value's claim
+   outranks a preference and would otherwise squeeze the key to its
+   min-content. */
 /* The key is the label of the row and the value is its content, so the key is
    set quiet and small while the value keeps the table's own size in `--ink`.
    A user agent renders a `th` bold and in the body colour, which puts the
    heavier half of the row on the field name and runs the reader's eye down
    the names rather than down the values (§13.10). */
 .property-table th {
-  width: 40%;
-  min-width: 16ch;
+  min-width: 180px;
   font-size: 11.5px;
   font-weight: 400;
   color: var(--faint);
+}
+
+.property-table td {
+  width: 100%;
+}
+
+/* The rail is a 316px column, so the table inside it is about 270px and a
+   180px key column would leave the value less than a third of the row. The
+   rail states its own floor in `ch` of the key's own mono face, so an ordinary
+   key such as `description` or `review_cadence` sits on one line at whatever
+   size that face is set at, and only a longer key falls back to the break
+   above. */
+.artifact-rail .property-table th {
+  min-width: 16ch;
 }
 
 /* A view switch that rides on a toolbar row is smaller than the one in a

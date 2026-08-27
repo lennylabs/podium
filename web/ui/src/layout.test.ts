@@ -959,20 +959,29 @@ describe("frontmatter property table", () => {
     expect(descendantStyle("property-table", "td").overflowWrap).toBe("anywhere");
   });
 
-  // A breakable value contributes nothing to the table's minimum, so without a
-  // claim of its own the key column collapses toward one character per line
-  // beside a value that asks for the whole table.
-  it("keeps a share of the table for the key column", () => {
-    expect(descendantStyle("property-table", "th").width).toBe("40%");
+  // Automatic table layout hands a column whatever surplus the table has left,
+  // so a key column stated as a share of the table grows with the table: the
+  // frontmatter tab stands this table across the full main column, where the
+  // share resolved to over 300px and stranded `type` and `version` a third of
+  // the page from the value they label. The value asks for the whole table,
+  // which sends the surplus there instead.
+  it("sends the table's surplus width to the value column", () => {
+    expect(descendantStyle("data-table property-table", "td").width).toBe("100%");
   });
 
-  // The share alone is measured against the table, and the table inside the
-  // 316px rail is narrow enough that 40% of it holds about ten mono
-  // characters. `description` and `review_cadence` then break mid-word. The
-  // floor is stated in `ch` of the key's own face, so it holds a key of
+  // The design fixes the key column at 180px. A preference would lose to the
+  // value's claim on the whole table, so the width is stated as the floor the
+  // value cannot squeeze past.
+  it("holds the key column at the design's fixed width", () => {
+    expect(descendantStyle("property-table", "th").minWidth).toBe("180px");
+  });
+
+  // The rail is a 316px column, so its table is about 270px wide and a 180px
+  // key column would leave the value less than a third of the row. The rail's
+  // own floor is stated in `ch` of the key's face, so it holds a key of
   // ordinary length on one line at whatever size that face is set at.
-  it("floors the key column at a width an ordinary key fits on one line", () => {
-    const key = descendantStyle("property-table", "th");
+  it("narrows the key column to an ordinary key's width inside the rail", () => {
+    const key = railKeyStyle();
     expect(key.minWidth).toBe("16ch");
     expect(Number.parseInt(key.minWidth, 10)).toBeGreaterThanOrEqual(
       "review_cadence".length,
@@ -1004,6 +1013,22 @@ describe("frontmatter property table", () => {
     }
   });
 });
+
+/** railKeyStyle attaches a property table inside the artifact rail and returns
+ * the computed style of its key cell, which is what a case reading the rail's
+ * narrower floor needs. */
+function railKeyStyle(): CSSStyleDeclaration {
+  const rail = document.createElement("aside");
+  rail.className = "artifact-rail";
+  const table = document.createElement("table");
+  table.className = "data-table property-table";
+  const key = document.createElement("th");
+  table.appendChild(key);
+  rail.appendChild(table);
+  document.body.appendChild(rail);
+  mounted.push(rail);
+  return window.getComputedStyle(key);
+}
 
 /** propertyRows attaches a property table holding count rows and returns them
  * in document order, which is what a case reading an `nth-child` rule needs. */
