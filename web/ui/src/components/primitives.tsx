@@ -25,11 +25,26 @@ export type BadgeTone = Tone | 'soft' | 'marker';
  * value that is copied by clicking it carries no affordance saying so, and a
  * one-time secret is unrecoverable once the reader has moved on. A block
  * field renders the value as preformatted text so its line breaks survive.
+ *
+ * A badge sits beside the label for a field whose value carries a condition
+ * the label alone does not state, which is how the webhook secret is marked
+ * as shown once without a heading that would also cover the field above it.
  */
-export function CopyField({ label, value, block = false }: { label: string; value: string; block?: boolean }) {
+export function CopyField({
+  label,
+  value,
+  block = false,
+  badge,
+}: {
+  label: string;
+  value: string;
+  block?: boolean;
+  badge?: string;
+}) {
   return (
     <div className="copy-field">
       <span className="label quiet">{label}</span>
+      {badge !== undefined && <Badge tone="accent">{badge}</Badge>}
       {block ? <pre className="mono copy-value">{value}</pre> : <span className="mono copy-value">{value}</span>}
       <CopyButton value={value} subject={label} />
     </div>

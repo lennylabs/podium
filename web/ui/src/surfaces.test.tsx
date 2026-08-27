@@ -7500,6 +7500,58 @@ describe("the layer write flows", () => {
     ).toBe(false);
   });
 
+  // The URL is stored on the layer and can be read again; the secret cannot.
+  // The shown-once treatment therefore covers the secret alone, because a
+  // dashed block holding both values tells the reader that the URL is
+  // unrecoverable as well.
+  //
+  // Spec: §13.10
+  it("marks only the secret as shown once and leaves the webhook URL outside the block", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "git",
+            Order: 1,
+            UserDefined: true,
+          },
+          webhook_url:
+            "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+          webhook_secret: "whsec-abc",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    const block = await screen.findByLabelText("Webhook secret");
+    // The secret and its badge are inside the block.
+    expect(within(block as HTMLElement).getByText("whsec-abc")).toBeTruthy();
+    expect(within(block as HTMLElement).getByText("SHOWN ONCE")).toBeTruthy();
+    // The URL is outside it, with the line saying it can be read again.
+    const url = screen.getByText(
+      "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+    );
+    expect(block.contains(url)).toBe(false);
+    expect(
+      screen.getByText("Stored on the layer. You can look this up again any time."),
+    ).toBeTruthy();
+    // The badge names the secret's field rather than heading both fields.
+    const secretRow = within(block as HTMLElement)
+      .getByText("whsec-abc")
+      .closest(".copy-field") as HTMLElement;
+    expect(within(secretRow).getByText("SHOWN ONCE")).toBeTruthy();
+    expect(within(secretRow).getByText("Webhook secret")).toBeTruthy();
+  });
+
   // The reveal is the branch where naming the layer matters most: the
   // credential is unrecoverable, and a dialog that presents it without the
   // outcome never confirms that the layer was created or which layer the

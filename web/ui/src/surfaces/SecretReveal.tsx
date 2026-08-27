@@ -45,17 +45,25 @@ export function SecretReveal({
   return (
     <>
       <Banner tone="accent">{outcome}</Banner>
+      {/* The URL is stored on the layer and the panel serves it again on
+          demand, so it sits outside the block below. Inside it, the block's
+          dashed edge would state that the URL is unrecoverable too, which is
+          the one thing a reader must not believe about the value they have to
+          configure their repository with. */}
+      {result.webhook_url !== undefined && result.webhook_url !== '' && (
+        <>
+          <CopyField label="Webhook URL" value={result.webhook_url} />
+          <p className="quiet">Stored on the layer. You can look this up again any time.</p>
+        </>
+      )}
       <div className="secret-reveal" aria-label="Webhook secret">
-        <p className="label">Shown once</p>
+        {/* The badge sits on the secret's own label, so the shown-once
+            condition names the one value it applies to. */}
+        <CopyField label="Webhook secret" badge="SHOWN ONCE" value={result.webhook_secret} />
         <p>
-          The webhook URL is permanent. The secret is returned here and on a rotation, and the registry stores only a
-          hash of it.
+          The registry stores a hash of the secret rather than the secret. Once this dialog closes it cannot be shown
+          again, and a replacement takes a rotation.
         </p>
-        {/* Both values are here to be taken away, so each carries its own
-            copy control. The secret is never served again, so a reader who
-            leaves without it has to rotate the secret to get another. */}
-        <CopyField label="Webhook URL" value={result.webhook_url ?? ''} />
-        <CopyField label="Webhook secret" value={result.webhook_secret} />
         <label>
           <input
             type="checkbox"
