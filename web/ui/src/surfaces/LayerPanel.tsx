@@ -46,7 +46,23 @@ import {
 } from "../api";
 import { deletedLayersHref } from "../route";
 import { since } from "../time";
+import type { Async } from "../useAsync";
 import { useAsync } from "../useAsync";
+
+/** RecoverableCount states how much the deleted-layer read found, beside the
+ * link that opens it. A read that failed states that instead of a count: the
+ * failed read and a read that found nothing both hold no layers, and drawing
+ * both as no badge reports a registry that did not answer as a registry
+ * holding nothing on its way to being erased. */
+function RecoverableCount({ read }: { read: Async<LayerRecord[]> }) {
+  if (read.error !== null) {
+    return <Badge tone="quiet">?</Badge>;
+  }
+  if (read.value === null || read.value.length === 0) {
+    return null;
+  }
+  return <Badge tone="quiet">{String(read.value.length)}</Badge>;
+}
 
 /** Refusal is a write the registry refused, held with the write itself so the
  * row can re-issue exactly what was attempted. */
@@ -108,6 +124,15 @@ export function LayerPanel({
   // document body puts the reader back at the top of the page.
   const heading = useRef<HTMLHeadingElement>(null);
 
+  /** reloadPanel re-reads every read the panel owns. The panel's retry runs
+   * it, because the outage that refused the layer list refused the deleted
+   * list beside it, and reloading the rows alone leaves the recoverable count
+   * reading as if nothing were recoverable for the rest of the session. */
+  const reloadPanel = () => {
+    layers.reload();
+    recoverable.reload();
+  };
+
   // The loading state stands in for the panel on the first read alone. A
   // write reloads the list, and the reload reports loading again, so swapping
   // the whole panel out here would unmount the form that issued the write and
@@ -117,7 +142,7 @@ export function LayerPanel({
     return <Loading label="Loading the layers." />;
   }
   if (layers.error !== null) {
-    return <ErrorState error={layers.error} onRetry={layers.reload} />;
+    return <ErrorState error={layers.error} onRetry={reloadPanel} />;
   }
   const rows = layers.value ?? [];
 
@@ -252,12 +277,14 @@ export function LayerPanel({
             className="button link-action"
             data-testid="recoverable-link"
             href={deletedLayersHref}
+            title={
+              recoverable.error !== null
+                ? "The recoverable count could not be read."
+                : undefined
+            }
           >
             ↺ Recently unregistered
-            {recoverable.value === null ||
-            recoverable.value.length === 0 ? null : (
-              <Badge tone="quiet">{String(recoverable.value.length)}</Badge>
-            )}
+            <RecoverableCount read={recoverable} />
           </a>
           <button
             type="button"

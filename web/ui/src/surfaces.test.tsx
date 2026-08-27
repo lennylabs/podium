@@ -9639,6 +9639,69 @@ describe("a refused layer write", () => {
         .hasAttribute("disabled"),
     ).toBe(true);
   });
+
+  // The panel's retry is the recovery from an outage that refused every read
+  // the panel owns, so it re-reads the deleted list beside the layer list. A
+  // retry that reloads the rows alone repopulates the table over a count that
+  // still holds the failure, and a layer inside its recovery window then
+  // reads as nothing to recover for the rest of the session.
+  it("re-reads the recoverable count when the panel retry recovers", async () => {
+    const deleted = {
+      layers: [
+        {
+          ...userLayer(),
+          ID: "alice-old",
+          DeletedAt: new Date().toISOString(),
+        },
+      ],
+    };
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { rejects: true },
+      "/v1/layers?deleted=true": { rejects: true },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("registry.unavailable");
+    // The registry answers again, and the reader presses the panel's own
+    // recovery control.
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": { body: deleted },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByLabelText("Layer panel");
+    const link = screen.getByTestId("recoverable-link");
+    await waitFor(() => {
+      expect(link.querySelector(".badge")?.textContent).toBe("1");
+    });
+  });
+
+  // A deleted-list read that failed holds no layers, and so does a tenant
+  // with nothing unregistered. The link states which of the two it has: a
+  // failed read is reported rather than drawn as the panel's nothing-to-
+  // recover arm.
+  it("marks the recoverable count unread when its own read failed", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": { rejects: true },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const link = screen.getByTestId("recoverable-link");
+    await waitFor(() => {
+      expect(link.querySelector(".badge")?.textContent).toBe("?");
+    });
+    expect(link.getAttribute("title")).toBe(
+      "The recoverable count could not be read.",
+    );
+    // The rows the panel did read are untouched by the failure beside them.
+    expect(screen.getByText("alice-personal")).toBeTruthy();
+  });
 });
 
 describe("a registry that did not answer", () => {
