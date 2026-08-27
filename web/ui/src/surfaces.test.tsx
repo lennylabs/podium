@@ -8853,6 +8853,35 @@ describe("the command palette", () => {
     expect(window.location.hash).toBe("#/search/nothingmatches");
   });
 
+  // A refused read leaves the panel with no row to open either, so it carries
+  // the same handoff the no-match arm carries and answers ⏎ with it. A panel
+  // that offered only a retry of the read that just failed made ⏎ a key the
+  // footer names and nothing answers.
+  it("offers the search surface, on the button and on ⏎, when the read is refused", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { rejects: true },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "deploy" },
+    });
+    await within(panel).findByText("The registry did not answer this request.");
+    expect(
+      within(panel).getByRole("button", { name: "Run it on the search surface" }),
+    ).toBeTruthy();
+    // The retry of the refused read stays beside it: the two are different
+    // recoveries, and the handoff does not replace the retry.
+    expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
+    fireEvent.keyDown(panel, { key: "Enter" });
+    expect(screen.queryByTestId("palette")).toBeNull();
+    expect(window.location.hash).toBe("#/search/deploy");
+  });
+
   // The no-match line quotes the query so a reader can see where it ends, and
   // it advises dropping a filter only when the line carries one to drop.
   it("quotes the query and withholds filter advice on a line with no filter", async () => {

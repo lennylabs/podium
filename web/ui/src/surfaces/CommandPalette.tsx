@@ -112,11 +112,14 @@ function PalettePanel({
   // that points at nothing.
   const listed = typed !== '' && !results.loading && results.error === null && rows.length > 0;
   const at = listed ? Math.min(index, rows.length - 1) : -1;
-  // The no-match arm below offers one action, the handoff to the search
-  // surface, and the footer advertises ⏎ the whole time the panel is open. So
-  // ⏎ runs that one action on the arm that has no row to open, rather than
-  // being a key the legend names and nothing answers.
-  const offersSearch = typed !== '' && !results.loading && results.error === null && rows.length === 0;
+  // The no-match arm and the refused arm below both offer one action, the
+  // handoff to the search surface, and the footer advertises ⏎ the whole time
+  // the panel is open. So ⏎ runs that one action wherever there is no row to
+  // open, rather than being a key the legend names and nothing answers. The
+  // refused arm needs it as much as the no-match one does: the query still
+  // reaches the search surface, which issues the read again on a surface that
+  // can list the whole result set.
+  const offersSearch = typed !== '' && !results.loading && !listed;
 
   const openRow = (id: string) => {
     onRun(typed);
@@ -347,7 +350,17 @@ function PaletteResults({
     return <Loading label="Searching." />;
   }
   if (results.error !== null) {
-    return <ErrorState error={results.error} onRetry={results.reload} />;
+    // The refused read leaves the panel with no row to open, so it carries
+    // the same handoff the no-match arm carries. Without it the panel states
+    // a failure and offers only a retry of the read that just failed, while
+    // the footer below still advertises ⏎.
+    return (
+      <ErrorState error={results.error} onRetry={results.reload}>
+        <button type="button" onClick={onSearch}>
+          Run it on the search surface
+        </button>
+      </ErrorState>
+    );
   }
   if (rows.length === 0) {
     // The query is quoted so a reader can see where it ends, and the advice to
