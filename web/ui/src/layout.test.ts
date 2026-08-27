@@ -1141,3 +1141,19 @@ describe("lifted artifact group", () => {
     expect(inner).toContain("border-radius: 0");
   });
 });
+
+// The layer row's overflow menu. Drawn in the flow of the fixed-width actions
+// cell it stretched its row to the height of the menu, emptied every other
+// cell in that row over that height, and pushed every row below it down the
+// page. The menu is drawn into the document instead and placed against its
+// trigger in viewport coordinates, because the table scrolls sideways inside
+// a container that clips what overflows it. jsdom performs no layout, so the
+// case pins the declarations that take the menu out of the table; the
+// rendered result is checked against a browser.
+describe("layer row overflow menu", () => {
+  it("takes the menu out of the table's flow and draws it over the rows", () => {
+    const menu = styled("row-menu");
+    expect(menu.position).toBe("fixed");
+    expect(menu.zIndex).toBe("20");
+  });
+});

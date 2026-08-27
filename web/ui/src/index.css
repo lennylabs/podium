@@ -2380,16 +2380,29 @@ label:has(> input:disabled) {
   color: var(--meta);
 }
 
+/* The menu overlays the table rather than taking space in it. Drawn in the
+   flow of the fixed-width actions cell it stretched its row to the height of
+   the menu, emptied every other cell over that height, and pushed every row
+   below it down the page, so a reader who opened a menu lost the row they
+   were reading. It is drawn into the document and placed against its trigger
+   in viewport coordinates, which leaves the table's geometry unchanged while
+   it is open. Placed against the cell instead it was cut off at the bottom of
+   the table, because the table scrolls sideways inside a container that clips
+   what overflows it. */
 .row-menu {
+  position: fixed;
+  z-index: 20;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 4px;
+  min-width: 140px;
   padding: 6px;
   margin-top: 6px;
   border: 1px solid var(--bd);
   border-radius: 8px;
   background: var(--surf2);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
 }
 
 .row-menu button {

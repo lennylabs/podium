@@ -6275,6 +6275,36 @@ describe("the layer write flows", () => {
     expect(document.activeElement).toBe(items[1]);
   });
 
+  // The menu overlays the table rather than taking space in it. Drawn in the
+  // flow of the row's fixed-width actions cell it stretched that row to the
+  // height of the menu, emptied every other cell in the row over that height,
+  // and pushed every row below it down the page, so a reader who opened a
+  // menu lost the row they were reading. jsdom performs no layout, so the
+  // case reads where the menu is drawn: outside the table, which is what
+  // leaves the table's geometry unchanged while a menu is open.
+  it("draws the row actions outside the table so the rows below stay where they were", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    const menu = screen.getByRole("menu", {
+      name: "More actions for alice-personal",
+    });
+    const table = document.querySelector(".layer-table");
+    expect(table).not.toBeNull();
+    expect(table?.contains(menu)).toBe(false);
+    // The row it belongs to still holds every cell the table draws.
+    const row = screen
+      .getByRole("button", { name: "More actions for alice-personal" })
+      .closest("tr");
+    expect(row?.querySelectorAll("td").length).toBe(6);
+    expect(row?.contains(menu)).toBe(false);
+  });
+
   // A dialog opens with focus on the field the reader has to fill in. Opening
   // focus on the dismissal ✕ made the first Enter close the dialog the reader
   // had just opened, and put the destructive confirmation's opening focus on

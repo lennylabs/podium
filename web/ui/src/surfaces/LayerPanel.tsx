@@ -10,7 +10,8 @@
 // point of that deployment.
 
 import type { KeyboardEvent, RefObject } from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { grantedGroups } from "./members";
 import { erasesOn, recoveryDays } from "./recovery";
@@ -870,6 +871,7 @@ function LayerRow({
         {overflowOpen && (
           <RowMenu
             menuRef={menu}
+            anchor={overflow}
             label={`More actions for ${layer.ID}`}
             items={[
               {
@@ -965,6 +967,41 @@ function LayerRow({
   );
 }
 
+/** useAnchoredPlacement returns the viewport coordinates that put a popup
+ * directly under its trigger and right-aligned with it. The popup is drawn
+ * into the document rather than into the row it belongs to, so it carries the
+ * position its trigger has rather than one the table's own layout gives it,
+ * and it is placed again on a scroll or a resize because the trigger moves
+ * under both. */
+function useAnchoredPlacement(anchor: RefObject<HTMLElement | null>) {
+  const [placement, setPlacement] = useState<{ top: number; right: number }>({
+    top: 0,
+    right: 0,
+  });
+  useLayoutEffect(() => {
+    const place = () => {
+      const rect = anchor.current?.getBoundingClientRect();
+      if (rect === undefined) {
+        return;
+      }
+      setPlacement({
+        top: rect.bottom + 6,
+        right: window.innerWidth - rect.right,
+      });
+    };
+    place();
+    // Capture, so the table's own sideways scroll moves the popup with the
+    // trigger rather than leaving it over the column the trigger has left.
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => {
+      window.removeEventListener("scroll", place, true);
+      window.removeEventListener("resize", place);
+    };
+  }, [anchor]);
+  return placement;
+}
+
 /** RowMenu is the popup behind a row's overflow control. It carries menu
  * semantics, so an assistive technology announces it as a menu and its
  * entries as menu items, and the label the popup states is read rather than
@@ -974,17 +1011,29 @@ function LayerRow({
  * already uses: the menu is one Tab stop, it opens with focus on its first
  * item, and the arrow keys move between items. Leaving focus on the trigger
  * made a forward Tab the only route into a popup the reader had just opened,
- * and past the last item on the row after that. */
+ * and past the last item on the row after that.
+ *
+ * The menu overlays the table rather than taking space in it. Drawn in the
+ * flow of the row's fixed-width actions cell it stretched that row to the
+ * height of the menu, emptied every other cell in the row over that height,
+ * and pushed every row below it down the page, so a reader who opened a menu
+ * lost the row they were reading. It is drawn into the document instead,
+ * positioned against its trigger, because the table scrolls sideways inside a
+ * container that clips what overflows it and a menu placed against the cell
+ * was cut off at the bottom of the table. */
 function RowMenu({
   menuRef,
+  anchor,
   label,
   items,
 }: {
   menuRef: RefObject<HTMLDivElement | null>;
+  anchor: RefObject<HTMLElement | null>;
   label: string;
   items: { label: string; disabled: boolean; onSelect: () => void }[];
 }) {
   const [active, setActive] = useState(0);
+  const placement = useAnchoredPlacement(anchor);
   const focusItem = (container: HTMLElement | null, index: number) => {
     container
       ?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')
@@ -1019,12 +1068,13 @@ function RowMenu({
     focusItem(event.currentTarget, next);
   };
 
-  return (
+  return createPortal(
     <div
       ref={menuRef}
       className="row-menu"
       role="menu"
       aria-label={label}
+      style={placement}
       onKeyDown={onArrow}
     >
       {items.map((item, index) => (
@@ -1041,7 +1091,8 @@ function RowMenu({
           {item.label}
         </button>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
