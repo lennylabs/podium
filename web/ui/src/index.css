@@ -3867,8 +3867,13 @@ label:has(> input:disabled) {
   flex: none;
 }
 
+/* The set-level download is the per-row Download action taken over the whole
+   table, so it sits at the table's right edge above the action column. Left
+   of the table it read as a heading over the file column instead of as the
+   counterpart to the buttons under it. */
 .download-all {
-  margin-bottom: 10px;
+  display: block;
+  margin: 0 0 10px auto;
 }
 
 /* The recoverable-layers link leads the panel's action row as a quiet accent

@@ -12168,9 +12168,15 @@ describe("the artifact viewer’s resources", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Resources/ }));
     // The total is the two files together: four inline bytes and two
     // megabytes fetched on demand.
-    expect(screen.getByTestId("download-all").textContent).toBe(
-      "Download all ↓ 2.0 MB",
-    );
+    const all = screen.getByTestId("download-all");
+    expect(all.textContent).toBe("Download all ↓ 2.0 MB");
+    // The control takes the set the row buttons take one file at a time, so
+    // it sits at the table's right edge above their column rather than at the
+    // left edge, where it reads as a heading over the file column.
+    const allStyle = window.getComputedStyle(all);
+    expect(allStyle.display).toBe("block");
+    expect(allStyle.marginLeft).toBe("auto");
+    expect(allStyle.marginRight).toBe("0px");
     expect(screen.queryByTestId("resource-detail")).toBeNull();
     const rows = within(screen.getByLabelText("Resources"))
       .getAllByRole("row")
