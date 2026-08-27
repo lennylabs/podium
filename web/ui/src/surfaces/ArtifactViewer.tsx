@@ -901,7 +901,7 @@ function ResourceTable({ rows }: { rows: ResourceRow[] }) {
             >
               <td className="mono">{row.name}</td>
               <td className="mono">{row.format}</td>
-              <td className="mono">{row.size} bytes</td>
+              <td className="mono">{formatSize(row.size)}</td>
               <td>{row.delivery}</td>
               <td>
                 <a href={row.href} download={row.name}>

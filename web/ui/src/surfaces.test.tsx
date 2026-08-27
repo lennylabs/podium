@@ -3392,7 +3392,9 @@ describe("the artifact viewer", () => {
   // previewed, so the row's action is the only path to the file. One binary
   // file puts the whole inline set into base64, and that row's action carries
   // the decoded bytes while its size column states the file's own byte count
-  // rather than the length of the encoding.
+  // rather than the length of the encoding. The column carries the same unit
+  // the total above the table and the detail card under it use, so one file's
+  // size does not read two ways on one screen.
   it("gives every resource row a format, a byte size, and a download action", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -3431,7 +3433,7 @@ describe("the artifact viewer", () => {
     expect(inline.slice(0, 4)).toEqual([
       "logo.png",
       "png",
-      "4 bytes",
+      "4 B",
       "inline, base64",
     ]);
     const download = within(rows[0]).getByRole("link", { name: "Download" });
@@ -3445,7 +3447,7 @@ describe("the artifact viewer", () => {
     expect(fetched.slice(0, 4)).toEqual([
       "corpus.bin",
       "application/octet-stream",
-      "168000000 bytes",
+      "160.2 MB",
       "fetched on demand",
     ]);
     expect(
@@ -9999,6 +10001,23 @@ describe("the artifact viewer’s resources", () => {
     expect(detail.textContent).toContain("corpus.bin");
     expect(detail.textContent).toContain("fetched on demand");
     expect(rows[1].className).toContain("row-selected");
+  });
+
+  // One file's size reads the same in every place the tab states it: the
+  // total above the table, the row's size column, and the detail card under
+  // it all take the same unit.
+  it("states a row's size in the same unit as the total and the detail card", async () => {
+    resourcePage();
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Resources/ }));
+    const rows = within(screen.getByLabelText("Resources"))
+      .getAllByRole("row")
+      .slice(1);
+    const size = within(rows[1]).getAllByRole("cell")[2].textContent;
+    expect(size).toBe("2.0 MB");
+    fireEvent.click(rows[1]);
+    expect(screen.getByTestId("resource-detail").textContent).toContain(size);
   });
 });
 
