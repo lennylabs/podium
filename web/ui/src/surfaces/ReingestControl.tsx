@@ -13,6 +13,7 @@
 // returns.
 
 import { useState } from 'react';
+import type { RefObject } from 'react';
 
 import type { BadgeTone, Tone } from '../components/primitives';
 import { Badge, CopyButton, Modal, TabStrip } from '../components/primitives';
@@ -80,13 +81,20 @@ export function ReingestButton({
   state,
   readOnly,
   onStart,
+  buttonRef,
 }: {
   state: ReingestState;
   readOnly: boolean;
   onStart: (breakGlass?: BreakGlass) => void;
+  /** buttonRef is how the row reaches the trigger it has to hand focus back
+   * to. The button disables itself while its request is open, which blurs
+   * it, and the banners the request resolves into take their dismissal
+   * controls with them when they close. */
+  buttonRef?: RefObject<HTMLButtonElement | null>;
 }) {
   return (
     <button
+      ref={buttonRef}
       type="button"
       disabled={readOnly || state.kind === 'running'}
       onClick={() => {

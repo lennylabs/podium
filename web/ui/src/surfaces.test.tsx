@@ -8003,6 +8003,52 @@ describe("the layer write flows", () => {
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 
+  // The trigger disables itself for as long as its request is open, which
+  // takes focus off it, and the banner the request settles into takes its own
+  // controls away when it is dismissed. Focus left on the document body puts
+  // the reader back at the top of the page, so the row hands it back to the
+  // control the reingest was started from.
+  it("returns focus to the row’s Reingest control when the request settles and when the refusal is dismissed", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers/reingest": {
+        status: 502,
+        body: {
+          code: "ingest.source_unreachable",
+          message: "the source could not be reached",
+          retryable: true,
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const trigger = screen.getByRole("button", { name: "Reingest" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    // Disabling the focused control is what the browser does while the
+    // request is open, and it leaves focus on the document body.
+    (document.activeElement as HTMLElement | null)?.blur();
+    const refused = await screen.findByLabelText("Reingest refused");
+    await waitFor(() => {
+      expect(document.activeElement).toBe(trigger);
+    });
+    // Dismissing the banner unmounts the control the press was made on, and
+    // the row hands focus back to the same trigger.
+    const dismiss = within(refused).getByRole("button", { name: "Dismiss" });
+    dismiss.focus();
+    fireEvent.click(dismiss);
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Reingest refused")).toBeNull();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Reingest" }),
+      );
+    });
+  });
+
   // The cap refusal carries the limit and the caller's current count, and
   // this is where the user created the layer, so the count is rendered here
   // rather than arriving as the generic failure every other refusal gets.
@@ -10173,6 +10219,28 @@ describe("a refused layer write", () => {
     expect(
       screen.getByRole("menuitem", { name: "Edit" }).hasAttribute("disabled"),
     ).toBe(false);
+  });
+
+  // Dismiss unmounts itself with the banner it closes, so a keyboard operator
+  // who presses it is left on the document body and the next Tab restarts at
+  // the top of the page. The row's Reingest control is where focus resumes.
+  it("returns focus to the row’s Reingest control when the refusal is dismissed", async () => {
+    refusedPage();
+    render(<App />);
+    await refuseAnUnregister();
+    const dismiss = within(screen.getByRole("alert")).getByRole("button", {
+      name: "Dismiss",
+    });
+    dismiss.focus();
+    fireEvent.click(dismiss);
+    await waitFor(() => {
+      expect(screen.queryByText(/nothing changed/)).toBeNull();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Reingest" }),
+      );
+    });
   });
 
   // The recoverable link leads the action row and states how much is still

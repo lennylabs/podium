@@ -682,6 +682,36 @@ function LayerRow({
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // The Reingest button is the row's stable control, and it is where focus
+  // returns from every row state that takes away the control focus was on:
+  // the button disables itself while its request is open, which blurs it,
+  // and a refusal banner's Dismiss goes away with the banner it closes. The
+  // browser leaves focus on the document body in both cases, which puts the
+  // reader back at the top of the page.
+  const trigger = useRef<HTMLButtonElement>(null);
+  // Focus is owed only from a press on this row's own controls. The panel's
+  // fan-out drives every row at once, and a row claiming focus for a request
+  // the reader started from the panel's control moves them into the table.
+  const owed = useRef(false);
+  const oweFocus = () => {
+    owed.current = true;
+  };
+  const refused = refusal !== null;
+  useEffect(() => {
+    // A request still open keeps the debt: the trigger is disabled for as
+    // long as it runs, and focusing a disabled control does nothing.
+    if (!owed.current || reingest.kind === "running") {
+      return;
+    }
+    // A dialog the state opened holds focus for itself, and it hands focus on
+    // when it closes, which is the render this runs on again.
+    const held = document.activeElement;
+    if (held !== null && held !== document.body) {
+      return;
+    }
+    owed.current = false;
+    trigger.current?.focus();
+  }, [reingest.kind, refused]);
   // Picking an item unmounts the menu, so the trigger takes focus back before
   // the dialog the item opens reads what to return focus to.
   const overflow = useRef<HTMLButtonElement>(null);
@@ -817,7 +847,11 @@ function LayerRow({
           <ReingestButton
             state={reingest}
             readOnly={readOnly}
-            onStart={onReingest}
+            buttonRef={trigger}
+            onStart={(breakGlass) => {
+              oweFocus();
+              onReingest(breakGlass);
+            }}
           />
           <button
             ref={overflow}
@@ -889,8 +923,14 @@ function LayerRow({
           <ReingestStatus
             layerID={layer.ID}
             state={reingest}
-            onStart={onReingest}
-            onDismiss={onDismissReingest}
+            onStart={(breakGlass) => {
+              oweFocus();
+              onReingest(breakGlass);
+            }}
+            onDismiss={() => {
+              oweFocus();
+              onDismissReingest();
+            }}
           />
           {refusal !== null && (
             <div className="row-refusal" role="alert">
@@ -907,7 +947,13 @@ function LayerRow({
               <button type="button" onClick={refusal.retry}>
                 Try again
               </button>
-              <button type="button" onClick={onDismissRefusal}>
+              <button
+                type="button"
+                onClick={() => {
+                  oweFocus();
+                  onDismissRefusal();
+                }}
+              >
                 Dismiss
               </button>
             </div>
