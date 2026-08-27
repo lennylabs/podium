@@ -2430,6 +2430,55 @@ label:has(> input:disabled) {
   margin: 6px 0;
 }
 
+/* A rail section header that states how many rows it holds. The figure sits
+   on the far edge so the header reads as a label and a count rather than as
+   a two-word label. */
+.rail-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.rail-section-count {
+  margin-left: auto;
+}
+
+/* A bundled file stands on its own bordered row, the treatment the relation
+   chips use, because a run of bare mono lines gives the reader no boundary
+   between one file and the next. The size sits on the opposite edge, where
+   it says what opening the file costs. */
+.resource-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+/* The name is the row's flexible half and can be longer than the rail is
+   wide, so it breaks inside itself rather than pushing the size off the
+   row. */
+.resource-chip > :first-child {
+  min-width: 0;
+  word-break: break-all;
+}
+
+/* A file fetched on demand is not in the page yet, so its row is outlined
+   rather than filled and its size carries the retrieval action. */
+.resource-chip.fetched {
+  border-style: dashed;
+  background: none;
+}
+
+.resource-size {
+  flex: none;
+  margin-left: auto;
+}
+
 .tabs {
   display: flex;
   gap: 6px;

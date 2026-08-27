@@ -11625,6 +11625,40 @@ describe("the artifact viewer’s resources", () => {
     expect(groups[1].textContent).toContain("corpus.bin");
   });
 
+  // A bundled file in the rail is a row rather than a line of text: it is
+  // bordered, and it states its size on the far edge, because a run of bare
+  // mono lines says neither where one file ends nor what opening it costs.
+  // The section header carries the count of the whole set, and a file
+  // fetched on demand takes the retrieval action from its size.
+  it("draws each rail resource as a bordered row stating its size", async () => {
+    resourcePage();
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const section = screen.getByLabelText("Bundled resources");
+    expect(screen.getByTestId("rail-resource-count").textContent).toBe("2");
+    const rows = [...section.querySelectorAll(".resource-chip")];
+    expect(rows.length).toBe(2);
+    expect(rows[0].textContent).toBe("checklist.md4 B");
+    const first = window.getComputedStyle(rows[0]);
+    expect(first.display).toBe("flex");
+    expect(first.borderRadius).toBe("8px");
+    expect(
+      window.getComputedStyle(
+        rows[0].querySelector(".resource-size") as Element,
+      ).marginLeft,
+    ).toBe("auto");
+    // The file fetched on demand is not in the page, so its row is outlined
+    // and its size is what retrieves it.
+    expect(rows[1].textContent).toBe("corpus.bin2.0 MB ↓");
+    expect(window.getComputedStyle(rows[1]).borderStyle).toBe("dashed");
+    const download = within(rows[1] as HTMLElement).getByRole("link", {
+      name: "Download corpus.bin",
+    });
+    expect(download.getAttribute("href")).toBe(
+      "https://objects.acme.com/corpus",
+    );
+  });
+
   // The tab keeps the two deliveries as one list, takes the whole set at
   // once from the control above the table, and opens the selected row's
   // detail card under it.

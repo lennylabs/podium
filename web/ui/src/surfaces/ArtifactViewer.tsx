@@ -622,7 +622,16 @@ function ArtifactRail({
       )}
       <Relations artifact={artifact} frontmatter={frontmatter} />
       <section aria-label="Bundled resources">
-        <p className="label">Resources</p>
+        {/* The count stands on the header's far edge, so the extent of the
+            section is read off the header rather than by counting rows. */}
+        <div className="rail-section-head">
+          <p className="label">Resources</p>
+          {resources.length > 0 && (
+            <p className="label rail-section-count" data-testid="rail-resource-count">
+              {resources.length}
+            </p>
+          )}
+        </div>
         {resources.length === 0 ? (
           <EmptyState scope="inline">This artifact bundles no files.</EmptyState>
         ) : (
@@ -635,11 +644,13 @@ function ArtifactRail({
               label="Inline"
               rows={resources.filter((row) => row.delivery !== fetchedDelivery)}
               absent="No file arrived with the response."
+              fetched={false}
             />
             <RailResourceGroup
               label="Fetched on demand"
               rows={resources.filter((row) => row.delivery === fetchedDelivery)}
               absent="No file is fetched on demand."
+              fetched
             />
           </>
         )}
@@ -650,8 +661,21 @@ function ArtifactRail({
 
 /** RailResourceGroup is one delivery's files in the rail. An empty group
  * states its absence rather than disappearing, because the two groups
- * together are what tell the reader how this artifact's files arrive. */
-function RailResourceGroup({ label, rows, absent }: { label: string; rows: ResourceRow[]; absent: string }) {
+ * together are what tell the reader how this artifact's files arrive. Each
+ * file stands on its own bordered row carrying its size, the figure that
+ * says what opening it costs, and a file fetched on demand carries the
+ * retrieval action on that figure because the bytes are not in the page. */
+function RailResourceGroup({
+  label,
+  rows,
+  absent,
+  fetched,
+}: {
+  label: string;
+  rows: ResourceRow[];
+  absent: string;
+  fetched: boolean;
+}) {
   return (
     <div className="rail-group">
       <p className="label quiet">{label}</p>
@@ -660,8 +684,20 @@ function RailResourceGroup({ label, rows, absent }: { label: string; rows: Resou
       ) : (
         <ul className="rail-list">
           {rows.map((row) => (
-            <li key={row.name} className="mono">
-              {row.name}
+            <li key={row.name} className={fetched ? 'resource-chip fetched' : 'resource-chip'}>
+              <span className="mono">{row.name}</span>
+              {fetched ? (
+                <a
+                  className="mono quiet resource-size"
+                  href={row.href}
+                  download={row.name}
+                  aria-label={`Download ${row.name}`}
+                >
+                  {formatSize(row.size)} ↓
+                </a>
+              ) : (
+                <span className="mono quiet resource-size">{formatSize(row.size)}</span>
+              )}
             </li>
           ))}
         </ul>
