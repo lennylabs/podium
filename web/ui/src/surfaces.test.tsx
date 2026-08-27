@@ -8829,17 +8829,17 @@ describe("the shell’s identity cluster", () => {
     const appearance = within(menu).getByRole("group", { name: "Appearance" });
     expect(appearance.className.split(" ")).toContain("segmented");
     expect(
-      within(appearance).getByRole("button", { name: "system" }).className,
+      within(appearance).getByRole("button", { name: "System" }).className,
     ).toBe("segment segment-on");
-    fireEvent.click(within(menu).getByRole("button", { name: "dark" }));
+    fireEvent.click(within(menu).getByRole("button", { name: "Dark" }));
     expect(
-      within(appearance).getByRole("button", { name: "dark" }).className,
+      within(appearance).getByRole("button", { name: "Dark" }).className,
     ).toBe("segment segment-on");
     expect(window.document.documentElement.getAttribute("data-theme")).toBe(
       "dark",
     );
     expect(window.localStorage.getItem("podium.theme")).toBe("dark");
-    fireEvent.click(within(menu).getByRole("button", { name: "system" }));
+    fireEvent.click(within(menu).getByRole("button", { name: "System" }));
     expect(window.document.documentElement.hasAttribute("data-theme")).toBe(
       false,
     );
@@ -8867,11 +8867,34 @@ describe("the shell’s identity cluster", () => {
     expect(menu.getAttribute("role")).toBeNull();
     const appearance = within(menu).getByRole("group", { name: "Appearance" });
     expect(appearance.className.split(" ")).toContain("segmented");
-    fireEvent.click(within(menu).getByRole("button", { name: "light" }));
+    fireEvent.click(within(menu).getByRole("button", { name: "Light" }));
     expect(window.document.documentElement.getAttribute("data-theme")).toBe(
       "light",
     );
     expect(window.localStorage.getItem("podium.theme")).toBe("light");
+  });
+
+  // Every label the shell writes for a reader is sentence case, and the
+  // appearance options are labels rather than identifiers. The stored
+  // preference stays lowercase because it is the value stamped on the root
+  // element, so the control must carry its own labels.
+  //
+  // Spec: §13.10
+  it("labels the appearance options in sentence case", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture() },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("appearance-trigger"));
+    const appearance = within(
+      screen.getByTestId("appearance-menu"),
+    ).getByRole("group", { name: "Appearance" });
+    expect(
+      within(appearance)
+        .getAllByRole("button")
+        .map((option) => option.textContent),
+    ).toEqual(["System", "Light", "Dark"]);
   });
 
   // The topbar menus are transient popovers, and every other overlay in the

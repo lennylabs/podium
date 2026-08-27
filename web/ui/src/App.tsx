@@ -1153,6 +1153,16 @@ function AccountMenu({
   );
 }
 
+/** themeChoices is the appearance control's options in the order they are
+ * offered, each with the sentence-case label the design names. The stored
+ * preference stays lowercase because it is the value stamped on the root
+ * element, so the label is carried beside it rather than derived from it. */
+const themeChoices: { value: ThemePreference; label: string }[] = [
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+];
+
 /** AppearanceSwitch is the segmented control that pins the appearance
  * preference. It is the same control wherever it stands, so the identity
  * cluster and the shell's own appearance menu carry one implementation. */
@@ -1167,17 +1177,17 @@ function AppearanceSwitch({
     <>
       <p className="label">Appearance</p>
       <div className="segmented" role="group" aria-label="Appearance">
-        {(['system', 'light', 'dark'] as ThemePreference[]).map((choice) => (
+        {themeChoices.map((choice) => (
           <button
-            key={choice}
+            key={choice.value}
             type="button"
-            className={theme === choice ? 'segment segment-on' : 'segment'}
-            aria-pressed={theme === choice}
+            className={theme === choice.value ? 'segment segment-on' : 'segment'}
+            aria-pressed={theme === choice.value}
             onClick={() => {
-              onTheme(choice);
+              onTheme(choice.value);
             }}
           >
-            {choice}
+            {choice.label}
           </button>
         ))}
       </div>
