@@ -3021,6 +3021,47 @@ label:has(> input:disabled) {
   border-top: 1px dashed var(--bd);
 }
 
+/* The domain listing's continuation is the list's own final row: it sits
+   inside the same card as the artifacts, on the quieter surface and behind an
+   accent mark, so it reads as the edge of the listing rather than as a note
+   about the page. */
+.listing-tail {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px 18px;
+  background: var(--surf2);
+}
+
+.artifact-row + .listing-tail {
+  border-top: 1px solid var(--b2);
+}
+
+.listing-tail-mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--acc);
+}
+
+.listing-tail-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.listing-tail-line {
+  margin: 0;
+  max-width: 640px;
+  color: var(--sec);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 /* The at-scale section header: the label and the count on the left, the
    controls over the listing pushed to the row's right edge. At this count the
    listing needs a filter, and a filter under its own label above the grid

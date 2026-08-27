@@ -98,6 +98,14 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
   // root's listing is not a truncated view of those artifacts, they sit under
   // the subdomains the page already links to.
   const catalogHeld = catalog.value === null ? 0 : catalog.value.length;
+  // The trimmed listing is continued at the end of the list rather than
+  // announced above it: the reader meets it where the returned edge is. It is
+  // the list's own last row, so a listing that carries rows takes it inside
+  // the card, and a table or an empty listing carries it in a card of its own
+  // rather than as a note detached under the page.
+  const tail = trimmed ? (
+    <TrimmedListing scope={body.path} shown={direct.length} total={total} note={body.note ?? ''} />
+  ) : null;
 
   return (
     <section className="surface" aria-label="Domain browser">
@@ -159,25 +167,27 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
       )}
 
       {compact && direct.length > 0 ? (
-        <ArtifactTable artifacts={direct} />
+        <>
+          <ArtifactTable artifacts={direct} />
+          {tail !== null && <ul className="artifact-list">{tail}</ul>}
+        </>
       ) : (
         <>
           <h2 className="label">Artifacts in this domain</h2>
           {direct.length === 0 ? (
-            <EmptyState>This domain lists no artifacts.</EmptyState>
+            <>
+              <EmptyState>This domain lists no artifacts.</EmptyState>
+              {tail !== null && <ul className="artifact-list">{tail}</ul>}
+            </>
           ) : (
             <ul className="artifact-list">
               {direct.map((artifact) => (
                 <ArtifactRow key={artifact.id} artifact={artifact} />
               ))}
+              {tail}
             </ul>
           )}
         </>
-      )}
-      {/* The trimmed listing is continued at the end of the list rather than
-          announced above it: the reader meets it where the returned edge is. */}
-      {trimmed && (
-        <TrimmedListing scope={body.path} shown={direct.length} total={total} note={body.note ?? ''} />
       )}
 
       {folded.length > 0 && (
@@ -234,15 +244,20 @@ function TrimmedListing({
   note: string;
 }) {
   return (
-    <div className="listing-continuation" role="status" data-testid="listing-continuation">
-      <p className="quiet">
-        {total === null ? `${String(shown)} artifacts shown.` : `${String(shown)} of ${String(total)} artifacts shown.`}{' '}
-        {note}
-      </p>
-      <a className="button" data-testid="listing-continue" href={scopedSearchHref(scope)}>
-        Load the rest
-      </a>
-    </div>
+    <li className="listing-tail" role="status" data-testid="listing-continuation">
+      {/* The dot marks the row as the listing's edge. It carries no text of
+          its own, so it is hidden from the reader who is read the row. */}
+      <span className="listing-tail-mark" aria-hidden="true" />
+      <div className="listing-tail-body">
+        <p className="listing-tail-line">
+          {total === null ? `${String(shown)} artifacts shown.` : `${String(shown)} of ${String(total)} artifacts shown.`}{' '}
+          {note}
+        </p>
+        <a className="button" data-testid="listing-continue" href={scopedSearchHref(scope)}>
+          Load the rest
+        </a>
+      </div>
+    </li>
   );
 }
 

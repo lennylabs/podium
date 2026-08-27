@@ -8861,6 +8861,27 @@ describe("the trimmed listing", () => {
     ).toBe(false);
   });
 
+  // The continuation is the listing's own last row rather than a note under
+  // the page: it closes the same bordered card the artifacts are drawn in, so
+  // it reads as the edge of the listing.
+  it("closes the artifact list with the continuation as its final row", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: trimmed },
+      "/v1/catalog": { body: { ids: heldBy("platform", 21) } },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    await screen.findByLabelText("Domain browser");
+    const line = await screen.findByTestId("listing-continuation");
+    const list = line.closest("ul.artifact-list");
+    expect(list).not.toBeNull();
+    expect(list?.lastElementChild).toBe(line);
+    // The card the continuation closes is the one the artifacts are listed
+    // in, rather than a second card of its own below them.
+    expect(within(list as HTMLElement).getByText("platform/lint")).toBeTruthy();
+  });
+
   // A domain with dozens of children is a map rather than a card grid, so the
   // subdomains become count tiles under a filter and the artifacts a sortable
   // table.
