@@ -1684,10 +1684,23 @@ input[type="search"]::-webkit-search-cancel-button {
   white-space: nowrap;
 }
 
+/* The head's elision falls at its start, so the characters it keeps end
+   flush against the tail and the two runs read as one path. Elided at its
+   end, the head kept the box the flex layout gave it and the ellipsis landed
+   wherever the last whole character fitted, which left up to a character of
+   slack before the tail and drew the cell as two values with a space between
+   them. The right-to-left direction moves the clip and the ellipsis to the
+   start of the line; the inner element restores left-to-right ordering so a
+   leading separator is not reordered to the far end of the string. */
 .source-detail-head {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  direction: rtl;
+}
+
+.source-detail-head > bdi {
+  direction: ltr;
 }
 
 .source-detail-tail {

@@ -79,14 +79,21 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
  * split so that the clip falls on the leading directories and the identifying
  * final segment is always drawn: several layers under one parent share every
  * leading directory, and clipping from the right rendered them as the same
- * string, which stops the column telling the rows apart. The title attribute
- * repeats the whole value because the head is still clipped where the column
- * is narrower than it. */
+ * string, which stops the column telling the rows apart. The head gives up
+ * its own leading characters to the clip, so what it keeps ends against the
+ * tail and the line reads as one path. The title attribute repeats the whole
+ * value because the head is still clipped where the column is narrower than
+ * it. */
 function Detail({ value }: { value: string }) {
   const { head, tail } = splitDetail(value);
   return (
     <div className="mono quiet source-detail" title={value}>
-      <span className="source-detail-head">{head}</span>
+      {/* The head is elided at its start, so its own bidirectional
+          isolation keeps a leading separator at the left of the run rather
+          than reordered to its end. */}
+      <span className="source-detail-head">
+        <bdi>{head}</bdi>
+      </span>
       <span className="source-detail-tail">{tail}</span>
     </div>
   );

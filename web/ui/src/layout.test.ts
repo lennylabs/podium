@@ -699,6 +699,16 @@ describe("layer source cell", () => {
     expect(tail.getPropertyValue("flex")).toBe("0 0 auto");
   });
 
+  // The head keeps the box the flex layout gives it, so eliding it at its end
+  // put the ellipsis wherever the last whole character fitted and left up to a
+  // character of slack before the tail, which drew one path as two values with
+  // a space between them. The elision falls at the head's start instead, where
+  // what the head keeps ends flush against the tail.
+  it("elides the head at its start so the line carries no gap", () => {
+    expect(styled("source-detail-head").direction).toBe("rtl");
+    expect(descendantStyle("source-detail-head", "bdi").direction).toBe("ltr");
+  });
+
   // A tail wider than the cell on its own has nowhere to shrink to. The
   // automatic margin holds a line that fits against the left edge, and where
   // one does not fit the end alignment runs it off the left edge instead of

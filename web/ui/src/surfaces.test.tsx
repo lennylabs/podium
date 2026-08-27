@@ -5547,6 +5547,17 @@ describe("the layer panel", () => {
     const head = (id: string) =>
       layerRow(id).querySelector(".source-detail-head")?.textContent;
     expect(head("finance")).toBe(`${parent}/`);
+    // The head fills the width the flex layout leaves it, so an elision at
+    // its end stopped at the last whole character that fitted and left up to
+    // a character of slack before the tail, which read as a space between two
+    // values. The elision falls at the head's start, where what it keeps ends
+    // flush against the tail, and the head isolates its own text so a leading
+    // separator is not reordered to the far end of the run.
+    const line = layerRow("finance").querySelector(".source-detail-head");
+    expect(window.getComputedStyle(line as Element).direction).toBe("rtl");
+    const isolated = line?.querySelector("bdi");
+    expect(isolated?.textContent).toBe(`${parent}/`);
+    expect(window.getComputedStyle(isolated as Element).direction).toBe("ltr");
   });
 
   // A final segment wider than the column would be clipped at its own end by
