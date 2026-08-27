@@ -74,10 +74,24 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // version it is compared against both start over, the way the held response
   // already does.
   const [viewed, setViewed] = useState(id);
+  // The rail states who the artifact's layer is visible to and the run that
+  // last ingested it, and load_artifact answers the layer's identifier alone,
+  // so the layer list is read beside the artifact. Its outcome is not reported
+  // to the shell: it is metadata standing beside the document rather than the
+  // catalog read this surface is built on, so a refusal leaves those rows
+  // unreported instead of replacing the artifact with a failure. Spec: §13.10.
+  const layers = useAsync(listLayers, []);
   if (viewed !== id) {
     setViewed(id);
     setViewing('');
     setLatest('');
+    // A layer list that was refused leaves the rail's visibility and ingested
+    // rows unreported, and this component survives the route change from one
+    // artifact to the next, so without re-issuing it here every later
+    // artifact inherits a momentary outage for the rest of the session.
+    if (layers.error !== null) {
+      layers.reload();
+    }
   }
   const artifact = useAsync(() => loadArtifact(id, viewing === '' ? undefined : viewing), [id, viewing]);
   useErrorReport(artifact.error, onError);
@@ -95,13 +109,6 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // own response and is already there.
   const link = body?.manifest_body_url;
   const fetched = useAsync(async () => (link === undefined ? '' : fetchText(link)), [link?.presigned_url ?? '']);
-  // The rail states who the artifact's layer is visible to and the run that
-  // last ingested it, and load_artifact answers the layer's identifier alone,
-  // so the layer list is read beside the artifact. Its outcome is not reported
-  // to the shell: it is metadata standing beside the document rather than the
-  // catalog read this surface is built on, so a refusal leaves those rows
-  // unreported instead of replacing the artifact with a failure. Spec: §13.10.
-  const layers = useAsync(listLayers, []);
   // The controls that return the reader to the latest version remove
   // themselves as they do it: the refusal banner and the older-version notice
   // both disappear once the pin is dropped, and the browser leaves focus on
@@ -125,6 +132,17 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
     versionTrigger.current?.focus();
   }, [viewing]);
 
+  // The rail's layer read is a second read this surface makes, and the outage
+  // that refused it is the one the reader is retrying, so the control that
+  // recovers the document re-issues it too. Retrying the document alone
+  // returns a page whose provenance rows stay unreported.
+  const retry = () => {
+    artifact.reload();
+    if (layers.error !== null) {
+      layers.reload();
+    }
+  };
+
   if (body === null) {
     if (artifact.error !== null) {
       // Nothing of this surface loaded, so the failure is the page rather
@@ -134,7 +152,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           error={artifact.error}
           title="No such artifact"
           subject={id}
-          onRetry={artifact.reload}
+          onRetry={retry}
           testID="artifact-failed"
         />
       );

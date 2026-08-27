@@ -143,6 +143,43 @@ function posture(overrides: Partial<SessionPosture> = {}): SessionPosture {
  * the ARTIFACT.md document, delimiter fences and all. */
 const manifestDoc = "---\nname: review\ntags:\n  - security\n---\n";
 
+/** ingestedLayer is a layer record carrying the grants and the ingest run the
+ * artifact viewer's provenance rail states. */
+function ingestedLayer(): Record<string, unknown> {
+  return {
+    ID: "acme-platform",
+    SourceType: "git",
+    Repo: "git@github.com:acme/platform.git",
+    Ref: "main",
+    Order: 1,
+    Organization: true,
+    last_ingested_at: new Date(Date.now() - 7200000).toISOString(),
+    LastIngestedRef: "4f2a1c9de4471b1e8f0c2a5d6e7b8c9a0d1e2f34",
+  };
+}
+
+/** payInvoice is a load_artifact answer whose layer is the record above. */
+function payInvoice(): Record<string, unknown> {
+  return {
+    id: "finance/ap/pay-invoice",
+    type: "skill",
+    version: "1.0.0",
+    content_hash: "sha256:ab74",
+    layer: "acme-platform",
+    manifest_body: "# Pay invoice\n",
+    frontmatter: manifestDoc,
+  };
+}
+
+/** railFacts reads the rail's provenance block as label and value pairs. */
+function railFacts(provenance: HTMLElement): (string | null | undefined)[][] {
+  const facts = within(provenance).getByTestId("rail-provenance");
+  return [...facts.querySelectorAll(".rail-fact")].map((row) => [
+    row.querySelector("dt")?.textContent,
+    row.querySelector("dd")?.textContent,
+  ]);
+}
+
 const emptyDomain = {
   path: "",
   subdomains: [],
@@ -3693,6 +3730,78 @@ describe("the artifact viewer", () => {
         ["visibility", "organization, group: platform"],
         // The age the reader scans, with the branch and the short commit the
         // run landed on beside it.
+        ["ingested", "2h ago · main@4f2a1c9"],
+        ["hash", "sha256:ab74"],
+      ]);
+    });
+  });
+
+  // The rail's layer read is refused by the same outage that refuses the
+  // document, and the reader recovers from it with the page's own Retry. That
+  // control re-issues both reads, so one press restores the provenance rows
+  // along with the document. Spec: §13.10.
+  it("recovers the provenance rows from the viewer's own retry", async () => {
+    const stubs: Record<string, Stub> = {
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      // The registry has gone away, so neither read reaches it.
+      "/v1/layers": { rejects: true },
+      "/v1/load_artifact": { rejects: true },
+      "/v1/dependents": { body: { edges: [] } },
+    };
+    stubRegistry(stubs);
+    goTo("#/artifact/finance%2Fap%2Fpay-invoice");
+    render(<App />);
+    await screen.findByTestId("artifact-failed");
+
+    stubs["/v1/layers"] = { body: { layers: [ingestedLayer()] } };
+    stubs["/v1/load_artifact"] = { body: payInvoice() };
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    const provenance = await screen.findByLabelText("Provenance");
+    await waitFor(() => {
+      expect(railFacts(provenance)).toEqual([
+        ["layer", "acme-platform"],
+        ["visibility", "organization"],
+        ["ingested", "2h ago · main@4f2a1c9"],
+        ["hash", "sha256:ab74"],
+      ]);
+    });
+  });
+
+  // The viewer survives the route change from one artifact to the next, so a
+  // layer read that was refused while the registry was away would otherwise
+  // stay refused for the rest of the session. The route change re-issues it.
+  // Spec: §13.10.
+  it("re-issues the refused layer read when the route names another artifact", async () => {
+    const stubs: Record<string, Stub> = {
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": { rejects: true },
+      "/v1/load_artifact": { body: payInvoice() },
+      "/v1/dependents": { body: { edges: [] } },
+    };
+    stubRegistry(stubs);
+    goTo("#/artifact/finance%2Fap%2Fpay-invoice");
+    render(<App />);
+    const first = await screen.findByLabelText("Provenance");
+    await waitFor(() => {
+      expect(railFacts(first)).toEqual([
+        ["layer", "acme-platform"],
+        ["visibility", "unreported"],
+        ["ingested", "unreported"],
+        ["hash", "sha256:ab74"],
+      ]);
+    });
+
+    stubs["/v1/layers"] = { body: { layers: [ingestedLayer()] } };
+    stubs["/v1/load_artifact"] = {
+      body: { ...payInvoice(), id: "eng/deploy", type: "context" },
+    };
+    goTo("#/artifact/eng%2Fdeploy");
+
+    await waitFor(() => {
+      expect(railFacts(screen.getByLabelText("Provenance"))).toEqual([
+        ["layer", "acme-platform"],
+        ["visibility", "organization"],
         ["ingested", "2h ago · main@4f2a1c9"],
         ["hash", "sha256:ab74"],
       ]);
