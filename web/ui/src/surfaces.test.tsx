@@ -6623,7 +6623,7 @@ describe("the layer write flows", () => {
     await screen.findByLabelText("Layer panel");
     fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
     const line = screen.getByTestId("visibility-consequence");
-    expect(line.textContent).toBe(
+    expect(line.querySelector(".consequence-text")?.textContent).toBe(
       "No grants — the registry stamps this deployment's default visibility, " +
         "which is public on a standalone with no identity provider. The registered row states what it applied.",
     );
@@ -7103,9 +7103,10 @@ describe("the layer write flows", () => {
     ).toBeTruthy();
     // A user-defined layer's visibility is fixed at registration, which is
     // the class this caller opens on.
-    expect(screen.getByTestId("visibility-note").textContent).toBe(
-      "Visibility is fixed at registration.",
-    );
+    expect(
+      screen.getByTestId("visibility-note").querySelector(".note-text")
+        ?.textContent,
+    ).toBe("Visibility is fixed at registration.");
     expect(
       within(dialog).getByRole("button", { name: "Register" }).className,
     ).toContain("primary");
@@ -7150,7 +7151,11 @@ describe("the layer write flows", () => {
       );
     }
     // The consequence of the whole selection, stated in the reviewer's terms.
-    expect(screen.getByTestId("visibility-consequence").textContent).toBe(
+    expect(
+      screen
+        .getByTestId("visibility-consequence")
+        .querySelector(".consequence-text")?.textContent,
+    ).toBe(
       "No grants — the registry stamps this deployment's default visibility, " +
         "which is public on a standalone with no identity provider. The registered row states what it applied.",
     );
@@ -7162,7 +7167,11 @@ describe("the layer write flows", () => {
         target: { value: "secops, appsec" },
       },
     );
-    expect(screen.getByTestId("visibility-consequence").textContent).toBe(
+    expect(
+      screen
+        .getByTestId("visibility-consequence")
+        .querySelector(".consequence-text")?.textContent,
+    ).toBe(
       "Everyone in this tenant will see this layer — the organization grant already covers secops and appsec.",
     );
   });
@@ -7195,11 +7204,48 @@ describe("the layer write flows", () => {
     const line = screen.getByTestId("visibility-consequence");
     expect(line.textContent).toContain("user25@acme.com");
     const clipped = line.querySelector(".consequence-text");
-    expect(clipped?.textContent).toBe(line.textContent);
+    expect(line.textContent).toContain(clipped?.textContent ?? "");
     const style = window.getComputedStyle(clipped as Element);
     expect(style.getPropertyValue("-webkit-line-clamp")).toBe("2");
     expect(style.display).toBe("-webkit-box");
     expect(style.overflow).toBe("hidden");
+  });
+
+  // The consequence and the neutral note sit next to each other at the foot
+  // of the form and are told apart only by their fill, which does not say
+  // which one states what the selection admits and which one is an aside.
+  // Each leads with its own glyph in a gutter of its own width, so the two
+  // read as different kinds of feedback and a wrapped message keeps its left
+  // edge. The glyph carries no text of its own, so it is hidden from the
+  // accessibility tree and the message stays the readable content.
+  it("leads the consequence and the neutral note with a glyph in their own gutter", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ identity_provider_configured: false }),
+      },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const consequence = screen.getByTestId("visibility-consequence");
+    const note = screen.getByTestId("visibility-note");
+    for (const block of [consequence, note]) {
+      const style = window.getComputedStyle(block);
+      expect(style.display).toBe("flex");
+      expect(style.gap).toBe("11px");
+      const glyph = block.firstElementChild as HTMLElement;
+      expect(glyph.className).toBe("note-glyph");
+      expect(glyph.getAttribute("aria-hidden")).toBe("true");
+      expect(glyph.textContent?.trim()).toBeTruthy();
+      expect(window.getComputedStyle(glyph).width).toBe("11px");
+    }
+    // The two glyphs differ, so the accent block and the aside are not the
+    // same mark in two fills.
+    expect(consequence.firstElementChild?.textContent?.trim()).not.toBe(
+      note.firstElementChild?.textContent?.trim(),
+    );
   });
 
   // §4.6 grants to a group name the identity provider supplies and the

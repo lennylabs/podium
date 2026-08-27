@@ -341,6 +341,9 @@ export function RegisterLayerForm({
               {/* §4.6 combines the axes as a union, so the consequence is
                   stated once over the whole selection rather than per axis. */}
               <p className="consequence" data-testid="visibility-consequence">
+                <span className="note-glyph" aria-hidden="true">
+                  ◉
+                </span>
                 <span className="consequence-text">
                   {consequence(isPublic, organization, groupMembers, userMembers)}
                 </span>
@@ -353,7 +356,12 @@ export function RegisterLayerForm({
               the update endpoint patches, and the panel's Edit control is
               where that happens. */}
           <p className="note" data-testid="visibility-note">
-            {userDefined ? 'Visibility is fixed at registration.' : 'Visibility can be changed later from Edit.'}
+            <span className="note-glyph" aria-hidden="true">
+              ⓘ
+            </span>
+            <span className="note-text">
+              {userDefined ? 'Visibility is fixed at registration.' : 'Visibility can be changed later from Edit.'}
+            </span>
           </p>
         </div>
         <div className="modal-foot">

@@ -2834,12 +2834,31 @@ label:has(> input:disabled) {
 }
 
 .consequence {
+  display: flex;
+  gap: 11px;
   margin: 4px 0 0;
   padding: 12px 14px;
   border: 1px solid var(--cbd);
   border-radius: 9px;
   background: var(--wash);
   font-size: 13px;
+}
+
+/* The consequence and the note sit next to each other at the foot of the
+   register form and differ only in their fill, which is not enough to tell an
+   advisory from the statement of what the selection admits. Each carries a
+   leading glyph in its own gutter: the consequence in the accent tone it is
+   filled with, and the note in the faint tone the panel gives an aside. The
+   gutter holds its width so a wrapped message keeps its left edge. */
+.note-glyph {
+  flex: none;
+  width: 11px;
+  color: var(--faint);
+  line-height: 1.5;
+}
+
+.consequence .note-glyph {
+  color: var(--link);
 }
 
 /* The consequence names every granted member, so a registration granting a
@@ -2850,6 +2869,8 @@ label:has(> input:disabled) {
    the padding edge and a clipped box renders a sliced third row inside its
    own bottom padding. */
 .consequence-text {
+  flex: 1;
+  min-width: 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -2858,6 +2879,8 @@ label:has(> input:disabled) {
 }
 
 .note {
+  display: flex;
+  gap: 11px;
   margin: 14px 0 0;
   padding: 12px 14px;
   border: 1px solid var(--bd);
