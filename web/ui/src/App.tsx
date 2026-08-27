@@ -402,6 +402,9 @@ export function App() {
             currentIsPage={route.name === 'domain'}
             onOutcome={onCatalogOutcome}
             reach={reachNonce}
+            // The eager read runs at treeDepth, so it answers for the levels
+            // of the top-level domains it returns.
+            covered={treeDepth > 1}
           />
           {catalogEmpty && (
             <p className="quiet catalog-empty" data-testid="catalog-empty">
@@ -645,6 +648,7 @@ function CatalogTree({
   currentIsPage,
   onOutcome,
   reach,
+  covered,
 }: {
   nodes: DomainDescriptor[];
   parent: string;
@@ -652,6 +656,13 @@ function CatalogTree({
   currentIsPage: boolean;
   onOutcome: (err: unknown) => void;
   reach: number;
+  /** covered reports whether the read that produced these nodes also carried
+   * their own children. A read of depth 2 answers for the level it returns
+   * and for the level under it, so a node in the first of those two carries
+   * `subdomains` when it has any and omits the field when it has none: the
+   * omission is an answer. A node in the second is at the read's edge, where
+   * the same omission says only that the read stopped there. */
+  covered: boolean;
 }) {
   const [all, setAll] = useState(false);
   // The reader's own position is never one of the folded rows: a level whose
@@ -680,6 +691,7 @@ function CatalogTree({
           currentIsPage={currentIsPage}
           onOutcome={onOutcome}
           reach={reach}
+          covered={covered}
         />
       ))}
       {foldable && (
@@ -728,6 +740,7 @@ function TreeNode({
   currentIsPage,
   onOutcome,
   reach,
+  covered,
 }: {
   node: DomainDescriptor;
   parent: string;
@@ -738,6 +751,9 @@ function TreeNode({
    * not. A bump re-issues this node's level, so a node whose read failed
    * during an outage clears when a retry elsewhere on the page answers. */
   reach: number;
+  /** covered reports whether the read that produced this node also answered
+   * for its children. See CatalogTree. */
+  covered: boolean;
 }) {
   const ancestor = onCurrentPath(node.path, current);
   const [open, setOpen] = useState(ancestor);
@@ -755,7 +771,13 @@ function TreeNode({
   // A node the eager read already reported empty is a leaf, so the row draws
   // the blank marker in the toggle's slot and keeps the label aligned with
   // its siblings. The reader never had a toggle there to press.
-  const leaf = eager !== undefined && eager.length === 0;
+  //
+  // The read reports an empty level by omitting `subdomains` as well as by
+  // returning it empty, so a covered node with no field is the same leaf.
+  // Drawing it with a disclosure instead puts a control on every leaf in the
+  // catalog that reveals nothing when it is pressed, and leaves the tree
+  // rendered differently depending on which rows the reader has pressed.
+  const leaf = covered ? (eager?.length ?? 0) === 0 : eager !== undefined && eager.length === 0;
   // A node whose own level came back empty is a leaf the reader discovered by
   // pressing the toggle, and that press is why the row keeps a control in the
   // slot rather than dropping it. Unmounting the button the reader is
@@ -924,6 +946,11 @@ function TreeNode({
           currentIsPage={currentIsPage}
           onOutcome={onOutcome}
           reach={reach}
+          // Children that came with this node sit at the edge of the read
+          // that carried them, so nothing is known about their own levels.
+          // Children this node read itself came from a read of the same
+          // depth as the eager one, which answered for their levels too.
+          covered={eager === undefined && treeDepth > 1}
         />
       )}
     </li>

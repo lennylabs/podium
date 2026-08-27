@@ -411,20 +411,20 @@ describe("the application shell", () => {
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       // The eager read stops at platform/ci, so the level holding the current
       // domain is one the tree has to read for itself.
+      // The current domain carries a level of its own, so its node keeps the
+      // toggle the assertion below counts. The read is two levels deep, so it
+      // carries that level with it. A domain the read reports empty is a
+      // leaf, and a leaf drops its toggle.
       "/v1/load_domain?path=platform%2Fci&depth=2": {
         body: {
           path: "platform/ci",
-          subdomains: [{ path: "platform/ci/lint", name: "lint" }],
-          notable: [],
-        },
-      },
-      // The current domain carries a level of its own, so its node keeps the
-      // toggle the assertion below counts. A domain whose own read comes back
-      // empty is a leaf, and a leaf drops its toggle.
-      "/v1/load_domain?path=platform%2Fci%2Flint&depth=2": {
-        body: {
-          path: "platform/ci/lint",
-          subdomains: [{ path: "platform/ci/lint/rules", name: "rules" }],
+          subdomains: [
+            {
+              path: "platform/ci/lint",
+              name: "lint",
+              subdomains: [{ path: "platform/ci/lint/rules", name: "rules" }],
+            },
+          ],
           notable: [],
         },
       },
@@ -923,28 +923,35 @@ describe("the application shell", () => {
       "/v1/load_domain": {
         body: {
           path: "",
-          subdomains: [{ path: "finance", name: "finance" }],
+          subdomains: [
+            {
+              path: "finance",
+              name: "finance",
+              subdomains: [{ path: "finance/ap", name: "ap" }],
+            },
+          ],
           notable: [],
         },
       },
       // The expanded node is at the eager read's edge, so it reads its own
       // level and the registry reports nothing under it.
-      "/v1/load_domain?path=finance&depth=2": {
-        body: { path: "finance", subdomains: [], notable: [] },
+      "/v1/load_domain?path=finance%2Fap&depth=2": {
+        body: { path: "finance/ap", subdomains: [], notable: [] },
       },
       "/v1/search_artifacts": { body: { total_matched: 0 } },
       "/v1/layers": { body: { layers: [] } },
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    const toggle = within(tree).getAllByRole("button", { expanded: false })[0];
+    fireEvent.click(within(tree).getByRole("button", { name: "Expand finance" }));
+    const toggle = within(tree).getByRole("button", { name: "Expand ap" });
     toggle.focus();
     fireEvent.click(toggle);
     // The control stays in the row once the level resolves to nothing, and it
     // is the same element, so the focus the reader put on it survives.
     await waitFor(() => {
       expect(
-        within(tree).getByRole("button", { name: "finance has no subdomains" }),
+        within(tree).getByRole("button", { name: "ap has no subdomains" }),
       ).toBeTruthy();
     });
     expect(document.activeElement).toBe(toggle);
@@ -960,13 +967,13 @@ describe("the application shell", () => {
     // alone and names the domain it reports on.
     const marker = within(tree).getByTestId("empty-domain");
     expect(marker.getAttribute("role")).toBe("status");
-    expect(marker.textContent).toBe("finance has no subdomains");
+    expect(marker.textContent).toBe("ap has no subdomains");
     expect(marker.className).toBe("assistive-only");
     expect(within(tree).queryByText("no subdomains")).toBeNull();
     expect(
       tree.querySelectorAll(".catalog-row > .catalog-marker"),
     ).toHaveLength(0);
-    expect(within(tree).getByRole("link", { name: "finance" })).toBeTruthy();
+    expect(within(tree).getByRole("link", { name: "ap" })).toBeTruthy();
     expect(tree.querySelectorAll("p")).toHaveLength(0);
   });
 
@@ -979,21 +986,29 @@ describe("the application shell", () => {
       "/v1/load_domain": {
         body: {
           path: "",
-          subdomains: [{ path: "finance", name: "finance" }],
+          subdomains: [
+            {
+              path: "finance",
+              name: "finance",
+              subdomains: [{ path: "finance/ap", name: "ap" }],
+            },
+          ],
           notable: [],
         },
       },
-      "/v1/load_domain?path=finance&depth=2": {
-        body: { path: "finance", subdomains: [], notable: [] },
+      "/v1/load_domain?path=finance%2Fap&depth=2": {
+        body: { path: "finance/ap", subdomains: [], notable: [] },
       },
       "/v1/search_artifacts": { body: { total_matched: 0 } },
       "/v1/layers": { body: { layers: [] } },
     });
-    goTo("#/domain/finance");
+    goTo("#/domain/finance/ap");
     render(<App />);
-    const tree = await screen.findByLabelText("Catalog");
-    const toggle = await within(tree).findByRole("button", {
-      name: "finance has no subdomains",
+    // The whole sidebar is the query root, because the resolved ancestry
+    // renders a nested level of the tree under the top one.
+    const tree = within(await screen.findByLabelText("Sections"));
+    const toggle = await tree.findByRole("button", {
+      name: "ap has no subdomains",
     });
     expect(toggle.tabIndex).toBe(-1);
     expect(document.activeElement).not.toBe(toggle);
@@ -1020,6 +1035,55 @@ describe("the application shell", () => {
     expect(within(tree).getByRole("link", { name: "finance" })).toBeTruthy();
     expect(within(tree).queryAllByRole("button")).toHaveLength(0);
     expect(within(tree).queryByTestId("empty-domain")).toBeNull();
+  });
+
+  // The registry omits `subdomains` on a descriptor that has none rather than
+  // returning it empty, so the eager read reports a leaf by leaving the field
+  // out. The read runs two levels deep and answers for the level under each
+  // top-level domain, so that omission is an answer and the row is drawn as a
+  // leaf on the first paint. Drawing a disclosure there instead gives every
+  // leaf in the catalog a control that reveals nothing when it is pressed,
+  // and leaves the tree drawn differently depending on which rows the reader
+  // has already pressed.
+  it("draws a leaf for a top-level domain the eager read left without subdomains", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            { path: "eng", name: "eng" },
+            { path: "finance", name: "finance" },
+            // The level under this one came with the read, so this row is the
+            // one node in the level that opens.
+            {
+              path: "sales",
+              name: "sales",
+              subdomains: [{ path: "sales/emea", name: "emea" }],
+            },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    expect(within(tree).getByRole("link", { name: "eng" })).toBeTruthy();
+    expect(within(tree).getByRole("link", { name: "finance" })).toBeTruthy();
+    expect(tree.querySelectorAll(".tree-leaf")).toHaveLength(2);
+    // The domain that holds a level keeps its disclosure, and it is the only
+    // control in the tree.
+    const toggles = within(tree).getAllByRole("button");
+    expect(toggles).toHaveLength(1);
+    expect(toggles[0].getAttribute("aria-label")).toBe("Expand sales");
+    // A node at the read's edge is a different case: nothing is known about
+    // its level, so it keeps a disclosure that reads it.
+    fireEvent.click(toggles[0]);
+    expect(
+      within(tree).getByRole("button", { name: "Expand emea" }),
+    ).toBeTruthy();
   });
 
   // A domain the registry refuses to open stays in the hierarchy and is not
@@ -5541,7 +5605,13 @@ describe("the session-expiry transition", () => {
       "/v1/load_domain": {
         body: {
           path: "platform",
-          subdomains: [{ path: "platform/ci", name: "ci" }],
+          subdomains: [
+            {
+              path: "platform/ci",
+              name: "ci",
+              subdomains: [{ path: "platform/ci/lint", name: "lint" }],
+            },
+          ],
           notable: [],
         },
       },
@@ -5558,9 +5628,12 @@ describe("the session-expiry transition", () => {
         body: { code: "auth.token_expired", message: "expired" },
       },
     });
+    // The node at the eager read's edge is the one that reads for itself, and
+    // that read is the refusal the transition hangs on.
     fireEvent.click(
-      within(tree).getAllByRole("button", { expanded: false })[0],
+      within(tree).getByRole("button", { name: "Expand platform/ci" }),
     );
+    fireEvent.click(within(tree).getByRole("button", { name: "Expand lint" }));
     await screen.findByTestId("session-ended");
     expect(screen.getByLabelText("Domain browser")).toBeTruthy();
     expect(screen.queryByLabelText("Catalog refused")).toBeNull();
