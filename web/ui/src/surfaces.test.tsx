@@ -3085,6 +3085,66 @@ describe("search", () => {
     ).toBeTruthy();
   });
 
+  // Spec: §13.10 — narrowing the search swaps the count and can replace the
+  // whole list with a sentence, and neither change moves focus. A reader who
+  // cannot see the surface is told the settled count and the moment the list
+  // empties through a polite region.
+  it("announces the settled result count and the emptied list", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts?query=review&top_k=10": {
+        body: {
+          total_matched: 2,
+          results: [
+            { id: "platform/review", type: "skill", score: 8.5 },
+            { id: "platform/weaker", type: "skill", score: 2.1 },
+          ],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    const region = await screen.findByTestId("search-announcement");
+    // The region is polite and mounted before its text arrives, so the change
+    // happens inside a node the accessibility tree already holds.
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    expect(region.className).toBe("assistive-only");
+    await waitFor(() => {
+      expect(region.textContent).toBe("2 of 2 artifacts matched.");
+    });
+    // Narrowing to a query nothing answers empties the list, and the region
+    // states the outcome rather than repeating the remedy the page draws.
+    fireEvent.change(screen.getByLabelText("Search artifacts"), {
+      target: { value: "zzzznotamatch" },
+    });
+    await screen.findByText("Nothing matched. Widen the query.");
+    expect(region.textContent).toBe("No artifact matched.");
+    // A filter narrowed over a query the row still carries lands on the same
+    // outcome, because the count and the list change the same way.
+    selectFilter("type", "skill");
+    await waitFor(() => {
+      expect(lastSearch().get("type")).toBe("skill");
+    });
+    expect(region.textContent).toBe("No artifact matched.");
+  });
+
+  // Spec: §13.10 — a browse that no filter and no query narrowed reports an
+  // empty catalog rather than a search that missed.
+  it("announces an empty catalog as the browse it answered", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/");
+    render(<App />);
+    const region = await screen.findByTestId("search-announcement");
+    await waitFor(() => {
+      expect(region.textContent).toBe("The catalog holds no artifacts.");
+    });
+  });
+
   it("draws the empty result as a card set quieter than a result row", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },

@@ -110,6 +110,14 @@ export function SearchSurface({
   }, [line]);
   useErrorReport(search.error, onError);
   const body = search.value;
+  const filtered = type !== "" || scope !== "" || tags.length > 0;
+  const queried = text !== "";
+  // What the row and the list drew is also stated for a reader who cannot see
+  // it. Typing a query or narrowing a filter swaps the count and can replace
+  // the whole list with a sentence, and neither change moves focus, so
+  // without a region the reader is told neither the new count nor that the
+  // list emptied (§13.10).
+  const announcement = searchAnnouncement(search, filtered, queried);
 
   return (
     // The content column opens on the query field. A "Search" title over a
@@ -193,10 +201,22 @@ export function SearchSurface({
           </p>
         )}
       </div>
+      {/* The region is rendered on every state of the surface, empty until a
+          read settles. A region mounted at the moment its text arrives is not
+          in the accessibility tree when the change happens, and the
+          announcement is dropped. */}
+      <p
+        className="assistive-only"
+        role="status"
+        aria-live="polite"
+        data-testid="search-announcement"
+      >
+        {announcement}
+      </p>
       <SearchResults
         search={search}
-        filtered={type !== "" || scope !== "" || tags.length > 0}
-        queried={text !== ""}
+        filtered={filtered}
+        queried={queried}
         cap={cap}
         onMore={(step) => {
           setCap((held) => Math.min(held + step, searchCapMax));
@@ -204,6 +224,32 @@ export function SearchSurface({
       />
     </section>
   );
+}
+
+/** searchAnnouncement is what the result state says to a reader who cannot
+ * see it. It is empty while a read is in flight and while one is refused, so
+ * a settled result set is announced once rather than every partial state on
+ * the way to it, and a refused read carries its own alert from ErrorState.
+ * The empty arms are worded for the region rather than repeated from the
+ * page, the way the palette's announcement is: the drawn sentence carries the
+ * remedy a reader acts on with the row in front of them, and the region
+ * states the outcome. */
+function searchAnnouncement(
+  search: Async<SearchResponse>,
+  filtered: boolean,
+  queried: boolean,
+): string {
+  if (search.loading || search.error !== null || search.value === null) {
+    return "";
+  }
+  const results = search.value.results ?? [];
+  if (results.length === 0) {
+    return filtered || queried
+      ? "No artifact matched."
+      : "The catalog holds no artifacts.";
+  }
+  const matched = search.value.total_matched;
+  return `${results.length} of ${matched} artifact${matched === 1 ? "" : "s"} matched.`;
 }
 
 /** FilterPill is one applied filter. It names the filter it applies as well
