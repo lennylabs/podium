@@ -16,10 +16,10 @@ export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
 /** BadgeTone is the tone set a badge takes. It extends the shared tones with
  * `soft`, the filled borderless chip the badge alone draws, `grant`, the
  * filled chip that keeps the badge's outline, `hollow`, the outlined chip that
- * drops the fill, and `marker`, the rounded chip that carries an accent dot:
- * the banner tones are full-width containers, where a second neutral fill
- * states nothing. */
-export type BadgeTone = Tone | 'soft' | 'grant' | 'hollow' | 'marker';
+ * drops the fill, `marker`, the rounded chip that carries an accent dot, and
+ * `count`, the filled pill a bare figure takes: the banner tones are
+ * full-width containers, where a second neutral fill states nothing. */
+export type BadgeTone = Tone | 'soft' | 'grant' | 'hollow' | 'marker' | 'count';
 
 /**
  * CopyField renders a value the reader has to take away with them beside an

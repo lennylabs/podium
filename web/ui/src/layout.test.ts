@@ -706,6 +706,22 @@ describe("badge tones", () => {
     expect(soft.background).not.toBe(outline.background);
     expect(soft.borderTopColor).not.toBe(outline.borderTopColor);
   });
+
+  // A bare figure stated inside a control takes the count tone: a filled pill
+  // with no edge, set tighter and heavier than the informational badges.
+  // Drawn as the outlined badge, the layer panel's recoverable figure read as
+  // a boxed input parked beside the link's label rather than as its count.
+  it("draws the count tone as a filled pill with no edge", () => {
+    const count = styled("badge badge-count");
+    expect(count.background).toBe("var(--chip)");
+    expect(count.borderTopColor).toBe("rgba(0, 0, 0, 0)");
+    expect(count.borderRadius).toBe("100px");
+    expect(count.fontWeight).toBe("600");
+    expect(count.fontSize).toBe("10.5px");
+    const outline = styled("badge");
+    expect(count.borderRadius).not.toBe(outline.borderRadius);
+    expect(count.fontSize).not.toBe(outline.fontSize);
+  });
 });
 
 describe("layer identifier cell", () => {

@@ -719,6 +719,22 @@ h2.label {
   background: var(--acc);
 }
 
+/* The count tone is the bare figure a control states beside its own label. It
+   is drawn as a filled pill with no edge, tighter and heavier than the
+   informational badges, because a figure sitting inside a link or a button
+   takes its meaning from the label it follows rather than from a box of its
+   own. Given the outlined badge the tabular markers take, the same figure
+   reads as a boxed input parked next to the label. */
+.badge-count {
+  padding: 1px 6px;
+  border-color: transparent;
+  border-radius: 100px;
+  background: var(--chip);
+  color: var(--meta);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
 .badge-danger {
   background: var(--danger-bg);
   border-color: var(--danger-bd);

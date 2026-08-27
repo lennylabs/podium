@@ -62,12 +62,12 @@ import { useAsync, useReachReport } from "../useAsync";
  * holding nothing on its way to being erased. */
 function RecoverableCount({ read }: { read: Async<LayerRecord[]> }) {
   if (read.error !== null) {
-    return <Badge tone="quiet">?</Badge>;
+    return <Badge tone="count">?</Badge>;
   }
   if (read.value === null || read.value.length === 0) {
     return null;
   }
-  return <Badge tone="quiet">{String(read.value.length)}</Badge>;
+  return <Badge tone="count">{String(read.value.length)}</Badge>;
 }
 
 /** Refusal is a write the registry refused, held with the write itself so the

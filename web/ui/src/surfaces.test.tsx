@@ -11946,6 +11946,13 @@ describe("a refused layer write", () => {
     // The figure is the badge every other count in the UI uses, so it reads
     // as a count rather than as running text appended to the label.
     expect(link.textContent).not.toContain("·");
+    // It takes the count tone, the filled pill a bare figure inside a control
+    // carries. The outlined badge the tabular markers take draws the same
+    // figure as a boxed input parked beside the link's label.
+    const badge = link.querySelector(".badge") as HTMLElement;
+    const tones = badge.className.split(" ");
+    expect(tones).toContain("badge-count");
+    expect(tones).not.toContain("badge-quiet");
     // It is the first control in the action row, ahead of the primary
     // Register layer and the secondary Reingest all.
     const actions = Array.from(
@@ -12050,6 +12057,11 @@ describe("a refused layer write", () => {
     expect(link.getAttribute("title")).toBe(
       "The recoverable count could not be read.",
     );
+    // The unread marker stands where the figure would, so it takes the same
+    // count tone the figure takes.
+    expect(
+      (link.querySelector(".badge") as HTMLElement).className.split(" "),
+    ).toContain("badge-count");
     // The rows the panel did read are untouched by the failure beside them.
     expect(screen.getByText("alice-personal")).toBeTruthy();
   });
