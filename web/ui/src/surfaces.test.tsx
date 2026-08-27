@@ -1511,7 +1511,19 @@ describe("the domain browser", () => {
     expect(within(browser).getByText("ci")).toBeTruthy();
     expect(screen.getByText("platform/deploy")).toBeTruthy();
     expect(screen.getByText("\u2605 CURATED")).toBeTruthy();
-    expect(screen.getByText("Lifted from sparse subdomains")).toBeTruthy();
+    // The lifted entries sit in their own group, whose head names the group
+    // and qualifies it on the same line, and whose container holds the rows.
+    // A label with a sentence under it and the listing beside them leaves the
+    // group looking like a second listing of the domain's own artifacts.
+    const lifted = screen.getByText("Lifted from sparse subdomains");
+    const head = lifted.parentElement;
+    expect(head?.className).toContain("folded-head");
+    expect(within(head as HTMLElement).getByText("Not direct children")).toBeTruthy();
+    const group = head?.parentElement;
+    expect(group?.className).toContain("folded");
+    expect(
+      within(group as HTMLElement).getByText("platform/ci/lint"),
+    ).toBeTruthy();
     // The note reaches the reader at the returned edge rather than above the
     // description, beside the count and the control that continues past it.
     const continuation = await screen.findByTestId("listing-continuation");

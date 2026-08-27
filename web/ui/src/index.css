@@ -849,6 +849,53 @@ h2.label {
   background: var(--surf);
 }
 
+/* The lifted group holds entries a §4.5.5 sparse chain folded up into this
+   domain, which are not its children. The dashed container is what carries
+   that: drawn with the solid border the direct listing takes, the group reads
+   as a second listing of the same standing. The list inside gives its border
+   up to the container and keeps a hairline over the first row, so the group
+   reads as one box with a titled head rather than as a box inside a box. */
+.folded {
+  margin-top: 26px;
+  padding: 14px 16px;
+  border: 1px dashed var(--bd);
+  border-radius: 11px;
+  background: var(--surf2);
+}
+
+/* The caption shares the label's line. It qualifies the label rather than
+   standing on its own, and baseline alignment sits the two on one rule
+   despite the size between them. */
+.folded-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.folded-head > .label {
+  margin: 0;
+}
+
+.folded-head > .quiet {
+  font-size: 12.5px;
+}
+
+.folded > .artifact-list {
+  border: 0;
+  border-top: 1px solid var(--b2);
+  border-radius: 0;
+  background: none;
+}
+
+/* The container already pads the group, so the rows keep their vertical
+   rhythm and give up the horizontal padding the bordered listing needs. */
+.folded > .artifact-list > .artifact-row {
+  padding-left: 0;
+  padding-right: 0;
+}
+
 /* A row is up to three columns: a ranked row's relevance indicator at the left
    edge, the artifact and what it says about itself in the middle, and its type
    and version pinned to the right edge, so a reader scanning a listing for a

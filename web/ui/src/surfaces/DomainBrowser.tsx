@@ -190,10 +190,19 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
         </>
       )}
 
+      {/* A §4.5.5 lifted entry is not a child of this domain, so the group is
+          drawn as its own dashed container rather than as a second section
+          styled like the direct listing above it. The container is what says
+          the rows belong to somewhere else; a bare label over an identical
+          bordered list leaves the distinction to the reader's memory of the
+          heading. The caption sits on the label's own line, because the
+          container has already made the point a full sentence was carrying. */}
       {folded.length > 0 && (
         <section className="folded">
-          <h3 className="label">Lifted from sparse subdomains</h3>
-          <p className="quiet">These artifacts are not direct children of this domain.</p>
+          <div className="folded-head">
+            <h3 className="label">Lifted from sparse subdomains</h3>
+            <span className="quiet">Not direct children</span>
+          </div>
           <ul className="artifact-list">
             {folded.map((artifact) => (
               <ArtifactRow key={artifact.id} artifact={artifact} />

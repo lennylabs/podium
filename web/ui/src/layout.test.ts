@@ -1080,3 +1080,35 @@ describe("attention row", () => {
     expect(styled("badge").alignSelf).toBe("");
   });
 });
+
+// A §4.5.5 lifted entry is not a child of the domain it is listed under, and
+// the group that holds those entries carries that on its own container: a
+// dashed box whose head names the group, with the rows inside it. Drawn with
+// the solid border and the fill the direct listing takes, the group is
+// indistinguishable from the domain's own artifacts. jsdom performs no layout,
+// so the cases pin the declarations that reach the elements.
+describe("lifted artifact group", () => {
+  it("draws the group as a dashed container", () => {
+    // The border is declared as a shorthand naming a token, which jsdom does
+    // not expand into a computed longhand, so the case reads the rule.
+    expect(ruleText(".folded")).toContain("border: 1px dashed var(--bd)");
+    const group = styled("folded");
+    expect(group.borderRadius).toBe("11px");
+    expect(group.padding).toBe("14px 16px");
+  });
+
+  it("sits the group caption on the label's own line", () => {
+    const head = styled("folded-head");
+    expect(head.display).toBe("flex");
+    expect(head.alignItems).toBe("baseline");
+  });
+
+  // The container is the group's border, so the listing inside gives its own
+  // up and keeps a hairline over the first row as the head's divider.
+  it("gives the listing inside the group up to the container", () => {
+    const inner = ruleText(".folded > .artifact-list");
+    expect(inner).toContain("border: 0");
+    expect(inner).toContain("border-top: 1px solid var(--b2)");
+    expect(inner).toContain("border-radius: 0");
+  });
+});
