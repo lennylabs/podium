@@ -2063,6 +2063,47 @@ describe("the domain browser", () => {
     expect(within(cards[1]).getByText("No description.")).toBeTruthy();
   });
 
+  // The card reads name, then description, then the two figures. Set at the
+  // body size in the quiet tone, the description is the largest and the palest
+  // text in the card and reads as a second counts line, so it takes the
+  // secondary ink the artifact row's description takes and a size under the
+  // card title's, and only the counts stay quiet.
+  it("sets the subdomain card description under the title size in the secondary ink", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            {
+              path: "platform",
+              name: "platform",
+              description: "Platform engineering.",
+              subdomains: [{ path: "platform/ci", name: "ci" }],
+            },
+          ],
+          notable: [],
+        },
+      },
+    });
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const grid = within(browser).getByRole("list", { name: "Subdomains" });
+    const card = within(grid).getAllByRole("listitem")[0];
+    const title = within(card).getByRole("link");
+    const description = within(card).getByText("Platform engineering.");
+    const counts = within(card).getByText("1 subdomain");
+    expect(parseFloat(window.getComputedStyle(description).fontSize)).toBeLessThan(
+      parseFloat(window.getComputedStyle(title).fontSize),
+    );
+    expect(window.getComputedStyle(description).color).not.toBe(
+      window.getComputedStyle(counts.parentElement as HTMLElement).color,
+    );
+    // The placeholder that stands where a child carries no description keeps
+    // the quiet tone, because it is not a description the author wrote.
+    expect(description.classList.contains("quiet")).toBe(false);
+  });
+
   // A §4.5.5 sparse chain arrives collapsed into one entry whose path holds
   // every segment it crossed and whose name holds only the last one. A card
   // drawn from the name puts finance/ap on screen as ap under the root, which

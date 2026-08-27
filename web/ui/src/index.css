@@ -1027,6 +1027,24 @@ button.version-notice-latest {
   flex: 1;
 }
 
+/* The card carries three tiers: the name, what the domain holds, and the two
+   figures under it. The description is the tier the reader reads, so it takes
+   the secondary ink the artifact row's description takes and a size under the
+   card title's. Left at the body size in the quiet tone it is the largest and
+   the palest text in the card, and it reads as a second counts line. */
+.subdomain-description {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--sec);
+  text-wrap: pretty;
+}
+
+/* The absent case, for the reason `.artifact-description.quiet` states: the
+   description colour is declared after `.quiet` and would otherwise win. */
+.subdomain-description.quiet {
+  color: var(--meta);
+}
+
 /* The card title is the card's name, set in the ink the card is drawn in.
    Drawn in the link tone it reads as an inline link sitting inside the card
    rather than as the card's own name, and the chevron at the right edge is
@@ -1036,6 +1054,7 @@ button.version-notice-latest {
   display: flex;
   align-items: center;
   gap: 8px;
+  font-size: 14px;
   font-weight: 600;
   color: var(--ink);
 }
