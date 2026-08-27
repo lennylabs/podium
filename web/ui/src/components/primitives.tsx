@@ -14,9 +14,10 @@ import { dismissAttribute, holdDismissal, useDialogFocus } from './focus';
 export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
 
 /** BadgeTone is the tone set a badge takes. It extends the shared tones with
- * `soft`, the filled borderless chip the badge alone draws: the banner tones
- * are full-width containers, where a second neutral fill states nothing. */
-export type BadgeTone = Tone | 'soft';
+ * `soft`, the filled borderless chip the badge alone draws, and `marker`, the
+ * rounded chip that carries an accent dot: the banner tones are full-width
+ * containers, where a second neutral fill states nothing. */
+export type BadgeTone = Tone | 'soft' | 'marker';
 
 /**
  * CopyField renders a value the reader has to take away with them beside an
@@ -124,6 +125,13 @@ export function Chevron() {
   );
 }
 
+/**
+ * Badge is the small marker beside a name or a title. The tone selects the
+ * treatment: `marker` states a property of the response rather than of the
+ * subject, and it is the one tone that draws a dot.
+ *
+ * Spec: §13.10
+ */
 export function Badge({ tone = 'neutral', children }: { tone?: BadgeTone; children: ReactNode }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }

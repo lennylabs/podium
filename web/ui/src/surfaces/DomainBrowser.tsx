@@ -130,7 +130,13 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           {/* Nothing is a subdomain of the root, so the entry screen counts
               the top-level domains by that name. */}
           <CountBadge count={body.subdomains.length} noun={root ? 'domain' : 'subdomain'} />
-          {trimmed && <Badge tone="accent">listing trimmed</Badge>}
+          {/* The marker states that the listing below is a truncated view,
+              which is a property of the response rather than of the domain.
+              It therefore takes the marker tone: the same filled chip as the
+              counts beside it, in the metadata colour, carrying an accent dot.
+              An accent fill or edge would read as a warning, and a trimmed
+              listing is neither content nor error. */}
+          {trimmed && <Badge tone="marker">listing trimmed</Badge>}
         </div>
       </div>
       {/* A domain with no description of its own is told it carries none. The

@@ -10035,7 +10035,12 @@ describe("the trimmed listing", () => {
     goTo("#/domain/platform");
     render(<App />);
     await screen.findByLabelText("Domain browser");
-    expect(screen.getByText("listing trimmed")).toBeTruthy();
+    // The marker reads as neither content nor error, so it takes the filled
+    // chip in the metadata tone the counts beside it take rather than the
+    // accent-outlined badge, which reads as a warning.
+    const pill = screen.getByText("listing trimmed");
+    expect(pill.className.split(" ")).toContain("badge-marker");
+    expect(pill.className).not.toContain("badge-accent");
     const line = await screen.findByTestId("listing-continuation");
     await waitFor(() => {
       expect(line.textContent).toContain("2 of 21 artifacts shown.");

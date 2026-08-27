@@ -670,6 +670,32 @@ h2.label {
   color: var(--meta);
 }
 
+/* The marker tone states a property of the response rather than of the thing
+   the badge sits beside, which is how the trimmed-listing pill stands among
+   the header's count chips. It takes the same filled chip in the metadata
+   tone as those counts and separates itself by its rounded edge and by an
+   accent dot. An accent fill or an accent edge would read as a warning, and
+   the marker must read as neither content nor error. */
+.badge-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-color: transparent;
+  border-radius: 100px;
+  background: var(--chip);
+  color: var(--meta);
+}
+
+.badge-marker::before {
+  content: '';
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--acc);
+}
+
 .badge-danger {
   background: var(--danger-bg);
   border-color: var(--danger-bd);
