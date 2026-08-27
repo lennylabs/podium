@@ -3891,6 +3891,63 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // A pin the registry refused is still the string the field opens on, so
+  // reopening the picker on it with the caret at its end let the reader's
+  // correction be appended to the refused pin: 0.1.0 typed into a field
+  // holding 9.9.9 asks the registry for 9.9.90.1.0, which it refuses again.
+  // The field is mounted per opening and its text is selected on mount, so
+  // the correction replaces the refused pin and an abandoned edit is
+  // discarded with the popover.
+  // Spec: §13.10
+  it("selects the refused pin when the version picker reopens on it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 404,
+        body: {
+          code: "registry.not_found",
+          message: "version: invalid pin: no candidate matches",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    pinVersion("9.9.9");
+    await screen.findByTestId("version-refused");
+
+    openVersionPicker();
+    const reopened = screen.getByLabelText("Version") as HTMLInputElement;
+    expect(reopened.value).toBe("9.9.9");
+    // The whole string is selected, so the next keystroke replaces it.
+    expect(reopened.selectionStart).toBe(0);
+    expect(reopened.selectionEnd).toBe("9.9.9".length);
+
+    // An edit the reader abandons is discarded with the popover rather than
+    // waiting in the field the next opening presents.
+    fireEvent.change(reopened, { target: { value: "9.9" } });
+    fireEvent.keyDown(document, { key: "Escape" });
+    openVersionPicker();
+    expect((screen.getByLabelText("Version") as HTMLInputElement).value).toBe(
+      "9.9.9",
+    );
+  });
+
   // The registry prefixes several §6.10 messages with the code they carry, and
   // the banner already states that code on a line of its own. The prose is
   // stripped of the repetition so the reader is told the code once.

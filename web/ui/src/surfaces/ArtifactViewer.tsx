@@ -321,7 +321,6 @@ function VersionPicker({
   onView: (version: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [typed, setTyped] = useState(viewing);
   // The field is a transient popup, so it carries the dismissal paths the
   // other popups in this shell carry: Escape closes it and hands focus back to
   // the badge it was disclosed from, and a press or a focus move outside it
@@ -335,10 +334,6 @@ function VersionPicker({
     },
     trigger,
   );
-  const view = () => {
-    setOpen(false);
-    onView(typed.trim());
-  };
   const label = formatVersion(current);
   return (
     <span className="version-picker">
@@ -358,34 +353,77 @@ function VersionPicker({
         </span>
       </button>
       {open && (
-        <span className="version-picker-field" ref={field}>
-          <label className="label" htmlFor="version-picker-input">
-            Version
-          </label>
-          <input
-            id="version-picker-input"
-            type="text"
-            value={typed}
-            placeholder="latest"
-            autoFocus
-            onChange={(event) => {
-              setTyped(event.target.value);
-            }}
-            // A single-field entry control takes Enter as its commit, because a
-            // reader who typed a version reaches for the return key before the
-            // adjacent button. Escape is the disclosure's own dismissal and is
-            // handled with the rest of them.
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') {
-                view();
-              }
-            }}
-          />
-          <button type="button" onClick={view}>
-            View
-          </button>
-        </span>
+        <VersionField
+          field={field}
+          viewing={viewing}
+          onView={(version) => {
+            setOpen(false);
+            onView(version);
+          }}
+        />
       )}
+    </span>
+  );
+}
+
+/** VersionField is one opening of the picker's entry field. It is mounted
+ * only while the popover is open, so the string the reader last submitted is
+ * discarded with it rather than reappearing with the caret at its end. A pin
+ * the registry refused stays the version the page asked for, so the field
+ * still opens on it, and the seeded text is selected on mount: the next
+ * keystroke replaces the refused pin instead of extending it into a longer
+ * one the registry refuses again.
+ *
+ * Spec: §13.10
+ */
+function VersionField({
+  field,
+  viewing,
+  onView,
+}: {
+  field: RefObject<HTMLSpanElement | null>;
+  viewing: string;
+  onView: (version: string) => void;
+}) {
+  const [typed, setTyped] = useState(viewing);
+  const view = () => {
+    onView(typed.trim());
+  };
+  // Selecting on mount rather than from an inline ref callback: React
+  // reattaches an inline callback on every render, which would reselect the
+  // whole field after each keystroke.
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    input.current?.select();
+  }, []);
+  return (
+    <span className="version-picker-field" ref={field}>
+      <label className="label" htmlFor="version-picker-input">
+        Version
+      </label>
+      <input
+        id="version-picker-input"
+        type="text"
+        value={typed}
+        placeholder="latest"
+        ref={input}
+        autoFocus
+        onChange={(event) => {
+          setTyped(event.target.value);
+        }}
+        // A single-field entry control takes Enter as its commit, because a
+        // reader who typed a version reaches for the return key before the
+        // adjacent button. Escape is the disclosure's own dismissal and is
+        // handled with the rest of them.
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            view();
+          }
+        }}
+      />
+      <button type="button" onClick={view}>
+        View
+      </button>
     </span>
   );
 }
