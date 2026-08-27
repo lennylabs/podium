@@ -1143,8 +1143,8 @@ function TopBar({
  *
  * The hook also mints the popover's id, so a trigger can point aria-controls
  * at the element it owns and every topbar popover carries the same wiring.
- * The trigger names the kind of popup it opens through aria-haspopup, which
- * differs between the two menus, so that attribute stands on each trigger.
+ * Whether the popover is one of the kinds aria-haspopup names differs between
+ * the two triggers, so that attribute stands on each trigger rather than here.
  *
  * Spec: §13.10
  */
@@ -1277,11 +1277,16 @@ function AppearanceSwitch({
  * deployment that renders no identity cluster.
  *
  * The popover holds the segmented control and nothing else, so it declares no
- * role of its own, and the trigger's aria-haspopup is the unqualified "true"
- * rather than "menu". A role="menu" whose children are ordinary toggle buttons
- * rather than menu items is announced as a menu holding no items, and the
- * pinned preference then reads as a pressed toggle instead of the selected
- * member of its group. The group and its label stand on the control itself.
+ * role of its own, and the trigger carries no aria-haspopup. A role="menu"
+ * whose children are ordinary toggle buttons rather than menu items is
+ * announced as a menu holding no items, and the pinned preference then reads
+ * as a pressed toggle instead of the selected member of its group. The
+ * unqualified aria-haspopup="true" is defined as equivalent to "menu", so a
+ * trigger that kept it would promise the arrow-key item navigation the group
+ * does not provide. aria-expanded and aria-controls state that the trigger
+ * owns something disclosed and where it stands, which is what a labelled
+ * group of toggle buttons is. The group and its label stand on the control
+ * itself.
  *
  * Spec: §13.10
  */
@@ -1299,7 +1304,6 @@ function AppearanceMenu({
         type="button"
         className="account-trigger appearance-trigger"
         data-testid="appearance-trigger"
-        aria-haspopup="true"
         aria-controls={menuId}
         aria-expanded={open}
         ref={trigger}

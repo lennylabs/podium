@@ -9689,25 +9689,32 @@ describe("the shell’s identity cluster", () => {
   });
 
   // A trigger that toggles aria-expanded and stops there tells a reader that
-  // something opened without naming what kind of thing it is or where it
-  // stands. Both topbar triggers name their popup and point at the element
-  // they own, the same wiring the layer table's overflow control carries.
+  // something opened without saying where it stands. Both topbar triggers
+  // point at the element they own, the same wiring the layer table's overflow
+  // control carries.
   //
   // Spec: §13.10
-  it("names the popup each topbar trigger owns", async () => {
+  it("points the appearance trigger at the popover it owns and claims no menu", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture() },
       "/v1/load_domain": { body: emptyDomain },
     });
     render(<App />);
     const trigger = await screen.findByTestId("appearance-trigger");
-    // The popover holds a group rather than menu items, so the trigger
-    // declares the unqualified popup kind.
-    expect(trigger.getAttribute("aria-haspopup")).toBe("true");
+    // The popover holds a labelled group of toggle buttons rather than menu
+    // items. aria-haspopup names the kind of popup a trigger opens and its
+    // unqualified "true" is defined as equivalent to "menu", so a trigger
+    // carrying either value promises arrow-key item navigation and
+    // menuitemradio announcement that the group does not provide. The
+    // appearance trigger therefore carries no aria-haspopup at all.
+    expect(trigger.hasAttribute("aria-haspopup")).toBe(false);
     const controls = trigger.getAttribute("aria-controls");
     expect(controls).toBeTruthy();
     fireEvent.click(trigger);
-    expect(screen.getByTestId("appearance-menu").id).toBe(controls);
+    const popover = screen.getByTestId("appearance-menu");
+    expect(popover.id).toBe(controls);
+    expect(popover.getAttribute("role")).toBeNull();
+    within(popover).getByRole("group", { name: "Appearance" });
   });
 
   // The identity cluster's trigger carries the same wiring, and its popover
