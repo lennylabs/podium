@@ -711,7 +711,7 @@ h2.label {
 }
 
 .badge-marker::before {
-  content: '';
+  content: "";
   flex: none;
   width: 5px;
   height: 5px;
@@ -3582,6 +3582,19 @@ label:has(> input:disabled) {
 
 .curated-block .data-table {
   border-radius: 0 0 9px 9px;
+}
+
+/* The at-scale artifact table lays itself out from its content, and its
+   description column alone asks for more than a narrow content column holds.
+   Nothing above it clipped what it asked for, so at a 1024px viewport the
+   table rendered past the right edge of the window, scrolled the whole
+   document sideways with the top bar and the sidebar on it, and broke an
+   identifier such as `big/direct-01` across two lines. The floor is the width
+   the design draws the five columns at, and below it the table scrolls
+   sideways inside the `.table-scroll` container it sits in, which is the same
+   treatment the layer table and the restore table carry (§13.10). */
+.artifact-rows {
+  min-width: 860px;
 }
 
 /* The at-scale subdomain treatment: count tiles in a grid, or one per row. */

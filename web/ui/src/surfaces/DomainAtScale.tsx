@@ -321,76 +321,99 @@ export function ArtifactTable({
             <span className="label">Curated by the domain author</span>
             <span className="mono">{curated.length}</span>
           </div>
-          <ArtifactRows rows={curated} />
+          <ArtifactRows rows={curated} region="Curated artifacts" />
         </div>
       )}
       {/* The rest carries no heading of its own. The picks above it are the
           block that is titled, and a second title over everything the domain
           returned names the listing the page is already about. */}
-      {rest.length > 0 && <ArtifactRows rows={rest} />}
+      {rest.length > 0 && (
+        <ArtifactRows rows={rest} region="Artifacts in this domain" />
+      )}
     </div>
   );
 }
 
 /** ArtifactRows draws one block of the table. The column labels are quiet
  * markers over the columns they name: the sort control above the table is
- * where an ordering is chosen, so a header carries no control of its own. */
-function ArtifactRows({ rows }: { rows: ArtifactDescriptor[] }) {
+ * where an ordering is chosen, so a header carries no control of its own.
+ *
+ * The table keeps its designed column widths down to a floor and scrolls
+ * sideways inside its own container below that, the way the layer panel's
+ * table does. Left to grow with its content it rendered past the right edge
+ * of the window at a 1024px viewport and scrolled the whole shell sideways,
+ * carrying the top bar and the sidebar with it. The container is focusable
+ * and carries a name of its own, because a region that scrolls must be
+ * reachable from the keyboard (§13.10). */
+function ArtifactRows({
+  rows,
+  region,
+}: {
+  rows: ArtifactDescriptor[];
+  region: string;
+}) {
   return (
-    <table className="data-table" aria-label="Artifacts">
-      <thead>
-        <tr>
-          <th className="column-label">Artifact</th>
-          <th className="column-label">Type</th>
-          <th className="column-label">Version</th>
-          <th className="column-label">Tags</th>
-          <th className="column-label">Description</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((artifact) => (
-          <tr key={artifact.id}>
-            <td className="mono">
-              <a href={artifactHref(artifact.id)}>{artifact.id}</a>
-            </td>
-            {/* The type and the version are the same two markers the compact
+    <div
+      className="table-scroll"
+      tabIndex={0}
+      role="region"
+      aria-label={region}
+    >
+      <table className="data-table artifact-rows" aria-label="Artifacts">
+        <thead>
+          <tr>
+            <th className="column-label">Artifact</th>
+            <th className="column-label">Type</th>
+            <th className="column-label">Version</th>
+            <th className="column-label">Tags</th>
+            <th className="column-label">Description</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((artifact) => (
+            <tr key={artifact.id}>
+              <td className="mono">
+                <a href={artifactHref(artifact.id)}>{artifact.id}</a>
+              </td>
+              {/* The type and the version are the same two markers the compact
                 listing and the viewer carry, so the cell renders the shared
                 badge and the shared `v` prefix rather than the raw field: a
                 table that prints them bare reads as a different component
                 for the same pair of values. */}
-            <td>
-              <TypeBadge type={artifact.type} />
-            </td>
-            <td className="mono quiet">
-              {artifact.version === undefined || artifact.version === ""
-                ? "unversioned"
-                : formatVersion(artifact.version)}
-            </td>
-            <td>
-              <span className="tag-list">
-                {(artifact.tags ?? []).map((tag) => (
-                  <span key={tag} className="tag">
-                    {tag}
-                  </span>
-                ))}
-              </span>
-            </td>
-            {/* The clip sits on an inner element rather than on the cell.
+              <td>
+                <TypeBadge type={artifact.type} />
+              </td>
+              <td className="mono quiet">
+                {artifact.version === undefined || artifact.version === ""
+                  ? "unversioned"
+                  : formatVersion(artifact.version)}
+              </td>
+              <td>
+                <span className="tag-list">
+                  {(artifact.tags ?? []).map((tag) => (
+                    <span key={tag} className="tag">
+                      {tag}
+                    </span>
+                  ))}
+                </span>
+              </td>
+              {/* The clip sits on an inner element rather than on the cell.
                 A `display: block` cell leaves the row's cell layout, which
                 broke the rule under the description column away from the rule
                 under the columns beside it and dropped the row's tag chips
                 below their neighbours' baseline. */}
-            <td className="quiet">
-              <span
-                className={`clipped${artifact.description === undefined ? " absent-description" : ""}`}
-              >
-                {artifact.description ?? "No description."}
-              </span>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+              <td className="quiet">
+                <span
+                  className={`clipped${artifact.description === undefined ? " absent-description" : ""}`}
+                >
+                  {artifact.description ?? "No description."}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

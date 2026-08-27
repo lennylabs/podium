@@ -11310,6 +11310,73 @@ describe("the trimmed listing", () => {
     expect(tags).not.toBeNull();
     expect(window.getComputedStyle(tags as Element).marginTop).toBe("0px");
   });
+
+  // Spec: §13.10 — the table asks for more width than a narrow content column
+  // holds, and nothing above it clipped what it asked for: at a 1024px
+  // viewport it rendered past the right edge of the window and scrolled the
+  // whole shell sideways, carrying the top bar and the sidebar with it. Each
+  // block sits in the scroll container the layer panel's table sits in, so
+  // the container owns the sideways scroll, and it is focusable and named so
+  // a keyboard reaches it.
+  it("puts each block of the table in a container that scrolls sideways", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: [
+            {
+              id: "platform/deploy",
+              type: "skill",
+              version: "2.0.0",
+              source: "featured",
+            },
+            { id: "platform/lint", type: "rule", version: "1.0.0" },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const tables = within(browser).getAllByLabelText("Artifacts");
+    expect(tables).toHaveLength(2);
+    expect(
+      tables.map((table) => {
+        const container = table.parentElement as HTMLElement;
+        return {
+          scroller: container.classList.contains("table-scroll"),
+          overflow: window.getComputedStyle(container).overflowX,
+          focusable: container.tabIndex,
+          name: container.getAttribute("aria-label"),
+        };
+      }),
+    ).toEqual([
+      {
+        scroller: true,
+        overflow: "auto",
+        focusable: 0,
+        name: "Curated artifacts",
+      },
+      {
+        scroller: true,
+        overflow: "auto",
+        focusable: 0,
+        name: "Artifacts in this domain",
+      },
+    ]);
+    // The floor is what keeps the columns at the widths the design draws them
+    // at inside that container: below it an identifier such as
+    // `platform/deploy` broke across two lines.
+    const floor = Number.parseFloat(
+      window.getComputedStyle(tables[0]).minWidth,
+    );
+    expect(floor).toBeGreaterThanOrEqual(860);
+  });
 });
 
 describe("the anonymous framing", () => {
