@@ -6951,6 +6951,41 @@ describe("the layer write flows", () => {
     });
   });
 
+  // Every other held write in the panel names what is holding it, so the
+  // unregister confirmation states its hold in the footer and points the
+  // disabled control and the field at that sentence. The hold clears once the
+  // typed ID matches, which is when the control becomes pressable.
+  it("names the hold on the unregister confirmation until the typed ID matches", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
+    await screen.findByLabelText("Unregister alice-personal");
+    const field = screen.getByLabelText("Type the layer ID to confirm");
+    const confirm = screen.getByRole("button", { name: "Unregister layer" });
+    const note = screen.getByTestId("unregister-foot-note");
+    expect(note.textContent).toBe(
+      "Type the layer ID to confirm the unregistration.",
+    );
+    expect(confirm.getAttribute("aria-describedby")).toBe(note.id);
+    expect(field.getAttribute("aria-describedby")).toBe(note.id);
+    // A near miss is still held, and the sentence still stands.
+    fireEvent.change(field, { target: { value: "alice-persona" } });
+    expect(screen.getByTestId("unregister-foot-note").textContent).toBe(
+      "Type the layer ID to confirm the unregistration.",
+    );
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    fireEvent.change(field, { target: { value: "alice-personal" } });
+    expect(screen.queryByTestId("unregister-foot-note")).toBeNull();
+    expect(confirm.getAttribute("aria-describedby")).toBeNull();
+    expect(confirm.hasAttribute("disabled")).toBe(false);
+  });
+
   // The destructive half and the recoverable half of the confirmation sit
   // side by side and differ only in their fill, so each leads with its own
   // glyph in a fixed gutter, the way the register form's consequence and note

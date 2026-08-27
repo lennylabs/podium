@@ -10,7 +10,7 @@
 // point of that deployment.
 
 import type { KeyboardEvent, RefObject } from "react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { grantedGroups } from "./members";
@@ -1170,6 +1170,12 @@ function UnregisterConfirmation({
   onConfirm: () => void;
 }) {
   const [typed, setTyped] = useState("");
+  // A held write names what is holding it, the way the register form's footer
+  // does. Without the sentence the reader is left pressing a disabled control
+  // that reports no reason, and a reader who has scrolled past the field or is
+  // hearing the button announced has nothing to go on at all.
+  const held = typed !== layer.ID;
+  const holdID = useId();
   return (
     <Modal title={`Unregister ${layer.ID}`} onClose={onCancel}>
       <div className="modal-body">
@@ -1206,6 +1212,9 @@ function UnregisterConfirmation({
           <input
             type="text"
             value={typed}
+            // The hold is stated in the footer, and a reader working in the
+            // field never reaches that line, so the field points at it too.
+            aria-describedby={held ? holdID : undefined}
             onChange={(event) => {
               setTyped(event.target.value);
             }}
@@ -1226,13 +1235,23 @@ function UnregisterConfirmation({
           danger tone, so the press that reaches every caller is the one the
           reader has to aim for. */}
       <div className="modal-foot">
+        {held && (
+          <span
+            className="modal-foot-note modal-foot-hold"
+            id={holdID}
+            data-testid="unregister-foot-note"
+          >
+            Type the layer ID to confirm the unregistration.
+          </span>
+        )}
         <button type="button" onClick={onCancel}>
           Cancel
         </button>
         <button
           type="button"
           className="button danger"
-          disabled={typed !== layer.ID}
+          disabled={held}
+          aria-describedby={held ? holdID : undefined}
           onClick={onConfirm}
         >
           Unregister layer
