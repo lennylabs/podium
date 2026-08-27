@@ -103,7 +103,7 @@ export function replaceRoute(href: string): void {
   if (window.location.hash === href) {
     return;
   }
-  window.history.replaceState(null, '', href);
+  window.history.replaceState(window.history.state, '', href);
 }
 
 /** routeKey names the surface a route selects. `useRoute` parses a fresh
@@ -144,7 +144,7 @@ export function useRoute(): Route {
       const held = heldRoute();
       if (held !== null) {
         if (window.location.hash !== held) {
-          window.history.replaceState(null, '', held === '' ? '#/' : held);
+          window.history.replaceState(window.history.state, '', held === '' ? '#/' : held);
         }
         return;
       }
@@ -162,4 +162,64 @@ export function useRoute(): Route {
     };
   }, []);
   return route;
+}
+
+/** entryMark is the key a visited history entry carries. Chrome fires
+ * `popstate` for a fragment push as well as for a history traversal, so the
+ * event does not say which of the two happened. An entry the shell has
+ * already drawn a surface on carries this mark; an entry a link has just
+ * pushed does not. */
+const entryMark = 'podiumVisited';
+
+/** entryState is the state the current history entry carries, as an object.
+ * An entry nothing has written state to carries none, and what a browser
+ * reports for one is not fixed, so anything other than an object reads as an
+ * entry with no state on it. */
+function entryState(): Record<string, unknown> {
+  const state: unknown = window.history.state;
+  return typeof state === 'object' && state !== null ? (state as Record<string, unknown>) : {};
+}
+
+/** markVisited stamps the current history entry, leaving its address and any
+ * state a surface holds beside the mark untouched. */
+function markVisited(): void {
+  window.history.replaceState({ ...entryState(), [entryMark]: true }, '');
+}
+
+/** visitedEntry reports whether the entry the window is on is one the shell
+ * has already been on, which is what a history step lands on. */
+function visitedEntry(): boolean {
+  return entryState()[entryMark] === true;
+}
+
+/** useTopOfNewRoute returns the window to the top of the document when the
+ * reader follows a link. The shell draws one document and swaps the surface
+ * inside it, so the window keeps whatever offset the previous surface was
+ * scrolled to: an artifact opened from the relations rail would otherwise
+ * arrive with its title, breadcrumb, type badge, and property table above the
+ * viewport, and the reader would have to scroll up to see what they opened.
+ *
+ * A history step is left where the browser puts it. The browser restores the
+ * offset the entry was left at, and moving the reader to the top of a page
+ * they stepped back to loses the place they came from.
+ *
+ * Spec: §13.10 */
+export function useTopOfNewRoute(): void {
+  useEffect(() => {
+    markVisited();
+    const onChange = () => {
+      // A dialog that holds the route writes the hash back over the step and
+      // the shell stays on the surface it was drawing, so no surface was
+      // entered to put the reader at the top of.
+      if (heldRoute() !== null || visitedEntry()) {
+        return;
+      }
+      markVisited();
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener('hashchange', onChange);
+    return () => {
+      window.removeEventListener('hashchange', onChange);
+    };
+  }, []);
 }

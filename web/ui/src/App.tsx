@@ -24,7 +24,15 @@ import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
 import { catalogDepth, domainLabel, marksCurrentDomain } from './domain';
 import { useDismissalHeld, usePopupDismiss } from './components/focus';
-import { artifactDomain, domainHref, layersHref, routeKey, searchHref, useRoute } from './route';
+import {
+  artifactDomain,
+  domainHref,
+  layersHref,
+  routeKey,
+  searchHref,
+  useRoute,
+  useTopOfNewRoute,
+} from './route';
 import { since } from './time';
 import type { ThemePreference } from './theme';
 import { useTheme } from './theme';
@@ -82,6 +90,10 @@ export function App() {
   // A dialog that refuses every dismissal route holds the page, and the
   // accelerator below is one of the routes it is refusing.
   const dismissalHeld = useDismissalHeld();
+
+  // A surface entered from a link is drawn into the document the reader was
+  // already scrolled inside, so the shell puts the window back at the top.
+  useTopOfNewRoute();
 
   useEffect(() => subscribeReadOnly(setReadOnly), []);
 
