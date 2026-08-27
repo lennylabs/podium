@@ -4310,6 +4310,46 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // The two views of one block must agree. A plain scalar's authored token is
+  // not its parsed value: the YAML core schema resolves `007` to the number 7
+  // and `1.10` to 1.1, so a table built from parsed values shows a key whose
+  // value the author never wrote while Raw YAML beside it shows the token
+  // (§13.10). A quoted scalar still drops its delimiters, which is the text
+  // inside them.
+  it("shows a scalar as the token the author wrote rather than as its parsed value", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "eng/scalars",
+          type: "context",
+          version: "0.1.0",
+          content_hash: "sha256:abc",
+          manifest_body: "Body.\n",
+          frontmatter:
+            '---\ntype: context\nnum: 007\nrelease: 1.10\nlabel: "quoted text"\n---\n',
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/eng%2Fscalars");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    expect(screen.getByTestId("property-value-num").textContent).toBe("007");
+    expect(screen.getByTestId("property-value-release").textContent).toBe(
+      "1.10",
+    );
+    expect(screen.getByTestId("property-value-label").textContent).toBe(
+      "quoted text",
+    );
+    // The same tab's other view shows the same tokens.
+    fireEvent.click(screen.getByRole("button", { name: "Raw YAML" }));
+    const raw = screen.getByTestId("raw-frontmatter").textContent ?? "";
+    expect(raw).toContain("num: 007");
+    expect(raw).toContain("release: 1.10");
+  });
+
   it("drops the rail’s frontmatter section where the response yields no pairs", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },

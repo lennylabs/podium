@@ -9,7 +9,7 @@
 // file. Both are split here before either half is used, so the parser is
 // handed a YAML mapping and the body is handed to the rendering path.
 
-import { isMap, isScalar, isSeq, parseDocument, type Node } from 'yaml';
+import { isMap, isScalar, isSeq, parseDocument, Scalar, type Node } from 'yaml';
 
 /** Property is one row of the frontmatter property table. The value is text:
  * it is rendered as text and never as markup. */
@@ -112,25 +112,39 @@ function row(source: string, key: unknown, value: unknown): Property {
 }
 
 /** valueText renders one frontmatter value as the text the table shows. The panel
- * states that its values are shown verbatim, so a scalar is its own resolved
- * text, line breaks in a block scalar included, and a nested mapping or
+ * states that its values are shown verbatim, so a scalar is the token the
+ * author wrote, line breaks in a block scalar included, and a nested mapping or
  * sequence is the source the author wrote rather than a re-serialization in
  * another notation (§13.10). Trailing blank lines are dropped, because a
  * block scalar chomps to a newline the table would otherwise render as an
  * empty line of its own. */
 function valueText(source: string, value: unknown): string {
   if (isScalar(value)) {
-    const resolved = value.value;
-    if (resolved === null || resolved === undefined) {
-      return '';
-    }
-    return String(resolved).replace(/\s+$/, '');
+    return scalarText(value);
   }
   const range = (value as Node | null | undefined)?.range;
   if (range === null || range === undefined) {
     return '';
   }
   return dedent(source, range[0], source.slice(range[0], range[1]).replace(/\s+$/, ''));
+}
+
+/** scalarText is one scalar's authored text. A plain scalar carries the token
+ * the author typed in its source, while the parser's resolved value is what the
+ * YAML core schema derives from that token: `007` resolves to the number 7 and
+ * `1.10` to 1.1, so a table built from resolved values shows a value the author
+ * never wrote and contradicts the Raw YAML view of the same block (§13.10). A
+ * quoted or block scalar keeps its delimiters and its indentation in the
+ * source, and its resolved value is the text inside them. */
+function scalarText(value: Scalar): string {
+  if (value.type === Scalar.PLAIN && typeof value.source === 'string') {
+    return value.source.replace(/\s+$/, '');
+  }
+  const resolved = value.value;
+  if (resolved === null || resolved === undefined) {
+    return '';
+  }
+  return String(resolved).replace(/\s+$/, '');
 }
 
 /** dedent strips the indent a nested block sits at from every line after its
