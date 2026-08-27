@@ -11692,12 +11692,15 @@ describe("the artifact viewer’s resources", () => {
 });
 
 describe("a refused layer write", () => {
-  function refusedPage(): void {
+  function refusedPage(refusal?: {
+    status: number;
+    body: Record<string, unknown>;
+  }): void {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": { body: { layers: [userLayer("bob@acme.com")] } },
       "/v1/layers?deleted=true": { body: { layers: [] } },
-      "DELETE /v1/layers": {
+      "DELETE /v1/layers": refusal ?? {
         status: 403,
         body: { code: "auth.forbidden", message: "not permitted" },
       },
@@ -11720,7 +11723,16 @@ describe("a refused layer write", () => {
   // control re-issues the write that was refused rather than a fresh guess
   // at it.
   it("re-issues the refused write from the row", async () => {
-    refusedPage();
+    // The re-issue is offered where the envelope reports the condition clears
+    // on its own, so the write this drives is refused by a transient one.
+    refusedPage({
+      status: 503,
+      body: {
+        code: "registry.unavailable",
+        message: "the registry did not answer",
+        retryable: true,
+      },
+    });
     render(<App />);
     await refuseAnUnregister();
     const sent = requests.filter((r) => r.method === "DELETE").length;
@@ -11734,6 +11746,40 @@ describe("a refused layer write", () => {
         sent + 1,
       );
     });
+  });
+
+  // A refused write is presented on the envelope's own terms. Rendering the
+  // code alone discards the sentence stating what was refused and the
+  // remediation naming the one action that clears it, and it offers a retry
+  // the envelope reports cannot succeed: a browser-origin refusal answers an
+  // identical re-issue from the same page identically.
+  // Spec: §6.10
+  it("states the refusal’s message and remediation and withholds a retry that cannot succeed", async () => {
+    refusedPage({
+      status: 403,
+      body: {
+        code: "auth.csrf_invalid",
+        message:
+          "The request was refused because it did not pass the browser-origin check.",
+        retryable: false,
+        suggested_action:
+          "Reload the web UI and retry the operation from it; if the registry is behind a gateway, pass the browser-facing Host header through unrewritten.",
+      },
+    });
+    render(<App />);
+    await refuseAnUnregister();
+    const banner = screen.getByRole("alert");
+    expect(banner.textContent).toContain("auth.csrf_invalid");
+    expect(banner.textContent).toContain(
+      "did not pass the browser-origin check",
+    );
+    expect(banner.textContent).toContain("Reload the web UI");
+    expect(within(banner).queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(within(banner).getByTestId("not-retryable")).toBeTruthy();
+    // Dismiss is the way out that remains.
+    expect(
+      within(banner).getByRole("button", { name: "Dismiss" }),
+    ).toBeTruthy();
   });
 
   // Dismiss clears the row's refusal without driving another write, which is

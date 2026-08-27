@@ -43,7 +43,6 @@ import {
   visibilitySummary,
 } from "./layerfacts";
 import {
-  ApiError,
   listDeletedLayers,
   listLayers,
   readQuota,
@@ -766,9 +765,9 @@ function LayerRow({
 
   // A write the panel sends can come back refused, including on a row the
   // panel presented as this caller's to manage. The refusal is drawn on the
-  // row and says only that the registry refused that action and that nothing
-  // changed. It reports neither who owns the layer nor the state of the
-  // session, because the refusal carries neither.
+  // row on the envelope's own terms: the code, the message, and the
+  // remediation the registry names. It reports neither who owns the layer nor
+  // the state of the session, because the refusal carries neither.
   // The refusal carries the write beside it, so Try again re-issues exactly
   // the action that was refused rather than a fresh guess at it.
   const attempt = (run: () => Promise<unknown>, done?: () => void) => {
@@ -972,20 +971,18 @@ function LayerRow({
             }}
           />
           {refusal !== null && (
-            <div className="row-refusal" role="alert">
-              <p>
-                The registry refused that action and nothing changed.{" "}
-                <span className="mono">
-                  {refusal.error instanceof ApiError
-                    ? refusal.error.code
-                    : "registry.unavailable"}
-                </span>
-              </p>
-              {/* The refusal is cleared by re-issuing the write or by
-                  dismissing it. Every other control on the row stays live. */}
-              <button type="button" onClick={refusal.retry}>
-                Try again
-              </button>
+            /* The refusal is cleared by re-issuing the write or by dismissing
+               it. Every other control on the row stays live. ErrorState draws
+               the envelope's message and its remediation beside the code, and
+               it withholds Try again where the envelope reports the condition
+               does not clear on its own: a browser-origin refusal answers an
+               identical re-issue identically, so the recovery on offer is the
+               one the registry names rather than a loop. */
+            <ErrorState
+              error={refusal.error}
+              title="The registry refused that action and nothing changed."
+              onRetry={refusal.retry}
+            >
               <button
                 type="button"
                 onClick={() => {
@@ -995,7 +992,7 @@ function LayerRow({
               >
                 Dismiss
               </button>
-            </div>
+            </ErrorState>
           )}
         </td>
       </tr>
