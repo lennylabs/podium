@@ -407,11 +407,17 @@ h3 {
   border-radius: 0 6px 6px 0;
 }
 
+/* The tree is a list the reader scans for one entry, so its names step back
+   to the secondary ink the way the section rows above them do. The sidebar's
+   anchor rule sets every link in the column at the primary ink, and a tree
+   left at that tone states the current domain by weight alone, which is not
+   enough separation to find a position in a column of names. */
 .catalog-row > .mono {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--sec);
 }
 
 /* The toggle keeps its width, because it is a control the reader aims at. */
@@ -447,7 +453,10 @@ h3 {
   font-weight: 600;
 }
 
-.catalog-row-current a {
+/* The current row comes back to the primary ink, so the tree separates it
+   from its siblings by tone as well as by weight. The selector covers the
+   restricted arm too, which draws its name in a span rather than a link. */
+.catalog-row-current .mono {
   color: var(--ink);
 }
 

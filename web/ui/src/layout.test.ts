@@ -452,6 +452,32 @@ describe("sidebar tree row", () => {
     expect(marker.textOverflow).toBe("ellipsis");
     expect(marker.whiteSpace).toBe("nowrap");
   });
+
+  // The sidebar's anchor rule sets every link in the column at the primary
+  // ink. Board 14a draws the tree as a quiet list with one strong entry, so a
+  // tree left at that tone separates the current domain from its siblings by
+  // weight alone. The case pins the two tones against each other.
+  it("draws the tree quiet and the current row at the primary ink", () => {
+    /** treeLabel attaches a tree row inside a sidebar and returns its name. */
+    function treeLabel(tag: string, current: boolean): Element {
+      const sidebar = document.createElement("div");
+      sidebar.className = "sidebar";
+      const row = document.createElement("div");
+      row.className = current ? "catalog-row catalog-row-current" : "catalog-row";
+      const name = document.createElement(tag);
+      name.className = "mono";
+      row.appendChild(name);
+      sidebar.appendChild(row);
+      document.body.appendChild(sidebar);
+      mounted.push(sidebar);
+      return name;
+    }
+
+    expect(declaredFor(treeLabel("a", false), "color")).toBe("var(--sec)");
+    expect(declaredFor(treeLabel("span", false), "color")).toBe("var(--sec)");
+    expect(declaredFor(treeLabel("a", true), "color")).toBe("var(--ink)");
+    expect(declaredFor(treeLabel("span", true), "color")).toBe("var(--ink)");
+  });
 });
 
 // A domain's artifacts and a search's results are one bordered container with
