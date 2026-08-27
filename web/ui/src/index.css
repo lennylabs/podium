@@ -2587,10 +2587,19 @@ label:has(> input:disabled) {
 
 .secret-reveal {
   padding: 14px 16px;
-  margin-bottom: 16px;
+  margin-bottom: 14px;
   border: 1px dashed var(--cbd);
   border-radius: 11px;
   background: var(--wash);
+}
+
+/* The acknowledgement is a row of its own under the block that frames the
+   credential, and the control it gates sits in the dialog's footer. */
+.secret-ack {
+  display: flex;
+  align-items: center;
+  font-size: 13.5px;
+  color: var(--sec);
 }
 
 /* A write the reader reviews before sending is a dialog over a scrim. The

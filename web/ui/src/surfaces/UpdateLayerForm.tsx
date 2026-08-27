@@ -92,13 +92,11 @@ export function UpdateLayerForm({
         onClose={done}
         dismissible={!revealsSecret(result)}
       >
-        <div className="modal-body">
-          <SecretReveal
-            result={result}
-            outcome={`Layer ${layer.ID} is updated.`}
-            onDone={done}
-          />
-        </div>
+        <SecretReveal
+          result={result}
+          outcome={`Layer ${layer.ID} is updated.`}
+          onDone={done}
+        />
       </Modal>
     );
   }

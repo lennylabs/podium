@@ -178,8 +178,7 @@ export function RegisterLayerForm({
     // discard a credential the reader can then recover only by rotating it.
     return (
       <Modal title="Layer registered" onClose={onClose} dismissible={!revealsSecret(result)}>
-        <div className="modal-body">
-          <SecretReveal result={result} outcome={`Layer ${result.layer.ID} is registered.`} onDone={onClose} />
+        <SecretReveal result={result} outcome={`Layer ${result.layer.ID} is registered.`} onDone={onClose}>
           {/* §7.3.1: registration runs no ingest, and a git source stays at
               its initial commit until a webhook delivery or the first manual
               reingest. The row the registration adds therefore reads "never"
@@ -190,7 +189,7 @@ export function RegisterLayerForm({
             Registering does not ingest. The layer serves no artifacts until its first ingest, which the Reingest
             control on its row runs.
           </p>
-        </div>
+        </SecretReveal>
       </Modal>
     );
   }

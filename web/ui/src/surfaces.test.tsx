@@ -7552,6 +7552,57 @@ describe("the layer write flows", () => {
     expect(within(secretRow).getByText("Webhook secret")).toBeTruthy();
   });
 
+  // The acknowledgement is the reader's own statement rather than part of the
+  // credential the dashed block frames, and the control it gates closes the
+  // dialog, so it belongs in the dialog's footer beside the note that names
+  // the way back.
+  //
+  // Spec: §13.10
+  it("puts the acknowledgement on its own row and Done in the modal footer", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "git",
+            Order: 1,
+            UserDefined: true,
+          },
+          webhook_url:
+            "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+          webhook_secret: "whsec-abc",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    const block = await screen.findByLabelText("Webhook secret");
+    // The checkbox sits outside the dashed block that frames the credential.
+    const ack = screen.getByLabelText("I have stored the secret.");
+    expect(block.contains(ack)).toBe(false);
+    // Done is the footer's primary, and the footer carries the rotation note.
+    const done = screen.getByRole("button", { name: "Done" });
+    const foot = done.closest(".modal-foot") as HTMLElement | null;
+    expect(foot).not.toBeNull();
+    expect(done.className).toContain("primary");
+    expect(foot!.contains(ack)).toBe(false);
+    expect(
+      within(foot!).getByText("You can rotate the secret later if you need to."),
+    ).toBeTruthy();
+    // The footer sits below the dialog's scrolling body rather than inside it.
+    expect(
+      (foot!.previousElementSibling as HTMLElement | null)?.className,
+    ).toContain("modal-body");
+  });
+
   // The reveal is the branch where naming the layer matters most: the
   // credential is unrecoverable, and a dialog that presents it without the
   // outcome never confirms that the layer was created or which layer the
