@@ -4781,6 +4781,36 @@ describe("the artifact viewer", () => {
       ).toBeNull();
     });
 
+    // A control that reports aria-expanded has to name the region the state
+    // belongs to, or assistive technology announces "expanded" over nothing.
+    // The header and the rail each clip the same description on one page, so
+    // the two regions also have to carry distinct ids.
+    // Spec: §13.10
+    it("points each clip control at the region it opens", async () => {
+      stubHeights(900);
+      stubViewer("The invoice approval path routes each document.");
+      await screen.findByLabelText("Artifact viewer");
+      const lead = screen.getByTestId("artifact-lead");
+      const railValue = screen.getByTestId("property-value-description");
+      const headerControl = screen.getByRole("button", { name: "Show more" });
+      const railControl = screen.getByRole("button", {
+        name: "Show the whole description value",
+      });
+      expect(headerControl.getAttribute("aria-controls")).toBe(lead.id);
+      expect(lead.id).not.toBe("");
+      expect(railControl.getAttribute("aria-controls")).toBe(railValue.id);
+      expect(railValue.id).not.toBe("");
+      expect(lead.id).not.toBe(railValue.id);
+      // Opening the region keeps the association, so the announced state and
+      // the named region stay in step.
+      fireEvent.click(headerControl);
+      const opened = screen.getByRole("button", { name: "Show less" });
+      expect(opened.getAttribute("aria-expanded")).toBe("true");
+      expect(opened.getAttribute("aria-controls")).toBe(
+        screen.getByTestId("artifact-lead").id,
+      );
+    });
+
     it("offers no control for a description the clip already holds", async () => {
       stubHeights(60);
       stubViewer("Pay a supplier invoice.");

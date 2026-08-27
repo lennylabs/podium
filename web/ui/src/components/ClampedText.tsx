@@ -7,7 +7,7 @@
 //
 // Spec: §13.10
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 
 /** ClampedText renders text under the shared three-line clip and carries the
  * control that opens it. The control appears only where the text actually
@@ -33,6 +33,12 @@ export function ClampedText({
    * button reads as its own label. */
   moreLabel?: string;
 }) {
+  // The control reports its state with aria-expanded, which is only half of
+  // what a screen reader needs: without aria-controls the state is announced
+  // over no named region. The paragraph therefore carries a generated id the
+  // button points at. The id comes from useId so the rail, which renders one
+  // clip per property row, does not repeat an id across the document.
+  const region = useId();
   const [expanded, setExpanded] = useState(false);
   const [overrun, setOverrun] = useState(false);
   const paragraph = useRef<HTMLParagraphElement>(null);
@@ -60,7 +66,12 @@ export function ClampedText({
 
   return (
     <>
-      <p ref={paragraph} className={expanded ? className : `${className} clamped`} data-testid={testID}>
+      <p
+        ref={paragraph}
+        id={region}
+        className={expanded ? className : `${className} clamped`}
+        data-testid={testID}
+      >
         {text}
       </p>
       {overrun && (
@@ -68,6 +79,7 @@ export function ClampedText({
           type="button"
           className="clamp-more"
           aria-expanded={expanded}
+          aria-controls={region}
           aria-label={moreLabel}
           onClick={() => {
             setExpanded(!expanded);
