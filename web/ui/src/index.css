@@ -3576,6 +3576,17 @@ button.stat-open {
   color: var(--faint);
 }
 
+/* An identifier in the row is a token the operator copies back into a gate,
+   such as the layer id the unregister confirmation asks to be typed. As a
+   flex item it takes min-content as its automatic minimum, so beside a long
+   message it shrank to the width of the longest unbreakable run and drew
+   `hr-layer` as `hr-` over `layer`, leaving it ambiguous whether the hyphen
+   belongs to the id. The identifier keeps its own text width and the message
+   beside it absorbs the rest of the row. */
+.attention-id {
+  flex: none;
+}
+
 .attention-text {
   min-width: 0;
   margin: 0;

@@ -1065,6 +1065,14 @@ describe("attention row", () => {
     expect(styled("attention-row").alignItems).toBe("baseline");
   });
 
+  // The identifier that leads the row is a flex item, and a flex item takes
+  // min-content as its automatic minimum, so beside a long message it shrank
+  // to the longest unbreakable run of the id and wrapped `hr-layer` at its
+  // hyphen. The column keeps its own text width instead.
+  it("keeps an identifier column at the width of its text", () => {
+    expect(ruleText(".attention-id")).toContain("flex: none");
+  });
+
   // The badge itself stays an inline box, so a badge sitting in a baseline-
   // aligned header keeps the alignment its container asks for.
   it("leaves the badge an inline box", () => {

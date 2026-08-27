@@ -742,7 +742,8 @@ export function ReingestRunReport({
             <p className="label">Refused · {refused.length}</p>
             {refused.map((outcome) => (
               <div key={outcome.layerID} className="attention-row attention-danger">
-                <span className="mono">{outcome.layerID}</span> <Badge tone="quiet">{refusalCode(outcome)}</Badge>{' '}
+                <span className="mono attention-id">{outcome.layerID}</span>{' '}
+                <Badge tone="quiet">{refusalCode(outcome)}</Badge>{' '}
                 {refusalMessage(outcome)}
               </div>
             ))}

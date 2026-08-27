@@ -353,6 +353,20 @@ describe('the finished fan-out report', () => {
     expect(refused.textContent).toContain('git source requires ref');
   });
 
+  // The layer id in that row is what the operator types back into the
+  // unregister gate, so it is drawn as a column that keeps its own text width
+  // rather than as a flex item the message beside it squeezes down to the
+  // longest unbreakable run, which broke `hr-layer` across two lines at its
+  // hyphen. jsdom performs no layout, so the case pins the class that carries
+  // the declaration; the rendered row is checked against a browser.
+  it('keeps the refused layer id on one line', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    const id = within(screen.getByLabelText('Refused layers')).getByText('acme/ops');
+    expect(id.className).toContain('attention-id');
+  });
+
   it('copies the whole run out, layer by layer', () => {
     const text = runText(runOutcomes, finishedAt);
     expect(text).toContain('Reingest all finished 14:06:22 UTC: 3 layers');
