@@ -195,10 +195,11 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           </ErrorState>
         )}
         {older && (
-          <div className="banner banner-accent" role="status" data-testid="older-version">
-            <p className="banner-title">You are reading version {body.version}.</p>
-            <button type="button" onClick={showLatest}>
-              Go to {latest}
+          <div className="banner banner-accent version-notice" role="status" data-testid="older-version">
+            <span className="version-notice-pin">Viewing {formatVersion(body.version)}</span>
+            <span className="quiet">— not the latest.</span>
+            <button type="button" className="version-notice-latest" onClick={showLatest}>
+              Go to {formatVersion(latest)}
             </button>
           </div>
         )}

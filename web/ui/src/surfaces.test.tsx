@@ -3571,8 +3571,11 @@ describe("the artifact viewer", () => {
     });
     pinVersion("1.0.0");
     const notice = await screen.findByTestId("older-version");
-    expect(notice.textContent).toContain("1.0.0");
-    expect(screen.getByRole("button", { name: "Go to 2.3.0" })).toBeTruthy();
+    // The notice names both versions the way the header's badge names one, so
+    // the row and the badge above it read as the same fact.
+    expect(notice.textContent).toContain("Viewing v1.0.0");
+    expect(notice.textContent).toContain("not the latest");
+    expect(screen.getByRole("button", { name: "Go to v2.3.0" })).toBeTruthy();
     expect(requests.some((r) => r.url.includes("version=1.0.0"))).toBe(true);
   });
 

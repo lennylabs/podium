@@ -703,6 +703,41 @@ h2.label {
   color: var(--danger);
 }
 
+/* The pinned-version notice is one row rather than a titled block: the version
+   being read, the fact that it is not the latest, and the way back to it. The
+   version is set in the mono face the version badge one line above uses, so
+   the reader matches the two at a glance, and it carries the same `v` prefix
+   that badge carries. A stacked heading and a chromed button restated the
+   header's own fact at the weight of a warning the reader has to act on. */
+.version-notice {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex-wrap: wrap;
+}
+
+.version-notice-pin {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+/* The way back is the version itself, underlined, because it returns the
+   reader to a version the page already names rather than starting an action:
+   a button chrome in a one-line notice reads as the heavier of the two. */
+button.version-notice-latest {
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--link);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+}
+
 /* A whole-surface failure is a card the reader lands on rather than a strip
    pinned to the top of an otherwise empty column, so it is centered in the
    content area and drawn in the surface tone: the page did not go wrong, the
