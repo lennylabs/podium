@@ -720,6 +720,32 @@ h2.label {
   border-color: var(--danger-bd);
 }
 
+/* A banner that carries a leading glyph holds it in a fixed gutter, so a
+   statement that wraps keeps its left edge under the first line. The danger
+   tone takes the glyph in its own colour, because the mark is what separates
+   the destructive statement from the reassuring one beside it. */
+.banner-lead {
+  display: flex;
+  gap: 11px;
+}
+
+.banner-glyph {
+  flex: none;
+  width: 11px;
+  color: var(--faint);
+  line-height: 1.5;
+}
+
+.banner-danger .banner-glyph {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
 .banner-title {
   margin: 0 0 4px;
   font-weight: 600;

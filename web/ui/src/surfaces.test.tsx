@@ -6122,6 +6122,42 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The destructive half and the recoverable half of the confirmation sit
+  // side by side and differ only in their fill, so each leads with its own
+  // glyph in a fixed gutter, the way the register form's consequence and note
+  // do. The glyph carries no text of its own and stays out of the
+  // accessibility tree.
+  it("leads each unregister consequence block with its own glyph", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
+    const dialog = await screen.findByLabelText("Unregister alice-personal");
+    const banners = Array.from(dialog.querySelectorAll(".banner"));
+    expect(banners.length).toBe(2);
+    for (const banner of banners) {
+      const style = window.getComputedStyle(banner);
+      expect(style.display).toBe("flex");
+      expect(style.gap).toBe("11px");
+      const glyph = banner.firstElementChild as HTMLElement;
+      expect(glyph.className).toBe("banner-glyph");
+      expect(glyph.getAttribute("aria-hidden")).toBe("true");
+      expect(glyph.textContent?.trim()).toBeTruthy();
+      expect(window.getComputedStyle(glyph).width).toBe("11px");
+    }
+    // The danger block's mark is not the neutral block's, so the two halves
+    // are told apart by more than their fill.
+    expect(banners[0].classList.contains("banner-danger")).toBe(true);
+    expect(banners[0].firstElementChild?.textContent?.trim()).not.toBe(
+      banners[1].firstElementChild?.textContent?.trim(),
+    );
+  });
+
   // The confirmation's single field commits on Enter, the way the version
   // picker's does, so the reader who has typed the ID does not have to reach
   // for the pointer. A half-typed ID leaves Enter inert, on the same match

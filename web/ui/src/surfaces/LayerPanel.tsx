@@ -1148,7 +1148,7 @@ function UnregisterConfirmation({
       <div className="modal-body">
         {/* The reach of the write leads, in the danger tone, because it is
             the half that cannot be undone by the reader alone. */}
-        <Banner tone="danger">
+        <Banner tone="danger" glyph="!">
           <p className="banner-title">
             Its artifacts disappear from every caller&rsquo;s view.
           </p>
@@ -1156,7 +1156,7 @@ function UnregisterConfirmation({
         </Banner>
         {/* The recovery window is the half that limits the damage, so it is
             stated in the neutral tone beside it rather than buried under it. */}
-        <Banner>
+        <Banner glyph="↺">
           <p className="banner-title">Recoverable for {recoveryDays} days.</p>
           <p>
             The layer and its artifacts are kept and can be restored from

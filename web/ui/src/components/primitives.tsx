@@ -239,10 +239,34 @@ export function DeprecatedBadge({ deprecated }: { deprecated?: boolean }) {
   return <Badge tone="accent">DEPRECATED</Badge>;
 }
 
-export function Banner({ tone = 'neutral', children }: { tone?: Tone; children: ReactNode }) {
+/**
+ * Banner states one fact about the surface it sits on. Two banners set side
+ * by side differ only in their fill, which is not enough to tell a warning
+ * from the aside beside it, so a banner that has a neighbour takes a leading
+ * glyph in its own gutter the way the register form's consequence and note do.
+ */
+export function Banner({
+  tone = 'neutral',
+  glyph,
+  children,
+}: {
+  tone?: Tone;
+  glyph?: string;
+  children: ReactNode;
+}) {
+  if (glyph === undefined) {
+    return (
+      <div className={`banner banner-${tone}`} role="status">
+        {children}
+      </div>
+    );
+  }
   return (
-    <div className={`banner banner-${tone}`} role="status">
-      {children}
+    <div className={`banner banner-${tone} banner-lead`} role="status">
+      <span className="banner-glyph" aria-hidden="true">
+        {glyph}
+      </span>
+      <div className="banner-text">{children}</div>
     </div>
   );
 }
