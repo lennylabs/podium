@@ -124,11 +124,19 @@ const strippedLinkClass = 'link-stripped';
 // names the removal in the same terms the stripped link uses.
 const strippedImageClass = 'image-stripped';
 
-/** clearMarkers strips both removal markers from a node, so a body that
+// The class the note left in place of an embedded document carries. An
+// `iframe` or an `embed` draws nothing of its own once its source is gone, so
+// without a note the paragraph an author wrote it in disappears and the
+// reader cannot tell a refusal from a body that failed to ingest. The note
+// names the removal in the same terms the stripped link and the stripped
+// image use.
+const strippedEmbedClass = 'embed-stripped';
+
+/** clearMarkers strips every removal marker from a node, so a body that
  * writes one on a live element of its own cannot pass that element off as a
  * neutralized one. */
 function clearMarkers(node: Element): void {
-  for (const marker of [strippedLinkClass, strippedImageClass]) {
+  for (const marker of [strippedLinkClass, strippedImageClass, strippedEmbedClass]) {
     node.classList.remove(marker);
   }
   if (node.hasAttribute('class') && node.classList.length === 0) {
@@ -157,6 +165,32 @@ function replaceStrippedImages(root: DocumentFragment): void {
     note.className = strippedImageClass;
     note.textContent = image.getAttribute('alt') ?? '';
     image.replaceWith(note);
+  }
+}
+
+// The embedded-document elements a body can carry. The sanitizer's HTML
+// profile drops both outright, which leaves nothing where the author wrote
+// one, so they are admitted as tags and replaced here instead. Admitting them
+// costs nothing: the hook above removes the attributes a browser fetches on
+// its own, this pass removes the elements themselves before the markup
+// leaves the module, and the fragment they pass through is detached, so
+// neither one is ever laid out.
+const embedTags = ['iframe', 'embed'];
+
+/** replaceStrippedEmbeds replaces every embedded document by a note holding
+ * its title, which is the only text such an element carries. The replacement
+ * is unconditional, so no embedded document survives this pass whatever the
+ * sanitizer left on it.
+ *
+ * The pass runs on the sanitizer's output for the reason
+ * `replaceStrippedImages` does: the hook clears the marker classes from every
+ * node it visits and would clear the marker off the note. */
+function replaceStrippedEmbeds(root: DocumentFragment): void {
+  for (const embed of root.querySelectorAll(embedTags.join(','))) {
+    const note = document.createElement('span');
+    note.className = strippedEmbedClass;
+    note.textContent = embed.getAttribute('title') ?? '';
+    embed.replaceWith(note);
   }
 }
 
@@ -298,13 +332,19 @@ export function renderArtifactBody(body: string, resources: readonly string[] = 
     // that a reader cannot tell from the UI's own chrome, which is the
     // credential prompt this control exists to prevent.
     FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'option'],
-    FORBID_ATTR: ['style'],
+    // The embedded-document elements are admitted so `replaceStrippedEmbeds`
+    // below can leave a note where the author wrote one. `srcdoc` is refused
+    // with them: it carries a whole document inline rather than a URL, so no
+    // attribute test reaches what it holds.
+    ADD_TAGS: embedTags,
+    FORBID_ATTR: ['style', 'srcdoc'],
     // The fragment is taken rather than the string so the pass below runs on
     // the sanitizer's own output. Nothing between the two adds an element or
     // an attribute the sanitizer did not pass.
     RETURN_DOM_FRAGMENT: true,
   });
   replaceStrippedImages(sanitized);
+  replaceStrippedEmbeds(sanitized);
   routeArtifactReferences(sanitized, new Set(resources));
   markScrollableRegions(sanitized);
   const holder = document.createElement('div');

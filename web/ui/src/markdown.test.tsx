@@ -234,6 +234,33 @@ describe('the sanitized artifact-body rendering path', () => {
     expect(live.querySelector('.image-stripped')).toBeNull();
   });
 
+  // An embedded document draws nothing at all once the rendering path has
+  // refused its source, so the paragraph the author wrote it in disappears
+  // and the reader cannot tell a refusal from a body that failed to ingest.
+  // The path replaces it with a note, which the stylesheet names the removal
+  // beside, in the same terms it names the stripped link and the stripped
+  // image. The marker is stripped from every node the body writes it on, so a
+  // body cannot pass an element of its own off as a neutralized one.
+  it('replaces an embedded document it removed with a note', () => {
+    const stripped = [
+      '<iframe src="https://example.com/frame" title="a frame"></iframe>\n',
+      '<iframe srcdoc="&lt;script&gt;window.hijacked=1&lt;/script&gt;" title="a frame"></iframe>\n',
+      '<embed src="https://example.com/frame" title="a frame">\n',
+    ];
+    for (const body of stripped) {
+      const container = renderBody(body);
+      expect(container.querySelector('iframe')).toBeNull();
+      expect(container.querySelector('embed')).toBeNull();
+      expect(container.querySelector('[srcdoc]')).toBeNull();
+      const note = container.querySelector('.embed-stripped');
+      expect(note?.textContent).toBe('a frame');
+    }
+
+    const live = renderBody('<p class="embed-stripped">local</p>\n');
+    expect(live.querySelector('p')?.textContent).toBe('local');
+    expect(live.querySelector('.embed-stripped')).toBeNull();
+  });
+
   it('renders a markup-carrying frontmatter value as literal text', () => {
     const container = render(<PropertyTable raw={'title: <img src=x onerror="window.hijacked=1">\n'} />).container;
     expect(container.querySelector('img')).toBeNull();

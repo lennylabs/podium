@@ -2221,6 +2221,20 @@ label:has(> input:disabled) {
   color: var(--meta);
 }
 
+/* The note left where an embedded document stood. Such an element draws
+   nothing of its own once the viewer refuses its source, so without the note
+   the paragraph the author wrote it in disappears and the reader cannot tell
+   a refusal from a body that failed to ingest. */
+.prose .embed-stripped {
+  color: var(--meta);
+}
+
+.prose .embed-stripped::after {
+  content: " (embed removed)";
+  font-size: 12px;
+  color: var(--meta);
+}
+
 /* A quoted aside carries no marker of its own once the user-agent indent is
    dropped, so the rule on the left is what separates it from the paragraph
    above it, and the quieter ink is what marks it as borrowed rather than
