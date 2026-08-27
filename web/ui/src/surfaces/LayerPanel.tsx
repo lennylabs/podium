@@ -146,6 +146,24 @@ export function LayerPanel({
     recoverable.reload();
   };
 
+  /** runReport is the finished fan-out's report, built before the panel's
+   * read guards. The run ends with a reload, and an outage that began while
+   * the fan-out was issuing requests fails that reload and puts the panel
+   * into its error state; a report rendered only under that guard is
+   * unmounted by it, and a press that issued a request per layer would then
+   * state nothing about what any of them answered. */
+  const runReport =
+    run !== null && run.finishedAt !== null ? (
+      <ReingestRunReport
+        outcomes={run.outcomes}
+        startedAt={run.startedAt}
+        finishedAt={run.finishedAt}
+        onDone={() => {
+          setRun(null);
+        }}
+      />
+    ) : null;
+
   // The loading state stands in for the panel on the first read alone. A
   // write reloads the list, and the reload reports loading again, so swapping
   // the whole panel out here would unmount the form that issued the write and
@@ -155,7 +173,12 @@ export function LayerPanel({
     return <Loading label="Loading the layers." />;
   }
   if (layers.error !== null) {
-    return <ErrorState error={layers.error} onRetry={reloadPanel} />;
+    return (
+      <>
+        {runReport}
+        <ErrorState error={layers.error} onRetry={reloadPanel} />
+      </>
+    );
   }
   const rows = layers.value ?? [];
 
@@ -328,16 +351,7 @@ export function LayerPanel({
           </button>
         </div>
       </div>
-      {run !== null && run.finishedAt !== null && (
-        <ReingestRunReport
-          outcomes={run.outcomes}
-          startedAt={run.startedAt}
-          finishedAt={run.finishedAt}
-          onDone={() => {
-            setRun(null);
-          }}
-        />
-      )}
+      {runReport}
       {/* §13.2.1 marks a read-only registry on its read responses, so the
           state is presented once here and every write control is unavailable
           at once rather than each one failing when it is pressed. */}

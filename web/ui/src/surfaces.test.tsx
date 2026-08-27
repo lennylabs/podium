@@ -8630,6 +8630,46 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The run ends by re-reading the layer list, and an outage that began while
+  // the fan-out was running refuses that read. The press issued a request per
+  // layer, so what they answered is reported beside the outage rather than
+  // being dropped by the panel's error state.
+  it("reports the run when the reload that ends it is refused", async () => {
+    const stubs: Record<string, Stub> = {
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+      "/v1/layers/reingest?id=company": {
+        body: { accepted: 3, idempotent: 1 },
+      },
+      "/v1/layers/reingest?id=alice-personal": {
+        status: 503,
+        body: { code: "registry.unavailable", message: "down" },
+      },
+    };
+    stubRegistry(stubs);
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    // The outage begins after the panel loaded, so the fan-out's first layer
+    // answers and the reload that follows the run does not.
+    stubs["/v1/layers"] = {
+      status: 503,
+      body: { code: "registry.unavailable", message: "down" },
+    };
+    fireEvent.click(screen.getByRole("button", { name: "Reingest all" }));
+    // The refused reload lands last, and the report is still on the page once
+    // it has: the outage state stands in for the table alone.
+    await screen.findByText("The registry did not answer this request.");
+    const report = screen.getByLabelText("Reingest all result");
+    // Both layers are in the report: the one that answered before the outage
+    // and the one the outage refused.
+    expect(report.textContent).toContain("company");
+    expect(report.textContent).toContain("alice-personal");
+    expect(screen.getByLabelText("Refused layers").textContent).toContain(
+      "registry.unavailable",
+    );
+  });
+
   // The reingest call runs the whole pipeline inside the request and answers
   // with a summary the reader has to act on, so the control presents the
   // counts and, behind the count that carries the list, the itemised
