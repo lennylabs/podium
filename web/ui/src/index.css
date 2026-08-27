@@ -2680,10 +2680,15 @@ label:has(> input:disabled) {
   overflow-y: auto;
 }
 
+/* The footer's controls sit at the trailing edge, where the dialog's press is
+   aimed in every board. A footer that carries a note reached that edge through
+   the note's `flex: 1`; one without a note left its buttons against the leading
+   edge, so the same application drew its dialog footers two ways. */
 .modal-foot {
   flex: none;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 9px;
   padding: 14px 22px;
   border-top: 1px solid var(--b2);

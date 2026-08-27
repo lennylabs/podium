@@ -1274,3 +1274,18 @@ describe("layer row overflow menu", () => {
     expect(menu.zIndex).toBe("20");
   });
 });
+
+// Every dialog footer puts its controls at the trailing edge. The alignment
+// came from the `flex: 1` on the footer's note, so a footer that carries no
+// note drew Cancel and its primary against the leading edge instead. jsdom
+// performs no layout, so the case pins the declaration on the footer itself;
+// the rendered result is checked against a browser.
+describe("dialog footer", () => {
+  it("aligns the footer controls to the trailing edge without a note", () => {
+    expect(styled("modal-foot").justifyContent).toBe("flex-end");
+  });
+
+  it("keeps the note leading the controls when the footer carries one", () => {
+    expect(styled("modal-foot-note").flexGrow).toBe("1");
+  });
+});
