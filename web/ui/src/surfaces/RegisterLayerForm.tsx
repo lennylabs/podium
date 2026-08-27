@@ -113,6 +113,7 @@ export function RegisterLayerForm({
   // clicking a disabled control that reports no reason, and the field the hold
   // is on scrolls out of view once the body is scrolled to the submit row.
   const hold = registrationHold({
+    id,
     sourceType,
     ref,
     localPath,
@@ -205,16 +206,15 @@ export function RegisterLayerForm({
               <RegistrationRefusal refusal={refusal} />
             </div>
           )}
-          <label className="field">
-            <span className="label">Layer ID</span>
-            <input
-              type="text"
-              value={id}
-              onChange={(event) => {
-                setID(event.target.value);
-              }}
-            />
-          </label>
+          <RequiredField
+            label="Layer ID"
+            value={id}
+            testID="register-id"
+            held={heldOn('id')}
+            onChange={(next) => {
+              setID(next);
+            }}
+          />
           <label className="field">
             <span className="label">Layer class</span>
             <select
@@ -389,7 +389,7 @@ export function RegisterLayerForm({
 
 /** HoldField identifies the field a registration hold stands on, so the field
  * itself can be marked invalid and pointed at the sentence stating the hold. */
-type HoldField = 'ref' | 'local-path' | 'groups' | 'users';
+type HoldField = 'id' | 'ref' | 'local-path' | 'groups' | 'users';
 
 /** registrationHold names the field the submit is held on, or null when the
  * form is ready to send. The submit is disabled while a hold stands, and a
@@ -397,6 +397,7 @@ type HoldField = 'ref' | 'local-path' | 'groups' | 'users';
  * that does nothing, so every arm of the hold has a sentence naming the field
  * it is on. */
 function registrationHold({
+  id,
   sourceType,
   ref,
   localPath,
@@ -406,6 +407,7 @@ function registrationHold({
   userScoped,
   userMembers,
 }: {
+  id: string;
   sourceType: string;
   ref: string;
   localPath: string;
@@ -415,6 +417,14 @@ function registrationHold({
   userScoped: boolean;
   userMembers: string[];
 }): { field: HoldField; message: string } | null {
+  // §4.6: a layer is addressed by its ID and every source type carries one.
+  // The registry refuses a registration without it with
+  // "id and source_type are required", a message naming a field the form
+  // does not draw, so the form holds the write until the ID is named rather
+  // than sending a request it knows will be refused.
+  if (id.trim() === '') {
+    return { field: 'id', message: 'Name the layer ID before registering.' };
+  }
   if (sourceType === 'git' && ref.trim() === '') {
     return { field: 'ref', message: 'Name the ref before registering.' };
   }

@@ -6296,6 +6296,11 @@ describe("the layer write flows", () => {
     await screen.findByLabelText("Layer panel");
     fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
     const note = screen.getByTestId("register-foot-note");
+    // The ID holds the submit first, so it is named before the ref becomes
+    // the field the hold stands on.
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "git-layer" },
+    });
     const ref = screen.getByLabelText("Ref");
     expect(ref.getAttribute("aria-invalid")).toBe("true");
     expect(ref.getAttribute("aria-describedby")).toBe(note.id);
@@ -6326,6 +6331,60 @@ describe("the layer write flows", () => {
     expect(groupField.getAttribute("aria-invalid")).toBe("true");
     expect(groupField.getAttribute("aria-describedby")).toBe(
       screen.getByTestId("register-foot-note").id,
+    );
+  });
+
+  // A layer is addressed by its ID, and a registration without one is refused
+  // by the registry with a message naming `source_type`, a field the form
+  // never draws. The ID therefore carries the same requirement marker and the
+  // same hold the ref and the local path carry, on every source type.
+  it("holds a registration until the layer ID is named", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = screen.getByRole("dialog", { name: "Register a layer" });
+    const register = within(dialog).getByRole("button", { name: "Register" });
+    const note = screen.getByTestId("register-foot-note");
+    const layerID = screen.getByLabelText("Layer ID");
+    expect(screen.getByTestId("register-id-required").textContent).toBe(
+      "required",
+    );
+    expect(layerID.getAttribute("aria-required")).toBe("true");
+    // The local arm's own field filled, the submit is still held, and the
+    // footer and the ID field both name the ID as what is holding it.
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "/Users/alice/reg" },
+    });
+    expect(register.hasAttribute("disabled")).toBe(true);
+    expect(note.textContent).toContain("Name the layer ID before registering.");
+    expect(register.getAttribute("aria-describedby")).toBe(note.id);
+    expect(layerID.getAttribute("aria-invalid")).toBe("true");
+    expect(layerID.getAttribute("aria-describedby")).toBe(note.id);
+    // Naming the ID releases the hold on every source type.
+    fireEvent.change(layerID, { target: { value: "alice-personal" } });
+    expect(register.hasAttribute("disabled")).toBe(false);
+    expect(layerID.getAttribute("aria-invalid")).toBe(null);
+    expect(screen.getByTestId("register-foot-note").textContent).toContain(
+      "Registers at the end of the order",
+    );
+    // The git arm holds on the ID just the same, and whitespace alone does
+    // not name one.
+    fireEvent.click(screen.getByRole("radio", { name: "Git repository" }));
+    fireEvent.change(screen.getByLabelText("Ref"), {
+      target: { value: "main" },
+    });
+    fireEvent.change(layerID, { target: { value: "   " } });
+    expect(register.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByTestId("register-foot-note").textContent).toContain(
+      "Name the layer ID before registering.",
     );
   });
 
