@@ -196,6 +196,7 @@ export function SearchSurface({
       <SearchResults
         search={search}
         filtered={type !== "" || scope !== "" || tags.length > 0}
+        queried={text !== ""}
         cap={cap}
         onMore={(step) => {
           setCap((held) => Math.min(held + step, searchCapMax));
@@ -371,11 +372,13 @@ function TokenEntry({
 function SearchResults({
   search,
   filtered,
+  queried,
   cap,
   onMore,
 }: {
   search: Async<SearchResponse>;
   filtered: boolean;
+  queried: boolean;
   cap: number;
   onMore: (step: number) => void;
 }) {
@@ -394,7 +397,18 @@ function SearchResults({
     // The remedy names only what the reader can act on. A row standing at
     // "type: all" and "scope: all" with no tag pill has no filter to clear,
     // so offering that as the way out sends the reader looking for a control
-    // the page does not carry (§13.10).
+    // the page does not carry (§13.10). A row that also carries no query text
+    // issued a browse over the whole catalog, so an empty result set is a
+    // catalog holding nothing rather than a search that missed: there is no
+    // query to widen, and the way out is the one the sidebar tree already
+    // names for the same registry.
+    if (!filtered && !queried) {
+      return (
+        <EmptyState>
+          The catalog holds no artifacts. Register a layer to fill it.
+        </EmptyState>
+      );
+    }
     return (
       <EmptyState>
         {filtered

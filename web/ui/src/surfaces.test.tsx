@@ -3015,6 +3015,55 @@ describe("search", () => {
     ).toBeTruthy();
   });
 
+  // Spec: §13.10
+  it("names the empty catalog rather than a missed query when neither was issued", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/");
+    render(<App />);
+    // The browse carried no query and no filter, so nothing was searched for
+    // and there is nothing to widen. The remedy is the one the sidebar tree
+    // names for the same registry.
+    const empty = await screen.findByText(
+      "The catalog holds no artifacts. Register a layer to fill it.",
+    );
+    expect(empty).toBeTruthy();
+    expect(
+      screen.queryByText("Nothing matched. Widen the query."),
+    ).toBeNull();
+    // Typing a query makes the empty result the answer to that query, so the
+    // no-match remedy returns.
+    fireEvent.change(screen.getByLabelText("Search artifacts"), {
+      target: { value: "deploy" },
+    });
+    expect(
+      await screen.findByText("Nothing matched. Widen the query."),
+    ).toBeTruthy();
+  });
+
+  // Spec: §13.10
+  it("names a filtered browse with no query as a search that matched nothing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/");
+    render(<App />);
+    await screen.findByText(
+      "The catalog holds no artifacts. Register a layer to fill it.",
+    );
+    // A filter applied with no query text is a request the reader issued, and
+    // the filter is a control the row carries, so the remedy names it.
+    selectFilter("type", "skill");
+    expect(
+      await screen.findByText(
+        "Nothing matched. Widen the query or clear a filter.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("offers clearing a filter only when the row carries one", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
