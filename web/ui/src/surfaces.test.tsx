@@ -3656,6 +3656,37 @@ describe("the artifact viewer", () => {
     expect(screen.getByTestId("frontmatter-table")).toBeTruthy();
   });
 
+  // The raw pane scrolls sideways, so it takes the same treatment as the
+  // rendered body's tables and code fences: a keyboard-only reader reaches it
+  // in the tab order and is told what it holds.
+  // Spec: §13.10
+  it("names the raw frontmatter pane as a focusable region", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: manifestDoc,
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Raw YAML" }));
+    const pane = screen.getByRole("region", {
+      name: "Frontmatter, as authored",
+    });
+    expect(pane.getAttribute("data-testid")).toBe("raw-frontmatter");
+    expect(pane.getAttribute("tabindex")).toBe("0");
+  });
+
   // The version affordance is disclosed from the badge in the header. Most
   // artifacts carry one published version, and standing an entry field and
   // its button between the description and the tabs put a form on the page

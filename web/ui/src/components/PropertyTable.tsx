@@ -189,10 +189,21 @@ function AbsentValue({ keyName }: { keyName: string }) {
 /** RawBlock is the block as the author wrote it. The line the parser
  * complained about is marked, so the reader is shown where the failure is
  * rather than only being told its coordinates. A block with no reported
- * position marks nothing. */
+ * position marks nothing.
+ *
+ * The block scrolls sideways, so it is a named region in the tab order the
+ * same way the rendered body's tables and code fences are (§13.10). Without
+ * it a keyboard-only reader cannot reach the scroll container and cannot read
+ * a value that runs past the pane's right edge. */
 function RawBlock({ block, offending }: { block: string; offending: number }) {
   return (
-    <pre className="mono raw-frontmatter" data-testid="raw-frontmatter">
+    <pre
+      className="mono raw-frontmatter"
+      data-testid="raw-frontmatter"
+      tabIndex={0}
+      role="region"
+      aria-label="Frontmatter, as authored"
+    >
       {block.split('\n').map((line, index) => (
         <span
           key={`${String(index)}:${line}`}
