@@ -6575,6 +6575,7 @@ describe("the layer write flows", () => {
       target: { value: "git-layer" },
     });
     const ref = screen.getByLabelText("Ref");
+    fireEvent.blur(ref);
     expect(ref.getAttribute("aria-invalid")).toBe("true");
     expect(ref.getAttribute("aria-describedby")).toBe(note.id);
     // Naming the ref releases the hold, and the field stops reporting itself
@@ -6585,6 +6586,7 @@ describe("the layer write flows", () => {
     // The local arm carries the same association on its own field.
     fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
     const localPath = screen.getByLabelText("Local path");
+    fireEvent.blur(localPath);
     expect(localPath.getAttribute("aria-invalid")).toBe("true");
     expect(localPath.getAttribute("aria-describedby")).toBe(
       screen.getByTestId("register-foot-note").id,
@@ -6601,9 +6603,45 @@ describe("the layer write flows", () => {
     const groupField = screen.getByLabelText(
       "Group names, separated by commas",
     );
+    fireEvent.blur(groupField);
     expect(groupField.getAttribute("aria-invalid")).toBe("true");
     expect(groupField.getAttribute("aria-describedby")).toBe(
       screen.getByTestId("register-foot-note").id,
+    );
+  });
+
+  // The dialog opens with every required field empty, and the ID takes focus.
+  // A field that reported itself invalid from the hold alone would announce a
+  // refusal on a form the reader has not begun to fill in. The mark waits
+  // until the reader has been in the field and left it empty.
+  it("leaves a pristine required field unmarked until it is left empty", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const layerID = screen.getByLabelText("Layer ID");
+    const note = screen.getByTestId("register-foot-note");
+    // The hold stands on the ID and the footer says so, and the requirement
+    // reaches the field through the marker and `aria-required`, but the
+    // pristine field is not invalid.
+    expect(note.textContent).toContain("Name the layer ID before registering.");
+    expect(layerID.getAttribute("aria-required")).toBe("true");
+    expect(layerID.getAttribute("aria-invalid")).toBe(null);
+    // Leaving the field still empty is what marks it.
+    fireEvent.blur(layerID);
+    expect(layerID.getAttribute("aria-invalid")).toBe("true");
+    // A pristine ref carries no mark either, and it is the field the hold
+    // moves to once the ID is named.
+    fireEvent.change(layerID, { target: { value: "alice-personal" } });
+    expect(layerID.getAttribute("aria-invalid")).toBe(null);
+    expect(screen.getByLabelText("Ref").getAttribute("aria-invalid")).toBe(
+      null,
     );
   });
 
@@ -6639,6 +6677,7 @@ describe("the layer write flows", () => {
     expect(register.hasAttribute("disabled")).toBe(true);
     expect(note.textContent).toContain("Name the layer ID before registering.");
     expect(register.getAttribute("aria-describedby")).toBe(note.id);
+    fireEvent.blur(layerID);
     expect(layerID.getAttribute("aria-invalid")).toBe("true");
     expect(layerID.getAttribute("aria-describedby")).toBe(note.id);
     // Naming the ID releases the hold on every source type.

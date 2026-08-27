@@ -442,6 +442,23 @@ function registrationHold({
   return null;
 }
 
+/** useHeldInvalid decides whether the field a hold stands on marks itself
+ * invalid, and carries the blur handler that arms the mark. The dialog opens
+ * with every required field empty, so a field that reported itself invalid
+ * from the hold alone would announce a refusal on a form the reader has not
+ * begun to fill in, on the very control that takes focus. The visible
+ * requirement marker, `aria-required`, and the footer sentence carry the
+ * requirement until the reader has been in the field and left it empty. */
+function useHeldInvalid(held: string | undefined): { invalid: true | undefined; onBlur: () => void } {
+  const [touched, setTouched] = useState(false);
+  return {
+    invalid: held !== undefined && touched ? true : undefined,
+    onBlur: () => {
+      setTouched(true);
+    },
+  };
+}
+
 /** RequiredField is a text field the submit is held on. It carries a visible
  * requirement marker beside its label and `aria-required` on its input, and it
  * associates the two by id rather than by wrapping, so the marker stays out of
@@ -461,6 +478,7 @@ function RequiredField({
   onChange: (next: string) => void;
 }) {
   const inputID = useId();
+  const { invalid, onBlur } = useHeldInvalid(held);
   return (
     <div className="field">
       <span className="label">
@@ -474,8 +492,9 @@ function RequiredField({
         type="text"
         value={value}
         aria-required="true"
-        aria-invalid={held === undefined ? undefined : true}
+        aria-invalid={invalid}
         aria-describedby={held}
+        onBlur={onBlur}
         onChange={(event) => {
           onChange(event.target.value);
         }}
@@ -591,6 +610,7 @@ function TokenInput({
 }) {
   const inputID = useId();
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const { invalid, onBlur } = useHeldInvalid(held);
   return (
     <div className="field token-input">
       <label className="label" htmlFor={inputID}>
@@ -601,8 +621,9 @@ function TokenInput({
         ref={inputRef}
         type="text"
         value={value}
-        aria-invalid={held === undefined ? undefined : true}
+        aria-invalid={invalid}
         aria-describedby={held}
+        onBlur={onBlur}
         onChange={(event) => {
           onChange(event.target.value);
         }}
