@@ -3765,6 +3765,22 @@ label:has(> input:disabled) {
   box-shadow: inset 2px 0 0 var(--acc);
 }
 
+/* The file name carries the row's selection, so it is a button that reads as
+   the cell's text: the row's tint and accent bar are the selected state the
+   reader sees, and the button contributes the focus ring and the keyboard
+   path. The transparent border reserves the width the focus ring's border
+   takes, so focusing a name does not shift the column. */
+.resource-name {
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .resource-detail {
   margin-top: 10px;
   padding: 12px 14px;

@@ -1032,7 +1032,24 @@ function ResourceTable({ rows }: { rows: ResourceRow[] }) {
                 setSelected(row.name);
               }}
             >
-              <td className="mono">{row.name}</td>
+              <td className="mono">
+                {/* The file name is a button so the selection that drives the
+                    detail card has an input path that is not a pointer click
+                    on the row. A row carries no role a keyboard reaches, so
+                    without the button the card below the table is unreachable
+                    without a mouse. The row's own click handler stays for the
+                    pointer, so a click anywhere in the row still selects it. */}
+                <button
+                  type="button"
+                  className="resource-name"
+                  aria-pressed={row.name === selected}
+                  onClick={() => {
+                    setSelected(row.name);
+                  }}
+                >
+                  {row.name}
+                </button>
+              </td>
               <td className="mono">{row.format}</td>
               <td className="mono">{formatSize(row.size)}</td>
               <td>

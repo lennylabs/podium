@@ -11683,6 +11683,31 @@ describe("the artifact viewer’s resources", () => {
     expect(rows[1].className).toContain("row-selected");
   });
 
+  // The selection drives what the tab shows, so it is operable without a
+  // pointer: the file name is a button a keyboard reaches and activates, and
+  // it states whether its row is the selected one.
+  it("selects a resource row from the keyboard", async () => {
+    resourcePage();
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Resources/ }));
+    const table = within(screen.getByLabelText("Resources"));
+    const name = table.getByRole("button", { name: "corpus.bin" });
+    name.focus();
+    expect(document.activeElement).toBe(name);
+    expect(name.getAttribute("aria-pressed")).toBe("false");
+    // A focused button activates on Enter or Space, which the browser
+    // delivers as a click.
+    fireEvent.click(name);
+    expect(name.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByTestId("resource-detail").textContent).toContain(
+      "corpus.bin",
+    );
+    expect(
+      table.getAllByRole("row").slice(1)[1].className,
+    ).toContain("row-selected");
+  });
+
   // One file's size reads the same in every place the tab states it: the
   // total above the table, the row's size column, and the detail card under
   // it all take the same unit.
