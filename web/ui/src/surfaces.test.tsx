@@ -6820,6 +6820,52 @@ describe("the layer write flows", () => {
     );
   });
 
+  // §4.6 keys a layer on its ID and the registration writes that key, so
+  // reusing the ID of a registered layer rewrites it: the stored layer takes a
+  // new place at the end of the order and its last ingest is cleared, while
+  // the dialog reports plain success. The panel already lists the IDs, so the
+  // form holds the submit on a reused one and names the layer it would
+  // overwrite.
+  it("holds the register submit on a layer ID that is already registered", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = screen.getByRole("dialog", { name: "Register a layer" });
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "company" },
+    });
+    fireEvent.change(screen.getByLabelText("Repository"), {
+      target: { value: "https://github.com/acme/company.git" },
+    });
+    fireEvent.change(screen.getByLabelText("Ref"), {
+      target: { value: "main" },
+    });
+    const register = within(dialog).getByRole("button", { name: "Register" });
+    const note = screen.getByTestId("register-foot-note");
+    expect(register.hasAttribute("disabled")).toBe(true);
+    expect(note.textContent).toContain("Layer company is already registered.");
+    expect(register.getAttribute("aria-describedby")).toBe(note.id);
+    // The hold stands on the ID field, which reports itself invalid once the
+    // reader has left it.
+    fireEvent.blur(screen.getByLabelText("Layer ID"));
+    expect(
+      screen.getByLabelText("Layer ID").getAttribute("aria-invalid"),
+    ).toBe("true");
+    // An unused ID releases the hold.
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "company-archive" },
+    });
+    expect(register.hasAttribute("disabled")).toBe(false);
+    expect(screen.getByTestId("register-foot-note").textContent).toContain(
+      "Registers at the end of the order",
+    );
+  });
+
   // The guidance under the fields is explanatory text about the controls
   // beside it. Left at the body size it is the longest and largest run of
   // text in the dialog, louder than the field labels and the checkbox titles

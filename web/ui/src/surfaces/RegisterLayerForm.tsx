@@ -25,6 +25,7 @@ import { ApiError, registerLayer } from '../api';
 export function RegisterLayerForm({
   subject,
   knownGroups,
+  knownIDs,
   onRegistered,
   onClose,
   readOnly,
@@ -34,6 +35,13 @@ export function RegisterLayerForm({
    * can see. They back the group axis's typeahead, which is the only check the
    * form can offer on a name before it is sent. */
   knownGroups: string[];
+  /** knownIDs are the IDs of the layers the panel already lists. §4.6 keys a
+   * layer on its ID and the registration is an upsert on that key, so a
+   * registration reusing one rewrites the stored layer, reassigning its place
+   * in the order and clearing its ingest state. The list covers the layers the
+   * caller can see, which is what the form can check a posted ID against
+   * before it sends one. */
+  knownIDs: readonly string[];
   onRegistered: () => void;
   onClose: () => void;
   readOnly: boolean;
@@ -114,6 +122,7 @@ export function RegisterLayerForm({
   // is on scrolls out of view once the body is scrolled to the submit row.
   const hold = registrationHold({
     id,
+    knownIDs,
     sourceType,
     ref,
     localPath,
@@ -408,6 +417,7 @@ type HoldField = 'id' | 'ref' | 'local-path' | 'groups' | 'users';
  * it is on. */
 function registrationHold({
   id,
+  knownIDs,
   sourceType,
   ref,
   localPath,
@@ -418,6 +428,7 @@ function registrationHold({
   userMembers,
 }: {
   id: string;
+  knownIDs: readonly string[];
   sourceType: string;
   ref: string;
   localPath: string;
@@ -434,6 +445,18 @@ function registrationHold({
   // than sending a request it knows will be refused.
   if (id.trim() === '') {
     return { field: 'id', message: 'Name the layer ID before registering.' };
+  }
+  // §4.6 keys a layer on its ID, and the registration writes that key rather
+  // than refusing a reused one: the stored layer is rewritten, its place in
+  // the order is reassigned to the end, and its last ingest is cleared, so a
+  // live layer is reset by a registration that reports plain success. The
+  // panel already lists the IDs, so the form holds the write on a reused one
+  // and names the layer it would overwrite.
+  if (knownIDs.some((known) => known === id.trim())) {
+    return {
+      field: 'id',
+      message: `Layer ${id.trim()} is already registered. Registering it again would reset its place in the order and its last ingest, so name an unused ID.`,
+    };
   }
   if (sourceType === 'git' && ref.trim() === '') {
     return { field: 'ref', message: 'Name the ref before registering.' };

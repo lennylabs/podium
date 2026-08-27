@@ -349,6 +349,7 @@ export function LayerPanel({
         <RegisterLayerForm
           subject={subject}
           knownGroups={grantedGroups(rows)}
+          knownIDs={rows.map((row) => row.ID)}
           onRegistered={afterWrite}
           onClose={() => {
             setRegistering(false);
