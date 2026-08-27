@@ -9421,6 +9421,37 @@ describe("the layer write flows", () => {
     expect(store.effectAllowed).toBe("move");
   });
 
+  // The dragged row takes the slot of the row it is dropped onto, so it lands
+  // above that row when it moves up the table and below it when it moves
+  // down. The indicator marks the edge the row will land on, because an
+  // indicator fixed to the top edge promises the slot above the target on a
+  // downward drag and the row arrives one place further down than that.
+  it("marks the edge the dragged row will land on", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
+        },
+      },
+      "/v1/layers/reorder": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    // Downward: alice-personal onto alice-scratch lands below alice-scratch.
+    dragRowOver("alice-personal", "alice-scratch");
+    expect(layerRow("alice-scratch").className).toContain("row-drop-below");
+    expect(layerRow("alice-scratch").className).not.toContain("row-drop-above");
+    fireEvent.dragEnd(layerRow("alice-personal"));
+    // Upward: bob-personal onto alice-personal lands above alice-personal.
+    dragRowOver("bob-personal", "alice-personal");
+    expect(layerRow("alice-personal").className).toContain("row-drop-above");
+    expect(layerRow("alice-personal").className).not.toContain(
+      "row-drop-below",
+    );
+  });
+
   // §4.6 composes every user-defined layer above every admin-defined one
   // whatever the stored order values are, so a drop across the class boundary
   // names a move no composition would make and the panel sends nothing.
@@ -10716,6 +10747,14 @@ function moveHandleLabel(id: string): string {
  * It returns the drag data store the drag was carried on, which a browser
  * supplies on every drag event and jsdom supplies on none.
  */
+/** dragRowOver picks a row up and holds it over another row without dropping
+ * it, which is the state the drop indicator is drawn in. */
+function dragRowOver(from: string, onto: string): void {
+  const dataTransfer = dragStore();
+  fireEvent.dragStart(layerRow(from), { dataTransfer });
+  fireEvent.dragOver(layerRow(onto), { dataTransfer });
+}
+
 function dragRowOnto(from: string, onto: string): DragStore {
   const source = layerRow(from);
   const target = layerRow(onto);

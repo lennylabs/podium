@@ -445,7 +445,7 @@ export function LayerPanel({
                   reingest={reingest[layer.ID] ?? idleReingest}
                   reingestHeld={runActive}
                   dragging={dragging === layer.ID}
-                  over={over === layer.ID}
+                  over={dropEdge(rows, dragging, over, layer.ID)}
                   onDragStart={() => {
                     setDragging(layer.ID);
                   }}
@@ -640,6 +640,32 @@ function movedOrder(
   return order;
 }
 
+/** DropEdge is the edge of the row under the pointer that the insertion
+ * indicator is drawn on, or null where the row is no drop target. */
+type DropEdge = "above" | "below" | null;
+
+/** dropEdge names which edge of the target row the drop would insert on. The
+ * dragged row takes the target's slot, so a row moving up the table lands
+ * above the row it is dropped onto and a row moving down lands below it. An
+ * indicator fixed to the top edge therefore marks the slot above the target
+ * on a downward drag, which is one place higher than the row will land. */
+function dropEdge(
+  rows: LayerRecord[],
+  dragging: string | null,
+  over: string | null,
+  id: string,
+): DropEdge {
+  if (dragging === null || over !== id || dragging === id) {
+    return null;
+  }
+  const at = rows.findIndex((row) => row.ID === dragging);
+  const target = rows.findIndex((row) => row.ID === id);
+  if (at < 0 || target < 0) {
+    return null;
+  }
+  return target > at ? "below" : "above";
+}
+
 /** movedNote states where a committed reorder left the layer, in the same
  * terms the row itself carries: the position counted down the whole table,
  * which is the precedence order the panel is about. The moved block is the
@@ -715,7 +741,9 @@ function LayerRow({
    * is never reingested twice at once. */
   reingestHeld: boolean;
   dragging: boolean;
-  over: boolean;
+  /** over is the edge the drop would insert on, or null where this row is
+   * not the row under the pointer. */
+  over: DropEdge;
   onDragStart: () => void;
   onDragOver: () => void;
   onDrop: () => void;
@@ -801,7 +829,7 @@ function LayerRow({
 
   const rowClass = [
     dragging ? "row-dragging" : "",
-    over ? "row-drop-target" : "",
+    over === null ? "" : `row-drop-${over}`,
   ].filter((name) => name !== "");
 
   // A refusal is full-width prose: a code, the envelope's own message, its
