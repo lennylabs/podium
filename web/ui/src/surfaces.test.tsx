@@ -10027,6 +10027,48 @@ describe("the command palette", () => {
     expect(within(panel).queryByText(/permission/i)).toBeNull();
   });
 
+  // A reader who cannot see the panel is told what the query settled on. The
+  // count reaches them as the read lands, and the region is mounted before
+  // the query is typed so the text arrives in a region the accessibility tree
+  // already holds.
+  it("announces the settled result count", async () => {
+    palettePage(
+      [{ id: "platform/review", type: "skill", version: "1.2.0" }],
+      4,
+    );
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    const region = within(panel).getByTestId("palette-announcement");
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    expect(region.className).toContain("assistive-only");
+    expect(region.textContent).toBe("");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "review" },
+    });
+    await within(panel).findByTestId("palette-heading");
+    expect(region.textContent).toBe("1 of 4 artifacts matched.");
+  });
+
+  // The no-match arm replaces the whole listbox with a sentence, which is what
+  // the field's aria-activedescendant pointed into, so it is announced rather
+  // than left to a list that is no longer drawn.
+  it("announces the no-match arm when the list empties", async () => {
+    palettePage([], 0);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    const region = within(panel).getByTestId("palette-announcement");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "zzzznotathing" },
+    });
+    await within(panel).findByText(/Check the spelling/);
+    expect(region.textContent).toBe(
+      "No artifact matched \u201czzzznotathing\u201d.",
+    );
+  });
+
   // The footer advertises ⏎ for as long as the panel is open, so the arm with
   // no row to open answers it with the one action it does offer, which is the
   // handoff the visible button performs.

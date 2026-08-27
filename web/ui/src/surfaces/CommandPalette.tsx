@@ -120,6 +120,12 @@ function PalettePanel({
   // reaches the search surface, which issues the read again on a surface that
   // can list the whole result set.
   const offersSearch = typed !== '' && !results.loading && !listed;
+  // What the panel drew is also stated for a reader who cannot see it. The
+  // count reaches them as the read settles, and the no-match arm, which
+  // replaces the whole listbox with a sentence, reaches them at all:
+  // `aria-activedescendant` names a row while there is one to name and says
+  // nothing at the moment the list empties.
+  const announcement = resultAnnouncement(typed, results, rows);
 
   const openRow = (id: string) => {
     onRun(typed);
@@ -258,10 +264,36 @@ function PalettePanel({
             />
           )}
         </div>
+        {/* The region is rendered on every state of the panel, empty until a
+            read settles. A region mounted at the moment its text arrives is
+            not in the accessibility tree when the change happens, and the
+            announcement is dropped. */}
+        <p className="assistive-only" role="status" aria-live="polite" data-testid="palette-announcement">
+          {announcement}
+        </p>
         <PaletteFooter />
       </div>
     </div>
   );
+}
+
+/** resultAnnouncement is what the panel's result state says to a reader who
+ * cannot see it. It is empty while nothing has been typed and while a read is
+ * in flight, so a settled result is announced once rather than a partial one
+ * being announced on the way to it. The no-match line is worded for the region
+ * rather than repeated from the panel, the way the copy control's
+ * announcement is: the drawn sentence carries advice a reader acts on with
+ * the panel in front of them, and the region states the outcome. A refused
+ * read carries its own alert from ErrorState and is not restated here. */
+function resultAnnouncement(typed: string, results: Async<SearchResponse>, rows: ArtifactDescriptor[]): string {
+  if (typed === '' || results.loading || results.error !== null) {
+    return '';
+  }
+  if (rows.length === 0) {
+    return `No artifact matched “${typed}”.`;
+  }
+  const matched = results.value?.total_matched ?? rows.length;
+  return `${rows.length} of ${matched} artifact${matched === 1 ? '' : 's'} matched.`;
 }
 
 /** KeyCap draws one keystroke as the key it names. The footer states four of
