@@ -2339,6 +2339,33 @@ describe("search", () => {
     ).toBe("");
   });
 
+  // A submitted value closes the field the same way a dismissal does, and the
+  // add control stands back in its place, so it takes the focus. Without it a
+  // reader who applied a tag filter from the keyboard is dropped on the
+  // document body and has to tab through the whole shell to get back to the
+  // filter row they were standing on.
+  it("returns focus to the add control when a tag filter is applied", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    await screen.findByLabelText("Search");
+
+    const open = () => screen.getByRole("button", { name: "+ tag" });
+    fireEvent.click(open());
+    const field = screen.getByLabelText("Add a tag filter");
+    fireEvent.change(field, { target: { value: "review" } });
+    // The ⏎ is consumed, because the add control takes the focus back as the
+    // field closes, and the browser would otherwise read the same key as an
+    // activation of the button now under it and reopen the field.
+    expect(fireEvent.keyDown(field, { key: "Enter" })).toBe(false);
+    expect(await screen.findByText("tag: review")).toBeTruthy();
+    expect(document.activeElement).toBe(open());
+  });
+
   // A native select is as wide as its widest option, so a catalog carrying a
   // deep domain path stretched the scope control to that path and left a gap
   // between the label and the indicator. The closed pill draws its own label,
@@ -3739,6 +3766,70 @@ describe("the artifact viewer", () => {
     expect((screen.getByLabelText("Version") as HTMLInputElement).value).toBe(
       "",
     );
+  });
+
+  // Both of the picker's transient parts remove themselves: the disclosed
+  // field closes on Escape, and the refusal banner disappears with the pin it
+  // reports. Each hands the focus to the version badge, which is the control
+  // the reader was operating and the one that survives the read. Without it
+  // they are left on the document body at the top of the page.
+  it("returns focus to the version badge when the picker and the refusal close", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const badge = () => screen.getByRole("button", { name: /^Version / });
+
+    openVersionPicker();
+    fireEvent.keyDown(screen.getByLabelText("Version"), { key: "Escape" });
+    expect(screen.queryByLabelText("Version")).toBeNull();
+    expect(document.activeElement).toBe(badge());
+
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 404,
+        body: {
+          code: "registry.not_found",
+          message: "version: invalid pin: no candidate matches",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    pinVersion("9.9.9");
+    await screen.findByTestId("version-refused");
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Show latest" }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("version-refused")).toBeNull();
+    });
+    expect(document.activeElement).toBe(badge());
   });
 
   // The version the picker names belongs to the artifact it was named for. A

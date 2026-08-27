@@ -9,12 +9,13 @@
 // Authored source, and Resources, and each one disappears where the artifact
 // carries nothing for it rather than standing an empty panel in the layout.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, RefObject } from 'react';
 
 import { ArtifactBody } from '../components/ArtifactBody';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { usePopupDismiss } from '../components/focus';
 import { Lead } from '../components/Lead';
 import {
   Badge,
@@ -99,6 +100,28 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // catalog read this surface is built on, so a refusal leaves those rows
   // unreported instead of replacing the artifact with a failure. Spec: §13.10.
   const layers = useAsync(listLayers, []);
+  // The controls that return the reader to the latest version remove
+  // themselves as they do it: the refusal banner and the older-version notice
+  // both disappear once the pin is dropped, and the browser leaves focus on
+  // the document body, so a keyboard reader is dumped at the top of the page.
+  // The header's version control is what they were recovering from, it is on
+  // the row the banner referred to, and it survives the read, so it takes the
+  // focus back. The picker is keyed on the pin and remounts with it, which is
+  // why the handover is an effect: the button the ref names is the one the
+  // next render mounts.
+  const versionTrigger = useRef<HTMLButtonElement>(null);
+  const owedFocus = useRef(false);
+  const showLatest = () => {
+    owedFocus.current = true;
+    setViewing('');
+  };
+  useEffect(() => {
+    if (!owedFocus.current) {
+      return;
+    }
+    owedFocus.current = false;
+    versionTrigger.current?.focus();
+  }, [viewing]);
 
   if (body === null) {
     if (artifact.error !== null) {
@@ -144,6 +167,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           <TypeBadge type={body.type} />
           <VersionPicker
             key={viewing}
+            trigger={versionTrigger}
             current={body.version}
             viewing={viewing}
             onView={(version) => {
@@ -163,12 +187,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
             testID="version-refused"
           >
             <p className="quiet">Still showing version {body.version}.</p>
-            <button
-              type="button"
-              onClick={() => {
-                setViewing('');
-              }}
-            >
+            <button type="button" onClick={showLatest}>
               Show latest
             </button>
           </ErrorState>
@@ -176,12 +195,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
         {older && (
           <div className="banner banner-accent" role="status" data-testid="older-version">
             <p className="banner-title">You are reading version {body.version}.</p>
-            <button
-              type="button"
-              onClick={() => {
-                setViewing('');
-              }}
-            >
+            <button type="button" onClick={showLatest}>
               Go to {latest}
             </button>
           </div>
@@ -293,16 +307,31 @@ interface ManifestHalves {
  * Spec: §13.10
  */
 function VersionPicker({
+  trigger,
   current,
   viewing,
   onView,
 }: {
+  trigger: RefObject<HTMLButtonElement | null>;
   current: string;
   viewing: string;
   onView: (version: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [typed, setTyped] = useState(viewing);
+  // The field is a transient popup, so it carries the dismissal paths the
+  // other popups in this shell carry: Escape closes it and hands focus back to
+  // the badge it was disclosed from, and a press or a focus move outside it
+  // closes it. A reader who abandoned it on Escape was otherwise left on the
+  // document body, at the top of the page, with the header row they were
+  // reading gone from under them.
+  const field = usePopupDismiss<HTMLSpanElement>(
+    open,
+    () => {
+      setOpen(false);
+    },
+    trigger,
+  );
   const view = () => {
     setOpen(false);
     onView(typed.trim());
@@ -312,6 +341,7 @@ function VersionPicker({
     <span className="version-picker">
       <button
         type="button"
+        ref={trigger}
         className="badge badge-soft version-picker-open"
         aria-expanded={open}
         aria-label={`Version ${label === '' ? 'unstated' : label}. Read another version.`}
@@ -325,7 +355,7 @@ function VersionPicker({
         </span>
       </button>
       {open && (
-        <span className="version-picker-field">
+        <span className="version-picker-field" ref={field}>
           <label className="label" htmlFor="version-picker-input">
             Version
           </label>
@@ -340,14 +370,11 @@ function VersionPicker({
             }}
             // A single-field entry control takes Enter as its commit, because a
             // reader who typed a version reaches for the return key before the
-            // adjacent button. Escape abandons the disclosure, which is what a
-            // reader who opened it by accident reaches for.
+            // adjacent button. Escape is the disclosure's own dismissal and is
+            // handled with the rest of them.
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 view();
-              }
-              if (event.key === 'Escape') {
-                setOpen(false);
               }
             }}
           />

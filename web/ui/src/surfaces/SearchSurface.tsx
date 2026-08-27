@@ -290,11 +290,11 @@ function TokenEntry({
   // or a focus move outside itself. Without that, a reader who opened it to
   // look loses the add control for the rest of the session, because the
   // field stands in the button's place until a value is submitted.
-  const dismissed = useRef(false);
+  const owed = useRef(false);
   const entry = usePopupDismiss<HTMLSpanElement>(
     open,
     () => {
-      dismissed.current = true;
+      owed.current = true;
       setTyped("");
       setOpen(false);
     },
@@ -302,13 +302,16 @@ function TokenEntry({
   );
   // usePopupDismiss hands focus back to the trigger, but the trigger is
   // unmounted while the field stands in its place, so the focus lands on
-  // nothing. The dismissal records that it asked for it and the button takes
-  // it once it is back.
+  // nothing. Every exit records that the button is owed the focus, and it
+  // takes it once it is back. A submitted value closes the field the same way
+  // a dismissal does, so without this a reader who applied a tag filter by
+  // keyboard was left on the document body with the filter row gone from
+  // under them.
   useEffect(() => {
-    if (open || !dismissed.current) {
+    if (open || !owed.current) {
       return;
     }
-    dismissed.current = false;
+    owed.current = false;
     trigger.current?.focus();
   }, [open]);
 
@@ -317,6 +320,7 @@ function TokenEntry({
     if (value !== "") {
       onAdd(value);
     }
+    owed.current = true;
     setTyped("");
     setOpen(false);
   };
@@ -345,8 +349,13 @@ function TokenEntry({
         onChange={(event) => {
           setTyped(event.target.value);
         }}
+        // The default action is refused because the add control takes the
+        // focus back as the field closes, and the browser would then read the
+        // same ⏎ as an activation of the button now under it and reopen the
+        // field the reader just submitted.
         onKeyDown={(event) => {
           if (event.key === "Enter") {
+            event.preventDefault();
             commit();
           }
         }}
