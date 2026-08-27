@@ -3,7 +3,7 @@
 // designed state rather than blank space, so a surface reaches for these
 // rather than rendering nothing.
 
-import type { ReactNode } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
 import { useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -551,5 +551,87 @@ export function Modal({
       </div>
     </div>,
     document.body,
+  );
+}
+
+/** TabStrip is a set of exclusive in-place views over one subject, with the
+ * open view's content under the strip. A `role="tablist"` is one stop in the
+ * Tab order and the arrows move between the tabs inside it, so a widget that
+ * announces itself as a tab set behaves as one rather than as a row of
+ * buttons. Selection follows focus, which is what a tab set whose panels are
+ * already loaded is expected to do.
+ *
+ * The ids are derived from a per-instance prefix, because two strips can
+ * stand on one page and an id serves one element.
+ */
+export function TabStrip<Name extends string>({
+  label,
+  tabs,
+  open,
+  onOpen,
+  children,
+}: {
+  label: string;
+  tabs: { name: Name; label: string; badge?: string; badgeTone?: BadgeTone }[];
+  open: Name;
+  onOpen: (name: Name) => void;
+  children: ReactNode;
+}) {
+  const prefix = useId();
+  const onArrow = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const at = tabs.findIndex((entry) => entry.name === open);
+    let next = at;
+    switch (event.key) {
+      case 'ArrowRight':
+        next = (at + 1) % tabs.length;
+        break;
+      case 'ArrowLeft':
+        next = (at + tabs.length - 1) % tabs.length;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = tabs.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    onOpen(tabs[next].name);
+    // The focus moves with the selection rather than staying on the tab the
+    // reader has already left.
+    event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
+  };
+  return (
+    <>
+      <div className="tabs" role="tablist" aria-label={label} onKeyDown={onArrow}>
+        {tabs.map((entry) => (
+          <button
+            key={entry.name}
+            type="button"
+            role="tab"
+            id={`${prefix}tab-${entry.name}`}
+            aria-selected={open === entry.name}
+            aria-controls={`${prefix}panel-${entry.name}`}
+            // The roving tabindex: the tab set is one Tab stop, and the open
+            // tab is the one it lands on.
+            tabIndex={open === entry.name ? 0 : -1}
+            className={open === entry.name ? 'tab tab-open' : 'tab'}
+            onClick={() => {
+              onOpen(entry.name);
+            }}
+          >
+            {entry.label}
+            {entry.badge !== undefined && entry.badge !== '' && (
+              <Badge tone={entry.badgeTone ?? 'quiet'}>{entry.badge}</Badge>
+            )}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id={`${prefix}panel-${open}`} aria-labelledby={`${prefix}tab-${open}`}>
+        {children}
+      </div>
+    </>
   );
 }

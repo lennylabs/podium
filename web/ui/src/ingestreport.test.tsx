@@ -139,9 +139,91 @@ describe('the finished reingest report', () => {
     expect(within(attention).getByText(/3 lint failures/)).toBeTruthy();
     fireEvent.click(within(attention).getByRole('button', { name: '1 artifact rejected' }));
     expect(within(screen.getByLabelText('Rejected artifacts')).getByText('above the floor')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Back to the counts' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back to summary' }));
     fireEvent.click(screen.getByRole('button', { name: '1 immutability conflict' }));
     expect(screen.getByText('platform/lint@1.0.0')).toBeTruthy();
+  });
+
+  // The response itemises four independent lists over one run, and a reader
+  // who arrived at one of them compares it with the others. The lists are
+  // therefore a tab set over one panel, and only a list the response carries
+  // gets a tab.
+  it('draws the itemised lists as a tab set carrying each list’s count', () => {
+    report({
+      accepted: 2,
+      idempotent: 0,
+      artifacts: [{ id: 'platform/deploy', version: '2.0.0', status: 'accepted' }],
+      rejected: [{ artifact_id: 'platform/deploy', code: 'ingest.sensitivity_floor', reason: 'above the floor' }],
+      conflicts: [
+        {
+          artifact_id: 'platform/lint',
+          version: '1.0.0',
+          old_hash: 'sha256:aaa',
+          new_hash: 'sha256:bbb',
+          code: 'ingest.immutable_violation',
+        },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '1 immutability conflict' }));
+    const tabs = within(screen.getByRole('tablist')).getAllByRole('tab');
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Accepted1', 'Rejected1', 'Conflicts1']);
+    // The list the reader opened is the selected tab, and the panel under the
+    // strip is that list.
+    expect(screen.getByRole('tab', { name: /Conflicts/ }).getAttribute('aria-selected')).toBe('true');
+    expect(within(screen.getByRole('tabpanel')).getByLabelText('Immutability conflicts')).toBeTruthy();
+    // Another list is reached from the strip rather than by leaving the
+    // itemised half and opening a count again.
+    fireEvent.click(screen.getByRole('tab', { name: /Rejected/ }));
+    expect(within(screen.getByRole('tabpanel')).getByText('above the floor')).toBeTruthy();
+    expect(screen.queryByLabelText('Immutability conflicts')).toBeNull();
+  });
+
+  // An entry carries an identifier, its §6.10 code, and a message of no
+  // bounded length, so it is a bordered card. The browser's default disc
+  // marker sets it as a bulleted line instead.
+  it('draws each itemised entry as a card rather than a bulleted line', () => {
+    report({
+      accepted: 0,
+      idempotent: 0,
+      conflicts: [
+        {
+          artifact_id: 'platform/lint',
+          version: '1.0.0',
+          old_hash: 'sha256:aaa',
+          new_hash: 'sha256:bbb',
+          code: 'ingest.immutable_violation',
+        },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '1 immutability conflict' }));
+    const conflicts = screen.getByLabelText('Immutability conflicts');
+    expect(conflicts.querySelector('ul')?.className).toContain('ingest-entries');
+    const entry = within(conflicts).getByRole('listitem');
+    expect(entry.className).toContain('ingest-entry');
+    // Both hashes are labelled, because the reader compares two long runs
+    // that differ somewhere in the middle.
+    expect(within(entry).getByText('stored').nextElementSibling?.textContent).toBe('sha256:aaa');
+    expect(within(entry).getByText('incoming').nextElementSibling?.textContent).toBe('sha256:bbb');
+  });
+
+  // The way back is a footer control beside Done, so the two ways out of the
+  // itemised half sit together rather than one of them standing over the
+  // content it leaves.
+  it('returns to the counts from a footer control beside Done', () => {
+    report({
+      accepted: 0,
+      idempotent: 0,
+      rejected: [{ artifact_id: 'platform/deploy', code: 'ingest.sensitivity_floor', reason: 'above the floor' }],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '1 artifact rejected' }));
+    expect(screen.queryByLabelText('Ingest counts')).toBeNull();
+    const back = screen.getByRole('button', { name: 'Back to summary' });
+    const foot = back.closest('.modal-foot');
+    expect(foot).toBeTruthy();
+    expect(within(foot as HTMLElement).getAllByRole('button').at(-1)?.textContent).toBe('Done');
+    fireEvent.click(back);
+    expect(screen.getByLabelText('Ingest counts')).toBeTruthy();
+    expect(screen.queryByRole('tablist')).toBeNull();
   });
 
   // The count is a control and the remedy is prose, so an em dash separates

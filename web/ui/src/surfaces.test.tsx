@@ -7735,12 +7735,12 @@ describe("the layer write flows", () => {
       screen.getByRole("button", { name: "1 artifact rejected" }),
     );
     expect(screen.getByLabelText("Rejected artifacts")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Back to the counts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to summary" }));
     fireEvent.click(
       screen.getByRole("button", { name: "1 immutability conflict" }),
     );
     expect(screen.getByText("platform/lint@1.0.0")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Back to the counts" }));
+    fireEvent.click(screen.getByRole("button", { name: "Back to summary" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(
       screen.queryByLabelText("Reingest result for alice-personal"),

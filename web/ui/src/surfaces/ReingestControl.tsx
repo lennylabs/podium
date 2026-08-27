@@ -14,8 +14,8 @@
 
 import { useState } from 'react';
 
-import type { Tone } from '../components/primitives';
-import { Badge, CopyButton, Modal } from '../components/primitives';
+import type { BadgeTone, Tone } from '../components/primitives';
+import { Badge, CopyButton, Modal, TabStrip } from '../components/primitives';
 import type {
   BreakGlass,
   IngestAdvisory,
@@ -252,25 +252,20 @@ function IngestReport({
           </>
         )}
         {detail !== null && (
-          <>
-            <button
-              type="button"
-              onClick={() => {
-                setDetail(null);
-              }}
-            >
-              Back to the counts
-            </button>
-            {detail === 'accepted' && <AcceptedList artifacts={accepted} />}
-            {detail === 'rejected' && <RejectionList rejections={rejected} />}
-            {detail === 'conflicts' && <ConflictList conflicts={conflicts} />}
-            {detail === 'advisories' && <AdvisoryList advisories={advisories} total={advisories.length} />}
-          </>
+          <IngestDetailTabs
+            open={detail}
+            onOpen={setDetail}
+            accepted={accepted}
+            rejected={rejected}
+            conflicts={conflicts}
+            advisories={advisories}
+          />
         )}
       </section>
       <div className="modal-foot">
         <span className="modal-foot-note mono quiet">finished {clock(finishedAt)}</span>
         {!recorded && <CopyButton value={summaryText(layerID, summary, finishedAt)} label="Copy summary" />}
+        {detail !== null && <BackToSummary onBack={setDetail} />}
         {/* Done is the press that closes the report, so it carries the primary
             fill. Beside an identically outlined copy control neither button
             reads as the one that dismisses the dialog. */}
@@ -425,20 +420,95 @@ export function summaryText(layerID: string, summary: IngestSummary, finishedAt:
   return lines.join('\n');
 }
 
+/** BackToSummary is the way out of the itemised half. It sits in the footer
+ * beside the control that closes the dialog, because both are ways out of
+ * what the reader is looking at, and a back control standing over the list it
+ * leaves reads as part of that list. */
+function BackToSummary({ onBack }: { onBack: (detail: IngestDetail | null) => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        onBack(null);
+      }}
+    >
+      Back to summary
+    </button>
+  );
+}
+
+/** IngestDetailTabs is the itemised half of the report. The response
+ * itemises four independent lists over one run, and the reader arrives at one
+ * of them from a count and then compares it with the others, so they are
+ * drawn as a tab set over the same panel rather than as one list reached by
+ * leaving the counts. Only a list the response actually carries gets a tab,
+ * because a tab that opens onto nothing is a control that does nothing.
+ *
+ * Each list opens with a line saying what the entries mean for the layer,
+ * because the tab names the list and does not say whether the snapshot
+ * applied it.
+ *
+ * Spec: §7.3.1
+ */
+function IngestDetailTabs({
+  open,
+  onOpen,
+  accepted,
+  rejected,
+  conflicts,
+  advisories,
+}: {
+  open: IngestDetail;
+  onOpen: (detail: IngestDetail) => void;
+  accepted: IngestedArtifact[];
+  rejected: IngestRejection[];
+  conflicts: IngestConflict[];
+  advisories: IngestAdvisory[];
+}) {
+  type DetailTab = { name: IngestDetail; label: string; badge: string; badgeTone?: BadgeTone };
+  const listed = (name: IngestDetail, label: string, count: number, badgeTone?: BadgeTone): DetailTab[] =>
+    count === 0 ? [] : [{ name, label, badge: String(count), badgeTone }];
+  const tabs: DetailTab[] = [
+    ...listed('accepted', 'Accepted', accepted.length),
+    ...listed('rejected', 'Rejected', rejected.length, 'danger'),
+    ...listed('conflicts', 'Conflicts', conflicts.length, 'accent'),
+    ...listed('advisories', 'Advisories', advisories.length),
+  ];
+  // A count opens its own tab, so the open one is always among them. The
+  // fallback stands for a response whose list is empty behind a count that is
+  // not, which leaves the panel on a tab that exists.
+  const current = tabs.some((entry) => entry.name === open) ? open : (tabs[0]?.name ?? open);
+  if (tabs.length === 0) {
+    return null;
+  }
+  return (
+    <TabStrip label="Ingest result lists" tabs={tabs} open={current} onOpen={onOpen}>
+      <>
+        {current === 'accepted' && <AcceptedList artifacts={accepted} />}
+        {current === 'rejected' && <RejectionList rejections={rejected} />}
+        {current === 'conflicts' && <ConflictList conflicts={conflicts} />}
+        {current === 'advisories' && <AdvisoryList advisories={advisories} total={advisories.length} inTab />}
+      </>
+    </TabStrip>
+  );
+}
+
 /** AcceptedList names the (artifact_id, version) pairs the snapshot newly
  * stored. It is what the accepted count opens, because "184 accepted" does
  * not say which versions are now live and the reader's next action is to
  * check one of them. */
 function AcceptedList({ artifacts }: { artifacts: IngestedArtifact[] }) {
   return (
-    <section aria-label="Accepted artifacts">
-      <p className="label">Accepted · {artifacts.length}</p>
-      <ul>
+    <section className="ingest-detail" aria-label="Accepted artifacts">
+      <p className="ingest-detail-lede">Newly stored by the snapshot. Each version is now live in the layer.</p>
+      <ul className="ingest-entries">
         {artifacts.map((artifact) => (
-          <li key={`${artifact.id}:${artifact.version}`}>
-            <span className="mono">
-              {artifact.id}@{artifact.version}
-            </span>
+          <li className="ingest-entry" key={`${artifact.id}:${artifact.version}`}>
+            <p className="ingest-entry-head">
+              <span className="mono">
+                {artifact.id}@{artifact.version}
+              </span>
+            </p>
           </li>
         ))}
       </ul>
@@ -446,15 +516,21 @@ function AcceptedList({ artifacts }: { artifacts: IngestedArtifact[] }) {
   );
 }
 
+/** RejectionList names what the snapshot dropped, with the §6.10 code and the
+ * reason the pipeline gave, because the reader's next action is a fix in the
+ * source repository and the reason is what names it. */
 function RejectionList({ rejections }: { rejections: IngestRejection[] }) {
   return (
-    <section aria-label="Rejected artifacts">
-      <p className="label">Rejected · {rejections.length}</p>
-      <ul>
+    <section className="ingest-detail" aria-label="Rejected artifacts">
+      <p className="ingest-detail-lede">Dropped by the snapshot. Everything else in the layer was applied.</p>
+      <ul className="ingest-entries">
         {rejections.map((rejection) => (
-          <li key={`${rejection.artifact_id}:${rejection.code}`}>
-            <span className="mono">{rejection.artifact_id}</span> <Badge tone="quiet">{rejection.code}</Badge>{' '}
-            {rejection.reason}
+          <li className="ingest-entry" key={`${rejection.artifact_id}:${rejection.code}`}>
+            <p className="ingest-entry-head">
+              <span className="mono">{rejection.artifact_id}</span>
+              <Badge tone="danger">{rejection.code}</Badge>
+            </p>
+            <p className="ingest-entry-text">{rejection.reason}</p>
           </li>
         ))}
       </ul>
@@ -464,19 +540,31 @@ function RejectionList({ rejections }: { rejections: IngestRejection[] }) {
 
 /** ConflictList names the artifact, the version that collided, and both
  * hashes, because a published version is immutable and the author's next
- * action is to bump it. */
+ * action is to bump it. The two hashes are set as a labelled pair rather than
+ * inline, because they differ in the middle of a long unbreakable run and a
+ * reader comparing them has to find where. */
 function ConflictList({ conflicts }: { conflicts: IngestConflict[] }) {
   return (
-    <section aria-label="Immutability conflicts">
-      <p className="label">Conflicts · {conflicts.length}</p>
-      <ul>
+    <section className="ingest-detail" aria-label="Immutability conflicts">
+      <p className="ingest-detail-lede">
+        Each version already exists with different content. A published version is immutable, so bump the version and
+        reingest.
+      </p>
+      <ul className="ingest-entries">
         {conflicts.map((conflict) => (
-          <li key={`${conflict.artifact_id}:${conflict.version}`}>
-            <span className="mono">
-              {conflict.artifact_id}@{conflict.version}
-            </span>{' '}
-            <Badge tone="quiet">{conflict.code}</Badge> stored <span className="mono">{conflict.old_hash}</span>,
-            incoming <span className="mono">{conflict.new_hash}</span>
+          <li className="ingest-entry ingest-entry-accent" key={`${conflict.artifact_id}:${conflict.version}`}>
+            <p className="ingest-entry-head">
+              <span className="mono">
+                {conflict.artifact_id}@{conflict.version}
+              </span>
+              <Badge tone="accent">{conflict.code}</Badge>
+            </p>
+            <dl className="ingest-hashes mono">
+              <dt className="quiet">stored</dt>
+              <dd>{conflict.old_hash}</dd>
+              <dt className="quiet">incoming</dt>
+              <dd>{conflict.new_hash}</dd>
+            </dl>
           </li>
         ))}
       </ul>
@@ -492,27 +580,37 @@ function AdvisoryList({
   advisories,
   total,
   onSeeAll,
+  inTab = false,
 }: {
   advisories: IngestAdvisory[];
   total: number;
   onSeeAll?: () => void;
+  inTab?: boolean;
 }) {
   return (
     <section className="advisories" aria-label="Advisories">
-      <p className="label">
-        Advisories · non-blocking · {total}
-        {onSeeAll !== undefined && (
-          <>
-            {' '}
-            <button type="button" className="stat-open" onClick={onSeeAll}>
-              See all {total}
-            </button>
-          </>
-        )}
-      </p>
-      <ul>
+      {/* Under its own tab the count is already on the tab, so the heading
+          states what the entries mean for the layer instead of repeating it. */}
+      {inTab ? (
+        <p className="ingest-detail-lede">
+          Raised without blocking the snapshot. Everything listed was applied to the layer.
+        </p>
+      ) : (
+        <p className="label">
+          Advisories · non-blocking · {total}
+          {onSeeAll !== undefined && (
+            <>
+              {' '}
+              <button type="button" className="stat-open" onClick={onSeeAll}>
+                See all {total}
+              </button>
+            </>
+          )}
+        </p>
+      )}
+      <ul className="ingest-entries">
         {advisories.map((advisory) => (
-          <li key={`${advisory.artifact_id}:${advisory.code}`}>
+          <li className="ingest-entry" key={`${advisory.artifact_id}:${advisory.code}`}>
             <p className="advisory-head">
               <Badge tone={severityTone(advisory.severity)}>{severityLabel(advisory.severity)}</Badge>{' '}
               <span className="mono">{advisory.artifact_id}</span>{' '}
@@ -744,19 +842,14 @@ export function ReingestRunReport({
     >
       <section className="ingest-report modal-body" aria-label="Reingest all result">
         {detail !== null && (
-          <>
-            <button
-              type="button"
-              onClick={() => {
-                setDetail(null);
-              }}
-            >
-              Back to the counts
-            </button>
-            {detail === 'rejected' && <RejectionList rejections={totals.rejected} />}
-            {detail === 'conflicts' && <ConflictList conflicts={totals.conflicts} />}
-            {detail === 'advisories' && <AdvisoryList advisories={totals.advisories} total={totals.advisories.length} />}
-          </>
+          <IngestDetailTabs
+            open={detail}
+            onOpen={setDetail}
+            accepted={[]}
+            rejected={totals.rejected}
+            conflicts={totals.conflicts}
+            advisories={totals.advisories}
+          />
         )}
         {detail === null && (
           <>
@@ -831,6 +924,7 @@ export function ReingestRunReport({
       <div className="modal-foot">
         <span className="modal-foot-note mono quiet">finished {clock(finishedAt)}</span>
         <CopyButton value={runText(outcomes, finishedAt)} label="Copy summary" />
+        {detail !== null && <BackToSummary onBack={setDetail} />}
         <button type="button" className="button primary" onClick={onDone}>
           Done
         </button>

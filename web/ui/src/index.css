@@ -3544,11 +3544,6 @@ label:has(> input:disabled) {
   padding-top: 16px;
 }
 
-.ingest-report > button {
-  align-self: flex-start;
-  margin: 0;
-}
-
 .stats {
   display: flex;
   flex-wrap: wrap;
@@ -3742,7 +3737,13 @@ button.stat-open {
   line-height: 1.55;
 }
 
-.advisories ul {
+/* An itemised ingest list. Every entry carries an identifier, one or two
+   §6.10 codes, and a message of no bounded length, so each is a bordered card
+   rather than a bulleted line: the default disc marker sets a long artifact
+   id against a hanging indent and runs the code and the reason together. The
+   advisory rows in the summary use the same cards, because they are the same
+   kind of entry read in a narrower place. */
+.ingest-entries {
   list-style: none;
   display: flex;
   flex-direction: column;
@@ -3751,11 +3752,68 @@ button.stat-open {
   padding: 0;
 }
 
-.advisories li {
+.ingest-entry {
   padding: 11px 13px;
   border: 1px solid var(--b2);
   border-radius: 9px;
   background: var(--surf2);
+}
+
+/* A conflict is the one entry the reader has to act on rather than read, so
+   it carries the accent edge the attention row beside it uses. */
+.ingest-entry-accent {
+  border-color: var(--cbd);
+  background: var(--wash);
+}
+
+.ingest-entry-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 0;
+  font-size: 12.5px;
+  word-break: break-word;
+}
+
+.ingest-entry-text {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--sec);
+}
+
+/* The stored and incoming hashes differ somewhere inside one long
+   unbreakable run, so they are set one under the other against their labels
+   rather than inline, where the reader has to find the difference in a
+   sentence. */
+.ingest-hashes {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 9px 0 0;
+  font-size: 11.5px;
+}
+
+.ingest-hashes dt,
+.ingest-hashes dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+/* The line under the tabs stating what the open list means for the layer. */
+.ingest-detail-lede {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--sec);
+}
+
+/* The report's tab strip is a flex item of a column that already sets the
+   gap between its parts, so the strip's own page margins would be added to
+   that gap rather than replacing it. */
+.ingest-report .tabs {
+  margin: 0;
 }
 
 .advisory-head {

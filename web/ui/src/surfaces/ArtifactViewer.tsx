@@ -11,14 +11,14 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import type { KeyboardEvent, RefObject } from 'react';
+import type { RefObject } from 'react';
 
 import { ArtifactBody } from '../components/ArtifactBody';
 import { Breadcrumb } from '../components/Breadcrumb';
 import { usePopupDismiss } from '../components/focus';
 import { Lead } from '../components/Lead';
+import type { BadgeTone } from '../components/primitives';
 import {
-  Badge,
   CopyButton,
   DeprecatedBadge,
   EmptyState,
@@ -26,6 +26,7 @@ import {
   ErrorState,
   Loading,
   SensitivityBadge,
+  TabStrip,
   TypeBadge,
   formatVersion,
 } from '../components/primitives';
@@ -413,9 +414,9 @@ function Manifest({
   // because the tab badge reports the parse failure and the tab is drawn
   // before the panel it opens.
   const invalid = parseFrontmatter(frontmatter).error !== '';
-  const tabs: { name: TabName; label: string; badge: string }[] = [
+  const tabs: { name: TabName; label: string; badge: string; badgeTone?: BadgeTone }[] = [
     { name: 'rendered', label: 'Rendered', badge: '' },
-    { name: 'frontmatter', label: 'Frontmatter', badge: invalid ? '!' : '' },
+    { name: 'frontmatter', label: 'Frontmatter', badge: invalid ? '!' : '', badgeTone: invalid ? 'danger' : 'quiet' },
     ...(skillRaw === '' ? [] : [{ name: 'source' as TabName, label: 'Authored source', badge: '' }]),
     ...(resources.length === 0
       ? []
@@ -425,67 +426,15 @@ function Manifest({
   // manifest arrives by link and the authored source it carried is cleared.
   const open = tabs.some((entry) => entry.name === tab) ? tab : 'rendered';
 
-  // A `role="tablist"` is one stop in the Tab order, and the arrows move
-  // between the tabs inside it. Without this the widget announces itself as a
-  // tab set and then behaves as a row of buttons, which is the state a
-  // screen-reader user is left to reconcile.
-  const onArrow = (event: KeyboardEvent<HTMLDivElement>) => {
-    const at = tabs.findIndex((entry) => entry.name === open);
-    let next = at;
-    switch (event.key) {
-      case 'ArrowRight':
-        next = (at + 1) % tabs.length;
-        break;
-      case 'ArrowLeft':
-        next = (at + tabs.length - 1) % tabs.length;
-        break;
-      case 'Home':
-        next = 0;
-        break;
-      case 'End':
-        next = tabs.length - 1;
-        break;
-      default:
-        return;
-    }
-    event.preventDefault();
-    onTab(tabs[next].name);
-    // Selection follows focus, so the focus moves with the selection rather
-    // than staying on the tab the reader has already left.
-    event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus();
-  };
-
   return (
-    <>
-      <div className="tabs" role="tablist" aria-label="Artifact views" onKeyDown={onArrow}>
-        {tabs.map((entry) => (
-          <button
-            key={entry.name}
-            type="button"
-            role="tab"
-            id={`tab-${entry.name}`}
-            aria-selected={open === entry.name}
-            aria-controls={`panel-${entry.name}`}
-            // The roving tabindex: the tab set is one Tab stop, and the open
-            // tab is the one it lands on.
-            tabIndex={open === entry.name ? 0 : -1}
-            className={open === entry.name ? 'tab tab-open' : 'tab'}
-            onClick={() => {
-              onTab(entry.name);
-            }}
-          >
-            {entry.label}
-            {entry.badge !== '' && <Badge tone={entry.badge === '!' ? 'danger' : 'quiet'}>{entry.badge}</Badge>}
-          </button>
-        ))}
-      </div>
-      <div role="tabpanel" id={`panel-${open}`} aria-labelledby={`tab-${open}`}>
+    <TabStrip label="Artifact views" tabs={tabs} open={open} onOpen={onTab}>
+      <>
         {open === 'rendered' && <ArtifactBody body={body} resources={resourceNames} />}
         {open === 'frontmatter' && <PropertyTable raw={frontmatter} offerRaw />}
         {open === 'source' && <AuthoredSource name="SKILL.md" value={skillRaw} />}
         {open === 'resources' && <ResourceTable rows={resources} />}
-      </div>
-    </>
+      </>
+    </TabStrip>
   );
 }
 
