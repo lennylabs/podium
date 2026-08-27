@@ -711,6 +711,44 @@ describe("the application shell", () => {
     expect(within(tree).queryByRole("button", { name: "+ 3 more" })).toBeNull();
   });
 
+  // The remainder row is a disclosure the keyboard reaches, so expanding it
+  // leaves focus on it. A row that unmounted on the click it handled would
+  // drop that reader onto the document body with the whole shell to tab back
+  // through, and the same row folding the level back is what keeps it
+  // mounted.
+  it("keeps focus on the remainder row across the expansion it performs", async () => {
+    const wide = Array.from({ length: 11 }, (_, i) => ({
+      path: `sub${String(i)}`,
+      name: `sub${String(i)}`,
+      subdomains: [],
+    }));
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: { path: "", subdomains: wide, notable: [] },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    const more = within(tree).getByRole("button", { name: "+ 3 more" });
+    more.focus();
+    fireEvent.click(more);
+    expect(within(tree).getByText("sub10")).toBeTruthy();
+    expect(document.activeElement).toBe(more);
+    expect(more.getAttribute("aria-expanded")).toBe("true");
+    // The row folds the level back, so the reader who opened it can close it
+    // from where the keyboard already is.
+    expect(within(tree).getByRole("button", { name: "\u2212 show fewer" })).toBe(
+      more,
+    );
+    fireEvent.click(more);
+    expect(within(tree).queryByText("sub10")).toBeNull();
+    expect(document.activeElement).toBe(more);
+    expect(more.getAttribute("aria-expanded")).toBe("false");
+  });
+
   // The reader's own position is never one of the folded rows. A domain that
   // sits past the cap is what the page is showing, so the level is drawn
   // whole and the row marking the current domain is on screen.

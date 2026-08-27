@@ -657,10 +657,16 @@ function CatalogTree({
   // The reader's own position is never one of the folded rows: a level whose
   // current domain sits past the cap is drawn whole, because the row that
   // marks where the page sits is what the tree is for.
-  const folded =
-    !all &&
+  //
+  // foldable separates the level that has a remainder to hold back from the
+  // state it is currently in, so the row stays mounted across the expansion
+  // and keeps the focus a keyboard reader put on it. A row that unmounted on
+  // the click it handled would drop that reader onto the document body, with
+  // the whole shell to tab back through.
+  const foldable =
     nodes.length > siblingCap &&
     !nodes.slice(siblingCap).some((node) => onCurrentPath(node.path, current));
+  const folded = foldable && !all;
   const shown = folded ? nodes.slice(0, siblingCap) : nodes;
 
   return (
@@ -676,19 +682,24 @@ function CatalogTree({
           reach={reach}
         />
       ))}
-      {folded && (
+      {foldable && (
         <li className="catalog-node">
           {/* The row states how many domains it is holding back and opens
               them in place, so the level is reachable from the tree rather
-              than only from the domain page's subdomain list. */}
+              than only from the domain page's subdomain list. Opened, the
+              same row folds the remainder back, which is what keeps it in
+              the DOM and keeps focus on it. */}
           <button
             type="button"
             className="catalog-more mono"
+            aria-expanded={!folded}
             onClick={() => {
-              setAll(true);
+              setAll(folded);
             }}
           >
-            + {nodes.length - siblingCap} more
+            {folded
+              ? `+ ${String(nodes.length - siblingCap)} more`
+              : '− show fewer'}
           </button>
         </li>
       )}
