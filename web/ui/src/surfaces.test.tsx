@@ -2762,14 +2762,15 @@ describe("search", () => {
     expect(screen.getByText("v2.0.0").className).toBe(
       "mono quiet artifact-version",
     );
-    // The row names the artifact and states its full path beside it, which is
-    // the same identifying line the domain listing draws. A ranked row that
-    // printed the whole identifier alone would give the name no weight.
-    const first = screen.getByRole("link", { name: "review" });
+    // A ranked result set spans the whole catalog and stands under no domain
+    // heading, so the row's link carries the whole identifier and the row
+    // prints the leaf once. The leaf-plus-path pairing belongs to the domain
+    // listing, where the heading already supplies the levels above the row.
+    const first = screen.getByRole("link", { name: "platform/review" });
     const head = first.parentElement as HTMLElement;
-    expect(within(head).getByText("platform/review").className).toBe(
-      "mono quiet artifact-path",
-    );
+    expect(first.className).toBe("mono artifact-id");
+    expect(head.querySelector(".artifact-path")).toBeNull();
+    expect(within(head).queryAllByText("review")).toEqual([]);
     expect(
       within(first.parentElement as HTMLElement).getByText("SKILL"),
     ).toBeTruthy();
@@ -2937,7 +2938,7 @@ describe("search", () => {
     });
     goTo("#/search/");
     render(<App />);
-    expect(await screen.findByRole("link", { name: "deploy" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "eng/deploy" })).toBeTruthy();
     expect(screen.queryByText("matched by meaning")).toBeNull();
     expect(screen.queryAllByTestId("relevance-bars")).toEqual([]);
     expect(screen.queryByTestId("artifact-row-relevance")).toBeNull();
