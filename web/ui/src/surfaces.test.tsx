@@ -4746,6 +4746,92 @@ describe("the artifact viewer", () => {
     expect(document.activeElement).toBe(badge());
   });
 
+  // Committing a pin closes the popover the same way a dismissal does, and it
+  // removes the field the reader was typing in. The focus therefore goes back
+  // to the version badge on that path too, whether the registry served the
+  // pin, refused it, or was asked for the version already on screen. Without
+  // it a keyboard reader who pinned a version was left on the document body,
+  // above the whole shell, with the refusal banner they need to recover from
+  // a full catalog tree away.
+  //
+  // Spec: §13.10
+  it("returns focus to the version badge when the picker commits a pin", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const badge = () => screen.getByRole("button", { name: /^Version / });
+
+    // A pin the registry serves.
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:old",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    pinVersion("1.0.0");
+    await screen.findByTestId("older-version");
+    expect(document.activeElement).toBe(badge());
+
+    // The version already on screen, which writes the state it already holds
+    // and so renders nothing of its own for the handover to follow.
+    openVersionPicker();
+    fireEvent.click(screen.getByRole("button", { name: "View" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Version")).toBeNull();
+    });
+    expect(document.activeElement).toBe(badge());
+
+    // A pin the registry refuses, submitted from the field itself.
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 404,
+        body: {
+          code: "registry.not_found",
+          message: "version: invalid pin: no candidate matches",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    openVersionPicker();
+    fireEvent.change(screen.getByLabelText("Version"), {
+      target: { value: "9.9.9" },
+    });
+    // The commit refuses the key's default action, because the focus lands on
+    // the badge while the press is still being processed and the browser
+    // would otherwise carry the same Enter on to that button and disclose the
+    // field again.
+    const commit = fireEvent.keyDown(screen.getByLabelText("Version"), {
+      key: "Enter",
+    });
+    expect(commit).toBe(false);
+    await screen.findByTestId("version-refused");
+    expect(document.activeElement).toBe(badge());
+    expect(screen.queryByLabelText("Version")).toBeNull();
+  });
+
   // The version the picker names belongs to the artifact it was named for. A
   // route change from one viewer to another reuses the component, so a pin
   // that survived it would read the next artifact at a version that artifact

@@ -110,28 +110,34 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // own response and is already there.
   const link = body?.manifest_body_url;
   const fetched = useAsync(async () => (link === undefined ? '' : fetchText(link)), [link?.presigned_url ?? '']);
-  // The controls that return the reader to the latest version remove
-  // themselves as they do it: the refusal banner and the older-version notice
-  // both disappear once the pin is dropped, and the browser leaves focus on
-  // the document body, so a keyboard reader is dumped at the top of the page.
-  // The header's version control is what they were recovering from, it is on
-  // the row the banner referred to, and it survives the read, so it takes the
-  // focus back. The picker is keyed on the pin and remounts with it, which is
-  // why the handover is an effect: the button the ref names is the one the
-  // next render mounts.
+  // Every control that reads another version removes itself as it does so:
+  // the picker's field is unmounted when it commits a pin, and the refusal
+  // banner and the older-version notice both disappear once the pin is
+  // dropped. The browser leaves focus on the document body each time, so a
+  // keyboard reader is dumped at the top of the page. The header's version
+  // control is the one they were operating, it is on the row those banners
+  // refer to, and it survives the read, so it takes the focus back. The
+  // picker is keyed on the pin and remounts with it, which is why the
+  // handover is an effect: the button the ref names is the one the next
+  // render mounts. The effect follows a counter rather than the pin itself,
+  // because a reader can ask for the version already on screen, and writing
+  // the state that is already held renders nothing for the handover to
+  // follow.
   const versionTrigger = useRef<HTMLButtonElement>(null);
-  const owedFocus = useRef(false);
+  const [owedFocus, setOwedFocus] = useState(0);
+  const returnFocus = () => {
+    setOwedFocus((owed) => owed + 1);
+  };
   const showLatest = () => {
-    owedFocus.current = true;
+    returnFocus();
     setViewing('');
   };
   useEffect(() => {
-    if (!owedFocus.current) {
+    if (owedFocus === 0) {
       return;
     }
-    owedFocus.current = false;
     versionTrigger.current?.focus();
-  }, [viewing]);
+  }, [owedFocus]);
 
   // The rail's layer read is a second read this surface makes, and the outage
   // that refused it is the one the reader is retrying, so the control that
@@ -192,6 +198,7 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
             current={body.version}
             viewing={viewing}
             onView={(version) => {
+              returnFocus();
               setViewing(version);
             }}
           />
@@ -447,9 +454,14 @@ function VersionField({
         // A single-field entry control takes Enter as its commit, because a
         // reader who typed a version reaches for the return key before the
         // adjacent button. Escape is the disclosure's own dismissal and is
-        // handled with the rest of them.
+        // handled with the rest of them. The commit is the key's whole
+        // meaning here, so its default action is refused: the commit hands
+        // the focus back to the badge while the press is still being
+        // processed, and the browser would otherwise carry the same Enter on
+        // to that button and disclose the field again.
         onKeyDown={(event) => {
           if (event.key === 'Enter') {
+            event.preventDefault();
             view();
           }
         }}
