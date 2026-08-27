@@ -11112,6 +11112,98 @@ describe("the trimmed listing", () => {
     expect(subhead.textContent).toContain("24");
   });
 
+  // §4.5.5 caps the notable list, so the at-scale table filters a partial view
+  // of the domain. A filter that matches nothing among the returned rows has
+  // established nothing about the artifacts the response withheld, and
+  // clearing the filter or changing the type loads none of them, so the table
+  // states the reach of the filter and continues into the search bounded to
+  // this domain carrying the same words.
+  //
+  // Spec: §13.10
+  it("continues a filter over a trimmed at-scale listing into the scoped search", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: Array.from({ length: 10 }, (_, i) => ({
+            id: `platform/direct-${String(i + 1)}`,
+            type: "skill",
+          })),
+        },
+      },
+      "/v1/catalog": {
+        body: {
+          ids: Array.from(
+            { length: 25 },
+            (_, i) => `platform/direct-${String(i + 1)}`,
+          ),
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const arthead = within(browser).getByRole("heading", {
+      name: "Artifacts",
+    }).parentElement as HTMLElement;
+
+    // An artifact past the returned edge is not reported as absent, and the
+    // recovery offered is the one that reaches it.
+    fireEvent.change(within(arthead).getByLabelText("Filter in this domain"), {
+      target: { value: "direct-25" },
+    });
+    const reach = await within(browser).findByTestId("filter-reach");
+    expect(reach.textContent).toContain("Nothing on this page matched.");
+    expect(reach.textContent).toContain(
+      "The filter covers the 10 artifacts this page loaded.",
+    );
+    expect(reach.textContent).toContain(
+      "15 more artifacts stand under this domain.",
+    );
+    expect(
+      within(browser).queryByText(
+        "Nothing matched. Clear the filter or pick another type.",
+      ),
+    ).toBeNull();
+    expect(
+      within(reach)
+        .getByRole("link", { name: "Search the whole domain" })
+        .getAttribute("href"),
+    ).toBe(searchHref("scope:platform direct-25"));
+
+    // A match among the returned rows is still an answer about those rows
+    // alone, so the continuation stands beside the row it found and the type
+    // chip travels with it.
+    fireEvent.change(within(arthead).getByLabelText("Filter in this domain"), {
+      target: { value: "direct-3" },
+    });
+    fireEvent.click(within(arthead).getByRole("button", { name: "skill" }));
+    expect(
+      within(browser).getByRole("link", { name: "platform/direct-3" }),
+    ).toBeTruthy();
+    const found = within(browser).getByTestId("filter-reach");
+    expect(found.textContent).not.toContain("Nothing on this page matched.");
+    expect(
+      within(found)
+        .getByRole("link", { name: "Search the whole domain" })
+        .getAttribute("href"),
+    ).toBe(searchHref("type:skill scope:platform direct-3"));
+
+    // An unfiltered listing states its edge in the continuation row under the
+    // table and carries no filter continuation of its own.
+    fireEvent.change(within(arthead).getByLabelText("Filter in this domain"), {
+      target: { value: "" },
+    });
+    fireEvent.click(within(arthead).getByRole("button", { name: "All" }));
+    expect(within(browser).queryByTestId("filter-reach")).toBeNull();
+    expect(within(browser).getByTestId("listing-continuation")).toBeTruthy();
+  });
+
   // The compact treatment is the one the design pass fixed for this count: the
   // section label carries the count and the controls over the listing share
   // its row, a tile states what the response reported below the child, and the

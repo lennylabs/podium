@@ -4296,3 +4296,18 @@ button.stat-open {
   line-height: 1.5;
   color: var(--sec);
 }
+
+/* The at-scale table's filter continuation. It carries the same accent mark
+   and quiet surface as the listing's own end-of-list row, because it reports
+   the same fact about the same trimmed listing, and it sits under the rows
+   the filter did match rather than replacing them. */
+.filter-reach {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: 12px;
+  padding: 14px 18px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: var(--surf2);
+}

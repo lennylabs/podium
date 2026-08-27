@@ -187,7 +187,16 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
         tail !== null && <ul className="artifact-list">{tail}</ul>
       ) : compact && direct.length > 0 ? (
         <>
-          <ArtifactTable artifacts={direct} />
+          {/* The table filters the rows the response carried, so it is told
+              whether those rows are the whole domain: a filter over a trimmed
+              listing continues into the scoped search rather than reporting
+              an artifact the listing withheld as absent. */}
+          <ArtifactTable
+            artifacts={direct}
+            scope={body.path}
+            trimmed={trimmed}
+            withheld={total === null ? null : total - direct.length}
+          />
           {tail !== null && <ul className="artifact-list">{tail}</ul>}
         </>
       ) : (

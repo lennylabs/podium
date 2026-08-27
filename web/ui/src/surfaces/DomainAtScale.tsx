@@ -15,7 +15,8 @@ import {
   domainLabel,
   subdomainCountLabel,
 } from "../domain";
-import { artifactHref, domainHref } from "../route";
+import { formatQueryLine } from "../query";
+import { artifactHref, domainHref, searchHref } from "../route";
 
 /** tileCap is how many tiles the grid shows before the reader asks for the
  * rest, which keeps a domain with dozens of children to one screen. */
@@ -220,11 +221,31 @@ const sortOptions: { key: ArtifactColumn; label: string }[] = [
  *
  * The author's picks stand above the rest under every ordering. The sort
  * control chooses what orders the rows inside each block, so it names the
- * column it sorts on rather than the arrangement of the blocks. */
+ * column it sorts on rather than the arrangement of the blocks.
+ *
+ * The filter runs over the rows the response carried, and §4.5.5 caps that
+ * listing at the configured notable_count. Where the cap trimmed it, a filter
+ * that matches nothing has established nothing about the domain, so the table
+ * states the reach of the filter and continues into the scoped §4.5.3 search
+ * carrying the same words and the same type. Reporting the artifact as absent
+ * and offering a cleared filter as the recovery denies an artifact the domain
+ * holds, and neither clearing the filter nor changing the type loads the rows
+ * the response withheld (§13.10). */
 export function ArtifactTable({
   artifacts,
+  scope,
+  trimmed,
+  withheld,
 }: {
   artifacts: ArtifactDescriptor[];
+  /** scope is the domain the listing belongs to, which bounds the search the
+   * continuation runs. The registry root carries no scope filter. */
+  scope: string;
+  /** trimmed reports that the listing is a partial view of the domain. */
+  trimmed: boolean;
+  /** withheld is how many artifacts the domain holds beyond the listing, and
+   * null where the response reported the reduction without a count. */
+  withheld: number | null;
 }) {
   const [type, setType] = useState("");
   const [filter, setFilter] = useState("");
@@ -239,6 +260,9 @@ export function ArtifactTable({
       (type === "" || artifact.type === type) &&
       (needle === "" || artifact.id.toLowerCase().includes(needle)),
   );
+  // A filter or a type chip over a trimmed listing answers for the returned
+  // rows alone, which is what the continuation below the table exists to say.
+  const narrowed = trimmed && (needle !== "" || type !== "");
   const curated = sorted(
     matched.filter((artifact) => artifact.source === "featured"),
     column,
@@ -308,11 +332,23 @@ export function ArtifactTable({
         </label>
       </div>
       {/* Same reason as the tiles above: the filters and the type chips stay
-          on screen, so the region under them says why it holds no rows. */}
-      {matched.length === 0 && (
+          on screen, so the region under them says why it holds no rows. A
+          trimmed listing states the trim instead, because the returned rows
+          are not the whole domain and the recovery lies past their edge. */}
+      {matched.length === 0 && !narrowed && (
         <EmptyState>
           Nothing matched. Clear the filter or pick another type.
         </EmptyState>
+      )}
+      {narrowed && (
+        <FilterReach
+          scope={scope}
+          shown={artifacts.length}
+          matched={matched.length}
+          withheld={withheld}
+          query={filter.trim()}
+          type={type}
+        />
       )}
       {curated.length > 0 && (
         <div className="curated-block">
@@ -332,6 +368,62 @@ export function ArtifactTable({
       )}
     </div>
   );
+}
+
+/** FilterReach states how far the table's filter reached and continues past
+ * it. It is drawn where a filter or a type chip narrows a listing the
+ * response trimmed, on both arms: a match found among the returned rows is
+ * still no answer about the rows that were withheld, and a filter that matched
+ * nothing has established nothing at all.
+ *
+ * The continuation is the §4.5.3 search bounded to this domain, carrying the
+ * typed words and the chosen type, so the reader lands on the same question
+ * asked of the whole domain rather than on an unfiltered search they have to
+ * retype. */
+function FilterReach({
+  scope,
+  shown,
+  matched,
+  withheld,
+  query,
+  type,
+}: {
+  scope: string;
+  shown: number;
+  matched: number;
+  withheld: number | null;
+  query: string;
+  type: string;
+}) {
+  const rest =
+    withheld === null
+      ? "The response returned fewer artifacts than the domain holds."
+      : `${String(withheld)} more ${withheld === 1 ? "artifact stands" : "artifacts stand"} under this domain.`;
+  return (
+    <div className="filter-reach" role="status" data-testid="filter-reach">
+      <span className="listing-tail-mark" aria-hidden="true" />
+      <div className="listing-tail-body">
+        <p className="listing-tail-line">
+          {matched === 0 && "Nothing on this page matched. "}
+          {`The filter covers the ${String(shown)} ${shown === 1 ? "artifact" : "artifacts"} this page loaded. ${rest}`}
+        </p>
+        <a
+          className="button"
+          data-testid="filter-reach-continue"
+          href={reachHref(scope, query, type)}
+        >
+          Search the whole domain
+        </a>
+      </div>
+    </div>
+  );
+}
+
+/** reachHref addresses the scoped search the filter continues into. The
+ * registry root carries no scope filter, because the empty path bounds
+ * nothing. */
+function reachHref(scope: string, query: string, type: string): string {
+  return searchHref(formatQueryLine({ query, type, scope, tags: [] }));
 }
 
 /** ArtifactRows draws one block of the table. The column labels are quiet
