@@ -3368,11 +3368,18 @@ label:has(> input:disabled) {
   font-size: 11px;
 }
 
-.palette-rows,
-.palette-recents {
+.palette-rows {
   list-style: none;
   margin: 8px 0;
   padding: 0;
+}
+
+/* The return glyph on a recent query, held at a fixed width so the queries
+   themselves line up in one column. */
+.palette-recent-mark {
+  flex: none;
+  width: 15px;
+  font-size: 11px;
 }
 
 /* A row spans the panel and carries the inset itself, so the selection tint

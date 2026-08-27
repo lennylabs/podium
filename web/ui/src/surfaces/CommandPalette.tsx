@@ -107,11 +107,17 @@ function PalettePanel({
   );
   const rows = results.value?.results ?? [];
   // The result list is drawn only on the arm PaletteResults reaches with rows
-  // in hand. `aria-expanded` and `aria-activedescendant` state that same arm,
-  // because a field that points at an option no page holds is worse than one
-  // that points at nothing.
+  // in hand. `aria-expanded` and `aria-activedescendant` state the arm that
+  // holds a list, because a field that points at an option no page holds is
+  // worse than one that points at nothing.
   const listed = typed !== '' && !results.loading && results.error === null && rows.length > 0;
-  const at = listed ? Math.min(index, rows.length - 1) : -1;
+  // The just-opened panel lists the queries this page has run, and the arrows
+  // move over them the way they move over results. The two lists never appear
+  // together, so one highlight walks whichever list is drawn and the footer
+  // names the keys that act on it.
+  const listedRecents = typed === '' && recents.length > 0;
+  const options = listedRecents ? recents.length : listed ? rows.length : 0;
+  const at = options === 0 ? -1 : Math.min(index, options - 1);
   // The no-match arm and the refused arm below both offer one action, the
   // handoff to the search surface, and the footer advertises ⏎ the whole time
   // the panel is open. So ⏎ runs that one action wherever there is no row to
@@ -120,6 +126,11 @@ function PalettePanel({
   // reaches the search surface, which issues the read again on a surface that
   // can list the whole result set.
   const offersSearch = typed !== '' && !results.loading && !listed;
+  // Which list the panel is drawing, which is what the footer names its keys
+  // against. A read still in flight keeps the legend the settled list will
+  // carry rather than flickering through the bare arm on every keystroke.
+  const mode: PaletteMode =
+    typed === '' ? (listedRecents ? 'recents' : 'bare') : offersSearch ? 'search' : 'rows';
   // What the panel drew is also stated for a reader who cannot see it. The
   // count reaches them as the read settles, and the no-match arm, which
   // replaces the whole listbox with a sentence, reaches them at all:
@@ -132,6 +143,14 @@ function PalettePanel({
     navigated.current = true;
     window.location.hash = artifactHref(id);
     onClose();
+  };
+
+  // Running a recent query puts it back in the field, which is what issues
+  // the read again. The highlight returns to the top of the list the read
+  // produces.
+  const runRecent = (query: string) => {
+    setLine(query);
+    setIndex(0);
   };
 
   const openSearch = () => {
@@ -152,11 +171,11 @@ function PalettePanel({
         return;
       case 'ArrowDown':
         event.preventDefault();
-        setIndex((at) => (rows.length === 0 ? 0 : (at + 1) % rows.length));
+        setIndex((at) => (options === 0 ? 0 : (at + 1) % options));
         return;
       case 'ArrowUp':
         event.preventDefault();
-        setIndex((at) => (rows.length === 0 ? 0 : (at + rows.length - 1) % rows.length));
+        setIndex((at) => (options === 0 ? 0 : (at + options - 1) % options));
         return;
       case 'Enter':
         // Both arms navigate and close the panel, and closing it hands focus
@@ -168,6 +187,19 @@ function PalettePanel({
         //
         // ⌘⏎ hands the same query to the search surface, which is the one
         // place the whole result set is listed.
+        //
+        // An empty line has no query to hand over and no row to open, so both
+        // arms below are refused there rather than carrying nothing to the
+        // search surface, which lands on its browse listing and reads as the
+        // panel having discarded what the reader asked for. ⏎ runs the
+        // highlighted recent query instead, which is what the footer names.
+        if (typed === '') {
+          if (listedRecents) {
+            event.preventDefault();
+            runRecent(recents[at]);
+          }
+          return;
+        }
         if (event.metaKey || event.ctrlKey) {
           event.preventDefault();
           openSearch();
@@ -227,7 +259,7 @@ function PalettePanel({
             aria-label="Search artifacts"
             aria-autocomplete="list"
             aria-controls={listboxID}
-            aria-expanded={listed}
+            aria-expanded={listed || listedRecents}
             aria-activedescendant={at < 0 ? undefined : optionID(at)}
             placeholder="Search artifacts"
             value={line}
@@ -251,12 +283,7 @@ function PalettePanel({
             inset. */}
         <div className="palette-body">
           {typed === '' ? (
-            <PaletteHints
-              recents={recents}
-              onPick={(query) => {
-                setLine(query);
-              }}
-            />
+            <PaletteHints recents={recents} at={at} onPick={runRecent} />
           ) : (
             <PaletteResults
               results={results}
@@ -275,7 +302,7 @@ function PalettePanel({
         <p className="assistive-only" role="status" aria-live="polite" data-testid="palette-announcement">
           {announcement}
         </p>
-        <PaletteFooter searchOnly={offersSearch} />
+        <PaletteFooter mode={mode} />
       </div>
     </div>
   );
@@ -307,32 +334,41 @@ function KeyCap({ children }: { children: ReactNode }) {
   return <span className="mono key-cap">{children}</span>;
 }
 
+/** PaletteMode is which list the panel is drawing, which is what fixes the
+ * keys the footer names and the list the arrows walk. */
+type PaletteMode = 'rows' | 'recents' | 'bare' | 'search';
+
 /** PaletteFooter is the keyboard legend. Escape sits at the right edge on its
  * own, because it leaves the panel rather than acting inside it. On an arm
- * with no row to open, the legend states the one key that acts, because
- * naming ↑↓ and ⏎ over a panel holding no rows advertises keys nothing
- * answers. */
-function PaletteFooter({ searchOnly }: { searchOnly: boolean }) {
-  if (searchOnly) {
-    return (
-      <p className="palette-footer quiet" data-testid="palette-footer">
-        <KeyCap>⏎</KeyCap>
-        <span>search anyway</span>
-        <span className="spacer" />
-        <KeyCap>esc</KeyCap>
-        <span>close</span>
-      </p>
-    );
-  }
+ * with no row to open, the legend states the keys that act, because naming a
+ * key over a panel nothing answers it on advertises an action the reader
+ * cannot take. The just-opened arm names ⏎ as run, because it runs the
+ * highlighted recent query, and drops ⌘⏎, because an empty line carries no
+ * query to the search surface. */
+function PaletteFooter({ mode }: { mode: PaletteMode }) {
   return (
     <p className="palette-footer quiet" data-testid="palette-footer">
-      <KeyCap>↑</KeyCap>
-      <KeyCap>↓</KeyCap>
-      <span>navigate</span>
-      <KeyCap>⏎</KeyCap>
-      <span>open</span>
-      <KeyCap>⌘⏎</KeyCap>
-      <span>all results</span>
+      {mode === 'rows' || mode === 'recents' ? (
+        <>
+          <KeyCap>↑</KeyCap>
+          <KeyCap>↓</KeyCap>
+          <span>navigate</span>
+          <KeyCap>⏎</KeyCap>
+          <span>{mode === 'rows' ? 'open' : 'run'}</span>
+        </>
+      ) : null}
+      {mode === 'rows' && (
+        <>
+          <KeyCap>⌘⏎</KeyCap>
+          <span>all results</span>
+        </>
+      )}
+      {mode === 'search' && (
+        <>
+          <KeyCap>⏎</KeyCap>
+          <span>search anyway</span>
+        </>
+      )}
       <span className="spacer" />
       <KeyCap>esc</KeyCap>
       <span>close</span>
@@ -342,24 +378,48 @@ function PaletteFooter({ searchOnly }: { searchOnly: boolean }) {
 
 /** PaletteHints is the just-opened panel: the queries this page has already
  * run, and the inline filter syntax, which is what teaches the query language
- * the search surface exposes as pills. */
-function PaletteHints({ recents, onPick }: { recents: string[]; onPick: (query: string) => void }) {
+ * the search surface exposes as pills. The recent queries are the panel's
+ * listbox on this arm, so the arrows walk them and ⏎ runs the highlighted one,
+ * which is what the footer names here. */
+function PaletteHints({
+  recents,
+  at,
+  onPick,
+}: {
+  recents: string[];
+  at: number;
+  onPick: (query: string) => void;
+}) {
   return (
-    <div className="palette-hints">
+    <>
       <p className="label">Recent queries</p>
       {recents.length === 0 ? (
         <EmptyState scope="inline">No query has been run on this page yet.</EmptyState>
       ) : (
-        <ul className="palette-recents">
-          {recents.map((query) => (
-            <li key={query}>
+        // The list carries the result list's own classes, because the arrows
+        // move one highlight and a recent query drawn as an inset button
+        // would read as a different kind of row from the ones the same keys
+        // walk over a query's matches.
+        <ul className="palette-rows" id={listboxID} role="listbox" aria-label="Recent queries">
+          {recents.map((query, row) => (
+            <li key={query} role="presentation">
               <button
                 type="button"
+                role="option"
+                id={optionID(row)}
+                aria-selected={row === at}
+                // The query field keeps focus while the arrows move the
+                // highlight, so no row is a Tab stop.
+                tabIndex={-1}
+                className={row === at ? 'palette-row palette-row-selected' : 'palette-row'}
                 onClick={() => {
                   onPick(query);
                 }}
               >
-                {query}
+                <span className="quiet palette-recent-mark" aria-hidden="true">
+                  ↩
+                </span>
+                <span>{query}</span>
               </button>
             </li>
           ))}
@@ -373,7 +433,7 @@ function PaletteHints({ recents, onPick }: { recents: string[]; onPick: (query: 
           </span>
         ))}
       </div>
-    </div>
+    </>
   );
 }
 

@@ -10716,13 +10716,92 @@ describe("the command palette", () => {
 
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     const panel = screen.getByTestId("palette");
-    const recent = within(panel).getByRole("button", { name: "review" });
+    const recent = within(panel).getByRole("option", { name: "review" });
     // Picking one fills the field with it, which is the point of listing it.
     fireEvent.click(recent);
     expect(
       (within(panel).getByLabelText("Search artifacts") as HTMLInputElement)
         .value,
     ).toBe("review");
+  });
+
+  // The just-opened panel has no row to open and no query to hand to the
+  // search surface, so the footer names neither. It names the keys that act:
+  // the arrows walk the recent queries and ⏎ runs the highlighted one. A
+  // legend carried over from the typed state advertised ⏎ open and ⌘⏎ all
+  // results over a panel where ⌘⏎ landed on the search surface's browse
+  // listing, which is the results of nothing the reader asked for.
+  it("names the keys the just-opened panel answers and runs the highlighted recent query", async () => {
+    palettePage([{ id: "platform/review", type: "skill" }], 1);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const type = (query: string) => {
+      fireEvent.change(
+        within(screen.getByTestId("palette")).getByLabelText(
+          "Search artifacts",
+        ),
+        { target: { value: query } },
+      );
+    };
+    // Two queries run from this page, so the reopened panel lists both.
+    for (const query of ["review", "lint"]) {
+      type(query);
+      await screen.findByTestId("palette-heading");
+      // ⏎ opens the highlighted row, which is what records the query. The
+      // panel is reopened once the surface it opened has settled, because
+      // entering a surface closes whatever panel covers it.
+      fireEvent.keyDown(screen.getByTestId("palette"), { key: "Enter" });
+      await screen.findByLabelText("Artifact viewer");
+      fireEvent.keyDown(window, { key: "k", metaKey: true });
+    }
+
+    const panel = screen.getByTestId("palette");
+    const footer = within(panel).getByTestId("palette-footer");
+    expect(footer.textContent).toBe("↑↓navigate⏎runescclose");
+    expect(footer.textContent).not.toContain("⌘⏎");
+
+    // The arrows walk the recent queries, and the field names the one they
+    // hold for a reader who cannot see the highlight.
+    const field = within(panel).getByLabelText("Search artifacts");
+    const list = within(panel).getByRole("listbox", { name: "Recent queries" });
+    const held = () =>
+      within(list)
+        .getAllByRole("option")
+        .findIndex((row) => row.getAttribute("aria-selected") === "true");
+    expect(held()).toBe(0);
+    fireEvent.keyDown(panel, { key: "ArrowDown" });
+    expect(held()).toBe(1);
+    expect(field.getAttribute("aria-activedescendant")).toBe(
+      within(list).getAllByRole("option")[1].id,
+    );
+
+    // ⏎ runs the highlighted one, which puts it back in the field and issues
+    // the read again.
+    fireEvent.keyDown(panel, { key: "Enter" });
+    expect((field as HTMLInputElement).value).toBe("review");
+    await waitFor(() => {
+      expect(lastSearch().get("query")).toBe("review");
+    });
+    expect(window.location.hash).not.toContain("#/search/");
+  });
+
+  // Nothing typed is nothing to carry, so ⌘⏎ is refused rather than landing
+  // on the search surface's browse listing with the panel closed behind it.
+  it("refuses the search handoff while the line is empty", async () => {
+    palettePage([], 0);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    for (const metaKey of [true, false]) {
+      fireEvent.keyDown(panel, { key: "Enter", metaKey });
+    }
+    expect(window.location.hash).not.toContain("#/search/");
+    expect(screen.getByTestId("palette")).toBeTruthy();
+    // With no query run on this page there is no recent to walk either, so
+    // the footer names the one key that acts.
+    expect(within(panel).getByTestId("palette-footer").textContent).toBe(
+      "escclose",
+    );
   });
 
   // A route change the panel did not issue is the reader entering a surface
