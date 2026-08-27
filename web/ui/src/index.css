@@ -1198,11 +1198,17 @@ button.version-notice-latest {
   gap: 6px;
 }
 
+/* A keyword is a value the API treats as an identifier, so a pill is set in the
+   mono face at the small quiet tone the type table assigns those values. In the
+   body sans at the body tone a row of pills outweighed the mono path above it
+   and became the second thing read after the artifact name. */
 .tag {
-  padding: 1px 8px;
+  padding: 2px 7px;
   border-radius: 100px;
   background: var(--chip);
-  font-size: 12.5px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--meta);
 }
 
 .field {

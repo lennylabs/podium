@@ -298,6 +298,25 @@ describe("artifact row description", () => {
   });
 });
 
+// A keyword is an identifier the API round-trips as a filter value, and the
+// row already states its identifiers in the mono face at the quiet tone. Set
+// in the body sans at body ink, a row of a dozen pills outweighed the mono
+// path directly above it and read as the row's second most prominent element
+// after the artifact name. jsdom resolves no custom property, so the tone and
+// the face are pinned through the rules the sheet matches.
+describe("artifact row keyword pill", () => {
+  it("sets a keyword in the small quiet mono the identifiers around it use", () => {
+    const pill = document.createElement("li");
+    pill.className = "tag";
+    document.body.appendChild(pill);
+    mounted.push(pill);
+
+    expect(window.getComputedStyle(pill).fontSize).toBe("10.5px");
+    expect(declaredFor(pill, "font-family")).toBe("var(--font-mono)");
+    expect(declaredFor(pill, "color")).toBe("var(--meta)");
+  });
+});
+
 // A sidebar tree label is the whole folded stretch of path a §4.5.5 sparse
 // chain collapsed into one entry, so it runs wider than the 268px sidebar. A
 // wrapping row breaks the toggle away from the label, drops the label onto the
