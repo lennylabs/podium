@@ -9473,6 +9473,46 @@ describe("the shell’s identity cluster", () => {
     expect(window.localStorage.getItem("podium.theme")).toBe("light");
   });
 
+  // A trigger that toggles aria-expanded and stops there tells a reader that
+  // something opened without naming what kind of thing it is or where it
+  // stands. Both topbar triggers name their popup and point at the element
+  // they own, the same wiring the layer table's overflow control carries.
+  //
+  // Spec: §13.10
+  it("names the popup each topbar trigger owns", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture() },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const trigger = await screen.findByTestId("appearance-trigger");
+    // The popover holds a group rather than menu items, so the trigger
+    // declares the unqualified popup kind.
+    expect(trigger.getAttribute("aria-haspopup")).toBe("true");
+    const controls = trigger.getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("appearance-menu").id).toBe(controls);
+  });
+
+  // The identity cluster's trigger carries the same wiring, and its popover
+  // is a menu, so it names that kind.
+  //
+  // Spec: §13.10
+  it("names the menu the identity cluster owns", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const trigger = await screen.findByTestId("account-trigger");
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    const controls = trigger.getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("account-menu").id).toBe(controls);
+  });
+
   // Every label the shell writes for a reader is sentence case, and the
   // appearance options are labels rather than identifiers. The stored
   // preference stays lowercase because it is the value stamped on the root

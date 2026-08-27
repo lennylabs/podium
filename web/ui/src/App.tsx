@@ -3,7 +3,7 @@
 // §13.10 surfaces: the domain browser, search, the artifact viewer, and the
 // layer panel.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import type { ReactNode, RefObject } from 'react';
 
@@ -1114,10 +1114,16 @@ function TopBar({
  * menu stands over a surface the reader deliberately entered, which is the
  * same leak the palette closes on a route change.
  *
+ * The hook also mints the popover's id, so a trigger can point aria-controls
+ * at the element it owns and every topbar popover carries the same wiring.
+ * The trigger names the kind of popup it opens through aria-haspopup, which
+ * differs between the two menus, so that attribute stands on each trigger.
+ *
  * Spec: §13.10
  */
 function useTopbarMenu() {
   const [open, setOpen] = useState(false);
+  const menuId = useId();
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = usePopupDismiss<HTMLDivElement>(
     open,
@@ -1132,6 +1138,7 @@ function useTopbarMenu() {
   }, [entered]);
   return {
     open,
+    menuId,
     trigger,
     menu,
     toggle: () => {
@@ -1157,13 +1164,15 @@ function AccountMenu({
   onTheme: (next: ThemePreference) => void;
   signOutPath: string | null;
 }) {
-  const { open, trigger, menu, toggle } = useTopbarMenu();
+  const { open, menuId, trigger, menu, toggle } = useTopbarMenu();
   return (
     <div className="account">
       <button
         type="button"
         className="account-trigger"
         data-testid="account-trigger"
+        aria-haspopup="menu"
+        aria-controls={menuId}
         aria-expanded={open}
         ref={trigger}
         onClick={toggle}
@@ -1174,7 +1183,14 @@ function AccountMenu({
         <span className="mono subject">{subject}</span>
       </button>
       {open && (
-        <div className="account-menu" role="menu" aria-label="Account" data-testid="account-menu" ref={menu}>
+        <div
+          id={menuId}
+          className="account-menu"
+          role="menu"
+          aria-label="Account"
+          data-testid="account-menu"
+          ref={menu}
+        >
           <p className="mono quiet">{subject}</p>
           <AppearanceSwitch theme={theme} onTheme={onTheme} />
           <LayerQuota />
@@ -1234,7 +1250,8 @@ function AppearanceSwitch({
  * deployment that renders no identity cluster.
  *
  * The popover holds the segmented control and nothing else, so it declares no
- * role of its own. A role="menu" whose children are ordinary toggle buttons
+ * role of its own, and the trigger's aria-haspopup is the unqualified "true"
+ * rather than "menu". A role="menu" whose children are ordinary toggle buttons
  * rather than menu items is announced as a menu holding no items, and the
  * pinned preference then reads as a pressed toggle instead of the selected
  * member of its group. The group and its label stand on the control itself.
@@ -1248,13 +1265,15 @@ function AppearanceMenu({
   theme: ThemePreference;
   onTheme: (next: ThemePreference) => void;
 }) {
-  const { open, trigger, menu, toggle } = useTopbarMenu();
+  const { open, menuId, trigger, menu, toggle } = useTopbarMenu();
   return (
     <div className="account">
       <button
         type="button"
         className="account-trigger appearance-trigger"
         data-testid="appearance-trigger"
+        aria-haspopup="true"
+        aria-controls={menuId}
         aria-expanded={open}
         ref={trigger}
         onClick={toggle}
@@ -1263,7 +1282,7 @@ function AppearanceMenu({
         Appearance
       </button>
       {open && (
-        <div className="account-menu" data-testid="appearance-menu" ref={menu}>
+        <div id={menuId} className="account-menu" data-testid="appearance-menu" ref={menu}>
           <AppearanceSwitch theme={theme} onTheme={onTheme} />
         </div>
       )}
