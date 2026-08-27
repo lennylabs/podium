@@ -6903,6 +6903,59 @@ describe("the layer write flows", () => {
     expect(sent.root).toBeUndefined();
   });
 
+  // §4.6: a git layer reads its tree from a repository, and the registry's
+  // source validator refuses one without it on every ingest with
+  // "git source requires repo". The registration itself is accepted, so a form
+  // that sends it leaves a layer that can never ingest, and the repository is
+  // held on exactly as the ref beside it is.
+  it("holds the register submit on a git source with no repository", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = screen.getByRole("dialog", { name: "Register a layer" });
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "git-layer" },
+    });
+    fireEvent.change(screen.getByLabelText("Ref"), {
+      target: { value: "main" },
+    });
+    // The repository carries the same visible requirement marker the ref does.
+    expect(screen.getByTestId("register-repo-required").textContent).toBe(
+      "required",
+    );
+    expect(
+      screen.getByLabelText("Repository").getAttribute("aria-required"),
+    ).toBe("true");
+    const register = within(dialog).getByRole("button", { name: "Register" });
+    const note = screen.getByTestId("register-foot-note");
+    expect(register.hasAttribute("disabled")).toBe(true);
+    expect(note.textContent).toContain(
+      "Name the repository before registering.",
+    );
+    expect(register.getAttribute("aria-describedby")).toBe(note.id);
+    // The field the hold stands on reports itself invalid once the reader has
+    // been in it and left it empty.
+    fireEvent.blur(screen.getByLabelText("Repository"));
+    expect(
+      screen.getByLabelText("Repository").getAttribute("aria-invalid"),
+    ).toBe("true");
+    // Naming the repository releases the hold and sends the registration.
+    fireEvent.change(screen.getByLabelText("Repository"), {
+      target: { value: "https://github.com/alice/catalog.git" },
+    });
+    expect(register.hasAttribute("disabled")).toBe(false);
+    expect(screen.getByTestId("register-foot-note").textContent).toContain(
+      "Registers at the end of the order",
+    );
+  });
+
   // A disabled submit reports no reason of its own, and the field the hold is
   // on scrolls out of view once the body is scrolled to the submit row, so the
   // form names the field holding the submit beside the control and marks the
@@ -7050,10 +7103,13 @@ describe("the layer write flows", () => {
     await screen.findByLabelText("Layer panel");
     fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
     const note = screen.getByTestId("register-foot-note");
-    // The ID holds the submit first, so it is named before the ref becomes
-    // the field the hold stands on.
+    // The ID and the repository hold the submit first, so both are named
+    // before the ref becomes the field the hold stands on.
     fireEvent.change(screen.getByLabelText("Layer ID"), {
       target: { value: "git-layer" },
+    });
+    fireEvent.change(screen.getByLabelText("Repository"), {
+      target: { value: "https://github.com/alice/catalog.git" },
     });
     const ref = screen.getByLabelText("Ref");
     fireEvent.blur(ref);

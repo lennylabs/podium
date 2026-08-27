@@ -106,13 +106,13 @@ export function RegisterLayerForm({
   // selected axis carries at least one member.
   const groupMembers = members(groups);
   const userMembers = members(users);
-  // §4.6: the git source resolves its tree at the ref, and it has no default.
-  // The registration itself is accepted with the ref blank, so a layer
-  // registered without one issues its webhook secret, takes a place in the
-  // order, and is then refused on every ingest with
-  // "git source requires ref". The form holds the write until the ref is
-  // named rather than handing the reader a layer that can never serve an
-  // artifact.
+  // §4.6: the git source reads its tree from a repository at a ref, and
+  // neither has a default. The registration itself is accepted with either
+  // blank, so a layer registered without one issues its webhook secret, takes
+  // a place in the order, and is then refused on every ingest with
+  // "git source requires repo" or "git source requires ref". The form holds
+  // the write until both are named rather than handing the reader a layer
+  // that can never serve an artifact.
   // §4.6: a local source reads its tree from the named directory and has no
   // default either, so the same hold applies on that arm. A registration with
   // the path blank is accepted and then refused on every ingest with
@@ -124,6 +124,7 @@ export function RegisterLayerForm({
     id,
     knownIDs,
     sourceType,
+    repo,
     ref,
     localPath,
     userDefined,
@@ -243,16 +244,15 @@ export function RegisterLayerForm({
           <SourceChoice value={sourceType} onChange={edited(setSourceType)} />
           {sourceType === 'git' ? (
             <>
-              <label className="field">
-                <span className="label">Repository</span>
-                <input
-                  type="text"
-                  value={repo}
-                  onChange={(event) => {
-                    setRepo(event.target.value);
-                  }}
-                />
-              </label>
+              <RequiredField
+                label="Repository"
+                value={repo}
+                testID="register-repo"
+                held={heldOn('repo')}
+                onChange={(next) => {
+                  setRepo(next);
+                }}
+              />
               {/* The ref and the root both qualify the repository above them
                   and each holds a short value, so they share one row. */}
               <div className="field-pair">
@@ -407,7 +407,7 @@ export function RegisterLayerForm({
 
 /** HoldField identifies the field a registration hold stands on, so the field
  * itself can be marked invalid and pointed at the sentence stating the hold. */
-type HoldField = 'id' | 'ref' | 'local-path' | 'groups' | 'users';
+type HoldField = 'id' | 'repo' | 'ref' | 'local-path' | 'groups' | 'users';
 
 /** registrationHold names the field the submit is held on, or null when the
  * form is ready to send. The submit is disabled while a hold stands, and a
@@ -418,6 +418,7 @@ function registrationHold({
   id,
   knownIDs,
   sourceType,
+  repo,
   ref,
   localPath,
   userDefined,
@@ -429,6 +430,7 @@ function registrationHold({
   id: string;
   knownIDs: readonly string[];
   sourceType: string;
+  repo: string;
   ref: string;
   localPath: string;
   userDefined: boolean;
@@ -456,6 +458,13 @@ function registrationHold({
       field: 'id',
       message: `Layer ${id.trim()} is already registered. Registering it again would reset its place in the order and its last ingest, so name an unused ID.`,
     };
+  }
+  // §4.6: the git source reads its tree from the named repository and has no
+  // default. A registration with the repository blank is accepted and then
+  // refused on every ingest with "git source requires repo", the same failure
+  // the blank ref produces, so the same hold applies to both fields.
+  if (sourceType === 'git' && repo.trim() === '') {
+    return { field: 'repo', message: 'Name the repository before registering.' };
   }
   if (sourceType === 'git' && ref.trim() === '') {
     return { field: 'ref', message: 'Name the ref before registering.' };
