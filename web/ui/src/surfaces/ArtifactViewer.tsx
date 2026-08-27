@@ -34,7 +34,7 @@ import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
 import { abbreviateHash } from '../hash';
 import type { DependencyEdge, LargeResourceLink, LayerRecord, LoadArtifactResponse } from '../api';
-import { dependentsOf, listLayers, loadArtifact } from '../api';
+import { catalogArtifactIDs, dependentsOf, listLayers, loadArtifact } from '../api';
 import { artifactHref } from '../route';
 import { since } from '../time';
 import { useAsync, useErrorReport } from '../useAsync';
@@ -765,17 +765,51 @@ function referenceID(reference: string): string {
   return at === -1 ? reference : reference.slice(0, at);
 }
 
-/** declaredExtends reads the artifact's own outbound `extends:` reference.
- * The dependents endpoint serves the reverse index alone (§4.7.3), so this
- * direction reaches the rail only from the manifest. A merged response
- * re-serializes the manifest with the hidden parent stripped (§4.6) and
- * carries the pre-merge document beside it, which is where the authored
- * reference survives. */
+/** declaredExtends reads the reference the artifact's author wrote, which is
+ * a candidate for the rail rather than something the rail may draw. The
+ * dependents endpoint serves the reverse index alone (§4.7.3), so this
+ * direction reaches the rail only from the manifest, and the registry
+ * re-serializes every extends manifest with the parent stripped (§4.6) and
+ * carries the pre-merge document beside it for the content-hash check, so
+ * the authored reference survives only there. Whether the reader may be told
+ * the parent exists is settled by visibleExtends. */
 function declaredExtends(artifact: LoadArtifactResponse, frontmatter: string): string {
   const raw = artifact.raw_frontmatter ?? '';
   const source = raw === '' ? frontmatter : raw;
   const found = parseFrontmatter(source).properties.find((property) => property.key === 'extends');
   return found === undefined ? '' : found.value.trim();
+}
+
+/** parentScope is the domain a parent artifact ID sits in, which is the scope
+ * the catalog read is taken over. A top-level ID sits at the root, whose
+ * scope is the empty string. */
+function parentScope(id: string): string {
+  const cut = id.lastIndexOf('/');
+  return cut === -1 ? '' : id.slice(0, cut);
+}
+
+/** visibleExtends resolves the authored reference into the chips the rail may
+ * draw. §4.6 merges a parent whose layer the caller cannot see and holds that
+ * "the parent's existence and ID are not surfaced to the requester", so a
+ * concealed parent has to read on this surface exactly as an artifact that
+ * extends nothing does. The served frontmatter cannot settle it either way,
+ * because the registry strips the parent from every extends response whether
+ * or not the caller can see it, and the pre-merge document beside it is a
+ * disclosure that does not license the rail to republish the ID.
+ *
+ * The §4.5.2 catalog read answers with the IDs the caller can see under a
+ * scope, so a parent it lists is one the caller could have opened on its own
+ * and naming it discloses nothing, and a parent it omits leaves the group
+ * indistinguishable from one nobody declared. A catalog read that fails
+ * resolves to no chip, because a concealment rule that cannot be evaluated
+ * denies. */
+async function visibleExtends(declared: string): Promise<RelationChip[]> {
+  if (declared === '') {
+    return [];
+  }
+  const id = referenceID(declared);
+  const visible = await catalogArtifactIDs(parentScope(id));
+  return visible.includes(id) ? [{ href: artifactHref(id), text: declared }] : [];
 }
 
 /** inboundGroups splits the reverse-index edges into one group per relation,
@@ -801,21 +835,27 @@ function inboundGroups(edges: DependencyEdge[]): { label: string; chips: Relatio
 /** Relations lists the artifacts this one extends and the artifacts that
  * extend or otherwise depend on it. The reverse-index edges arrive on their
  * own request, so an artifact with no edges is a state of that group rather
- * than of the page, and the outbound group comes from the manifest already
- * in hand and renders while the request is in flight. */
+ * than of the page. The outbound direction takes a read of its own as well,
+ * because the reference the manifest carries names a parent the caller may
+ * not be allowed to know exists (§4.6). An artifact that declares no parent
+ * settles without waiting on anything. */
 function Relations({ artifact, frontmatter }: { artifact: LoadArtifactResponse; frontmatter: string }) {
   const edges = useAsync(() => dependentsOf(artifact.id), [artifact.id]);
   const declared = declaredExtends(artifact, frontmatter);
-  const outbound = declared === '' ? [] : [{ href: artifactHref(referenceID(declared)), text: declared }];
+  const parent = useAsync(() => visibleExtends(declared), [artifact.id, declared]);
   return (
     <section aria-label="Relations">
       <p className="label">Relations</p>
-      <RailRelationGroup
-        label="extends"
-        chips={outbound}
-        absent="This artifact extends nothing."
-        direction="outbound"
-      />
+      {declared !== '' && parent.loading ? (
+        <Loading label="Loading relations." />
+      ) : (
+        <RailRelationGroup
+          label="extends"
+          chips={parent.value ?? []}
+          absent="This artifact extends nothing."
+          direction="outbound"
+        />
+      )}
       {edges.loading && <Loading label="Loading relations." />}
       {edges.error !== null && <ErrorState error={edges.error} onRetry={edges.reload} />}
       {edges.value !== null &&

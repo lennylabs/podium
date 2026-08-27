@@ -3316,10 +3316,12 @@ describe("the artifact viewer", () => {
   // dependents endpoint serves the reverse index alone, so the artifact's own
   // outbound extends reaches the rail from the manifest. A merged response
   // strips the parent from the frontmatter it re-serializes and carries the
-  // pre-merge document beside it, which is where the reference survives.
+  // pre-merge document beside it, which is where the reference survives. The
+  // catalog read lists the parent, so this caller may be told it exists.
   it("splits the rail's relations into the artifact's own extends and the artifacts extending it", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/catalog": { body: { ids: ["finance/ap/pay-invoice"] } },
       "/v1/load_artifact": {
         body: {
           id: "finance/ap/three-way-match",
@@ -3357,6 +3359,78 @@ describe("the artifact viewer", () => {
     ).toBeNull();
   });
 
+  // Spec: §4.6 — when the caller cannot see the layer that contributes a
+  // parent, the registry merges it server-side and "the parent's existence
+  // and ID are not surfaced to the requester". The pre-merge document travels
+  // beside the merged manifest for the content-hash check, so the authored
+  // reference is still on the response, and republishing it as a chip would
+  // tell the reader an artifact they cannot open exists. The catalog read
+  // omits the parent, so the group reads as it does for an artifact that
+  // declares none.
+  it("withholds the extends chip when the catalog does not list the declared parent", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/catalog": { body: { ids: [] } },
+      "/v1/load_artifact": {
+        body: {
+          id: "pub/child",
+          type: "skill",
+          version: "0.1.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Child\n",
+          frontmatter: "---\ntype: skill\nversion: 0.1.0\n---\n",
+          manifest_merged: true,
+          raw_frontmatter:
+            "---\ntype: skill\nversion: 0.1.0\nextends: hidden/parent\n---\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/pub%2Fchild");
+    render(<App />);
+    const relations = await screen.findByLabelText("Relations");
+    await within(relations).findByText("This artifact extends nothing.");
+    // Neither the ID nor a link to it reaches the page.
+    expect(screen.queryByText("hidden/parent")).toBeNull();
+    expect(
+      relations.querySelector('a[href="#/artifact/hidden%2Fparent"]'),
+    ).toBeNull();
+    // The read that settled it was taken over the parent's own domain.
+    expect(
+      requests.some((req) => req.url.includes("/v1/catalog?scope=hidden")),
+    ).toBe(true);
+  });
+
+  // Spec: §4.6 — a concealment rule that cannot be evaluated denies. When the
+  // catalog read fails, the rail cannot establish that the caller may see the
+  // declared parent, so it withholds the chip rather than falling back to the
+  // reference the pre-merge document carries.
+  it("withholds the extends chip when the catalog read fails", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/catalog": { rejects: true },
+      "/v1/load_artifact": {
+        body: {
+          id: "pub/child",
+          type: "skill",
+          version: "0.1.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Child\n",
+          frontmatter: "---\ntype: skill\nversion: 0.1.0\n---\n",
+          manifest_merged: true,
+          raw_frontmatter:
+            "---\ntype: skill\nversion: 0.1.0\nextends: hidden/parent\n---\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/pub%2Fchild");
+    render(<App />);
+    const relations = await screen.findByLabelText("Relations");
+    await within(relations).findByText("This artifact extends nothing.");
+    expect(screen.queryByText("hidden/parent")).toBeNull();
+  });
+
   // Spec: §13.10 — the viewer links to extending or dependent artifacts. The
   // chips of both directions are the same bordered row, so the leading dot is
   // what separates the edge the artifact declares from the edges that end at
@@ -3364,6 +3438,7 @@ describe("the artifact viewer", () => {
   it("tones each relation chip's leading dot by the direction of its edge", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/catalog": { body: { ids: ["finance/ap/pay-invoice"] } },
       "/v1/load_artifact": {
         body: {
           id: "finance/ap/three-way-match",
