@@ -32,6 +32,7 @@ import {
 } from '../components/primitives';
 import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
+import { abbreviateHash } from '../hash';
 import type { DependencyEdge, LargeResourceLink, LayerRecord, LoadArtifactResponse } from '../api';
 import { dependentsOf, listLayers, loadArtifact } from '../api';
 import { artifactHref } from '../route';
@@ -644,20 +645,6 @@ function ingestedLine(layer: LayerRecord | null): string {
   const age = at === '' ? 'never' : since(at, Date.now());
   const ref = ingestedRef(layer);
   return ref === '' ? age : `${age} · ${ref}`;
-}
-
-/** abbreviateHash keeps a content hash to the width of the rail. The
- * algorithm prefix identifies what was hashed and the ends of the digest are
- * what a reader compares against another copy, so both survive and the
- * middle is elided. A digest short enough to stand whole is left alone. */
-function abbreviateHash(hash: string): string {
-  const separator = hash.indexOf(':');
-  const algorithm = separator === -1 ? '' : hash.slice(0, separator + 1);
-  const digest = hash.slice(separator + 1);
-  if (digest.length <= 12) {
-    return hash;
-  }
-  return `${algorithm}${digest.slice(0, 4)}…${digest.slice(-4)}`;
 }
 
 /** inboundLabel names an edge from the perspective of the artifact it ends

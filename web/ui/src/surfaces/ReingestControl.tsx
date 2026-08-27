@@ -25,6 +25,7 @@ import type {
   IngestSummary,
 } from '../api';
 import { ApiError } from '../api';
+import { abbreviateHash } from '../hash';
 import { clock, elapsed } from '../time';
 
 /** immutableViolation is the §6.10 code the registry answers with when every
@@ -542,7 +543,10 @@ function RejectionList({ rejections }: { rejections: IngestRejection[] }) {
  * hashes, because a published version is immutable and the author's next
  * action is to bump it. The two hashes are set as a labelled pair rather than
  * inline, because they differ in the middle of a long unbreakable run and a
- * reader comparing them has to find where. */
+ * reader comparing them has to find where. Each is elided the way every other
+ * hash in this UI is, with a wider lead than the artifact rail takes because
+ * two hashes read against each other need more digest before they part. The
+ * whole hash stays on the title, so a reader who needs to copy it has it. */
 function ConflictList({ conflicts }: { conflicts: IngestConflict[] }) {
   return (
     <section className="ingest-detail" aria-label="Immutability conflicts">
@@ -561,9 +565,9 @@ function ConflictList({ conflicts }: { conflicts: IngestConflict[] }) {
             </p>
             <dl className="ingest-hashes mono">
               <dt className="quiet">stored</dt>
-              <dd>{conflict.old_hash}</dd>
+              <dd title={conflict.old_hash}>{abbreviateHash(conflict.old_hash ?? '', 8)}</dd>
               <dt className="quiet">incoming</dt>
-              <dd>{conflict.new_hash}</dd>
+              <dd title={conflict.new_hash}>{abbreviateHash(conflict.new_hash ?? '', 8)}</dd>
             </dl>
           </li>
         ))}

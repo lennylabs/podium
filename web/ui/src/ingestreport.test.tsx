@@ -206,6 +206,36 @@ describe('the finished reingest report', () => {
     expect(within(entry).getByText('incoming').nextElementSibling?.textContent).toBe('sha256:bbb');
   });
 
+  // A real §6.4 digest is 64 characters. Set whole it is a run of hex that
+  // wraps across lines and states nothing the reader can hold, so it is
+  // elided the way every other hash in this UI is, with the whole value kept
+  // on the title for a reader who has to copy it.
+  it('elides the middle of each conflicting hash and keeps the whole one on the title', () => {
+    const stored = `sha256:${'9c1f4e02'}${'0'.repeat(52)}a04b`;
+    const incoming = `sha256:${'2b77af51'}${'0'.repeat(52)}e39c`;
+    report({
+      accepted: 0,
+      idempotent: 0,
+      conflicts: [
+        {
+          artifact_id: 'platform/lint',
+          version: '2.3.0',
+          old_hash: stored,
+          new_hash: incoming,
+          code: 'ingest.immutable_violation',
+        },
+      ],
+    });
+    fireEvent.click(screen.getByRole('button', { name: '1 immutability conflict' }));
+    const entry = within(screen.getByLabelText('Immutability conflicts')).getByRole('listitem');
+    const storedCell = within(entry).getByText('stored').nextElementSibling;
+    const incomingCell = within(entry).getByText('incoming').nextElementSibling;
+    expect(storedCell?.textContent).toBe('sha256:9c1f4e02…a04b');
+    expect(incomingCell?.textContent).toBe('sha256:2b77af51…e39c');
+    expect(storedCell?.getAttribute('title')).toBe(stored);
+    expect(incomingCell?.getAttribute('title')).toBe(incoming);
+  });
+
   // The way back is a footer control beside Done, so the two ways out of the
   // itemised half sit together rather than one of them standing over the
   // content it leaves.
