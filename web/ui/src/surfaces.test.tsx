@@ -2167,6 +2167,36 @@ describe("the domain browser", () => {
     expect(screen.getByText("This domain has no subdomains.")).toBeTruthy();
     expect(screen.getByText("This domain lists no artifacts.")).toBeTruthy();
   });
+
+  // §4.5.5 folding can leave a domain with an empty subdomain list and an
+  // empty direct listing while its whole content arrived lifted. The two
+  // empty panels would then contradict the header count and stand between it
+  // and the entries it counts.
+  it("states no absence on a domain whose every entry arrived folded", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "finance",
+          description: "Finance.",
+          subdomains: [],
+          notable: [
+            { id: "finance/ap/pay-invoice", type: "skill", folded_from: "ap" },
+            { id: "finance/ar/send-invoice", type: "skill", folded_from: "ar" },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/finance");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    expect(within(browser).queryByText("This domain has no subdomains.")).toBeNull();
+    expect(within(browser).queryByText("This domain lists no artifacts.")).toBeNull();
+    // The header count and the group it refers to are what the screen holds.
+    expect(within(browser).getByText("2 ARTIFACTS")).toBeTruthy();
+    expect(within(browser).getByText("Lifted from sparse subdomains")).toBeTruthy();
+    expect(within(browser).getByText("finance/ap/pay-invoice")).toBeTruthy();
+  });
 });
 
 describe("search", () => {

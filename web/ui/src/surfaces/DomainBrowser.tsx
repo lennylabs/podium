@@ -90,6 +90,14 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
   const trimmed = total !== null || (body.note !== undefined && body.note !== '');
   const compact = body.subdomains.length > atScale;
   const root = body.path === '';
+  // §4.5.5 collapses a sparse subdomain into its parent's leaf set, and a
+  // domain whose every entry arrived that way returns an empty subdomain list
+  // and an empty direct listing while still carrying the entries the header
+  // counts. Stating both absences above the lifted group contradicts that
+  // count and spends the first screen saying nothing is there, so where the
+  // folded group is the whole of what the domain holds, the two empty panels
+  // stand down and the group is what the reader meets.
+  const foldedOnly = folded.length > 0 && body.subdomains.length === 0 && direct.length === 0;
   // The root's artifact badge counts the whole catalog rather than what the
   // empty path holds directly. §4.5.2 returns every visible ID under the
   // scope, and at the root that scope is the registry, so a count of direct
@@ -153,7 +161,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
 
           The compact treatments carry their own label, because at this count
           the label shares its row with the controls over the listing. */}
-      {compact && body.subdomains.length > 0 ? (
+      {foldedOnly ? null : compact && body.subdomains.length > 0 ? (
         <SubdomainTiles subdomains={body.subdomains} parent={body.path} catalog={catalog.value} />
       ) : (
         <>
@@ -166,7 +174,12 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
         </>
       )}
 
-      {compact && direct.length > 0 ? (
+      {foldedOnly ? (
+        // The listing is gone, and a rendering note the response carried is
+        // not: it reports what the fold left out, which is the one thing this
+        // screen would otherwise fail to state.
+        tail !== null && <ul className="artifact-list">{tail}</ul>
+      ) : compact && direct.length > 0 ? (
         <>
           <ArtifactTable artifacts={direct} />
           {tail !== null && <ul className="artifact-list">{tail}</ul>}
