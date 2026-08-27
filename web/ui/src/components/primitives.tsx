@@ -315,8 +315,27 @@ export function Loading({ label }: { label: string }) {
  */
 export type EmptyScope = 'page' | 'inline';
 
-export function EmptyState({ scope = 'page', children }: { scope?: EmptyScope; children: ReactNode }) {
-  return <p className={`empty empty-${scope}`}>{children}</p>;
+/** EmptyStateProps carries the title only on the `page` scope. The designed
+ * page-scope absence is two lines, a short title over the sentence that says
+ * what would appear there, because a lone centred sentence in a card the size
+ * of the listing it replaced reads as a caption that lost its content. The
+ * rail-scope absence is the single quiet line, so the union refuses a title
+ * there rather than letting one section of the rail outweigh the others.
+ *
+ * Spec: §13.10
+ */
+type EmptyStateProps =
+  | { scope?: 'page'; title: string; children: ReactNode }
+  | { scope: 'inline'; title?: never; children: ReactNode };
+
+export function EmptyState(props: EmptyStateProps) {
+  const scope = props.scope ?? 'page';
+  return (
+    <div className={`empty empty-${scope}`}>
+      {props.title === undefined ? null : <p className="empty-title">{props.title}</p>}
+      <p className="empty-body">{props.children}</p>
+    </div>
+  );
 }
 
 /** ErrorPageKind is what a whole-surface failure was: the read resolved

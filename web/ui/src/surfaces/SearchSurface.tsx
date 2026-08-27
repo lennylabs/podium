@@ -490,16 +490,16 @@ function SearchResults({
     // names for the same registry.
     if (!filtered && !queried) {
       return (
-        <EmptyState>
-          The catalog holds no artifacts. Register a layer to fill it.
+        <EmptyState title="The catalog holds no artifacts">
+          Register a layer to fill it.
         </EmptyState>
       );
     }
     return (
-      <EmptyState>
+      <EmptyState title="Nothing matched">
         {filtered
-          ? "Nothing matched. Widen the query or clear a filter."
-          : "Nothing matched. Widen the query."}
+          ? "Widen the query or clear a filter."
+          : "Widen the query."}
       </EmptyState>
     );
   }

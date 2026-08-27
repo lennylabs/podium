@@ -2435,8 +2435,45 @@ describe("the domain browser", () => {
     });
     render(<App />);
     await screen.findByLabelText("Domain browser");
-    expect(screen.getByText("This domain has no subdomains.")).toBeTruthy();
-    expect(screen.getByText("This domain lists no artifacts.")).toBeTruthy();
+    expect(screen.getByText("No subdomains")).toBeTruthy();
+    expect(
+      screen.getByText("Domains nested under this one appear here."),
+    ).toBeTruthy();
+    expect(screen.getByText("No artifacts here")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Artifacts published directly to this domain appear here.",
+      ),
+    ).toBeTruthy();
+  });
+
+  // Spec: §13.10 — the page-scope absence is the two-line state: a title in
+  // the surface's own ink over the sentence that says what would appear
+  // there. Drawn as the sentence alone, the card reads as a caption that lost
+  // its content rather than as the state the design draws.
+  it("draws a page-scope absence as a title over its sentence", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    await screen.findByLabelText("Domain browser");
+    const card = screen
+      .getByText("Artifacts published directly to this domain appear here.")
+      .closest(".empty") as HTMLElement;
+    expect(card.className.split(" ")).toContain("empty-page");
+    const lines = Array.from(card.children).map((line) => [
+      line.className,
+      line.textContent,
+    ]);
+    expect(lines).toEqual([
+      ["empty-title", "No artifacts here"],
+      [
+        "empty-body",
+        "Artifacts published directly to this domain appear here.",
+      ],
+    ]);
+    expect(window.getComputedStyle(card.children[0]).color).toBe("var(--ink)");
   });
 
   // §4.5.5 folding can leave a domain with an empty subdomain list and an
@@ -2461,8 +2498,8 @@ describe("the domain browser", () => {
     goTo("#/domain/finance");
     render(<App />);
     const browser = await screen.findByLabelText("Domain browser");
-    expect(within(browser).queryByText("This domain has no subdomains.")).toBeNull();
-    expect(within(browser).queryByText("This domain lists no artifacts.")).toBeNull();
+    expect(within(browser).queryByText("No subdomains")).toBeNull();
+    expect(within(browser).queryByText("No artifacts here")).toBeNull();
     // The header count and the group it refers to are what the screen holds.
     expect(within(browser).getByText("2 ARTIFACTS")).toBeTruthy();
     expect(within(browser).getByText("Lifted from sparse subdomains")).toBeTruthy();
@@ -3179,7 +3216,7 @@ describe("search", () => {
     goTo("#/search/nothing");
     render(<App />);
     expect(
-      await screen.findByText("Nothing matched. Widen the query."),
+      await screen.findByText("Widen the query."),
     ).toBeTruthy();
   });
 
@@ -3195,11 +3232,11 @@ describe("search", () => {
     // and there is nothing to widen. The remedy is the one the sidebar tree
     // names for the same registry.
     const empty = await screen.findByText(
-      "The catalog holds no artifacts. Register a layer to fill it.",
+      "Register a layer to fill it.",
     );
     expect(empty).toBeTruthy();
     expect(
-      screen.queryByText("Nothing matched. Widen the query."),
+      screen.queryByText("Widen the query."),
     ).toBeNull();
     // Typing a query makes the empty result the answer to that query, so the
     // no-match remedy returns.
@@ -3207,7 +3244,7 @@ describe("search", () => {
       target: { value: "deploy" },
     });
     expect(
-      await screen.findByText("Nothing matched. Widen the query."),
+      await screen.findByText("Widen the query."),
     ).toBeTruthy();
   });
 
@@ -3220,14 +3257,14 @@ describe("search", () => {
     goTo("#/search/");
     render(<App />);
     await screen.findByText(
-      "The catalog holds no artifacts. Register a layer to fill it.",
+      "Register a layer to fill it.",
     );
     // A filter applied with no query text is a request the reader issued, and
     // the filter is a control the row carries, so the remedy names it.
     selectFilter("type", "skill");
     expect(
       await screen.findByText(
-        "Nothing matched. Widen the query or clear a filter.",
+        "Widen the query or clear a filter.",
       ),
     ).toBeTruthy();
   });
@@ -3241,14 +3278,14 @@ describe("search", () => {
     render(<App />);
     // Nothing is applied, so the row has no filter to clear and the remedy
     // names only the query.
-    const plain = await screen.findByText("Nothing matched. Widen the query.");
+    const plain = await screen.findByText("Widen the query.");
     expect(plain.textContent).not.toContain("filter");
     // Applying a type filter gives the reader a control to undo, and the
     // sentence names it.
     selectFilter("type", "skill");
     expect(
       await screen.findByText(
-        "Nothing matched. Widen the query or clear a filter.",
+        "Widen the query or clear a filter.",
       ),
     ).toBeTruthy();
   });
@@ -3287,7 +3324,7 @@ describe("search", () => {
     fireEvent.change(screen.getByLabelText("Search artifacts"), {
       target: { value: "zzzznotamatch" },
     });
-    await screen.findByText("Nothing matched. Widen the query.");
+    await screen.findByText("Widen the query.");
     expect(region.textContent).toBe("No artifact matched.");
     // A filter narrowed over a query the row still carries lands on the same
     // outcome, because the count and the list change the same way.
@@ -3320,8 +3357,15 @@ describe("search", () => {
     });
     goTo("#/search/nothing");
     render(<App />);
-    const absent = await screen.findByText("Nothing matched. Widen the query.");
+    const absent = (await screen.findByText("Widen the query.")).closest(
+      ".empty",
+    ) as HTMLElement;
     expect(absent.className.split(" ")).toContain("empty-page");
+    // The card carries the title line over the sentence, so the absence
+    // reads as the designed state rather than as a stranded caption.
+    expect(within(absent).getByText("Nothing matched").className).toBe(
+      "empty-title",
+    );
     // The page preset is a bordered card, and the sentence inside it is
     // smaller and quieter than the body text a result would have carried.
     const style = window.getComputedStyle(absent);
@@ -5059,7 +5103,12 @@ describe("the artifact viewer", () => {
       "Nothing extends this artifact.",
       "This artifact bundles no files.",
     ]) {
-      const absent = await screen.findByText(sentence);
+      const absent = (await screen.findByText(sentence)).closest(
+        ".empty",
+      ) as HTMLElement;
+      // The rail variant is the title-less single line, so one absent
+      // section never outweighs the sections beside it that hold content.
+      expect([sentence, absent.textContent]).toEqual([sentence, sentence]);
       expect([sentence, absent.className.split(" ")]).toEqual([
         sentence,
         ["empty", "empty-inline"],
@@ -11544,7 +11593,7 @@ describe("the trimmed listing", () => {
     });
     expect(
       within(browser).getByText(
-        "Nothing matched. Clear the filter to see every subdomain.",
+        "Clear the filter to see every subdomain.",
       ),
     ).toBeTruthy();
     // The grid is gone, the caption that describes its ordering goes with it,
@@ -11564,7 +11613,7 @@ describe("the trimmed listing", () => {
     });
     expect(
       within(browser).getByText(
-        "Nothing matched. Clear the filter or pick another type.",
+        "Clear the filter or pick another type.",
       ),
     ).toBeTruthy();
     expect(within(browser).queryByLabelText("Artifacts")).toBeNull();
@@ -11703,7 +11752,7 @@ describe("the trimmed listing", () => {
     );
     expect(
       within(browser).queryByText(
-        "Nothing matched. Clear the filter or pick another type.",
+        "Clear the filter or pick another type.",
       ),
     ).toBeNull();
     expect(
@@ -12733,7 +12782,7 @@ describe("a refused layer write", () => {
     render(<App />);
     const panel = await screen.findByLabelText("Layer panel");
     expect(panel.textContent).toContain(
-      "No layers are registered under this tenant.",
+      "Register a layer to bring its artifacts into the catalog.",
     );
     expect(panel.textContent).not.toContain("Precedence");
     expect(panel.textContent).not.toContain("composes above");

@@ -2343,6 +2343,32 @@ label:has(> input:disabled) {
   text-wrap: pretty;
 }
 
+.empty p {
+  margin: 0;
+}
+
+/* The title states the absence and the body under it says what would appear
+   there, so the title takes the surface's own ink while the body stays quiet.
+   Both at the same tone would leave the card a block of grey with no line to
+   read first. */
+.empty-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.empty-page .empty-title + .empty-body {
+  margin-top: 6px;
+}
+
+/* The body is capped short of the card so the sentence wraps into a centred
+   block rather than running the full width of the listing it replaced. */
+.empty-page .empty-body {
+  max-width: 340px;
+  margin-inline: auto;
+}
+
 /* The page preset replaces a whole listing, so it takes the solid card the
    listing would have occupied. */
 .empty-page {

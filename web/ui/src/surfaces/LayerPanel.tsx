@@ -394,7 +394,9 @@ export function LayerPanel({
         </>
       )}
       {rows.length === 0 ? (
-        <EmptyState>No layers are registered under this tenant.</EmptyState>
+        <EmptyState title="No layers">
+          Register a layer to bring its artifacts into the catalog.
+        </EmptyState>
       ) : (
         // The table keeps its designed column widths down to a floor and
         // scrolls sideways inside its own container below that, so a narrow

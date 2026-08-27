@@ -103,7 +103,9 @@ export function DeletedLayers({
       <h1 ref={heading}>Recently unregistered</h1>
       <p className="lead">A layer stays restorable for {recoveryDays} days, after which it is erased.</p>
       {rows.length === 0 ? (
-        <EmptyState>Nothing is waiting to be erased.</EmptyState>
+        <EmptyState title="Nothing to erase">
+          An unregistered layer waits here until its recovery window ends.
+        </EmptyState>
       ) : (
         // The table keeps its designed column widths down to a floor and
         // scrolls sideways inside its own container below that, the way the

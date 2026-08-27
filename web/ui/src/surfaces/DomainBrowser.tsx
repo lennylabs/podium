@@ -174,7 +174,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
         <>
           <h2 className="label">Subdomains</h2>
           {body.subdomains.length === 0 ? (
-            <EmptyState>This domain has no subdomains.</EmptyState>
+            <EmptyState title="No subdomains">Domains nested under this one appear here.</EmptyState>
           ) : (
             <SubdomainGrid subdomains={body.subdomains} parent={body.path} catalog={catalog.value} />
           )}
@@ -205,7 +205,9 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           <h2 className="label">Artifacts in this domain</h2>
           {direct.length === 0 ? (
             <>
-              <EmptyState>This domain lists no artifacts.</EmptyState>
+              <EmptyState title="No artifacts here">
+                Artifacts published directly to this domain appear here.
+              </EmptyState>
               {tailList}
             </>
           ) : (

@@ -129,8 +129,8 @@ export function SubdomainTiles({
           and leaving the controls over blank space reads as a listing that
           failed to load (§13.10). */}
       {matched.length === 0 ? (
-        <EmptyState>
-          Nothing matched. Clear the filter to see every subdomain.
+        <EmptyState title="Nothing matched">
+          Clear the filter to see every subdomain.
         </EmptyState>
       ) : (
         <ul
@@ -362,8 +362,8 @@ export function ArtifactTable({
           trimmed listing states the trim instead, because the returned rows
           are not the whole domain and the recovery lies past their edge. */}
       {matched.length === 0 && !narrowed && (
-        <EmptyState>
-          Nothing matched. Clear the filter or pick another type.
+        <EmptyState title="Nothing matched">
+          Clear the filter or pick another type.
         </EmptyState>
       )}
       {narrowed && (
