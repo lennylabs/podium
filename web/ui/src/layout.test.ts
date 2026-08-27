@@ -904,6 +904,24 @@ describe("restore table columns", () => {
   });
 });
 
+// The erase clock. The date, the depleting bar, and the count left are one
+// row: drawn as a block under the date, the bar sat directly beneath it and
+// read as an underline of the date rather than as a gauge of the window.
+describe("erase clock", () => {
+  it("lays the date, the bar, and the count out on one row", () => {
+    const clock = styled("erase-clock");
+    expect(clock.display).toBe("flex");
+    expect(clock.alignItems).toBe("center");
+  });
+
+  it("keeps the depleting bar inline at its drawn width", () => {
+    const bar = styled("depleting");
+    expect(bar.flex).toBe("0 0 auto");
+    expect(bar.width).toBe("54px");
+    expect(bar.marginTop).not.toBe("4px");
+  });
+});
+
 // Every data table separates its header row from the listing by drawing the
 // header on the inset tone. The layer panel and the restore table took the
 // tone from the at-scale table's column-label class, which they do not carry,

@@ -231,17 +231,27 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-/** zonedDate is the calendar date an instant fell on in the given zone,
- * derived through the platform formatter rather than through the surface's
- * own arithmetic, so the assertion does not restate what it checks. */
+/** zonedDate is the calendar date an instant fell on in the given zone, in
+ * the short form the recovery surface states its dates in. The day, the
+ * month, and the year come from the platform formatter rather than from the
+ * surface's own arithmetic, so the assertion does not restate what it
+ * checks. */
 function zonedDate(at: Date, timeZone: string): string {
-  return at.toLocaleDateString("en-CA", { timeZone });
+  const parts = new Intl.DateTimeFormat("en-US", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone,
+  }).formatToParts(at);
+  const value = (type: string) =>
+    parts.find((part) => part.type === type)?.value ?? "";
+  return `${value("day")} ${value("month")} ${value("year")}`;
 }
 
 /** localDate is the calendar date an instant fell on in the zone the suite
  * runs in, which is the zone the recovery surface states its dates in. */
 function localDate(at: Date): string {
-  return at.toLocaleDateString("en-CA");
+  return zonedDate(at, Intl.DateTimeFormat().resolvedOptions().timeZone);
 }
 
 describe("the application shell", () => {
@@ -8714,7 +8724,7 @@ describe("the layer write flows", () => {
     expect(surface.textContent).toContain(localDate(unregisteredAt));
     expect(surface.textContent).toContain(erasesOn);
     const left = screen.getByTestId("days-left-alice-personal");
-    expect(left.textContent).toBe("2 days left");
+    expect(left.textContent).toBe("2d left");
     expect(left.className).toContain("accent");
     // The source is on the same record, so the row names where the layer
     // came from rather than its identifier alone.
@@ -8884,15 +8894,77 @@ describe("the layer write flows", () => {
     const [roomy, expiring] = Array.from(
       document.querySelectorAll(".depleting"),
     );
-    expect(screen.getByTestId("days-left-alice-roomy").textContent).toBe(
-      "30 days left",
-    );
+    expect(screen.getByTestId("days-left-alice-roomy").textContent).toBe("30d");
     expect(roomy.className).not.toContain("depleting-urgent");
 
     expect(screen.getByTestId("days-left-alice-expiring").textContent).toBe(
-      "2 days left",
+      "2d left",
     );
     expect(expiring.className).toContain("depleting-urgent");
+  });
+
+  // The erase deadline is a clock the reader reads at a glance: the date, how
+  // much of the window is left drawn between them, and the count. Drawn as a
+  // block under the date, the bar sat directly beneath it and read as an
+  // underline of the date rather than as a gauge, and an ISO date in that
+  // position read as a serial number rather than as a day on the calendar.
+  it("draws the erase deadline as a dated clock on one row", async () => {
+    const unregisteredAt = new Date(Date.now() - 22 * 24 * 60 * 60 * 1000);
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }],
+        },
+      },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    const surface = await screen.findByLabelText("Recently unregistered");
+    const erases = new Date(
+      unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000,
+    );
+    // The date names its month rather than numbering it, and the ISO date it
+    // was rendered as is nowhere in the cell.
+    const clock = surface.querySelector(".erase-clock") as HTMLElement;
+    expect(clock.textContent).toContain(localDate(erases));
+    expect(clock.textContent).not.toContain(erases.toISOString().slice(0, 10));
+    expect(clock.textContent).not.toContain(
+      `${String(erases.getFullYear())}-`,
+    );
+    // The bar is between the date and the count, so the row reads as a clock
+    // rather than as a date with a rule under it.
+    const cells = Array.from(clock.children);
+    expect(cells[0].textContent).toBe(localDate(erases));
+    expect(cells[1].className).toContain("depleting");
+    expect(cells[2]).toBe(screen.getByTestId("days-left-alice-personal"));
+    expect(cells[2].textContent).toBe("8d");
+    // The compact count is a gauge label, so the phrase it stands for is
+    // still what a reader who hears the row is told.
+    expect(cells[3].className).toContain("assistive-only");
+    expect(cells[3].textContent).toBe("8 days left");
+  });
+
+  // A layer unregistered earlier the same day is looked for by someone who
+  // did it minutes ago, so the row states the time of day. The date of a day
+  // the reader is already on tells them nothing.
+  it("states a same-day unregister as the time of day", async () => {
+    const unregisteredAt = new Date(Date.now() - 60 * 1000);
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }],
+        },
+      },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    const surface = await screen.findByLabelText("Recently unregistered");
+    const pad = (value: number) => String(value).padStart(2, "0");
+    expect(surface.textContent).toContain(
+      `today, ${pad(unregisteredAt.getHours())}:${pad(unregisteredAt.getMinutes())}`,
+    );
   });
 
   // The unregister confirmation promises the full §8.4 window and names the
@@ -8913,7 +8985,7 @@ describe("the layer write flows", () => {
     render(<App />);
     const surface = await screen.findByLabelText("Recently unregistered");
     expect(screen.getByTestId("days-left-alice-personal").textContent).toBe(
-      "30 days left",
+      "30d",
     );
     expect(surface.textContent).toContain(
       localDate(new Date(unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000)),

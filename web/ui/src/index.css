@@ -1774,15 +1774,15 @@ input[type="search"]::-webkit-search-cancel-button {
    header row read as one token. */
 .restore-table {
   table-layout: fixed;
-  min-width: 960px;
+  min-width: 1040px;
 }
 
 .restore-table th:nth-child(1) {
-  width: 24%;
+  width: 26%;
 }
 
 .restore-table th:nth-child(2) {
-  width: 16%;
+  width: 15%;
 }
 
 /* The artifact-count column is the design's narrow column between the source
@@ -1790,7 +1790,7 @@ input[type="search"]::-webkit-search-cancel-button {
    states the count is unreported, which broke over two lines in a column
    sized to the count alone. */
 .restore-table th:nth-child(3) {
-  width: 12%;
+  width: 10%;
 }
 
 .restore-table td:nth-child(3) {
@@ -1798,11 +1798,14 @@ input[type="search"]::-webkit-search-cancel-button {
 }
 
 .restore-table th:nth-child(4) {
-  width: 13%;
+  width: 12%;
 }
 
+/* The erase column carries a date, a bar, and a count on one row, so it is
+   the widest column after the identifier and the floor above is what keeps
+   the three of them on that row. */
 .restore-table th:nth-child(5) {
-  width: 22%;
+  width: 24%;
 }
 
 .restore-table th:last-child {
@@ -2536,15 +2539,27 @@ label:has(> input:disabled) {
   color: var(--link);
 }
 
+/* The erase clock: the deadline, the depleting bar, and the count left, laid
+   out as one row. Stacked, the bar sat on the line under the date and read as
+   an underline of it rather than as a gauge. */
+.erase-clock {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  white-space: nowrap;
+}
+
 /* The depleting bar. It draws how much of the recovery window is left, and
-   the row states the same count in words beside it. The fill is neutral for
-   as long as the window is comfortable, so the accent is left to mean the
-   layer is close to erasure rather than to mean the row exists. */
+   the row states the same count beside it. The fill is neutral for as long as
+   the window is comfortable, so the accent is left to mean the layer is close
+   to erasure rather than to mean the row exists. The unfilled remainder is
+   drawn on the inset tone, so a window most of the way through reads as a
+   part-full track rather than as a short rule. */
 .depleting {
-  display: block;
-  width: 120px;
+  flex: none;
+  width: 54px;
   height: 4px;
-  margin-top: 4px;
   border-radius: 100px;
   background: linear-gradient(
     to right,

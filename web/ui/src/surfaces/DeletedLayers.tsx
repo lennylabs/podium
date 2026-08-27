@@ -13,7 +13,7 @@
 
 import { useRef, useState } from 'react';
 
-import { accentDays, calendarDate, daysLeft, erasesOn, recoveryDays } from './recovery';
+import { accentDays, daysLeft, erasesOn, recoveryDays, unregisteredOn } from './recovery';
 import { EmptyState, ErrorState, Loading } from '../components/primitives';
 import { layersHref } from '../route';
 import { takeFocus } from '../components/focus';
@@ -232,20 +232,32 @@ function DeletedRow({
           // rather than computing a date from a value it does not hold.
           <span className="quiet">The registry reported no erase date.</span>
         ) : (
-          <>
+          // The cell is a clock: the deadline, how much of the window is
+          // left drawn between them, and the count. Stacked, the bar sat
+          // directly under the date and read as an underline of it rather
+          // than as a gauge of anything.
+          <span className="erase-clock">
             {/* The date, the count, and the bar carry the same urgency, so a
                 row about to be erased reads as one accented unit rather than
                 as a bar that is accent on every row. */}
-            <span className={window.urgent ? 'mono accent' : 'mono'}>{window.erases}</span>{' '}
-            <span className={window.urgent ? 'accent' : 'quiet'} data-testid={`days-left-${layer.ID}`}>
-              {window.left} days left
-            </span>
+            <span className={window.urgent ? 'mono accent' : 'mono'}>{window.erases}</span>
             <span
               className={window.urgent ? 'depleting depleting-urgent' : 'depleting'}
               role="presentation"
               style={{ ['--remaining' as string]: `${String(window.remaining)}%` }}
             />
-          </>
+            {/* The count is compact enough to sit inside the column beside
+                the bar, and the phrase it stands for is carried for a reader
+                who hears the row rather than sees the gauge. */}
+            <span
+              className={window.urgent ? 'mono accent' : 'mono quiet'}
+              data-testid={`days-left-${layer.ID}`}
+              aria-hidden="true"
+            >
+              {window.left}d{window.urgent ? ' left' : ''}
+            </span>
+            <span className="assistive-only">{window.left} days left</span>
+          </span>
         )}
       </td>
       <td>
@@ -285,9 +297,10 @@ function recoveryWindow(layer: LayerRecord): RecoveryWindow | null {
   if (Number.isNaN(at.getTime())) {
     return null;
   }
-  const left = daysLeft(at, Date.now());
+  const now = Date.now();
+  const left = daysLeft(at, now);
   return {
-    unregistered: calendarDate(at),
+    unregistered: unregisteredOn(at, now),
     erases: erasesOn(at),
     left,
     remaining: Math.round((left / recoveryDays) * 100),
