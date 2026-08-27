@@ -731,7 +731,17 @@ function LayerRow({
     <tr
       className={rowClass.join(" ")}
       draggable={!readOnly}
-      onDragStart={onDragStart}
+      onDragStart={(event) => {
+        // The drag data store is what makes the drag a drag: a dragstart
+        // that leaves it empty is a cancelled drag under the HTML model, so
+        // a browser that enforces that fires neither dragover nor drop and
+        // the pointer reorder is lost with no sign of it. The row carries
+        // its own layer ID, and the move it names is a reorder rather than
+        // a copy.
+        event.dataTransfer.setData("text/plain", layer.ID);
+        event.dataTransfer.effectAllowed = "move";
+        onDragStart();
+      }}
       onDragOver={(event) => {
         // A row that does not cancel the drag-over event is not a drop
         // target, so the drop never fires and the move is silently lost.

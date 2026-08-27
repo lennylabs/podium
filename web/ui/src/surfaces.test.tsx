@@ -7114,6 +7114,27 @@ describe("the layer write flows", () => {
     );
   });
 
+  // A dragstart that writes nothing to the drag data store is a cancelled
+  // drag under the HTML drag-and-drop model, and a browser that enforces
+  // that fires neither dragover nor drop, which takes the pointer reorder
+  // away and leaves only the keyboard handle.
+  it("carries the dragged layer on the drag data store", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layers: [adminLayer(), userLayer(), scratchLayer()] },
+      },
+      "/v1/layers/reorder": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const store = dragRowOnto("alice-personal", "alice-scratch");
+    expect(store.getData("text/plain")).toBe("alice-personal");
+    // The drop moves the row rather than copying it.
+    expect(store.effectAllowed).toBe("move");
+  });
+
   // §4.6 composes every user-defined layer above every admin-defined one
   // whatever the stored order values are, so a drop across the class boundary
   // names a move no composition would make and the panel sends nothing.
@@ -8097,13 +8118,37 @@ function moveHandleLabel(id: string): string {
 
 /** dragRowOnto drives the panel's drag-to-reorder: the row is picked up by
  * its handle and dropped onto another row, and the move commits on the drop.
+ * It returns the drag data store the drag was carried on, which a browser
+ * supplies on every drag event and jsdom supplies on none.
  */
-function dragRowOnto(from: string, onto: string): void {
+function dragRowOnto(from: string, onto: string): DragStore {
   const source = layerRow(from);
   const target = layerRow(onto);
-  fireEvent.dragStart(source);
-  fireEvent.dragOver(target);
-  fireEvent.drop(target);
+  const dataTransfer = dragStore();
+  fireEvent.dragStart(source, { dataTransfer });
+  fireEvent.dragOver(target, { dataTransfer });
+  fireEvent.drop(target, { dataTransfer });
+  return dataTransfer;
+}
+
+/** DragStore records what a dragstart writes to the drag data store. */
+interface DragStore {
+  effectAllowed: string;
+  data: Record<string, string>;
+  setData: (format: string, value: string) => void;
+  getData: (format: string) => string;
+}
+
+function dragStore(): DragStore {
+  const store: DragStore = {
+    effectAllowed: "uninitialized",
+    data: {},
+    setData: (format, value) => {
+      store.data[format] = value;
+    },
+    getData: (format) => store.data[format] ?? "",
+  };
+  return store;
 }
 
 function layerRow(id: string): HTMLElement {
