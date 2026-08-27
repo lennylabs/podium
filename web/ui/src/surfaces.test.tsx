@@ -2929,6 +2929,79 @@ describe("search", () => {
     ).toBeTruthy();
   });
 
+  // Spec: §13.10 — the reader who continues the list by keyboard stays on the
+  // control they pressed. The widened read is the same request at a raised
+  // count, so the list it widens stands while it is in flight rather than
+  // being replaced by the loading line: replacing it unmounts the button from
+  // under the focus, the focus falls to the document body, and the next Tab
+  // restarts at the top of the page.
+  it("holds the focused continuation control across the widened request", async () => {
+    const hits = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        id: `platform/svc${String(i + 1)}`,
+        type: "skill",
+        score: 9 - i * 0.01,
+      }));
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts?query=review&top_k=10": {
+        body: { total_matched: 60, results: hits(10) },
+      },
+      "/v1/search_artifacts?query=review&top_k=30": {
+        body: { total_matched: 60, results: hits(30) },
+        deferred: true,
+      },
+      "/v1/search_artifacts?query=review&top_k=50": {
+        body: { total_matched: 60, results: hits(50) },
+        deferred: true,
+      },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    await screen.findByTestId("result-count");
+    const control = screen.getByTestId("search-continue");
+    control.focus();
+    expect(document.activeElement).toBe(control);
+    fireEvent.click(control);
+    // The request is in flight. The rows the reader already had are still
+    // drawn, the control is the same element it was, and the focus is still
+    // on it. It refuses a second press while it waits.
+    expect(lastSearch().get("top_k")).toBe("30");
+    expect(screen.getByTestId("search-continue")).toBe(control);
+    expect(document.activeElement).toBe(control);
+    expect(control.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getAllByTestId("relevance-bars").length).toBe(10);
+    fireEvent.click(control);
+    expect(
+      requests.filter((r) => r.url.includes("top_k=50")).length,
+    ).toBe(0);
+    // The results land on the same control, which is now live again and asks
+    // for the next page.
+    await waitFor(() => {
+      expect(screen.getAllByTestId("relevance-bars").length).toBe(30);
+    });
+    expect(document.activeElement).toBe(control);
+    expect(control.getAttribute("aria-disabled")).toBeNull();
+    expect(control.textContent).toBe("Load 20 more");
+    // The last step is the same: the control the reader is standing on stays
+    // mounted while the request that spends the cap is in flight.
+    fireEvent.click(control);
+    expect(lastSearch().get("top_k")).toBe("50");
+    expect(screen.getByTestId("search-continue")).toBe(control);
+    expect(document.activeElement).toBe(control);
+    // That press spent the cap, so the control it was on is gone once its own
+    // results land. The focus goes to the first result the press appended
+    // rather than to the document body, which is where the reader was
+    // reading.
+    await waitFor(() => {
+      expect(screen.getAllByTestId("relevance-bars").length).toBe(50);
+    });
+    expect(screen.queryByTestId("search-continue")).toBeNull();
+    expect((document.activeElement as HTMLElement).textContent).toBe(
+      "platform/svc31",
+    );
+  });
+
   // Spec: §13.10 — the continuation asks for what is still withheld rather
   // than a fixed page, and it is gone once the list is whole. A new request
   // is a new result set, so an edited filter drops the cap back.

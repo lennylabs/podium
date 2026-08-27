@@ -98,6 +98,42 @@ export function SearchSurface({
     setCap(resultCap);
   }
   const search = useAsync(() => searchArtifacts(filters, cap), [key, cap]);
+  // A continuation is the one read that must not replace the list it widens.
+  // The reader pressed a control at the foot of the list, and swapping the
+  // subtree for the loading line unmounts the control from under their focus,
+  // which drops it to the document body and sends the next Tab back to the
+  // top of the page. A raised cap against the settled request's own key is
+  // that read, so the list it already carries stands while it is in flight
+  // and the control stays the same element throughout (§13.10).
+  const continuing = search.loading && search.value !== null && cap > resultCap;
+  // Where the continuation spends the cap, the control the reader pressed is
+  // gone once its own results land, because §5 serves no more than the count
+  // it just asked for. The focus would fall to the document body with it, so
+  // the surface hands it to the first result the press appended, which is
+  // where the reader was reading. The handoff records the request it belongs
+  // to, so a query edited while the widened read is in flight lands on its
+  // own result set rather than moving the focus into a list the reader did
+  // not ask for (§13.10).
+  const surface = useRef<HTMLElement>(null);
+  const handoff = useRef<{ key: string; from: number } | null>(null);
+  useEffect(() => {
+    const owed = handoff.current;
+    if (owed === null || search.loading) {
+      return;
+    }
+    handoff.current = null;
+    const root = surface.current;
+    if (root === null || owed.key !== key) {
+      return;
+    }
+    if (root.querySelector("[data-testid='search-continue']") !== null) {
+      return;
+    }
+    const rows = root.querySelectorAll<HTMLElement>("a.artifact-id");
+    rows[owed.from]?.focus();
+    // The handoff is owed by the read the press issued, so the settling of
+    // that read is what the effect keys on.
+  }, [search.loading]);
   // A search is a page of the catalog like any other, so the query and the
   // filters live in the route rather than only in component state: the
   // address bar names the search that is on screen, a reload restores it, and
@@ -126,7 +162,7 @@ export function SearchSurface({
     // named for assistive technology by the landmark label alone. The layer
     // panel does carry a title, because its header also holds a description
     // and its write actions.
-    <section className="surface" aria-label="Search">
+    <section className="surface" aria-label="Search" ref={surface}>
       {/* The field is a row rather than a bare input: the magnifier names it
           as the query field the way the top bar's trigger and the palette's
           own field do, and the border belongs to the row so the icon sits
@@ -217,8 +253,9 @@ export function SearchSurface({
         search={search}
         filtered={filtered}
         queried={queried}
-        cap={cap}
+        continuing={continuing}
         onMore={(step) => {
+          handoff.current = { key, from: (body?.results ?? []).length };
           setCap((held) => Math.min(held + step, searchCapMax));
         }}
       />
@@ -419,16 +456,16 @@ function SearchResults({
   search,
   filtered,
   queried,
-  cap,
+  continuing,
   onMore,
 }: {
   search: Async<SearchResponse>;
   filtered: boolean;
   queried: boolean;
-  cap: number;
+  continuing: boolean;
   onMore: (step: number) => void;
 }) {
-  if (search.loading) {
+  if (search.loading && !continuing) {
     return <Loading label="Searching." />;
   }
   if (search.error !== null) {
@@ -474,8 +511,11 @@ function SearchResults({
   // A result the cap withheld is reachable from the foot of the list. The
   // step asks for one page more, bounded by what is still withheld and by the
   // largest count §5 serves, and a step of zero means the cap is spent and
-  // narrowing the request is the only way further.
-  const step = Math.min(searchPage, withheld, searchCapMax - cap);
+  // narrowing the request is the only way further. It is measured against the
+  // results on the page rather than against the requested cap, so a
+  // continuation in flight leaves the control the reader is standing on
+  // mounted and labelled until the results it asked for land.
+  const step = Math.min(searchPage, withheld, searchCapMax - results.length);
   return (
     <>
       {withheld > 0 && (
@@ -496,17 +536,28 @@ function SearchResults({
       </ul>
       {step > 0 && (
         <div className="listing-continuation" data-testid="search-continuation">
+          {/* The control carries aria-disabled rather than disabled while
+              the request it issued is in flight: a disabled control leaves
+              the focus order, and the browser hands the focus of the reader
+              who just pressed it to the document body. It keeps its element,
+              its label, and its place, and refuses a second press until the
+              results land. */}
           <button
             type="button"
             className="button"
             data-testid="search-continue"
+            aria-disabled={continuing ? true : undefined}
             onClick={() => {
-              onMore(step);
+              if (!continuing) {
+                onMore(step);
+              }
             }}
           >
             Load {step} more
           </button>
-          <p className="quiet">Ranked by relevance.</p>
+          <p className="quiet">
+            {continuing ? "Loading more results." : "Ranked by relevance."}
+          </p>
         </div>
       )}
     </>
