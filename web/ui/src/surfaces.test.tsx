@@ -4854,11 +4854,14 @@ describe("the artifact viewer", () => {
       ).toBe(true);
     });
 
-    // A sequence is entries the author wrote rather than one running value.
-    // Clipped, a list of ten tags reads as a list of four with the rest
-    // behind a control, so the rail states every entry.
+    // A sequence one entry per line is unbounded in the rail's narrow column:
+    // a dozen tags run the frontmatter table past 700px on their own and push
+    // RELATIONS and RESOURCES off the fold, which is the state the clip
+    // exists to prevent. The rail runs the entries together on one line and
+    // clips that line like any other value, and the control opens the rest in
+    // place.
     // Spec: §13.10
-    it("states a sequence value whole in the rail's table", async () => {
+    it("clips a sequence value in the rail's table and opens it on request", async () => {
       stubHeights(900);
       stubRegistry({
         "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -4880,11 +4883,20 @@ describe("the artifact viewer", () => {
       render(<App />);
       await screen.findByLabelText("Artifact viewer");
       const tags = screen.getByTestId("property-value-tags");
-      expect(tags.querySelectorAll("li")).toHaveLength(10);
-      expect(tags.classList.contains("clamped")).toBe(false);
+      // No entry is dropped: the whole sequence is in the cell, on one line.
+      expect(tags.textContent).toBe(
+        "alpha, bravo, charlie, delta, echo, foxtrot, golf, hotel, india, juliet",
+      );
+      expect(tags.querySelectorAll("li")).toHaveLength(0);
+      expect(tags.classList.contains("clamped")).toBe(true);
+      // The rest is one control away rather than gone.
+      const more = await screen.findByRole("button", {
+        name: "Show the whole tags value",
+      });
+      fireEvent.click(more);
       expect(
-        screen.queryByRole("button", { name: "Show the whole tags value" }),
-      ).toBeNull();
+        screen.getByTestId("property-value-tags").classList.contains("clamped"),
+      ).toBe(false);
     });
 
     // The full-width Frontmatter panel states that its values are shown
@@ -4934,10 +4946,11 @@ describe("the artifact viewer", () => {
     // A sequence value is several entries, and an entry is often a sentence.
     // Joined into one line, the separator runs into the entry's own full stop
     // and the cell reads as "invoice., A purchase order", where the reader
-    // cannot tell where one entry ends. Each entry stands on its own line in
-    // both the rail and the full-width panel.
+    // cannot tell where one entry ends. The full-width panel is where such a
+    // sequence is read entry by entry, so each entry stands on its own line
+    // there; the rail's narrow column runs them together and clips the line.
     // Spec: §13.10
-    it("states each entry of a sequence value on its own line", async () => {
+    it("states each entry of a sequence value on its own line in the panel", async () => {
       stubHeights(60);
       stubRegistry({
         "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -4960,36 +4973,36 @@ describe("the artifact viewer", () => {
       render(<App />);
       await screen.findByLabelText("Artifact viewer");
 
-      const uses = screen.getByTestId("property-value-when_to_use");
-      const entries = Array.from(uses.querySelectorAll("li")).map(
-        (item) => item.textContent,
-      );
-      expect(entries).toEqual([
-        "The user asks to pay a vendor invoice.",
-        "A purchase order needs matching against a received invoice.",
-      ]);
-      // No separator stands between an entry's full stop and the next entry.
-      expect(uses.textContent).not.toContain("invoice., A");
-      // A tag list is entries too, so it is read the same way rather than
-      // being flattened into one line.
+      // The rail runs the entries together, so its cell carries no list.
       expect(
-        Array.from(
-          screen.getByTestId("property-value-tags").querySelectorAll("li"),
-        ).map((item) => item.textContent),
-      ).toEqual(["finance", "ap"]);
+        screen
+          .getByTestId("property-value-tags")
+          .querySelectorAll("li"),
+      ).toHaveLength(0);
+      expect(screen.getByTestId("property-value-tags").textContent).toBe(
+        "finance, ap",
+      );
 
       fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
       const panel = screen.getByTestId("frontmatter-table");
+      const uses = panel.querySelector<HTMLElement>(
+        '[data-testid="property-value-when_to_use"]',
+      );
       expect(
-        Array.from(
-          panel.querySelectorAll(
-            '[data-testid="property-value-when_to_use"] li',
-          ),
-        ).map((item) => item.textContent),
+        Array.from(uses?.querySelectorAll("li") ?? []).map(
+          (item) => item.textContent,
+        ),
       ).toEqual([
         "The user asks to pay a vendor invoice.",
         "A purchase order needs matching against a received invoice.",
       ]);
+      // No separator stands between an entry's full stop and the next entry.
+      expect(uses?.textContent).not.toContain("invoice., A");
+      expect(
+        Array.from(
+          panel.querySelectorAll('[data-testid="property-value-tags"] li'),
+        ).map((item) => item.textContent),
+      ).toEqual(["finance", "ap"]);
     });
   });
 });

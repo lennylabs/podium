@@ -21,11 +21,11 @@ export function PropertyTable({
 }: {
   raw: string;
   testID?: string;
-  /** clampValues puts a scalar value under the shared three-line clip with a
-   * control of its own, which the rail asks for and the full-width panel does
-   * not. A description carries no length bound, and in the rail's narrow
-   * column an unclipped one runs for screens and pushes the relation links
-   * §13.10 requires the viewer to carry far below the fold. */
+  /** clampValues puts a value under the shared three-line clip with a control
+   * of its own, which the rail asks for and the full-width panel does not.
+   * Neither a description nor a sequence carries a length bound, and in the
+   * rail's narrow column an unclipped one runs for screens and pushes the
+   * relation links §13.10 requires the viewer to carry far below the fold. */
   clampValues?: boolean;
   /** offerRaw stands the Table and Raw YAML views side by side, which the
    * full-width panel offers and the rail does not. It also carries the two
@@ -121,20 +121,38 @@ export function PropertyTable({
   );
 }
 
-/** PropertyValue is the content of one value cell. A sequence always wraps
- * whole, because clipping it hides entries the author wrote behind a control
- * and a list of ten tags then reads as a list of four. A scalar wraps whole in
+/** PropertyValue is the content of one value cell. Every value wraps whole in
  * the full-width panel, which is wide and carries nothing under the table to
- * bury, and is clipped in the rail, where a description of several hundred
- * words otherwise makes one row taller than the rest of the page and pushes
- * the relation links off the fold (§13.10). */
+ * bury, and is clipped in the rail, where an unbounded row makes the table
+ * taller than the rest of the page and pushes the relation links off the fold
+ * (§13.10). A sequence is clipped the same way a scalar is: a dozen tags one
+ * per line runs the rail's table past 700px on its own, which is the state the
+ * clip exists to prevent. */
 function PropertyValue({ property, clamp }: { property: Property; clamp: boolean }) {
   if (property.items.length > 0) {
-    // A sequence keeps its entries apart. Joined into one line, an entry that
-    // ends in a full stop runs into the separator and reads as `invoice., A
-    // purchase order`, where the reader cannot tell the separator from the
-    // author's own punctuation. Each entry is a list item, so a wrapped entry
-    // stays one entry (§13.10).
+    if (clamp) {
+      // The rail runs the entries together on one line and clips the result,
+      // which is what the design draws: `tags | tracing, review, otel`. An
+      // entry that ends in a full stop then runs into the separator, and the
+      // full-width panel below is where such a sequence is read entry by
+      // entry. A blank entry takes the em dash the absent state uses, so a
+      // key the author left an empty entry in does not read as a doubled
+      // separator (§13.10).
+      const joined = property.items.map((item) => (item.trim() === '' ? '—' : item)).join(', ');
+      return (
+        <ClampedText
+          text={joined}
+          className="property-value"
+          testID={`property-value-${property.key}`}
+          moreLabel={`Show the whole ${property.key} value`}
+        />
+      );
+    }
+    // The full-width panel keeps the entries apart. Joined into one line, an
+    // entry that ends in a full stop runs into the separator and reads as
+    // `invoice., A purchase order`, where the reader cannot tell the
+    // separator from the author's own punctuation. Each entry is a list item,
+    // so a wrapped entry stays one entry (§13.10).
     return (
       <ul className="property-items" data-testid={`property-value-${property.key}`}>
         {property.items.map((item, index) => (
