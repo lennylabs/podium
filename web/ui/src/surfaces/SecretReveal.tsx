@@ -21,8 +21,13 @@ export function revealsSecret(result: LayerSecretResult): boolean {
 /**
  * SecretReveal draws the credential the registry returned once. A response
  * that carries no secret (a local-path source, or an update with no rotation)
- * carries no reveal, so the component renders the outcome banner instead and
- * the caller does not have to branch on the response itself.
+ * carries no reveal, so the component renders the outcome alone and the caller
+ * does not have to branch on the response itself.
+ *
+ * The outcome is stated on both branches. The reveal is where naming the layer
+ * matters most: the credential is unrecoverable, and a reader who is handed a
+ * secret with no outcome line is not told that the write landed or which layer
+ * the secret belongs to.
  */
 export function SecretReveal({
   result,
@@ -38,30 +43,33 @@ export function SecretReveal({
     return <Banner tone="accent">{outcome}</Banner>;
   }
   return (
-    <div className="secret-reveal" aria-label="Webhook secret">
-      <p className="label">Shown once</p>
-      <p>
-        The webhook URL is permanent. The secret is returned here and on a rotation, and the registry stores only a
-        hash of it.
-      </p>
-      {/* Both values are here to be taken away, so each carries its own
-          copy control. The secret is never served again, so a reader who
-          leaves without it has to rotate the secret to get another. */}
-      <CopyField label="Webhook URL" value={result.webhook_url ?? ''} />
-      <CopyField label="Webhook secret" value={result.webhook_secret} />
-      <label>
-        <input
-          type="checkbox"
-          checked={acknowledged}
-          onChange={(event) => {
-            setAcknowledged(event.target.checked);
-          }}
-        />
-        I have stored the secret.
-      </label>
-      <button type="button" disabled={!acknowledged} onClick={onDone}>
-        Done
-      </button>
-    </div>
+    <>
+      <Banner tone="accent">{outcome}</Banner>
+      <div className="secret-reveal" aria-label="Webhook secret">
+        <p className="label">Shown once</p>
+        <p>
+          The webhook URL is permanent. The secret is returned here and on a rotation, and the registry stores only a
+          hash of it.
+        </p>
+        {/* Both values are here to be taken away, so each carries its own
+            copy control. The secret is never served again, so a reader who
+            leaves without it has to rotate the secret to get another. */}
+        <CopyField label="Webhook URL" value={result.webhook_url ?? ''} />
+        <CopyField label="Webhook secret" value={result.webhook_secret} />
+        <label>
+          <input
+            type="checkbox"
+            checked={acknowledged}
+            onChange={(event) => {
+              setAcknowledged(event.target.checked);
+            }}
+          />
+          I have stored the secret.
+        </label>
+        <button type="button" disabled={!acknowledged} onClick={onDone}>
+          Done
+        </button>
+      </div>
+    </>
   );
 }

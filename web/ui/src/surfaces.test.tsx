@@ -7045,6 +7045,66 @@ describe("the layer write flows", () => {
     ).toBe(false);
   });
 
+  // The reveal is the branch where naming the layer matters most: the
+  // credential is unrecoverable, and a dialog that presents it without the
+  // outcome never confirms that the layer was created or which layer the
+  // secret belongs to.
+  it("states the registration outcome beside the revealed secret", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "git",
+            Order: 1,
+            UserDefined: true,
+          },
+          webhook_url:
+            "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+          webhook_secret: "whsec-abc",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByLabelText("Webhook secret");
+    expect(screen.getByText("Layer alice-personal is registered.")).toBeTruthy();
+  });
+
+  // A rotation reveals the fresh secret on the same terms, so it states its
+  // own outcome beside it.
+  it("states the update outcome beside a rotated secret", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "PUT /v1/layers/update": {
+        body: {
+          layer: adminLayer(),
+          webhook_url: "https://registry.acme.com/v1/ingest/webhook/company",
+          webhook_secret: "whsec-rotated",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    fireEvent.click(screen.getByLabelText("Rotate the webhook secret"));
+    fireEvent.submit(form);
+    await screen.findByLabelText("Webhook secret");
+    expect(screen.getByText("Layer company is updated.")).toBeTruthy();
+  });
+
   // The secret is served once, so the copy is the one action in the panel a
   // reader cannot repeat. A confirmation that only paints beside the control
   // reaches nobody driving the panel by screen reader, so the outcome is
