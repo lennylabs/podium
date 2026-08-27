@@ -913,10 +913,11 @@ describe("layer source cell", () => {
 });
 
 /** layerTable attaches the layer panel's table with one header row and one
- * source cell, and returns the table, its header cells in column order, and
- * the source cell. */
+ * source cell, and returns the table, its body, its header cells in column
+ * order, and the source cell. */
 function layerTable(): {
   table: HTMLTableElement;
+  body: HTMLTableSectionElement;
   headers: HTMLTableCellElement[];
   cell: HTMLTableCellElement;
 } {
@@ -945,7 +946,7 @@ function layerTable(): {
   table.appendChild(body);
   document.body.appendChild(table);
   mounted.push(table);
-  return { table, headers, cell };
+  return { table, body, headers, cell };
 }
 
 // The layer table's columns. The row is identified by its layer name, so that
@@ -986,6 +987,38 @@ describe("layer table columns", () => {
 
   it("scrolls the table sideways inside its own container", () => {
     expect(styled("table-scroll").overflowX).toBe("auto");
+  });
+
+  // A layer that matches on more than one visibility axis wraps its markers
+  // over several lines and sets the row's height. Under the table default the
+  // rest of the row stayed at the top of that height with an empty band below
+  // it, so the row read as a short row with a stack of markers hanging off it
+  // rather than as one tier.
+  it("centres a body cell against the height the widest cell sets", () => {
+    const { body } = layerTable();
+    const row = document.createElement("tr");
+    for (const className of ["drag-cell", "mono", "source-col", "", "mono", "row-actions"]) {
+      const cell = document.createElement("td");
+      cell.className = className;
+      row.appendChild(cell);
+    }
+    body.appendChild(row);
+    for (const cell of Array.from(row.cells)) {
+      expect(window.getComputedStyle(cell).verticalAlign).toBe("middle");
+    }
+  });
+
+  // The panel a row control opens is a full-width cell in a row of its own, so
+  // it is laid out from its top edge.
+  it("lays the detail row's panel out from the top", () => {
+    const { body } = layerTable();
+    const row = document.createElement("tr");
+    row.className = "row-detail";
+    const cell = document.createElement("td");
+    cell.colSpan = 6;
+    row.appendChild(cell);
+    body.appendChild(row);
+    expect(window.getComputedStyle(cell).verticalAlign).toBe("top");
   });
 });
 
