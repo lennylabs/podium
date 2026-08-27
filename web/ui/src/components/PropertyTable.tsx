@@ -12,6 +12,8 @@ import { useState } from 'react';
 
 import { parseFrontmatter, splitDocument, type Property } from '../frontmatter';
 import { ClampedText } from './ClampedText';
+import { CodeBlock, codeLines } from './CodeBlock';
+import { CopyButton } from './primitives';
 
 export function PropertyTable({
   raw,
@@ -204,34 +206,34 @@ function AbsentValue({ keyName }: { keyName: string }) {
   );
 }
 
-/** RawBlock is the block as the author wrote it. The line the parser
- * complained about is marked, so the reader is shown where the failure is
- * rather than only being told its coordinates. A block with no reported
- * position marks nothing.
+/** RawBlock is the block as the author wrote it. It takes the same file view
+ * as the viewer's authored source pane, because both panes stand on the same
+ * surface and a reader who learns one reads the other: a header naming the
+ * block and counting its lines, a numbered gutter, and an explicit Copy
+ * control under it (§13.10). The line the parser complained about is marked,
+ * so the reader is shown where the failure is rather than only being told its
+ * coordinates. A block with no reported position marks nothing.
  *
- * The block scrolls sideways, so it is a named region in the tab order the
- * same way the rendered body's tables and code fences are (§13.10). Without
- * it a keyboard-only reader cannot reach the scroll container and cannot read
- * a value that runs past the pane's right edge. */
+ * The text column scrolls sideways, so it is a named region in the tab order
+ * the same way the rendered body's tables and code fences are. Without it a
+ * keyboard-only reader cannot reach the scroll container and cannot read a
+ * value that runs past the pane's right edge. */
 function RawBlock({ block, offending }: { block: string; offending: number }) {
+  const lines = codeLines(block);
   return (
-    <pre
-      className="mono raw-frontmatter"
-      data-testid="raw-frontmatter"
-      tabIndex={0}
-      role="region"
-      aria-label="Frontmatter, as authored"
-    >
-      {block.split('\n').map((line, index) => (
-        <span
-          key={`${String(index)}:${line}`}
-          className={index + 1 === offending ? 'raw-line raw-line-offending' : 'raw-line'}
-          data-testid={index + 1 === offending ? 'offending-line' : undefined}
-        >
-          {line}
-          {'\n'}
-        </span>
-      ))}
-    </pre>
+    <section className="source-pane">
+      <CodeBlock
+        name="raw frontmatter"
+        lines={lines}
+        offending={offending}
+        label="Frontmatter, as authored"
+        testID="raw-frontmatter"
+      />
+      <div className="source-actions source-actions-under">
+        {/* The block itself rather than the rendered lines, so the copy is
+            the text the parser and the table were built from. */}
+        <CopyButton value={block} label="Copy raw block" subject="Raw frontmatter" />
+      </div>
+    </section>
   );
 }

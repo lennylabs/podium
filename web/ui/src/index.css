@@ -1700,12 +1700,12 @@ input[type="search"]::-webkit-search-cancel-button {
   background: var(--danger-bg);
 }
 
-.raw-frontmatter {
-  padding: 12px;
-  overflow-x: auto;
-  background: var(--surf2);
-  border: 1px solid var(--bd);
-  border-radius: 9px;
+/* The same mark carried down the gutter, so the number of the line the
+   parser named reads as part of the marked row rather than beside it. */
+.source-gutter-offending {
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-weight: 700;
 }
 
 /* The layer table's identifier cell. The name and the marker qualifying it are
@@ -3950,6 +3950,13 @@ label:has(> input:disabled) {
 .source-actions button {
   margin-right: 0;
   white-space: nowrap;
+}
+
+/* The take-away control the raw block carries stands under it rather than
+   over it, because the toggle that opened the view already holds the row
+   above and two controls there read as one group. */
+.source-actions-under {
+  margin: 14px 0 0;
 }
 
 .source-block {

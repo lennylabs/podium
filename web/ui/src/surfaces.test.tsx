@@ -4136,6 +4136,108 @@ describe("the artifact viewer", () => {
     expect(pane.getAttribute("tabindex")).toBe("0");
   });
 
+  // The two code panes on this surface take the same file view. A bare block
+  // says neither what it holds nor how far it runs, and a value that runs
+  // past the right edge is only reachable by scrolling a pane nothing marks
+  // as scrollable, so the raw block carries the header, the numbered gutter,
+  // and the explicit Copy the authored source pane carries (§13.10).
+  it("gives the raw frontmatter block a header, a gutter, and a Copy control", async () => {
+    const written: string[] = [];
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: (text: string) => {
+          written.push(text);
+          return Promise.resolve();
+        },
+      },
+      configurable: true,
+    });
+    try {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": {
+          body: {
+            id: "platform/review",
+            type: "context",
+            version: "1.0.0",
+            content_hash: "sha256:abc",
+            manifest_body: "# Review\n",
+            frontmatter: manifestDoc,
+          },
+        },
+        "/v1/dependents": { body: { edges: [] } },
+      });
+      goTo("#/artifact/platform%2Freview");
+      render(<App />);
+      await screen.findByLabelText("Artifact viewer");
+      fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Raw YAML" }));
+      const block = screen
+        .getByTestId("raw-frontmatter")
+        .closest(".source-block") as HTMLElement;
+      // The header names the block and states its extent.
+      expect(
+        (block.querySelector(".source-head") as HTMLElement).textContent,
+      ).toBe("raw frontmatter3 lines");
+      // The gutter numbers every line of the block and is skipped by a
+      // screen reader, which would otherwise interleave the numbers.
+      const gutter = block.querySelector(".source-gutter") as HTMLElement;
+      expect(gutter.getAttribute("aria-hidden")).toBe("true");
+      expect([...gutter.children].map((line) => line.textContent)).toEqual([
+        "1",
+        "2",
+        "3",
+      ]);
+      const copy = screen.getByRole("button", { name: "Copy raw block" });
+      fireEvent.click(copy);
+      await waitFor(() => {
+        expect(written).toEqual(["name: review\ntags:\n  - security"]);
+      });
+    } finally {
+      if (original !== undefined) {
+        Object.defineProperty(navigator, "clipboard", original);
+      } else {
+        delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+      }
+    }
+  });
+
+  // The gutter carries the parse failure too, so the number of the line the
+  // parser named is marked alongside the line itself.
+  // Spec: §13.10
+  it("marks the offending line in the raw block's gutter", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/broken",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Broken\n",
+          frontmatter: "---\nname: broken\n  bad: indent\n---\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Fbroken");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    await screen.findByText("Invalid syntax");
+    const marked = screen.getByTestId("offending-line");
+    const block = marked.closest(".source-block") as HTMLElement;
+    const gutter = block.querySelector(".source-gutter") as HTMLElement;
+    const tinted = [...gutter.children].filter((line) =>
+      line.classList.contains("source-gutter-offending"),
+    );
+    expect(tinted.length).toBe(1);
+    // The tinted number is the position of the marked line.
+    const lines = [...(marked.parentElement as HTMLElement).children];
+    expect(tinted[0].textContent).toBe(String(lines.indexOf(marked) + 1));
+  });
+
   // The version affordance is disclosed from the badge in the header. Most
   // artifacts carry one published version, and standing an entry field and
   // its button between the description and the tabs put a form on the page

@@ -15,6 +15,7 @@ import type { RefObject } from 'react';
 
 import { ArtifactBody } from '../components/ArtifactBody';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { CodeBlock, codeLines } from '../components/CodeBlock';
 import { usePopupDismiss } from '../components/focus';
 import { Lead } from '../components/Lead';
 import type { BadgeTone } from '../components/primitives';
@@ -502,10 +503,7 @@ function Manifest({
  * gutter. The reader reaches this tab to quote a line or to take the file
  * away, so the numbering and the download are what the panel is for. */
 function AuthoredSource({ name, value }: { name: string; value: string }) {
-  // A file ends with a newline, and splitting on it yields a trailing empty
-  // element that is not a line. One trailing newline is dropped so the count
-  // and the gutter agree with what an editor reports.
-  const lines = value.replace(/\n$/, '').split('\n');
+  const lines = codeLines(value);
   const bytes = new TextEncoder().encode(value).length;
   return (
     <section className="source-pane">
@@ -523,29 +521,10 @@ function AuthoredSource({ name, value }: { name: string; value: string }) {
           Download {name}
         </button>
       </div>
-      <div className="source-block">
-        <div className="source-head mono">
-          <span>{name}</span>
-          <span className="quiet">
-            {lines.length} lines · {formatSize(bytes)}
-          </span>
-        </div>
-        <div className="source-lines">
-          {/* The gutter is decorative for a reader who is listening rather
-              than looking: it repeats no content, and a screen reader that
-              read it would interleave numbers with the file's own text. */}
-          <div className="source-gutter mono" aria-hidden="true">
-            {lines.map((_, index) => (
-              <div key={index}>{index + 1}</div>
-            ))}
-          </div>
-          {/* The joined lines rather than the value, because a trailing
-              newline draws a line the gutter does not number and pulls the
-              two columns out of register. Copy and Download carry the
-              value itself. */}
-          <pre className="mono source-code">{lines.join('\n')}</pre>
-        </div>
-      </div>
+      {/* The split lines rather than the value, because a trailing newline
+          draws a line the gutter does not number and pulls the two columns
+          out of register. Copy and Download carry the value itself. */}
+      <CodeBlock name={name} extra={formatSize(bytes)} lines={lines} />
     </section>
   );
 }
