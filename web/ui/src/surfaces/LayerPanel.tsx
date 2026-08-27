@@ -259,8 +259,12 @@ export function LayerPanel({
   const moveBy = (id: string, delta: number) => {
     const block = blockOf(rows, id);
     const at = block.findIndex((row) => row.ID === id);
+    if (at < 0) {
+      return;
+    }
     const onto = block[at + delta];
-    if (at < 0 || onto === undefined) {
+    if (onto === undefined) {
+      setOutcome(blockEdgeNote(block, id, delta));
       return;
     }
     commitMove(id, onto.ID);
@@ -627,6 +631,24 @@ function movedNote(
   const at = order.indexOf(id);
   const position = offset + at + 1;
   return `${id} moved to order ${String(position)} of ${String(rows.length)}.`;
+}
+
+/** blockEdgeNote states why an arrow key moved nothing. A row at either end
+ * of its class block has nowhere to step, because §4.6 composes every
+ * user-defined layer above every admin-defined one whatever the stored order
+ * values are, so a step across the class boundary names no move. The refusal
+ * goes to the live region a committed move states its outcome in: a reader
+ * who cannot see the rows stay put otherwise hears the previous move's
+ * confirmation or nothing at all. */
+function blockEdgeNote(
+  block: LayerRecord[],
+  id: string,
+  delta: number,
+): string {
+  const klass =
+    block[0]?.UserDefined === true ? "user-defined" : "admin-defined";
+  const edge = delta < 0 ? "first" : "last";
+  return `${id} is already ${edge} among the ${klass} layers; it did not move.`;
 }
 
 /** unregisteredNote states what a committed unregister did and where the

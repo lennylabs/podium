@@ -8214,6 +8214,41 @@ describe("the layer write flows", () => {
     expect(requests.some((r) => r.url === "/v1/layers/reorder")).toBe(false);
   });
 
+  // A refused step is a no-op the keyboard reader cannot see, so it states
+  // its refusal in the live region the committed move states its outcome in.
+  // Leaving the region alone leaves the previous move's confirmation standing
+  // as the answer to a press that moved nothing.
+  it("announces that an arrow key stepped off the end of the block", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layers: [adminLayer(), userLayer(), scratchLayer()] },
+      },
+      "/v1/layers/reorder": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.keyDown(
+      screen.getByLabelText(moveHandleLabel("alice-personal")),
+      { key: "ArrowDown" },
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("panel-announcement").textContent).toBe(
+        "alice-personal moved to order 3 of 3.",
+      );
+    });
+    fireEvent.keyDown(
+      screen.getByLabelText(moveHandleLabel("alice-personal")),
+      { key: "ArrowUp" },
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("panel-announcement").textContent).toBe(
+        "alice-personal is already first among the user-defined layers; it did not move.",
+      );
+    });
+  });
+
   // The fan-out issues one request per layer in sequence, and the press is
   // one press, so the run answers with one report: the combined counts, a row
   // per layer, and no dialog naming a single layer.
