@@ -950,6 +950,9 @@ describe("the application shell", () => {
     expect(document.activeElement).toBe(toggle);
     expect(toggle.getAttribute("aria-disabled")).toBe("true");
     expect(toggle.getAttribute("aria-expanded")).toBeNull();
+    // Keeping the reader's focus is all the control is still there for, so it
+    // leaves the tab order and the next reader tabs past the row.
+    expect(toggle.tabIndex).toBe(-1);
     // The outcome is announced rather than drawn beside the name. The row's
     // right-aligned slot is the design's "restricted" slot and is too narrow
     // for the sentence, which clipped to a fragment beside any name longer
@@ -965,6 +968,35 @@ describe("the application shell", () => {
     ).toHaveLength(0);
     expect(within(tree).getByRole("link", { name: "finance" })).toBeTruthy();
     expect(tree.querySelectorAll("p")).toHaveLength(0);
+  });
+
+  // A route onto a leaf domain opens its node and resolves the level to
+  // nothing with no press behind it, so nobody's focus is standing on the
+  // control. It must not cost the reader a tab stop on the way down the tree.
+  it("keeps a level the route emptied out of the tab order", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [{ path: "finance", name: "finance" }],
+          notable: [],
+        },
+      },
+      "/v1/load_domain?path=finance&depth=2": {
+        body: { path: "finance", subdomains: [], notable: [] },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/domain/finance");
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    const toggle = await within(tree).findByRole("button", {
+      name: "finance has no subdomains",
+    });
+    expect(toggle.tabIndex).toBe(-1);
+    expect(document.activeElement).not.toBe(toggle);
   });
 
   // A level the eager read already reported empty never carried a toggle, so

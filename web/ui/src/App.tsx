@@ -831,11 +831,20 @@ function TreeNode({
           // resolving to nothing. It carries aria-disabled rather than
           // disabled for the same reason: a disabled control is removed from
           // the focus order, and the browser drops focus to the body.
+          //
+          // It leaves the tab order instead, through tabindex. A browser keeps
+          // focus where it is when the focused element takes tabindex="-1", so
+          // the reader who pressed the toggle stays on it and is told the
+          // outcome, while every other reader tabs from the row above straight
+          // to the next row rather than through a control that does nothing.
+          // A domain the route opened reaches the same state with no press at
+          // all, so leaving the row in the tab order costs a stop per leaf.
           <button
             type="button"
             className={emptied ? 'tree-toggle tree-toggle-empty' : 'tree-toggle'}
             aria-expanded={emptied ? undefined : open}
             aria-disabled={emptied ? true : undefined}
+            tabIndex={emptied ? -1 : undefined}
             aria-label={
               emptied ? `${label} has no subdomains` : `${open ? 'Collapse' : 'Expand'} ${label}`
             }
