@@ -2929,9 +2929,23 @@ label:has(> input:disabled) {
 }
 
 /* The panel is full-bleed so the header divider and the footer reach both
-   edges, which means everything between them carries its own inset. */
+   edges, which means everything between them carries its own inset. The body
+   carries the vertical padding alone and hands the horizontal inset to each
+   block inside it, because the result rows are the one block that has to
+   reach both edges: the selected row is tinted across the whole panel, and an
+   inset on the body would draw that tint as a box floating inside it. */
 .palette-body {
-  padding: 8px 16px;
+  padding: 8px 0;
+}
+
+.palette-body > * {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.palette-body > .palette-rows {
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .palette-count {
@@ -2946,13 +2960,20 @@ label:has(> input:disabled) {
   padding: 0;
 }
 
+/* A row spans the panel and carries the inset itself, so the selection tint
+   below reaches both edges. The button border and radius come off for the
+   same reason: the arrows move the selection down a list, and a row that
+   rounds and outlines itself when it is reached reads as a box the selection
+   entered rather than as the next row down. */
 .palette-row {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
   margin: 0;
-  border-color: transparent;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 0;
   background: transparent;
   text-align: left;
 }
@@ -2963,7 +2984,6 @@ label:has(> input:disabled) {
    reader has no way to produce. */
 .palette-row-selected {
   background: var(--wash);
-  border-color: var(--cbd);
   box-shadow: inset 2px 0 var(--acc);
 }
 
