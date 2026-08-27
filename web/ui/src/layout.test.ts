@@ -56,6 +56,25 @@ function mediaBlock(condition: string): string {
   return rules.join("\n");
 }
 
+/** mediaRule returns the declarations the stylesheet writes for one selector
+ * under the given media condition, and the empty string when the condition
+ * declares nothing for it. */
+function mediaRule(condition: string, selector: string): string {
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      if (!(rule instanceof CSSMediaRule) || rule.conditionText !== condition) {
+        continue;
+      }
+      for (const inner of Array.from(rule.cssRules)) {
+        if (inner instanceof CSSStyleRule && inner.selectorText === selector) {
+          return inner.style.cssText;
+        }
+      }
+    }
+  }
+  return "";
+}
+
 describe("shell layout", () => {
   it("gives the content column a zero minimum", () => {
     expect(styled("app-body").gridTemplateColumns).toBe("268px minmax(0, 1fr)");
@@ -76,6 +95,32 @@ describe("shell layout", () => {
     expect(narrow).toContain(".app-body");
     expect(narrow).toContain("minmax(0, 1fr)");
     expect(narrow).not.toContain("268px");
+  });
+
+  // The top bar's items are about 790px wide together on one row, so a narrow
+  // viewport carried the account cluster past the right edge: the appearance
+  // control sat entirely off screen and was reachable only by scrolling the
+  // document sideways, and the squeezed search trigger wrapped its label onto
+  // the key hint. Below the shell's narrow breakpoint the bar wraps and the
+  // search trigger takes the second row on its own.
+  it("wraps the top bar so no control leaves a narrow viewport", () => {
+    const bar = mediaRule("(max-width: 900px)", ".topbar");
+    expect(bar).toContain("flex-wrap: wrap");
+    expect(bar).toContain("height: auto");
+
+    const trigger = mediaRule("(max-width: 900px)", ".search-trigger");
+    expect(trigger).toContain("order: 1");
+    expect(trigger).toContain("flex: 1 1 100%");
+    expect(trigger).toContain("max-width: none");
+  });
+
+  // A flex item does not shrink below its min-content width on its own, so
+  // the registry host held the top bar's first row open at its full width.
+  it("truncates the registry host rather than holding the top bar open", () => {
+    const host = styled("topbar-host");
+    expect(host.minWidth).toBe("0");
+    expect(host.overflow).toBe("hidden");
+    expect(host.textOverflow).toBe("ellipsis");
   });
 
   it("wraps a panel head the column is too narrow to hold on one line", () => {

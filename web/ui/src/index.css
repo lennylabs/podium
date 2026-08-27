@@ -2964,11 +2964,19 @@ label:has(> input:disabled) {
 
 /* The registry the page is served from, set behind the wordmark by a rule
    and read as an identifier rather than as prose. */
+/* The host is the row's one expendable item. A flex item does not shrink
+   below its min-content width on its own, so a long host name held the row
+   open and pushed the controls beside it off a narrow viewport. A zero
+   minimum lets it give way first and truncate. */
 .topbar-host {
+  min-width: 0;
+  overflow: hidden;
   padding-left: 12px;
   border-left: 1px solid var(--b2);
   font-size: 11px;
   color: var(--faint);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .topbar-divider {
@@ -3065,6 +3073,38 @@ label:has(> input:disabled) {
 
 .appearance-trigger .contrast-disc {
   flex: none;
+}
+
+/* The bar's items are about 790px wide together, so on a narrow viewport one
+   row of them ran past the right edge: the account cluster left the viewport
+   and the appearance control could only be reached by scrolling the document
+   sideways, and the squeezed search trigger wrapped its label onto the key
+   hint. Below the shell's narrow breakpoint the bar wraps instead. The search
+   trigger takes a row of its own, which leaves the first row holding the
+   wordmark and the account cluster.
+
+   The block sits after the rules it overrides. A media condition adds no
+   specificity, so the same declaration written earlier in the file loses to
+   the component rule below. */
+@media (max-width: 900px) {
+  .topbar {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 8px 12px;
+  }
+
+  .search-trigger {
+    order: 1;
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  /* The rows separate the clusters the dividers separated on one row, and a
+     divider left beside the wrap point reads as a rule with nothing on one
+     side of it. */
+  .topbar-divider {
+    display: none;
+  }
 }
 
 /* The command palette sits over a scrim, 96px from the top, on whatever page
