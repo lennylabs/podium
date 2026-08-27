@@ -181,6 +181,17 @@ export function LayerPanel({
   }
   const rows = layers.value ?? [];
 
+  // One in-flight guard covers the whole surface. The registry runs the §7.3.1
+  // ingest pipeline inside the request, so two open requests for one layer run
+  // that pipeline twice over the same source at once. While a row's own
+  // reingest is open the fan-out is held, and while the fan-out is open every
+  // row trigger is held, which also keeps the fan-out from overwriting a row
+  // state the reader has not read yet.
+  const runActive = run !== null && run.finishedAt === null;
+  const reingesting =
+    runActive ||
+    Object.values(reingest).some((state) => state.kind === "running");
+
   /** afterWrite re-reads everything a layer write moves: the panel's own
    * rows, and the shell's catalog read behind the sidebar tree and the footer
    * counts. Every write path goes through it, because a register, an
@@ -337,11 +348,7 @@ export function LayerPanel({
           </button>
           <button
             type="button"
-            disabled={
-              readOnly ||
-              rows.length === 0 ||
-              (run !== null && run.finishedAt === null)
-            }
+            disabled={readOnly || rows.length === 0 || reingesting}
             onClick={() => {
               void reingestAll();
             }}
@@ -436,6 +443,7 @@ export function LayerPanel({
                   readOnly={readOnly}
                   refusal={refusals[layer.ID] ?? null}
                   reingest={reingest[layer.ID] ?? idleReingest}
+                  reingestHeld={runActive}
                   dragging={dragging === layer.ID}
                   over={over === layer.ID}
                   onDragStart={() => {
@@ -681,6 +689,7 @@ function LayerRow({
   readOnly,
   refusal,
   reingest,
+  reingestHeld,
   dragging,
   over,
   onDragStart,
@@ -701,6 +710,10 @@ function LayerRow({
   readOnly: boolean;
   refusal: Refusal | null;
   reingest: ReingestState;
+  /** reingestHeld is the panel's fan-out running over every layer, this one
+   * included. The row's trigger is held for as long as it runs, so one layer
+   * is never reingested twice at once. */
+  reingestHeld: boolean;
   dragging: boolean;
   over: boolean;
   onDragStart: () => void;
@@ -886,6 +899,7 @@ function LayerRow({
           <ReingestButton
             state={reingest}
             readOnly={readOnly}
+            held={reingestHeld}
             buttonRef={trigger}
             onStart={(breakGlass) => {
               oweFocus();

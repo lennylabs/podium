@@ -80,11 +80,18 @@ export function reingestRefusal(err: unknown): ReingestState {
 export function ReingestButton({
   state,
   readOnly,
+  held,
   onStart,
   buttonRef,
 }: {
   state: ReingestState;
   readOnly: boolean;
+  /** held is the panel's own in-flight guard: a fan-out across every layer is
+   * open, and this row is one of the layers it reingests. Without it the row
+   * trigger and the fan-out see only their own request, and a second POST for
+   * the same layer runs the registry's whole ingest pipeline twice over one
+   * source at once. */
+  held?: boolean;
   onStart: (breakGlass?: BreakGlass) => void;
   /** buttonRef is how the row reaches the trigger it has to hand focus back
    * to. The button disables itself while its request is open, which blurs
@@ -96,7 +103,7 @@ export function ReingestButton({
     <button
       ref={buttonRef}
       type="button"
-      disabled={readOnly || state.kind === 'running'}
+      disabled={readOnly || held === true || state.kind === 'running'}
       onClick={() => {
         onStart();
       }}

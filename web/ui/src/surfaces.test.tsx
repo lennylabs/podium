@@ -9434,6 +9434,78 @@ describe("the layer write flows", () => {
     expect(report.textContent).toContain("alice-personal");
   });
 
+  // The registry runs the whole ingest pipeline inside the request, so a
+  // layer already reingesting must not be handed a second concurrent request.
+  // The row trigger and the fan-out are one guard: while a row's own reingest
+  // is open, "Reingest all" is held, and the row keeps the result it waited
+  // for rather than having it overwritten by a run that started after it.
+  it("holds Reingest all while a row's own reingest is open", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+      "/v1/layers/reingest?id=company": {
+        body: { accepted: 3, idempotent: 1 },
+        deferred: true,
+      },
+      "/v1/layers/reingest?id=alice-personal": {
+        body: { accepted: 2, idempotent: 6 },
+        deferred: true,
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getAllByRole("button", { name: "Reingest" })[0]);
+    const all = screen.getByRole("button", { name: "Reingest all" });
+    expect(all.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(all);
+    // The row's own reingest answers, and its result is what the row reports.
+    await screen.findByLabelText("Reingest result for company");
+    const reingests = requests.filter((r) =>
+      r.url.startsWith("/v1/layers/reingest"),
+    );
+    expect(reingests.map((r) => r.url)).toEqual([
+      "/v1/layers/reingest?id=company",
+    ]);
+    // The guard lifts once nothing is in flight.
+    await waitFor(() => {
+      expect(
+        screen
+          .getByRole("button", { name: "Reingest all" })
+          .hasAttribute("disabled"),
+      ).toBe(false);
+    });
+  });
+
+  // The same guard from the other side: the fan-out reingests every layer, so
+  // the row triggers are held for as long as it runs.
+  it("holds the row triggers while the fan-out is running", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+      "/v1/layers/reingest?id=company": {
+        body: { accepted: 3, idempotent: 1 },
+        deferred: true,
+      },
+      "/v1/layers/reingest?id=alice-personal": {
+        body: { accepted: 2, idempotent: 6 },
+        deferred: true,
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Reingest all" }));
+    for (const trigger of screen.getAllByRole("button", { name: "Reingest" })) {
+      expect(trigger.hasAttribute("disabled")).toBe(true);
+    }
+    await screen.findByLabelText("Reingest all result");
+    // Two layers, one request each: the fan-out issued nothing twice.
+    expect(
+      requests.filter((r) => r.url.startsWith("/v1/layers/reingest")).length,
+    ).toBe(2);
+  });
+
   // A layer the registry refused is part of the run's result. Reported on the
   // row alone it sat behind the reports of every other layer, so the roll-up
   // names it with the code and the message its envelope carried.
