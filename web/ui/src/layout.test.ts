@@ -1208,6 +1208,15 @@ describe("attention row", () => {
     expect(ruleText(".attention-id")).toContain("flex: none");
   });
 
+  // A refusal message carries whatever the §6.10 envelope wrote, and a
+  // filesystem path offers no break opportunity, so the row overflowed its
+  // card and the tail of the message was clipped at the modal edge. The
+  // message breaks inside such a run instead. jsdom performs no layout, so the
+  // case pins the declaration; the rendered row is checked against a browser.
+  it("breaks a message inside an unbreakable run rather than overflowing the card", () => {
+    expect(styled("attention-text").overflowWrap).toBe("anywhere");
+  });
+
   // The badge itself stays an inline box, so a badge sitting in a baseline-
   // aligned header keeps the alignment its container asks for.
   it("leaves the badge an inline box", () => {

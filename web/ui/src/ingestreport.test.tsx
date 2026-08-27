@@ -515,6 +515,18 @@ describe('the finished fan-out report', () => {
     expect(id.className).toContain('attention-id');
   });
 
+  // The message beside that id was a bare text node in the row's flex
+  // container, so a path in it had no element to wrap within and ran past the
+  // card's right edge. It is drawn as the same wrapping prose every other
+  // attention row uses.
+  it('draws the refusal message as prose that wraps within the card', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    const message = within(screen.getByLabelText('Refused layers')).getByText(/git source requires ref/);
+    expect(message.className).toContain('attention-text');
+  });
+
   it('copies the whole run out, layer by layer', () => {
     const text = runText(runOutcomes, finishedAt);
     expect(text).toContain('Reingest all finished 14:06:22 UTC: 3 layers');

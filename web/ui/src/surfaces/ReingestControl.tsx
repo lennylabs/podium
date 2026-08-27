@@ -899,7 +899,7 @@ export function ReingestRunReport({
                   <div key={outcome.layerID} className="attention-row attention-danger">
                     <span className="mono attention-id">{outcome.layerID}</span>{' '}
                     <Badge tone="quiet">{refusalCode(outcome)}</Badge>{' '}
-                    {refusalMessage(outcome)}
+                    <p className="attention-text">{refusalMessage(outcome)}</p>
                   </div>
                 ))}
                 <p className="quiet">

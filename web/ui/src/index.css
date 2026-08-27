@@ -3907,9 +3907,16 @@ button.stat-open {
   flex: none;
 }
 
+/* A refusal message carries whatever the envelope wrote, including a
+   filesystem path with no break opportunity in it. Left to the default the
+   run of characters is wider than the row's min-content, so the row overflowed
+   its card and the tail of the message was clipped at the modal edge, where
+   the remediation the message states is the only place it is stated. The
+   message breaks inside the token instead. */
 .attention-text {
   min-width: 0;
   margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .attention-danger {
