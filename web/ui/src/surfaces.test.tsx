@@ -2809,7 +2809,7 @@ describe("search", () => {
     goTo("#/search/review");
     render(<App />);
     const count = await screen.findByTestId("result-count");
-    expect(count.textContent).toBe("Showing 3 of 143");
+    expect(count.textContent).toBe("Showing 3 of 143 matches");
     // The inline count is set in the proportional face with the two numerals
     // lifted out of the quiet surrounding words. The mono variant belongs to
     // a count that sits inside a field.
@@ -2870,6 +2870,33 @@ describe("search", () => {
     expect(screen.queryByText(/score 8/)).toBeNull();
   });
 
+  // Spec: §13.10 — the count names what it counts. Two bare numerals leave a
+  // reader to guess what the second one is, and the domain listing states its
+  // own count with the noun, so the two surfaces read alike.
+  it("names the counted noun and agrees with a lone match", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts": {
+        body: {
+          query: "tls",
+          total_matched: 1,
+          results: [{ id: "platform/tls", type: "skill" }],
+        },
+      },
+    });
+    goTo("#/search/tls");
+    render(<App />);
+    const count = await screen.findByTestId("result-count");
+    expect(count.textContent).toBe("Showing 1 of 1 match");
+    // The noun stays at the paragraph's quiet tone, so only the numerals lift
+    // to ink.
+    expect(
+      Array.from(count.querySelectorAll("strong")).map(
+        (node) => node.textContent,
+      ),
+    ).toEqual(["1", "1"]);
+  });
+
   // Spec: §13.10 — a truncated result list reaches the results the cap
   // withheld. §5 search takes a result count and no offset, so the
   // continuation raises `top_k` on the same request, and it stops at the
@@ -2897,7 +2924,7 @@ describe("search", () => {
     goTo("#/search/review");
     render(<App />);
     expect((await screen.findByTestId("result-count")).textContent).toBe(
-      "Showing 10 of 143",
+      "Showing 10 of 143 matches",
     );
     const foot = screen.getByTestId("search-continuation");
     // The caption sits with the control, so the reader reads the order the
@@ -2908,7 +2935,7 @@ describe("search", () => {
       expect(lastSearch().get("top_k")).toBe("30");
     });
     expect((await screen.findByTestId("result-count")).textContent).toBe(
-      "Showing 30 of 143",
+      "Showing 30 of 143 matches",
     );
     fireEvent.click(
       await screen.findByRole("button", { name: "Load 20 more" }),
@@ -2917,7 +2944,7 @@ describe("search", () => {
       expect(lastSearch().get("top_k")).toBe("50");
     });
     expect((await screen.findByTestId("result-count")).textContent).toBe(
-      "Showing 50 of 143",
+      "Showing 50 of 143 matches",
     );
     // The cap is spent, so the control is gone and narrowing the request is
     // what the surface offers.
@@ -3036,14 +3063,14 @@ describe("search", () => {
     goTo("#/search/review");
     render(<App />);
     expect((await screen.findByTestId("result-count")).textContent).toBe(
-      "Showing 10 of 12",
+      "Showing 10 of 12 matches",
     );
     fireEvent.click(await screen.findByRole("button", { name: "Load 2 more" }));
     await waitFor(() => {
       expect(lastSearch().get("top_k")).toBe("12");
     });
     expect((await screen.findByTestId("result-count")).textContent).toBe(
-      "Showing 12 of 12",
+      "Showing 12 of 12 matches",
     );
     expect(screen.queryByTestId("search-continuation")).toBeNull();
     // The raised cap belonged to the request that carried it, so the filtered

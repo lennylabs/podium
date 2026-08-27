@@ -229,11 +229,14 @@ export function SearchSurface({
           }}
         />
         {/* The match count is taken before the cap truncates the list, so
-            fewer results than matches is the ordinary outcome. */}
+            fewer results than matches is the ordinary outcome. The trailing
+            noun names what the second numeral counts, which two bare numerals
+            leave the reader to guess at. */}
         {body !== null && (
           <p className="result-count quiet" data-testid="result-count">
             Showing <strong>{(body.results ?? []).length}</strong> of{" "}
-            <strong>{body.total_matched}</strong>
+            <strong>{body.total_matched}</strong>{" "}
+            {body.total_matched === 1 ? "match" : "matches"}
           </p>
         )}
       </div>
