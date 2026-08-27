@@ -5587,6 +5587,57 @@ describe("the layer panel", () => {
     expect(counts).toEqual(["+3", "+2"]);
   });
 
+  // A row granting on no axis states that as a marker of the same size and
+  // geometry as a granted axis, so the column reads as one row of markers
+  // whatever the grant state. Set as plain body text the statement read as a
+  // cell that had failed to render its marker.
+  it("states an absent grant as an outlined marker in the visibility cell", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "alice-personal",
+              SourceType: "local",
+              Path: "/Users/alice/registry",
+              Order: 1,
+            },
+            {
+              ID: "shared",
+              SourceType: "local",
+              Path: "/srv/registry",
+              Order: 2,
+              Organization: true,
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const marker = screen.getByText("no grants — only you");
+    expect(marker.className).toContain("badge");
+    // The marker sits in the cell a granted row uses, so the two rows put
+    // their markers at the same place in the column.
+    expect(marker.closest(".visibility-markers")).toBeTruthy();
+    // Asserted against the stylesheet the bundle ships: the marker takes the
+    // padding and the mono face a granted axis takes, so the column holds one
+    // row of markers of one size, and it separates itself by dropping the
+    // fill the granted marker carries.
+    const style = getComputedStyle(marker);
+    const granted = getComputedStyle(
+      screen.getByText("organization").closest(".badge") as Element,
+    );
+    expect(style.padding).toBe(granted.padding);
+    expect(style.fontFamily).toBe(granted.fontFamily);
+    expect(style.fontSize).toBe(granted.fontSize);
+    expect(style.backgroundColor).toBe("rgba(0, 0, 0, 0)");
+    expect(granted.background).not.toBe(style.background);
+    expect(style.color).toBe("var(--meta)");
+  });
+
   // The source cell names the type it is showing and states every source
   // field the layer was registered with. A git layer's configured root is
   // part of where the layer's artifacts come from, so a row that omits it

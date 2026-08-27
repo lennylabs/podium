@@ -681,6 +681,18 @@ h2.label {
   color: var(--sec);
 }
 
+/* The hollow tone is the grant tone's counterpart: the same box and mono face
+   with the fill dropped and the edge kept, in the metadata tone. The layer
+   panel's visibility column states an absent grant with it, so a row granting
+   on no axis carries a marker of the same size and geometry as a row that
+   grants, and the column reads as one row of markers whatever the grant state.
+   Set as plain body text the same statement read as a cell that had failed to
+   render its marker. */
+.badge-hollow {
+  background: none;
+  color: var(--meta);
+}
+
 /* The marker tone states a property of the response rather than of the thing
    the badge sits beside, which is how the trimmed-listing pill stands among
    the header's count chips. It takes the same filled chip in the metadata

@@ -1291,7 +1291,14 @@ function LastIngestCell({ layer }: { layer: LayerRecord }) {
 function VisibilityCell({ layer }: { layer: LayerRecord }) {
   const markers = visibilityMarkers(layer);
   if (markers.length === 0) {
-    return <span className="quiet">no grants — only you</span>;
+    // The absent grant is stated as a marker rather than as body text, and in
+    // the same wrapping cell a granted row uses, so the column keeps one row
+    // of markers whatever the grant state.
+    return (
+      <div className="visibility-markers">
+        <Badge tone="hollow">no grants — only you</Badge>
+      </div>
+    );
   }
   // The markers share one wrapping cell so a row that grants on four axes
   // keeps the height of a row that grants on one. Left to the badge's own
