@@ -3813,10 +3813,42 @@ label:has(> input:disabled) {
 
 .resource-detail {
   margin-top: 10px;
-  padding: 12px 14px;
-  background: var(--surf2);
+  background: var(--surf);
   border: 1px solid var(--bd);
   border-radius: 10px;
+  overflow: hidden;
+}
+
+/* The card names the file it describes on its own tinted strip, so the
+   property grid under it reads as the file's attributes rather than as four
+   more rows continuing the table above. */
+.resource-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: var(--surf2);
+  border-bottom: 1px solid var(--bd);
+}
+
+/* The action sits beside the grid rather than under it, because it retrieves
+   the file the grid describes and the card is wider than the grid needs. It
+   wraps under the grid where the column is too narrow to hold both. */
+.resource-detail-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 14px;
+}
+
+.resource-detail-body .rail-facts {
+  margin: 0;
+}
+
+.resource-detail-body .button {
+  flex: none;
 }
 
 .download-all {

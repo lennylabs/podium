@@ -11714,6 +11714,53 @@ describe("the artifact viewer’s resources", () => {
     expect(rows[1].className).toContain("row-selected");
   });
 
+  // The detail card states the file's attributes as a labelled property grid
+  // rather than as one dot-joined line, and its retrieval action is the
+  // primary control on the tab, which the selected row's own action joins.
+  // Without this the card read as a caption with a secondary button under it
+  // and the reader had to infer which value answered which attribute.
+  it("details the selected file as a property grid with a primary download", async () => {
+    resourcePage();
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Resources/ }));
+    const rows = within(screen.getByLabelText("Resources"))
+      .getAllByRole("row")
+      .slice(1);
+    fireEvent.click(rows[1]);
+    const facts = screen.getByTestId("resource-detail-facts");
+    const pairs = [...facts.querySelectorAll(".rail-fact")].map((fact) => [
+      fact.querySelector("dt")?.textContent,
+      fact.querySelector("dd")?.textContent,
+    ]);
+    expect(pairs).toEqual([
+      ["format", "application/octet-stream"],
+      ["size", "2.0 MB"],
+      ["delivery", "fetched on demand"],
+      ["content type", "application/octet-stream"],
+    ]);
+    const card = screen.getByTestId("resource-detail");
+    const action = within(card).getByRole("link", { name: "Download ↓" });
+    expect(action.className).toContain("primary");
+    expect(action.getAttribute("href")).toBe("https://objects.acme.com/corpus");
+    // The selected row's own action is filled the same way, so the pair reads
+    // as one control rather than as a primary card action beside an outlined
+    // row action that retrieves the same file.
+    expect(
+      within(rows[1]).getByRole("link", { name: "Download ↓" }).className,
+    ).toContain("primary");
+    expect(
+      within(rows[0]).getByRole("link", { name: "Download ↓" }).className,
+    ).not.toContain("primary");
+    // An inline file carries no recorded media type, so the card keeps the
+    // row and names the absence rather than dropping it.
+    fireEvent.click(rows[0]);
+    const inline = [
+      ...screen.getByTestId("resource-detail-facts").querySelectorAll(".rail-fact"),
+    ];
+    expect(inline[3].textContent).toBe("content typenot recorded");
+  });
+
   // The selection drives what the tab shows, so it is operable without a
   // pointer: the file name is a button a keyboard reaches and activates, and
   // it states whether its row is the selected one.

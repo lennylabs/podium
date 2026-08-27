@@ -937,6 +937,10 @@ interface ResourceRow {
   delivery: string;
   size: number;
   href: string;
+  // The media type the registry recorded for the file. Only a fetched file
+  // carries one, so an inline file leaves it empty and the detail card states
+  // that the registry recorded none rather than dropping the row.
+  contentType: string;
 }
 
 function resourceRows(artifact: LoadArtifactResponse): ResourceRow[] {
@@ -950,6 +954,7 @@ function resourceRows(artifact: LoadArtifactResponse): ResourceRow[] {
     // encoding it arrived in.
     size: base64 ? base64Bytes(value) : new TextEncoder().encode(value).length,
     href: inlineHref(value, base64),
+    contentType: '',
   }));
   const fetched = Object.entries(artifact.large_resources ?? {}).map(([name, link]) => ({
     name,
@@ -957,6 +962,7 @@ function resourceRows(artifact: LoadArtifactResponse): ResourceRow[] {
     delivery: fetchedDelivery,
     size: link.size,
     href: link.presigned_url,
+    contentType: link.content_type ?? '',
   }));
   return [...inline, ...fetched];
 }
@@ -1056,7 +1062,16 @@ function ResourceTable({ rows }: { rows: ResourceRow[] }) {
                 <span className="badge badge-quiet">{row.delivery}</span>
               </td>
               <td>
-                <a className="button" href={row.href} download={row.name}>
+                {/* The selected row's action is the primary one on the page:
+                    the detail card below states that file's attributes, so
+                    the two controls that retrieve it read as one pair rather
+                    than as the card's action and an outlined row control
+                    that happens to do the same thing. */}
+                <a
+                  className={row.name === selected ? 'button primary' : 'button'}
+                  href={row.href}
+                  download={row.name}
+                >
                   Download ↓
                 </a>
               </td>
@@ -1066,14 +1081,40 @@ function ResourceTable({ rows }: { rows: ResourceRow[] }) {
       </table>
       {detail !== null && (
         <div className="resource-detail" data-testid="resource-detail">
-          <p className="label">Selected</p>
-          <p className="mono">{detail.name}</p>
-          <p className="quiet mono">
-            {detail.format} · {formatSize(detail.size)} · {detail.delivery}
-          </p>
-          <a className="button" href={detail.href} download={detail.name}>
-            Download
-          </a>
+          <div className="resource-detail-head">
+            <p className="label">Selected</p>
+            <p className="mono">{detail.name}</p>
+          </div>
+          {/* The file's attributes are a labelled property grid rather than
+              one dot-joined line, so each value is read against the name of
+              the attribute it answers and the card states the same set for
+              every file. The grid reuses the rail's fact list, because both
+              present the same kind of label and value pairs. */}
+          <div className="resource-detail-body">
+            <dl className="rail-facts" data-testid="resource-detail-facts">
+              <div className="rail-fact">
+                <dt className="mono">format</dt>
+                <dd>{detail.format}</dd>
+              </div>
+              <div className="rail-fact">
+                <dt className="mono">size</dt>
+                <dd>{formatSize(detail.size)}</dd>
+              </div>
+              <div className="rail-fact">
+                <dt className="mono">delivery</dt>
+                <dd>{detail.delivery}</dd>
+              </div>
+              <div className="rail-fact">
+                <dt className="mono">content type</dt>
+                <dd className={detail.contentType === '' ? 'quiet' : undefined}>
+                  {detail.contentType === '' ? 'not recorded' : detail.contentType}
+                </dd>
+              </div>
+            </dl>
+            <a className="button primary" href={detail.href} download={detail.name}>
+              Download ↓
+            </a>
+          </div>
         </div>
       )}
     </>
