@@ -2742,6 +2742,21 @@ label:has(> input:disabled) {
   font-size: 13px;
 }
 
+/* The consequence names every granted member, so a registration granting a
+   couple of dozen users wrapped to eight rows and pushed the note and the
+   dialog footer out of the modal body. The members are already listed as
+   tokens directly above the line, so it clips at two rows. The clip sits on
+   the text rather than on the padded box, because `overflow: hidden` clips at
+   the padding edge and a clipped box renders a sliced third row inside its
+   own bottom padding. */
+.consequence-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
 .note {
   margin: 14px 0 0;
   padding: 12px 14px;

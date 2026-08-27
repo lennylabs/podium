@@ -6722,6 +6722,41 @@ describe("the layer write flows", () => {
     );
   });
 
+  // A registration can name a couple of dozen users, and the consequence
+  // states every one of them. Unclipped, the line wrapped to eight rows,
+  // pushed the neutral note and the footer down, and made the dialog body
+  // scroll. The names are already listed as tokens above the line, so the
+  // line clips at two rows and the dialog keeps its size.
+  it("clips the consequence line of a long user grant to two lines", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ identity_provider_configured: false }),
+      },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.click(screen.getByLabelText("Specific users"));
+    const named = Array.from(
+      { length: 25 },
+      (_, index) => `user${index + 1}@acme.com`,
+    );
+    fireEvent.change(
+      screen.getByLabelText("User identifiers, separated by commas"),
+      { target: { value: named.join(", ") } },
+    );
+    const line = screen.getByTestId("visibility-consequence");
+    expect(line.textContent).toContain("user25@acme.com");
+    const clipped = line.querySelector(".consequence-text");
+    expect(clipped?.textContent).toBe(line.textContent);
+    const style = window.getComputedStyle(clipped as Element);
+    expect(style.getPropertyValue("-webkit-line-clamp")).toBe("2");
+    expect(style.display).toBe("-webkit-box");
+    expect(style.overflow).toBe("hidden");
+  });
+
   // §4.6 grants to a group name the identity provider supplies and the
   // registry accepts any string, so a mistyped name registers a layer that
   // silently admits nobody and no refusal ever names it. No response

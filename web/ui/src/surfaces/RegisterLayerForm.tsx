@@ -341,7 +341,9 @@ export function RegisterLayerForm({
               {/* §4.6 combines the axes as a union, so the consequence is
                   stated once over the whole selection rather than per axis. */}
               <p className="consequence" data-testid="visibility-consequence">
-                {consequence(isPublic, organization, groupMembers, userMembers)}
+                <span className="consequence-text">
+                  {consequence(isPublic, organization, groupMembers, userMembers)}
+                </span>
               </p>
             </fieldset>
           )}

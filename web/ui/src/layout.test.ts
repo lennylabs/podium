@@ -258,6 +258,24 @@ describe("artifact row description", () => {
     expect(lead.maxWidth).toBe("720px");
   });
 
+  // The register dialog's consequence line names every granted member, so a
+  // registration granting a couple of dozen users wrapped to eight lines,
+  // pushed the neutral note and the dialog footer down, and made the body
+  // scroll. The members are already listed as tokens above the line, so it
+  // clips at two rows.
+  it("clips the register consequence line to two lines", () => {
+    const line = styled("consequence-text");
+    expect(line.getPropertyValue("-webkit-line-clamp")).toBe("2");
+    expect(line.display).toBe("-webkit-box");
+    expect(line.overflow).toBe("hidden");
+    // The clip sits on the text rather than on the padded box around it: a
+    // clipped box shows a sliced third row inside its own bottom padding,
+    // because overflow clips at the padding edge.
+    const box = styled("consequence");
+    expect(box.getPropertyValue("-webkit-line-clamp")).toBe("");
+    expect(box.padding).toBe("12px 14px");
+  });
+
   // The property table is rows of key and value. A value states what the
   // author wrote in full, so it takes none of the clip the header reads at:
   // a clipped cell hides part of the frontmatter and stands taller than the
