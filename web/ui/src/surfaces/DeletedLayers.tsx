@@ -241,8 +241,11 @@ function DeletedRow({
           <span className="erase-clock">
             {/* The date, the count, and the bar carry the same urgency, so a
                 row about to be erased reads as one accented unit rather than
-                as a bar that is accent on every row. */}
-            <span className={window.urgent ? 'mono accent' : 'mono'}>{window.erases}</span>
+                as a bar that is accent on every row. Off the threshold all
+                three are quiet, because a date set in ink on every row is the
+                loudest thing in the cell and leaves the accent nothing to
+                contrast against. */}
+            <span className={window.urgent ? 'mono accent' : 'mono quiet'}>{window.erases}</span>
             <span
               className={window.urgent ? 'depleting depleting-urgent' : 'depleting'}
               role="presentation"

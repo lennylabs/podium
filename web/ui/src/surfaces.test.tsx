@@ -10396,6 +10396,19 @@ describe("the layer write flows", () => {
       "2d left",
     );
     expect(expiring.className).toContain("depleting-urgent");
+
+    // The date is the third element of the cell's tone, so off the threshold
+    // it is quiet like the count beside it and only the urgent row sets it in
+    // the accent. A date in ink on every row is the loudest thing in the cell
+    // and leaves the accent nothing to contrast against.
+    const dates = Array.from(
+      document.querySelectorAll(".erase-clock > :first-child"),
+    );
+    expect(dates[0].className).toBe("mono quiet");
+    expect(screen.getByTestId("days-left-alice-roomy").className).toBe(
+      "mono quiet",
+    );
+    expect(dates[1].className).toBe("mono accent");
   });
 
   // The erase deadline is a clock the reader reads at a glance: the date, how
