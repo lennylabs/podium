@@ -17,8 +17,21 @@ export type Route =
   // layer rows off the first screen.
   | { name: 'layers'; deleted: boolean };
 
-export function parseRoute(hash: string): Route {
+/** catalogRoute is the registry root, addressed by the empty path. It is the
+ * route the page opens on and the one an unrecognized hash is corrected to. */
+const catalogRoute: Route = { name: 'domain', path: '' };
+
+/** parseRoute reads the surface a hash addresses, and answers null when the
+ * hash names no surface. A hash the router cannot read is not drawn as the
+ * catalog, because the reader would then be looking at "All domains" under an
+ * address that says something else, and copying the link, bookmarking it, or
+ * stepping back all carry the broken route on. `useRoute` corrects such a hash
+ * to the catalog's own address. */
+export function parseRoute(hash: string): Route | null {
   const raw = hash.replace(/^#\/?/, '');
+  if (raw === '') {
+    return catalogRoute;
+  }
   const [head, ...rest] = raw.split('/');
   const tail = decodeURIComponent(rest.join('/'));
   switch (head) {
@@ -31,9 +44,7 @@ export function parseRoute(hash: string): Route {
     case 'domain':
       return { name: 'domain', path: tail };
     default:
-      // The registry root is addressed by the empty path, which is the
-      // route the page opens on.
-      return { name: 'domain', path: '' };
+      return null;
   }
 }
 
@@ -49,7 +60,7 @@ export function domainHref(path: string): string {
  * rather than from a string comparison against `#/`. */
 export function atCatalogRoute(hash: string): boolean {
   const route = parseRoute(hash);
-  return route.name === 'domain' && route.path === '';
+  return route !== null && route.name === 'domain' && route.path === '';
 }
 
 export function artifactHref(id: string): string {
@@ -121,8 +132,14 @@ export function routeKey(route: Route): string {
  * landed on and the shell stays where it was. `replaceState` fires no
  * `hashchange`, so the correction does not re-enter this handler. */
 export function useRoute(): Route {
-  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash) ?? catalogRoute);
   useEffect(() => {
+    // A hash naming no surface is corrected on arrival as well as on change,
+    // because a reader reaches one from a pasted link or a bookmark, and the
+    // first paint under such a hash is already the catalog.
+    if (parseRoute(window.location.hash) === null) {
+      replaceRoute(domainHref(''));
+    }
     const onChange = () => {
       const held = heldRoute();
       if (held !== null) {
@@ -131,7 +148,13 @@ export function useRoute(): Route {
         }
         return;
       }
-      setRoute(parseRoute(window.location.hash));
+      const next = parseRoute(window.location.hash);
+      if (next === null) {
+        replaceRoute(domainHref(''));
+        setRoute(catalogRoute);
+        return;
+      }
+      setRoute(next);
     };
     window.addEventListener('hashchange', onChange);
     return () => {
