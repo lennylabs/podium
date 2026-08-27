@@ -47,6 +47,12 @@
   --page: #f4f1ea;
   --surf: #ffffff;
   --surf2: #fcfbf6;
+  /* The sidebar's ground is its own token because the two themes place it
+     differently against the top bar: the light theme paints both the same
+     white, and the dark theme drops the sidebar a step below the bar so the
+     navigation column reads as inset under a raised bar. Painting it `surf`
+     in both merges the two planes in the dark theme. */
+  --nav-surf: #ffffff;
   --ink: #14130f;
   --sec: #43413a;
   --meta: #63604f;
@@ -78,6 +84,7 @@
     --page: #0c0f16;
     --surf: #171b28;
     --surf2: #141824;
+    --nav-surf: #141824;
     --ink: #eaeef7;
     --sec: #c4cbdb;
     --meta: #9aa3ba;
@@ -104,6 +111,7 @@
   --page: #0c0f16;
   --surf: #171b28;
   --surf2: #141824;
+  --nav-surf: #141824;
   --ink: #eaeef7;
   --sec: #c4cbdb;
   --meta: #9aa3ba;
@@ -309,7 +317,7 @@ h3 {
   flex-direction: column;
   gap: 6px;
   padding: 18px 16px;
-  background: var(--surf);
+  background: var(--nav-surf);
   border-right: 1px solid var(--bd);
 }
 
