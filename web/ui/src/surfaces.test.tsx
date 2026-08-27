@@ -2299,6 +2299,55 @@ describe("the domain browser", () => {
     expect(window.getComputedStyle(here[0]).fontWeight).toBe("500");
   });
 
+  // A trail long enough to wrap must not break between a separator and the
+  // segment it introduces, or the first line ends on a dangling slash and the
+  // path reads as truncated mid-segment. Each separator is grouped with the
+  // crumb that follows it so the pair wraps as one unit.
+  it("groups each breadcrumb separator with the segment that follows it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform/networking/edge/loadbalancing",
+          subdomains: [],
+          notable: [],
+        },
+      },
+    });
+    goTo("#/domain/platform%2Fnetworking%2Fedge%2Floadbalancing");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const trail = within(browser).getByRole("navigation", {
+      name: "Breadcrumb",
+    });
+    const labels = [
+      "catalog",
+      "platform",
+      "networking",
+      "edge",
+      "loadbalancing",
+    ];
+    const crumbs = Array.from(trail.children);
+    expect(crumbs.length).toBe(labels.length);
+    crumbs.forEach((crumb, index) => {
+      expect(crumb.textContent).toBe(
+        index === 0 ? labels[0] : `/${labels[index]}`,
+      );
+      // No separator stands alone at the wrap boundary: every one of them is
+      // inside the group whose segment it introduces.
+      const sep = crumb.querySelector(".breadcrumb-sep");
+      if (index === 0) {
+        expect(sep).toBeNull();
+      } else {
+        expect(sep).toBeTruthy();
+        expect(crumb.firstElementChild).toBe(sep);
+      }
+    });
+    expect(trail.querySelectorAll(".breadcrumb-sep").length).toBe(
+      labels.length - 1,
+    );
+  });
+
   it("carries the registry root as the single word catalog", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },

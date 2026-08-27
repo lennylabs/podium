@@ -589,6 +589,14 @@ h3 {
   color: var(--faint);
 }
 
+/* Each crumb carries the separator that precedes it, so the pair wraps as one
+   unit and no line ends on a trailing slash. */
+.breadcrumb-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
 .breadcrumb a {
   color: inherit;
   text-decoration: none;

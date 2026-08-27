@@ -2,8 +2,6 @@
 // viewer both open on one, and both address the same §4.2 hierarchy, so the
 // trail is rendered once here rather than per surface.
 
-import { Fragment } from 'react';
-
 import { domainHref } from '../route';
 
 /** Breadcrumb links every domain above the page back to the domain browser,
@@ -30,7 +28,10 @@ export function Breadcrumb({ path, current }: { path: string; current?: string }
   return (
     <nav className="breadcrumb" aria-label="Breadcrumb">
       {trail.map((entry, index) => (
-        <Fragment key={entry.label + String(index)}>
+        // The separator belongs to the crumb that follows it and is grouped
+        // with it, so a trail long enough to wrap carries `/ segment` onto the
+        // next line together instead of ending a line on a dangling slash.
+        <span className="breadcrumb-crumb" key={entry.label + String(index)}>
           {index > 0 && (
             <span className="breadcrumb-sep" aria-hidden="true">
               /
@@ -43,7 +44,7 @@ export function Breadcrumb({ path, current }: { path: string; current?: string }
           ) : (
             <a href={entry.href}>{entry.label}</a>
           )}
-        </Fragment>
+        </span>
       ))}
     </nav>
   );
