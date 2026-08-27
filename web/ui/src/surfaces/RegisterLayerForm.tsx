@@ -70,6 +70,13 @@ export function RegisterLayerForm({
   const [users, setUsers] = useState('');
   const [result, setResult] = useState<LayerSecretResult | null>(null);
   const [refusal, setRefusal] = useState<unknown>(null);
+  // §4.6 keys a layer on its ID and the registration is an upsert on that
+  // key, so a second registration sent while the first is still open rewrites
+  // the layer the first one created: it reassigns the layer's place in the
+  // order and issues a fresh webhook secret, which replaces the one the reveal
+  // is presenting as shown once. The form therefore holds the write while one
+  // is open, on the same terms as the row's Reingest control.
+  const [pending, setPending] = useState(false);
   const refusalRef = useRef<HTMLDivElement | null>(null);
 
   // The form is taller than the dialog and the body scrolls, so a refusal
@@ -143,6 +150,12 @@ export function RegisterLayerForm({
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
+    // The submit control disables itself while a registration is open, and
+    // the guard stands here as well because a form submits on Enter from any
+    // field in it, which the disabled control does not intercept.
+    if (pending) {
+      return;
+    }
     const body: LayerRegistration = {
       id,
       source_type: sourceType,
@@ -159,13 +172,16 @@ export function RegisterLayerForm({
       groups: !userDefined && groupScoped ? groupMembers : undefined,
       users: !userDefined && userScoped ? userMembers : undefined,
     };
+    setPending(true);
     registerLayer(body).then(
       (next) => {
+        setPending(false);
         setRefusal(null);
         setResult(next);
         onRegistered();
       },
       (err: unknown) => {
+        setPending(false);
         setResult(null);
         setRefusal(err);
       },
@@ -394,7 +410,8 @@ export function RegisterLayerForm({
           <button
             type="submit"
             className="button primary"
-            disabled={readOnly || incomplete}
+            disabled={readOnly || incomplete || pending}
+            aria-busy={pending || undefined}
             aria-describedby={hold === null ? undefined : holdID}
           >
             Register

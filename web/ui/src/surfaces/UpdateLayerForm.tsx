@@ -39,11 +39,21 @@ export function UpdateLayerForm({
   const [users, setUsers] = useState((layer.Users ?? []).join(", "));
   const [result, setResult] = useState<LayerSecretResult | null>(null);
   const [refusal, setRefusal] = useState<unknown>(null);
+  // A patch carrying a rotation issues a fresh webhook secret on every call,
+  // and the reveal presents that secret as shown once. A second patch sent
+  // while the first is still open rotates again and replaces the value the
+  // reader is copying, leaving them holding a secret the registry has already
+  // retired. The form holds the write while one is open, on the same terms as
+  // the row's Reingest control.
+  const [pending, setPending] = useState(false);
 
   // send is held apart from the form's submit handler so a refused patch can
   // be re-issued from the refusal itself, which is the treatment every other
   // refused write on the panel carries.
   const send = () => {
+    if (pending) {
+      return;
+    }
     const patch: LayerUpdate = git
       ? { ref, root, force_push_policy: policy, rotate_webhook_secret: rotate }
       : { local_path: localPath, root };
@@ -56,13 +66,16 @@ export function UpdateLayerForm({
       patch.groups = members(groups);
       patch.users = members(users);
     }
+    setPending(true);
     updateLayer(layer.ID, patch).then(
       (next) => {
+        setPending(false);
         setRefusal(null);
         setResult(next);
         onUpdated();
       },
       (err: unknown) => {
+        setPending(false);
         setResult(null);
         setRefusal(err);
       },
@@ -272,7 +285,12 @@ export function UpdateLayerForm({
           <button type="button" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="button primary" disabled={readOnly}>
+          <button
+            type="submit"
+            className="button primary"
+            disabled={readOnly || pending}
+            aria-busy={pending || undefined}
+          >
             Save changes
           </button>
         </div>

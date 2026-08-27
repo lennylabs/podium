@@ -8332,6 +8332,92 @@ describe("the layer write flows", () => {
     expect(screen.getByText("Layer company is updated.")).toBeTruthy();
   });
 
+  // A registration is an upsert on the layer ID, so a second one sent while
+  // the first is still open rewrites the layer the first one created and
+  // issues a fresh webhook secret. The submit holds itself closed while its
+  // own write is open, the way the row's Reingest control does.
+  it("sends one registration however many times the submit is activated", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        deferred: true,
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "local",
+            Order: 1,
+            UserDefined: true,
+          },
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = screen.getByRole("dialog", { name: "Register a layer" });
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "/Users/alice/reg" },
+    });
+    const submit = within(dialog).getByRole("button", { name: "Register" });
+    fireEvent.click(submit);
+    expect(submit.hasAttribute("disabled")).toBe(true);
+    expect(submit.getAttribute("aria-busy")).toBe("true");
+    fireEvent.click(submit);
+    fireEvent.click(submit);
+    // Enter from a field in the form submits it without going through the
+    // control, so the form is driven that way as well.
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByText("Layer alice-personal is registered.");
+    expect(
+      requests.filter((r) => r.url === "/v1/layers" && r.method === "POST")
+        .length,
+    ).toBe(1);
+  });
+
+  // Every patch carrying a rotation issues a fresh secret, so a second Save
+  // changes while the first is open rotates again and replaces the value the
+  // reveal is presenting as shown once.
+  it("sends one rotation however many times Save changes is activated", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "PUT /v1/layers/update": {
+        deferred: true,
+        body: {
+          layer: adminLayer(),
+          webhook_url: "https://registry.acme.com/v1/ingest/webhook/company",
+          webhook_secret: "whsec-rotated",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    fireEvent.click(screen.getByLabelText("Rotate the webhook secret"));
+    const save = within(form).getByRole("button", { name: "Save changes" });
+    fireEvent.click(save);
+    expect(save.hasAttribute("disabled")).toBe(true);
+    expect(save.getAttribute("aria-busy")).toBe("true");
+    fireEvent.click(save);
+    fireEvent.submit(form);
+    await screen.findByLabelText("Webhook secret");
+    expect(
+      requests.filter(
+        (r) => r.url.startsWith("/v1/layers/update") && r.method === "PUT",
+      ).length,
+    ).toBe(1);
+    expect(screen.getByText("whsec-rotated")).toBeTruthy();
+  });
+
   // The secret is served once, so the copy is the one action in the panel a
   // reader cannot repeat. A confirmation that only paints beside the control
   // reaches nobody driving the panel by screen reader, so the outcome is
