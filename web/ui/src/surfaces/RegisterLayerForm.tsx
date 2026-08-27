@@ -228,7 +228,7 @@ export function RegisterLayerForm({
             </select>
           </label>
           {userDefined && (
-            <p className="quiet">
+            <p className="quiet field-note">
               A layer of your own is visible to you alone, and it counts against the layer limit an administrator sets.
             </p>
           )}
@@ -268,7 +268,7 @@ export function RegisterLayerForm({
                   />
                 </label>
               </div>
-              <p className="quiet" data-testid="register-git-note">
+              <p className="quiet field-note" data-testid="register-git-note">
                 Name the branch, tag, or commit to ingest as the ref; a git layer has no default and cannot ingest
                 without one. Leave the root empty to ingest the whole repository, or name the subdirectory the
                 artifacts live under.
@@ -285,7 +285,7 @@ export function RegisterLayerForm({
                   setLocalPath(next);
                 }}
               />
-              <p className="quiet" data-testid="register-local-note">
+              <p className="quiet field-note" data-testid="register-local-note">
                 Name the directory the registry reads the artifacts from; a local layer has no default and cannot
                 ingest without one.
               </p>

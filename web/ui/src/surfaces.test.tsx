@@ -6785,6 +6785,33 @@ describe("the layer write flows", () => {
     );
   });
 
+  // The guidance under the fields is explanatory text about the controls
+  // beside it. Left at the body size it is the longest and largest run of
+  // text in the dialog, louder than the field labels and the checkbox titles
+  // it explains, so it takes the dense size the form's other helper strings
+  // are set at.
+  it("sets the register form's field guidance at the dense size", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const gitNote = screen.getByTestId("register-git-note");
+    expect(window.getComputedStyle(gitNote).fontSize).toBe("12.5px");
+    // The class note stands on the same footing on the user-defined arm.
+    const classNote = screen.getByText(/A layer of your own is visible/);
+    expect(window.getComputedStyle(classNote).fontSize).toBe("12.5px");
+    // The local arm carries the same guidance about its own field.
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    const localNote = screen.getByTestId("register-local-note");
+    expect(window.getComputedStyle(localNote).fontSize).toBe("12.5px");
+  });
+
   // The sentence stating the hold sits in the footer, and a reader who tabs
   // into the field it names never reaches it. The field the hold stands on
   // therefore reports itself invalid and points at that same sentence, so the

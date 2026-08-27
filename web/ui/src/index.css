@@ -2682,6 +2682,15 @@ label:has(> input:disabled) {
   margin: 14px 0 0;
 }
 
+/* Guidance that qualifies the fields above it inside a form. It is set at the
+   dense size the form's other explanatory strings use, because at the body
+   size it becomes the largest run of text in the dialog and outweighs the
+   field labels and the checkbox titles it is explaining. */
+.field-note {
+  margin: 9px 0 0;
+  font-size: 12.5px;
+}
+
 .visibility-lead {
   margin: 0;
   font-size: 12.5px;
