@@ -10,10 +10,22 @@ export const recoveryDays = 30;
  * the layer is close enough to erasure that the row says so. */
 export const accentDays = 3;
 
+/** calendarDate renders an instant as the calendar date it fell on in the
+ * reader's own zone, formatted as `YYYY-MM-DD`. A recovery date is a deadline
+ * the reader checks against the calendar on their wall, so a UTC calendar day
+ * would tell a reader west of UTC in the evening that a layer they
+ * unregistered moments ago went tomorrow, and would put the erase deadline a
+ * day off their own calendar. The date carries no zone name because a bare
+ * calendar date already reads as the reader's own. */
+export function calendarDate(at: Date): string {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${String(at.getFullYear())}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
+
 /** erasesOn returns the date the recovery window runs out for a layer
- * unregistered at the given time, as an ISO calendar date. */
+ * unregistered at the given time, as a calendar date in the reader's zone. */
 export function erasesOn(unregisteredAt: Date): string {
-  return new Date(unregisteredAt.getTime() + recoveryDays * dayMillis).toISOString().slice(0, 10);
+  return calendarDate(new Date(unregisteredAt.getTime() + recoveryDays * dayMillis));
 }
 
 /** daysLeft returns whole days remaining before erasure, floored at zero. The

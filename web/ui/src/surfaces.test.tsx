@@ -231,6 +231,19 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** zonedDate is the calendar date an instant fell on in the given zone,
+ * derived through the platform formatter rather than through the surface's
+ * own arithmetic, so the assertion does not restate what it checks. */
+function zonedDate(at: Date, timeZone: string): string {
+  return at.toLocaleDateString("en-CA", { timeZone });
+}
+
+/** localDate is the calendar date an instant fell on in the zone the suite
+ * runs in, which is the zone the recovery surface states its dates in. */
+function localDate(at: Date): string {
+  return at.toLocaleDateString("en-CA");
+}
+
 describe("the application shell", () => {
   const catalog = {
     path: "",
@@ -8246,14 +8259,10 @@ describe("the layer write flows", () => {
     goTo("#/layers/deleted");
     render(<App />);
     const surface = await screen.findByLabelText("Recently unregistered");
-    const erasesOn = new Date(
-      unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000,
-    )
-      .toISOString()
-      .slice(0, 10);
-    expect(surface.textContent).toContain(
-      unregisteredAt.toISOString().slice(0, 10),
+    const erasesOn = localDate(
+      new Date(unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000),
     );
+    expect(surface.textContent).toContain(localDate(unregisteredAt));
     expect(surface.textContent).toContain(erasesOn);
     const left = screen.getByTestId("days-left-alice-personal");
     expect(left.textContent).toBe("2 days left");
@@ -8458,10 +8467,55 @@ describe("the layer write flows", () => {
       "30 days left",
     );
     expect(surface.textContent).toContain(
-      new Date(unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .slice(0, 10),
+      localDate(new Date(unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000)),
     );
+  });
+
+  // Both recovery dates are calendar days, and a calendar day only means
+  // anything in a zone. A reader west of UTC late in the evening is on the
+  // day before the UTC one, so a UTC calendar day told them a layer they had
+  // just unregistered went tomorrow and put the erase deadline a day off the
+  // calendar they read the row against. The dates are the reader's own.
+  it("dates the recovery window on the reader's calendar rather than UTC", async () => {
+    const zone = "America/Los_Angeles";
+    // The surface reads the zone through the platform's local-time getters,
+    // which Node resolves from TZ on each call, so the case fixes a zone west
+    // of UTC rather than depending on the one the suite happens to run in.
+    vi.stubEnv("TZ", zone);
+    try {
+      // 06:00 UTC is 23:00 the previous day in the zone, so the instant's
+      // calendar day differs between the two whatever day the suite runs on.
+      const evening = new Date();
+      evening.setUTCHours(6, 0, 0, 0);
+      const unregisteredAt = new Date(
+        evening.getTime() - 28 * 24 * 60 * 60 * 1000,
+      );
+      const erases = new Date(
+        unregisteredAt.getTime() + 30 * 24 * 60 * 60 * 1000,
+      );
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+        "/v1/layers": {
+          body: {
+            layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }],
+          },
+        },
+      });
+      goTo("#/layers/deleted");
+      render(<App />);
+      const surface = await screen.findByLabelText("Recently unregistered");
+      expect(surface.textContent).toContain(zonedDate(unregisteredAt, zone));
+      expect(surface.textContent).toContain(zonedDate(erases, zone));
+      // The UTC calendar day is a day ahead of both, and neither is stated.
+      expect(surface.textContent).not.toContain(
+        unregisteredAt.toISOString().slice(0, 10),
+      );
+      expect(surface.textContent).not.toContain(
+        erases.toISOString().slice(0, 10),
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   // The recovery surface is a page of its own under the panel. It carries a

@@ -13,7 +13,7 @@
 
 import { useRef, useState } from 'react';
 
-import { accentDays, daysLeft, erasesOn, recoveryDays } from './recovery';
+import { accentDays, calendarDate, daysLeft, erasesOn, recoveryDays } from './recovery';
 import { EmptyState, ErrorState, Loading } from '../components/primitives';
 import { layersHref } from '../route';
 import { takeFocus } from '../components/focus';
@@ -287,7 +287,7 @@ function recoveryWindow(layer: LayerRecord): RecoveryWindow | null {
   }
   const left = daysLeft(at, Date.now());
   return {
-    unregistered: at.toISOString().slice(0, 10),
+    unregistered: calendarDate(at),
     erases: erasesOn(at),
     left,
     remaining: Math.round((left / recoveryDays) * 100),
