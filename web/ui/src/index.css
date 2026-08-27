@@ -582,8 +582,15 @@ h3 {
   margin: 0;
 }
 
+/* The sentence a page states under its title. It supports the title rather
+   than competing with it, so it takes the secondary ink the subdomain card's
+   and the listing row's descriptions take. Left at the primary ink it carries
+   the same weight as the heading above it and the body below it, and the
+   header block reads as one flat slab. `.quiet` is declared after this rule,
+   so the absent placeholder still reads in the quiet tone. */
 .lead {
   max-width: 720px;
+  color: var(--sec);
   text-wrap: pretty;
 }
 

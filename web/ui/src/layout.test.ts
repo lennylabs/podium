@@ -303,6 +303,32 @@ describe("artifact row description", () => {
     expect(lead.maxWidth).toBe("720px");
   });
 
+  // The lead is the sentence a page states under its title: a domain's
+  // description, an artifact's, and the layer panel's. Set at the primary ink
+  // it carries the same weight as the heading above it and the body below it,
+  // and the header block reads as one flat slab, so it takes the secondary
+  // tone the row description beside it takes. jsdom resolves no custom
+  // property, so the tone is pinned through the rules the sheet matches.
+  it("sets the page lead in the secondary tone", () => {
+    const lead = document.createElement("p");
+    lead.className = "lead";
+    document.body.appendChild(lead);
+    mounted.push(lead);
+
+    expect(declaredFor(lead, "color")).toBe("var(--sec)");
+  });
+
+  // The absent placeholder keeps the quiet tone the listing row and the
+  // subdomain card state their own absence in.
+  it("keeps a lead that states an absent description in the quiet tone", () => {
+    const lead = document.createElement("p");
+    lead.className = "lead quiet absent-description";
+    document.body.appendChild(lead);
+    mounted.push(lead);
+
+    expect(declaredFor(lead, "color")).toBe("var(--meta)");
+  });
+
   // The register dialog's consequence line names every granted member, so a
   // registration granting a couple of dozen users wrapped to eight lines,
   // pushed the neutral note and the dialog footer down, and made the body
