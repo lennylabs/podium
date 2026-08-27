@@ -1199,14 +1199,18 @@ function UnregisterConfirmation({
         </Banner>
         {/* What the layer grants today, so the reader confirms against the
             audience the write takes it from rather than against its ID alone. */}
-        <table className="data-table" data-testid="unregister-properties">
-          <tbody>
-            <tr>
-              <th scope="row">visibility</th>
-              <td>{visibilitySummary(layer)}</td>
-            </tr>
-          </tbody>
-        </table>
+        {/* One labelled value takes the borderless list the rail's provenance
+            and the resource detail already use, rather than a bordered table.
+            A `th` is drawn bold and in the body face by the user agent, so a
+            single-row table set the word "visibility" heavier than the grants
+            it labels and read as a table header over the dialog rather than
+            as a key beside its value (§13.10). */}
+        <dl className="rail-facts" data-testid="unregister-properties">
+          <div className="rail-fact">
+            <dt className="mono">visibility</dt>
+            <dd>{visibilitySummary(layer)}</dd>
+          </div>
+        </dl>
         <label className="field">
           <span className="label">Type the layer ID to confirm</span>
           <input

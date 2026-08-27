@@ -7191,6 +7191,40 @@ describe("the layer write flows", () => {
     expect(confirm.className).toContain("danger");
   });
 
+  // Every other key-and-value pair in the build — the artifact rail's
+  // provenance and the resource detail — is a borderless list whose key is a
+  // quiet lowercase mono label. Drawn as a single-row table the confirmation's
+  // visibility pair took the user agent's bold `th` in the UI face and read as
+  // a table header standing over the dialog rather than as a label beside the
+  // grants it names.
+  it("states the visibility in the unregister confirmation as a quiet mono-keyed borderless pair", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
+    await screen.findByLabelText("Unregister alice-personal");
+    const properties = screen.getByTestId("unregister-properties");
+    // The pair is a labelled list, so it carries no table and no bordered
+    // table container.
+    expect(properties.tagName).toBe("DL");
+    expect(properties.closest("table")).toBeNull();
+    expect(properties.className.split(" ")).toContain("rail-facts");
+    const rows = [...properties.querySelectorAll(".rail-fact")].map((row) => [
+      row.querySelector("dt")?.textContent,
+      row.querySelector("dd")?.textContent,
+    ]);
+    expect(rows).toEqual([["visibility", "no grants — only you"]]);
+    // The key takes the mono face the rail's keys take, which is what
+    // separates a label from a heading here.
+    const key = properties.querySelector("dt") as HTMLElement;
+    expect(key.className.split(" ")).toContain("mono");
+  });
+
   // A dialog that leaves focus on the surface it covers puts a keyboard
   // reader on controls the scrim has hidden, and one that closes without
   // handing focus back drops them at the top of the document. The row's
