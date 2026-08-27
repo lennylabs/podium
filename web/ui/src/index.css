@@ -645,6 +645,18 @@ h2.label {
   color: var(--meta);
 }
 
+/* The lifted marker states that the row is not a child of the domain it is
+   listed under, which is a different kind of fact from the type, the version,
+   and the tags the row also carries. It therefore takes the dashed edge the
+   lifted group's own container carries and drops the fill, so the marker reads
+   as provenance at a glance instead of as one more chip in the row. */
+.badge-folded {
+  border-style: dashed;
+  background: none;
+  color: var(--meta);
+  letter-spacing: 0.05em;
+}
+
 /* The soft tone is the badge's second neutral. It is drawn as a filled chip
    with no visible edge, so a badge carrying a secondary fact (a version, a
    count, a source type) reads at a lower weight than the outlined badge

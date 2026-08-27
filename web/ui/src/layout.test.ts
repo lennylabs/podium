@@ -1103,6 +1103,17 @@ describe("lifted artifact group", () => {
     expect(head.alignItems).toBe("baseline");
   });
 
+  // The marker on a lifted row states provenance, and the tag pills two lines
+  // below it state topics. Drawn as another filled chip the marker reads as one
+  // more tag, so it takes the dashed edge the group's own container carries and
+  // drops the fill.
+  it("draws the lifted marker on a dashed edge with no fill", () => {
+    const marker = styled("badge badge-folded");
+    expect(marker.borderStyle).toBe("dashed");
+    expect(ruleText(".badge-folded")).toContain("background: none");
+    expect(styled("tag").borderStyle).not.toBe("dashed");
+  });
+
   // The container is the group's border, so the listing inside gives its own
   // up and keeps a hairline over the first row as the head's divider.
   it("gives the listing inside the group up to the container", () => {

@@ -1524,6 +1524,11 @@ describe("the domain browser", () => {
     expect(
       within(group as HTMLElement).getByText("platform/ci/lint"),
     ).toBeTruthy();
+    // The lifted row names the subdomain it was raised out of, and it names
+    // the relation rather than printing the subpath alone. The marker is drawn
+    // on the group's dashed edge so it does not read as one more tag pill.
+    const marker = within(group as HTMLElement).getByText("\u2191 FROM ci");
+    expect(marker.className).toContain("badge-folded");
     // The note reaches the reader at the returned edge rather than above the
     // description, beside the count and the control that continues past it.
     const continuation = await screen.findByTestId("listing-continuation");

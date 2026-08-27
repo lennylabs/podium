@@ -2,7 +2,7 @@
 // receive the same descriptor, so both render this row and neither formats
 // the same field twice.
 
-import { Badge, CuratedBadge, SensitivityBadge, TypeBadge, formatVersion } from './primitives';
+import { CuratedBadge, FoldedFromBadge, SensitivityBadge, TypeBadge, formatVersion } from './primitives';
 import type { ArtifactDescriptor } from '../api';
 import { artifactHref, artifactLeaf } from '../route';
 
@@ -128,9 +128,7 @@ export function ArtifactRow({
               what the response distinguishes, which is featured against the
               rest. */}
           {artifact.source === 'featured' && <CuratedBadge />}
-          {artifact.folded_from !== undefined && artifact.folded_from !== '' && (
-            <Badge tone="quiet">from {artifact.folded_from}</Badge>
-          )}
+          <FoldedFromBadge foldedFrom={artifact.folded_from} />
           {scored && filled === 0 && <span className="quiet label">matched by meaning</span>}
         </div>
         {/* A manifest carries no required description, and the row's aside

@@ -166,6 +166,25 @@ export function CuratedBadge() {
 }
 
 /**
+ * FoldedFromBadge names the subdomain a §4.5.5 lifted entry was raised out of.
+ * The row it sits on is not a child of the domain it is listed under, and the
+ * badge is what says so, so it is drawn on the dashed edge the lifted group's
+ * own container carries rather than on the outline every informational badge
+ * beside it takes. The arrow states the direction the entry travelled, and
+ * naming the relation in caps keeps the badge from reading as one more tag on
+ * the row. The value is the relative subpath the registry reports, which is
+ * what distinguishes two lifted entries of the same name.
+ *
+ * Spec: §4.5.5
+ */
+export function FoldedFromBadge({ foldedFrom }: { foldedFrom?: string }) {
+  if (foldedFrom === undefined || foldedFrom === '') {
+    return null;
+  }
+  return <span className="badge badge-folded">↑ FROM {foldedFrom}</span>;
+}
+
+/**
  * SensitivityBadge renders the artifact's sensitivity classification. The
  * value alone ("internal", "confidential") does not say which axis it
  * measures, so the badge names the axis and carries the same weight as the
