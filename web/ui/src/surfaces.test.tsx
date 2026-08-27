@@ -11244,6 +11244,75 @@ describe("the trimmed listing", () => {
     expect(subhead.textContent).toContain("24");
   });
 
+  // Both at-scale filters rewrite a result set whose count is drawn in a
+  // heading and in the table body, where a reader who cannot see the page
+  // reads neither. Each states its new count in a polite live region, the way
+  // the search surface and the command palette state theirs.
+  it("announces the at-scale filter counts", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: [
+            { id: "platform/deploy", type: "skill", version: "2.0.0" },
+            { id: "platform/lint", type: "rule", version: "1.0.0" },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+
+    // Both regions are mounted before a filter is typed and say nothing, so
+    // the first announcement lands on a region already in the tree.
+    const subs = within(browser).getByTestId("subdomain-filter-announcement");
+    const arts = within(browser).getByTestId("artifact-filter-announcement");
+    for (const region of [subs, arts]) {
+      expect(region.getAttribute("role")).toBe("status");
+      expect(region.getAttribute("aria-live")).toBe("polite");
+      expect(region.textContent).toBe("");
+    }
+
+    const subhead = within(browser).getByRole("heading", {
+      name: "Subdomains",
+    }).parentElement as HTMLElement;
+    fireEvent.change(within(subhead).getByLabelText("Filter subdomains"), {
+      target: { value: "d1" },
+    });
+    // d1 and d10 through d19.
+    expect(subs.textContent).toBe("11 of 24 subdomains matched.");
+    fireEvent.change(within(subhead).getByLabelText("Filter subdomains"), {
+      target: { value: "zzz" },
+    });
+    expect(subs.textContent).toBe("No subdomain matched.");
+    fireEvent.change(within(subhead).getByLabelText("Filter subdomains"), {
+      target: { value: "" },
+    });
+    expect(subs.textContent).toBe("");
+
+    const arthead = within(browser).getByRole("heading", {
+      name: "Artifacts",
+    }).parentElement as HTMLElement;
+    fireEvent.change(within(arthead).getByLabelText("Filter in this domain"), {
+      target: { value: "lint" },
+    });
+    expect(arts.textContent).toBe("1 of 2 artifacts matched.");
+    // A type chip narrows the same listing, so it reports through the same
+    // region as the typed filter.
+    fireEvent.change(within(arthead).getByLabelText("Filter in this domain"), {
+      target: { value: "" },
+    });
+    expect(arts.textContent).toBe("");
+    fireEvent.click(within(arthead).getByRole("button", { name: "skill" }));
+    expect(arts.textContent).toBe("1 of 2 artifacts matched.");
+  });
+
   // §4.5.5 caps the notable list, so the at-scale table filters a partial view
   // of the domain. A filter that matches nothing among the returned rows has
   // established nothing about the artifacts the response withheld, and

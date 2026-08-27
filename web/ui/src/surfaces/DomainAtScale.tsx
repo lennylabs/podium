@@ -183,6 +183,25 @@ export function SubdomainTiles({
           })}
         </ul>
       )}
+      {/* The filter rewrites the grid and the count in the heading above it,
+          and neither is a change a reader who cannot see the page is told
+          about. The region is rendered on every state of the section, empty
+          until a filter is typed: a region mounted at the moment its text
+          arrives is not in the accessibility tree when the change happens,
+          and the announcement is dropped (§13.10). */}
+      <p
+        className="assistive-only"
+        role="status"
+        aria-live="polite"
+        data-testid="subdomain-filter-announcement"
+      >
+        {filterAnnouncement(
+          needle !== "",
+          matched.length,
+          ordered.length,
+          "subdomain",
+        )}
+      </p>
       <div className="tile-foot">
         {!all && matched.length > shown.length && (
           <button
@@ -382,8 +401,46 @@ export function ArtifactTable({
           Both rows carry role="status", so the contradiction is read out as
           well as drawn (§13.10). */}
       {!filtering && tail}
+      {/* The filter and the type chips rewrite the table body, and the counts
+          they change live in the rows themselves. The region states the new
+          one for the reader who cannot see the table, on the same terms the
+          search surface and the command palette state theirs (§13.10). */}
+      <p
+        className="assistive-only"
+        role="status"
+        aria-live="polite"
+        data-testid="artifact-filter-announcement"
+      >
+        {filterAnnouncement(
+          filtering,
+          matched.length,
+          artifacts.length,
+          "artifact",
+        )}
+      </p>
     </div>
   );
+}
+
+/** filterAnnouncement is what a client-side filter says to a reader who
+ * cannot see the listing it rewrote. It is empty while no filter is applied,
+ * so the listing is announced when the reader narrows it rather than on the
+ * first paint, and it counts against the rows the surface holds rather than
+ * against the domain: both filters run over what the response returned, and
+ * the reach line beside the table is what continues past that edge. */
+function filterAnnouncement(
+  filtering: boolean,
+  matched: number,
+  total: number,
+  noun: string,
+): string {
+  if (!filtering) {
+    return "";
+  }
+  if (matched === 0) {
+    return `No ${noun} matched.`;
+  }
+  return `${String(matched)} of ${String(total)} ${total === 1 ? noun : `${noun}s`} matched.`;
 }
 
 /** FilterReach states how far the table's filter reached and continues past
