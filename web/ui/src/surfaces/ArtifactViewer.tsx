@@ -30,10 +30,12 @@ import {
 } from '../components/primitives';
 import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
-import type { DependencyEdge, LargeResourceLink, LoadArtifactResponse } from '../api';
-import { dependentsOf, loadArtifact } from '../api';
+import type { DependencyEdge, LargeResourceLink, LayerRecord, LoadArtifactResponse } from '../api';
+import { dependentsOf, listLayers, loadArtifact } from '../api';
 import { artifactHref } from '../route';
+import { since } from '../time';
 import { useAsync, useErrorReport } from '../useAsync';
+import { ingestedRef, visibilitySummary } from './layerfacts';
 
 type TabName = 'rendered' | 'frontmatter' | 'source' | 'resources';
 
@@ -90,6 +92,13 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // own response and is already there.
   const link = body?.manifest_body_url;
   const fetched = useAsync(async () => (link === undefined ? '' : fetchText(link)), [link?.presigned_url ?? '']);
+  // The rail states who the artifact's layer is visible to and the run that
+  // last ingested it, and load_artifact answers the layer's identifier alone,
+  // so the layer list is read beside the artifact. Its outcome is not reported
+  // to the shell: it is metadata standing beside the document rather than the
+  // catalog read this surface is built on, so a refusal leaves those rows
+  // unreported instead of replacing the artifact with a failure. Spec: §13.10.
+  const layers = useAsync(listLayers, []);
 
   if (body === null) {
     if (artifact.error !== null) {
@@ -185,7 +194,12 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           <Manifest artifact={body} document={document} tab={tab} onTab={setTab} />
         )}
       </div>
-      <ArtifactRail artifact={body} frontmatter={document.frontmatter} showFrontmatter={tab !== 'frontmatter'} />
+      <ArtifactRail
+        artifact={body}
+        layer={layerOf(layers.value, body)}
+        frontmatter={document.frontmatter}
+        showFrontmatter={tab !== 'frontmatter'}
+      />
     </section>
   );
 }
@@ -519,10 +533,12 @@ async function fetchText(link: LargeResourceLink): Promise<string> {
  * the rail reads as provenance followed directly by relations. */
 function ArtifactRail({
   artifact,
+  layer,
   frontmatter,
   showFrontmatter,
 }: {
   artifact: LoadArtifactResponse;
+  layer: LayerRecord | null;
   frontmatter: string;
   showFrontmatter: boolean;
 }) {
@@ -544,6 +560,14 @@ function ArtifactRail({
           <div className="rail-fact">
             <dt className="mono">layer</dt>
             <dd>{layerName(artifact)}</dd>
+          </div>
+          <div className="rail-fact">
+            <dt className="mono">visibility</dt>
+            <dd>{layer === null ? 'unreported' : visibilitySummary(layer)}</dd>
+          </div>
+          <div className="rail-fact">
+            <dt className="mono">ingested</dt>
+            <dd title={layer?.last_ingested_at ?? undefined}>{ingestedLine(layer)}</dd>
           </div>
           <div className="rail-fact">
             <dt className="mono">hash</dt>
@@ -617,6 +641,33 @@ function RailResourceGroup({ label, rows, absent }: { label: string; rows: Resou
  * standing an empty value in the section. */
 function layerName(artifact: LoadArtifactResponse): string {
   return artifact.layer === undefined || artifact.layer === '' ? 'unreported' : artifact.layer;
+}
+
+/** layerOf is the record for the layer the artifact was served from. The
+ * layer list is a second read, so it is absent while that read is in flight
+ * and after one that failed, and a layer the caller cannot see is absent from
+ * a list that did answer. Each case leaves the rows it feeds unreported. */
+function layerOf(layers: LayerRecord[] | null, artifact: LoadArtifactResponse): LayerRecord | null {
+  const id = artifact.layer ?? '';
+  if (layers === null || id === '') {
+    return null;
+  }
+  return layers.find((record) => record.ID === id) ?? null;
+}
+
+/** ingestedLine states when the artifact's layer was last ingested and the
+ * reference the run landed on, which is the pair that says which revision of
+ * the source the bytes above came from. The age is what the row displays and
+ * the exact stamp stays on the row's title, the same discipline the layer
+ * panel's ingest column and the abbreviated hash below follow. */
+function ingestedLine(layer: LayerRecord | null): string {
+  if (layer === null) {
+    return 'unreported';
+  }
+  const at = layer.last_ingested_at ?? '';
+  const age = at === '' ? 'never' : since(at, Date.now());
+  const ref = ingestedRef(layer);
+  return ref === '' ? age : `${age} · ${ref}`;
 }
 
 /** abbreviateHash keeps a content hash to the width of the rail. The

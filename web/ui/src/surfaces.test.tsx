@@ -3154,8 +3154,12 @@ describe("the artifact viewer", () => {
       row.querySelector("dt")?.textContent,
       row.querySelector("dd")?.textContent,
     ]);
+    // The layer list answered nothing here, so the two rows it feeds state
+    // that rather than disappearing out of the block.
     expect(rows).toEqual([
       ["layer", "acme-platform"],
+      ["visibility", "unreported"],
+      ["ingested", "unreported"],
       ["hash", "sha256:ab74…8e5f"],
     ]);
     // The section carries no table and no bordered container of its own, so
@@ -3164,9 +3168,68 @@ describe("the artifact viewer", () => {
     expect(provenance.querySelector(".data-table")).toBeNull();
     // The abbreviation is a display, so the whole value is still on the row.
     expect(within(provenance).queryByText(contentHash)).toBeNull();
-    expect(facts.querySelectorAll("dd")[1].getAttribute("title")).toBe(
+    expect(facts.querySelectorAll("dd")[3].getAttribute("title")).toBe(
       contentHash,
     );
+  });
+
+  // The rail is where a reader learns who else can see the artifact and which
+  // revision of the source it came from, which §13.10 puts beside the
+  // document rather than behind the layer panel. Neither fact is on the
+  // load_artifact response, so the viewer reads the layer list and states the
+  // layer's §4.6 grants and the run it last ingested from the record there.
+  it("states the layer's visibility and its last ingest in the provenance rail", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "acme-platform",
+              SourceType: "git",
+              Repo: "git@github.com:acme/platform.git",
+              Ref: "main",
+              Order: 1,
+              Organization: true,
+              Groups: ["platform"],
+              last_ingested_at: new Date(Date.now() - 7200000).toISOString(),
+              LastIngestedRef: "4f2a1c9de4471b1e8f0c2a5d6e7b8c9a0d1e2f34",
+            },
+          ],
+        },
+      },
+      "/v1/load_artifact": {
+        body: {
+          id: "finance/ap/pay-invoice",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:ab74",
+          layer: "acme-platform",
+          manifest_body: "# Pay invoice\n",
+          frontmatter: manifestDoc,
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/finance%2Fap%2Fpay-invoice");
+    render(<App />);
+    const provenance = await screen.findByLabelText("Provenance");
+    await waitFor(() => {
+      const facts = within(provenance).getByTestId("rail-provenance");
+      const rows = [...facts.querySelectorAll(".rail-fact")].map((row) => [
+        row.querySelector("dt")?.textContent,
+        row.querySelector("dd")?.textContent,
+      ]);
+      expect(rows).toEqual([
+        ["layer", "acme-platform"],
+        // Every granted axis, in the union order §4.6 defines.
+        ["visibility", "organization, group: platform"],
+        // The age the reader scans, with the branch and the short commit the
+        // run landed on beside it.
+        ["ingested", "2h ago · main@4f2a1c9"],
+        ["hash", "sha256:ab74"],
+      ]);
+    });
   });
 
   // The viewer is two columns with a tab set over the content one. The

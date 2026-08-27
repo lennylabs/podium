@@ -36,6 +36,12 @@ import { SourceCell } from "../components/SourceCell";
 import { takeFocus, usePopupDismiss } from "../components/focus";
 import type { BreakGlass, LayerRecord } from "../api";
 import {
+  ingestRef,
+  shortRef,
+  visibilityMarkers,
+  visibilitySummary,
+} from "./layerfacts";
+import {
   ApiError,
   listDeletedLayers,
   listLayers,
@@ -1017,7 +1023,6 @@ function UnregisterConfirmation({
   onConfirm: () => void;
 }) {
   const [typed, setTyped] = useState("");
-  const markers = visibilityMarkers(layer);
   return (
     <Modal title={`Unregister ${layer.ID}`} onClose={onCancel}>
       <div className="modal-body">
@@ -1045,11 +1050,7 @@ function UnregisterConfirmation({
           <tbody>
             <tr>
               <th scope="row">visibility</th>
-              <td>
-                {markers.length === 0
-                  ? "no grants — only you"
-                  : markers.map(markerText).join(", ")}
-              </td>
+              <td>{visibilitySummary(layer)}</td>
             </tr>
           </tbody>
         </table>
@@ -1149,25 +1150,6 @@ function LastIngestCell({ layer }: { layer: LayerRecord }) {
   );
 }
 
-/** ingestRef is the reference the cell displays beneath the age. A git source
- * records the commit the run landed on, which is the fact a reader compares
- * across runs. A local source records the directory it read, which the Source
- * column two cells to the left already states, and which wraps over several
- * lines in a column this narrow, so a non-git layer displays no reference. */
-function ingestRef(layer: LayerRecord): string {
-  if (layer.SourceType !== "git") {
-    return "";
-  }
-  return layer.LastIngestedRef ?? "";
-}
-
-/** shortRef abbreviates an ingest reference to what a reader compares. A
- * commit SHA is stated at its short length, and a reference that is not a
- * SHA, such as a branch name, is stated whole. */
-function shortRef(ref: string): string {
-  return /^[0-9a-f]{12,}$/i.test(ref) ? ref.slice(0, 7) : ref;
-}
-
 /** VisibilityCell renders one marker per matching axis, in the fixed order
  * public, organization, groups, then users, because §4.6 defines visibility
  * as independent grants that combine as a union. Two layers carrying the same
@@ -1198,61 +1180,3 @@ function VisibilityCell({ layer }: { layer: LayerRecord }) {
   );
 }
 
-/** VisibilityMarker is one axis's marker: the axis and the members it names,
- * and the count of members it does not. */
-interface VisibilityMarker {
-  named: string;
-  extra: number;
-}
-
-/** visibilityMarkers returns one marker per matching axis. The row and the
- * unregister confirmation both name what a layer grants, and they derive the
- * markers here so the audience the confirmation states is the audience the
- * row displays. */
-function visibilityMarkers(layer: LayerRecord): VisibilityMarker[] {
-  const groups = layer.Groups ?? [];
-  const users = layer.Users ?? [];
-  return [
-    layer.Public === true ? { named: "public", extra: 0 } : null,
-    layer.Organization === true ? { named: "organization", extra: 0 } : null,
-    groups.length > 0 ? summarize("group", groups) : null,
-    users.length > 0 ? summarize("user", users) : null,
-  ].filter((marker): marker is VisibilityMarker => marker !== null);
-}
-
-/** markerText states a marker as one string, which is what the unregister
- * confirmation lists rather than drawing a row of badges. */
-function markerText(marker: VisibilityMarker): string {
-  return marker.extra > 0
-    ? `${marker.named} +${String(marker.extra)}`
-    : marker.named;
-}
-
-/** memberBudget is how many characters of member names one marker states
- * before the rest become a count. The visibility column is the narrowest of
- * the row's text columns, and a marker wider than this was clipped by the
- * cell part-way through a name, which took the remainder count with it. Two
- * short group names fit the budget; two addresses do not, so an axis of
- * addresses names one and counts the rest. */
-const memberBudget = 24;
-
-/** summarize keeps an axis that names more members than the row can hold
- * inside its own marker, so the axis stays visible and the count is not
- * dropped to make room. It names as many members as the budget holds, and at
- * least one however long that one is. */
-function summarize(axis: string, members: string[]): VisibilityMarker {
-  const named: string[] = [];
-  let width = 0;
-  for (const member of members) {
-    const cost = named.length === 0 ? member.length : member.length + 3;
-    if (named.length > 0 && width + cost > memberBudget) {
-      break;
-    }
-    named.push(member);
-    width += cost;
-  }
-  return {
-    named: `${axis}: ${named.join(" · ")}`,
-    extra: members.length - named.length,
-  };
-}
