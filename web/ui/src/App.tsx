@@ -192,6 +192,36 @@ export function App() {
     setCatalogNonce((nonce) => nonce + 1);
   }, []);
 
+  // Whether the shell's own catalog read is standing failed for a reason
+  // other than identity. The refused arm carries its own retry and a re-read
+  // answers the same refusal, so it is left where it is.
+  const shellReadFailed = !tree.loading && tree.error !== null && !isIdentityRefusal(tree.error);
+  // surfaceReach counts the reads a layers surface reported as answered. The
+  // layers surfaces report reachability rather than the catalog outcome the
+  // other surfaces report: a layer endpoint resolves an unverifiable session
+  // to the anonymous caller and answers, so clearing the refused state from
+  // its outcome would state that a session that ended is live. What a read
+  // that answered does say is that the registry is reachable.
+  const [surfaceReach, setSurfaceReach] = useState(0);
+  const onReach = useCallback(() => {
+    setSurfaceReach((n) => n + 1);
+  }, []);
+  // The shell re-issues its own read on a surface read that answered while
+  // that read is standing failed, so the sidebar and the footer stop stating
+  // an outage the surface between them has already come back from. Which of
+  // the two arrives first is not fixed, so the re-issue keys on both rather
+  // than on the report alone. Each report is acted on once, so a re-issue
+  // that fails again is left stated instead of running in a loop.
+  // Spec: §13.10.
+  const reissued = useRef(0);
+  useEffect(() => {
+    if (!shellReadFailed || surfaceReach === 0 || reissued.current === surfaceReach) {
+      return;
+    }
+    reissued.current = surfaceReach;
+    reloadCatalog();
+  }, [shellReadFailed, surfaceReach, reloadCatalog]);
+
   // A surface read that answers after one that did not is the reader's retry
   // reaching the registry, which is the same condition the sidebar reported
   // when its own read failed. The shell re-issues that read on the
@@ -410,6 +440,7 @@ export function App() {
               readOnly={readOnly}
               onCatalogOutcome={onCatalogOutcome}
               onCatalogChange={reloadCatalog}
+              onReach={onReach}
             />
           )}
         </main>
@@ -424,12 +455,14 @@ function Surface({
   readOnly,
   onCatalogOutcome,
   onCatalogChange,
+  onReach,
 }: {
   route: ReturnType<typeof useRoute>;
   subject: string;
   readOnly: boolean;
   onCatalogOutcome: (err: unknown) => void;
   onCatalogChange: () => void;
+  onReach: () => void;
 }) {
   switch (route.name) {
     case 'search':
@@ -443,9 +476,9 @@ function Surface({
       // A restore moves the same figures the sidebar footer states, so the
       // recovery surface reports it the way every other layer write does.
       return route.deleted ? (
-        <DeletedLayers onRestored={onCatalogChange} readOnly={readOnly} />
+        <DeletedLayers onRestored={onCatalogChange} readOnly={readOnly} onReach={onReach} />
       ) : (
-        <LayerPanel subject={subject} readOnly={readOnly} onCatalogChange={onCatalogChange} />
+        <LayerPanel subject={subject} readOnly={readOnly} onCatalogChange={onCatalogChange} onReach={onReach} />
       );
     case 'domain':
       return <DomainBrowser path={route.path} onError={onCatalogOutcome} />;

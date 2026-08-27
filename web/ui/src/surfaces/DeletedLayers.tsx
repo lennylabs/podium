@@ -20,10 +20,22 @@ import { takeFocus } from '../components/focus';
 import { SourceCell } from '../components/SourceCell';
 import type { LayerRecord } from '../api';
 import { ApiError, listDeletedLayers, listLayers, restoreLayer } from '../api';
-import { useAsync } from '../useAsync';
+import { useAsync, useReachReport } from '../useAsync';
 
-export function DeletedLayers({ onRestored, readOnly }: { onRestored: () => void; readOnly: boolean }) {
+export function DeletedLayers({
+  onRestored,
+  readOnly,
+  onReach,
+}: {
+  onRestored: () => void;
+  readOnly: boolean;
+  /** onReach tells the shell that this read answered, so a shell read that
+   * failed during the same outage is re-issued rather than leaving the
+   * sidebar stating an outage this table has come back from. */
+  onReach: () => void;
+}) {
   const deleted = useAsync(() => listDeletedLayers(), []);
+  useReachReport(!deleted.loading && deleted.error === null, onReach);
   const [refusal, setRefusal] = useState<unknown>(null);
   // What the last restore did. A restored row leaves the table, and the empty
   // state that follows reports nothing about the write that emptied it, so

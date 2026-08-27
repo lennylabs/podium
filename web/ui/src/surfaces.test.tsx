@@ -23,7 +23,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { invalidateDomainReads } from "./api";
 import { parseQueryLine } from "./query";
-import { artifactHref, domainHref, layersHref, searchHref } from "./route";
+import {
+  artifactHref,
+  deletedLayersHref,
+  domainHref,
+  layersHref,
+  searchHref,
+} from "./route";
 import type { SessionPosture } from "./session";
 // The stylesheet is imported for its own sake: the wrapping rule the rail
 // depends on is asserted from the computed style it produces.
@@ -1223,6 +1229,77 @@ describe("the application shell", () => {
     await waitFor(() => {
       expect(screen.getByTestId("catalog-counts").textContent).toBe(
         "1 layer · 312 artifacts",
+      );
+    });
+  });
+
+  // The layers route's surfaces report no catalog outcome, because a layer
+  // endpoint answers an unverifiable session anonymously and says nothing
+  // about it. A read of theirs that answered does say the registry is
+  // reachable, which is the condition the sidebar reported, so the shell
+  // re-issues its own read on it. Without that the sidebar states an outage
+  // for the rest of the session while the panel beside it lists the layers.
+  it("recovers the tree and the counts from the layer panel's retry", async () => {
+    const stubs: Record<string, Stub> = {
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { rejects: true },
+      "/v1/catalog": { body: catalogOf(312) },
+      "/v1/layers": { rejects: true },
+    };
+    stubRegistry(stubs);
+    goTo(layersHref);
+    render(<App />);
+    await screen.findByTestId("catalog-failed");
+    expect(screen.getByTestId("catalog-counts").textContent).toBe(
+      "Counts unavailable",
+    );
+
+    stubs["/v1/load_domain"] = { body: rootDomains };
+    stubs["/v1/layers"] = { body: { layers: [adminLayer()] } };
+    // The panel's own retry, whose name is the bare label. The sidebar's
+    // control names the read it re-issues, so the two do not collide.
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-failed")).toBeNull();
+    });
+    expect(
+      within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
+    ).toHaveLength(2);
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-counts").textContent).toBe(
+        "1 layer · 312 artifacts",
+      );
+    });
+  });
+
+  // The recovery table is the other surface the layers route carries, and it
+  // is reached from the panel while the sidebar is still stating the outage.
+  // Its read answering recovers the shell the same way.
+  it("recovers the tree and the counts from the recovery table's read", async () => {
+    const stubs: Record<string, Stub> = {
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { rejects: true },
+      "/v1/catalog": { body: catalogOf(312) },
+      "/v1/layers": { rejects: true },
+    };
+    stubRegistry(stubs);
+    goTo(layersHref);
+    render(<App />);
+    await screen.findByTestId("catalog-failed");
+
+    stubs["/v1/load_domain"] = { body: rootDomains };
+    stubs["/v1/layers"] = { body: { layers: [] } };
+    // The route name does not change between the panel and the recovery
+    // table, so the shell's read is not re-issued by the navigation itself.
+    goTo(deletedLayersHref);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId("catalog-failed")).toBeNull();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-counts").textContent).toBe(
+        "0 layers · 312 artifacts",
       );
     });
   });

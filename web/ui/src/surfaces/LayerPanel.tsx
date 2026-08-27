@@ -47,7 +47,7 @@ import {
 import { deletedLayersHref } from "../route";
 import { since } from "../time";
 import type { Async } from "../useAsync";
-import { useAsync } from "../useAsync";
+import { useAsync, useReachReport } from "../useAsync";
 
 /** RecoverableCount states how much the deleted-layer read found, beside the
  * link that opens it. A read that failed states that instead of a count: the
@@ -85,6 +85,7 @@ export function LayerPanel({
   subject,
   readOnly,
   onCatalogChange,
+  onReach,
 }: {
   subject: string;
   readOnly: boolean;
@@ -93,12 +94,17 @@ export function LayerPanel({
    * owns no part of that footer, and without the signal it keeps the figure
    * the page loaded with for the rest of the session. */
   onCatalogChange: () => void;
+  /** onReach tells the shell that this read answered, so a shell read that
+   * failed during the same outage is re-issued rather than leaving the
+   * sidebar stating an outage the panel beside it has come back from. */
+  onReach: () => void;
 }) {
   const layers = useAsync(() => listOrdered(), []);
   // The recoverable list is read for its count alone here. The section it
   // opens reads the list itself, so the panel holds no copy of what that
   // section renders.
   const recoverable = useAsync(() => listDeletedLayers(), []);
+  useReachReport(!layers.loading && layers.error === null, onReach);
   const [registering, setRegistering] = useState(false);
   // A write's refusal is drawn on the row it was attempted on. The panel
   // holds the map because a reorder is committed by a drop on another row

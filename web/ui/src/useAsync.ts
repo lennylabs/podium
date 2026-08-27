@@ -60,3 +60,20 @@ export function useErrorReport(error: unknown, report: (err: unknown) => void): 
     // what the effect keys on.
   }, [error]);
 }
+
+/** useReachReport tells the shell that a read answered, which is the one
+ * thing it says: the registry was reachable when it did. The layer surfaces
+ * report through this rather than through the catalog outcome above, because
+ * a layer endpoint resolves an unverifiable session to the anonymous caller
+ * and answers, so its outcome carries nothing about the session and clearing
+ * the refused state from it would state the session is live when it ended.
+ * Spec: §13.10. */
+export function useReachReport(reached: boolean, report: () => void): void {
+  useEffect(() => {
+    if (reached) {
+      report();
+    }
+    // report is stable for the lifetime of the shell, so the transition into
+    // a read that answered is what the effect keys on.
+  }, [reached]);
+}
