@@ -5518,10 +5518,21 @@ describe("the layer panel", () => {
     const cell = screen.getByText("public").closest(".visibility-markers");
     expect(cell).toBeTruthy();
     expect(cell?.querySelectorAll(".badge").length).toBe(4);
-    // A marker states a grant the row already carries rather than asking to
-    // be found, so it takes the badge's soft tone and the outlined badges in
-    // the table read above it.
-    expect(cell?.querySelectorAll(".badge-soft").length).toBe(4);
+    // A marker states the grant the row is listed under, which is the fact
+    // the column exists to carry, so it keeps the badge's outline and its
+    // body tone. The soft tone is the source chip beside it, and a marker
+    // that took it would read at the source chip's weight.
+    expect(cell?.querySelectorAll(".badge-grant").length).toBe(4);
+    expect(cell?.querySelectorAll(".badge-soft").length).toBe(0);
+    // Asserted against the stylesheet the bundle ships rather than against
+    // the class name, because the two treatments differ only in the edge and
+    // the text tone: the soft chip declares its border away and drops to the
+    // metadata tone, and a marker that did the same would be indistinguishable
+    // from the source chip in the column beside it.
+    const marker = screen.getByText("public").closest(".badge");
+    const markerStyle = getComputedStyle(marker as Element);
+    expect(markerStyle.borderColor).not.toBe("transparent");
+    expect(markerStyle.color).toBe("var(--sec)");
     for (const marker of [
       "organization",
       "group: secops · appsec",

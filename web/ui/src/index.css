@@ -670,6 +670,17 @@ h2.label {
   color: var(--meta);
 }
 
+/* The grant tone is the filled chip that keeps the badge's outline. A
+   visibility marker states the grant the row is listed under, which is the
+   fact the layer panel's visibility column exists to carry, so it is set one
+   step above the soft source chip beside it: the outline and the body tone
+   separate the two, and without them a row's grant statement reads at the
+   same weight as the chip naming where the layer came from. */
+.badge-grant {
+  background: var(--chip);
+  color: var(--sec);
+}
+
 /* The marker tone states a property of the response rather than of the thing
    the badge sits beside, which is how the trimmed-listing pill stands among
    the header's count chips. It takes the same filled chip in the metadata
