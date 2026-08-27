@@ -5,6 +5,7 @@
 // load_domain response either way: this module changes only how much of it a
 // screen can hold at once.
 
+import type { ReactNode } from "react";
 import { useState } from "react";
 
 import type { ArtifactDescriptor, DomainDescriptor } from "../api";
@@ -236,6 +237,7 @@ export function ArtifactTable({
   scope,
   trimmed,
   withheld,
+  tail,
 }: {
   artifacts: ArtifactDescriptor[];
   /** scope is the domain the listing belongs to, which bounds the search the
@@ -246,6 +248,10 @@ export function ArtifactTable({
   /** withheld is how many artifacts the domain holds beyond the listing, and
    * null where the response reported the reduction without a count. */
   withheld: number | null;
+  /** tail is the continuation row that states how much of the domain the
+   * listing carries. The table owns where it is drawn, because the table is
+   * what knows whether the rows under it are still the ones the tail counts. */
+  tail?: ReactNode;
 }) {
   const [type, setType] = useState("");
   const [filter, setFilter] = useState("");
@@ -260,9 +266,10 @@ export function ArtifactTable({
       (type === "" || artifact.type === type) &&
       (needle === "" || artifact.id.toLowerCase().includes(needle)),
   );
+  const filtering = needle !== "" || type !== "";
   // A filter or a type chip over a trimmed listing answers for the returned
   // rows alone, which is what the continuation below the table exists to say.
-  const narrowed = trimmed && (needle !== "" || type !== "");
+  const narrowed = trimmed && filtering;
   const curated = sorted(
     matched.filter((artifact) => artifact.source === "featured"),
     column,
@@ -366,6 +373,15 @@ export function ArtifactTable({
       {rest.length > 0 && (
         <ArtifactRows rows={rest} region="Artifacts in this domain" />
       )}
+      {/* The tail counts the rows the response returned, and a filter narrows
+          what the table draws without loading any more of them. It is
+          therefore drawn over the unfiltered listing alone: under a filter it
+          states a count the reader cannot see, and beneath an empty table it
+          asserts rows are on screen. The reach line above is the filtered
+          listing's edge, and it carries the continuation the filter needs.
+          Both rows carry role="status", so the contradiction is read out as
+          well as drawn (§13.10). */}
+      {!filtering && tail}
     </div>
   );
 }

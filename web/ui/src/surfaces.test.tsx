@@ -11204,6 +11204,79 @@ describe("the trimmed listing", () => {
     expect(within(browser).getByTestId("listing-continuation")).toBeTruthy();
   });
 
+  // The continuation row counts the rows the response returned, and a filter
+  // narrows the table without loading any more of them. Left standing under a
+  // filtered table it reports a figure the reader cannot see, and under an
+  // empty one it asserts rows are on screen directly beneath the reach line
+  // saying nothing matched. Both rows carry role="status", so the reader who
+  // is read the page hears the contradiction as well.
+  //
+  // Spec: §13.10
+  it("drops the continuation row while a filter narrows the at-scale table", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: Array.from({ length: 10 }, (_, i) => ({
+            id: `platform/direct-${String(i + 1)}`,
+            type: "skill",
+          })),
+        },
+      },
+      "/v1/catalog": {
+        body: {
+          ids: Array.from(
+            { length: 25 },
+            (_, i) => `platform/direct-${String(i + 1)}`,
+          ),
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const arthead = within(browser).getByRole("heading", {
+      name: "Artifacts",
+    }).parentElement as HTMLElement;
+    const filter = within(arthead).getByLabelText("Filter in this domain");
+    await waitFor(() => {
+      expect(
+        within(browser).getByTestId("listing-continuation").textContent,
+      ).toContain("10 of 25 artifacts shown.");
+    });
+
+    // A filter that matches nothing leaves an empty table, and no row under it
+    // claims ten artifacts are shown.
+    fireEvent.change(filter, { target: { value: "zzzz" } });
+    expect(within(browser).queryAllByRole("row")).toHaveLength(0);
+    expect(within(browser).queryByTestId("listing-continuation")).toBeNull();
+    expect(within(browser).queryByText(/artifacts shown\./)).toBeNull();
+
+    // A filter that matches one row does not claim ten either.
+    fireEvent.change(filter, { target: { value: "direct-1" } });
+    expect(
+      within(browser).getByRole("link", { name: "platform/direct-1" }),
+    ).toBeTruthy();
+    expect(within(browser).queryByTestId("listing-continuation")).toBeNull();
+
+    // A type chip narrows the same way a typed filter does.
+    fireEvent.change(filter, { target: { value: "" } });
+    fireEvent.click(within(arthead).getByRole("button", { name: "skill" }));
+    expect(within(browser).queryByTestId("listing-continuation")).toBeNull();
+
+    // Clearing both restores the row, because the table is drawing the rows it
+    // counts again.
+    fireEvent.click(within(arthead).getByRole("button", { name: "All" }));
+    expect(
+      within(browser).getByTestId("listing-continuation").textContent,
+    ).toContain("10 of 25 artifacts shown.");
+  });
+
   // The compact treatment is the one the design pass fixed for this count: the
   // section label carries the count and the controls over the listing share
   // its row, a tile states what the response reported below the child, and the

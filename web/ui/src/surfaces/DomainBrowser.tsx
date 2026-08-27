@@ -114,6 +114,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
   const tail = trimmed ? (
     <TrimmedListing scope={body.path} shown={direct.length} total={total} note={body.note ?? ''} />
   ) : null;
+  const tailList = tail === null ? null : <ul className="artifact-list">{tail}</ul>;
 
   return (
     <section className="surface" aria-label="Domain browser">
@@ -184,28 +185,28 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
         // The listing is gone, and a rendering note the response carried is
         // not: it reports what the fold left out, which is the one thing this
         // screen would otherwise fail to state.
-        tail !== null && <ul className="artifact-list">{tail}</ul>
+        tailList
       ) : compact && direct.length > 0 ? (
-        <>
-          {/* The table filters the rows the response carried, so it is told
-              whether those rows are the whole domain: a filter over a trimmed
-              listing continues into the scoped search rather than reporting
-              an artifact the listing withheld as absent. */}
-          <ArtifactTable
-            artifacts={direct}
-            scope={body.path}
-            trimmed={trimmed}
-            withheld={total === null ? null : total - direct.length}
-          />
-          {tail !== null && <ul className="artifact-list">{tail}</ul>}
-        </>
+        // The table filters the rows the response carried, so it is told
+        // whether those rows are the whole domain: a filter over a trimmed
+        // listing continues into the scoped search rather than reporting an
+        // artifact the listing withheld as absent. It is handed the
+        // continuation row as well, because it is what knows whether the rows
+        // drawn under it are still the ones that row counts.
+        <ArtifactTable
+          artifacts={direct}
+          scope={body.path}
+          trimmed={trimmed}
+          withheld={total === null ? null : total - direct.length}
+          tail={tailList}
+        />
       ) : (
         <>
           <h2 className="label">Artifacts in this domain</h2>
           {direct.length === 0 ? (
             <>
               <EmptyState>This domain lists no artifacts.</EmptyState>
-              {tail !== null && <ul className="artifact-list">{tail}</ul>}
+              {tailList}
             </>
           ) : (
             <ul className="artifact-list">
