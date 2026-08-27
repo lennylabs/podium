@@ -269,7 +269,13 @@ function CountBadge({ count, noun }: { count: number; noun: string }) {
  * domain. `load_domain` takes the subtree depth as its only argument, and the
  * notable list is capped independently of it, so raising the depth returns no
  * artifact the reader does not already hold and can return fewer once the
- * §4.5.5 budget loop pops entries off the list. */
+ * §4.5.5 budget loop pops entries off the list.
+ *
+ * The control names that handoff rather than promising the withheld artifacts.
+ * The search surface opens at its own cap and cannot serve a `top_k` above the
+ * §5 ceiling, so a domain holding more than the ceiling has no listing that
+ * carries the rest, and a control labelled as one that loads them delivers
+ * neither the rest nor a single artifact past what the reader already holds. */
 function TrimmedListing({
   scope,
   shown,
@@ -292,7 +298,7 @@ function TrimmedListing({
           {note}
         </p>
         <a className="button" data-testid="listing-continue" href={scopedSearchHref(scope)}>
-          Load the rest
+          {scope === '' ? 'Search the catalog' : 'Search this domain'}
         </a>
       </div>
     </li>

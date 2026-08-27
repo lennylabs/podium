@@ -10972,7 +10972,7 @@ describe("the trimmed listing", () => {
     expect(line.textContent).toContain("10 of 24 artifacts shown.");
     expect(
       within(line)
-        .getByRole("link", { name: "Load the rest" })
+        .getByRole("link", { name: "Search this domain" })
         .getAttribute("href"),
     ).toBe(searchHref("scope:platform"));
   });
@@ -11027,7 +11027,7 @@ describe("the trimmed listing", () => {
     await waitFor(() => {
       expect(line.textContent).toContain("2 of 21 artifacts shown.");
     });
-    const cont = within(line).getByRole("link", { name: "Load the rest" });
+    const cont = within(line).getByRole("link", { name: "Search this domain" });
     expect(cont.getAttribute("href")).toBe(searchHref("scope:platform"));
     goTo(searchHref("scope:platform"));
     await screen.findByLabelText("Search");
@@ -11048,6 +11048,65 @@ describe("the trimmed listing", () => {
         (r) => r.url.startsWith("/v1/load_domain") && r.url.includes("depth=3"),
       ),
     ).toBe(false);
+  });
+
+  // The continuation hands the reader to the scoped search, which opens at
+  // its own cap and cannot ask §5 for a top_k above the ceiling. A domain
+  // holding more than that ceiling therefore has no listing that carries the
+  // withheld artifacts, so the control names the search it opens instead of
+  // promising a load that arrives with nothing more than the reader holds.
+  it("names the scoped search it hands off to rather than promising the withheld artifacts", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "scale",
+          subdomains: [],
+          notable: heldBy("scale", 10).map((id) => ({ id, type: "skill" })),
+        },
+      },
+      "/v1/catalog": { body: { ids: heldBy("scale", 60) } },
+    });
+    goTo("#/domain/scale");
+    render(<App />);
+    await screen.findByLabelText("Domain browser");
+    const line = await screen.findByTestId("listing-continuation");
+    await waitFor(() => {
+      expect(line.textContent).toContain("10 of 60 artifacts shown.");
+    });
+    const cont = within(line).getByTestId("listing-continue");
+    expect(cont.textContent).toBe("Search this domain");
+    expect(cont.getAttribute("href")).toBe(searchHref("scope:scale"));
+    // No wording on the row offers to load, or to produce the rest, because
+    // the press loads no artifact and the rest is past what §5 serves.
+    expect(line.textContent).not.toMatch(/load/i);
+    expect(line.textContent).not.toMatch(/the rest/i);
+  });
+
+  // The registry root bounds nothing, so its continuation carries no scope
+  // filter and the label names the catalog-wide search it opens.
+  it("names the catalog-wide search at the registry root", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [],
+          notable: heldBy("", 10).map((id) => ({
+            id: id.replace(/^\//, ""),
+            type: "skill",
+          })),
+          note: "The listing was trimmed to fit the response budget.",
+        },
+      },
+      "/v1/catalog": { body: { ids: heldBy("root", 60) } },
+    });
+    goTo("#/");
+    render(<App />);
+    await screen.findByLabelText("Domain browser");
+    const cont = await screen.findByTestId("listing-continue");
+    expect(cont.textContent).toBe("Search the catalog");
+    expect(cont.getAttribute("href")).toBe(searchHref(""));
   });
 
   // The continuation is the listing's own last row rather than a note under
