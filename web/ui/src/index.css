@@ -403,8 +403,35 @@ h3 {
   flex-wrap: nowrap;
   align-items: center;
   gap: 4px;
-  padding: 2px 8px 2px 0;
+  padding: 6px 8px 6px 0;
   border-radius: 0 6px 6px 0;
+  /* The row is one line of a list the reader scans, so it sets its own
+     leading rather than taking the page's reading line-height. Board 14a
+     draws a 27px row: 13px of name between 6px of padding on each side. The
+     row owns the whole box, because the label inside it is an anchor in one
+     arm and a span in the other, and a box drawn on the label would size the
+     two differently. */
+  line-height: 1.15;
+}
+
+/* The tree row is the sidebar's own metric, so its label drops the padding
+   and the type scale the sidebar's section links carry. Left at those, an
+   anchor label boxed the row out to 38px against the design's 27px, and the
+   tree ran 40 percent past the fold it was drawn to fit inside. */
+.catalog-row > .mono {
+  padding: 0;
+  font-size: inherit;
+}
+
+/* The current row is filled across its whole width, so the hover is drawn on
+   the row too. Left on the label, it filled the label's box alone, which is
+   the text itself once the label carries no padding. */
+.catalog-row:not(.catalog-row-current):hover {
+  background: var(--chip);
+}
+
+.catalog-row > .mono:hover {
+  background: none;
 }
 
 /* The tree is a list the reader scans for one entry, so its names step back

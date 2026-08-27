@@ -478,6 +478,53 @@ describe("sidebar tree row", () => {
     expect(declaredFor(treeLabel("a", true), "color")).toBe("var(--ink)");
     expect(declaredFor(treeLabel("span", true), "color")).toBe("var(--ink)");
   });
+
+  // Board 14a draws a 27px tree row: a 13px name between 6px of padding on
+  // each side. The sidebar's anchor rule sets every link in the column at
+  // 13.5px inside 6px of its own padding, and a label left at that boxed the
+  // row out to 38px on the page's 1.6 reading leading, which put the tree 40
+  // percent past the fold it was drawn to fit inside. The case sums the row's
+  // vertical box, because jsdom performs no layout; the rendered row is
+  // checked against a browser.
+  it("draws a row at the design's height", () => {
+    const sidebar = document.createElement("div");
+    sidebar.className = "sidebar";
+    const node = document.createElement("li");
+    node.className = "catalog-node";
+    const row = document.createElement("div");
+    row.className = "catalog-row";
+    const name = document.createElement("a");
+    name.className = "mono";
+    row.appendChild(name);
+    node.appendChild(row);
+    sidebar.appendChild(node);
+    document.body.appendChild(sidebar);
+    mounted.push(sidebar);
+
+    const rowStyle = window.getComputedStyle(row);
+    const nameStyle = window.getComputedStyle(name);
+    // The label carries neither a size nor a box of its own, so the row's
+    // metrics are the row's. jsdom resolves neither the inherited size nor
+    // the `inherit` keyword, so the size is read from the node that declares
+    // it and the label's own declarations are read from the stylesheet.
+    expect(declaredFor(name, "font-size")).toBe("inherit");
+    expect(declaredFor(name, "padding")).toBe("0");
+    const fontSize = Number.parseFloat(window.getComputedStyle(node).fontSize);
+    expect(fontSize).toBe(13);
+
+    /** leading resolves the row's line-height, which the stylesheet writes as
+     * a unitless factor of the font size. */
+    const declared = rowStyle.lineHeight;
+    const leading = declared.endsWith("px")
+      ? Number.parseFloat(declared)
+      : Number.parseFloat(declared) * fontSize;
+
+    const labelPadding = Number.parseFloat(nameStyle.paddingTop) || 0;
+    const height =
+      leading + 2 * Number.parseFloat(rowStyle.paddingTop) + 2 * labelPadding;
+    expect(height).toBeGreaterThan(24);
+    expect(height).toBeLessThanOrEqual(28);
+  });
 });
 
 // A domain's artifacts and a search's results are one bordered container with
