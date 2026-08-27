@@ -1731,6 +1731,37 @@ describe("the domain browser", () => {
     );
   });
 
+  // A domain keyword covers the whole subtree and an artifact tag labels one
+  // row. Drawn with the same pill they read as one vocabulary, so the header
+  // keyword and the listing tag carry different treatments.
+  it("draws a domain keyword apart from an artifact tag", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          keywords: ["infra"],
+          subdomains: [],
+          notable: [
+            {
+              id: "platform/deploy",
+              type: "skill",
+              version: "2.0.0",
+              tags: ["tracing"],
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const keyword = within(browser).getByText("infra");
+    const tag = within(browser).getByText("tracing");
+    expect(keyword.className).toBe("keyword");
+    expect(tag.className).toBe("tag");
+  });
+
   // A listing row is two columns. The reader scanning for a type or a
   // version reads one column at the row's right edge rather than reading
   // across the second line of every row.

@@ -1286,6 +1286,20 @@ button.version-notice-latest {
   color: var(--meta);
 }
 
+/* A domain keyword and an artifact tag are different things: the keyword is a
+   term the domain author curates for the whole subtree, and the tag labels one
+   artifact. Drawn with the same filled chip they read as one vocabulary, so the
+   keyword takes an outline over the page ground at the larger mono size and the
+   tag keeps the fill. */
+.keyword {
+  padding: 3px 9px;
+  border-radius: 100px;
+  border: 1px solid var(--b2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--meta);
+}
+
 .field {
   display: flex;
   flex-direction: column;

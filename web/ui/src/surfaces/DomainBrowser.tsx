@@ -153,7 +153,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
       {body.keywords !== undefined && body.keywords.length > 0 && (
         <ul className="tag-list">
           {body.keywords.map((keyword) => (
-            <li key={keyword} className="tag">
+            <li key={keyword} className="keyword">
               {keyword}
             </li>
           ))}
