@@ -8355,9 +8355,10 @@ describe("the layer write flows", () => {
     fireEvent.click(screen.getByLabelText("Groups"));
     const field = screen.getByLabelText("Group names, separated by commas");
     const picker = screen.getByTestId("group-picker");
-    // Nothing typed yet, so every known name is on offer.
+    // Nothing typed yet, so every known name is on offer. Four names is one
+    // more than the box holds, so the header says the rest scroll.
     expect(screen.getByTestId("group-picker-count").textContent).toBe(
-      "4 of 4 match",
+      "4 of 4 match · scroll for more",
     );
     expect(
       within(picker)
@@ -8399,6 +8400,57 @@ describe("the layer write flows", () => {
     expect(
       screen.getByRole("button", { name: "Remove platfrom" }),
     ).toBeTruthy();
+  });
+
+  // The box bounds the dialog at three whole rows, so a longer list is cut
+  // off. A cut with nothing marking it contradicts the count in the header,
+  // which tells the reader six matched while three are drawn. The header says
+  // the rest scroll and the last visible row is faded, and both go away once
+  // the typed fragment narrows the list to what the box holds.
+  it("marks the group list as scrolling while it is longer than the picker holds", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ identity_provider_configured: false }),
+      },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ...adminLayer(),
+              Groups: [
+                "appsec",
+                "data",
+                "infra",
+                "platform-eng",
+                "platform-oncall",
+                "secops",
+              ],
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.click(screen.getByLabelText("Groups"));
+    const field = screen.getByLabelText("Group names, separated by commas");
+    expect(screen.getByTestId("group-picker-count").textContent).toBe(
+      "6 of 6 match · scroll for more",
+    );
+    expect(
+      screen.getByTestId("group-picker-rows").className.split(" "),
+    ).toContain("picker-rows-scrolls");
+    // Narrowed to what the box holds, nothing is hidden and neither cue is
+    // drawn.
+    fireEvent.change(field, { target: { value: "plat" } });
+    expect(screen.getByTestId("group-picker-count").textContent).toBe(
+      "2 of 6 match",
+    );
+    expect(
+      screen.getByTestId("group-picker-rows").className.split(" "),
+    ).not.toContain("picker-rows-scrolls");
   });
 
   // The registration reloads the list, and the reload answers over the

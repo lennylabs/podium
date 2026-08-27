@@ -3134,9 +3134,20 @@ label:has(> input:disabled) {
   font-size: 12.5px;
 }
 
+/* The box holds three whole 32px rows and half of a fourth, so a list longer
+   than three ends on a row that is visibly cut off. Ending on the border
+   instead reads as the whole list, which contradicts the count in the header.
+   The half row is why pickerVisibleRows in RegisterLayerForm.tsx is 3. */
 .picker-rows {
-  max-height: 96px;
+  max-height: 112px;
   overflow-y: auto;
+}
+
+/* The cut-off row fades out so the cut reads as more list below rather than
+   as a row drawn wrong. The fade is drawn only while the list is longer than
+   the box, because a fade over a list that fits hides nothing. */
+.picker-rows-scrolls {
+  mask-image: linear-gradient(180deg, #000 76%, transparent 100%);
 }
 
 .picker-row {

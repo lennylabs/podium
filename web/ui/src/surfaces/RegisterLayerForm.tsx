@@ -719,6 +719,13 @@ function TokenInput({
   );
 }
 
+/** pickerVisibleRows is how many whole rows the picker shows before the rest
+ * scroll. The box holds half a row more than this, so the next row is drawn
+ * cut off rather than the list ending on the border with nothing to say it
+ * continues. It has to agree with the `--picker-rows` height in `.picker-rows`,
+ * which is what actually bounds the box. */
+const pickerVisibleRows = 3;
+
 /** GroupPicker is the typeahead the group axis draws under its input. A grant
  * to a group nobody is in admits nobody, and the refusal for it never comes:
  * the registry accepts any name, so a typo is a layer that silently serves no
@@ -729,12 +736,13 @@ function TokenInput({
 function GroupPicker({ known, value, onChange }: { known: string[]; value: string; onChange: (next: string) => void }) {
   const matches = matchGroups(known, value);
   const query = fragment(value);
+  const scrolls = matches.length > pickerVisibleRows;
   return (
     <div className="picker" data-testid="group-picker">
       <p className="picker-head">
         <span className="label">Groups already granted</span>
         <span className="label picker-count" data-testid="group-picker-count">
-          {matches.length} of {known.length} match
+          {matches.length} of {known.length} match{scrolls && ' · scroll for more'}
         </span>
       </p>
       {matches.length === 0 ? (
@@ -744,7 +752,7 @@ function GroupPicker({ known, value, onChange }: { known: string[]; value: strin
             : `No group granted elsewhere matches “${query}”.`}
         </p>
       ) : (
-        <div className="picker-rows">
+        <div className={scrolls ? 'picker-rows picker-rows-scrolls' : 'picker-rows'} data-testid="group-picker-rows">
           {matches.map((name) => (
             <button
               type="button"
