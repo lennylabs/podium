@@ -9,7 +9,7 @@
 // Authored source, and Resources, and each one disappears where the artifact
 // carries nothing for it rather than standing an empty panel in the layout.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import type { RefObject } from 'react';
 
@@ -340,6 +340,14 @@ function VersionPicker({
   onView: (version: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  // aria-expanded alone states that something opened without stating what or
+  // where, and the popover it discloses stands several elements away in the
+  // document. The popover therefore takes a generated id the badge points
+  // aria-controls at, and the badge names the kind it opens. The popover is a
+  // labelled entry field with its own submit, which takes focus on opening,
+  // returns it on Escape, and closes on a press outside it, so it is a
+  // non-modal dialog and says so on both ends.
+  const fieldId = useId();
   // The field is a transient popup, so it carries the dismissal paths the
   // other popups in this shell carry: Escape closes it and hands focus back to
   // the badge it was disclosed from, and a press or a focus move outside it
@@ -361,6 +369,8 @@ function VersionPicker({
         ref={trigger}
         className="badge badge-soft version-picker-open"
         aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-controls={fieldId}
         aria-label={`Version ${label === '' ? 'unstated' : label}. Read another version.`}
         onClick={() => {
           setOpen(!open);
@@ -374,6 +384,7 @@ function VersionPicker({
       {open && (
         <VersionField
           field={field}
+          fieldId={fieldId}
           viewing={viewing}
           onView={(version) => {
             setOpen(false);
@@ -397,10 +408,13 @@ function VersionPicker({
  */
 function VersionField({
   field,
+  fieldId,
   viewing,
   onView,
 }: {
   field: RefObject<HTMLSpanElement | null>;
+  /** fieldId is the id the badge points aria-controls at. */
+  fieldId: string;
   viewing: string;
   onView: (version: string) => void;
 }) {
@@ -416,7 +430,7 @@ function VersionField({
     input.current?.select();
   }, []);
   return (
-    <span className="version-picker-field" ref={field}>
+    <span className="version-picker-field" id={fieldId} role="dialog" aria-label="Read another version" ref={field}>
       <label className="label" htmlFor="version-picker-input">
         Version
       </label>

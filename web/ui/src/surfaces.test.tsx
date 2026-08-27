@@ -4521,6 +4521,47 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // The badge toggles aria-expanded, which states that something opened
+  // without stating what or where it stands, and the field it discloses is
+  // several elements away in the document. The badge therefore points at the
+  // popover it owns and names its kind, the same wiring the topbar triggers
+  // carry.
+  //
+  // Spec: §13.10
+  it("points the version badge at the popover it owns and names its kind", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const badge = screen.getByRole("button", { name: /^Version / });
+    // The popover is a labelled entry field with its own submit that takes
+    // focus on opening and hands it back on Escape, so it is a non-modal
+    // dialog and both ends say so.
+    expect(badge.getAttribute("aria-haspopup")).toBe("dialog");
+    const controls = badge.getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+    openVersionPicker();
+    const popover = screen.getByRole("dialog", {
+      name: "Read another version",
+    });
+    expect(popover.id).toBe(controls);
+    within(popover).getByLabelText("Version");
+    within(popover).getByRole("button", { name: "View" });
+  });
+
   // Both of the picker's transient parts remove themselves: the disclosed
   // field closes on Escape, and the refusal banner disappears with the pin it
   // reports. Each hands the focus to the version badge, which is the control
