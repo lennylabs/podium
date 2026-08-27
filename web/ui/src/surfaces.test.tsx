@@ -2895,6 +2895,25 @@ describe("search", () => {
     goTo("#/search/nothing");
     render(<App />);
     expect(
+      await screen.findByText("Nothing matched. Widen the query."),
+    ).toBeTruthy();
+  });
+
+  it("offers clearing a filter only when the row carries one", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/nothing");
+    render(<App />);
+    // Nothing is applied, so the row has no filter to clear and the remedy
+    // names only the query.
+    const plain = await screen.findByText("Nothing matched. Widen the query.");
+    expect(plain.textContent).not.toContain("filter");
+    // Applying a type filter gives the reader a control to undo, and the
+    // sentence names it.
+    selectFilter("type", "skill");
+    expect(
       await screen.findByText(
         "Nothing matched. Widen the query or clear a filter.",
       ),
@@ -2908,9 +2927,7 @@ describe("search", () => {
     });
     goTo("#/search/nothing");
     render(<App />);
-    const absent = await screen.findByText(
-      "Nothing matched. Widen the query or clear a filter.",
-    );
+    const absent = await screen.findByText("Nothing matched. Widen the query.");
     expect(absent.className.split(" ")).toContain("empty-page");
     // The page preset is a bordered card, and the sentence inside it is
     // smaller and quieter than the body text a result would have carried.

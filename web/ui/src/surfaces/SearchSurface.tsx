@@ -195,6 +195,7 @@ export function SearchSurface({
       </div>
       <SearchResults
         search={search}
+        filtered={type !== "" || scope !== "" || tags.length > 0}
         cap={cap}
         onMore={(step) => {
           setCap((held) => Math.min(held + step, searchCapMax));
@@ -369,10 +370,12 @@ function TokenEntry({
 
 function SearchResults({
   search,
+  filtered,
   cap,
   onMore,
 }: {
   search: Async<SearchResponse>;
+  filtered: boolean;
   cap: number;
   onMore: (step: number) => void;
 }) {
@@ -388,9 +391,15 @@ function SearchResults({
   }
   const results = body.results ?? [];
   if (results.length === 0) {
+    // The remedy names only what the reader can act on. A row standing at
+    // "type: all" and "scope: all" with no tag pill has no filter to clear,
+    // so offering that as the way out sends the reader looking for a control
+    // the page does not carry (§13.10).
     return (
       <EmptyState>
-        Nothing matched. Widen the query or clear a filter.
+        {filtered
+          ? "Nothing matched. Widen the query or clear a filter."
+          : "Nothing matched. Widen the query."}
       </EmptyState>
     );
   }
