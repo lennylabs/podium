@@ -1698,10 +1698,7 @@ input[type="search"]::-webkit-search-cancel-button {
    the whole line from the right left several layers under one parent
    rendering the identical string, so the column stopped telling the rows
    apart. The tail's automatic right margin takes the spare width while the
-   line fits, which keeps a short line against the left edge; where the tail
-   alone is wider than the cell, the margin resolves to zero, the end
-   alignment takes effect, and the line runs off the left edge rather than
-   losing the segment that identifies the row. */
+   line fits, which keeps a short line against the left edge. */
 .source-detail {
   display: flex;
   justify-content: flex-end;
@@ -1720,17 +1717,33 @@ input[type="search"]::-webkit-search-cancel-button {
    leading separator is not reordered to the far end of the string. */
 .source-detail-head {
   min-width: 0;
+  /* The head gives up every pixel of the shrink before the tail gives up one:
+     the flex algorithm distributes the negative free space in proportion to
+     the scaled shrink factors, so a factor this much larger than the tail's
+     drives the head to zero and freezes it there, and only what is still
+     over the cell reaches the tail. */
+  flex-shrink: 9999;
   overflow: hidden;
   text-overflow: ellipsis;
   direction: rtl;
 }
 
-.source-detail-head > bdi {
+.source-detail-head > bdi,
+.source-detail-tail > bdi {
   direction: ltr;
 }
 
+/* The tail elides at its own start once the head has collapsed. Held out of
+   the shrink entirely, a final segment wider than the cell overflowed the
+   line's clip and was sliced mid-glyph with no marker, so the row stated a
+   repository name that was not the layer's beside sibling rows that all
+   carried a leading ellipsis. */
 .source-detail-tail {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
   margin-right: auto;
 }
 

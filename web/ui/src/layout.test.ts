@@ -733,7 +733,13 @@ describe("layer source cell", () => {
     expect(detail.overflowWrap).not.toBe("anywhere");
   });
 
-  it("takes the clip out of the head and never shrinks the tail", () => {
+  // The head absorbs the whole clip while it has width to give, so the tail
+  // is drawn complete on every line whose head still fits. The tail is not
+  // held out of the shrink altogether: a final segment wider than the cell
+  // then overflowed the line's clip and was sliced with no elision marker,
+  // and the row stated a repository name that was not the layer's. It elides
+  // at its own start once the head has collapsed.
+  it("takes the clip out of the head and elides the tail only after it", () => {
     const detail = styled("source-detail");
     expect(detail.display).toBe("flex");
     const head = styled("source-detail-head");
@@ -741,7 +747,15 @@ describe("layer source cell", () => {
     expect(head.textOverflow).toBe("ellipsis");
     expect(head.minWidth).toBe("0");
     const tail = styled("source-detail-tail");
-    expect(tail.getPropertyValue("flex")).toBe("0 0 auto");
+    expect(tail.getPropertyValue("flex")).toBe("0 1 auto");
+    expect(tail.overflow).toBe("hidden");
+    expect(tail.textOverflow).toBe("ellipsis");
+    expect(tail.direction).toBe("rtl");
+    expect(tail.minWidth).toBe("0");
+    // The negative free space goes in proportion to the scaled shrink
+    // factors, so the head's factor drives it to zero and freezes it there
+    // before the tail gives up a pixel.
+    expect(Number(head.flexShrink)).toBeGreaterThan(1000);
   });
 
   // The head keeps the box the flex layout gives it, so eliding it at its end

@@ -5716,8 +5716,11 @@ describe("the layer panel", () => {
 
   // A final segment wider than the column would be clipped at its own end by
   // an ordinary clip, which loses exactly the characters the reader is
-  // scanning for, so the line runs off the left edge of the cell instead.
-  it("runs a source path off the left where its last segment fills the cell", async () => {
+  // scanning for, so the clip falls at the segment's start instead. Held out
+  // of the shrink entirely, the segment overflowed the line's clip and was
+  // sliced with no marker, and the row read as a whole value beside sibling
+  // rows that all carried a leading ellipsis.
+  it("elides a source path's last segment at its start where it fills the cell", async () => {
     const longSegment = "a".repeat(60);
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -5738,9 +5741,22 @@ describe("the layer panel", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     const row = layerRow("wide");
-    expect(row.querySelector(".source-detail-tail")?.textContent).toBe(
-      longSegment,
-    );
+    const tail = row.querySelector(".source-detail-tail") as Element;
+    expect(tail.textContent).toBe(longSegment);
+    const tailStyle = window.getComputedStyle(tail);
+    expect(tailStyle.textOverflow).toBe("ellipsis");
+    expect(tailStyle.overflow).toBe("hidden");
+    expect(tailStyle.direction).toBe("rtl");
+    expect(tailStyle.flexShrink).toBe("1");
+    const isolated = tail.querySelector("bdi");
+    expect(isolated?.textContent).toBe(longSegment);
+    expect(window.getComputedStyle(isolated as Element).direction).toBe("ltr");
+    // The head absorbs the whole shrink before the tail gives up a pixel, so
+    // a line whose head still fits keeps its final segment complete.
+    const headShrink = window.getComputedStyle(
+      row.querySelector(".source-detail-head") as Element,
+    ).flexShrink;
+    expect(Number(headShrink)).toBeGreaterThan(1000);
     const line = window.getComputedStyle(
       row.querySelector(".source-detail") as Element,
     );

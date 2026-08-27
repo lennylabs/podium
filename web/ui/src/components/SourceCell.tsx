@@ -81,9 +81,11 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
  * leading directory, and clipping from the right rendered them as the same
  * string, which stops the column telling the rows apart. The head gives up
  * its own leading characters to the clip, so what it keeps ends against the
- * tail and the line reads as one path. The title attribute repeats the whole
- * value because the head is still clipped where the column is narrower than
- * it. */
+ * tail and the line reads as one path. Where the tail alone is wider than the
+ * cell, the head has already collapsed and the tail takes the same leading
+ * elision, so the line always states that it is truncated. The title
+ * attribute repeats the whole value because the head is still clipped where
+ * the column is narrower than it. */
 function Detail({ value }: { value: string }) {
   const { head, tail } = splitDetail(value);
   return (
@@ -94,7 +96,11 @@ function Detail({ value }: { value: string }) {
       <span className="source-detail-head">
         <bdi>{head}</bdi>
       </span>
-      <span className="source-detail-tail">{tail}</span>
+      {/* The tail is elided at its start for the same reason, and isolates
+          its own text so a separator is not reordered to the far end. */}
+      <span className="source-detail-tail">
+        <bdi>{tail}</bdi>
+      </span>
     </div>
   );
 }
