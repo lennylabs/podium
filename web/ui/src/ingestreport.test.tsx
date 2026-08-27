@@ -290,7 +290,11 @@ describe('the report clock', () => {
 /** runOutcomes is a fan-out over three layers: two the registry ran and one
  * it refused. */
 const runOutcomes: ReingestOutcome[] = [
-  { layerID: 'acme/platform-artifacts', kind: 'summary', summary: { accepted: 12, idempotent: 3, lint_failures: 2 } },
+  {
+    layerID: 'acme/platform-artifacts',
+    kind: 'summary',
+    summary: { accepted: 12, idempotent: 3, lint_failures: 2, advisories: advisories(3) },
+  },
   {
     layerID: 'acme/finance',
     kind: 'summary',
@@ -321,9 +325,41 @@ describe('the finished fan-out report', () => {
     expect(within(counts).getByText('16')).toBeTruthy();
     expect(within(counts).getByText('4')).toBeTruthy();
     expect(within(counts).getByText('2')).toBeTruthy();
-    // Each layer states what its own response carried.
+    // Each layer states what its own response carried, including the lint
+    // failures the run's aggregate count is made of.
     const layers = within(dialog).getByLabelText('What each layer returned');
-    expect(layers.textContent).toContain('12 accepted · 3 unchanged · 0 rejected · 0 conflicts');
+    expect(layers.textContent).toContain('12 accepted · 3 unchanged · 0 rejected · 0 conflicts · 2 lint failures');
+    expect(layers.textContent).toContain('4 accepted · 1 unchanged · 1 rejected · 0 conflicts · 0 lint failures');
+  });
+
+  // The fan-out is client-side, so each layer's itemised rows are already in
+  // hand. The run report states what needs attention on the same terms the
+  // single-layer report states it, and opens the lists behind the counts it
+  // itemises.
+  it('names what needs attention across the run and opens the lists behind it', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    const attention = screen.getByLabelText('Needs attention');
+    expect(attention.textContent).toContain('1 artifact rejected');
+    expect(attention.textContent).toContain('2 lint failures');
+    fireEvent.click(within(attention).getByRole('button', { name: '1 artifact rejected' }));
+    const rejected = screen.getByLabelText('Rejected artifacts');
+    expect(rejected.textContent).toContain('finance/pay');
+    expect(rejected.textContent).toContain('ingest.sensitivity_floor');
+  });
+
+  // The advisories every layer raised are listed under the same cap the
+  // single-layer report applies, with the rest behind a count of them.
+  it('lists the advisories the run raised and holds the rest behind see-all', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    const listed = screen.getByLabelText('Advisories');
+    expect(listed.textContent).toContain('Advisories · non-blocking · 3');
+    expect(within(listed).getAllByRole('listitem')).toHaveLength(2);
+    fireEvent.click(within(listed).getByRole('button', { name: 'See all 3' }));
+    expect(within(screen.getByLabelText('Advisories')).getAllByRole('listitem')).toHaveLength(3);
   });
 
   // One run reads the same whichever button started it: the fan-out's counts

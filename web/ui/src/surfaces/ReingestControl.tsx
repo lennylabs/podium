@@ -680,24 +680,29 @@ export type ReingestOutcome =
   | { layerID: string; kind: 'refused'; error: unknown };
 
 /** counted adds up what the run's summaries carried. A layer the registry
- * only recorded contributes nothing, because it reports no counts. */
+ * only recorded contributes nothing, because it reports no counts. The
+ * itemised rows are gathered rather than tallied, so the run report can open
+ * the same lists the single-layer report opens instead of presenting a total
+ * with nothing behind it. */
 function counted(outcomes: ReingestOutcome[]) {
   let accepted = 0;
   let idempotent = 0;
-  let rejected = 0;
-  let conflicts = 0;
   let lintFailures = 0;
+  const rejected: IngestRejection[] = [];
+  const conflicts: IngestConflict[] = [];
+  const advisories: IngestAdvisory[] = [];
   for (const outcome of outcomes) {
     if (outcome.kind !== 'summary') {
       continue;
     }
     accepted += outcome.summary.accepted ?? 0;
     idempotent += outcome.summary.idempotent ?? 0;
-    rejected += (outcome.summary.rejected ?? []).length;
-    conflicts += (outcome.summary.conflicts ?? []).length;
     lintFailures += outcome.summary.lint_failures ?? 0;
+    rejected.push(...(outcome.summary.rejected ?? []));
+    conflicts.push(...(outcome.summary.conflicts ?? []));
+    advisories.push(...(outcome.summary.advisories ?? []));
   }
-  return { accepted, idempotent, rejected, conflicts, lintFailures };
+  return { accepted, idempotent, rejected, conflicts, advisories, lintFailures };
 }
 
 /** ReingestRunReport is what "Reingest all" resolves into. The fan-out issues
@@ -708,7 +713,14 @@ function counted(outcomes: ReingestOutcome[]) {
  * layer with what its own response carried, and the layers the registry
  * refused. A refusal that takes a further decision, such as a freeze window,
  * is named here and reingested from its own row, where that decision has its
- * confirmation. */
+ * confirmation.
+ *
+ * The fan-out is client-side, so every layer's rejections, conflicts, and
+ * advisories are already in hand. The run report therefore states what needs
+ * attention and lists the advisories on the same terms the single-layer
+ * report does, and each layer's line carries its own lint failures, so the
+ * aggregate lint count is attributable to a layer rather than being a total
+ * the reader can only recover from the copied text. */
 export function ReingestRunReport({
   outcomes,
   startedAt,
@@ -723,6 +735,7 @@ export function ReingestRunReport({
   const totals = counted(outcomes);
   const refused = outcomes.filter((outcome) => outcome.kind === 'refused');
   const layerWord = outcomes.length === 1 ? 'layer' : 'layers';
+  const [detail, setDetail] = useState<IngestDetail | null>(null);
   return (
     <Modal
       title="Reingest all finished"
@@ -730,38 +743,90 @@ export function ReingestRunReport({
       onClose={onDone}
     >
       <section className="ingest-report modal-body" aria-label="Reingest all result">
-        <div className="stats" aria-label="Ingest counts across the run">
-          <Stat label="accepted" count={totals.accepted} tone="ok" />
-          <Stat label="unchanged" count={totals.idempotent} />
-          <Stat label="rejected" count={totals.rejected} tone="danger" />
-          <Stat label="conflicts" count={totals.conflicts} tone="accent" />
-          <Stat label="lint failures" count={totals.lintFailures} caption="count only" />
-        </div>
-        {refused.length > 0 && (
-          <section className="attention" aria-label="Refused layers">
-            <p className="label">Refused · {refused.length}</p>
-            {refused.map((outcome) => (
-              <div key={outcome.layerID} className="attention-row attention-danger">
-                <span className="mono attention-id">{outcome.layerID}</span>{' '}
-                <Badge tone="quiet">{refusalCode(outcome)}</Badge>{' '}
-                {refusalMessage(outcome)}
-              </div>
-            ))}
-            <p className="quiet">
-              Reingest a refused layer from its own row, which carries the remediation its refusal states.
-            </p>
-          </section>
+        {detail !== null && (
+          <>
+            <button
+              type="button"
+              onClick={() => {
+                setDetail(null);
+              }}
+            >
+              Back to the counts
+            </button>
+            {detail === 'rejected' && <RejectionList rejections={totals.rejected} />}
+            {detail === 'conflicts' && <ConflictList conflicts={totals.conflicts} />}
+            {detail === 'advisories' && <AdvisoryList advisories={totals.advisories} total={totals.advisories.length} />}
+          </>
         )}
-        <section aria-label="What each layer returned">
-          <p className="label">Layers · {outcomes.length}</p>
-          <ul className="run-layers">
-            {outcomes.map((outcome) => (
-              <li key={outcome.layerID}>
-                <span className="mono">{outcome.layerID}</span> <span className="quiet">{layerLine(outcome)}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        {detail === null && (
+          <>
+            <div className="stats" aria-label="Ingest counts across the run">
+              <Stat label="accepted" count={totals.accepted} tone="ok" />
+              <Stat label="unchanged" count={totals.idempotent} />
+              <Stat
+                label="rejected"
+                count={totals.rejected.length}
+                tone="danger"
+                onOpen={() => {
+                  setDetail('rejected');
+                }}
+              />
+              <Stat
+                label="conflicts"
+                count={totals.conflicts.length}
+                tone="accent"
+                onOpen={() => {
+                  setDetail('conflicts');
+                }}
+              />
+              <Stat label="lint failures" count={totals.lintFailures} caption="count only" />
+            </div>
+            <NeedsAttention
+              rejected={totals.rejected.length}
+              conflicts={totals.conflicts.length}
+              lintFailures={totals.lintFailures}
+              onOpen={setDetail}
+            />
+            {refused.length > 0 && (
+              <section className="attention" aria-label="Refused layers">
+                <p className="label">Refused · {refused.length}</p>
+                {refused.map((outcome) => (
+                  <div key={outcome.layerID} className="attention-row attention-danger">
+                    <span className="mono attention-id">{outcome.layerID}</span>{' '}
+                    <Badge tone="quiet">{refusalCode(outcome)}</Badge>{' '}
+                    {refusalMessage(outcome)}
+                  </div>
+                ))}
+                <p className="quiet">
+                  Reingest a refused layer from its own row, which carries the remediation its refusal states.
+                </p>
+              </section>
+            )}
+            {totals.advisories.length > 0 && (
+              <AdvisoryList
+                advisories={totals.advisories.slice(0, advisoryPreview)}
+                total={totals.advisories.length}
+                onSeeAll={
+                  totals.advisories.length > advisoryPreview
+                    ? () => {
+                        setDetail('advisories');
+                      }
+                    : undefined
+                }
+              />
+            )}
+            <section aria-label="What each layer returned">
+              <p className="label">Layers · {outcomes.length}</p>
+              <ul className="run-layers">
+                {outcomes.map((outcome) => (
+                  <li key={outcome.layerID}>
+                    <span className="mono">{outcome.layerID}</span> <span className="quiet">{layerLine(outcome)}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </>
+        )}
       </section>
       <div className="modal-foot">
         <span className="modal-foot-note mono quiet">finished {clock(finishedAt)}</span>
@@ -799,7 +864,7 @@ function layerLine(outcome: ReingestOutcome): string {
     return 'recorded · this registry runs no pipeline inside the request';
   }
   const summary = outcome.summary;
-  return `${String(summary.accepted)} accepted · ${String(summary.idempotent ?? 0)} unchanged · ${String((summary.rejected ?? []).length)} rejected · ${String((summary.conflicts ?? []).length)} conflicts`;
+  return `${String(summary.accepted)} accepted · ${String(summary.idempotent ?? 0)} unchanged · ${String((summary.rejected ?? []).length)} rejected · ${String((summary.conflicts ?? []).length)} conflicts · ${String(summary.lint_failures ?? 0)} lint failures`;
 }
 
 /** runText is the whole run as plain text, for a reader who carries the
@@ -810,7 +875,7 @@ export function runText(outcomes: ReingestOutcome[], finishedAt: number): string
   const totals = counted(outcomes);
   const lines = [
     `Reingest all finished ${clock(finishedAt)}: ${String(outcomes.length)} ${outcomes.length === 1 ? 'layer' : 'layers'}`,
-    `${String(totals.accepted)} accepted, ${String(totals.idempotent)} unchanged, ${String(totals.rejected)} rejected, ${String(totals.conflicts)} conflicts, ${String(totals.lintFailures)} lint failures`,
+    `${String(totals.accepted)} accepted, ${String(totals.idempotent)} unchanged, ${String(totals.rejected.length)} rejected, ${String(totals.conflicts.length)} conflicts, ${String(totals.lintFailures)} lint failures`,
   ];
   for (const outcome of outcomes) {
     if (outcome.kind === 'refused') {
