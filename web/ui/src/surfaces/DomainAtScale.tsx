@@ -206,6 +206,7 @@ export function SubdomainTiles({
         {!all && matched.length > shown.length && (
           <button
             type="button"
+            className="tile-more"
             data-testid="show-all-subdomains"
             onClick={() => {
               setAll(true);

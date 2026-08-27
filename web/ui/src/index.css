@@ -3914,6 +3914,18 @@ label:has(> input:disabled) {
   gap: 12px;
 }
 
+/* The control that opens the rest of the grid is a disclosure over the tiles
+   above it rather than an action on the domain, so it drops the button fill
+   and takes the quiet dashed edge the "+ tag" chip on the search filter row
+   already carries. Drawn in the default button tone it read as the loudest
+   control on the surface, louder than the Grid and List toggle beside it. */
+.tile-more {
+  border-style: dashed;
+  background: none;
+  color: var(--meta);
+  font-size: 12.5px;
+}
+
 .tile-order {
   font-size: 12px;
 }

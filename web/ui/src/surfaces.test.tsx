@@ -11899,9 +11899,11 @@ describe("the trimmed listing", () => {
     goTo("#/domain/platform");
     render(<App />);
     const browser = await screen.findByLabelText("Domain browser");
-    expect(within(browser).getByTestId("show-all-subdomains").textContent).toBe(
-      "Show all 24 subdomains",
-    );
+    const showAll = within(browser).getByTestId("show-all-subdomains");
+    expect(showAll.textContent).toBe("Show all 24 subdomains");
+    // The disclosure over the tile grid is drawn quiet, so it does not read as
+    // the loudest control on the surface (§13.10).
+    expect(showAll.classList.contains("tile-more")).toBe(true);
     fireEvent.change(within(browser).getByLabelText("Filter subdomains"), {
       target: { value: "d1" },
     });
