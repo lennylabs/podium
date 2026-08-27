@@ -1052,3 +1052,23 @@ function ruleText(selector: string): string {
   }
   return "";
 }
+
+// The reingest summary's refused row states a layer, the §6.10 code its
+// refusal carried, and a message of no bounded length. The code is drawn as a
+// badge, and under the flex container's default stretch that badge took the
+// height of the wrapped message and rendered as an empty bordered rectangle
+// with its text against the top edge. jsdom performs no layout, so the case
+// pins the alignment that sizes each item to its own text; the rendered row is
+// checked against a browser.
+describe("attention row", () => {
+  it("sizes each item in the row to its own text", () => {
+    expect(styled("attention-row").alignItems).toBe("baseline");
+  });
+
+  // The badge itself stays an inline box, so a badge sitting in a baseline-
+  // aligned header keeps the alignment its container asks for.
+  it("leaves the badge an inline box", () => {
+    expect(styled("badge").display).toBe("inline-block");
+    expect(styled("badge").alignSelf).toBe("");
+  });
+});

@@ -3551,8 +3551,16 @@ button.stat-open {
   margin: 0;
 }
 
+/* The row is a line of text: a glyph or an identifier, sometimes a §6.10 code
+   badge, and a message of no bounded length beside them. Under the default
+   stretch every item takes the height of the wrapped message, and an item
+   carrying a border is then drawn as an empty rectangle with its text against
+   the top edge, which is what the refused row of the reingest summary did to
+   the code badge. Baseline alignment sizes each item to its own text and sets
+   them on the message's first line. */
 .attention-row {
   display: flex;
+  align-items: baseline;
   gap: 11px;
   padding: 12px 14px;
   border: 1px solid var(--b2);
