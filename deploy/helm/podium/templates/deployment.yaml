@@ -6,13 +6,24 @@ metadata:
     {{- include "podium.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "podium.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
         {{- include "podium.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
     spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
@@ -41,19 +52,61 @@ spec:
               value: {{ .Values.config.store.type | quote }}
             - name: PODIUM_OBJECT_STORE
               value: {{ .Values.config.objectStore.type | quote }}
+            {{- if eq .Values.config.objectStore.type "s3" }}
+            {{- with .Values.config.objectStore.bucket }}
+            - name: PODIUM_S3_BUCKET
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.config.objectStore.region }}
+            - name: PODIUM_S3_REGION
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.config.objectStore.endpoint }}
+            - name: PODIUM_S3_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.config.objectStore.s3ForcePathStyle }}
+            - name: PODIUM_S3_FORCE_PATH_STYLE
+              value: "true"
+            {{- end }}
+            {{- end }}
+            {{- if eq .Values.config.objectStore.type "filesystem" }}
+            - name: PODIUM_FILESYSTEM_ROOT
+              value: {{ .Values.config.objectStore.filesystemRoot | quote }}
+            {{- end }}
             - name: PODIUM_VECTOR_BACKEND
               value: {{ .Values.config.vectorBackend.type | quote }}
             - name: PODIUM_EMBEDDING_PROVIDER
               value: {{ .Values.config.embeddingProvider.type | quote }}
             - name: PODIUM_IDENTITY_PROVIDER
               value: {{ .Values.config.identityProvider.type | quote }}
-            {{- if .Values.config.identityProvider.issuer }}
+            {{- with .Values.config.identityProvider.issuer }}
             - name: PODIUM_OAUTH_ISSUER
-              value: {{ .Values.config.identityProvider.issuer | quote }}
+              value: {{ . | quote }}
             {{- end }}
-            {{- if .Values.config.identityProvider.audience }}
+            {{- with .Values.config.identityProvider.audience }}
             - name: PODIUM_OAUTH_AUDIENCE
-              value: {{ .Values.config.identityProvider.audience | quote }}
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.config.identityProvider.groupsClaim }}
+            - name: PODIUM_OAUTH_GROUPS_CLAIM
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.config.identityProvider.idpGroupMapping }}
+            - name: PODIUM_IDP_GROUP_MAPPING
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.config.bootstrapAdmins }}
+            - name: PODIUM_BOOTSTRAP_ADMINS
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with .Values.config.defaultLayerVisibility }}
+            - name: PODIUM_DEFAULT_LAYER_VISIBILITY
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if .Values.runtimeKeys.enabled }}
+            - name: PODIUM_RUNTIME_KEYS_PATH
+              value: {{ .Values.runtimeKeys.mountPath | quote }}
             {{- end }}
             # Public mode and its bind override travel together. The bind above
             # is 0.0.0.0 so the kubelet can reach the probes, and public mode
@@ -67,6 +120,9 @@ spec:
             - name: PODIUM_ALLOW_PUBLIC_BIND
               value: "true"
             {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -79,3 +135,40 @@ spec:
             initialDelaySeconds: 5
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+          {{- if or .Values.objects.enabled .Values.runtimeKeys.enabled }}
+          volumeMounts:
+            {{- if .Values.objects.enabled }}
+            - name: objects
+              mountPath: {{ .Values.config.objectStore.filesystemRoot }}
+            {{- end }}
+            {{- if .Values.runtimeKeys.enabled }}
+            - name: keys
+              mountPath: {{ .Values.runtimeKeys.mountPath }}
+              readOnly: true
+            {{- end }}
+          {{- end }}
+      {{- if or .Values.objects.enabled .Values.runtimeKeys.enabled }}
+      volumes:
+        {{- if .Values.objects.enabled }}
+        - name: objects
+          persistentVolumeClaim:
+            claimName: {{ .Values.objects.existingClaim | default (printf "%s-objects" (include "podium.fullname" .)) }}
+        {{- end }}
+        {{- if .Values.runtimeKeys.enabled }}
+        - name: keys
+          secret:
+            secretName: {{ required "runtimeKeys.secretName is required when runtimeKeys.enabled" .Values.runtimeKeys.secretName }}
+        {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

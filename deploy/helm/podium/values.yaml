@@ -21,7 +21,9 @@ config:
     type: s3
     bucket: ""
     region: us-east-1
-    endpoint: ""  # set for MinIO/R2/GCS
+    endpoint: ""       # set for MinIO/R2/GCS
+    s3ForcePathStyle: false  # set true for MinIO/R2/Ceph
+    filesystemRoot: /objects  # used when type: filesystem
 
   # Hybrid search is off by default so a bare `helm install` boots without an
   # embedding-provider credential. Turn it on by setting both of the following
@@ -60,6 +62,8 @@ config:
     type: oidc-jwt
     audience: ""
     issuer: ""
+    groupsClaim: ""       # JWT claim that carries group membership
+    idpGroupMapping: ""   # raw group=layer-name pairs, space-separated
 
   # Public mode bypasses authentication and the visibility model (§13.10). It
   # binds loopback unless the bind is explicitly allowed, and this chart renders
@@ -70,6 +74,9 @@ config:
   # identity provider: setting both fails with `config.public_mode_with_idp`.
   publicMode: false
   allowPublicBind: false
+
+  bootstrapAdmins: ""         # comma-separated list of admin identities on first boot
+  defaultLayerVisibility: ""  # private | organization; empty uses server default
 
   # The §13.12 / §4.5.5 discovery block is config-file-only: it has no
   # environment variable, and this chart configures the registry through env.
@@ -92,6 +99,7 @@ resources:
 service:
   type: ClusterIP
   port: 8080
+  annotations: {}
 
 # An ingress and a prometheus-operator ServiceMonitor were declared here and no
 # template rendered either, so setting them did nothing. They are removed rather
@@ -108,3 +116,60 @@ securityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
+
+strategy:
+  type: RollingUpdate
+
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+extraEnv: []
+
+# Persistent volume for filesystem object store (config.objectStore.type: filesystem).
+objects:
+  enabled: false
+  existingClaim: ""
+  size: 10Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+# Secret mounted as a volume for runtime-keys (identity provider: injected-session-token).
+runtimeKeys:
+  enabled: false
+  secretName: ""
+  mountPath: /keys
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  path: /
+  pathType: Prefix
+  tls: []
+
+# Bundled single-replica Postgres — for evaluation and single-node pilots only.
+# Set postgresql.existingSecret to a secret with key "password".
+# For production, use an external managed database and supply PODIUM_POSTGRES_DSN
+# through existingSecret.
+postgresql:
+  enabled: false
+  fullnameOverride: ""
+  image: postgres:17-alpine
+  imagePullPolicy: IfNotPresent
+  database: podium
+  username: podium
+  existingSecret: ""
+  passwordKey: password
+  podAnnotations: {}
+  resources: {}
+  persistence:
+    size: 10Gi
+    storageClass: ""
