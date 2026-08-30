@@ -1097,15 +1097,58 @@ function base64Bytes(value: string): number {
   return Math.floor((encoded.length * 3) / 4);
 }
 
-/** formatOf is the row's format column. A fetched file carries the content
- * type the registry recorded; an inline one carries none, so the file's own
- * extension is what the row has to state. */
+/** extensionFormats names the format a filename suffix carries. The suffix
+ * itself is already the end of the file cell, so a column that restated it
+ * would carry nothing: `checklist.md` is markdown and `otel-dump.tar.gz` is an
+ * archive. A suffix with no entry here has no better name than itself. */
+const extensionFormats: Record<string, string> = {
+  md: 'markdown',
+  markdown: 'markdown',
+  ndjson: 'ndjson',
+  jsonl: 'ndjson',
+  yml: 'yaml',
+  txt: 'text',
+  gz: 'archive',
+  tgz: 'archive',
+  tar: 'archive',
+  zip: 'archive',
+  bz2: 'archive',
+  xz: 'archive',
+  zst: 'archive',
+};
+
+/** contentTypeFormats names the format a media type carries, for a fetched
+ * file whose suffix names none. The media type itself has its own row in the
+ * detail card, so printing it in the format column would state one value
+ * twice and name the format nowhere. */
+const contentTypeFormats: Record<string, string> = {
+  'text/markdown': 'markdown',
+  'text/plain': 'text',
+  'text/csv': 'csv',
+  'application/json': 'json',
+  'application/x-ndjson': 'ndjson',
+  'application/gzip': 'archive',
+  'application/zip': 'archive',
+  'application/x-tar': 'archive',
+  'application/octet-stream': 'binary',
+};
+
+/** formatOf is the row's format column: what kind of file the row is, drawn
+ * from the file's suffix and, for a fetched file whose suffix names no known
+ * format, from the media type the registry recorded. */
 function formatOf(name: string, contentType?: string): string {
-  if (contentType !== undefined && contentType !== '') {
-    return contentType;
-  }
   const dot = name.lastIndexOf('.');
-  return dot <= 0 ? 'unknown' : name.slice(dot + 1);
+  const extension = dot <= 0 ? '' : name.slice(dot + 1).toLowerCase();
+  const named = extensionFormats[extension];
+  if (named !== undefined) {
+    return named;
+  }
+  const mediaType = (contentType ?? '').split(';')[0].trim().toLowerCase();
+  const fromType = contentTypeFormats[mediaType];
+  if (fromType !== undefined) {
+    return fromType;
+  }
+  return extension === '' ? 'unknown' : extension;
 }
 
 /** ResourceTable lists every bundled file as one set distinguished by its

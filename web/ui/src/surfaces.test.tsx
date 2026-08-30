@@ -4529,7 +4529,7 @@ describe("the artifact viewer", () => {
       .map((cell) => cell.textContent);
     expect(fetched.slice(0, 4)).toEqual([
       "corpus.bin",
-      "application/octet-stream",
+      "binary",
       "160.2 MB",
       "fetched on demand",
     ]);
@@ -14393,7 +14393,7 @@ describe("the artifact viewer’s resources", () => {
       fact.querySelector("dd")?.textContent,
     ]);
     expect(pairs).toEqual([
-      ["format", "application/octet-stream"],
+      ["format", "binary"],
       ["size", "2.0 MB"],
       ["delivery", "fetched on demand"],
       ["content type", "application/octet-stream"],
@@ -14489,6 +14489,70 @@ describe("the artifact viewer’s resources", () => {
     expect(size).toBe("2.0 MB");
     fireEvent.click(rows[1]);
     expect(screen.getByTestId("resource-detail").textContent).toContain(size);
+  });
+
+  // The format column names the kind of file the row is. The file cell
+  // already ends in the suffix, so a column that printed `md` beside
+  // `checklist.md` restated it and named the format nowhere.
+  it("names the format rather than repeating the file’s suffix", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+          resources: {
+            "resources/checklist.md": "body",
+            "resources/attributes.json": "{}",
+          },
+          large_resources: {
+            "examples/trace-corpus.ndjson": {
+              presigned_url: "https://objects.acme.com/corpus",
+              content_hash: "sha256:def",
+              size: 1024,
+              content_type: "application/x-ndjson",
+            },
+            "fixtures/otel-dump.tar.gz": {
+              presigned_url: "https://objects.acme.com/dump",
+              content_hash: "sha256:ghi",
+              size: 2048,
+              content_type: "application/gzip",
+            },
+          },
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Resources/ }));
+    const rows = within(screen.getByLabelText("Resources"))
+      .getAllByRole("row")
+      .slice(1);
+    const formats = rows.map((row) => [
+      within(row).getAllByRole("cell")[0].textContent,
+      within(row).getAllByRole("cell")[1].textContent,
+    ]);
+    expect(formats).toEqual([
+      ["resources/checklist.md", "markdown"],
+      ["resources/attributes.json", "json"],
+      ["examples/trace-corpus.ndjson", "ndjson"],
+      ["fixtures/otel-dump.tar.gz", "archive"],
+    ]);
+    // The media type the registry recorded has its own row in the detail
+    // card, so the format column names the format instead of stating the
+    // media type a second time.
+    fireEvent.click(rows[3]);
+    const pairs = [
+      ...screen.getByTestId("resource-detail-facts").querySelectorAll(".rail-fact"),
+    ].map((fact) => fact.querySelector("dd")?.textContent);
+    expect(pairs[0]).toBe("archive");
+    expect(pairs[3]).toBe("application/gzip");
   });
 
   // The resource table is one of the UI's data tables, so its column headers
