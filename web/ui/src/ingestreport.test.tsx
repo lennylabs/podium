@@ -13,6 +13,8 @@ import type { ReingestOutcome } from './surfaces/ReingestControl';
 import { ReingestRunReport, ReingestStatus, runText, summaryText } from './surfaces/ReingestControl';
 import { clock, elapsed } from './time';
 
+import './index.css';
+
 const startedAt = Date.UTC(2026, 7, 26, 14, 3, 34);
 const finishedAt = Date.UTC(2026, 7, 26, 14, 6, 22);
 
@@ -40,6 +42,47 @@ function report(summary: IngestSummary) {
 afterEach(() => {
   cleanup();
 });
+
+/** specificity scores a compound selector as (ids, classes, elements), which
+ * is enough for the flat selectors this sheet carries. */
+function specificity(selector: string): number {
+  const ids = selector.match(/#[\w-]+/g)?.length ?? 0;
+  const classes = selector.match(/[.:[][\w-]+/g)?.length ?? 0;
+  const elements = selector.match(/(^|[\s>+~])[a-z]+/g)?.length ?? 0;
+  return ids * 10000 + classes * 100 + elements;
+}
+
+/** cascaded resolves what the sheet gives property for element, by
+ * specificity and then by source order. jsdom's getComputedStyle does not
+ * apply an author sheet, so the case reads the rules itself. The `font`
+ * shorthand is expanded, because a button reset states its type that way. */
+function cascaded(element: Element, property: string): string {
+  let winner = '';
+  let best = -1;
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      if (!(rule instanceof CSSStyleRule)) {
+        continue;
+      }
+      for (const selector of rule.selectorText.split(',')) {
+        const trimmed = selector.trim();
+        if (!element.matches(trimmed)) {
+          continue;
+        }
+        const value = rule.style.getPropertyValue(property) || rule.style.getPropertyValue('font');
+        if (value === '') {
+          continue;
+        }
+        const score = specificity(trimmed);
+        if (score >= best) {
+          best = score;
+          winner = value;
+        }
+      }
+    }
+  }
+  return winner;
+}
 
 describe('the finished reingest report', () => {
   // The counts are the first thing the reader acts on, so each is a card
@@ -83,6 +126,39 @@ describe('the finished reingest report', () => {
     // as good, so the accepted count carries the success tone. This response
     // itemised no artifacts, so the count opens nothing.
     expect(within(counts).getByText('accepted').parentElement?.className).toContain('stat-ok');
+  });
+
+  // Every count is drawn at one size and one weight, and the tone alone says
+  // which one needs acting on. A count the response itemises is a button, and
+  // a button states its own type, so the case pins the two counts the reader
+  // most needs against the counts beside them.
+  it('draws an itemised count in the same type as the counts beside it', () => {
+    report({
+      layer: 'acme/platform-artifacts',
+      accepted: 184,
+      idempotent: 97,
+      lint_failures: 3,
+      rejected: [{ artifact_id: 'platform/deploy', code: 'ingest.sensitivity_floor', reason: 'above the floor' }],
+      conflicts: [
+        {
+          artifact_id: 'platform/lint',
+          version: '1.0.0',
+          old_hash: 'sha256:aaa',
+          new_hash: 'sha256:bbb',
+          code: 'ingest.immutable_violation',
+        },
+      ],
+    });
+    const counts = screen.getByLabelText('Ingest counts');
+    const type = (label: string) => {
+      const element = within(counts).getByText(label).previousSibling as Element;
+      return ['font-family', 'font-size', 'font-weight'].map((property) => cascaded(element, property)).join(' ');
+    };
+    const plain = type('unchanged');
+    expect(plain).toBe('var(--font-mono) 22px 700');
+    for (const label of ['accepted', 'rejected', 'conflicts', 'lint failures']) {
+      expect(type(label)).toBe(plain);
+    }
   });
 
   // The response itemises the pairs the snapshot left in the layer and marks

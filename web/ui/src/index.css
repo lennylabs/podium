@@ -4415,11 +4415,22 @@ label:has(> input:disabled) {
   background: var(--wash);
 }
 
-.stat-count {
+/* The second selector carries the same type onto a count drawn as a button.
+   The button reset below sets `font: inherit` on `button.stat-open`, which
+   outranks a lone class, so a count that opens a list would otherwise fall
+   back to the body font and read as the smallest number in the row. */
+.stat-count,
+button.stat-count.stat-open {
   font-family: var(--font-mono);
   font-size: 22px;
   font-weight: 700;
   line-height: 1;
+}
+
+/* The tone rules below select on two classes, so the color stays out of the
+   button-qualified selector above; a third-component match there would
+   outrank them and flatten every count to the neutral ink. */
+.stat-count {
   color: var(--ink);
 }
 
