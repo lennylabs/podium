@@ -393,6 +393,9 @@ function concealRefusal(error: unknown): unknown {
  *
  * Spec: §6.10 */
 function envelopeMessage(error: ApiError): string {
+  if (error.code === '') {
+    return error.message;
+  }
   const prefix = `${error.code}: `;
   return error.message.startsWith(prefix) ? error.message.slice(prefix.length) : error.message;
 }
@@ -429,7 +432,17 @@ export function ErrorPage({
   const envelope = shown instanceof ApiError ? shown : null;
   const kind = errorPageKind(shown);
   const label = kind === 'notFound' ? 'NOT FOUND' : kind === 'unavailable' ? 'REGISTRY UNREACHABLE' : 'REFUSED';
-  const heading = kind === 'unavailable' ? "Can't reach the registry" : title;
+  // The caller's title states what the route asked for and did not get ("No
+  // such domain"), which a refusal carrying a §6.10 code has been classified
+  // enough to say. A refusal carrying no code has not: the status alone does
+  // not report that the domain is missing, so the page states that the
+  // request was refused and leaves the code line to report the status.
+  const heading =
+    kind === 'unavailable'
+      ? "Can't reach the registry"
+      : envelope !== null && envelope.code === ''
+        ? 'The request was refused'
+        : title;
   const offerRetry = onRetry !== undefined && (envelope === null || envelope.retryable);
   // The way off is omitted on the route it leads to. The catalog read can fail
   // at the registry root, and there the link navigates to the route already on
@@ -471,7 +484,7 @@ export function ErrorPage({
         )}
         {envelope !== null && (
           <p className="mono error-code">
-            {envelope.code} · {envelope.retryable ? 'retryable' : 'not retryable'}
+            {envelope.label} · {envelope.retryable ? 'retryable' : 'not retryable'}
           </p>
         )}
       </div>
@@ -511,7 +524,7 @@ export function ErrorState({
   return (
     <div className="banner banner-danger" role="alert" data-testid={testID}>
       <p className="banner-title">{title}</p>
-      {envelope !== null && <p className="mono banner-code">{envelope.code}</p>}
+      {envelope !== null && <p className="mono banner-code">{envelope.label}</p>}
       <p>{envelope !== null ? envelopeMessage(envelope) : String(error)}</p>
       {envelope !== null && envelope.suggestedAction !== '' && <p className="quiet">{envelope.suggestedAction}</p>}
       {onRetry !== undefined &&

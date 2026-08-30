@@ -794,7 +794,7 @@ function ReingestRefused({ error, onRetry, onDone }: { error: unknown; onRetry: 
       <div className="banner-text">
         <p className="banner-title">The registry refused this reingest and the layer is unchanged.</p>
         <p className="banner-detail">
-          <span className="mono banner-code">{envelope?.code ?? 'registry.unavailable'}</span>{' '}
+          <span className="mono banner-code">{envelope?.label ?? 'registry.unavailable'}</span>{' '}
           {envelope !== null ? envelope.message : String(error)}
         </p>
         {envelope !== null && envelope.suggestedAction !== '' && (
@@ -990,7 +990,7 @@ export function ReingestRunReport({
  * surface answers with for one. */
 function refusalCode(outcome: ReingestOutcome): string {
   const envelope = outcome.kind === 'refused' && outcome.error instanceof ApiError ? outcome.error : null;
-  return envelope?.code ?? 'registry.unavailable';
+  return envelope?.label ?? 'registry.unavailable';
 }
 
 function refusalMessage(outcome: ReingestOutcome): string {

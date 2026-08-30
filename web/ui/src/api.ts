@@ -45,6 +45,15 @@ export class ApiError extends Error {
     this.suggestedAction = suggestedAction;
     this.details = details;
   }
+
+  /** label is what a surface prints where it states the refusal's code. It is
+   * the §6.10 code wherever the response carried one, and the status alone
+   * where it did not. The code is the machine-readable fact the page puts in
+   * front of whoever has to act on the refusal, so a response carrying none
+   * is reported by what it did carry. */
+  get label(): string {
+    return this.code === '' ? `HTTP ${this.status}` : this.code;
+  }
 }
 
 /** identityRefusalCodes are the §6.10 codes the identity middleware answers a
@@ -158,17 +167,51 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (text === '' ? {} : JSON.parse(text)) as T;
 }
 
+/** statusRetryable says whether a refusal that carried no §6.10 envelope
+ * clears on its own. The envelope's own signal is the authority wherever the
+ * registry wrote one, and a refusal carrying none was written by something
+ * else in the path: §13.10 supports serving the registry behind a gateway,
+ * and a gateway, a proxy, or a load balancer refuses with a status and a page
+ * of its own. The status is then the only evidence about the condition. A
+ * server-side status, a timed-out request, and a throttled one all clear
+ * without the reader changing anything, and every other status reports a
+ * decision that a retry repeats. */
+function statusRetryable(status: number): boolean {
+  return status >= 500 || status === 408 || status === 429;
+}
+
+/** errorFrom reads the §6.10 envelope off a refused response. A response that
+ * carries no envelope, or a JSON body carrying no code, is not given one: the
+ * error takes an empty code, which every surface prints as the status through
+ * ApiError.label. Naming registry.unavailable there reported a gateway's 403
+ * as the registry being unreachable and a gateway's 503 as permanent, and the
+ * code is the part an operator acts on. */
 function errorFrom(status: number, body: string): ApiError {
   let envelope: ErrorEnvelope = {};
   try {
-    envelope = JSON.parse(body) as ErrorEnvelope;
+    const parsed: unknown = JSON.parse(body);
+    // A body that parses to a non-object (`null`, a number, a string) is no
+    // more an envelope than one that does not parse at all.
+    if (typeof parsed === 'object' && parsed !== null) {
+      envelope = parsed as ErrorEnvelope;
+    }
   } catch {
     // A response that is not the §6.10 envelope carries no code, and the
     // page falls back to the status alone rather than showing raw bytes.
   }
+  if (envelope.code === undefined) {
+    return new ApiError(
+      status,
+      '',
+      envelope.message ?? `The request was answered with HTTP ${status} and no error code.`,
+      envelope.retryable ?? statusRetryable(status),
+      envelope.suggested_action ?? '',
+      envelope.details ?? {},
+    );
+  }
   return new ApiError(
     status,
-    envelope.code ?? 'registry.unavailable',
+    envelope.code,
     envelope.message ?? `The registry answered ${status}.`,
     envelope.retryable ?? false,
     envelope.suggested_action ?? '',

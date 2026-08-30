@@ -933,7 +933,7 @@ function RegistrationRefusal({ refusal }: { refusal: unknown }) {
       <p className="banner-title">
         You have reached your layer limit — {count(refusal.details.current)} of {count(refusal.details.limit)}.
       </p>
-      <p className="mono banner-code">{refusal.code}</p>
+      <p className="mono banner-code">{refusal.label}</p>
       <p>Unregister a layer you no longer read from, or ask an administrator to raise the limit.</p>
     </div>
   );

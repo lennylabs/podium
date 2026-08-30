@@ -177,7 +177,7 @@ export function DeletedLayers({
       {refusal !== null && (
         <p className="row-refusal" role="alert">
           The registry refused that action and nothing changed.{' '}
-          <span className="mono">{refusal instanceof ApiError ? refusal.code : 'registry.unavailable'}</span>
+          <span className="mono">{refusal instanceof ApiError ? refusal.label : 'registry.unavailable'}</span>
         </p>
       )}
       {/* What a restore does, stated where the reader decides to press it.

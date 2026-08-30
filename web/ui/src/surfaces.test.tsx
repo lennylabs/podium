@@ -10504,6 +10504,54 @@ describe("the layer write flows", () => {
     expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
   });
 
+  // §13.10 supports serving the registry behind a gateway, and a refusal
+  // written by that gateway rather than by the registry carries a status and
+  // no §6.10 envelope. The code is the machine-readable fact the panel puts
+  // in front of an operator, so a response that carried none is reported by
+  // its status rather than given a code the registry never sent.
+  it("reports a refusal that carried no error envelope by its status alone", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers/reingest": {
+        status: 403,
+        text: "<html><body>403 Forbidden</body></html>",
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    const refused = await screen.findByLabelText("Reingest refused");
+    expect(refused.textContent).toContain("HTTP 403");
+    expect(refused.textContent).not.toContain("registry.unavailable");
+    // A 403 is a decision, so the band states no recovery that repeats it.
+    expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  });
+
+  // The same refusal at a server-side status is transient, and nothing in the
+  // response says so, so the status is what the arm reads. Reporting it as
+  // permanent withholds the retry that clears it.
+  it("offers the retry on a codeless refusal whose status is server-side", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers/reingest": {
+        status: 503,
+        text: "<html><body>503 Service Unavailable</body></html>",
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    const refused = await screen.findByLabelText("Reingest refused");
+    expect(refused.textContent).toContain("HTTP 503");
+    expect(
+      within(refused).getByRole("button", { name: "Try again" }),
+    ).toBeTruthy();
+  });
+
   // The trigger disables itself for as long as its request is open, which
   // takes focus off it, and the banner the request settles into takes its own
   // controls away when it is dismissed. Focus left on the document body puts
@@ -14082,6 +14130,29 @@ describe("a whole-surface failure", () => {
       within(page).getByRole("link", { name: "Back to catalog" }),
     ).toBeTruthy();
     expect(page.textContent).toContain("registry.unavailable · retryable");
+  });
+
+  // A refusal written by something in front of the registry carries a status
+  // and no §6.10 envelope. The page states the status it received rather than
+  // a code the registry never sent, it does not read the status as the domain
+  // being missing, and a server-side status keeps the retry that clears it.
+  it("states the status alone where a whole-surface refusal carried no error code", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        status: 502,
+        text: "<html><body>502 Bad Gateway</body></html>",
+      },
+    });
+    goTo("#/domain/platform%2Fci");
+    render(<App />);
+    const page = await screen.findByTestId("domain-failed");
+    expect(page.textContent).toContain("HTTP 502 · retryable");
+    expect(page.textContent).not.toContain("registry.unavailable");
+    expect(
+      within(page).getByRole("heading", { name: "The request was refused" }),
+    ).toBeTruthy();
+    expect(within(page).getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 
   // The way off is only a way off where it leads somewhere else. At the
