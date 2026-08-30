@@ -22,6 +22,7 @@ import (
 	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/audit"
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
+	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
@@ -990,7 +991,13 @@ func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) 
 	var out []filesystem.ArtifactRecord
 	walkErr := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			// spec: §6.10 — a directory of the snapshot that cannot be read is
+			// the layer's source being unreachable, the same condition the git
+			// provider reports when its fetch fails. Without the sentinel this
+			// reaches the handler unclassified and is coded
+			// registry.unavailable, which tells the reader the registry did not
+			// answer when the registry answered and the source is the problem.
+			return fmt.Errorf("%w: %v", source.ErrSourceUnreachable, err)
 		}
 		if d.IsDir() {
 			if strings.HasPrefix(d.Name(), ".") && p != "." {
@@ -1143,7 +1150,9 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 	// Walk the artifact's directory for bundled resources.
 	walkErr := fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			// spec: §6.10 — an unreadable directory under the artifact package
+			// is the same source-unreachable condition walkLayer reports.
+			return fmt.Errorf("%w: %v", source.ErrSourceUnreachable, err)
 		}
 		if d.IsDir() {
 			// spec: §4.2/§4.4 — stop at a nested artifact-package boundary so

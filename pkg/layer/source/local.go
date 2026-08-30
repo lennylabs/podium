@@ -23,11 +23,12 @@ func (Local) Snapshot(_ context.Context, cfg LayerConfig) (*Snapshot, error) {
 	if cfg.Path == "" {
 		return nil, fmt.Errorf("%w: local source requires path", ErrInvalidConfig)
 	}
+	// spec: §6.10 — a path that cannot be stat'd is unreachable whatever the
+	// reason. A permission failure is the same condition as a missing
+	// directory, so it carries ingest.source_unreachable rather than falling
+	// through unclassified to registry.unavailable.
 	if _, err := os.Stat(cfg.Path); err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", ErrSourceUnreachable, cfg.Path)
-		}
-		return nil, err
+		return nil, fmt.Errorf("%w: %s: %v", ErrSourceUnreachable, cfg.Path, err)
 	}
 	return &Snapshot{
 		Reference: cfg.Path,

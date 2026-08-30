@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"io/fs"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
@@ -45,6 +47,32 @@ func TestLocal_RequiresPath(t *testing.T) {
 func TestLocal_MissingPathFailsSourceUnreachable(t *testing.T) {
 	t.Parallel()
 	_, err := Local{}.Snapshot(context.Background(), LayerConfig{Path: "/nonexistent/path/qqqq"})
+	if !errors.Is(err, ErrSourceUnreachable) {
+		t.Fatalf("got %v, want ErrSourceUnreachable", err)
+	}
+}
+
+// Spec: §6.10 namespace — a path the process cannot stat is unreachable for
+// the same reason a missing one is, so a permission failure carries
+// ErrSourceUnreachable instead of an unclassified error the reingest handler
+// would code registry.unavailable.
+// Matrix: §6.10 (ingest.source_unreachable)
+func TestLocal_UnreadablePathFailsSourceUnreachable(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	parent := t.TempDir()
+	layer := filepath.Join(parent, "layer")
+	if err := os.Mkdir(layer, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Chmod(parent, 0o000); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(parent, 0o755) })
+
+	_, err := Local{}.Snapshot(context.Background(), LayerConfig{Path: layer})
 	if !errors.Is(err, ErrSourceUnreachable) {
 		t.Fatalf("got %v, want ErrSourceUnreachable", err)
 	}
