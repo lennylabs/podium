@@ -2282,6 +2282,22 @@ label:has(> input:disabled) {
   overflow-wrap: anywhere;
 }
 
+/* Body prose in the rendered document takes the secondary ink, which is the
+   body-text role every other reading surface here already uses. Without a
+   colour of its own it inherits the primary ink from `body`, so a paragraph
+   is drawn at the same weight as the heading above it and the document loses
+   the contrast that separates its structure from its text. The headings keep
+   the primary ink, and paragraphs open slightly wider than the global
+   line-height because a full-width document column reads at 1.65. */
+.prose p,
+.prose li {
+  color: var(--sec);
+}
+
+.prose p {
+  line-height: 1.65;
+}
+
 /* A heading inside the body is the document's structure, and the page title
    above it is the page's. Without a scale of its own the body inherits the
    global one, where h1 is 29px/700, so a markdown h1 draws at the size and

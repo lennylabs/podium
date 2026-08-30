@@ -244,6 +244,22 @@ describe("rendered artifact body", () => {
     expect(sizes).toEqual([22, 20, 17, 15]);
   });
 
+  // The heading carries the primary ink and the prose under it carries the
+  // secondary, which is the body-text tone every other reading surface here
+  // uses. Without a colour of its own the body inherits the primary ink from
+  // the page and a paragraph draws at the weight of its own heading.
+  it("draws the body prose in the secondary ink under a primary-ink heading", () => {
+    expect(descendantStyle("prose", "p").color).toBe("var(--sec)");
+    expect(descendantStyle("prose", "li").color).toBe("var(--sec)");
+    expect(descendantStyle("prose", "h2").color).not.toBe("var(--sec)");
+  });
+
+  // A full-width document column opens wider than the global leading.
+  it("opens the body paragraph's leading past the global line-height", () => {
+    expect(descendantStyle("prose", "p").lineHeight).toBe("1.65");
+    expect(window.getComputedStyle(document.body).lineHeight).toBe("1.6");
+  });
+
   // The body's leading heading sits directly under the tab strip, so it drops
   // the top margin the levels below it carry.
   it("drops the top margin on the body's leading heading", () => {
