@@ -1242,6 +1242,15 @@ button.version-notice-latest {
   }
 }
 
+/* A domain that nests nothing states it in one line where the label and the
+   grid would have stood. The top margin matches the section label it replaces
+   and collapses into the next section's own, so the line takes a section's
+   gap rather than a section's height. */
+.subdomains-absent {
+  margin: 26px 0;
+  font-size: 12.5px;
+}
+
 .subdomain {
   display: flex;
   flex-direction: column;

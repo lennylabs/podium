@@ -159,14 +159,24 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           the label shares its row with the controls over the listing. */}
       {foldedOnly ? null : compact && body.subdomains.length > 0 ? (
         <SubdomainTiles subdomains={body.subdomains} parent={body.path} catalog={catalog.value} />
+      ) : body.subdomains.length === 0 ? (
+        // A leaf is an ordinary position in the §4.2 hierarchy rather than a
+        // section the response failed to fill, and the artifacts under it are
+        // the whole of what the domain holds. A card the size of the grid it
+        // replaced puts an announcement that nothing is there above the one
+        // listing that carries something, so the absence takes the treatment
+        // the artifact rail already gives its frontmatter section: the label
+        // stands down with the listing, and one quiet line is left in place
+        // of both.
+        <p className="quiet subdomains-absent">
+          {root
+            ? 'The registry holds no domains.'
+            : 'No subdomains are nested under this one.'}
+        </p>
       ) : (
         <>
           <h2 className="label">Subdomains</h2>
-          {body.subdomains.length === 0 ? (
-            <EmptyState title="No subdomains">Domains nested under this one appear here.</EmptyState>
-          ) : (
-            <SubdomainGrid subdomains={body.subdomains} parent={body.path} catalog={catalog.value} />
-          )}
+          <SubdomainGrid subdomains={body.subdomains} parent={body.path} catalog={catalog.value} />
         </>
       )}
 

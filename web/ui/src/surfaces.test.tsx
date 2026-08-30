@@ -2664,10 +2664,7 @@ describe("the domain browser", () => {
     });
     render(<App />);
     await screen.findByLabelText("Domain browser");
-    expect(screen.getByText("No subdomains")).toBeTruthy();
-    expect(
-      screen.getByText("Domains nested under this one appear here."),
-    ).toBeTruthy();
+    expect(screen.getByText("The registry holds no domains.")).toBeTruthy();
     expect(screen.getByText("No artifacts here")).toBeTruthy();
     expect(
       screen.getByText(
@@ -2703,6 +2700,38 @@ describe("the domain browser", () => {
       ],
     ]);
     expect(window.getComputedStyle(card.children[0]).color).toBe("var(--ink)");
+  });
+
+  // Spec: §13.10 — a leaf domain's artifact listing is the whole of what the
+  // domain holds, and it stays on the first screen. The absent subdomain
+  // section drops its label along with the card the grid would have occupied,
+  // on the same reading as the artifact rail's frontmatter section, and
+  // leaves one quiet line in place of both.
+  it("drops the subdomains label and its card on a leaf domain", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "ops",
+          description: "Ops.",
+          subdomains: [],
+          notable: [{ id: "ops/runbook", type: "context" }],
+        },
+      },
+    });
+    goTo("#/domain/ops");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    expect(within(browser).queryByText("Subdomains")).toBeNull();
+    expect(within(browser).queryByText("No subdomains")).toBeNull();
+    const line = within(browser).getByText(
+      "No subdomains are nested under this one.",
+    );
+    expect(line.className.split(" ")).toContain("quiet");
+    expect(line.closest(".empty")).toBeNull();
+    // What the domain does hold is what the reader meets under the line.
+    expect(within(browser).getByText("Artifacts in this domain")).toBeTruthy();
+    expect(within(browser).getByText("ops/runbook")).toBeTruthy();
   });
 
   // §4.5.5 folding can leave a domain with an empty subdomain list and an
