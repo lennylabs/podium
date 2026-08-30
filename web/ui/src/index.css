@@ -3908,6 +3908,31 @@ label:has(> input:disabled) {
   line-height: 1.55;
 }
 
+/* The correction the no-match arm offers. The chip is drawn as a control
+   rather than as a word inside the sentence, because clicking it is what puts
+   the corrected line in the field. */
+.palette-correction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.palette-correction-chip {
+  padding: 5px 11px;
+  border: 1px solid var(--b2);
+  border-radius: 7px;
+  background: var(--surf);
+  color: var(--link);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.palette-correction-chip:hover {
+  border-color: var(--link);
+}
+
 .palette-footer {
   display: flex;
   align-items: center;

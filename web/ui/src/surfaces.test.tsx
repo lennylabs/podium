@@ -12393,6 +12393,44 @@ describe("the command palette", () => {
     expect(footer.textContent).toBe("\u23cesearch anywayescclose");
   });
 
+  // A typo has one way out of the panel that is not retyping the line: the
+  // correction the catalog spells. The arm drew prose telling a reader to
+  // check the spelling and gave them nothing to check it against.
+  it("offers the nearest spelling the catalog holds and runs it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/load_artifact": { body: artifact },
+      "/v1/dependents": { body: { edges: [] } },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/catalog": { body: { ids: ["platform/span-coverage"] } },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    const field = within(panel).getByLabelText("Search artifacts");
+    fireEvent.change(field, { target: { value: "span covrage" } });
+    const correction = await within(panel).findByTestId("palette-correction");
+    expect(correction.textContent).toBe("Did you mean span coverage");
+    // The handoff to the search surface stays beside it: the correction
+    // answers a typo, and the handoff answers a query the panel cannot list.
+    expect(
+      within(panel).getByRole("button", { name: "Run it on the search surface" }),
+    ).toBeTruthy();
+    // Clicking the correction puts the corrected line in the field, which is
+    // what issues the read again.
+    fireEvent.click(
+      within(correction).getByRole("button", { name: "span coverage" }),
+    );
+    expect((field as HTMLInputElement).value).toBe("span coverage");
+    // A query nothing in the catalog is near keeps the arm as it was rather
+    // than rewriting it into an unrelated word.
+    fireEvent.change(field, { target: { value: "zzqqxx" } });
+    await within(panel).findByText(/Nothing matched “zzqqxx”/);
+    expect(within(panel).queryByTestId("palette-correction")).toBeNull();
+  });
+
   // A reopened panel is a fresh one. A panel that held the line the reader
   // last typed puts the caret at its end with nothing selected, so the
   // "open and type" gesture appends to a finished query and searches for the

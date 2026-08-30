@@ -11,7 +11,8 @@ import { useDialogFocus } from '../components/focus';
 import { useScrollLock } from '../components/scrolllock';
 import { EmptyState, ErrorState, Loading, Magnifier, TypeBadge, formatVersion } from '../components/primitives';
 import type { ArtifactDescriptor, SearchResponse } from '../api';
-import { searchArtifacts } from '../api';
+import { catalogArtifactIDs, searchArtifacts } from '../api';
+import { correctQueryLine } from './correction';
 import { hasFilters, parseQueryLine } from '../query';
 import { artifactHref, searchHref } from '../route';
 import type { Async } from '../useAsync';
@@ -116,6 +117,18 @@ function PalettePanel({
     [typed],
   );
   const rows = results.value?.results ?? [];
+  // A query that matched nothing is offered the nearest spelling the catalog
+  // holds, because prose telling a reader to check the spelling leaves them
+  // retyping a line they already believe is right. No endpoint answers "did
+  // you mean", so the vocabulary is the §4.5.2 catalog of canonical IDs and
+  // the correction is computed here. The read is issued only on the arm that
+  // has nothing to list, and the arm holds across keystrokes, so a query that
+  // matched costs nothing and a reader still typing a miss costs one read. A
+  // catalog the caller cannot read leaves the arm as it was: the correction is
+  // an offer, and a failure to make one is not a failure to report.
+  const noMatch = typed !== '' && !results.loading && results.error === null && rows.length === 0;
+  const catalog = useAsync<string[]>(async () => (noMatch ? catalogArtifactIDs('') : []), [noMatch]);
+  const correction = noMatch ? correctQueryLine(typed, catalog.value ?? []) : null;
   // The result list is drawn only on the arm PaletteResults reaches with rows
   // in hand. `aria-expanded` and `aria-activedescendant` state the arm that
   // holds a list, because a field that points at an option no page holds is
@@ -300,8 +313,10 @@ function PalettePanel({
               rows={rows}
               index={index}
               typed={typed}
+              correction={correction}
               onOpen={openRow}
               onSearch={openSearch}
+              onCorrect={runRecent}
             />
           )}
         </div>
@@ -462,15 +477,19 @@ function PaletteResults({
   rows,
   index,
   typed,
+  correction,
   onOpen,
   onSearch,
+  onCorrect,
 }: {
   results: Async<SearchResponse>;
   rows: ArtifactDescriptor[];
   index: number;
   typed: string;
+  correction: string | null;
   onOpen: (id: string) => void;
   onSearch: () => void;
+  onCorrect: (query: string) => void;
 }) {
   if (results.loading) {
     return <Loading label="Searching." />;
@@ -506,6 +525,23 @@ function PaletteResults({
             : 'Try fewer words, or check the spelling.'}{' '}
           Search covers artifact names, descriptions, and tags.
         </p>
+        {/* The correction is the one control that answers a typo, so it sits
+            above the handoff, which re-runs the query that just failed. It is
+            drawn only when the catalog holds a spelling near the typed one. */}
+        {correction !== null && (
+          <p className="palette-correction" data-testid="palette-correction">
+            <span className="quiet">Did you mean</span>{' '}
+            <button
+              type="button"
+              className="mono palette-correction-chip"
+              onClick={() => {
+                onCorrect(correction);
+              }}
+            >
+              {correction}
+            </button>
+          </p>
+        )}
         <button type="button" onClick={onSearch}>
           Run it on the search surface
         </button>
