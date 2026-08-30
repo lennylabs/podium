@@ -12337,6 +12337,59 @@ describe("the command palette", () => {
     expect(window.location.hash).toBe("#/search/deploy");
   });
 
+  // The retry inside the panel removes itself when the read it re-issues
+  // answers, and a control that unmounts leaves focus on the document body.
+  // The body is outside the dialog, so the keys the panel answers on its own
+  // element stop arriving: the arrows no longer move the highlight, ⏎ no
+  // longer opens the highlighted row, and Escape no longer closes a panel
+  // that covers the shell. The dialog takes focus back to its query field.
+  it("takes focus back to the query field when the retry inside it unmounts", async () => {
+    const stubs: Record<string, Stub> = {
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { rejects: true },
+      "/v1/load_artifact": { body: artifact },
+      "/v1/dependents": { body: { edges: [] } },
+      "/v1/layers": { body: { layers: [] } },
+    };
+    stubRegistry(stubs);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    const field = within(panel).getByLabelText("Search artifacts");
+    fireEvent.change(field, { target: { value: "review" } });
+    await within(panel).findByText("The registry did not answer this request.");
+
+    stubs["/v1/search_artifacts"] = {
+      body: {
+        total_matched: 2,
+        results: [
+          { id: "platform/review", type: "skill", version: "1.2.0" },
+          { id: "platform/deploy", type: "skill", version: "1.0.0" },
+        ],
+      },
+    };
+    // The reader presses the retry, so the retry holds focus when the answer
+    // to the read it re-issued removes it.
+    const retry = within(panel).getByRole("button", { name: "Try again" });
+    retry.focus();
+    fireEvent.click(retry);
+    await screen.findByTestId("palette-heading");
+    expect(document.activeElement).toBe(field);
+
+    // The keys the panel answers work again, which is what the restored focus
+    // buys. They are dispatched on whatever holds focus, so a key that never
+    // reaches the panel's own element is a key the panel does not answer.
+    fireEvent.keyDown(document.activeElement as Element, { key: "ArrowDown" });
+    expect(
+      within(panel)
+        .getAllByRole("option")
+        .map((row) => row.getAttribute("aria-selected")),
+    ).toEqual(["false", "true"]);
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+    expect(screen.queryByTestId("palette")).toBeNull();
+  });
+
   // The no-match line quotes the query so a reader can see where it ends, and
   // it advises dropping a filter only when the line carries one to drop.
   it("quotes the query and withholds filter advice on a line with no filter", async () => {

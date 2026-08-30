@@ -61,6 +61,9 @@ export function takeFocus(target: HTMLElement | null): void {
  * control inside it that is not a dismissal when it opens, Tab and Shift+Tab
  * cycle within it rather than walking out onto the covered surface, and focus
  * returns to whatever held it when the dialog opened once the dialog closes.
+ * Focus that leaves the dialog while it is still open, which is what a
+ * control removing itself does, is taken back the same way it was taken on
+ * opening.
  *
  * Attach the returned ref to the element carrying `role="dialog"`. The
  * element the dialog was opened from is read at that moment rather than
@@ -118,15 +121,33 @@ export function useDialogFocus<T extends HTMLElement>(
       return;
     }
     const stops = () => Array.from(dialog.querySelectorAll<HTMLElement>(focusableStops));
-    const opening = stops().filter((stop) => !stop.hasAttribute(dismissAttribute));
-    if (opening.length > 0) {
-      opening[0].focus();
-    } else {
+    const enter = () => {
+      const opening = stops().filter((stop) => !stop.hasAttribute(dismissAttribute));
+      if (opening.length > 0) {
+        opening[0].focus();
+        return;
+      }
       // A dialog whose only control dismisses it still takes the reader's
       // focus off the covered surface, so the dialog itself receives it.
       dialog.tabIndex = -1;
       dialog.focus();
-    }
+    };
+    enter();
+    // A control inside the dialog that removes itself, such as the retry on a
+    // refused read once the re-issued read answers, leaves focus on the
+    // document body. The body is outside the dialog, so every key the dialog
+    // answers on its own element stops arriving: the arrows, ⏎, and the
+    // Escape that is the keyboard reader's only way out of a panel that
+    // covers the shell. The content is watched rather than the blur, because
+    // removing the focused node does not reliably report one, and focus is
+    // taken back the same way it was taken on opening.
+    const watcher = new MutationObserver(() => {
+      if (!dialog.isConnected || dialog.contains(document.activeElement)) {
+        return;
+      }
+      enter();
+    });
+    watcher.observe(dialog, { childList: true, subtree: true });
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Tab') {
         return;
@@ -148,6 +169,7 @@ export function useDialogFocus<T extends HTMLElement>(
     };
     document.addEventListener('keydown', onKeyDown);
     return () => {
+      watcher.disconnect();
       document.removeEventListener('keydown', onKeyDown);
     };
   }, [active, identity]);
