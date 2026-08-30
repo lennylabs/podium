@@ -16,7 +16,7 @@
 import type { FormEvent, KeyboardEvent, ReactNode } from 'react';
 import { useEffect, useId, useRef, useState } from 'react';
 
-import { revealsSecret, SecretReveal } from './SecretReveal';
+import { SecretReveal, useSecretAcknowledgement } from './SecretReveal';
 import { fragment, matchGroups, members, replaceFragment, without } from './members';
 import { ErrorState, Modal } from '../components/primitives';
 import type { LayerRegistration, LayerSecretResult } from '../api';
@@ -69,6 +69,7 @@ export function RegisterLayerForm({
   const [userScoped, setUserScoped] = useState(false);
   const [users, setUsers] = useState('');
   const [result, setResult] = useState<LayerSecretResult | null>(null);
+  const secret = useSecretAcknowledgement();
   const [refusal, setRefusal] = useState<unknown>(null);
   // The dialog opens with every required field empty, so a hold stands from
   // the first paint. Stating it then would open the form on a sentence in the
@@ -200,13 +201,20 @@ export function RegisterLayerForm({
   };
 
   if (result !== null) {
-    // The secret is returned on this response and nowhere else, so while it
-    // is on screen the dialog closes only through the reveal's own
+    // The secret is returned on this response and nowhere else, so until the
+    // reader acknowledges it the dialog closes only through the reveal's own
     // acknowledgement. Escape, the scrim, and the close control would
     // discard a credential the reader can then recover only by rotating it.
+    // The acknowledgement retires that hold and the dialog dismisses again.
     return (
-      <Modal title="Layer registered" onClose={onClose} dismissible={!revealsSecret(result)}>
-        <SecretReveal result={result} outcome={`Layer ${result.layer.ID} is registered.`} onDone={onClose}>
+      <Modal title="Layer registered" onClose={onClose} dismissible={secret.dismissible(result)}>
+        <SecretReveal
+          result={result}
+          outcome={`Layer ${result.layer.ID} is registered.`}
+          acknowledged={secret.acknowledged}
+          onAcknowledge={secret.setAcknowledged}
+          onDone={onClose}
+        >
           {/* §7.3.1: registration runs no ingest, and a git source stays at
               its initial commit until a webhook delivery or the first manual
               reingest. The row the registration adds therefore reads "never"

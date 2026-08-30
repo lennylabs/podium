@@ -22,6 +22,25 @@ export function revealsSecret(
 }
 
 /**
+ * useSecretAcknowledgement holds whether the reader has stated they stored the
+ * secret, and reports whether the dialog around the reveal may offer its
+ * ordinary dismissal routes.
+ *
+ * The hold on Escape, the scrim, and the close control exists so a reader
+ * cannot leave an unrecoverable credential behind without saying they took it.
+ * Once the acknowledgement is given that reason is spent, so the dialog goes
+ * back to closing the way every other dialog does and the keyboard is a route
+ * out again. A response that carries no secret is dismissible throughout,
+ * because it leaves nothing to acknowledge.
+ */
+export function useSecretAcknowledgement() {
+  const [acknowledged, setAcknowledged] = useState(false);
+  const dismissible = (result: LayerSecretResult | null) =>
+    result === null || !revealsSecret(result) || acknowledged;
+  return { acknowledged, setAcknowledged, dismissible };
+}
+
+/**
  * SecretReveal draws the credential the registry returned once. A response
  * that carries no secret (a local-path source, or an update with no rotation)
  * carries no reveal, so the component renders the outcome alone and the caller
@@ -36,19 +55,26 @@ export function revealsSecret(
  * the acknowledgement gates the only control that closes the dialog and a
  * footer has to be the body's sibling to sit below it. A caller passes any
  * further body content as children.
+ *
+ * The acknowledgement is held by the caller through useSecretAcknowledgement,
+ * because it also decides whether the dialog around the reveal offers its
+ * ordinary dismissal routes.
  */
 export function SecretReveal({
   result,
   outcome,
+  acknowledged,
+  onAcknowledge,
   onDone,
   children,
 }: {
   result: LayerSecretResult;
   outcome: string;
+  acknowledged: boolean;
+  onAcknowledge: (acknowledged: boolean) => void;
   onDone: () => void;
   children?: ReactNode;
 }) {
-  const [acknowledged, setAcknowledged] = useState(false);
   if (!revealsSecret(result)) {
     return (
       <div className="modal-body">
@@ -89,15 +115,15 @@ export function SecretReveal({
             type="checkbox"
             checked={acknowledged}
             onChange={(event) => {
-              setAcknowledged(event.target.checked);
+              onAcknowledge(event.target.checked);
             }}
           />
           I have stored the secret.
         </label>
         {children}
       </div>
-      {/* The dialog closes only through this control while a secret is on
-          screen, so it is the footer's primary on the same terms as every
+      {/* Until the acknowledgement is given this control is the dialog's only
+          way out, so it is the footer's primary on the same terms as every
           other dialog's submit, and the note beside it names the way back for
           a reader who did not store the value. */}
       <div className="modal-foot">

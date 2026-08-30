@@ -9,7 +9,7 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 
-import { SecretReveal, revealsSecret } from "./SecretReveal";
+import { SecretReveal, useSecretAcknowledgement } from "./SecretReveal";
 import { members } from "./members";
 import { Badge, ErrorState, Modal } from "../components/primitives";
 import type { LayerRecord, LayerSecretResult, LayerUpdate } from "../api";
@@ -38,6 +38,7 @@ export function UpdateLayerForm({
   const [groups, setGroups] = useState((layer.Groups ?? []).join(", "));
   const [users, setUsers] = useState((layer.Users ?? []).join(", "));
   const [result, setResult] = useState<LayerSecretResult | null>(null);
+  const secret = useSecretAcknowledgement();
   const [refusal, setRefusal] = useState<unknown>(null);
   // A patch carrying a rotation issues a fresh webhook secret on every call,
   // and the reveal presents that secret as shown once. A second patch sent
@@ -95,19 +96,21 @@ export function UpdateLayerForm({
   if (result !== null) {
     // A rotation returns the fresh secret once, on the same terms as
     // registration, so the reveal is the one the register flow uses, and
-    // while a secret is on screen the dialog closes only through the reveal's
-    // own acknowledgement. Escape, the scrim, and the close control would
-    // discard a credential the reader can then recover only by rotating it
-    // again.
+    // until the reader acknowledges it the dialog closes only through the
+    // reveal's own acknowledgement. Escape, the scrim, and the close control
+    // would discard a credential the reader can then recover only by rotating
+    // it again. The acknowledgement retires that hold.
     return (
       <Modal
         title="Layer updated"
         onClose={done}
-        dismissible={!revealsSecret(result)}
+        dismissible={secret.dismissible(result)}
       >
         <SecretReveal
           result={result}
           outcome={`Layer ${layer.ID} is updated.`}
+          acknowledged={secret.acknowledged}
+          onAcknowledge={secret.setAcknowledged}
           onDone={done}
         />
       </Modal>

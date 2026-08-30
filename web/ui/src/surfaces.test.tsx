@@ -9829,6 +9829,46 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The hold exists so the reader cannot leave an unrecoverable credential
+  // without saying they took it. Once they have said so the reason is spent,
+  // and a dialog that still refused the keyboard would leave a reader who has
+  // satisfied the gate reaching for a pointer to close it.
+  it("returns the secret reveal to the ordinary dismissal routes once it is acknowledged", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "git",
+            Order: 1,
+            UserDefined: true,
+          },
+          webhook_url:
+            "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+          webhook_secret: "whsec-abc",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByLabelText("Webhook secret");
+    fireEvent.click(screen.getByLabelText("I have stored the secret."));
+    // The close control comes back with the rest of the routes.
+    expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Webhook secret")).toBeNull();
+    });
+  });
+
   // The browser's Back gesture is the dismissal route the dialog cannot see:
   // it fires no key and no press, and leaving the layers route unmounts the
   // panel the reveal is rendered from. It discards the same credential Escape
