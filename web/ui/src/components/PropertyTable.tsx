@@ -137,7 +137,8 @@ export function PropertyTable({
  * taller than the rest of the page and pushes the relation links off the fold
  * (§13.10). A sequence is clipped the same way a scalar is: a dozen tags one
  * per line runs the rail's table past 700px on its own, which is the state the
- * clip exists to prevent. */
+ * clip exists to prevent. Both surfaces run a sequence onto one line; the rail
+ * clips that line and the panel wraps it. */
 function PropertyValue({ property, clamp }: { property: Property; clamp: boolean }) {
   if (property.items.length > 0) {
     if (clamp) {
@@ -158,11 +159,13 @@ function PropertyValue({ property, clamp }: { property: Property; clamp: boolean
         />
       );
     }
-    // The full-width panel keeps the entries apart. Joined into one line, an
-    // entry that ends in a full stop runs into the separator and reads as
-    // `invoice., A purchase order`, where the reader cannot tell the
-    // separator from the author's own punctuation. Each entry is a list item,
-    // so a wrapped entry stays one entry (§13.10).
+    // The full-width panel runs the entries onto one line too, which is the
+    // row the design draws and the height the rows around it take. Each entry
+    // is still a list item, so a wrapped entry stays one entry and a screen
+    // reader counts them; the sheet flows the items inline and draws the
+    // separator between them in the de-emphasized tone, which is what tells an
+    // entry ending in a full stop apart from the comma that follows it
+    // (§13.10).
     return (
       <ul className="property-items" data-testid={`property-value-${property.key}`}>
         {property.items.map((item, index) => (

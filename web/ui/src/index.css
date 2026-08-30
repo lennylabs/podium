@@ -1018,25 +1018,28 @@ button.version-notice-latest {
   overflow-wrap: anywhere;
 }
 
-/* A sequence value renders one entry per line. The user-agent list indent and
-   marker are dropped, as they are on the other listings, and a marker is put
-   back only where the sequence carries more than one entry: entries that are
-   sentences wrap across several lines each, so a line break alone does not
-   say where one entry ends and the next begins. A single-entry sequence reads
-   as one value and takes no marker. */
+/* A sequence value flows onto one line, `tags | tracing, review, otel`, which
+   is the row the design draws and the height every other row in the table
+   takes. Stacked one entry per line, a twelve-tag sequence turns a single row
+   into a block of bullets and pushes the keys below it off the reader's first
+   screen. The entries stay separate list items so a screen reader still counts
+   them and a wrapped entry stays one entry; only the layout runs them
+   together. The separator is drawn rather than authored, and it takes the
+   de-emphasized tone, so an entry that ends in a full stop is still told apart
+   from the comma that follows it. */
 .property-items {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-.property-items li + li {
-  margin-top: 4px;
+.property-items li {
+  display: inline;
 }
 
-.property-items:has(li + li) {
-  padding-left: 15px;
-  list-style: disc outside;
+.property-items li + li::before {
+  content: ', ';
+  color: var(--faint);
 }
 
 /* The em dash standing for a key the author left empty. It is the absence

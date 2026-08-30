@@ -38,6 +38,21 @@ function declared(element: Element, property: string): string {
   return value;
 }
 
+/** ruleValue returns the value the rule with exactly this selector gives
+ * property, or the empty string when the sheet carries no such rule. A
+ * pseudo-element selector cannot be matched against an element, so a case that
+ * reads the drawn separator asks the sheet for the rule by name. */
+function ruleValue(selector: string, property: string): string {
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      if (rule instanceof CSSStyleRule && rule.selectorText === selector) {
+        return rule.style.getPropertyValue(property);
+      }
+    }
+  }
+  return '';
+}
+
 /** fills returns the background each row of the named table is given. */
 function fills(testID: string): string[] {
   const rows = Array.from(screen.getByTestId(testID).querySelectorAll('tbody tr'));
@@ -59,5 +74,33 @@ describe('frontmatter property table', () => {
       'property-table-panel',
     );
     expect(fills('rail-frontmatter-table')).toEqual(['', '', '']);
+  });
+
+  // A sequence takes the same one-line row every other key takes, which is what
+  // the design draws for `tags`. Stacked one entry per line, a twelve-tag
+  // sequence turns one row into a block of bullets and pushes the keys under it
+  // down the page. The entries stay list items and the sheet flows them inline
+  // with a drawn separator, so the row reads as one line without the markup
+  // losing where an entry ends.
+  // Spec: §13.10
+  it('flows a sequence value onto one line in the full-width panel', () => {
+    const sequence = ['---', 'tags:', '  - tracing', '  - review', '  - otel', '---'].join('\n');
+    render(<PropertyTable raw={sequence} offerRaw />);
+    const value = screen.getByTestId('property-value-tags');
+    expect(Array.from(value.querySelectorAll('li')).map((item) => item.textContent)).toEqual([
+      'tracing',
+      'review',
+      'otel',
+    ]);
+    expect(declared(value.querySelectorAll('li')[0], 'display')).toBe('inline');
+    // No marker and no per-entry stacking: the row is one line high.
+    expect(declared(value, 'list-style')).toBe('none');
+    expect(ruleValue('.property-items li + li', 'margin-top')).toBe('');
+    // The separator is drawn between the entries and de-emphasized, so an entry
+    // ending in a full stop is still told apart from the comma after it.
+    // The sheet keeps the quote character it was authored with, so the case
+    // reads the string the separator is rather than the way it was quoted.
+    expect(ruleValue('.property-items li + li::before', 'content').replace(/'/g, '"')).toBe('", "');
+    expect(ruleValue('.property-items li + li::before', 'color')).toBe('var(--faint)');
   });
 });

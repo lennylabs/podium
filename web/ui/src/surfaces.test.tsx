@@ -5834,14 +5834,13 @@ describe("the artifact viewer", () => {
       expect(panel.textContent).not.toContain("~");
     });
 
-    // A sequence value is several entries, and an entry is often a sentence.
-    // Joined into one line, the separator runs into the entry's own full stop
-    // and the cell reads as "invoice., A purchase order", where the reader
-    // cannot tell where one entry ends. The full-width panel is where such a
-    // sequence is read entry by entry, so each entry stands on its own line
-    // there; the rail's narrow column runs them together and clips the line.
+    // A sequence value is several entries, and both surfaces run them onto one
+    // line: the rail joins the text and clips it, and the panel keeps the
+    // entries as list items the sheet flows inline. The markup is what carries
+    // the entry boundary either way, so no entry is dropped and no entry is
+    // merged into its neighbour.
     // Spec: §13.10
-    it("states each entry of a sequence value on its own line in the panel", async () => {
+    it("carries every entry of a sequence value on both surfaces", async () => {
       stubHeights(60);
       stubRegistry({
         "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -5887,7 +5886,8 @@ describe("the artifact viewer", () => {
         "The user asks to pay a vendor invoice.",
         "A purchase order needs matching against a received invoice.",
       ]);
-      // No separator stands between an entry's full stop and the next entry.
+      // The separator is drawn by the sheet rather than authored into the
+      // text, so the entry a reader copies is the entry the author wrote.
       expect(uses?.textContent).not.toContain("invoice., A");
       expect(
         Array.from(
