@@ -74,6 +74,15 @@ export function artifactLeaf(id: string): string {
   return cut < 0 ? id : id.slice(cut + 1);
 }
 
+/** pathUnder is the stretch of a §4.2 path that lies below `parent`, which is
+ * what a name states when the levels above it are already on the page. A path
+ * that does not hang under the parent is stated whole, because a partial
+ * identifier that names no position is worse than a long one. */
+export function pathUnder(path: string, parent: string): string {
+  const prefix = parent === '' ? '' : `${parent}/`;
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+}
+
 /** artifactDomain is the §4.2 domain the artifact hangs under, which is where
  * the sidebar tree puts an open artifact. An artifact registered at the root
  * carries no domain above it, so the answer there is the empty path. */

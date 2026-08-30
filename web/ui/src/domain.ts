@@ -1,6 +1,7 @@
 // Labelling a §4.2 domain the catalog reports.
 
 import type { DomainDescriptor } from './api';
+import { pathUnder } from './route';
 
 /** domainLabel is the label an entry under `parent` carries. A §4.5.5 sparse
  * chain is collapsed by the server into one entry whose path holds every
@@ -11,8 +12,7 @@ import type { DomainDescriptor } from './api';
  * stretch of path the entry navigates across, which leaves an unfolded entry
  * on its own segment. */
 export function domainLabel(path: string, parent: string): string {
-  const prefix = parent === '' ? '' : `${parent}/`;
-  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+  return pathUnder(path, parent);
 }
 
 /** marksCurrentDomain reports whether the tree entry at `path` under `parent`

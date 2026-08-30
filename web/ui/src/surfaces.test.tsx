@@ -12465,8 +12465,75 @@ describe("the trimmed listing", () => {
     ).toBeTruthy();
     const tables = within(browser).getAllByLabelText("Artifacts");
     expect(
-      within(tables[0]).getByRole("link", { name: "platform/deploy" }),
+      within(tables[0]).getByRole("link", { name: "deploy" }),
     ).toBeTruthy();
+  });
+
+  // The at-scale table states each identifier under the domain the page is
+  // on. The heading names that domain already, so a cell carrying the whole
+  // identifier spends the column on a prefix every row shares (§13.10).
+  it("states an at-scale artifact identifier under the current domain", async () => {
+    const scope = "finance/accounts-payable/invoicing";
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: scope,
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `${scope}/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: [
+            { id: `${scope}/pay-invoice`, type: "skill", version: "2.0.0" },
+            {
+              id: `${scope}/disputes/hold-payment`,
+              type: "rule",
+              version: "1.0.0",
+            },
+          ],
+        },
+      },
+    });
+    goTo(`#/domain/${encodeURIComponent(scope)}`);
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const table = within(browser).getByLabelText("Artifacts");
+
+    // A row directly under the domain states its own name, and a row from a
+    // subdomain states the levels between, which is what tells the two apart.
+    const leaf = within(table).getByRole("link", { name: "pay-invoice" });
+    const nested = within(table).getByRole("link", {
+      name: "disputes/hold-payment",
+    });
+    expect(table.textContent).not.toContain(scope);
+    // The link still addresses the whole identifier, and carries it for a
+    // reader who needs the row's absolute name.
+    expect(leaf.getAttribute("href")).toBe(artifactHref(`${scope}/pay-invoice`));
+    expect(leaf.getAttribute("title")).toBe(`${scope}/pay-invoice`);
+    expect(nested.getAttribute("href")).toBe(
+      artifactHref(`${scope}/disputes/hold-payment`),
+    );
+
+    // The filter runs over what the column states, so a word from the shared
+    // prefix matches no row rather than every row.
+    const arthead = within(browser).getByRole("heading", {
+      name: "Artifacts",
+    }).parentElement as HTMLElement;
+    fireEvent.change(within(arthead).getByLabelText("Filter in this domain"), {
+      target: { value: "accounts-payable" },
+    });
+    expect(
+      within(browser).getByText("Clear the filter or pick another type."),
+    ).toBeTruthy();
+    fireEvent.change(within(arthead).getByLabelText("Filter in this domain"), {
+      target: { value: "disputes" },
+    });
+    expect(
+      within(browser).getByRole("link", { name: "disputes/hold-payment" }),
+    ).toBeTruthy();
+    expect(
+      within(browser).queryByRole("link", { name: "pay-invoice" }),
+    ).toBeNull();
   });
 
   // A filter that matches nothing on the at-scale surface states the outcome
@@ -12678,7 +12745,7 @@ describe("the trimmed listing", () => {
     });
     fireEvent.click(within(arthead).getByRole("button", { name: "skill" }));
     expect(
-      within(browser).getByRole("link", { name: "platform/direct-3" }),
+      within(browser).getByRole("link", { name: "direct-3" }),
     ).toBeTruthy();
     const found = within(browser).getByTestId("filter-reach");
     expect(found.textContent).not.toContain("Nothing on this page matched.");
@@ -12754,7 +12821,7 @@ describe("the trimmed listing", () => {
     // A filter that matches one row does not claim ten either.
     fireEvent.change(filter, { target: { value: "direct-1" } });
     expect(
-      within(browser).getByRole("link", { name: "platform/direct-1" }),
+      within(browser).getByRole("link", { name: "direct-1" }),
     ).toBeTruthy();
     expect(within(browser).queryByTestId("listing-continuation")).toBeNull();
 
@@ -12868,11 +12935,11 @@ describe("the trimmed listing", () => {
     fireEvent.click(artrow.getByRole("button", { name: "rule" }));
     expect(all.getAttribute("aria-pressed")).toBe("false");
     expect(
-      within(browser).queryByRole("link", { name: "platform/notes" }),
+      within(browser).queryByRole("link", { name: "notes" }),
     ).toBeNull();
     fireEvent.click(all);
     expect(
-      within(browser).getByRole("link", { name: "platform/notes" }),
+      within(browser).getByRole("link", { name: "notes" }),
     ).toBeTruthy();
 
     // The in-domain filter runs over the identifier the first column carries.
@@ -12880,7 +12947,7 @@ describe("the trimmed listing", () => {
       target: { value: "notes" },
     });
     expect(
-      within(browser).queryByRole("link", { name: "platform/lint" }),
+      within(browser).queryByRole("link", { name: "lint" }),
     ).toBeNull();
     fireEvent.change(artrow.getByLabelText("Filter in this domain"), {
       target: { value: "" },

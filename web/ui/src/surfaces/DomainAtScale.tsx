@@ -17,7 +17,7 @@ import {
   subdomainCountLabel,
 } from "../domain";
 import { formatQueryLine } from "../query";
-import { artifactHref, domainHref, searchHref } from "../route";
+import { artifactHref, domainHref, pathUnder, searchHref } from "../route";
 
 /** tileCap is how many tiles the grid shows before the reader asks for the
  * rest, which keeps a domain with dozens of children to one screen. */
@@ -280,11 +280,14 @@ export function ArtifactTable({
   const types = [...new Set(artifacts.map((artifact) => artifact.type))].sort();
   const needle = filter.trim().toLowerCase();
   // The filter runs over the identifier the first column carries, for the
-  // reason the subdomain filter runs over the tile's own label.
+  // reason the subdomain filter runs over the tile's own label. That column
+  // states the path under the current domain, so a filter run over the whole
+  // identifier would keep rows on a stretch of prefix no row prints.
   const matched = artifacts.filter(
     (artifact) =>
       (type === "" || artifact.type === type) &&
-      (needle === "" || artifact.id.toLowerCase().includes(needle)),
+      (needle === "" ||
+        pathUnder(artifact.id, scope).toLowerCase().includes(needle)),
   );
   const filtering = needle !== "" || type !== "";
   // A filter or a type chip over a trimmed listing answers for the returned
@@ -384,14 +387,22 @@ export function ArtifactTable({
             <span className="label">Curated by the domain author</span>
             <span className="mono">{curated.length}</span>
           </div>
-          <ArtifactRows rows={curated} region="Curated artifacts" />
+          <ArtifactRows
+            rows={curated}
+            scope={scope}
+            region="Curated artifacts"
+          />
         </div>
       )}
       {/* The rest carries no heading of its own. The picks above it are the
           block that is titled, and a second title over everything the domain
           returned names the listing the page is already about. */}
       {rest.length > 0 && (
-        <ArtifactRows rows={rest} region="Artifacts in this domain" />
+        <ArtifactRows
+          rows={rest}
+          scope={scope}
+          region="Artifacts in this domain"
+        />
       )}
       {/* The tail counts the rows the response returned, and a filter narrows
           what the table draws without loading any more of them. It is
@@ -513,9 +524,13 @@ function reachHref(scope: string, query: string, type: string): string {
  * reachable from the keyboard (§13.10). */
 function ArtifactRows({
   rows,
+  scope,
   region,
 }: {
   rows: ArtifactDescriptor[];
+  /** scope is the domain the page stands on, which the identifier column
+   * states each row relative to. */
+  scope: string;
   region: string;
 }) {
   return (
@@ -538,8 +553,17 @@ function ArtifactRows({
         <tbody>
           {rows.map((artifact) => (
             <tr key={artifact.id}>
+              {/* The cell states the path under the domain the page is on,
+                the way the design's own table does. The heading above the
+                table already names that domain, so a cell carrying the whole
+                identifier restates it on every row and pushes the segment
+                that tells the rows apart to the right of a prefix they all
+                share. The link still addresses the whole identifier, and a
+                title carries it for a reader who needs it. */}
               <td className="mono">
-                <a href={artifactHref(artifact.id)}>{artifact.id}</a>
+                <a href={artifactHref(artifact.id)} title={artifact.id}>
+                  {pathUnder(artifact.id, scope)}
+                </a>
               </td>
               {/* The type and the version are the same two markers the compact
                 listing and the viewer carry, so the cell renders the shared
