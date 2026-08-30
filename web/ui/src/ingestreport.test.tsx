@@ -5,12 +5,13 @@
 // calls in surfaces.test.tsx.
 
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { IngestSummary } from './api';
 import { ApiError } from './api';
 import type { ReingestOutcome } from './surfaces/ReingestControl';
 import { ReingestRunReport, ReingestStatus, runText, summaryText } from './surfaces/ReingestControl';
+import { unregisteredOn } from './surfaces/recovery';
 import { clock, elapsed } from './time';
 
 import './index.css';
@@ -405,7 +406,7 @@ describe('the finished reingest report', () => {
   it('states how long the run took, when it finished, and copies the outcome out', () => {
     report({ accepted: 184, idempotent: 97, lint_failures: 3 });
     expect(screen.getByText(/acme\/platform-artifacts · 2 minutes 48 seconds/)).toBeTruthy();
-    expect(screen.getByText('finished 14:06:22 UTC')).toBeTruthy();
+    expect(screen.getByText(`finished ${clock(finishedAt)}`)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Copy summary' })).toBeTruthy();
   });
 
@@ -444,7 +445,7 @@ describe('the copied summary', () => {
       },
       finishedAt,
     );
-    expect(text).toContain('Reingest acme/platform-artifacts finished 14:06:22 UTC');
+    expect(text).toContain(`Reingest acme/platform-artifacts finished ${clock(finishedAt)}`);
     expect(text).toContain('184 accepted, 97 unchanged, 1 rejected, 0 conflicts, 3 lint failures, 1 advisories');
     expect(text).toContain('rejected platform/deploy ingest.sensitivity_floor: above the floor');
     expect(text).toContain('warning platform/ci/check-0 lint.thin_description: advisory number 0');
@@ -469,8 +470,25 @@ describe('the report clock', () => {
     expect(elapsed(-5_000)).toBe('0 seconds');
   });
 
-  it('states the wall clock in UTC', () => {
-    expect(clock(Date.UTC(2026, 7, 26, 4, 6, 2))).toBe('04:06:02 UTC');
+  // The layer panel states two absolute times: the stamp a finished run
+  // carries, and the time of day the recovery table gives a same-day
+  // unregister. They were read off two different clocks, one rendered in UTC
+  // and labelled and one rendered in the reader's zone and unlabelled, so an
+  // operator comparing an unregistration against a reingest read a gap the
+  // width of their offset from UTC. Both are the reader's own clock now, and
+  // both name the zone.
+  it("states both of the panel's absolute times on the reader's clock, zoned", () => {
+    // The stamps are read through the platform's local-time getters, which
+    // Node resolves from TZ on each call, so the case fixes a zone west of
+    // UTC rather than depending on the one the suite happens to run in.
+    vi.stubEnv('TZ', 'America/Los_Angeles');
+    try {
+      const at = Date.UTC(2026, 7, 26, 18, 54, 2);
+      expect(clock(at)).toBe('11:54:02 PDT');
+      expect(unregisteredOn(new Date(at), at)).toBe('today, 11:54 PDT');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
@@ -625,7 +643,7 @@ describe('the finished fan-out report', () => {
 
   it('copies the whole run out, layer by layer', () => {
     const text = runText(runOutcomes, finishedAt);
-    expect(text).toContain('Reingest all finished 14:06:22 UTC: 3 layers');
+    expect(text).toContain(`Reingest all finished ${clock(finishedAt)}: 3 layers`);
     expect(text).toContain('16 accepted, 4 unchanged, 1 rejected, 0 conflicts, 2 lint failures');
     expect(text).toContain('refused acme/ops registry.invalid_config: source: invalid_config: git source requires ref');
     expect(text).toContain('Reingest acme/finance finished');

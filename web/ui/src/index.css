@@ -2078,15 +2078,21 @@ input[type="search"]::-webkit-search-cancel-button {
   white-space: nowrap;
 }
 
+/* The unregistered column carries a stamp that names its zone, so it is
+   sized for the zone name as well as for the time and holds the two on one
+   row. Broken over two lines the stamp read as two data. */
 .restore-table th:nth-child(4) {
-  width: 12%;
+  width: 15%;
 }
 
-/* The erase column carries a date, a bar, and a count on one row, so it is
-   the widest column after the identifier and the floor above is what keeps
-   the three of them on that row. */
+.restore-table td:nth-child(4) {
+  white-space: nowrap;
+}
+
+/* The erase column carries a date, a bar, and a count on one row, and the
+   floor above is what keeps the three of them on that row. */
 .restore-table th:nth-child(5) {
-  width: 24%;
+  width: 21%;
 }
 
 .restore-table th:last-child {

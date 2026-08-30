@@ -31,6 +31,7 @@ import {
   searchHref,
 } from "./route";
 import type { SessionPosture } from "./session";
+import { zone } from "./time";
 // The stylesheet is imported for its own sake: the wrapping rule the rail
 // depends on is asserted from the computed style it produces.
 import "./index.css";
@@ -10965,7 +10966,10 @@ describe("the layer write flows", () => {
     expect(
       screen.getByText(/^alice-personal · \d+ (second|minute)/),
     ).toBeTruthy();
-    expect(screen.getByText(/^finished \d\d:\d\d:\d\d UTC$/)).toBeTruthy();
+    // The stamp is the reader's own clock and names the zone, which is the
+    // same convention the recovery table's unregistered column reads on.
+    const stamp = screen.getByText(/^finished \d\d:\d\d:\d\d /);
+    expect(stamp.textContent?.endsWith(` ${zone(new Date())}`)).toBe(true);
     expect(screen.getByLabelText("Advisories")).toBeTruthy();
     // The itemised lists sit behind the counts that carry them.
     expect(screen.queryByLabelText("Rejected artifacts")).toBeNull();

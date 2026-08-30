@@ -1,3 +1,5 @@
+import { zone } from '../time';
+
 // The §8.4 recovery window, shared by the surface that unregisters a layer
 // and the surface that lists what is still restorable. Both state the window
 // as the calendar date it runs out on rather than as a duration the reader
@@ -32,7 +34,10 @@ const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 /** unregisteredOn renders when a layer was unregistered. A layer unregistered
  * earlier the same day is stated as the time of day, because the reader who
  * is looking for it is looking for something they did minutes ago and the
- * day's own date tells them nothing. */
+ * day's own date tells them nothing. The time of day names its zone, so it
+ * reads on the same clock as the finished-run stamp the reingest report in
+ * the same panel states, and an operator comparing the two is not left to
+ * assume one of them is UTC. */
 export function unregisteredOn(at: Date, now: number): string {
   const today = new Date(now);
   const sameDay =
@@ -43,7 +48,7 @@ export function unregisteredOn(at: Date, now: number): string {
     return calendarDate(at);
   }
   const pad = (value: number) => String(value).padStart(2, '0');
-  return `today, ${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  return `today, ${pad(at.getHours())}:${pad(at.getMinutes())} ${zone(at)}`;
 }
 
 /** erasesOn returns the date the recovery window runs out for a layer

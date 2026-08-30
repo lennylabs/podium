@@ -39,12 +39,40 @@ export function elapsed(ms: number): string {
   return rest === 0 ? minutePart : `${minutePart} ${secondPart}`;
 }
 
-/** clock renders a wall-clock stamp in UTC, which is what a report of a
- * finished run states. The zone is named rather than left to the reader's
- * locale, because the stamp is quoted into an issue or a chat message
- * alongside the registry's own logs. */
+/** zone names the reader's own time zone, as the short name the platform
+ * gives it (`PDT`, `CEST`, `UTC`) or the GMT offset where it has no short
+ * name. Every absolute time this UI states is stated in the reader's zone and
+ * carries this name, so a stamp read off one surface can be compared against
+ * a stamp read off another and can be quoted into an issue without the reader
+ * having to say which clock it came from. */
+export function zone(at: Date): string {
+  const named = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' })
+    .formatToParts(at)
+    .find((part) => part.type === 'timeZoneName');
+  // Every implementation that honours timeZoneName emits the part, so the
+  // offset below is a stand-in for one that does not rather than a branch a
+  // browser reaches.
+  return named ? named.value : gmtOffset(at);
+}
+
+function gmtOffset(at: Date): string {
+  const minutes = -at.getTimezoneOffset();
+  const sign = minutes < 0 ? '-' : '+';
+  const size = Math.abs(minutes);
+  return `GMT${sign}${pad(Math.floor(size / 60))}:${pad(size % 60)}`;
+}
+
+/** clock renders a wall-clock stamp in the reader's own zone and names that
+ * zone. The layer panel states the time a layer was unregistered on the same
+ * clock, so a reader comparing a finished run against an unregistration reads
+ * one convention rather than two. The zone is named rather than left implicit,
+ * because the stamp is quoted into an issue or a chat message alongside the
+ * registry's own logs. */
 export function clock(at: number): string {
   const when = new Date(at);
-  const pad = (value: number) => String(value).padStart(2, '0');
-  return `${pad(when.getUTCHours())}:${pad(when.getUTCMinutes())}:${pad(when.getUTCSeconds())} UTC`;
+  return `${pad(when.getHours())}:${pad(when.getMinutes())}:${pad(when.getSeconds())} ${zone(when)}`;
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0');
 }
