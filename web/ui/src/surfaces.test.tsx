@@ -6210,6 +6210,40 @@ describe("the layer panel", () => {
     expect(bar?.querySelectorAll("button").length).toBe(2);
   });
 
+  // A refusal is drawn on the row and on the action that was attempted. The
+  // panel stacks one Reingest button per layer and draws the banner in a row
+  // under the layer it belongs to, so a trigger left in its ordinary tone
+  // leaves the reader inferring which control produced the banner from where
+  // the banner sits.
+  it("tints the Reingest button a refusal was attempted from and no other", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+      "/v1/layers/reingest?id=company": {
+        status: 503,
+        body: {
+          code: "registry.unavailable",
+          message: "the store is unreachable",
+          retryable: true,
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const refusedTrigger = reingestTrigger("company");
+    const untouched = reingestTrigger("alice-personal");
+    expect(refusedTrigger.className).not.toContain("action-refused");
+    fireEvent.click(refusedTrigger);
+    await screen.findByLabelText("Reingest refused");
+    expect(refusedTrigger.className).toContain("action-refused");
+    // Every other row's action stays in its ordinary tone.
+    expect(untouched.className).not.toContain("action-refused");
+    // Dismissing the refusal clears the tone with it.
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(refusedTrigger.className).not.toContain("action-refused");
+  });
+
   it("renders one marker per matching visibility axis and summarises an axis that overflows", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -10975,6 +11009,17 @@ function layerRow(id: string): HTMLElement {
     throw new Error(`no layer row for ${id}`);
   }
   return row;
+}
+
+/** reingestTrigger is one row's Reingest button, which the action bar draws
+ * before the overflow control. It is read off the row rather than by name,
+ * because every row carries a button with the same name. */
+function reingestTrigger(id: string): HTMLButtonElement {
+  const button = layerRow(id).querySelector(".row-action-bar button");
+  if (button === null) {
+    throw new Error(`no Reingest trigger for ${id}`);
+  }
+  return button as HTMLButtonElement;
 }
 
 /** details is the source cell's location lines on one row, each read whole

@@ -55,6 +55,17 @@ export type ReingestState =
 
 export const idleReingest: ReingestState = { kind: 'idle' };
 
+/** refusedReingest is whether the state is a refusal the row draws in danger
+ * tokens. The panel stacks one Reingest button per layer and draws the
+ * refusal banner in a full-width row under the layer it belongs to, so with
+ * the trigger left in its ordinary tone nothing on the row says which control
+ * produced the banner. The freeze window is not one of these: it answers with
+ * a confirmation that offers the override rather than with a refusal the
+ * reader can only dismiss. */
+export function refusedReingest(state: ReingestState): boolean {
+  return state.kind === 'refused' || state.kind === 'rejected';
+}
+
 /** reingestRefusal classifies what a reingest request failed with. The
  * whole-snapshot rejection and the freeze window each have a treatment of
  * their own, and every other code the pipeline answers with, including
@@ -103,6 +114,11 @@ export function ReingestButton({
     <button
       ref={buttonRef}
       type="button"
+      // The refusal is drawn on the action that was attempted as well as on
+      // the row, so the trigger carries the danger tone for as long as its
+      // own refusal stands and clears it when the refusal is dismissed or
+      // the next attempt opens.
+      className={refusedReingest(state) ? 'action-refused' : undefined}
       disabled={readOnly || held === true || state.kind === 'running'}
       onClick={() => {
         onStart();

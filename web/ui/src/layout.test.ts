@@ -1446,6 +1446,45 @@ describe("layer row overflow menu", () => {
   });
 });
 
+// The action a refused write was attempted from carries the refusal with the
+// row it belongs to. Left in the ordinary tone it is pixel-identical to every
+// other row action in the stack, and which control produced the banner under
+// the row can only be read off the banner's position.
+describe("refused row action", () => {
+  /** action attaches a row action button carrying the given classes and
+   * returns it. The tone is declared on `button.action-refused`, so a div
+   * matches neither the base control rule nor the refusal rule. */
+  function action(className: string): HTMLElement {
+    const button = document.createElement("button");
+    button.className = className;
+    document.body.appendChild(button);
+    mounted.push(button);
+    return button;
+  }
+
+  it("draws the attempted action in the danger tone", () => {
+    const refused = action("action-refused");
+    expect(declaredFor(refused, "border-color")).toBe("var(--danger-bd)");
+    expect(declaredFor(refused, "background")).toBe("var(--danger-bg)");
+    expect(declaredFor(refused, "color")).toBe("var(--danger)");
+  });
+
+  it("keeps it distinct from the untouched action beside it", () => {
+    const plain = action("");
+    expect(declaredFor(plain, "background")).toBe("var(--surf2)");
+    expect(declaredFor(plain, "color")).toBe("var(--ink)");
+  });
+
+  // A read-only registry mutes every write control, and the muted tone is
+  // declared after the base control rule. A refusal already drawn on a
+  // control keeps its own tone over that.
+  it("keeps the refusal tone on a control the registry has muted", () => {
+    const refused = action("action-refused");
+    refused.setAttribute("disabled", "");
+    expect(declaredFor(refused, "color")).toBe("var(--danger)");
+  });
+});
+
 // Every dialog footer puts its controls at the trailing edge. The alignment
 // came from the `flex: 1` on the footer's note, so a footer that carries no
 // note drew Cancel and its primary against the leading edge instead. jsdom

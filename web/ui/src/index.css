@@ -2143,6 +2143,19 @@ input:disabled {
   cursor: not-allowed;
 }
 
+/* The control a refused write was attempted from. The refusal is drawn on
+   the row and on the action that produced it, so a reader looking at a stack
+   of identical row actions can tell which one the banner under the row
+   belongs to. It is outlined rather than filled, because the control is still
+   live and pressing it re-issues the write. The rule sits after the disabled
+   block so a control refused on a read-only registry keeps the refusal tone
+   rather than the muted one. */
+button.action-refused {
+  border-color: var(--danger-bd);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
 /* A checkbox carries its meaning in the text beside it, so the label mutes
    with the box it labels. */
 label:has(> input:disabled) {
