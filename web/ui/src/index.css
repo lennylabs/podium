@@ -2579,6 +2579,31 @@ label:has(> input:disabled) {
   margin-inline: auto;
 }
 
+/* The correction the no-match arm offers, drawn under the sentence it
+   answers. The chip is a control rather than a word inside the sentence,
+   because pressing it is what puts the corrected line in the query field. */
+.search-correction {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.search-correction-chip {
+  padding: 5px 11px;
+  border: 1px solid var(--b2);
+  border-radius: 7px;
+  background: var(--surf);
+  color: var(--link);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.search-correction-chip:hover {
+  border-color: var(--link);
+}
+
 /* The page preset replaces a whole listing, so it takes the solid card the
    listing would have occupied. */
 .empty-page {

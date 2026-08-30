@@ -3574,6 +3574,66 @@ describe("search", () => {
     ).toBeTruthy();
   });
 
+  // Spec: §13.10 — the palette hands its query to this surface, so a query
+  // the palette answered with a correction must not land on a surface that
+  // has dropped it. The correction is derived from the same §4.5.2 catalog
+  // and offered as the same control.
+  it("offers the nearest spelling the catalog holds when the query matched nothing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/catalog": { body: { ids: ["eng/deploy"] } },
+    });
+    goTo("#/search/deploi");
+    render(<App />);
+    const correction = await screen.findByTestId("search-correction");
+    expect(correction.textContent).toBe("Did you mean deploy");
+    // Running it puts the corrected line in the field, which is what issues
+    // the read again and writes the corrected search into the address bar.
+    fireEvent.click(within(correction).getByRole("button", { name: "deploy" }));
+    expect(
+      (screen.getByLabelText("Search artifacts") as HTMLInputElement).value,
+    ).toBe("deploy");
+    await waitFor(() => {
+      expect(window.location.hash).toBe(searchHref("deploy"));
+    });
+  });
+
+  // Spec: §13.10
+  it("corrects the query text and leaves the applied filters standing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/catalog": { body: { ids: ["eng/deploy"] } },
+    });
+    goTo("#/search/type:context deploi");
+    render(<App />);
+    const correction = await screen.findByTestId("search-correction");
+    // The filter is drawn as a pill beside the field, so the chip names the
+    // rewritten word alone, and running it keeps the filter applied.
+    expect(correction.textContent).toBe("Did you mean deploy");
+    fireEvent.click(within(correction).getByRole("button", { name: "deploy" }));
+    await waitFor(() => {
+      expect(window.location.hash).toBe(searchHref("type:context deploy"));
+    });
+  });
+
+  // Spec: §13.10
+  it("leaves the no-match arm as it stands when the catalog spells nothing near the query", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/catalog": { body: { ids: ["eng/deploy"] } },
+    });
+    goTo("#/search/zzqqxx");
+    render(<App />);
+    await screen.findByText("Nothing matched");
+    expect(screen.queryByTestId("search-correction")).toBeNull();
+  });
+
   it("offers clearing a filter only when the row carries one", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },

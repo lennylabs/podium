@@ -15,7 +15,8 @@ import { ArtifactRow } from "../components/ArtifactRow";
 import { usePopupDismiss } from "../components/focus";
 import { Chevron, EmptyState, ErrorState, Loading, Magnifier } from "../components/primitives";
 import type { SearchFilters, SearchResponse } from "../api";
-import { loadDomain, searchArtifacts } from "../api";
+import { catalogArtifactIDs, loadDomain, searchArtifacts } from "../api";
+import { correctQueryLine } from "./correction";
 import { scopePaths } from "../domain";
 import { formatQueryLine, hasFilters, parseQueryLine, parseTypedLine } from "../query";
 import { parseRoute, replaceRoute, searchHref } from "../route";
@@ -204,6 +205,22 @@ export function SearchSurface({
   const body = search.value;
   const filtered = type !== "" || scope !== "" || tags.length > 0;
   const queried = text !== "";
+  // A query that matched nothing is offered the nearest spelling the catalog
+  // holds, which is the recovery the palette offers over the same query and
+  // the same catalog. The palette hands its query to this surface, so a
+  // correction that survives the handoff is the one the reader was already
+  // being offered. No endpoint answers "did you mean", so the vocabulary is
+  // the §4.5.2 catalog of canonical IDs and the correction is derived from
+  // it here. The read is issued only on the arm that has nothing to list, and
+  // a catalog the caller cannot read leaves the arm as it was: the correction
+  // is an offer, and a failure to make one is not a failure to report.
+  const noMatch =
+    queried && !search.loading && search.error === null && (body?.results ?? []).length === 0;
+  const catalog = useAsync<string[]>(
+    async () => (noMatch ? catalogArtifactIDs("") : []),
+    [noMatch],
+  );
+  const correction = noMatch ? correctQueryLine(line, catalog.value ?? []) : null;
   // What the row and the list drew is also stated for a reader who cannot see
   // it. Typing a query or narrowing a filter swaps the count and can replace
   // the whole list with a sentence, and neither change moves focus, so
@@ -316,6 +333,17 @@ export function SearchSurface({
         search={search}
         filtered={filtered}
         queried={queried}
+        correction={correction}
+        onCorrect={(corrected) => {
+          // The correction is a whole query line, so it is applied the way an
+          // arriving route is: the filters it carried through stand and the
+          // rewritten text replaces what the reader typed.
+          const spelled = parseQueryLine(corrected);
+          setType(spelled.type);
+          setScope(spelled.scope);
+          setTags(spelled.tags);
+          setText(spelled.query);
+        }}
         continuing={continuing}
         onMore={(step) => {
           handoff.current = { key, from: (body?.results ?? []).length };
@@ -524,14 +552,18 @@ function SearchResults({
   search,
   filtered,
   queried,
+  correction,
   continuing,
   onMore,
+  onCorrect,
 }: {
   search: Async<SearchResponse>;
   filtered: boolean;
   queried: boolean;
+  correction: string | null;
   continuing: boolean;
   onMore: (step: number) => void;
+  onCorrect: (query: string) => void;
 }) {
   if (search.loading && !continuing) {
     return <Loading label="Searching." />;
@@ -565,6 +597,28 @@ function SearchResults({
         {filtered
           ? "Widen the query or clear a filter."
           : "Widen the query."}
+        {/* The correction answers a misspelling, which widening the query
+            does not: a reader who typed the word wrong has no shorter way in.
+            It is drawn only when the catalog holds a spelling near the typed
+            one, and running it rewrites the field rather than the filters. */}
+        {correction !== null && (
+          <span className="search-correction" data-testid="search-correction">
+            <span className="quiet">Did you mean</span>{" "}
+            <button
+              type="button"
+              className="mono search-correction-chip"
+              onClick={() => {
+                onCorrect(correction);
+              }}
+            >
+              {/* The chip names the rewritten query text alone. The filters
+                  the correction carried through are already drawn as pills
+                  beside the field, and restating them in the chip offers the
+                  reader a line they can see is applied. */}
+              {parseQueryLine(correction).query}
+            </button>
+          </span>
+        )}
       </EmptyState>
     );
   }
