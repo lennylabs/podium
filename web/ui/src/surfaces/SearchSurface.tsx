@@ -16,7 +16,7 @@ import { usePopupDismiss } from "../components/focus";
 import { Chevron, EmptyState, ErrorState, Loading, Magnifier } from "../components/primitives";
 import type { SearchFilters, SearchResponse } from "../api";
 import { catalogArtifactIDs, loadDomain, searchArtifacts } from "../api";
-import { correctQueryLine } from "./correction";
+import { useOfferedCorrection } from "./correction";
 import { scopePaths } from "../domain";
 import { formatQueryLine, hasFilters, parseQueryLine, parseTypedLine } from "../query";
 import { parseRoute, replaceRoute, searchHref } from "../route";
@@ -240,7 +240,7 @@ export function SearchSurface({
     async () => (noMatch ? catalogArtifactIDs("") : []),
     [noMatch],
   );
-  const correction = noMatch ? correctQueryLine(line, catalog.value ?? []) : null;
+  const correction = useOfferedCorrection(line, catalog.value ?? [], noMatch);
   // What the row and the list drew is also stated for a reader who cannot see
   // it. Typing a query or narrowing a filter swaps the count and can replace
   // the whole list with a sentence, and neither change moves focus, so

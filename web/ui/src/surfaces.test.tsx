@@ -3634,6 +3634,11 @@ describe("search", () => {
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": { body: emptyDomain },
       "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      // The candidate is run under the applied filters before it is offered,
+      // so the fixture answers the corrected query with the match it holds.
+      "/v1/search_artifacts?query=deploy&top_k=1": {
+        body: { total_matched: 1, results: [{ id: "eng/deploy" }] },
+      },
       "/v1/catalog": { body: { ids: ["eng/deploy"] } },
     });
     goTo("#/search/deploi");
@@ -3657,6 +3662,9 @@ describe("search", () => {
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": { body: emptyDomain },
       "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/search_artifacts?query=deploy&type=context&top_k=1": {
+        body: { total_matched: 1, results: [{ id: "eng/deploy" }] },
+      },
       "/v1/catalog": { body: { ids: ["eng/deploy"] } },
     });
     goTo("#/search/type:context deploi");
@@ -3683,6 +3691,31 @@ describe("search", () => {
     render(<App />);
     await screen.findByText("Nothing matched");
     expect(screen.queryByTestId("search-correction")).toBeNull();
+  });
+
+  // Spec: §13.10 — the vocabulary is the whole catalog, and the surface is
+  // searching under a filter the catalog does not record, so the nearest
+  // spelling can be one the filter excludes. Offering it spends the reader's
+  // one way out of a typo on a second empty page.
+  it("withholds a correction the applied filters exclude", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      // `invoice` is spelled only by finance/ap/pay-invoice, which the eng
+      // scope excludes, so every search here answers with nothing.
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/catalog": {
+        body: { ids: ["eng/deploy", "finance/ap/pay-invoice"] },
+      },
+    });
+    goTo("#/search/scope:eng invoyce");
+    render(<App />);
+    // The remedy names the filter, which is what excluded the match the
+    // catalog spells.
+    await screen.findByText("Widen the query or clear a filter.");
+    await waitFor(() => {
+      expect(screen.queryByTestId("search-correction")).toBeNull();
+    });
   });
 
   it("offers clearing a filter only when the row carries one", async () => {
@@ -12744,6 +12777,11 @@ describe("the command palette", () => {
       "/v1/load_artifact": { body: artifact },
       "/v1/dependents": { body: { edges: [] } },
       "/v1/layers": { body: { layers: [] } },
+      // The candidate is run before it is offered, so the fixture answers the
+      // corrected query with the match it holds.
+      "/v1/search_artifacts?query=span+coverage&top_k=1": {
+        body: { total_matched: 1, results: [{ id: "platform/span-coverage" }] },
+      },
       "/v1/catalog": { body: { ids: ["platform/span-coverage"] } },
     });
     render(<App />);
@@ -12769,6 +12807,33 @@ describe("the command palette", () => {
     fireEvent.change(field, { target: { value: "zzqqxx" } });
     await within(panel).findByText(/Nothing matched “zzqqxx”/);
     expect(within(panel).queryByTestId("palette-correction")).toBeNull();
+  });
+
+  // Spec: §13.10 — the line carries a filter the catalog does not record, so
+  // the nearest spelling the catalog holds can be one the filter excludes.
+  it("withholds a correction the filters on the line exclude", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      // `invoice` is spelled only under finance, so no search under the eng
+      // scope answers with anything.
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/catalog": {
+        body: { ids: ["eng/deploy", "finance/ap/pay-invoice"] },
+      },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    const field = within(panel).getByLabelText("Search artifacts");
+    fireEvent.change(field, { target: { value: "scope:eng invoyce" } });
+    // The arm names the filter as what the reader can drop, and offers no
+    // correction that would land on the same empty panel.
+    await within(panel).findByText(/drop a filter from the line/);
+    await waitFor(() => {
+      expect(within(panel).queryByTestId("palette-correction")).toBeNull();
+    });
   });
 
   // A registry holding no artifact is not a query that missed. The panel once

@@ -4,7 +4,9 @@
 // caller can see is the only untruncated list of what the registry holds, and
 // the words those IDs spell are the vocabulary a typo was aimed at.
 
+import { searchArtifacts } from '../api';
 import { formatQueryLine, parseQueryLine } from '../query';
+import { useAsync } from '../useAsync';
 
 /** editCap is the largest edit distance a correction may cross, measured
  * against the length of the word the reader typed. A fixed cap of two rewrites
@@ -106,4 +108,29 @@ export function correctQueryLine(line: string, ids: string[]): string | null {
     return null;
   }
   return formatQueryLine({ ...filters, query: words.join(' ') });
+}
+
+/**
+ * useOfferedCorrection is the correction a surface draws. A correction is an
+ * offer to run a query, so it is withheld unless running it lands somewhere:
+ * the vocabulary is the whole catalog the caller can see, while the surface is
+ * searching under a type, a scope, or a tag the catalog does not record, so
+ * the nearest spelling can be one the applied filters exclude. Offering it
+ * puts the reader on a second empty page with the correction spent and nothing
+ * naming the filter that excluded it. The candidate is therefore run against
+ * the same filters before it is drawn, and a run that matches nothing leaves
+ * the empty state to name the filter instead. The read is issued only on the
+ * arm that has nothing to list and only when a candidate exists, and a run
+ * that fails withholds the offer rather than reporting a failure.
+ */
+export function useOfferedCorrection(line: string, ids: string[], live: boolean): string | null {
+  const candidate = live ? correctQueryLine(line, ids) : null;
+  const admitted = useAsync<string | null>(async () => {
+    if (candidate === null) {
+      return null;
+    }
+    const body = await searchArtifacts(parseQueryLine(candidate), 1);
+    return (body.results ?? []).length > 0 ? candidate : null;
+  }, [candidate]);
+  return admitted.value;
 }

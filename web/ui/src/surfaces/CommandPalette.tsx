@@ -12,7 +12,7 @@ import { useScrollLock } from '../components/scrolllock';
 import { EmptyState, ErrorState, Loading, Magnifier, TypeBadge, formatVersion } from '../components/primitives';
 import type { ArtifactDescriptor, SearchResponse } from '../api';
 import { catalogArtifactIDs, searchArtifacts } from '../api';
-import { correctQueryLine } from './correction';
+import { useOfferedCorrection } from './correction';
 import { hasFilters, parseQueryLine } from '../query';
 import { artifactHref, layersHref, searchHref } from '../route';
 import type { Async } from '../useAsync';
@@ -128,7 +128,7 @@ function PalettePanel({
   // an offer, and a failure to make one is not a failure to report.
   const noMatch = typed !== '' && !results.loading && results.error === null && rows.length === 0;
   const catalog = useAsync<string[]>(async () => (noMatch ? catalogArtifactIDs('') : []), [noMatch]);
-  const correction = noMatch ? correctQueryLine(typed, catalog.value ?? []) : null;
+  const correction = useOfferedCorrection(typed, catalog.value ?? [], noMatch);
   // The same read is the catalog's own census. An empty ID list is a registry
   // holding no artifact, so no spelling and no filter could have matched, and
   // advice about the query sends the reader to refine a line against nothing
