@@ -87,6 +87,26 @@ interface Run {
   finishedAt: number | null;
 }
 
+/** Outcome is what the last committed write did, and whether the reader can
+ * see that it happened without being told. A reorder leaves the rows in their
+ * new order on the page, so it is announced alone. An unregister takes its row
+ * away and moves the layer into a recovery window that ends, and neither the
+ * window nor where the layer went is stated anywhere else on the surface, so
+ * it is drawn as well as announced. */
+type Outcome = { text: string; visible: boolean };
+
+const noOutcome: Outcome = { text: "", visible: false };
+
+/** announced holds an outcome the page already shows the effect of. */
+function announced(text: string): Outcome {
+  return { text, visible: false };
+}
+
+/** drawn holds an outcome the reader is left with no on-screen trace of. */
+function drawn(text: string): Outcome {
+  return { text, visible: true };
+}
+
 export function LayerPanel({
   subject,
   readOnly,
@@ -130,7 +150,7 @@ export function LayerPanel({
   // is no report at all to the operator driving the handle from the keyboard,
   // and an unregister takes its own row away, so neither leaves anything on
   // the page that names what happened.
-  const [outcome, setOutcome] = useState("");
+  const [outcome, setOutcome] = useState<Outcome>(noOutcome);
   // The heading is where focus lands when a write removes the control it was
   // started from. The row's controls go with the row, and focus left on the
   // document body puts the reader back at the top of the page.
@@ -274,7 +294,7 @@ export function LayerPanel({
       reorderLayers(order).then(
         () => {
           clearRefusal(from);
-          setOutcome(movedNote(rows, order, from));
+          setOutcome(announced(movedNote(rows, order, from)));
           afterWrite();
         },
         (err: unknown) => {
@@ -297,7 +317,7 @@ export function LayerPanel({
     }
     const onto = block[at + delta];
     if (onto === undefined) {
-      setOutcome(blockEdgeNote(block, id, delta));
+      setOutcome(announced(blockEdgeNote(block, id, delta)));
       return;
     }
     commitMove(id, onto.ID);
@@ -485,7 +505,7 @@ export function LayerPanel({
                     recoverable.reload();
                   }}
                   onUnregistered={() => {
-                    setOutcome(unregisteredNote(layer.ID));
+                    setOutcome(drawn(unregisteredNote(layer.ID)));
                     takeFocus(heading.current);
                   }}
                   onRefusal={(err, retry) => {
@@ -505,12 +525,12 @@ export function LayerPanel({
           in the accessibility tree when the change happens, and the
           announcement is dropped. */}
       <p
-        className="assistive-only"
+        className={outcome.visible ? "banner banner-accent" : "assistive-only"}
         role="status"
         aria-live="polite"
         data-testid="panel-announcement"
       >
-        {outcome}
+        {outcome.text}
       </p>
       <PanelFoot rows={rows} subject={subject} readOnly={readOnly} />
     </section>

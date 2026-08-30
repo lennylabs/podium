@@ -7760,6 +7760,71 @@ describe("the layer write flows", () => {
     );
   });
 
+  // An unregister is the panel's destructive write, and what it leaves on the
+  // page is a row that is gone. Where the layer went and how long it can be
+  // restored from there are stated nowhere else on the surface, so the
+  // outcome is drawn as a banner as well as announced, the way the restore on
+  // the deleted-layer surface states its own outcome.
+  it("draws the unregister outcome on the page, with the recovery window", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "DELETE /v1/layers": { body: {} },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    expect(screen.getByTestId("panel-announcement").className).toContain(
+      "assistive-only",
+    );
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
+    await screen.findByLabelText("Unregister alice-personal");
+    fireEvent.change(screen.getByLabelText("Type the layer ID to confirm"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Unregister layer" }));
+    const region = await screen.findByTestId("panel-announcement");
+    await waitFor(() => {
+      expect(region.className).toContain("banner");
+    });
+    expect(region.className).not.toContain("assistive-only");
+    // The text the sighted reader now gets is the whole outcome, including
+    // where the layer went and when it stops being recoverable.
+    expect(region.textContent).toContain(
+      "restorable from Recently unregistered until",
+    );
+  });
+
+  // A reorder leaves the rows in their new order on the page, so its outcome
+  // is announced and not drawn. Drawing every outcome would put a banner
+  // under the table restating a move the reader has just watched happen.
+  it("keeps the reorder outcome out of the page and in the live region alone", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layers: [adminLayer(), userLayer(), scratchLayer()] },
+      },
+      "/v1/layers/reorder": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.keyDown(
+      screen.getByLabelText(moveHandleLabel("alice-personal")),
+      { key: "ArrowDown" },
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("panel-announcement").textContent).toBe(
+        "alice-personal moved to order 3 of 3.",
+      );
+    });
+    expect(screen.getByTestId("panel-announcement").className).toBe(
+      "assistive-only",
+    );
+  });
+
   // The row's overflow menu is a transient popup, and every other overlay in
   // the shell leaves on Escape. A popup whose only exit is its own trigger
   // strands a reader who opened it to look, and one that survives a press
