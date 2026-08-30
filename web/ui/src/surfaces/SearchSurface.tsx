@@ -488,6 +488,11 @@ function TokenEntry({
       <input
         type="text"
         aria-label={`Add a ${label} filter`}
+        // The dashed pill this field replaces carries the only statement of
+        // what the control takes, and it is gone once the field is open. The
+        // placeholder restates it, so the open field does not read as an empty
+        // capsule with a lone Add button at its right.
+        placeholder={`Filter by ${label}`}
         value={typed}
         autoFocus
         onChange={(event) => {

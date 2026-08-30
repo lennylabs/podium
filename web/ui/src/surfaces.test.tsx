@@ -2865,6 +2865,26 @@ describe("search", () => {
     });
   });
 
+  // The dashed pill states what the control takes, and it is gone once the
+  // field stands in its place, so the open field states it itself. Without the
+  // placeholder the entry reads as an empty capsule with a lone Add button.
+  it("states what the tag entry takes while it stands open", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    await screen.findByLabelText("Search");
+
+    fireEvent.click(screen.getByRole("button", { name: "+ tag" }));
+    expect(
+      (screen.getByLabelText("Add a tag filter") as HTMLInputElement)
+        .placeholder,
+    ).toBe("Filter by tag");
+  });
+
   // The tag entry stands in the add control's place while it is open, so a
   // reader who opened it to look and then moved on loses the control for the
   // rest of the session unless it dismisses itself. It carries the paths
