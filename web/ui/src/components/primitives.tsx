@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api';
 import { atCatalogRoute, domainHref } from '../route';
-import { dismissAttribute, holdDismissal, useDialogFocus } from './focus';
+import { dismissAttribute, holdDismissal, requestRetryFocus, useDialogFocus, useRetryFocus } from './focus';
 import { useScrollLock } from './scrolllock';
 
 export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
@@ -485,6 +485,10 @@ export function ErrorPage({
         ? 'The request was refused'
         : title;
   const offerRetry = onRetry !== undefined && (envelope === null || envelope.retryable);
+  // A retry that refuses again is rendered as a fresh control, so the control
+  // that was pressed takes the focus back rather than leaving the reader on
+  // the document body.
+  const retryControl = useRetryFocus<HTMLButtonElement>();
   const offerRecovery = children !== undefined && children !== null && children !== false;
   // The way off is omitted on the route it leads to. The catalog read can fail
   // at the registry root, and there the link navigates to the route already on
@@ -513,7 +517,15 @@ export function ErrorPage({
         {(offerRetry || offerRecovery || offerBack) && (
           <div className="error-actions">
             {offerRetry && (
-              <button type="button" className="button primary" onClick={onRetry}>
+              <button
+                type="button"
+                className="button primary"
+                ref={retryControl}
+                onClick={() => {
+                  requestRetryFocus();
+                  onRetry();
+                }}
+              >
                 Retry
               </button>
             )}
@@ -564,6 +576,7 @@ export function ErrorState({
 }) {
   const envelope = error instanceof ApiError ? error : null;
   const retryable = envelope === null || envelope.retryable;
+  const retryControl = useRetryFocus<HTMLButtonElement>();
   return (
     <div className="banner banner-danger" role="alert" data-testid={testID}>
       <p className="banner-title">{title}</p>
@@ -572,7 +585,14 @@ export function ErrorState({
       {envelope !== null && envelope.suggestedAction !== '' && <p className="quiet">{envelope.suggestedAction}</p>}
       {onRetry !== undefined &&
         (retryable ? (
-          <button type="button" onClick={onRetry}>
+          <button
+            type="button"
+            ref={retryControl}
+            onClick={() => {
+              requestRetryFocus();
+              onRetry();
+            }}
+          >
             Try again
           </button>
         ) : (

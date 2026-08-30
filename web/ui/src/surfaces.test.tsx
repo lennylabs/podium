@@ -15275,6 +15275,54 @@ describe("a registry that did not answer", () => {
       ).toBe(sent + 1);
     });
   });
+
+  // The retry is removed while the read it re-issues is in flight and drawn
+  // again when that read refuses, so the control the reader pressed is gone
+  // and focus is left on the document body. Tab from there restarts at the
+  // top of the document, and the reader walks the shell to reach the retry a
+  // second time. The control that replaces it takes the focus back.
+  it("takes focus back to the retry when the read refuses again", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { rejects: true },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const retry = within(await screen.findByRole("alert")).getByRole("button", {
+      name: "Retry",
+    });
+    retry.focus();
+    fireEvent.click(retry);
+    await waitFor(() => {
+      const again = within(screen.getByRole("alert")).getByRole("button", {
+        name: "Retry",
+      });
+      expect(document.activeElement).toBe(again);
+    });
+  });
+
+  // A surface that keeps standing around the failure carries the same retry
+  // in a banner, and it owes the reader the same handoff.
+  it("takes focus back to the banner’s retry when the read refuses again", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/layers": { rejects: true },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const retry = within(await screen.findByRole("alert")).getByRole("button", {
+      name: "Try again",
+    });
+    retry.focus();
+    fireEvent.click(retry);
+    await waitFor(() => {
+      const again = within(screen.getByRole("alert")).getByRole("button", {
+        name: "Try again",
+      });
+      expect(document.activeElement).toBe(again);
+    });
+  });
 });
 
 // A read that resolved nothing leaves no surface to stand a banner over, so

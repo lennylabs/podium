@@ -56,6 +56,76 @@ export function takeFocus(target: HTMLElement | null): void {
 }
 
 /**
+ * Retry focus reclaim. A retry control that fails again is removed while the
+ * re-issued read is in flight and rendered fresh when it refuses, so the
+ * element the reader pressed no longer exists and focus is left on the
+ * document body. Tab from there restarts at the top of the document, and a
+ * keyboard reader walks the whole shell to reach the retry a second time.
+ * The request is recorded when the control is activated and claimed by the
+ * control that replaces it.
+ */
+let retryFocusPending = false;
+let stopFocusWatch: (() => void) | null = null;
+
+function clearRetryFocus(): void {
+  retryFocusPending = false;
+  if (stopFocusWatch !== null) {
+    stopFocusWatch();
+    stopFocusWatch = null;
+  }
+}
+
+/**
+ * requestRetryFocus records that a retry control was activated, so the
+ * control rendered in its place takes the focus back. The request is dropped
+ * as soon as focus lands anywhere else, because a reader who has moved on
+ * owns where they are and a retry that answers renders no control to claim
+ * it.
+ */
+export function requestRetryFocus(): void {
+  clearRetryFocus();
+  retryFocusPending = true;
+  const onFocusIn = (event: FocusEvent) => {
+    if (event.target !== document.body) {
+      clearRetryFocus();
+    }
+  };
+  document.addEventListener('focusin', onFocusIn, true);
+  stopFocusWatch = () => {
+    document.removeEventListener('focusin', onFocusIn, true);
+  };
+}
+
+/**
+ * useRetryFocus returns the ref a retry control attaches to itself. The
+ * control claims a pending request when it mounts, which is the retry that
+ * refused again coming back on screen.
+ *
+ * A control inside a dialog claims nothing: the dialog owns the focus inside
+ * it and takes it back to its own first stop, which is where the reader
+ * resumes the panel's keys from.
+ */
+export function useRetryFocus<T extends HTMLElement>(): RefObject<T | null> {
+  const control = useRef<T>(null);
+  useEffect(() => {
+    if (!retryFocusPending) {
+      return;
+    }
+    const target = control.current;
+    clearRetryFocus();
+    if (target === null || target.closest('[role="dialog"]') !== null) {
+      return;
+    }
+    const held = document.activeElement;
+    if (held !== null && held !== document.body) {
+      return;
+    }
+    target.focus();
+  }, []);
+  return control;
+}
+
+/**
  * useDialogFocus gives a dialog the three behaviours a `role="dialog"` owes a
  * keyboard reader, for as long as `active` holds: focus moves to the first
  * control inside it that is not a dismissal when it opens, Tab and Shift+Tab
