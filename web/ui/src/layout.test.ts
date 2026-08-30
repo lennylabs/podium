@@ -1530,6 +1530,15 @@ describe("attention row", () => {
     expect(styled("attention-text").overflowWrap).toBe("anywhere");
   });
 
+  // A row carrying a message of no bounded length beside an identifier and a
+  // code badge stacks instead: the message is a block of its own under them
+  // rather than a flex item sized by what they leave. jsdom performs no
+  // layout, so the case pins the declaration; the rendered row is checked
+  // against a browser.
+  it("gives a stacked row's message the full width of the card", () => {
+    expect(styled("attention-row attention-stack").display).toBe("block");
+  });
+
   // The badge itself stays an inline box, so a badge sitting in a baseline-
   // aligned header keeps the alignment its container asks for.
   it("leaves the badge an inline box", () => {

@@ -4565,6 +4565,21 @@ button.stat-open {
   overflow-wrap: anywhere;
 }
 
+/* A row whose message is an envelope's own text carries no bound on its
+   length, and on one line beside an identifier and a code badge that message
+   is set in whatever width they leave: a refused layer's `ingest.*` message
+   wrapped into a narrow column against the card's right edge with the rest of
+   the card empty. The stacked form puts the identifier and the badge on their
+   own line and gives the message the card's full width, which is how the
+   itemised ingest entries beside it are already drawn. */
+.attention-stack {
+  display: block;
+}
+
+.attention-stack .attention-text {
+  margin-top: 5px;
+}
+
 .attention-danger {
   border-color: var(--danger-bd);
   background: var(--danger-bg);
@@ -4650,7 +4665,8 @@ button.stat-open {
   background: var(--wash);
 }
 
-.ingest-entry-head {
+.ingest-entry-head,
+.attention-head {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -4658,6 +4674,12 @@ button.stat-open {
   margin: 0;
   font-size: 12.5px;
   word-break: break-word;
+}
+
+/* An attention row's head shares that line layout and keeps the row's own type
+   size, so the identifier is not set smaller than the message under it. */
+.attention-head {
+  font-size: inherit;
 }
 
 .ingest-entry-text {

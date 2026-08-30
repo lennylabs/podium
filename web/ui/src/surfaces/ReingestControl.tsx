@@ -936,9 +936,11 @@ export function ReingestRunReport({
               <section className="attention" aria-label="Refused layers">
                 <p className="label">Refused · {refused.length}</p>
                 {refused.map((outcome) => (
-                  <div key={outcome.layerID} className="attention-row attention-danger">
-                    <span className="mono attention-id">{outcome.layerID}</span>{' '}
-                    <Badge tone="quiet">{refusalCode(outcome)}</Badge>{' '}
+                  <div key={outcome.layerID} className="attention-row attention-stack attention-danger">
+                    <p className="attention-head">
+                      <span className="mono attention-id">{outcome.layerID}</span>
+                      <Badge tone="quiet">{refusalCode(outcome)}</Badge>
+                    </p>
                     <p className="attention-text">{refusalMessage(outcome)}</p>
                   </div>
                 ))}

@@ -603,6 +603,26 @@ describe('the finished fan-out report', () => {
     expect(message.className).toContain('attention-text');
   });
 
+  // The message an `ingest.*` refusal carries has no bounded length, and set
+  // on the same line as the layer id and the code badge it was squeezed into
+  // the width they left, wrapping into a narrow column against the card's
+  // right edge. The id and the badge take a head line of their own and the
+  // message takes the card's full width beneath them, which is how the
+  // itemised ingest entries beside it are drawn.
+  it('sets the refusal message on its own line under the layer id and its code', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    const refused = screen.getByLabelText('Refused layers');
+    const id = within(refused).getByText('acme/ops');
+    const message = within(refused).getByText(/git source requires ref/);
+    const head = id.parentElement;
+    expect(head?.className).toContain('attention-head');
+    expect(within(head as HTMLElement).getByText('registry.invalid_config')).toBeTruthy();
+    expect(message.parentElement).not.toBe(head);
+    expect(message.parentElement?.className).toContain('attention-stack');
+  });
+
   it('copies the whole run out, layer by layer', () => {
     const text = runText(runOutcomes, finishedAt);
     expect(text).toContain('Reingest all finished 14:06:22 UTC: 3 layers');
