@@ -241,7 +241,9 @@ export function LayerPanel({
     breakGlass?: BreakGlass,
   ): Promise<void> => {
     const startedAt = Date.now();
-    setRowReingest(id, { kind: "running" });
+    // A row's own press opens the wait over the page, because the reader who
+    // made it has nothing else to read until the request returns.
+    setRowReingest(id, { kind: "running", startedAt, watching: true });
     try {
       const summary = await reingestLayer(id, breakGlass);
       setRowReingest(id, {
@@ -269,7 +271,13 @@ export function LayerPanel({
     setRun({ startedAt: Date.now(), outcomes: [], finishedAt: null });
     const outcomes: ReingestOutcome[] = [];
     for (const id of targets) {
-      setRowReingest(id, { kind: "running" });
+      // The fan-out opens no wait per layer. It reports every layer at once
+      // when it ends, and one dialog per layer would stack over that report.
+      setRowReingest(id, {
+        kind: "running",
+        startedAt: Date.now(),
+        watching: false,
+      });
       try {
         const summary = await reingestLayer(id);
         outcomes.push({ layerID: id, kind: "summary", summary });
@@ -497,6 +505,22 @@ export function LayerPanel({
                   }}
                   onDismissReingest={() => {
                     setRowReingest(layer.ID, idleReingest);
+                  }}
+                  onStopWaitingReingest={() => {
+                    // The request is with the registry, which runs the
+                    // pipeline to its end whatever this tab does. Only the
+                    // wait is closed, so the row keeps its running annotation
+                    // and its held trigger and still resolves into the report.
+                    setReingest((prev) => {
+                      const state = prev[layer.ID];
+                      if (state === undefined || state.kind !== "running") {
+                        return prev;
+                      }
+                      return {
+                        ...prev,
+                        [layer.ID]: { ...state, watching: false },
+                      };
+                    });
                   }}
                   onWrite={() => {
                     clearRefusal(layer.ID);
@@ -759,6 +783,7 @@ function LayerRow({
   onMove,
   onReingest,
   onDismissReingest,
+  onStopWaitingReingest,
   onWrite,
   onUnregistered,
   onRefusal,
@@ -785,6 +810,9 @@ function LayerRow({
   onMove: (delta: number) => void;
   onReingest: (breakGlass?: BreakGlass) => void;
   onDismissReingest: () => void;
+  /** onStopWaitingReingest closes the wait this row's press opened. The
+   * request stays with the registry, so the row stays running. */
+  onStopWaitingReingest: () => void;
   onWrite: () => void;
   /** onUnregistered reports the one write that takes this row away with it,
    * so the panel can state what happened and take the focus the row's own
@@ -1053,6 +1081,10 @@ function LayerRow({
             onDismiss={() => {
               oweFocus();
               onDismissReingest();
+            }}
+            onStopWaiting={() => {
+              oweFocus();
+              onStopWaitingReingest();
             }}
           />
           {refusal !== null && (

@@ -39,6 +39,22 @@ export function elapsed(ms: number): string {
   return rest === 0 ? minutePart : `${minutePart} ${secondPart}`;
 }
 
+/** stopwatch renders a wait that is still running, as the counter a reader
+ * watches tick. The finished report states its duration in words, because it
+ * is read once and quoted; a clock that advances every second is read at a
+ * glance and is therefore digits, minutes and seconds, with an hour part only
+ * once the wait has one. */
+export function stopwatch(ms: number): string {
+  const seconds = Math.max(Math.floor(ms / 1000), 0);
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor(seconds / 60) % 60;
+  const rest = seconds % 60;
+  if (hours === 0) {
+    return `${String(minutes)}:${pad(rest)}`;
+  }
+  return `${String(hours)}:${pad(minutes)}:${pad(rest)}`;
+}
+
 /** zone names the reader's own time zone, as the short name the platform
  * gives it (`PDT`, `CEST`, `UTC`) or the GMT offset where it has no short
  * name. Every absolute time this UI states is stated in the reader's zone and

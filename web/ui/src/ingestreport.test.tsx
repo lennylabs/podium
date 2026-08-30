@@ -4,7 +4,7 @@
 // fix it. The panel's wiring of that clock is driven through the UI's API
 // calls in surfaces.test.tsx.
 
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { IngestSummary } from './api';
@@ -12,7 +12,7 @@ import { ApiError } from './api';
 import type { ReingestOutcome } from './surfaces/ReingestControl';
 import { ReingestRunReport, ReingestStatus, runText, summaryText } from './surfaces/ReingestControl';
 import { unregisteredOn } from './surfaces/recovery';
-import { clock, elapsed } from './time';
+import { clock, elapsed, stopwatch } from './time';
 
 import './index.css';
 
@@ -35,6 +35,7 @@ function report(summary: IngestSummary) {
       state={{ kind: 'summary', summary, startedAt, finishedAt }}
       onStart={() => undefined}
       onDismiss={() => undefined}
+      onStopWaiting={() => undefined}
     />,
   );
   return screen.getByLabelText('Reingest result for acme/platform-artifacts');
@@ -449,6 +450,94 @@ describe('the copied summary', () => {
     expect(text).toContain('184 accepted, 97 unchanged, 1 rejected, 0 conflicts, 3 lint failures, 1 advisories');
     expect(text).toContain('rejected platform/deploy ingest.sensitivity_floor: above the floor');
     expect(text).toContain('warning platform/ci/check-0 lint.thin_description: advisory number 0');
+  });
+});
+
+describe('the wait a reingest opens', () => {
+  // The pipeline runs inside the request, so the press can stay open for
+  // minutes and the registry reports nothing while it does. The wait
+  // therefore states how long it has been open and offers the reader a way
+  // off it, rather than leaving one sentence under the row.
+  it('states the running pipeline, the clock, and the way off the wait', () => {
+    vi.useFakeTimers();
+    try {
+      const openedAt = Date.now() - 47_000;
+      render(
+        <ReingestStatus
+          layerID="acme/platform-artifacts"
+          state={{ kind: 'running', startedAt: openedAt, watching: true }}
+          onStart={() => undefined}
+          onDismiss={() => undefined}
+          onStopWaiting={() => undefined}
+        />,
+      );
+      const dialog = screen.getByRole('dialog', { name: 'Reingesting acme/platform-artifacts' });
+      expect(dialog.textContent).toContain('Running the ingest pipeline');
+      expect(dialog.textContent).toContain('The registry reports nothing until the request returns');
+      expect(dialog.textContent).toContain('Elapsed 0:47');
+      expect(dialog.textContent).toContain(`started ${clock(openedAt)}`);
+      expect(within(dialog).getByRole('button', { name: 'Stop waiting' })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The clock is the one part of the wait that changes while the reader
+  // watches, so it advances on its own rather than reporting the moment the
+  // dialog mounted for as long as the request stays open.
+  it('advances the clock while the request stays open', () => {
+    vi.useFakeTimers();
+    try {
+      const openedAt = Date.now();
+      render(
+        <ReingestStatus
+          layerID="acme/platform-artifacts"
+          state={{ kind: 'running', startedAt: openedAt, watching: true }}
+          onStart={() => undefined}
+          onDismiss={() => undefined}
+          onStopWaiting={() => undefined}
+        />,
+      );
+      const dialog = screen.getByRole('dialog', { name: 'Reingesting acme/platform-artifacts' });
+      expect(dialog.textContent).toContain('Elapsed 0:00');
+      act(() => {
+        vi.advanceTimersByTime(65_000);
+      });
+      expect(dialog.textContent).toContain('Elapsed 1:05');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // Stopping the wait closes the dialog alone. The request is with the
+  // registry, so the row keeps saying its reingest is running.
+  it('keeps the row running once the reader stops waiting', () => {
+    vi.useFakeTimers();
+    try {
+      const openedAt = Date.now() - 47_000;
+      render(
+        <ReingestStatus
+          layerID="acme/platform-artifacts"
+          state={{ kind: 'running', startedAt: openedAt, watching: false }}
+          onStart={() => undefined}
+          onDismiss={() => undefined}
+          onStopWaiting={() => undefined}
+        />,
+      );
+      expect(screen.queryByRole('dialog')).toBeNull();
+      const running = screen.getByTestId('reingest-running-acme/platform-artifacts');
+      expect(running.textContent).toContain('Reingesting acme/platform-artifacts for 0:47');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('states a running wait as a ticking counter', () => {
+    expect(stopwatch(0)).toBe('0:00');
+    expect(stopwatch(47_000)).toBe('0:47');
+    expect(stopwatch(65_400)).toBe('1:05');
+    expect(stopwatch(3_723_000)).toBe('1:02:03');
+    expect(stopwatch(-5_000)).toBe('0:00');
   });
 });
 

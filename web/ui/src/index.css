@@ -4543,6 +4543,66 @@ label:has(> input:disabled) {
   white-space: pre;
 }
 
+/* The wait a reingest opens. The registry runs the whole ingest pipeline
+   inside the request and reports nothing until it returns, so the dialog
+   carries one spinner, what is running, and a clock: how long the request has
+   been open, and the wall-clock stamp it opened at. The reader who has waited
+   long enough leaves through the footer's control, which closes the wait and
+   leaves the request with the registry. */
+.reingest-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 13px;
+  padding: 22px 22px 24px;
+  text-align: center;
+}
+
+/* The wait has one thing to say, so its spinner is the size of the statement
+   beside it rather than the inline size a line of text carries. */
+.spinner-large {
+  width: 34px;
+  height: 34px;
+  margin: 0 0 3px;
+  border-width: 3px;
+}
+
+.reingest-wait .wait-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.reingest-wait .wait-note {
+  margin: 0;
+  max-width: 380px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--faint);
+  text-wrap: pretty;
+}
+
+/* The clock is set apart from the statement above it, because it is the one
+   part of the dialog that changes while the reader watches. */
+.reingest-wait .wait-clock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 3px 0 0;
+  padding: 7px 13px;
+  border: 1px solid var(--b2);
+  border-radius: 100px;
+  background: var(--surf2);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.wait-clock-rule {
+  width: 1px;
+  height: 11px;
+  background: var(--b2);
+}
+
 /* The finished reingest report. The counts lead, because they say whether
    anything needs acting on, and each is a card rather than a bullet so the
    number is read before the word beside it. A tone is carried only by a

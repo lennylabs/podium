@@ -56,6 +56,11 @@ interface Stub {
    * never reached the registry: the fetch promise rejects with a TypeError
    * and there is no response to read. */
   rejects?: boolean;
+  /** hangs never answers, which is what a request the registry holds open
+   * looks like to the page. The reingest endpoint runs the whole ingest
+   * pipeline inside the request, so a case that reads what the surface shows
+   * while it waits needs a call that stays in flight for the whole case. */
+  hangs?: boolean;
 }
 
 interface Recorded {
@@ -95,6 +100,9 @@ function stubRegistry(stubs: Record<string, Stub>): void {
         };
       if (stub.rejects === true) {
         return Promise.reject(new TypeError("Failed to fetch"));
+      }
+      if (stub.hangs === true) {
+        return new Promise<Response>(() => undefined);
       }
       const status = stub.status ?? 200;
       const answer = () =>
@@ -8088,6 +8096,47 @@ describe("the layer write flows", () => {
     expect(screen.getByTestId("catalog-counts").textContent).toBe(
       "1 layer · 10 artifacts",
     );
+  });
+
+  // The registry runs the whole §7.3.1 ingest pipeline inside the request, so
+  // the press can stay open for minutes with nothing reported. The wait is
+  // therefore drawn over the page with a clock on it, and the reader who has
+  // seen enough leaves it without abandoning the request behind it.
+  //
+  // Spec: §13.10
+  it("holds the reingest wait open with a clock and a way off it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers/reingest": { hangs: true },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    const wait = await screen.findByRole("dialog", {
+      name: "Reingesting alice-personal",
+    });
+    expect(wait.textContent).toContain("Running the ingest pipeline");
+    expect(wait.textContent).toContain("Elapsed 0:0");
+    expect(wait.textContent).toContain("started ");
+    // Stopping the wait closes the dialog and nothing else: the request is
+    // already with the registry, so the row still reports it is running and
+    // its trigger stays held against a second pipeline over one source.
+    fireEvent.click(
+      within(wait).getByRole("button", { name: "Stop waiting" }),
+    );
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: "Reingesting alice-personal" }),
+      ).toBeNull();
+    });
+    expect(
+      screen.getByTestId("reingest-running-alice-personal").textContent,
+    ).toContain("Reingesting alice-personal for 0:0");
+    expect(
+      screen.getByRole("button", { name: "Reingest" }).hasAttribute("disabled"),
+    ).toBe(true);
   });
 
   // The confirmation is a dialog over a scrim rather than a panel inside the

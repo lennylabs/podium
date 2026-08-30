@@ -12,7 +12,7 @@
 // fan-out across every layer and a row changes only when its own request
 // returns.
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { RefObject } from 'react';
 
 import type { TabCountTone, Tone } from '../components/primitives';
@@ -27,7 +27,7 @@ import type {
 } from '../api';
 import { ApiError } from '../api';
 import { abbreviateHash } from '../hash';
-import { clock, elapsed } from '../time';
+import { clock, elapsed, stopwatch } from '../time';
 
 /** immutableViolation is the §6.10 code the registry answers with when every
  * artifact in the snapshot collided with a published version. Nothing was
@@ -44,7 +44,13 @@ const frozen = 'ingest.frozen';
  * from that row's own response. */
 export type ReingestState =
   | { kind: 'idle' }
-  | { kind: 'running' }
+  // The running arm carries when the request opened, because the pipeline
+  // runs inside it and the caller's own clock is the only thing that can say
+  // how long the reader has been waiting. `watching` is whether the wait is
+  // held open over the page: a row's own press opens it, "Stop waiting"
+  // closes it, and the fan-out never opens it, because the run reports every
+  // layer at once rather than one dialog per layer.
+  | { kind: 'running'; startedAt: number; watching: boolean }
   // The summary arm carries when the request opened and when it returned:
   // the pipeline runs inside the request, so how long the reader waited and
   // when the run finished are facts only the caller holds.
@@ -134,18 +140,26 @@ export function ReingestStatus({
   state,
   onStart,
   onDismiss,
+  onStopWaiting,
 }: {
   layerID: string;
   state: ReingestState;
   onStart: (breakGlass?: BreakGlass) => void;
   onDismiss: () => void;
+  /** onStopWaiting closes the wait the press opened. The request stays open,
+   * so the row keeps its running annotation and its held trigger. */
+  onStopWaiting: () => void;
 }) {
   return (
     <>
-      {state.kind === 'running' && (
+      {state.kind === 'running' && state.watching && (
+        <ReingestWait layerID={layerID} startedAt={state.startedAt} onStopWaiting={onStopWaiting} />
+      )}
+      {state.kind === 'running' && !state.watching && (
         <p className="loading" role="status" data-testid={`reingest-running-${layerID}`}>
           <span className="spinner" aria-hidden="true" />
-          Reingesting {layerID}. The registry runs the whole pipeline before it answers.
+          Reingesting {layerID} for <RunningClock startedAt={state.startedAt} />. The registry runs the whole pipeline
+          before it answers.
         </p>
       )}
       {state.kind === 'summary' && (
@@ -163,6 +177,76 @@ export function ReingestStatus({
       )}
       {state.kind === 'refused' && <ReingestRefused error={state.error} onRetry={onStart} onDone={onDismiss} />}
     </>
+  );
+}
+
+/** useTick re-renders once a second for as long as it is mounted. Every
+ * running clock on this surface reads the caller's own start stamp, so the
+ * clock advances only when something asks the component to render again. */
+function useTick(): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setNow(Date.now());
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+    };
+  }, []);
+  return now;
+}
+
+/** RunningClock is how long the open request has been running, ticking. */
+function RunningClock({ startedAt }: { startedAt: number }) {
+  const now = useTick();
+  return <span className="mono">{stopwatch(now - startedAt)}</span>;
+}
+
+/** ReingestWait is the wait itself. The registry runs the whole §7.3.1
+ * pipeline inside the request and reports nothing until it returns, so a
+ * press that can stay open for minutes is drawn as the surface the reader is
+ * left on rather than as one line under a row: the spinner says the request
+ * is open, the clock says how long it has been open and when it started, and
+ * "Stop waiting" gives the reader a way off the dialog.
+ *
+ * Stopping the wait abandons the wait alone. The request is already with the
+ * registry, which runs the pipeline to its end whatever this tab does, so the
+ * row keeps its running annotation and its held trigger and still resolves
+ * into the report when the response arrives. */
+function ReingestWait({
+  layerID,
+  startedAt,
+  onStopWaiting,
+}: {
+  layerID: string;
+  startedAt: number;
+  onStopWaiting: () => void;
+}) {
+  return (
+    <Modal
+      title={`Reingesting ${layerID}`}
+      description="One request, held open until the pipeline finishes. Keep this tab open. Stopping the wait abandons the wait rather than the ingest."
+      onClose={onStopWaiting}
+    >
+      <div className="reingest-wait modal-body" role="status" data-testid={`reingest-running-${layerID}`}>
+        <span className="spinner spinner-large" aria-hidden="true" />
+        <p className="wait-title">Running the ingest pipeline</p>
+        <p className="wait-note">
+          The registry reports nothing until the request returns. A large layer can take several minutes.
+        </p>
+        <p className="wait-clock mono">
+          Elapsed <RunningClock startedAt={startedAt} />
+          <span className="wait-clock-rule" aria-hidden="true" />
+          started {clock(startedAt)}
+        </p>
+      </div>
+      <div className="modal-foot">
+        <span className="modal-foot-note quiet">Triggered from the layer&apos;s row.</span>
+        <button type="button" className="button-plain" onClick={onStopWaiting}>
+          Stop waiting
+        </button>
+      </div>
+    </Modal>
   );
 }
 
