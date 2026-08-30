@@ -779,28 +779,45 @@ function BreakGlassConfirmation({
  * states them: its code, its message, and the remediation it carries. The
  * pipeline answers with codes whose next action differs, so the surface
  * carries the envelope's own words rather than one line that fits none of
- * them, and it offers a retry where the envelope says the condition clears. */
+ * them, and it offers a retry where the envelope says the condition clears.
+ *
+ * The refusal annotates one row of the panel, so it is drawn as a row
+ * annotation: a leading REFUSED marker, the statement and the envelope's
+ * words beside it, and the recovery at the band's right edge on the
+ * statement's own line. Stacking those under each other gave one row's
+ * refusal the height and the weight of a page-level failure. */
 function ReingestRefused({ error, onRetry, onDone }: { error: unknown; onRetry: () => void; onDone: () => void }) {
   const envelope = error instanceof ApiError ? error : null;
   return (
-    <div className="banner banner-danger" role="alert" aria-label="Reingest refused">
-      <p className="banner-title">The registry refused this reingest and the layer is unchanged.</p>
-      <p className="mono banner-code">{envelope?.code ?? 'registry.unavailable'}</p>
-      <p>{envelope !== null ? envelope.message : String(error)}</p>
-      {envelope !== null && envelope.suggestedAction !== '' && <p className="quiet">{envelope.suggestedAction}</p>}
-      {(envelope === null || envelope.retryable) && (
-        <button
-          type="button"
-          onClick={() => {
-            onRetry();
-          }}
-        >
-          Try again
+    <div className="banner banner-danger banner-annotation" role="alert" aria-label="Reingest refused">
+      <Badge tone="danger">REFUSED</Badge>
+      <div className="banner-text">
+        <p className="banner-title">The registry refused this reingest and the layer is unchanged.</p>
+        <p className="banner-detail">
+          <span className="mono banner-code">{envelope?.code ?? 'registry.unavailable'}</span>{' '}
+          {envelope !== null ? envelope.message : String(error)}
+        </p>
+        {envelope !== null && envelope.suggestedAction !== '' && (
+          <p className="banner-detail">{envelope.suggestedAction}</p>
+        )}
+      </div>
+      <div className="banner-actions">
+        {(envelope === null || envelope.retryable) && (
+          <button
+            type="button"
+            onClick={() => {
+              onRetry();
+            }}
+          >
+            Try again
+          </button>
+        )}
+        {/* Dismiss closes the band and changes nothing, so it is drawn
+            without a border beside the bordered recovery. */}
+        <button type="button" className="button-plain" onClick={onDone}>
+          Dismiss
         </button>
-      )}
-      <button type="button" onClick={onDone}>
-        Dismiss
-      </button>
+      </div>
     </div>
   );
 }

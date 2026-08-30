@@ -853,6 +853,54 @@ h2.label {
   color: var(--danger);
 }
 
+/* A banner that annotates one row of a table rather than the page stays about
+   one row tall: the marker leads, the statement and the envelope's words sit
+   beside it, and the recovery is pushed to the right edge on the statement's
+   own line. Stacked, the same content read as a page-level failure block. */
+.banner-annotation {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.banner-annotation .banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner-annotation .badge {
+  flex: none;
+  margin-top: 2px;
+}
+
+.banner-annotation .banner-actions {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.banner-annotation .banner-actions button {
+  margin-right: 0;
+}
+
+.banner-detail {
+  margin: 0;
+  color: var(--sec);
+  font-size: 12.5px;
+  line-height: 1.55;
+  max-width: 700px;
+  text-wrap: pretty;
+}
+
+/* A control that only closes what it is drawn in carries no border, so the
+   recovery beside it is the one control the band offers. */
+.button-plain {
+  border-color: transparent;
+  background: transparent;
+  color: var(--meta);
+}
+
 /* The pinned-version notice is one row rather than a titled block: the version
    being read, the fact that it is not the latest, and the way back to it. The
    version is set in the mono face the version badge one line above uses, so

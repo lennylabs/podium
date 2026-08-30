@@ -10235,6 +10235,46 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The refusal annotates one row of the panel, so it is drawn as a row
+  // annotation rather than as a page-level failure block: a leading REFUSED
+  // marker, the statement beside it, and the recovery at the band's right
+  // edge on the statement's own line.
+  it("draws a refused reingest as a row annotation with its marker leading and its controls at the right edge", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers/reingest": {
+        status: 503,
+        body: {
+          code: "registry.unavailable",
+          message: "the store is unreachable",
+          retryable: true,
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    const refused = await screen.findByLabelText("Reingest refused");
+    expect(refused.className).toContain("banner-annotation");
+    // The marker leads the band.
+    const marker = refused.firstElementChild as HTMLElement;
+    expect(marker.className).toContain("badge-danger");
+    expect(marker.textContent).toBe("REFUSED");
+    // Both controls sit together in the band's own action cluster rather than
+    // stacked under the statement.
+    const actions = refused.querySelector(".banner-actions");
+    expect(actions).not.toBeNull();
+    const retry = within(refused).getByRole("button", { name: "Try again" });
+    const dismiss = within(refused).getByRole("button", { name: "Dismiss" });
+    expect(actions?.contains(retry)).toBe(true);
+    expect(actions?.contains(dismiss)).toBe(true);
+    // Try again is the bordered recovery and Dismiss is drawn plain beside it.
+    expect(retry.className).not.toContain("button-plain");
+    expect(dismiss.className).toContain("button-plain");
+  });
+
   // Every other reingest refusal carries its own remediation in the
   // envelope, and the codes the pipeline answers with have different next
   // actions, so the arm presents the envelope's message and suggested action
