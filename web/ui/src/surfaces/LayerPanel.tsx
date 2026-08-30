@@ -1257,6 +1257,15 @@ function UnregisterConfirmation({
             Its artifacts disappear from every caller&rsquo;s view.
           </p>
           <p>They leave the catalog the next time each caller syncs.</p>
+          {/* How many artifacts go is the magnitude the reader is deciding
+              against, and no layer read carries an artifact count, so the
+              banner states the count as unreported the way the Recently
+              unregistered table states its own Artifacts cell. Dropping the
+              clause leaves the reader to read the silence as a small number
+              (§13.10). */}
+          <p data-testid="unregister-artifact-count">
+            How many is unreported: no layer read carries an artifact count.
+          </p>
         </Banner>
         {/* The recovery window is the half that limits the damage, so it is
             stated in the neutral tone beside it rather than buried under it. */}

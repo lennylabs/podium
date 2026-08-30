@@ -7882,6 +7882,33 @@ describe("the layer write flows", () => {
     expect(key.className.split(" ")).toContain("mono");
   });
 
+  // How many artifacts leave is the magnitude the reader decides against, and
+  // no layer read carries an artifact count. The banner states the count as
+  // unreported the way the Recently unregistered table states its own
+  // Artifacts cell; a banner that drops the clause reads as a write whose
+  // reach is small. Spec: §13.10.
+  it("states the artifact count as unreported in the unregister confirmation", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
+    const dialog = await screen.findByLabelText("Unregister alice-personal");
+    const clause = screen.getByTestId("unregister-artifact-count");
+    expect(clause.textContent).toContain("unreported");
+    // The clause sits in the danger banner that states the reach, so the
+    // magnitude is read with the statement it qualifies rather than apart
+    // from it.
+    const banner = within(dialog).getByText(
+      "Its artifacts disappear from every caller’s view.",
+    ).parentElement as HTMLElement;
+    expect(banner.contains(clause)).toBe(true);
+  });
+
   // A dialog that leaves focus on the surface it covers puts a keyboard
   // reader on controls the scrim has hidden, and one that closes without
   // handing focus back drops them at the top of the document. The row's
