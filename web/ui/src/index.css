@@ -4147,6 +4147,12 @@ label:has(> input:disabled) {
 /* The resource table's selected row and the card it drives. */
 .row-selected td {
   background: var(--wash);
+}
+
+/* The accent bar marks the row's leading edge once. An inset shadow on every
+   cell repeats the bar at each column boundary, so the tinted row reads as
+   one outlined box per column rather than as a single selected row. */
+.row-selected td:first-child {
   box-shadow: inset 2px 0 0 var(--acc);
 }
 

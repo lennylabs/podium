@@ -842,6 +842,44 @@ describe("command palette row", () => {
   });
 });
 
+// The resource table's selected row is one tinted band with a single accent
+// bar at its leading edge, per board 20f. Declared on every cell, the inset
+// bar repeats at each column boundary and the row reads as one accent-outlined
+// box per column.
+describe("resource table selected row", () => {
+  /** resourceRow attaches a resource table carrying a selected row and returns
+   * that row's cells. */
+  function resourceRow(): Element[] {
+    const table = document.createElement("table");
+    table.className = "data-table";
+    const body = document.createElement("tbody");
+    const row = document.createElement("tr");
+    row.className = "row-selected";
+    for (let i = 0; i < 5; i++) {
+      row.appendChild(document.createElement("td"));
+    }
+    body.appendChild(row);
+    table.appendChild(body);
+    document.body.appendChild(table);
+    mounted.push(table);
+    return Array.from(row.children);
+  }
+
+  it("tints every cell so the wash runs unbroken across the row", () => {
+    for (const cell of resourceRow()) {
+      expect(declaredFor(cell, "background")).toBe("var(--wash)");
+    }
+  });
+
+  it("draws the accent bar only at the row's leading edge", () => {
+    const cells = resourceRow();
+    expect(declaredFor(cells[0], "box-shadow")).toBe("inset 2px 0 0 var(--acc)");
+    for (const cell of cells.slice(1)) {
+      expect(declaredFor(cell, "box-shadow")).toBe("");
+    }
+  });
+});
+
 // The layer table's identifier cell holds the layer name and the marker
 // qualifying it. A badge declares a trailing margin and no leading one, so the
 // cell's own row supplies the space before the marker; without it the name and
