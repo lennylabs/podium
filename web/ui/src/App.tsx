@@ -496,7 +496,7 @@ function Surface({
       // it rather than leaving the prior query's pills standing.
       return <SearchSurface key={route.query} query={route.query} onError={onCatalogOutcome} />;
     case 'artifact':
-      return <ArtifactViewer id={route.id} onError={onCatalogOutcome} />;
+      return <ArtifactViewer id={route.id} viewing={route.version} onError={onCatalogOutcome} />;
     case 'layers':
       // A restore moves the same figures the sidebar footer states, so the
       // recovery surface reports it the way every other layer write does.

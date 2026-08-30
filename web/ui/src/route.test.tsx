@@ -49,12 +49,41 @@ describe("parseRoute", () => {
     expect(parseRoute(artifactHref("finance/ap/pay"))).toEqual({
       name: "artifact",
       id: "finance/ap/pay",
+      version: "",
     });
     expect(parseRoute(searchHref("deploy"))).toEqual({
       name: "search",
       query: "deploy",
     });
     expect(parseRoute(layersHref)).toEqual({ name: "layers", deleted: false });
+  });
+
+  // Reading an older version is a move between two drawn states of the same
+  // artifact, so the version it pins is part of the address. A version held
+  // outside the route cannot be linked or bookmarked, a reload drops back to
+  // the latest version, and a back step leaves the artifact altogether.
+  //
+  // Spec: §13.10
+  it("carries the version an artifact is pinned to in its address", () => {
+    expect(artifactHref("finance/ap/pay", "0.1.0")).toBe(
+      "#/artifact/finance%2Fap%2Fpay@0.1.0",
+    );
+    expect(parseRoute(artifactHref("finance/ap/pay", "0.1.0"))).toEqual({
+      name: "artifact",
+      id: "finance/ap/pay",
+      version: "0.1.0",
+    });
+    // The two reads are separate addresses, so a history stack holds both.
+    expect(artifactHref("finance/ap/pay", "0.1.0")).not.toBe(
+      artifactHref("finance/ap/pay"),
+    );
+    // The identifier is percent-encoded, so a separator inside it is not read
+    // as a pin.
+    expect(parseRoute(artifactHref("finance/ap/pay@odd"))).toEqual({
+      name: "artifact",
+      id: "finance/ap/pay@odd",
+      version: "",
+    });
   });
 
   it("answers null for a hash that names no surface", () => {

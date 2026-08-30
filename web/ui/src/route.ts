@@ -10,7 +10,14 @@ import { heldRoute } from './components/focus';
 export type Route =
   | { name: 'domain'; path: string }
   | { name: 'search'; query: string }
-  | { name: 'artifact'; id: string }
+  // version pins the artifact read to one stored version, and the empty
+  // string is the default read the registry answers with the latest one.
+  // Reading an older version is a move between two drawn states of the same
+  // artifact, so it is addressed rather than held in the viewer alone: a
+  // version held outside the route cannot be linked, survives neither a
+  // reload nor a step back, and leaves the address stating the latest version
+  // while the page states an older one.
+  | { name: 'artifact'; id: string; version: string }
   // deleted selects the recovery surface, which is a page of its own under
   // the panel rather than a section inside it: it carries its own table, and
   // stacking that table above the panel's pushes the precedence label and the
@@ -38,7 +45,7 @@ export function parseRoute(hash: string): Route | null {
     case 'search':
       return { name: 'search', query: tail };
     case 'artifact':
-      return { name: 'artifact', id: tail };
+      return artifactRoute(rest.join('/'));
     case 'layers':
       return { name: 'layers', deleted: tail === 'deleted' };
     case 'domain':
@@ -63,8 +70,33 @@ export function atCatalogRoute(hash: string): boolean {
   return route !== null && route.name === 'domain' && route.path === '';
 }
 
-export function artifactHref(id: string): string {
-  return `#/artifact/${encodeURIComponent(id)}`;
+/** versionMark separates an artifact's identifier from the version pinned on
+ * it, the way an `extends:` reference separates the two (§4.4). Both halves
+ * are percent-encoded and `encodeURIComponent` escapes `@`, so the separator
+ * cannot occur inside either one. */
+const versionMark = '@';
+
+/** artifactRoute reads an artifact address, whose tail is the encoded
+ * identifier and, where a version is pinned, the encoded version behind the
+ * separator. The halves are decoded after the split rather than before it, so
+ * an identifier carrying an encoded separator does not read as a pin. */
+function artifactRoute(encoded: string): Route {
+  const mark = encoded.lastIndexOf(versionMark);
+  if (mark === -1) {
+    return { name: 'artifact', id: decodeURIComponent(encoded), version: '' };
+  }
+  return {
+    name: 'artifact',
+    id: decodeURIComponent(encoded.slice(0, mark)),
+    version: decodeURIComponent(encoded.slice(mark + 1)),
+  };
+}
+
+/** artifactHref addresses an artifact, at the version named or at the latest
+ * one where none is. */
+export function artifactHref(id: string, version = ''): string {
+  const address = `#/artifact/${encodeURIComponent(id)}`;
+  return version === '' ? address : `${address}${versionMark}${encodeURIComponent(version)}`;
 }
 
 /** artifactLeaf is the artifact's own name inside its §4.2 path, which is
@@ -126,7 +158,7 @@ export function routeKey(route: Route): string {
     case 'search':
       return `search/${route.query}`;
     case 'artifact':
-      return `artifact/${route.id}`;
+      return route.version === '' ? `artifact/${route.id}` : `artifact/${route.id}${versionMark}${route.version}`;
     case 'layers':
       return route.deleted ? 'layers/deleted' : 'layers';
   }

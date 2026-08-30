@@ -4534,6 +4534,101 @@ describe("the artifact viewer", () => {
     expect(requests.some((r) => r.url.includes("version=1.0.0"))).toBe(true);
   });
 
+  // Reading an older version is a move between two drawn states of the same
+  // artifact, so it goes through the address the way every other move in the
+  // shell does. Without it the address states the latest version while the
+  // page states an older one: the reader who copies the link hands out the
+  // latest version, a reload drops the pin, and a back step leaves the
+  // artifact instead of returning to the version they came from.
+  //
+  // Spec: §13.10
+  it("addresses the version the picker names and returns to latest from the notice", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact?id=platform%2Freview": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/load_artifact?id=platform%2Freview&version=1.0.0": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:old",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo(artifactHref("platform/review"));
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+
+    pinVersion("1.0.0");
+    await screen.findByTestId("older-version");
+    expect(window.location.hash).toBe(artifactHref("platform/review", "1.0.0"));
+    // The pinned address is its own history entry, so the reader's back step
+    // returns to the latest version rather than leaving the artifact.
+    expect(window.location.hash).not.toBe(artifactHref("platform/review"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to v2.3.0" }));
+    await waitFor(() => {
+      expect(screen.queryByTestId("older-version")).toBeNull();
+    });
+    expect(window.location.hash).toBe(artifactHref("platform/review"));
+  });
+
+  // A pinned address is reachable from a pasted link, a bookmark, and a step
+  // back, so the viewer reads the version the address names on arrival. The
+  // latest version is read beside it, because the reader who arrived this way
+  // has never been told which version is current.
+  //
+  // Spec: §13.10
+  it("opens a pinned address at that version and marks it as an older one", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact?id=platform%2Freview": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Latest review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/load_artifact?id=platform%2Freview&version=1.0.0": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:old",
+          manifest_body: "# Older review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo(artifactHref("platform/review", "1.0.0"));
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+
+    const notice = await screen.findByTestId("older-version");
+    expect(notice.textContent).toContain("Viewing v1.0.0");
+    expect(screen.getByRole("button", { name: "Go to v2.3.0" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Version v1.0.0/ })).toBeTruthy();
+    expect(
+      screen.getByLabelText("Artifact viewer").textContent,
+    ).toContain("Older review");
+  });
+
   // The registry keeps serving a deprecated artifact and reports the lifecycle
   // state beside the bytes, so the viewer marks the artifact as retired and
   // opens the upgrade target the response names.

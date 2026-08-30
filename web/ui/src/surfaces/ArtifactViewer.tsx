@@ -48,12 +48,22 @@ type TabName = 'rendered' | 'frontmatter' | 'source' | 'resources';
  * column. */
 const fetchedDelivery = 'fetched on demand';
 
-export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unknown) => void }) {
-  // An empty version is the default read, which the registry answers with the
-  // latest version. The picker sets one, and the notice keys on the pair
-  // rather than on the picker alone, because a reader who picks the version
-  // the registry already served is looking at the latest one.
-  const [viewing, setViewing] = useState('');
+export function ArtifactViewer({
+  id,
+  viewing,
+  onError,
+}: {
+  id: string;
+  /** viewing is the version the route pins the read to. An empty version is
+   * the default read, which the registry answers with the latest version. The
+   * picker navigates to a pinned address rather than writing state here, so
+   * the older version can be linked and the reader's back step returns to the
+   * version they came from. The notice keys on the pair rather than on the
+   * pin alone, because a reader who asks for the version the registry already
+   * served is looking at the latest one. */
+  viewing: string;
+  onError: (err: unknown) => void;
+}) {
   // The open tab lives here rather than in the tab set, because the rail
   // beside it reads it: the Frontmatter tab already stands the same pairs
   // full width in the content column, and the rail's own copy of them would
@@ -67,13 +77,11 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // it the reader loses the picker along with the rest of the surface, and
   // the route still names this artifact, so nothing is left to recover with.
   const [held, setHeld] = useState<LoadArtifactResponse | null>(null);
-  // The version the picker named belongs to the artifact it was named for. A
-  // route change from one viewer to another reuses this component rather than
-  // remounting it, so without this the next artifact is read at the previous
-  // one's pinned version, the registry answers registry.not_found, and the
-  // viewer reports an artifact that exists as missing. The pin and the latest
-  // version it is compared against both start over, the way the held response
-  // already does.
+  // The latest version belongs to the artifact it was read for. A route
+  // change from one viewer to another reuses this component rather than
+  // remounting it, so without this the next artifact is compared against the
+  // previous one's latest version and its own is marked as an older one. The
+  // remembered version starts over, the way the held response already does.
   const [viewed, setViewed] = useState(id);
   // The rail states who the artifact's layer is visible to and the run that
   // last ingested it, and load_artifact answers the layer's identifier alone,
@@ -84,7 +92,6 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   const layers = useAsync(listLayers, []);
   if (viewed !== id) {
     setViewed(id);
-    setViewing('');
     setLatest('');
     // A layer list that was refused leaves the rail's visibility and ingested
     // rows unreported, and this component survives the route change from one
@@ -110,6 +117,17 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // own response and is already there.
   const link = body?.manifest_body_url;
   const fetched = useAsync(async () => (link === undefined ? '' : fetchText(link)), [link?.presigned_url ?? '']);
+  // A pinned address is reachable from a pasted link, a bookmark, and a step
+  // back, so the reader can arrive on an older version without having been on
+  // the latest one. The latest version is then read beside the pinned
+  // document, because the notice that marks the document as an older one and
+  // the control that leads back both name it. A reader who arrived from the
+  // latest version already has it remembered, and no second read is issued.
+  const unknownLatest = viewing !== '' && latest === '';
+  const latestRead = useAsync(async () => (unknownLatest ? (await loadArtifact(id)).version : ''), [id, unknownLatest]);
+  if (latestRead.value !== null && latestRead.value !== '' && latest === '') {
+    setLatest(latestRead.value);
+  }
   // Every control that reads another version removes itself as it does so:
   // the picker's field is unmounted when it commits a pin, and the refusal
   // banner and the older-version notice both disappear once the pin is
@@ -117,20 +135,25 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
   // keyboard reader is dumped at the top of the page. The header's version
   // control is the one they were operating, it is on the row those banners
   // refer to, and it survives the read, so it takes the focus back. The
-  // picker is keyed on the pin and remounts with it, which is why the
-  // handover is an effect: the button the ref names is the one the next
-  // render mounts. The effect follows a counter rather than the pin itself,
-  // because a reader can ask for the version already on screen, and writing
-  // the state that is already held renders nothing for the handover to
-  // follow.
+  // handover is an effect following a counter rather than the pin itself,
+  // because a reader can ask for the version already on screen, and
+  // navigating to the address the window is already on renders nothing for
+  // the handover to follow.
   const versionTrigger = useRef<HTMLButtonElement>(null);
   const [owedFocus, setOwedFocus] = useState(0);
   const returnFocus = () => {
     setOwedFocus((owed) => owed + 1);
   };
-  const showLatest = () => {
+  // Reading another version is a navigation, so it goes through the address
+  // and lands in the history stack: the reader's back step returns to the
+  // version they came from, and the address they copy while an older version
+  // is on screen opens that version.
+  const readVersion = (version: string) => {
     returnFocus();
-    setViewing('');
+    window.location.hash = artifactHref(id, version);
+  };
+  const showLatest = () => {
+    readVersion('');
   };
   useEffect(() => {
     if (owedFocus === 0) {
@@ -193,14 +216,10 @@ export function ArtifactViewer({ id, onError }: { id: string; onError: (err: unk
           <h1>{artifactName(body.id)}</h1>
           <TypeBadge type={body.type} />
           <VersionPicker
-            key={viewing}
             trigger={versionTrigger}
             current={body.version}
             viewing={viewing}
-            onView={(version) => {
-              returnFocus();
-              setViewing(version);
-            }}
+            onView={readVersion}
           />
           <SensitivityBadge sensitivity={body.sensitivity} />
           <DeprecatedBadge deprecated={body.deprecated} />
