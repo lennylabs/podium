@@ -1366,6 +1366,18 @@ function UnregisterConfirmation({
             <dt className="mono">visibility</dt>
             <dd>{visibilitySummary(layer)}</dd>
           </div>
+          {/* What still stands where this layer stood is the second fact the
+              reader decides against, and §4.6 composition never lets one
+              layer silently shadow another: replacing an artifact requires
+              the lower-precedence layer to drop it first. Nothing therefore
+              stands behind this one, and the pair states that absence as an
+              em dash the way the row's ingest reference does, rather than
+              dropping the pair and leaving the reader to read the gap as a
+              fact the dialog withheld (§13.10). */}
+          <div className="rail-fact">
+            <dt className="mono">shadowed by</dt>
+            <dd>—</dd>
+          </div>
         </dl>
         <label className="field">
           <span className="label">Type the layer ID to confirm</span>

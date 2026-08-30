@@ -8200,11 +8200,44 @@ describe("the layer write flows", () => {
       row.querySelector("dt")?.textContent,
       row.querySelector("dd")?.textContent,
     ]);
-    expect(rows).toEqual([["visibility", "no grants — only you"]]);
+    expect(rows).toEqual([
+      ["visibility", "no grants — only you"],
+      ["shadowed by", "—"],
+    ]);
     // The key takes the mono face the rail's keys take, which is what
     // separates a label from a heading here.
     const key = properties.querySelector("dt") as HTMLElement;
     expect(key.className.split(" ")).toContain("mono");
+  });
+
+  // What still stands where the layer stood is the second fact the reader
+  // decides against, and §4.6 composition never lets one layer silently
+  // shadow another, so nothing does. The pair states that absence as an em
+  // dash; dropping the pair leaves the reader to read the gap as a fact the
+  // dialog withheld, while the same dialog names the artifact count it cannot
+  // report. Spec: §13.10.
+  it("keeps the shadowed-by pair in the unregister confirmation and states its absence", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
+    await screen.findByLabelText("Unregister alice-personal");
+    const properties = screen.getByTestId("unregister-properties");
+    const shadowed = [...properties.querySelectorAll(".rail-fact")].find(
+      (row) => row.querySelector("dt")?.textContent === "shadowed by",
+    ) as HTMLElement | undefined;
+    expect(shadowed).toBeDefined();
+    expect(shadowed?.querySelector("dd")?.textContent).toBe("—");
+    // The pair takes the same mono key the visibility pair above it takes, so
+    // the two read as one list rather than as a pair and an afterthought.
+    expect(
+      shadowed?.querySelector("dt")?.className.split(" "),
+    ).toContain("mono");
   });
 
   // How many artifacts leave is the magnitude the reader decides against, and
