@@ -499,6 +499,10 @@ function Manifest({
   // because the tab badge reports the parse failure and the tab is drawn
   // before the panel it opens.
   const invalid = parseFrontmatter(frontmatter).error !== '';
+  // The selected file lives here rather than in the table, because a §4.4
+  // prose reference in the body opens the Resources tab on the file it names
+  // and the table is mounted by that press.
+  const [selected, setSelected] = useState('');
   const tabs: { name: TabName; label: string; badge: string; badgeTone?: BadgeTone }[] = [
     { name: 'rendered', label: 'Rendered', badge: '' },
     { name: 'frontmatter', label: 'Frontmatter', badge: invalid ? '!' : '', badgeTone: invalid ? 'danger' : 'quiet' },
@@ -514,10 +518,19 @@ function Manifest({
   return (
     <TabStrip label="Artifact views" tabs={tabs} open={open} onOpen={onTab}>
       <>
-        {open === 'rendered' && <ArtifactBody body={body} resources={resourceNames} />}
+        {open === 'rendered' && (
+          <ArtifactBody
+            body={body}
+            resources={resourceNames}
+            onResource={(name) => {
+              setSelected(name);
+              onTab('resources');
+            }}
+          />
+        )}
         {open === 'frontmatter' && <PropertyTable raw={frontmatter} offerRaw />}
         {open === 'source' && <AuthoredSource name="SKILL.md" value={skillRaw} />}
-        {open === 'resources' && <ResourceTable rows={resources} />}
+        {open === 'resources' && <ResourceTable rows={resources} selected={selected} onSelect={setSelected} />}
       </>
     </TabStrip>
   );
@@ -1006,8 +1019,15 @@ function formatOf(name: string, contentType?: string): string {
  * delivery column. Nothing is previewed, so the row's action is the only path
  * to the file, and the control above the table takes the whole set at once.
  * Selecting a row opens the detail card under the table. */
-function ResourceTable({ rows }: { rows: ResourceRow[] }) {
-  const [selected, setSelected] = useState('');
+function ResourceTable({
+  rows,
+  selected,
+  onSelect,
+}: {
+  rows: ResourceRow[];
+  selected: string;
+  onSelect: (name: string) => void;
+}) {
   const detail = rows.find((row) => row.name === selected) ?? null;
   const total = rows.reduce((sum, row) => sum + row.size, 0);
   return (
@@ -1040,7 +1060,7 @@ function ResourceTable({ rows }: { rows: ResourceRow[] }) {
               key={row.name}
               className={row.name === selected ? 'row-selected' : ''}
               onClick={() => {
-                setSelected(row.name);
+                onSelect(row.name);
               }}
             >
               <td className="mono">
@@ -1055,7 +1075,7 @@ function ResourceTable({ rows }: { rows: ResourceRow[] }) {
                   className="resource-name"
                   aria-pressed={row.name === selected}
                   onClick={() => {
-                    setSelected(row.name);
+                    onSelect(row.name);
                   }}
                 >
                   {row.name}

@@ -2223,6 +2223,26 @@ label:has(> input:disabled) {
   height: auto;
 }
 
+/* A §4.4 prose reference to a file the artifact bundles. The file has no
+   address of its own on this origin, so the reference is a control that opens
+   the Resources tab on it. It draws as the inline link the author wrote,
+   because the reader followed a reference either way. */
+.prose button.resource-reference {
+  /* The control sits inside a sentence, so it takes the paragraph's own box:
+     the shell's button rule otherwise gives it a margin and a centred line of
+     its own, which opens a gap on both sides of the reference. */
+  display: inline;
+  font: inherit;
+  color: var(--link);
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  text-align: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* An anchor the sanitizer left without a destination. It draws as body text
    rather than as a link, and the note beside it says the destination was
    removed, so the reader does not click a link that goes nowhere. */

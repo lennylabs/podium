@@ -13007,7 +13007,7 @@ describe("the anonymous framing", () => {
 });
 
 describe("the artifact viewer’s resources", () => {
-  function resourcePage(): void {
+  function resourcePage(manifestBody = "# Review\n"): void {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_artifact": {
@@ -13016,7 +13016,7 @@ describe("the artifact viewer’s resources", () => {
           type: "context",
           version: "1.0.0",
           content_hash: "sha256:abc",
-          manifest_body: "# Review\n",
+          manifest_body: manifestBody,
           frontmatter: "",
           resources: { "checklist.md": "body" },
           large_resources: {
@@ -13159,6 +13159,35 @@ describe("the artifact viewer’s resources", () => {
       ...screen.getByTestId("resource-detail-facts").querySelectorAll(".rail-fact"),
     ];
     expect(inline[3].textContent).toBe("content typenot recorded");
+  });
+
+  // A §4.4 prose reference in the body that names a bundled file is followed
+  // inside the viewer. The registry serves no per-artifact asset route, so
+  // left as authored the reference resolves against the /ui/ mount and the
+  // reader leaves the SPA for a plain-text 404; the Resources tab holds the
+  // file's only delivery, so the reference opens that tab on it (§13.10).
+  it("opens the Resources tab on the file a body reference names", async () => {
+    resourcePage("See [the checklist](checklist.md).\n");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const reference = within(screen.getByTestId("artifact-body")).getByRole(
+      "button",
+      { name: "the checklist" },
+    );
+    // Nothing in the body navigates out of the shell.
+    expect(
+      screen.getByTestId("artifact-body").querySelector("a"),
+    ).toBeNull();
+    fireEvent.click(reference);
+    expect(
+      screen.getByRole("tab", { name: /Resources/ }).getAttribute(
+        "aria-selected",
+      ),
+    ).toBe("true");
+    expect(screen.getByTestId("resource-detail").textContent).toContain(
+      "checklist.md",
+    );
+    expect(screen.getByLabelText("Artifact viewer")).toBeTruthy();
   });
 
   // The selection drives what the tab shows, so it is operable without a

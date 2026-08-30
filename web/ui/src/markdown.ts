@@ -196,29 +196,36 @@ function replaceStrippedEmbeds(root: DocumentFragment): void {
 
 // A §4.4 prose reference is written as an ordinary relative markdown link,
 // and `lint.prose_reference` admits one only when it resolves to a file the
-// artifact bundles or to another artifact's canonical ID. The second form is
-// the one an author is directed to write for a cross-artifact reference, and
-// left as authored the browser resolves it against the `/ui/` mount, where
-// the registry serves no such path: following it leaves the SPA for a
-// plain-text 404 and the shell disappears. So a reference that names no
-// bundled file is rewritten to the artifact route, which is the route the
-// relations rail already builds for the same target.
+// artifact bundles or to another artifact's canonical ID. Left as authored,
+// the browser resolves either form against the `/ui/` mount, where the
+// registry serves no such path: following it leaves the SPA for a plain-text
+// 404 and the shell disappears. So both forms are resolved here to something
+// the viewer answers itself. A reference that names another artifact is
+// rewritten to the artifact route, which is the route the relations rail
+// already builds for the same target. A reference that names a bundled file
+// becomes a control that opens the Resources tab on that file, which is the
+// viewer's only delivery of it: the registry serves no per-artifact asset
+// route, and the file's own bytes reach the reader through that tab's
+// download.
 //
 // The pass runs on the sanitizer's output, so it only ever sees an anchor
-// whose href the allowlist already admitted, and it rewrites that href to a
-// hash route on this same document.
+// whose href the allowlist already admitted, and what it writes is a hash
+// route on this same document or a control that navigates nowhere.
 
 /** referenceScheme is the RFC 3986 scheme production. A reference carrying
  * one addresses something outside this registry and is left as authored. */
 const referenceScheme = /^[a-z][a-z0-9+.\-]*:/i;
 
-/** artifactReference returns the artifact ID a relative href names, or null
- * when the href names something this UI has no route for: a fragment, a
- * root-relative path, an absolute URL, a file the artifact bundles, or one of
- * the artifact's own manifest files. It mirrors the resolution order
- * `lint.prose_reference` applies, so the viewer routes exactly the references
- * the linter resolves to another artifact. */
-function artifactReference(href: string, resources: ReadonlySet<string>): string | null {
+/** Reference is what a relative prose reference resolves to: another
+ * artifact the viewer has a route for, or a file this artifact bundles. */
+type Reference = { kind: 'artifact'; id: string } | { kind: 'resource'; name: string };
+
+/** resolveReference returns what a relative href names, or null when the href
+ * names something this UI has no answer for: a fragment, a root-relative
+ * path, an absolute URL, or one of the artifact's own manifest files. It
+ * mirrors the resolution order `lint.prose_reference` applies, so the viewer
+ * resolves exactly the references the linter admits. */
+function resolveReference(href: string, resources: ReadonlySet<string>): Reference | null {
   const trimmed = href.trim();
   if (trimmed === '' || trimmed.startsWith('#') || trimmed.startsWith('/') || referenceScheme.test(trimmed)) {
     return null;
@@ -229,22 +236,53 @@ function artifactReference(href: string, resources: ReadonlySet<string>): string
   if (target === '' || target === '.' || target === '..' || target.startsWith('../')) {
     return null;
   }
-  if (resources.has(target) || target === 'ARTIFACT.md' || target === 'SKILL.md') {
+  if (resources.has(target)) {
+    return { kind: 'resource', name: target };
+  }
+  if (target === 'ARTIFACT.md' || target === 'SKILL.md') {
     return null;
   }
   const pin = target.indexOf('@');
   const id = pin < 0 ? target : target.slice(0, pin);
-  return id === '' ? null : id;
+  return id === '' ? null : { kind: 'artifact', id };
 }
 
-/** routeArtifactReferences rewrites every cross-artifact prose reference in
- * the rendered body to the viewer's own route. */
-function routeArtifactReferences(root: DocumentFragment, resources: ReadonlySet<string>): void {
+/** resourceReferenceAttribute names the bundled file a reference control
+ * opens. The viewer reads it off the activated control, so the attribute is
+ * the contract between this module and the surface that renders its output. */
+export const resourceReferenceAttribute = 'data-resource';
+
+/** resourceReferenceClass is the class a reference control carries, which is
+ * what draws it as the inline link the author wrote. */
+const resourceReferenceClass = 'resource-reference';
+
+/** resourceControl replaces one anchor by a button naming the bundled file it
+ * referenced, keeping the text the author wrote inside it. A button rather
+ * than an anchor, because the file has no address of its own on this origin
+ * and the control acts on the page instead of navigating; it stays in the tab
+ * order, so the reference is reachable by keyboard the way the anchor was. */
+function resourceControl(anchor: Element, name: string): void {
+  const control = document.createElement('button');
+  control.type = 'button';
+  control.className = resourceReferenceClass;
+  control.setAttribute(resourceReferenceAttribute, name);
+  control.append(...anchor.childNodes);
+  anchor.replaceWith(control);
+}
+
+/** routeReferences resolves every prose reference in the rendered body to the
+ * viewer's own answer for it. */
+function routeReferences(root: DocumentFragment, resources: ReadonlySet<string>): void {
   for (const anchor of root.querySelectorAll('a[href]')) {
-    const id = artifactReference(anchor.getAttribute('href') ?? '', resources);
-    if (id !== null) {
-      anchor.setAttribute('href', artifactHref(id));
+    const reference = resolveReference(anchor.getAttribute('href') ?? '', resources);
+    if (reference === null) {
+      continue;
     }
+    if (reference.kind === 'artifact') {
+      anchor.setAttribute('href', artifactHref(reference.id));
+      continue;
+    }
+    resourceControl(anchor, reference.name);
   }
 }
 
@@ -345,7 +383,7 @@ export function renderArtifactBody(body: string, resources: readonly string[] = 
   });
   replaceStrippedImages(sanitized);
   replaceStrippedEmbeds(sanitized);
-  routeArtifactReferences(sanitized, new Set(resources));
+  routeReferences(sanitized, new Set(resources));
   markScrollableRegions(sanitized);
   const holder = document.createElement('div');
   holder.append(sanitized);

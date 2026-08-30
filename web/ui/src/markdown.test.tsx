@@ -9,7 +9,7 @@
 // a removed node, attribute, or URL is this implementation's choice, so each
 // case asserts the absence its clause states rather than a replacement.
 
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { ArtifactBody } from './components/ArtifactBody';
@@ -286,18 +286,55 @@ describe('a cross-artifact prose reference in the body', () => {
     expect(container.querySelector('a')?.getAttribute('href')).toBe('#/artifact/legal%2Fbase-policy');
   });
 
-  it('leaves a bundled file, an anchor, and an absolute URL as authored', () => {
-    const container = renderBody(
-      'A [file](reference.md), an [anchor](#section), and a [page](https://example.com/a).\n',
-      ['reference.md'],
-    );
+  it('leaves an anchor and an absolute URL as authored', () => {
+    const container = renderBody('An [anchor](#section) and a [page](https://example.com/a).\n');
     const hrefs = [...container.querySelectorAll('a')].map((anchor) => anchor.getAttribute('href'));
-    expect(hrefs).toEqual(['reference.md', '#section', 'https://example.com/a']);
+    expect(hrefs).toEqual(['#section', 'https://example.com/a']);
   });
 
   it('leaves a reference that escapes the artifact package as authored', () => {
     const container = renderBody('See [outside](../elsewhere).\n');
     expect(container.querySelector('a')?.getAttribute('href')).toBe('../elsewhere');
+  });
+});
+
+// A §4.4 prose reference also names a file the artifact bundles, and
+// `lint.prose_reference` admits that form too. The registry serves no
+// per-artifact asset route, so left as authored the reference resolves
+// against the `/ui/` mount and following it drops the reader out of the SPA
+// onto a plain-text 404. The file's delivery is the viewer's Resources tab,
+// so the reference is rendered as a control naming the file rather than as a
+// link out of the application (§13.10).
+describe('a prose reference to a bundled file', () => {
+  it('renders as a control naming the file rather than as a link', () => {
+    const container = renderBody('See [the checklist](files/checklist.md).\n', ['files/checklist.md']);
+    expect(container.querySelector('a')).toBeNull();
+    const control = container.querySelector('button');
+    expect(control?.getAttribute('data-resource')).toBe('files/checklist.md');
+    expect(control?.textContent).toBe('the checklist');
+    expect(control?.getAttribute('type')).toBe('button');
+  });
+
+  it('resolves a reference written with a leading ./ and one carrying a fragment', () => {
+    const container = renderBody('A [file](./files/notes.txt) and a [part](files/notes.txt#top).\n', [
+      'files/notes.txt',
+    ]);
+    const named = [...container.querySelectorAll('button')].map((control) => control.getAttribute('data-resource'));
+    expect(named).toEqual(['files/notes.txt', 'files/notes.txt']);
+  });
+
+  it('reports the file the reader follows', () => {
+    const followed: string[] = [];
+    const container = render(
+      <ArtifactBody
+        body={'See [the checklist](files/checklist.md).\n'}
+        resources={['files/checklist.md']}
+        onResource={(name) => followed.push(name)}
+      />,
+    ).container;
+    const control = container.querySelector('button') as HTMLButtonElement;
+    fireEvent.click(control);
+    expect(followed).toEqual(['files/checklist.md']);
   });
 });
 

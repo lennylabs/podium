@@ -5,15 +5,31 @@
 
 import { useMemo } from 'react';
 
-import { renderArtifactBody } from '../markdown';
+import type { MouseEvent } from 'react';
+
+import { renderArtifactBody, resourceReferenceAttribute } from '../markdown';
 
 /** noResources is the default bundle, held as one value so a caller that
  * passes none does not invalidate the memo below on every render. */
 const noResources: readonly string[] = [];
 
-export function ArtifactBody({ body, resources = noResources }: { body: string; resources?: readonly string[] }) {
+export function ArtifactBody({
+  body,
+  resources = noResources,
+  onResource,
+}: {
+  body: string;
+  resources?: readonly string[];
+  /** onResource is called with the bundled file a §4.4 prose reference names,
+   * when the reader follows that reference. The rendering path turns such a
+   * reference into a control rather than a link, because the file has no
+   * address of its own on this origin, and the surface holding the body
+   * decides what opening it means. */
+  onResource?: (name: string) => void;
+}) {
   // The bundled file names decide whether a relative §4.4 prose reference
-  // names one of them or another artifact, and only the second is routed.
+  // names one of them or another artifact, and the two are resolved
+  // differently.
   const markup = useMemo(() => renderArtifactBody(body, resources), [body, resources]);
   if (markup.trim() === '') {
     // A manifest carrying frontmatter and nothing else is a finished
@@ -28,5 +44,24 @@ export function ArtifactBody({ body, resources = noResources }: { body: string; 
       </p>
     );
   }
-  return <div className="prose" data-testid="artifact-body" dangerouslySetInnerHTML={{ __html: markup }} />;
+  // The reference controls are inside markup this component inserts whole, so
+  // the press is taken on the container rather than bound to each one.
+  const onClick = (event: MouseEvent<HTMLDivElement>) => {
+    if (onResource === undefined) {
+      return;
+    }
+    const target = event.target instanceof Element ? event.target : null;
+    const name = target?.closest(`[${resourceReferenceAttribute}]`)?.getAttribute(resourceReferenceAttribute);
+    if (name !== null && name !== undefined) {
+      onResource(name);
+    }
+  };
+  return (
+    <div
+      className="prose"
+      data-testid="artifact-body"
+      onClick={onClick}
+      dangerouslySetInnerHTML={{ __html: markup }}
+    />
+  );
 }
