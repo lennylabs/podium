@@ -2358,6 +2358,20 @@ label:has(> input:disabled) {
   color: var(--meta);
 }
 
+/* The note left where a form control stood. The control is removed with its
+   subtree, because its text is a label the author wrote for it and leaving
+   that text behind reads as prose. The note is what tells the reader the
+   viewer refused the control rather than that the body lost a passage. */
+.prose .form-stripped {
+  color: var(--meta);
+}
+
+.prose .form-stripped::after {
+  content: "(form removed)";
+  font-size: 12px;
+  color: var(--meta);
+}
+
 /* A quoted aside carries no marker of its own once the user-agent indent is
    dropped, so the rule on the left is what separates it from the paragraph
    above it, and the quieter ink is what marks it as borrowed rather than

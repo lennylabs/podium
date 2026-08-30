@@ -135,6 +135,33 @@ describe('the sanitized artifact-body rendering path', () => {
     expect(container.textContent).toContain('Before');
   });
 
+  // A control's own text is a label the author wrote for it, so a control
+  // that lost its element and kept its text would put that label in the body
+  // as prose the reader cannot tell from the author's own. The control goes
+  // with its subtree, and the note left in its place names the removal in the
+  // terms the stripped link, image, and embed use.
+  it('leaves a form control no text and a note in its place', () => {
+    const container = renderBody(
+      'Before\n\n<form action="/evil"><input name="q"><button>press me</button>' +
+        '<select><option>choose me</option></select></form>\n\nAfter\n',
+    );
+    expect(container.textContent).not.toContain('press me');
+    expect(container.textContent).not.toContain('choose me');
+    expect(container.querySelectorAll('.form-stripped')).toHaveLength(1);
+    expect(container.textContent).toContain('Before');
+    expect(container.textContent).toContain('After');
+  });
+
+  // The routing pass below the form pass builds this UI's own button for a
+  // bundled-file reference. A form pass that ran after it would remove that
+  // button as if the author had written it, which would leave the reference
+  // as a note reading (form removed).
+  it('keeps the resource reference control the routing pass builds', () => {
+    const container = renderBody('See [the sheet](notes.md).\n', ['notes.md']);
+    expect(container.querySelector('button.resource-reference')?.textContent).toBe('the sheet');
+    expect(container.querySelector('.form-stripped')).toBeNull();
+  });
+
   // A URL the browser fetches without the reader acting reaches the host it
   // names with the reader's IP address, User-Agent, and Referer, so a body
   // that named a foreign host on one would make every view of the artifact a

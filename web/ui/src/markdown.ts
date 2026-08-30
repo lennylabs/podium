@@ -132,11 +132,18 @@ const strippedImageClass = 'image-stripped';
 // image use.
 const strippedEmbedClass = 'embed-stripped';
 
+// The class the note left in place of a form control carries. A control's own
+// text is a label the author wrote for it, so leaving that text behind hands
+// the reader a fragment of removed markup as if it were prose. The control is
+// removed with its subtree instead, and the note names the removal in the same
+// terms the stripped link, image, and embed use.
+const strippedFormClass = 'form-stripped';
+
 /** clearMarkers strips every removal marker from a node, so a body that
  * writes one on a live element of its own cannot pass that element off as a
  * neutralized one. */
 function clearMarkers(node: Element): void {
-  for (const marker of [strippedLinkClass, strippedImageClass, strippedEmbedClass]) {
+  for (const marker of [strippedLinkClass, strippedImageClass, strippedEmbedClass, strippedFormClass]) {
     node.classList.remove(marker);
   }
   if (node.hasAttribute('class') && node.classList.length === 0) {
@@ -191,6 +198,41 @@ function replaceStrippedEmbeds(root: DocumentFragment): void {
     note.className = strippedEmbedClass;
     note.textContent = embed.getAttribute('title') ?? '';
     embed.replaceWith(note);
+  }
+}
+
+// The form controls a body can carry. A form on the registry's origin is
+// indistinguishable from the UI's own chrome, and the origin is the one the
+// session cookie is scoped to, so an author who can write a layer's source
+// could otherwise prompt a reader for a credential. No markdown renderer emits
+// one, and the whole set is removed here.
+//
+// They are admitted as tags rather than forbidden to the sanitizer, because a
+// forbidden tag is unwrapped rather than removed: the element goes and its
+// text children stay, which leaves a button's or an option's label in the body
+// as bare text the reader cannot tell from authored prose. Admitting them
+// costs nothing for the reason the embedded documents above are admitted: the
+// hook removes the attributes a browser fetches on its own, the pass below
+// removes the elements with their subtrees before the markup leaves the
+// module, and the fragment they pass through is detached, so none of them is
+// ever laid out.
+const formTags = ['form', 'input', 'button', 'textarea', 'select', 'option'];
+
+/** replaceStrippedForms replaces every form control by a note naming the
+ * removal, taking the control's subtree with it. A nested control is left to
+ * the outermost one, which the document order of the match list puts first.
+ *
+ * The pass runs on the sanitizer's output for the reason
+ * `replaceStrippedImages` does: the hook clears the marker classes from every
+ * node it visits and would clear the marker off the note. */
+function replaceStrippedForms(root: DocumentFragment): void {
+  for (const control of root.querySelectorAll(formTags.join(','))) {
+    if (!root.contains(control)) {
+      continue;
+    }
+    const note = document.createElement('span');
+    note.className = strippedFormClass;
+    control.replaceWith(note);
   }
 }
 
@@ -365,16 +407,14 @@ export function renderArtifactBody(body: string, resources: readonly string[] = 
     // A stylesheet is not executable, but it is author-controlled markup on
     // the registry's origin and the viewer renders the body inside its own
     // layout, so the body does not get to restyle the page around it.
-    // The form controls are dropped whole. No markdown renderer emits one, and
-    // a body that carries one renders a working input on the registry's origin
-    // that a reader cannot tell from the UI's own chrome, which is the
-    // credential prompt this control exists to prevent.
-    FORBID_TAGS: ['style', 'form', 'input', 'button', 'textarea', 'select', 'option'],
+    FORBID_TAGS: ['style'],
     // The embedded-document elements are admitted so `replaceStrippedEmbeds`
-    // below can leave a note where the author wrote one. `srcdoc` is refused
-    // with them: it carries a whole document inline rather than a URL, so no
-    // attribute test reaches what it holds.
-    ADD_TAGS: embedTags,
+    // below can leave a note where the author wrote one, and the form controls
+    // so `replaceStrippedForms` can remove each one with its subtree rather
+    // than leaving its label behind. `srcdoc` is refused: it carries a whole
+    // document inline rather than a URL, so no attribute test reaches what it
+    // holds.
+    ADD_TAGS: [...embedTags, ...formTags],
     FORBID_ATTR: ['style', 'srcdoc'],
     // The fragment is taken rather than the string so the pass below runs on
     // the sanitizer's own output. Nothing between the two adds an element or
@@ -383,6 +423,10 @@ export function renderArtifactBody(body: string, resources: readonly string[] = 
   });
   replaceStrippedImages(sanitized);
   replaceStrippedEmbeds(sanitized);
+  // Before the reference routing below, which is what puts this UI's own
+  // buttons into the fragment. A pass over the form controls that ran after it
+  // would take those with the author's.
+  replaceStrippedForms(sanitized);
   routeReferences(sanitized, new Set(resources));
   markScrollableRegions(sanitized);
   const holder = document.createElement('div');
