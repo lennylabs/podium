@@ -5,7 +5,7 @@
 import { ArtifactTable, SubdomainTiles } from './DomainAtScale';
 import { ArtifactRow } from '../components/ArtifactRow';
 import { Breadcrumb } from '../components/Breadcrumb';
-import { Badge, Chevron, EmptyState, ErrorPage, Loading } from '../components/primitives';
+import { Badge, Chevron, EmptyState, ErrorPage, Loading, PathLabel } from '../components/primitives';
 import type { DomainDescriptor } from '../api';
 import { catalogArtifactIDs, loadDomain } from '../api';
 import {
@@ -355,7 +355,9 @@ function SubdomainGrid({
               the whole card follow the link (`index.css`, `.stretched-link`),
               so the description and the counts are aimable too. */}
           <a className="subdomain-name mono stretched-link" href={domainHref(child.path)}>
-            <span>{domainLabel(child.path, parent)}</span>
+            <span>
+              <PathLabel path={domainLabel(child.path, parent)} />
+            </span>
             <Chevron />
           </a>
           {child.description !== undefined && child.description !== '' ? (

@@ -4,7 +4,7 @@
 // rather than rendering nothing.
 
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from 'react';
-import { useEffect, useId, useState } from 'react';
+import { Fragment, useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api';
@@ -178,6 +178,36 @@ export function formatVersion(version: string): string {
     return '';
   }
   return version.startsWith('v') ? version : `v${version}`;
+}
+
+/**
+ * PathLabel draws a slash-separated domain path as a label that breaks at its
+ * separators. A §4.5.5 sparse chain reaches a card folded into one entry whose
+ * label is the whole stretch of path it crosses, and a slash carries no break
+ * opportunity of its own, so a card too narrow for the label breaks it inside
+ * a segment and the title reads as broken text rather than as a path. The
+ * `<wbr>` after each separator is the opportunity the browser takes first,
+ * which keeps the break on a boundary and leaves the CSS break rule as the
+ * fallback for a single segment wider than the card.
+ *
+ * Spec: §13.10
+ */
+export function PathLabel({ path }: { path: string }) {
+  return (
+    <>
+      {path.split('/').map((segment, index) => (
+        <Fragment key={`${String(index)}:${segment}`}>
+          {index > 0 && (
+            <>
+              {'/'}
+              <wbr />
+            </>
+          )}
+          {segment}
+        </Fragment>
+      ))}
+    </>
+  );
 }
 
 /**

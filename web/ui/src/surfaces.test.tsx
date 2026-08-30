@@ -1820,6 +1820,43 @@ describe("the domain browser", () => {
     );
   });
 
+  // A §4.5.5 sparse chain reaches the grid folded into one card whose title is
+  // the whole stretch of path it crosses. A slash carries no break opportunity
+  // of its own, so a card too narrow for the title broke it inside a segment
+  // and read as broken text. The title declares a break after each separator.
+  it("breaks a folded subdomain card title at its path separators", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "finance",
+          subdomains: [
+            {
+              path: "finance/accounting/ledgers/reconciliation/quarterly",
+              name: "quarterly",
+              description: "Quarterly.",
+            },
+          ],
+          notable: [],
+        },
+      },
+    });
+    goTo("#/domain/finance");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const title = browser.querySelector(".subdomain-name > span");
+    expect(title?.textContent).toBe(
+      "accounting/ledgers/reconciliation/quarterly",
+    );
+    // One opportunity per separator, each of them after the slash, so a broken
+    // line ends on the separator rather than inside the segment before it.
+    const breaks = [...(title?.querySelectorAll("wbr") ?? [])];
+    expect(breaks.length).toBe(3);
+    for (const opportunity of breaks) {
+      expect(opportunity.previousSibling?.textContent).toBe("/");
+    }
+  });
+
   // A domain keyword covers the whole subtree and an artifact tag labels one
   // row. Drawn with the same pill they read as one vocabulary, so the header
   // keyword and the listing tag carry different treatments.
