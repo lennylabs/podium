@@ -10,7 +10,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 
 import { SecretReveal, useSecretAcknowledgement } from "./SecretReveal";
-import { members } from "./members";
+import { members, merge } from "./members";
 import { Badge, ErrorState, Modal } from "../components/primitives";
 import type { LayerRecord, LayerSecretResult, LayerUpdate } from "../api";
 import { updateLayer } from "../api";
@@ -35,8 +35,15 @@ export function UpdateLayerForm({
   const editableVisibility = layer.UserDefined !== true;
   const [isPublic, setPublic] = useState(layer.Public === true);
   const [organization, setOrganization] = useState(layer.Organization === true);
-  const [groups, setGroups] = useState((layer.Groups ?? []).join(", "));
-  const [users, setUsers] = useState((layer.Users ?? []).join(", "));
+  // The members already granted on an axis are displayed rather than edited,
+  // because the endpoint grants on each axis and withdraws on none: a field
+  // holding them would accept a deletion the registry discards while still
+  // answering success, which reads to an operator as an access narrowing that
+  // never happened. The field beside them names the members to add.
+  const grantedGroups = layer.Groups ?? [];
+  const grantedUsers = layer.Users ?? [];
+  const [groups, setGroups] = useState("");
+  const [users, setUsers] = useState("");
   const [result, setResult] = useState<LayerSecretResult | null>(null);
   const secret = useSecretAcknowledgement();
   const [refusal, setRefusal] = useState<unknown>(null);
@@ -60,12 +67,12 @@ export function UpdateLayerForm({
       : { local_path: localPath, root };
     if (editableVisibility) {
       // Each axis the patch carries grants, and an axis it omits keeps its
-      // stored value, so the form sends an axis the reader turned on and a
-      // member list they named.
+      // stored value, so the form sends an axis the reader turned on and the
+      // stored members plus the ones they added.
       patch.public = isPublic;
       patch.organization = organization;
-      patch.groups = members(groups);
-      patch.users = members(users);
+      patch.groups = merge(grantedGroups, members(groups));
+      patch.users = merge(grantedUsers, members(users));
     }
     setPending(true);
     updateLayer(layer.ID, patch).then(
@@ -206,8 +213,11 @@ export function UpdateLayerForm({
                 />
                 Organization
               </label>
+              <GrantedMembers label="Groups granted" members={grantedGroups} />
               <label className="field">
-                <span className="label">Group names, separated by commas</span>
+                <span className="label">
+                  Group names to add, separated by commas
+                </span>
                 <input
                   type="text"
                   value={groups}
@@ -216,9 +226,10 @@ export function UpdateLayerForm({
                   }}
                 />
               </label>
+              <GrantedMembers label="Users granted" members={grantedUsers} />
               <label className="field">
                 <span className="label">
-                  User identifiers, separated by commas
+                  User identifiers to add, separated by commas
                 </span>
                 <input
                   type="text"
@@ -299,5 +310,36 @@ export function UpdateLayerForm({
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** GrantedMembers displays the members an axis already carries. They are drawn
+ * as tokens rather than as a value in the field beside them, because the
+ * registry withdraws no grant: a removable control here would report success
+ * on a deletion it discarded.
+ *
+ * Spec: §4.6
+ */
+function GrantedMembers({
+  label,
+  members: granted,
+}: {
+  label: string;
+  members: readonly string[];
+}) {
+  if (granted.length === 0) {
+    return null;
+  }
+  return (
+    <div className="field">
+      <span className="label">{label}</span>
+      <span className="token-row" aria-label={label}>
+        {granted.map((member) => (
+          <span className="token mono" key={member}>
+            {member}
+          </span>
+        ))}
+      </span>
+    </div>
   );
 }

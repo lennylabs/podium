@@ -9702,6 +9702,45 @@ describe("the layer write flows", () => {
     ).toBe(1);
   });
 
+  // The endpoint grants on each visibility axis and withdraws on none, so a
+  // member the layer already carries cannot be taken back from the Edit
+  // dialog. The granted members are displayed rather than held in the field,
+  // and the patch carries them however the field is edited, so no deletion is
+  // sent and answered with a plain success the operator reads as a narrowing.
+  //
+  // Spec: §4.6
+  it("keeps a granted user on the layer the Edit dialog patches", async () => {
+    const granted = { ...adminLayer(), Users: ["alice@acme.com"] };
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [granted] } },
+      "PUT /v1/layers/update": { body: { layer: granted } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    // The grant is displayed, and the field beside it names additions alone.
+    expect(
+      within(within(form).getByLabelText("Users granted")).getByText(
+        "alice@acme.com",
+      ),
+    ).toBeTruthy();
+    const add = within(form).getByLabelText(
+      "User identifiers to add, separated by commas",
+    ) as HTMLInputElement;
+    expect(add.value).toBe("");
+    fireEvent.change(add, { target: { value: "bob@acme.com" } });
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    const sent = JSON.parse(bodies[bodies.length - 1]) as {
+      users: string[];
+    };
+    expect(sent.users).toEqual(["alice@acme.com", "bob@acme.com"]);
+  });
+
   // Every patch carrying a rotation issues a fresh secret, so a second Save
   // changes while the first is open rotates again and replaces the value the
   // reveal is presenting as shown once.
@@ -10172,7 +10211,7 @@ describe("the layer write flows", () => {
     );
     fireEvent.click(screen.getByLabelText("Public"));
     fireEvent.change(
-      screen.getByLabelText("Group names, separated by commas"),
+      screen.getByLabelText("Group names to add, separated by commas"),
       { target: { value: "secops" } },
     );
     fireEvent.change(screen.getByLabelText("Ref"), {

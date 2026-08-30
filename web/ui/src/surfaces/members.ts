@@ -71,3 +71,12 @@ export function replaceFragment(raw: string, picked: string): string {
 export function without(list: readonly string[], dropped: string): string[] {
   return list.filter((member) => member !== dropped);
 }
+
+/** merge adds the members a form names to the ones a layer already carries,
+ * keeping the stored list intact and dropping a name that repeats one of them.
+ * §4.6 grants on an axis and withdraws on none, so a member list a form sends
+ * is the stored grant plus what the reader added rather than a replacement. */
+export function merge(stored: readonly string[], added: readonly string[]): string[] {
+  const held = new Set(stored);
+  return [...stored, ...added.filter((member) => !held.has(member))];
+}
