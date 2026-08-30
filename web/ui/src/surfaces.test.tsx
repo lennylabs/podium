@@ -10592,6 +10592,38 @@ describe("the layer write flows", () => {
     });
   });
 
+  // A refused step moves no row and changes nothing else on the page, so a
+  // sighted keyboard operator has no way to tell the refusal apart from a
+  // dead key while it is stated in the assistive-only region alone. The panel
+  // draws it the way it draws the unregister outcome.
+  it("draws the block-edge refusal on the page", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layers: [adminLayer(), userLayer(), scratchLayer()] },
+      },
+      "/v1/layers/reorder": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    expect(screen.getByTestId("panel-announcement").className).toBe(
+      "assistive-only",
+    );
+    fireEvent.keyDown(
+      screen.getByLabelText(moveHandleLabel("alice-personal")),
+      { key: "ArrowUp" },
+    );
+    const region = await screen.findByTestId("panel-announcement");
+    await waitFor(() => {
+      expect(region.className).toContain("banner");
+    });
+    expect(region.className).not.toContain("assistive-only");
+    expect(region.textContent).toBe(
+      "alice-personal is already first among the user-defined layers; it did not move.",
+    );
+  });
+
   // The fan-out issues one request per layer in sequence, and the press is
   // one press, so the run answers with one report: the combined counts, a row
   // per layer, and no dialog naming a single layer.

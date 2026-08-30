@@ -92,7 +92,9 @@ interface Run {
  * new order on the page, so it is announced alone. An unregister takes its row
  * away and moves the layer into a recovery window that ends, and neither the
  * window nor where the layer went is stated anywhere else on the surface, so
- * it is drawn as well as announced. */
+ * it is drawn as well as announced. A reorder the panel refuses leaves the
+ * rows exactly where they were, so it is drawn as well: a sighted keyboard
+ * operator has nothing on screen to tell the refusal apart from a dead key. */
 type Outcome = { text: string; visible: boolean };
 
 const noOutcome: Outcome = { text: "", visible: false };
@@ -317,7 +319,7 @@ export function LayerPanel({
     }
     const onto = block[at + delta];
     if (onto === undefined) {
-      setOutcome(announced(blockEdgeNote(block, id, delta)));
+      setOutcome(drawn(blockEdgeNote(block, id, delta)));
       return;
     }
     commitMove(id, onto.ID);
@@ -718,7 +720,9 @@ function movedNote(
  * values are, so a step across the class boundary names no move. The refusal
  * goes to the live region a committed move states its outcome in: a reader
  * who cannot see the rows stay put otherwise hears the previous move's
- * confirmation or nothing at all. */
+ * confirmation or nothing at all. It is drawn on the page as well, because
+ * the press leaves no other trace and a sighted operator would read the
+ * silence as a key that does nothing. */
 function blockEdgeNote(
   block: LayerRecord[],
   id: string,
