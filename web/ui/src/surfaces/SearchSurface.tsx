@@ -80,15 +80,7 @@ export function SearchSurface({
   // Without the lift the same string named one search in the address bar and
   // ran another against the registry, because the route parses it and the
   // field did not (§13.10).
-  const onTyped = (typed: string) => {
-    const lifted = parseTypedLine(typed);
-    if (!hasFilters(lifted)) {
-      // Nothing was lifted, so the line stands exactly as typed. Rewriting it
-      // from the parse would drop the trailing space the reader just entered
-      // and fold their word into the one before it.
-      setText(typed);
-      return;
-    }
+  const applyLifted = (lifted: SearchFilters) => {
     if (lifted.type !== "") {
       setType(lifted.type);
     }
@@ -102,6 +94,34 @@ export function SearchSurface({
       ]);
     }
     setText(lifted.query);
+  };
+
+  const onTyped = (typed: string) => {
+    const lifted = parseTypedLine(typed);
+    if (!hasFilters(lifted)) {
+      // Nothing was lifted, so the line stands exactly as typed. Rewriting it
+      // from the parse would drop the trailing space the reader just entered
+      // and fold their word into the one before it.
+      setText(typed);
+      return;
+    }
+    applyLifted(lifted);
+  };
+
+  // ⏎ settles the word the reader is still on. Between keystrokes a filter
+  // token is lifted only once whitespace follows it, so `type:ski` does not
+  // filter on the way to `type:skill`, and a line submitted with no trailing
+  // space kept its token as query text while the route the surface wrote for
+  // the same line parsed it as a filter: one address named two searches, and
+  // which one ran depended on whether the reader had typed it or reloaded it.
+  // Submitting is the reader saying the word is finished, so the whole line is
+  // parsed the way the route and the palette parse it (§13.10).
+  const onSubmitted = () => {
+    const settled = parseQueryLine(text);
+    if (!hasFilters(settled)) {
+      return;
+    }
+    applyLifted(settled);
   };
 
   // A navigation onto the search route reaches the surface here rather than
@@ -254,6 +274,12 @@ export function SearchSurface({
           placeholder="Search artifacts"
           onChange={(event) => {
             onTyped(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onSubmitted();
+            }
           }}
         />
       </div>

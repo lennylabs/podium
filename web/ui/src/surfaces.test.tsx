@@ -2852,6 +2852,56 @@ describe("search", () => {
     expect(window.location.hash).toBe(searchHref("type:skill tag:review auth"));
   });
 
+  // Spec: §13.10 — the address the surface writes and the search it runs name
+  // one request. A token submitted with no trailing space is finished, so it
+  // is lifted the way the route parses it; otherwise the reader typing
+  // `type:skill` and pressing ⏎ ran a keyword search for the literal token
+  // while the address bar named the filtered one, and reloading that same
+  // address answered differently.
+  it("settles the last inline filter token when the line is submitted", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/");
+    render(<App />);
+    const field = await screen.findByLabelText("Search artifacts");
+    fireEvent.change(field, { target: { value: "type:skill" } });
+    await waitFor(() => {
+      expect(lastSearch().get("query")).toBe("type:skill");
+    });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(await screen.findByText("type: skill")).toBeTruthy();
+    expect((field as HTMLInputElement).value).toBe("");
+    await waitFor(() => {
+      const query = lastSearch();
+      expect(query.get("type")).toBe("skill");
+      expect(query.get("query")).toBeNull();
+    });
+    expect(window.location.hash).toBe(searchHref("type:skill"));
+  });
+
+  // Spec: §13.10 — a submitted line that names no filter is query text, so
+  // ⏎ over an ordinary word leaves the field and the request as they stand.
+  it("leaves a submitted line that carries no filter token as query text", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/");
+    render(<App />);
+    const field = await screen.findByLabelText("Search artifacts");
+    fireEvent.change(field, { target: { value: "deploy runbook" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect((field as HTMLInputElement).value).toBe("deploy runbook");
+    await waitFor(() => {
+      expect(lastSearch().get("query")).toBe("deploy runbook");
+    });
+    expect(window.location.hash).toBe(searchHref("deploy runbook"));
+  });
+
   // The row states what it is and carries one control per filter. It offers
   // no chip per artifact type, because a row that spends its width on the
   // unapplied values of one filter states the filter set less clearly than
