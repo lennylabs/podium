@@ -7192,6 +7192,45 @@ describe("read-only mode", () => {
     }
   });
 
+  // The handles are disabled for the pointer and the keyboard alike on this
+  // posture, so a precedence label that still instructs a drag or an arrow key
+  // sends the reader to a control that answers nothing, and a footnote that
+  // states when a reorder takes effect describes a write the panel refuses.
+  it("states reordering is off instead of instructing it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": {
+        body: emptyDomain,
+        headers: { "X-Podium-Read-Only": "true" },
+      },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    await screen.findByTestId("read-only-banner");
+    expect(screen.queryByText(/drag or press the arrow keys/)).toBeNull();
+    expect(
+      screen.getByText(/reordering is unavailable while the registry is read-only/i),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Reordering takes effect on the next read/)).toBeNull();
+  });
+
+  it("instructs the reorder where the registry serves writes", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    expect(screen.getByText(/drag or press the arrow keys/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Reordering takes effect on the next read/),
+    ).toBeTruthy();
+  });
+
   it("keeps every write control live where the registry serves writes", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },

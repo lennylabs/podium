@@ -385,12 +385,17 @@ export function LayerPanel({
           the reader's inference from position, a table sorted the other way
           round reads the same. Both lines describe the reorder, so an empty
           panel drops them: instructions for moving rows that do not exist
-          stand over the empty state as if the reader had missed something. */}
+          stand over the empty state as if the reader had missed something.
+          A read-only registry takes no reorder and the handles are disabled
+          for the pointer and the keyboard alike, so the label states that
+          instead of an instruction that produces no response (§13.2.1). */}
       {rows.length > 0 && (
         <>
           <p className="precedence-label">
             <span className="label">
-              Precedence — drag or press the arrow keys on a handle to reorder
+              {readOnly
+                ? "Precedence — reordering is unavailable while the registry is read-only"
+                : "Precedence — drag or press the arrow keys on a handle to reorder"}
             </span>
             <span className="quiet">lower row wins</span>
           </p>
@@ -507,7 +512,7 @@ export function LayerPanel({
       >
         {outcome}
       </p>
-      <PanelFoot rows={rows} subject={subject} />
+      <PanelFoot rows={rows} subject={subject} readOnly={readOnly} />
     </section>
   );
 }
@@ -526,21 +531,25 @@ export function LayerPanel({
  * arm carries the reordering note by itself.
  *
  * The reordering note describes moving a row, so an empty panel drops it for
- * the same reason the precedence lines above the table are dropped there. A
- * caller who resolves no subject and holds no row is left with nothing to
- * state, and the foot is absent rather than blank. */
+ * the same reason the precedence lines above the table are dropped there, and
+ * a read-only registry drops it as well: it states when a reorder takes
+ * effect, and on that posture no reorder is taken (§13.2.1). A caller who
+ * resolves no subject and holds no row is left with nothing to state, and the
+ * foot is absent rather than blank. */
 function PanelFoot({
   rows,
   subject,
+  readOnly,
 }: {
   rows: LayerRecord[];
   subject: string;
+  readOnly: boolean;
 }) {
   const quota = useAsync(() => readQuota(), []);
   const cap = quota.value?.limits?.MaxUserLayers;
   const mine = rows.filter((row) => ownedByCaller(row, subject)).length;
   const holding = subject !== "";
-  const reorderable = rows.length > 0;
+  const reorderable = rows.length > 0 && !readOnly;
   if (!holding && !reorderable) {
     return null;
   }
