@@ -3649,11 +3649,20 @@ label:has(> input:disabled) {
   white-space: nowrap;
 }
 
+/* The type and the version are the row's right-hand column, so they are set
+   apart from each other the way the design board sets them: a badge whose
+   right edge and a version whose left edge each land on one x down the whole
+   list. The pair is held at the panel's right edge, so a version rendered at
+   its intrinsic width drags the badge left by however many glyphs that
+   version happens to carry, and v1.10.0 beside v1.2.0 puts the two CONTEXT
+   badges at different x. The version column therefore carries a floor wide
+   enough for an ordinary semver string, which fixes both edges for every row
+   that fits it. */
 .palette-row-aside {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 10px;
   margin-left: auto;
 }
 
@@ -3662,6 +3671,8 @@ label:has(> input:disabled) {
 }
 
 .palette-row-version {
+  flex: none;
+  min-width: 7ch;
   font-size: 11px;
 }
 

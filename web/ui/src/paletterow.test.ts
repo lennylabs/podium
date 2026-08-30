@@ -39,14 +39,19 @@ function row(selected: boolean): HTMLElement {
   return button;
 }
 
-/** styled attaches an element carrying the given classes and returns the style
- * the stylesheet computes for it. */
-function styled(tag: string, className: string): CSSStyleDeclaration {
+/** attach mounts an element carrying the given classes and returns it. */
+function attach(tag: string, className: string): HTMLElement {
   const element = document.createElement(tag);
   element.className = className;
   document.body.appendChild(element);
   mounted.push(element);
-  return window.getComputedStyle(element);
+  return element;
+}
+
+/** styled attaches an element carrying the given classes and returns the style
+ * the stylesheet computes for it. */
+function styled(tag: string, className: string): CSSStyleDeclaration {
+  return window.getComputedStyle(attach(tag, className));
 }
 
 /** declared returns the value the sheet's last matching rule gives property
@@ -86,6 +91,17 @@ describe("command palette rows", () => {
     const body = styled("div", "palette-body");
     expect(body.paddingLeft).toBe("0px");
     expect(body.paddingRight).toBe("0px");
+  });
+
+  it("sets the version apart from the badge and holds it in a column", () => {
+    // The pair sits at the panel's right edge, so a version drawn at its own
+    // width moves the badge beside it. The floor holds an ordinary semver
+    // string, which puts every row's badge edge and version edge on one x.
+    const aside = styled("span", "palette-row-aside");
+    expect(aside.gap).toBe("10px");
+    const version = attach("span", "mono quiet palette-row-version");
+    expect(declared(version, "min-width")).toBe("7ch");
+    expect(declared(version, "flex")).toBe("none");
   });
 
   it("marks the selection with the accent bar alone", () => {
