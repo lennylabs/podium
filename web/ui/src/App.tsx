@@ -292,6 +292,13 @@ export function App() {
   // Both of those also render no node, so the empty line is gated on a read
   // that returned rather than on the node list alone.
   const catalogEmpty = !refused && !tree.loading && tree.error === null && catalogNodes.length === 0;
+  // A layer whose artifacts sit at its root contributes no domain, so the
+  // tree is empty on a registry that is registered, ingested, and serving.
+  // The advisory is therefore gated on the same read reporting no artifact at
+  // the top either: telling a reader to register a layer while the pane beside
+  // the message lists that layer's artifacts names a remedy already applied.
+  // Spec: §13.10.
+  const catalogBare = catalogEmpty && (tree.value?.notable ?? []).length === 0;
   // A read that failed for a reason other than identity leaves the sidebar
   // with nothing to render and nothing the reader can act on. Left unmarked
   // it reads as a catalog holding no domain, while the footer figures an
@@ -408,7 +415,10 @@ export function App() {
           />
           {catalogEmpty && (
             <p className="quiet catalog-empty" data-testid="catalog-empty">
-              The catalog holds no domains. Register a layer to fill it.
+              The catalog holds no domains.{' '}
+              {catalogBare
+                ? 'Register a layer to fill it.'
+                : 'Its artifacts sit at the top of the hierarchy.'}
             </p>
           )}
           {/* The failed read is the shell's own, and the surface beside it

@@ -1565,6 +1565,43 @@ describe("the application shell", () => {
         "The catalog holds no domains.",
       );
     });
+    expect(screen.getByTestId("catalog-empty").textContent).toContain(
+      "Register a layer to fill it.",
+    );
+  });
+
+  // A layer whose artifacts sit at its root contributes no domain, so the
+  // tree is empty while the registry is registered, ingested, and serving.
+  // The advisory names a remedy the reader has already applied there.
+  // Spec: §13.10
+  it("does not tell a reader to register a layer where the empty tree holds artifacts", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [],
+          notable: [
+            { id: "solo", type: "skill", description: "Pay an invoice" },
+          ],
+        },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    await screen.findByLabelText("Catalog");
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-empty").textContent).toContain(
+        "The catalog holds no domains.",
+      );
+    });
+    expect(screen.getByTestId("catalog-empty").textContent).not.toContain(
+      "Register a layer to fill it.",
+    );
+    expect(screen.getByTestId("catalog-empty").textContent).toContain(
+      "Its artifacts sit at the top of the hierarchy.",
+    );
   });
 });
 
