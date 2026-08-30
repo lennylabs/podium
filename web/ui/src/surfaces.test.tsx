@@ -2549,6 +2549,51 @@ describe("the domain browser", () => {
     expect(screen.queryByTestId("listing-continuation")).toBeNull();
   });
 
+  // A domain that carries its artifacts in its subdomains is counted by what
+  // stands under it rather than by the listing it returned, so the header
+  // agrees with the per-child counts the same screen prints below it.
+  it("counts the whole subtree in a domain header, not the direct listing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/catalog": {
+        body: {
+          ids: [
+            "platform/top1",
+            "platform/caching/c1",
+            "platform/networking/n1",
+            "platform/storage/s1",
+            "platform/storage/s2",
+          ],
+        },
+      },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: [
+            { path: "platform/caching", name: "caching" },
+            { path: "platform/networking", name: "networking" },
+            { path: "platform/storage", name: "storage" },
+          ],
+          notable: [{ id: "platform/top1", type: "skill" }],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const head = within(browser).getByRole("heading", {
+      level: 1,
+    }).parentElement;
+    await waitFor(() => {
+      expect(head?.textContent).toBe("platform5 ARTIFACTS3 SUBDOMAINS");
+    });
+    // The subtree count heads the page without continuing the listing: the
+    // four artifacts it counts past the listing sit under the subdomain cards
+    // rather than past a trimmed edge.
+    expect(screen.queryByTestId("listing-continuation")).toBeNull();
+    expect(within(browser).getByText("2 artifacts")).toBeTruthy();
+  });
+
   // The counts qualify the domain name, so they sit on the title's line in
   // the marker casing a badge carries, with what the domain holds read first.
   it("sets the counts beside the domain name in caps, artifacts first", async () => {

@@ -98,14 +98,18 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
   // folded group is the whole of what the domain holds, the two empty panels
   // stand down and the group is what the reader meets.
   const foldedOnly = folded.length > 0 && body.subdomains.length === 0 && direct.length === 0;
-  // The root's artifact badge counts the whole catalog rather than what the
-  // empty path holds directly. §4.5.2 returns every visible ID under the
-  // scope, and at the root that scope is the registry, so a count of direct
-  // children alone reads as zero on a registry that holds thousands. The
-  // figure stays out of `total`, which drives the trimmed-listing line: the
-  // root's listing is not a truncated view of those artifacts, they sit under
-  // the subdomains the page already links to.
-  const catalogHeld = catalog.value === null ? 0 : catalog.value.length;
+  // The artifact badge counts the whole subtree rather than what the domain
+  // holds directly. §4.5.2 returns every visible ID under the scope, which is
+  // the figure the subdomain tiles below the header already sum to, so a badge
+  // drawn from the direct listing reads smaller than the counts the same
+  // screen prints and reads as zero on a domain that carries everything one
+  // level down. The figure stays out of `total`, which drives the
+  // trimmed-listing line: the listing is not a truncated view of the artifacts
+  // under the subdomains, they sit under the links the page already draws.
+  //
+  // A catalog read that failed leaves the subtree unknown, and the page falls
+  // back to what `load_domain` returned.
+  const subtreeHeld = catalog.value === null ? null : catalog.value.length;
   // The trimmed listing is continued at the end of the list rather than
   // announced above it: the reader meets it where the returned edge is. It is
   // the list's own last row, so a listing that carries rows takes it inside
@@ -122,12 +126,15 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
       <div className="domain-head">
         <h1>{leafName(body.path)}</h1>
         <div className="domain-counts">
-          {/* The badge is the domain's own count rather than the listing's,
-              so a trimmed listing is not presented as the whole domain. The
-              two agree wherever nothing was trimmed, and the listing wins
-              where it carries entries the catalog does not count as direct
-              children, which is the folded group. */}
-          <CountBadge count={root ? catalogHeld : Math.max(body.notable.length, total ?? 0)} noun="artifact" />
+          {/* The badge is what the catalog holds under the domain rather than
+              what the listing returned, so a trimmed listing is not presented
+              as the whole domain and the header agrees with the tiles under
+              it. Where the catalog read failed the listing stands in, and the
+              trimmed total wins over it where the two disagree. */}
+          <CountBadge
+            count={subtreeHeld ?? Math.max(body.notable.length, total ?? 0)}
+            noun="artifact"
+          />
           {/* Nothing is a subdomain of the root, so the entry screen counts
               the top-level domains by that name. */}
           <CountBadge count={body.subdomains.length} noun={root ? 'domain' : 'subdomain'} />
