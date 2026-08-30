@@ -370,6 +370,9 @@ export function App() {
         }}
         trigger={searchTrigger}
         content={content}
+        // The recovery page is a route of its own under the panel, so the
+        // handoff still moves the reader off it and is offered there.
+        atLayers={route.name === 'layers' && !route.deleted}
       />
       {anonymous && (
         <PageBanner testID="anonymous-banner">

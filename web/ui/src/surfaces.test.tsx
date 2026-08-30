@@ -13071,6 +13071,64 @@ describe("the command palette", () => {
     expect(window.location.hash).toBe("#/layers");
   });
 
+  // The handoff leads to the layer panel, so a reader who opened the panel
+  // from that panel is offered an action that closes the panel and leaves the
+  // route where it was. The arm names where the register form is instead.
+  it("drops the layer-panel handoff for a reader already on the layer panel", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/catalog": { body: { ids: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "anything" },
+    });
+    const empty = await within(panel).findByTestId("palette-empty");
+    expect(
+      within(empty).getByText("The catalog holds no artifacts"),
+    ).toBeTruthy();
+    expect(
+      within(empty).getByText(
+        "No query can match until a layer is registered on the panel behind this one.",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(empty).queryByRole("button", { name: "Open the layer panel" }),
+    ).toBeNull();
+  });
+
+  // The recovery page is a route of its own under the panel, so the handoff
+  // moves the reader off it and is still offered there.
+  it("keeps the layer-panel handoff on the recovery page", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/layers/deleted": { body: { layers: [] } },
+      "/v1/catalog": { body: { ids: [] } },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "anything" },
+    });
+    const empty = await within(panel).findByTestId("palette-empty");
+    fireEvent.click(
+      within(empty).getByRole("button", { name: "Open the layer panel" }),
+    );
+    expect(window.location.hash).toBe("#/layers");
+  });
+
   // The arm turns on the catalog census rather than on the miss, so a registry
   // that holds artifacts keeps the advice about the query.
   it("keeps the query advice when the catalog holds an artifact", async () => {

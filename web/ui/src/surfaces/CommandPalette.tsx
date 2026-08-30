@@ -43,11 +43,13 @@ export function CommandPalette({
   onClose,
   trigger,
   content,
+  atLayers,
 }: {
   open: boolean;
   onClose: () => void;
   trigger: RefObject<HTMLElement | null>;
   content: RefObject<HTMLElement | null>;
+  atLayers: boolean;
 }) {
   // The queries this panel has acted on outlive one opening of it, so they are
   // held out here where closing it cannot discard them. A query joins the list
@@ -73,7 +75,16 @@ export function CommandPalette({
   if (!open) {
     return null;
   }
-  return <PalettePanel onClose={onClose} recents={recents} onRun={remember} trigger={trigger} content={content} />;
+  return (
+    <PalettePanel
+      onClose={onClose}
+      recents={recents}
+      onRun={remember}
+      trigger={trigger}
+      content={content}
+      atLayers={atLayers}
+    />
+  );
 }
 
 /** PalettePanel is one opening of the panel: the query the reader types into
@@ -84,12 +95,14 @@ function PalettePanel({
   onRun,
   trigger,
   content,
+  atLayers,
 }: {
   onClose: () => void;
   recents: string[];
   onRun: (query: string) => void;
   trigger: RefObject<HTMLElement | null>;
   content: RefObject<HTMLElement | null>;
+  atLayers: boolean;
 }) {
   const [line, setLine] = useState('');
   const [index, setIndex] = useState(0);
@@ -341,6 +354,7 @@ function PalettePanel({
               typed={typed}
               correction={correction}
               bareCatalog={bareCatalog}
+              atLayers={atLayers}
               onOpen={openRow}
               onSearch={openSearch}
               onLayers={openLayers}
@@ -517,6 +531,7 @@ function PaletteResults({
   typed,
   correction,
   bareCatalog,
+  atLayers,
   onOpen,
   onSearch,
   onLayers,
@@ -528,6 +543,7 @@ function PaletteResults({
   typed: string;
   correction: string | null;
   bareCatalog: boolean;
+  atLayers: boolean;
   onOpen: (id: string) => void;
   onSearch: () => void;
   onLayers: () => void;
@@ -556,15 +572,26 @@ function PaletteResults({
     // same registry, and hands the reader the panel where a layer is
     // registered rather than the search surface, which would report the same
     // empty catalog back.
+    //
+    // A reader who opened the panel from the layer panel is already on it.
+    // The handoff there closes the panel and leaves the route where it was,
+    // so the only offered action does nothing visible. That reader is told
+    // where the register form is instead, and Escape, which the footer names
+    // on this arm, uncovers it. The sidebar's empty line is gated the same
+    // way: it names a remedy only where the remedy has not been applied.
     return (
       <div className="palette-empty" data-testid="palette-empty">
         <p className="palette-empty-heading">The catalog holds no artifacts</p>
         <p className="quiet palette-empty-body">
-          No query can match until a layer is registered.
+          {atLayers
+            ? 'No query can match until a layer is registered on the panel behind this one.'
+            : 'No query can match until a layer is registered.'}
         </p>
-        <button type="button" onClick={onLayers}>
-          Open the layer panel
-        </button>
+        {!atLayers && (
+          <button type="button" onClick={onLayers}>
+            Open the layer panel
+          </button>
+        )}
       </div>
     );
   }
