@@ -7101,8 +7101,10 @@ describe("the layer write flows", () => {
 
   // Every other held write in the panel names what is holding it, so the
   // unregister confirmation states its hold in the footer and points the
-  // disabled control and the field at that sentence. The hold clears once the
-  // typed ID matches, which is when the control becomes pressable.
+  // disabled control and the field at that sentence. The confirmation opens
+  // with the field empty, so the sentence stands only once what the reader
+  // typed does not match, and it clears once the typed ID does match, which is
+  // when the control becomes pressable.
   it("names the hold on the unregister confirmation until the typed ID matches", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
@@ -7116,17 +7118,22 @@ describe("the layer write flows", () => {
     await screen.findByLabelText("Unregister alice-personal");
     const field = screen.getByLabelText("Type the layer ID to confirm");
     const confirm = screen.getByRole("button", { name: "Unregister layer" });
+    // Nothing has been typed, so the confirmation opens on no sentence at all
+    // rather than on one in the refusal colour. The field's own label carries
+    // the instruction until then.
+    expect(screen.queryByTestId("unregister-foot-note")).toBeNull();
+    expect(confirm.getAttribute("aria-describedby")).toBeNull();
+    expect(field.getAttribute("aria-describedby")).toBeNull();
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    // A near miss is still held, and the sentence states the hold.
+    fireEvent.change(field, { target: { value: "alice-persona" } });
     const note = screen.getByTestId("unregister-foot-note");
     expect(note.textContent).toBe(
       "Type the layer ID to confirm the unregistration.",
     );
+    expect(note.className).toContain("modal-foot-hold");
     expect(confirm.getAttribute("aria-describedby")).toBe(note.id);
     expect(field.getAttribute("aria-describedby")).toBe(note.id);
-    // A near miss is still held, and the sentence still stands.
-    fireEvent.change(field, { target: { value: "alice-persona" } });
-    expect(screen.getByTestId("unregister-foot-note").textContent).toBe(
-      "Type the layer ID to confirm the unregistration.",
-    );
     expect(confirm.hasAttribute("disabled")).toBe(true);
     fireEvent.change(field, { target: { value: "alice-personal" } });
     expect(screen.queryByTestId("unregister-foot-note")).toBeNull();
@@ -7927,6 +7934,41 @@ describe("the layer write flows", () => {
     );
   });
 
+  // The dialog opens with every required field empty, so a hold stands before
+  // the reader has typed anything. Stating it then would open the form on a
+  // sentence in the refusal colour, reading as an error the reader has already
+  // caused. The footer keeps its standing note until the reader has begun.
+  it("opens the register dialog on its standing note rather than a hold", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = screen.getByRole("dialog", { name: "Register a layer" });
+    const register = within(dialog).getByRole("button", { name: "Register" });
+    const note = screen.getByTestId("register-foot-note");
+    expect(register.hasAttribute("disabled")).toBe(true);
+    expect(note.textContent).toContain("Registers at the end of the order");
+    expect(note.className).not.toContain("modal-foot-hold");
+    expect(register.getAttribute("aria-describedby")).toBe(null);
+    const layerID = screen.getByLabelText("Layer ID");
+    expect(layerID.getAttribute("aria-describedby")).toBe(null);
+    // Once the reader has been in the form, the standing hold is named, in the
+    // refusal colour and on the field it stands on.
+    fireEvent.change(layerID, { target: { value: "git-layer" } });
+    fireEvent.change(layerID, { target: { value: "" } });
+    const held = screen.getByTestId("register-foot-note");
+    expect(held.textContent).toContain("Name the layer ID before registering.");
+    expect(held.className).toContain("modal-foot-hold");
+    expect(register.getAttribute("aria-describedby")).toBe(held.id);
+    expect(layerID.getAttribute("aria-describedby")).toBe(held.id);
+  });
+
   // A disabled submit reports no reason of its own, and the field the hold is
   // on scrolls out of view once the body is scrolled to the submit row, so the
   // form names the field holding the submit beside the control and marks the
@@ -8135,15 +8177,19 @@ describe("the layer write flows", () => {
     fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
     const layerID = screen.getByLabelText("Layer ID");
     const note = screen.getByTestId("register-foot-note");
-    // The hold stands on the ID and the footer says so, and the requirement
-    // reaches the field through the marker and `aria-required`, but the
-    // pristine field is not invalid.
-    expect(note.textContent).toContain("Name the layer ID before registering.");
+    // The requirement reaches the pristine field through the marker and
+    // `aria-required`, and neither the field nor the footer announces a
+    // refusal on a form the reader has not begun to fill in.
+    expect(note.textContent).toContain("Registers at the end of the order");
     expect(layerID.getAttribute("aria-required")).toBe("true");
     expect(layerID.getAttribute("aria-invalid")).toBe(null);
-    // Leaving the field still empty is what marks it.
+    // Leaving the field still empty is what marks it, and the footer names the
+    // hold from the same point.
     fireEvent.blur(layerID);
     expect(layerID.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByTestId("register-foot-note").textContent).toContain(
+      "Name the layer ID before registering.",
+    );
     // A pristine ref carries no mark either, and it is the field the hold
     // moves to once the ID is named.
     fireEvent.change(layerID, { target: { value: "alice-personal" } });

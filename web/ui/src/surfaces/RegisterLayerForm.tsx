@@ -70,6 +70,13 @@ export function RegisterLayerForm({
   const [users, setUsers] = useState('');
   const [result, setResult] = useState<LayerSecretResult | null>(null);
   const [refusal, setRefusal] = useState<unknown>(null);
+  // The dialog opens with every required field empty, so a hold stands from
+  // the first paint. Stating it then would open the form on a sentence in the
+  // refusal colour, which reads as an error the reader has already caused
+  // rather than as the requirement it is. The footer therefore keeps its
+  // standing note until the reader has begun to fill the form in, on the same
+  // terms as the per-field invalid mark below.
+  const [engaged, setEngaged] = useState(false);
   // §4.6 keys a layer on its ID and the registration is an upsert on that
   // key, so a second registration sent while the first is still open rewrites
   // the layer the first one created: it reassigns the layer's place in the
@@ -105,6 +112,7 @@ export function RegisterLayerForm({
     <T,>(set: (next: T) => void) =>
     (next: T) => {
       setRefusal(null);
+      setEngaged(true);
       set(next);
     };
 
@@ -141,12 +149,15 @@ export function RegisterLayerForm({
     userMembers,
   });
   const incomplete = hold !== null;
+  // What the footer says out loud. The submit is held from the first paint,
+  // and the sentence naming the hold is stated once the reader has begun.
+  const stated = engaged ? hold : null;
   const holdID = useId();
   // A hold is stated in the footer, and a reader who moves into the field it
   // is on never reaches that line. The field the hold names therefore points
   // at the same sentence and reports itself invalid, so the refusal arrives
   // where it applies rather than only beside the submit.
-  const heldOn = (field: HoldField) => (hold !== null && hold.field === field ? holdID : undefined);
+  const heldOn = (field: HoldField) => (stated !== null && stated.field === field ? holdID : undefined);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -223,6 +234,14 @@ export function RegisterLayerForm({
         onSubmit={submit}
         onChange={() => {
           setRefusal(null);
+          setEngaged(true);
+        }}
+        // Leaving a field is beginning too: the reader who tabs out of the
+        // empty ID has been in the form, and the field marks itself invalid at
+        // that point, so the sentence the field points at states the hold
+        // rather than the standing note.
+        onBlur={() => {
+          setEngaged(true);
         }}
       >
         <div className="modal-body">
@@ -393,11 +412,11 @@ export function RegisterLayerForm({
               the panel's last row is the one that wins, so the footer states
               where this registration lands rather than a fixed number. */}
           <span
-            className={hold === null ? 'quiet modal-foot-note' : 'modal-foot-note modal-foot-hold'}
+            className={stated === null ? 'quiet modal-foot-note' : 'modal-foot-note modal-foot-hold'}
             id={holdID}
             data-testid="register-foot-note"
           >
-            {hold?.message ?? 'Registers at the end of the order, where the last row wins.'}
+            {stated?.message ?? 'Registers at the end of the order, where the last row wins.'}
           </span>
           <button type="button" onClick={onClose}>
             Cancel
@@ -412,7 +431,7 @@ export function RegisterLayerForm({
             className="button primary"
             disabled={readOnly || incomplete || pending}
             aria-busy={pending || undefined}
-            aria-describedby={hold === null ? undefined : holdID}
+            aria-describedby={stated === null ? undefined : holdID}
           >
             Register
           </button>

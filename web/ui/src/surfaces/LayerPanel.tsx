@@ -1210,6 +1210,12 @@ function UnregisterConfirmation({
   // that reports no reason, and a reader who has scrolled past the field or is
   // hearing the button announced has nothing to go on at all.
   const held = typed !== layer.ID;
+  // The field is empty on the first paint, so the hold stands before the
+  // reader has done anything. Stating it then would open the confirmation on a
+  // sentence in the refusal colour, reading as an error the reader has already
+  // caused; the field's own label carries the instruction until they have
+  // typed. The sentence is stated once what they typed does not match.
+  const stated = held && typed !== "";
   const holdID = useId();
   return (
     <Modal title={`Unregister ${layer.ID}`} onClose={onCancel}>
@@ -1253,7 +1259,7 @@ function UnregisterConfirmation({
             value={typed}
             // The hold is stated in the footer, and a reader working in the
             // field never reaches that line, so the field points at it too.
-            aria-describedby={held ? holdID : undefined}
+            aria-describedby={stated ? holdID : undefined}
             onChange={(event) => {
               setTyped(event.target.value);
             }}
@@ -1274,7 +1280,7 @@ function UnregisterConfirmation({
           danger tone, so the press that reaches every caller is the one the
           reader has to aim for. */}
       <div className="modal-foot">
-        {held && (
+        {stated && (
           <span
             className="modal-foot-note modal-foot-hold"
             id={holdID}
@@ -1290,7 +1296,7 @@ function UnregisterConfirmation({
           type="button"
           className="button danger"
           disabled={held}
-          aria-describedby={held ? holdID : undefined}
+          aria-describedby={stated ? holdID : undefined}
           onClick={onConfirm}
         >
           Unregister layer
