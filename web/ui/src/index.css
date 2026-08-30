@@ -1500,6 +1500,15 @@ button.version-notice-latest {
   pointer-events: none;
 }
 
+/* The caret is one of the interaction tokens, so it is set once for every
+   field the reader types into rather than per control. Left to the browser
+   it takes the text colour, which is how the search surface's query drew an
+   ink caret beside a palette query drawing the accent one. */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea {
+  caret-color: var(--acc);
+}
+
 input[type="checkbox"] {
   width: 15px;
   height: 15px;
@@ -3652,7 +3661,6 @@ label:has(> input:disabled) {
   color: var(--ink);
   font: inherit;
   font-size: 16px;
-  caret-color: var(--acc);
 }
 
 /* The row carries no ring of its own, and a ring around the field would draw
