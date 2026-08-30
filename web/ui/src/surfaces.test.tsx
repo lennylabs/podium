@@ -3855,6 +3855,56 @@ describe("the artifact viewer", () => {
     ).toBeNull();
   });
 
+  // Spec: §13.10 — the frontmatter panel and the relation rail stand on the
+  // same page, and the block the panel renders is the one the registry
+  // re-serializes with the parent stripped (§4.6). The panel keeps the
+  // stripped block, because republishing the pre-merge document is the
+  // disclosure §4.6 withholds, and names the removal so the reader can
+  // reconcile a missing extends row with the parent the rail links.
+  it("names the withheld key on the frontmatter panel that the rail links as a parent", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/catalog": { body: { ids: ["eng/deploy"] } },
+      "/v1/load_artifact": {
+        body: {
+          id: "eng/overlay",
+          type: "context",
+          version: "0.1.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Overlay\n",
+          frontmatter: "---\ntype: context\nversion: 0.1.0\n---\n",
+          manifest_merged: true,
+          raw_frontmatter:
+            "---\ntype: context\nversion: 0.1.0\nextends: eng/deploy\n---\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/eng%2Foverlay");
+    render(<App />);
+    const relations = await screen.findByLabelText("Relations");
+    await within(relations).findByText("eng/deploy");
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    // The served block carries no extends row, and the panel says so rather
+    // than claiming the pairs are the ones the author wrote.
+    expect(screen.getByTestId("frontmatter-table").textContent).not.toContain(
+      "extends",
+    );
+    expect(screen.queryByText(/shown as authored/)).toBeNull();
+    expect(
+      screen.getByTestId("frontmatter-served-note").textContent,
+    ).toContain("(key withheld)");
+    // The note stands in the raw view too, which is the half that reads as
+    // the authored file when nothing accounts for the removal.
+    fireEvent.click(screen.getByRole("button", { name: "Raw YAML" }));
+    expect(screen.getByTestId("raw-frontmatter").textContent).not.toContain(
+      "extends",
+    );
+    expect(
+      screen.getByTestId("frontmatter-served-note").textContent,
+    ).toContain("(key withheld)");
+  });
+
   // Spec: §4.6 — when the caller cannot see the layer that contributes a
   // parent, the registry merges it server-side and "the parent's existence
   // and ID are not surfaced to the requester". The pre-merge document travels
@@ -4376,7 +4426,7 @@ describe("the artifact viewer", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
     fireEvent.click(screen.getByRole("button", { name: "Raw YAML" }));
     const pane = screen.getByRole("region", {
-      name: "Frontmatter, as authored",
+      name: "Frontmatter, as served",
     });
     expect(pane.getAttribute("data-testid")).toBe("raw-frontmatter");
     expect(pane.getAttribute("tabindex")).toBe("0");
@@ -4425,7 +4475,7 @@ describe("the artifact viewer", () => {
       // The header names the block and states its extent.
       expect(
         (block.querySelector(".source-head") as HTMLElement).textContent,
-      ).toBe("raw frontmatter3 lines");
+      ).toBe("served frontmatter3 lines");
       // The gutter numbers every line of the block and is skipped by a
       // screen reader, which would otherwise interleave the numbers.
       const gutter = block.querySelector(".source-gutter") as HTMLElement;
@@ -5571,7 +5621,7 @@ describe("the artifact viewer", () => {
     // The panel opens with the line that states where the pairs came from,
     // and the Table and Raw YAML views stand beside it on the same row.
     expect(
-      screen.getByText(/Unknown keys are preserved and shown as authored\./),
+      screen.getByText(/Parsed from the frontmatter the registry serves/),
     ).toBeTruthy();
     expect(screen.getByText(/Values are shown verbatim\./)).toBeTruthy();
     expect(

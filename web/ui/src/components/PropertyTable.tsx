@@ -70,7 +70,8 @@ export function PropertyTable({
         // rather than with a control standing alone.
         <div className="source-actions">
           <span className="source-lede">
-            Parsed from the artifact&apos;s manifest. Unknown keys are preserved and shown as authored.
+            Parsed from the frontmatter the registry serves for this artifact. Unknown keys are
+            preserved.
           </span>
           <div className="segmented" role="group" aria-label="Frontmatter view">
             <button
@@ -97,7 +98,10 @@ export function PropertyTable({
         </div>
       )}
       {offerRaw && rawView ? (
-        <RawBlock block={block} offending={0} />
+        <>
+          <RawBlock block={block} offending={0} />
+          <ServedNote />
+        </>
       ) : (
         // The panel's table is banded and the rail's is not, so the class the
         // banding hangs on is put on here beside the toggle that marks the
@@ -123,11 +127,32 @@ export function PropertyTable({
         </table>
       )}
       {offerRaw && !rawView && (
-        <p className="quiet property-note">
-          Values are shown verbatim. A long description wraps rather than being clipped.
-        </p>
+        <>
+          <p className="quiet property-note">
+            Values are shown verbatim. A long description wraps rather than being clipped.
+          </p>
+          <ServedNote />
+        </>
       )}
     </>
+  );
+}
+
+/** ServedNote accounts for the difference between this block and the file the
+ * author wrote. The registry re-serializes an extends manifest with the
+ * parent stripped (§4.6), so a reader who compares the panel with the
+ * EXTENDS chip the rail draws beside it finds a reference on one half of the
+ * viewer and no row for it on the other. The panel cannot close the gap by
+ * republishing the pre-merge document, because that is the disclosure §4.6
+ * withholds, so it names the removal instead, in the register the rendered
+ * body already uses for a stripped link (§13.10). */
+function ServedNote() {
+  return (
+    <p className="quiet property-note" data-testid="frontmatter-served-note">
+      The block is the one the registry serves. A key the registry withholds is absent from it (key
+      withheld), so an artifact can carry no <code className="mono">extends</code> row here and
+      still name a parent under Relations.
+    </p>
   );
 }
 
@@ -217,7 +242,7 @@ function AbsentValue({ keyName }: { keyName: string }) {
   );
 }
 
-/** RawBlock is the block as the author wrote it. It takes the same file view
+/** RawBlock is the block as the registry serves it. It takes the same file view
  * as the viewer's authored source pane, because both panes stand on the same
  * surface and a reader who learns one reads the other: a header naming the
  * block and counting its lines, a numbered gutter, and an explicit Copy
@@ -234,10 +259,10 @@ function RawBlock({ block, offending }: { block: string; offending: number }) {
   return (
     <section className="source-pane">
       <CodeBlock
-        name="raw frontmatter"
+        name="served frontmatter"
         lines={lines}
         offending={offending}
-        label="Frontmatter, as authored"
+        label="Frontmatter, as served"
         testID="raw-frontmatter"
       />
       <div className="source-actions source-actions-under">
