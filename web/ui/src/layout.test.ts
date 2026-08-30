@@ -1481,6 +1481,34 @@ describe("layer row overflow menu", () => {
     expect(menu.position).toBe("fixed");
     expect(menu.zIndex).toBe("20");
   });
+
+  // The menu is one panel holding rows. Carrying the ordinary control tone
+  // each item outlined itself in the fill the panel already carries, which
+  // drew an outline inside an outline and a doubled rule between the items,
+  // and the menu read as a stack of buttons in a box rather than as a menu.
+  it("draws each item flat inside the panel", () => {
+    const item = descendantStyle("row-menu", "button");
+    expect(item.borderWidth).toBe("0px");
+    expect(item.borderRadius).toBe("0");
+    expect(item.backgroundColor).toBe("rgba(0, 0, 0, 0)");
+  });
+
+  // The rows are told apart by the panel's own hairline rather than by a
+  // border each item draws for itself.
+  it("separates the items with a single hairline", () => {
+    expect(ruleText(".row-menu button + button")).toContain(
+      "border-top: 1px solid var(--b2)",
+    );
+  });
+
+  // A row runs the width of the panel, and the panel clips what overflows it,
+  // so the shell's ring is cut off at the row's edges where it stands outside
+  // the element.
+  it("draws the focus ring inside the focused row", () => {
+    expect(ruleText(".row-menu button:focus-visible")).toContain(
+      "box-shadow: inset 0 0 0 2px var(--acc)",
+    );
+  });
 });
 
 // The action a refused write was attempted from carries the refusal with the

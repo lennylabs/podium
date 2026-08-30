@@ -2860,19 +2860,55 @@ label:has(> input:disabled) {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
-  min-width: 140px;
-  padding: 6px;
+  min-width: 160px;
   margin-top: 6px;
+  overflow: hidden;
   border: 1px solid var(--bd);
   border-radius: 8px;
-  background: var(--surf2);
+  background: var(--surf);
   box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
 }
 
+/* The menu is one panel holding rows, so an item inside it is drawn flat.
+   Left with the ordinary control tone each item outlined itself in the same
+   fill the panel carries, which put an outline inside an outline and a
+   doubled rule between the two items, and the menu read as a stack of
+   buttons in a box. The rows are separated by the panel's own hairline and
+   take a fill only under the pointer or the keyboard. They run the width of
+   the panel, which is why the panel clips what overflows it: a square fill
+   behind a rounded corner leaves a notch. */
 .row-menu button {
-  margin-right: 0;
+  padding: 8px 12px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sec);
   text-align: left;
+}
+
+.row-menu button + button {
+  border-top: 1px solid var(--b2);
+}
+
+.row-menu button:hover:not(:disabled),
+.row-menu button:focus-visible {
+  background: var(--chip);
+  color: var(--ink);
+}
+
+/* The panel clips what overflows it, so the shell's ring, drawn outside the
+   element, is cut off at the row's edges. The focused row draws it inside
+   itself instead. */
+.row-menu button:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--acc);
+}
+
+/* An item the registry would refuse mutes where it stands. The shared
+   disabled tone fills and outlines the control, which puts the box back. */
+.row-menu button:disabled {
+  background: transparent;
+  color: var(--faint);
 }
 
 /* A panel a row control opens is read or acted on, so it is drawn across the
