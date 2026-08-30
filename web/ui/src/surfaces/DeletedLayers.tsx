@@ -103,7 +103,11 @@ export function DeletedLayers({
       <h1 ref={heading}>Recently unregistered</h1>
       <p className="lead">A layer stays restorable for {recoveryDays} days, after which it is erased.</p>
       {rows.length === 0 ? (
-        <EmptyState title="Nothing to erase">
+        // Restore is the only action this surface offers, and erasure is what
+        // happens on its own when the window ends. Naming the empty state
+        // after the erase titled it for an operation the reader cannot
+        // perform here.
+        <EmptyState title="No layers to restore">
           An unregistered layer waits here until its recovery window ends.
         </EmptyState>
       ) : (

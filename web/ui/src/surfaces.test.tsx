@@ -10507,6 +10507,23 @@ describe("the layer write flows", () => {
     );
   });
 
+  // Restore is the only action this surface carries, so the state it reaches
+  // when nothing is recoverable names the missing layer rather than the erase
+  // the reader never performs.
+  it("names the absent restorable layer when nothing is recoverable", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    const surface = await screen.findByLabelText("Recently unregistered");
+    const title = surface.querySelector(".empty-title") as HTMLElement;
+    expect(title.textContent).toBe("No layers to restore");
+    expect(surface.textContent).not.toContain("Nothing to erase");
+  });
+
   // A refused restore reports the refusal alone. Where a successful restore
   // came first, its outcome is dropped rather than left standing beside a
   // refusal of the next one.
