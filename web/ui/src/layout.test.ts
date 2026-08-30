@@ -5,6 +5,9 @@
 // minimum on the columns that hold page content. jsdom performs no layout, so
 // what a case asserts is the declaration that reaches the element; the
 // rendered result is checked against a browser at a narrow viewport.
+//
+// The file also holds the stylesheet-wide invariants that no single surface
+// owns, because they are read out of the same injected stylesheet.
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -1747,6 +1750,67 @@ describe("sidebar bands", () => {
   it("draws the catalog rule in the same hairline the footer draws", () => {
     expect(declaredFor(band("catalog-label"), "border-top")).toBe(
       declaredFor(band("sidebar-footer"), "border-top"),
+    );
+  });
+});
+
+// The monospace surfaces are verbatim: the authored source tab shows the file
+// byte for byte, the raw frontmatter view shows the block the registry serves,
+// and an artifact ID, a version constraint, or a hash is a value a reader
+// copies by eye. JetBrains Mono ligates operator sequences by default, which
+// draws `>=` as `≥`, `!=` as `≠`, and `->` as `→`, so a reader was shown
+// characters the author never wrote.
+describe("mono surfaces", () => {
+  /** styleRules returns every style rule the stylesheet declares, including
+   * those nested inside a media condition. */
+  function styleRules(): CSSStyleRule[] {
+    const collected: CSSStyleRule[] = [];
+    const visit = (rules: CSSRuleList) => {
+      for (const rule of Array.from(rules)) {
+        if (rule instanceof CSSStyleRule) {
+          collected.push(rule);
+        } else if (rule instanceof CSSMediaRule) {
+          visit(rule.cssRules);
+        }
+      }
+    };
+    for (const sheet of Array.from(document.styleSheets)) {
+      visit(sheet.cssRules);
+    }
+    return collected;
+  }
+
+  /** selectorsDeclaring returns the individual selectors of every rule writing
+   * the given declaration, split out of each rule's selector list. */
+  function selectorsDeclaring(property: string, value: string): Set<string> {
+    const found = new Set<string>();
+    for (const rule of styleRules()) {
+      if (rule.style.getPropertyValue(property).trim() !== value) {
+        continue;
+      }
+      for (const selector of rule.selectorText.split(",")) {
+        found.add(selector.trim());
+      }
+    }
+    return found;
+  }
+
+  it("renders the served characters rather than ligating an operator", () => {
+    expect(descendantStyle("markdown", "code").fontVariantLigatures).toBe(
+      "none",
+    );
+    expect(descendantStyle("markdown", "pre").fontVariantLigatures).toBe(
+      "none",
+    );
+  });
+
+  it("suppresses ligatures on every selector that takes the mono face", () => {
+    const mono = selectorsDeclaring("font-family", "var(--font-mono)");
+    const suppressed = selectorsDeclaring("font-variant-ligatures", "none");
+
+    expect(mono.size).toBeGreaterThan(0);
+    expect([...mono].filter((selector) => !suppressed.has(selector))).toEqual(
+      [],
     );
   });
 });

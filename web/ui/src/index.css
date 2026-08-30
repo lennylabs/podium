@@ -147,6 +147,37 @@ pre {
   font-size: 13px;
 }
 
+/* JetBrains Mono ships programming ligatures under `liga` and `calt`, so with
+   the defaults the face draws `>=` as a single `≥` glyph, and `<=`, `!=`,
+   `->`, `=>`, and `===` likewise. Every mono surface here is verbatim: the
+   authored source tab shows the file byte for byte, the raw frontmatter view
+   shows the block the registry serves, and an artifact ID or a hash is a value
+   a reader copies by eye. A substituted glyph on any of them shows characters
+   the author did not write. `none` covers the contextual set as well, which is
+   where the coding ligatures live, so no `font-feature-settings` is needed.
+
+   The selector list mirrors every rule that sets `font-family: var(--font-mono)`.
+   A case in typography.test.ts pins that correspondence, so a new mono surface
+   that forgets this rule fails the suite rather than silently ligating. */
+.mono,
+code,
+pre,
+.catalog-row > .catalog-marker,
+.breadcrumb,
+.label,
+.badge,
+.version-notice-pin,
+.tag,
+.keyword,
+.tab-count,
+.picker-count,
+.data-table th.column-label,
+.stat-count,
+button.stat-count.stat-open,
+.stat-label {
+  font-variant-ligatures: none;
+}
+
 /* An identifier set in mono is user-authored and unbounded, and a content
    hash is long by construction, so it wraps inside whatever holds it rather
    than running past the edge. The value is break-word rather than anywhere
