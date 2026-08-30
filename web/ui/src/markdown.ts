@@ -139,11 +139,25 @@ const strippedEmbedClass = 'embed-stripped';
 // terms the stripped link, image, and embed use.
 const strippedFormClass = 'form-stripped';
 
+// The class the note left in place of a drawing carries. An `svg` is a visual
+// construct the author wrote in place of a paragraph, and the sanitizer's
+// HTML profile drops it outright, which leaves an empty paragraph where the
+// drawing stood. The note names the removal in the same terms the stripped
+// link, image, embed, and form use, so the reader sees a refusal rather than
+// a gap.
+const strippedGraphicClass = 'graphic-stripped';
+
 /** clearMarkers strips every removal marker from a node, so a body that
  * writes one on a live element of its own cannot pass that element off as a
  * neutralized one. */
 function clearMarkers(node: Element): void {
-  for (const marker of [strippedLinkClass, strippedImageClass, strippedEmbedClass, strippedFormClass]) {
+  for (const marker of [
+    strippedLinkClass,
+    strippedImageClass,
+    strippedEmbedClass,
+    strippedFormClass,
+    strippedGraphicClass,
+  ]) {
     node.classList.remove(marker);
   }
   if (node.hasAttribute('class') && node.classList.length === 0) {
@@ -233,6 +247,38 @@ function replaceStrippedForms(root: DocumentFragment): void {
     const note = document.createElement('span');
     note.className = strippedFormClass;
     control.replaceWith(note);
+  }
+}
+
+// The drawing elements a body can carry. The sanitizer's HTML profile drops
+// them outright, which leaves the paragraph the author wrote one in empty, so
+// `svg` is admitted as a tag and replaced here instead. Admitting it costs
+// nothing for the reason the embedded documents above are admitted: no
+// element of the SVG namespace other than the root is admitted with it, the
+// hook removes the attributes a browser fetches on its own, the pass below
+// removes the root with its subtree before the markup leaves the module, and
+// the fragment they pass through is detached, so none of it is ever laid out
+// or serialized.
+const graphicTags = ['svg'];
+
+/** replaceStrippedGraphics replaces every drawing by a note naming the
+ * removal, taking its subtree with it. The subtree goes because what is left
+ * of it after sanitization is the text of elements the profile refused, which
+ * would otherwise land in the body as prose the reader cannot tell from the
+ * author's own. A nested drawing is left to the outermost one, which the
+ * document order of the match list puts first.
+ *
+ * The pass runs on the sanitizer's output for the reason
+ * `replaceStrippedImages` does: the hook clears the marker classes from every
+ * node it visits and would clear the marker off the note. */
+function replaceStrippedGraphics(root: DocumentFragment): void {
+  for (const graphic of root.querySelectorAll(graphicTags.join(','))) {
+    if (!root.contains(graphic)) {
+      continue;
+    }
+    const note = document.createElement('span');
+    note.className = strippedGraphicClass;
+    graphic.replaceWith(note);
   }
 }
 
@@ -401,7 +447,10 @@ export function renderArtifactBody(body: string, resources: readonly string[] = 
   const rendered = marked.parse(body, { async: false, gfm: true }) as string;
   const sanitized = DOMPurify.sanitize(rendered, {
     // The HTML profile drops SVG and MathML, which no markdown renderer
-    // emits and which carry their own script-bearing constructs.
+    // emits and which carry their own script-bearing constructs. The `svg`
+    // root alone is added back below, so the pass over the output can leave a
+    // note where the author wrote a drawing; no other element of either
+    // namespace is admitted.
     USE_PROFILES: { html: true },
     ALLOWED_URI_REGEXP: allowedURI,
     // A stylesheet is not executable, but it is author-controlled markup on
@@ -414,7 +463,7 @@ export function renderArtifactBody(body: string, resources: readonly string[] = 
     // than leaving its label behind. `srcdoc` is refused: it carries a whole
     // document inline rather than a URL, so no attribute test reaches what it
     // holds.
-    ADD_TAGS: [...embedTags, ...formTags],
+    ADD_TAGS: [...embedTags, ...formTags, ...graphicTags],
     FORBID_ATTR: ['style', 'srcdoc'],
     // The fragment is taken rather than the string so the pass below runs on
     // the sanitizer's own output. Nothing between the two adds an element or
@@ -423,10 +472,11 @@ export function renderArtifactBody(body: string, resources: readonly string[] = 
   });
   replaceStrippedImages(sanitized);
   replaceStrippedEmbeds(sanitized);
-  // Before the reference routing below, which is what puts this UI's own
-  // buttons into the fragment. A pass over the form controls that ran after it
-  // would take those with the author's.
+  // Both before the reference routing below, which is what puts this UI's own
+  // buttons into the fragment. A pass over the form controls or the drawings
+  // that ran after it would take those with the author's.
   replaceStrippedForms(sanitized);
+  replaceStrippedGraphics(sanitized);
   routeReferences(sanitized, new Set(resources));
   markScrollableRegions(sanitized);
   const holder = document.createElement('div');

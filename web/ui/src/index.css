@@ -2446,6 +2446,19 @@ label:has(> input:disabled) {
   color: var(--meta);
 }
 
+/* The note left where a drawing stood. An `svg` the viewer refuses draws
+   nothing, so without the note the paragraph the author wrote it in is empty
+   and the reader cannot tell a refusal from a body that failed to ingest. */
+.prose .graphic-stripped {
+  color: var(--meta);
+}
+
+.prose .graphic-stripped::after {
+  content: "(graphic removed)";
+  font-size: 12px;
+  color: var(--meta);
+}
+
 /* A quoted aside carries no marker of its own once the user-agent indent is
    dropped, so the rule on the left is what separates it from the paragraph
    above it, and the quieter ink is what marks it as borrowed rather than

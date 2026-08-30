@@ -288,6 +288,30 @@ describe('the sanitized artifact-body rendering path', () => {
     expect(live.querySelector('.embed-stripped')).toBeNull();
   });
 
+  // A drawing the sanitizer's HTML profile refuses leaves the paragraph the
+  // author wrote it in empty, which reads as a body that lost a passage
+  // rather than as a refusal. The path replaces it with a note, which the
+  // stylesheet names the removal beside, in the same terms it names the
+  // stripped link, image, embed, and form. The subtree goes with it, so no
+  // text of a refused element lands in the body as prose. The marker is
+  // stripped from every node the body writes it on, so a body cannot pass an
+  // element of its own off as a neutralized one.
+  it('replaces a drawing it removed with a note', () => {
+    const container = renderBody(
+      'Before.\n\n<svg width="20" height="20"><title>a chart</title>' +
+        '<circle cx="10" cy="10" r="9"/></svg>\n\nAfter.\n',
+    );
+    expect(container.querySelector('svg')).toBeNull();
+    expect(container.querySelectorAll('.graphic-stripped')).toHaveLength(1);
+    expect(container.textContent).not.toContain('a chart');
+    expect(container.textContent).toContain('Before.');
+    expect(container.textContent).toContain('After.');
+
+    const live = renderBody('<p class="graphic-stripped">local</p>\n');
+    expect(live.querySelector('p')?.textContent).toBe('local');
+    expect(live.querySelector('.graphic-stripped')).toBeNull();
+  });
+
   it('renders a markup-carrying frontmatter value as literal text', () => {
     const container = render(<PropertyTable raw={'title: <img src=x onerror="window.hijacked=1">\n'} />).container;
     expect(container.querySelector('img')).toBeNull();
