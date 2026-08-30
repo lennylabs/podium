@@ -100,10 +100,14 @@ export function artifactHref(id: string, version = ''): string {
 }
 
 /** artifactLeaf is the artifact's own name inside its §4.2 path, which is
- * what a row states when the domains above it are already on the page. */
+ * what a row states when the domains above it are already on the page. An
+ * identifier that ends in a separator has no last segment to state, and a
+ * reader shown nothing where a name belongs cannot tell what the page is
+ * about, so such an identifier is stated whole. */
 export function artifactLeaf(id: string): string {
   const cut = id.lastIndexOf('/');
-  return cut < 0 ? id : id.slice(cut + 1);
+  const leaf = cut < 0 ? id : id.slice(cut + 1);
+  return leaf === '' ? id : leaf;
 }
 
 /** pathUnder is the stretch of a §4.2 path that lies below `parent`, which is
@@ -200,7 +204,10 @@ export function routeTitle(route: Route): string {
     case 'search':
       return 'Search';
     case 'artifact':
-      return artifactLeaf(route.id);
+      // An address carrying no identifier at all names nothing to state, and
+      // a title of the separator alone reads as a defect in the tab strip, so
+      // the surface names itself instead.
+      return route.id === '' ? 'Artifact' : artifactLeaf(route.id);
     case 'layers':
       return route.deleted ? 'Recently unregistered' : 'Layers';
   }

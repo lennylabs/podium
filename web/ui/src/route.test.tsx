@@ -249,6 +249,15 @@ describe("routeTitle", () => {
     );
   });
 
+  // An identifier with no last segment left the title at the separator alone,
+  // so the tab read "· Podium" and named neither the surface nor what was
+  // asked for.
+  it("names a route whose identifier has no last segment", () => {
+    expect(routeTitle({ name: "artifact", id: "eng/deploy/", version: "" })).toBe("eng/deploy/");
+    expect(routeTitle({ name: "artifact", id: "", version: "" })).toBe("Artifact");
+    expect(routeTitle({ name: "domain", path: "eng/deploy/" })).toBe("eng/deploy/");
+  });
+
   // The name comes from the route rather than from the read the surface
   // issues, so a pinned version does not retitle the artifact it pins.
   it("titles a pinned artifact by its name", () => {
