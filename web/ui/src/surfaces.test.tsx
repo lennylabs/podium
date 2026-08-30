@@ -14498,6 +14498,40 @@ describe("the trimmed listing", () => {
     expect(cells[2].textContent).toBe("v1.0.0");
   });
 
+  // Both at-scale filters draw the magnifier inside the field ahead of the
+  // placeholder, which is what marks the control as a filter rather than as a
+  // plain text field. A bare bordered input is the defect this pins.
+  it("draws the magnifier inside both at-scale filter fields", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+            subdomains: [],
+          })),
+          notable: [{ id: "platform/lint", type: "rule", version: "1.0.0" }],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+
+    for (const label of ["Filter subdomains", "Filter in this domain"]) {
+      const input = within(browser).getByLabelText(label);
+      const row = input.parentElement as HTMLElement;
+      expect(row.className.split(" ")).toContain("filter-field");
+      // The border belongs to the row, so the icon sits inside the field
+      // rather than beside it.
+      expect(row.querySelectorAll("svg.magnifier").length).toBe(1);
+      expect(input.className.split(" ")).toContain("filter-input");
+    }
+  });
+
+
   // The list arm is a denser row rather than the grid tile stretched across the
   // container. A full-width tile carrying only a name and a count leaves most
   // of every row empty and costs a card of height per child, so the row states

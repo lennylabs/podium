@@ -65,6 +65,6 @@ describe("search field", () => {
   });
 
   it("removes it from a domain filter field", () => {
-    expect(cancelAppearance(field("filter-field"))).toBe("none");
+    expect(cancelAppearance(field("filter-input"))).toBe("none");
   });
 });

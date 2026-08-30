@@ -4116,16 +4116,45 @@ label:has(> input:disabled) {
   margin-left: auto;
 }
 
+/* The filter is a row holding the magnifier and the query, the way the search
+   field on the search surface is. The border is the row's, so the icon reads
+   as sitting inside the field ahead of the placeholder. */
 .filter-field {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   width: 220px;
   height: 30px;
   padding: 0 10px;
   border: 1px solid var(--bd);
   border-radius: 8px;
   background: var(--surf);
+  color: var(--meta);
+  font-size: 12.5px;
+}
+
+.filter-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: var(--ink);
   font: inherit;
   font-size: 12.5px;
+}
+
+/* The focus ring belongs to the row, for the reason the search field's does:
+   the row is what the reader sees as the field. */
+.filter-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.filter-field:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
 }
 
 .chip-row {

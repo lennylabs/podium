@@ -9,7 +9,12 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 
 import type { ArtifactDescriptor, DomainDescriptor } from "../api";
-import { EmptyState, TypeBadge, formatVersion } from "../components/primitives";
+import {
+  EmptyState,
+  Magnifier,
+  TypeBadge,
+  formatVersion,
+} from "../components/primitives";
 import {
   artifactCountLabel,
   artifactCounts,
@@ -31,6 +36,36 @@ const subdomainViews = [
   { view: "grid", label: "Grid" },
   { view: "list", label: "List" },
 ] as const;
+
+/** FilterField is the narrow filter both at-scale sections close their header
+ * row with. It is a row rather than a bare input, so the magnifier sits inside
+ * the border the way it does in the top bar's search trigger and on the search
+ * surface, which is what marks the control as a filter (§13.10). */
+function FilterField({
+  label,
+  value,
+  onTyped,
+}: {
+  label: string;
+  value: string;
+  onTyped: (text: string) => void;
+}) {
+  return (
+    <div className="filter-field">
+      <Magnifier size={13} />
+      <input
+        className="filter-input"
+        type="search"
+        aria-label={label}
+        placeholder={label}
+        value={value}
+        onChange={(event) => {
+          onTyped(event.target.value);
+        }}
+      />
+    </div>
+  );
+}
 
 /** SubdomainTiles is the compact treatment: the section label carrying the
  * child count, a filter over the names and a grid-or-list toggle on the same
@@ -97,16 +132,7 @@ export function SubdomainTiles({
             with it. The header badge beside the domain name is where the
             unfiltered total is read. */}
         <span className="mono quiet section-count">{matched.length}</span>
-        <input
-          className="filter-field"
-          type="search"
-          aria-label="Filter subdomains"
-          placeholder="Filter subdomains"
-          value={filter}
-          onChange={(event) => {
-            setFilter(event.target.value);
-          }}
-        />
+        <FilterField label="Filter subdomains" value={filter} onTyped={setFilter} />
         <div className="segmented" role="group" aria-label="Subdomain view">
           {subdomainViews.map((choice) => (
             <button
@@ -319,15 +345,10 @@ export function ArtifactTable({
     <div className="artifact-table">
       <div className="section-head">
         <h2 className="label">Artifacts</h2>
-        <input
-          className="filter-field"
-          type="search"
-          aria-label="Filter in this domain"
-          placeholder="Filter in this domain"
+        <FilterField
+          label="Filter in this domain"
           value={filter}
-          onChange={(event) => {
-            setFilter(event.target.value);
-          }}
+          onTyped={setFilter}
         />
         {/* The All chip is the unfiltered set stated as a chip of its own, so
             the row always carries the state it is in rather than leaving the
