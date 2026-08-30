@@ -260,6 +260,20 @@ describe("rendered artifact body", () => {
     expect(window.getComputedStyle(document.body).lineHeight).toBe("1.6");
   });
 
+  // Left to the user agent a list carries a 40px indent and the global 1.6
+  // leading, so a numbered procedure sits inset from the paragraph column
+  // above it and reads tighter than the prose around it. The case pins the
+  // 22px indent that keeps the marker in the prose column and the leading
+  // the design pass fixes for a list.
+  it("indents a body list into the prose column and opens its leading", () => {
+    for (const tag of ["ol", "ul"]) {
+      const list = descendantStyle("prose", tag);
+      expect(list.paddingInlineStart).toBe("22px");
+      expect(list.lineHeight).toBe("1.75");
+      expect(list.marginBottom).toBe("16px");
+    }
+  });
+
   // The body's leading heading sits directly under the tab strip, so it drops
   // the top margin the levels below it carry.
   it("drops the top margin on the body's leading heading", () => {

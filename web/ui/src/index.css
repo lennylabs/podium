@@ -2298,6 +2298,21 @@ label:has(> input:disabled) {
   line-height: 1.65;
 }
 
+/* Left to the user agent a list takes a 40px indent and the global leading,
+   so the markers of a numbered procedure sit visibly inset from the
+   paragraph column above them and the steps read tighter than the prose
+   around them. The design pass fixes a 22px indent, which keeps the marker
+   in the prose column and leaves a hanging indent under it for a wrapped
+   item, and opens the leading to 1.75 because a list is read one item at a
+   time. The indent is the inline start so a right-to-left document indents
+   from its own leading edge. */
+.prose ol,
+.prose ul {
+  margin: 0 0 16px;
+  padding-inline-start: 22px;
+  line-height: 1.75;
+}
+
 /* A heading inside the body is the document's structure, and the page title
    above it is the page's. Without a scale of its own the body inherits the
    global one, where h1 is 29px/700, so a markdown h1 draws at the size and
