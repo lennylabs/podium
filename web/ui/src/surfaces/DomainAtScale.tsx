@@ -251,7 +251,13 @@ const sortOptions: { key: ArtifactColumn; label: string }[] = [
  * carrying the same words and the same type. Reporting the artifact as absent
  * and offering a cleared filter as the recovery denies an artifact the domain
  * holds, and neither clearing the filter nor changing the type loads the rows
- * the response withheld (§13.10). */
+ * the response withheld (§13.10).
+ *
+ * A sort over that same trimmed listing ranks the returned rows alone, and a
+ * ranking reads as a statement about the domain: the top row of a version
+ * sort looks like the domain's highest version when it is the highest of the
+ * rows the page loaded. The sort therefore states its reach on the same line
+ * and offers the same continuation the filter does. */
 export function ArtifactTable({
   artifacts,
   scope,
@@ -290,9 +296,16 @@ export function ArtifactTable({
         pathUnder(artifact.id, scope).toLowerCase().includes(needle)),
   );
   const filtering = needle !== "" || type !== "";
-  // A filter or a type chip over a trimmed listing answers for the returned
-  // rows alone, which is what the continuation below the table exists to say.
-  const narrowed = trimmed && filtering;
+  // A column other than the identifier ranks the rows, and a ranking over a
+  // trimmed listing is the reading that goes wrong silently: the top row of a
+  // version sort is the highest version the page loaded, and the domain's
+  // highest can be among the rows the response withheld. Identifier order is
+  // the arrangement the listing already stands in, so it makes no claim the
+  // continuation row below the table does not already carry.
+  const ranking = column !== "id";
+  // A filter, a type chip, or a ranking over a trimmed listing answers for the
+  // returned rows alone, which is what the reach line exists to say.
+  const narrowed = trimmed && (filtering || ranking);
   const curated = sorted(
     matched.filter((artifact) => artifact.source === "featured"),
     column,
@@ -371,10 +384,11 @@ export function ArtifactTable({
         </EmptyState>
       )}
       {narrowed && (
-        <FilterReach
+        <ListingReach
           scope={scope}
+          subject={filtering ? "filter" : "sort"}
           shown={artifacts.length}
-          matched={matched.length}
+          empty={filtering && matched.length === 0}
           withheld={withheld}
           query={filter.trim()}
           type={type}
@@ -406,13 +420,14 @@ export function ArtifactTable({
       )}
       {/* The tail counts the rows the response returned, and a filter narrows
           what the table draws without loading any more of them. It is
-          therefore drawn over the unfiltered listing alone: under a filter it
-          states a count the reader cannot see, and beneath an empty table it
-          asserts rows are on screen. The reach line above is the filtered
-          listing's edge, and it carries the continuation the filter needs.
-          Both rows carry role="status", so the contradiction is read out as
-          well as drawn (§13.10). */}
-      {!filtering && tail}
+          therefore drawn over the listing no control has acted on: under a
+          filter it states a count the reader cannot see, and beneath an empty
+          table it asserts rows are on screen. The reach line above states the
+          same edge for the listing the reader is looking at, and it carries
+          the continuation past it, so the two never stand together. Both rows
+          carry role="status", so the contradiction is read out as well as
+          drawn (§13.10). */}
+      {!narrowed && !filtering && tail}
       {/* The filter and the type chips rewrite the table body, and the counts
           they change live in the rows themselves. The region states the new
           one for the reader who cannot see the table, on the same terms the
@@ -455,27 +470,33 @@ function filterAnnouncement(
   return `${String(matched)} of ${String(total)} ${total === 1 ? noun : `${noun}s`} matched.`;
 }
 
-/** FilterReach states how far the table's filter reached and continues past
- * it. It is drawn where a filter or a type chip narrows a listing the
- * response trimmed, on both arms: a match found among the returned rows is
- * still no answer about the rows that were withheld, and a filter that matched
- * nothing has established nothing at all.
+/** ListingReach states how far the control the reader just used reached and
+ * continues past it. It is drawn where a filter, a type chip, or a sort acts
+ * on a listing the response trimmed: a match found among the returned rows is
+ * still no answer about the rows that were withheld, a filter that matched
+ * nothing has established nothing at all, and a ranking of the returned rows
+ * is not the domain's ranking.
  *
  * The continuation is the §4.5.3 search bounded to this domain, carrying the
  * typed words and the chosen type, so the reader lands on the same question
  * asked of the whole domain rather than on an unfiltered search they have to
  * retype. */
-function FilterReach({
+function ListingReach({
   scope,
+  subject,
   shown,
-  matched,
+  empty,
   withheld,
   query,
   type,
 }: {
   scope: string;
+  /** subject names the control the line answers for, which is the word the
+   * sentence opens on. */
+  subject: "filter" | "sort";
   shown: number;
-  matched: number;
+  /** empty reports that the filter matched none of the returned rows. */
+  empty: boolean;
   withheld: number | null;
   query: string;
   type: string;
@@ -485,16 +506,16 @@ function FilterReach({
       ? "The response returned fewer artifacts than the domain holds."
       : `${String(withheld)} more ${withheld === 1 ? "artifact stands" : "artifacts stand"} under this domain.`;
   return (
-    <div className="filter-reach" role="status" data-testid="filter-reach">
+    <div className="listing-reach" role="status" data-testid="listing-reach">
       <span className="listing-tail-mark" aria-hidden="true" />
       <div className="listing-tail-body">
         <p className="listing-tail-line">
-          {matched === 0 && "Nothing on this page matched. "}
-          {`The filter covers the ${String(shown)} ${shown === 1 ? "artifact" : "artifacts"} this page loaded. ${rest}`}
+          {empty && "Nothing on this page matched. "}
+          {`The ${subject} covers the ${String(shown)} ${shown === 1 ? "artifact" : "artifacts"} this page loaded. ${rest}`}
         </p>
         <a
           className="button"
-          data-testid="filter-reach-continue"
+          data-testid="listing-reach-continue"
           href={reachHref(scope, query, type)}
         >
           Search the whole domain

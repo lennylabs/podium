@@ -4700,11 +4700,11 @@ button.stat-open {
   color: var(--sec);
 }
 
-/* The at-scale table's filter continuation. It carries the same accent mark
-   and quiet surface as the listing's own end-of-list row, because it reports
-   the same fact about the same trimmed listing, and it sits under the rows
-   the filter did match rather than replacing them. */
-.filter-reach {
+/* The at-scale table's continuation past the returned edge. It carries the
+   same accent mark and quiet surface as the listing's own end-of-list row,
+   because it reports the same fact about the same trimmed listing, and it
+   sits over the rows the table drew rather than replacing them. */
+.listing-reach {
   display: flex;
   align-items: flex-start;
   gap: 11px;

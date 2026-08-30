@@ -12904,7 +12904,7 @@ describe("the trimmed listing", () => {
     fireEvent.change(within(arthead).getByLabelText("Filter in this domain"), {
       target: { value: "direct-25" },
     });
-    const reach = await within(browser).findByTestId("filter-reach");
+    const reach = await within(browser).findByTestId("listing-reach");
     expect(reach.textContent).toContain("Nothing on this page matched.");
     expect(reach.textContent).toContain(
       "The filter covers the 10 artifacts this page loaded.",
@@ -12933,7 +12933,7 @@ describe("the trimmed listing", () => {
     expect(
       within(browser).getByRole("link", { name: "direct-3" }),
     ).toBeTruthy();
-    const found = within(browser).getByTestId("filter-reach");
+    const found = within(browser).getByTestId("listing-reach");
     expect(found.textContent).not.toContain("Nothing on this page matched.");
     expect(
       within(found)
@@ -12947,7 +12947,7 @@ describe("the trimmed listing", () => {
       target: { value: "" },
     });
     fireEvent.click(within(arthead).getByRole("button", { name: "All" }));
-    expect(within(browser).queryByTestId("filter-reach")).toBeNull();
+    expect(within(browser).queryByTestId("listing-reach")).toBeNull();
     expect(within(browser).getByTestId("listing-continuation")).toBeTruthy();
   });
 
@@ -13022,6 +13022,88 @@ describe("the trimmed listing", () => {
     expect(
       within(browser).getByTestId("listing-continuation").textContent,
     ).toContain("10 of 25 artifacts shown.");
+  });
+
+  // §4.5.5 caps the notable list, so a sort over the at-scale table ranks the
+  // returned rows rather than the domain. A version ranking whose top row is
+  // the highest version the page loaded reads as the domain's highest, so the
+  // table states the reach of the sort on the terms the filter already uses
+  // and continues into the search bounded to this domain.
+  //
+  // Spec: §13.10
+  it("states the reach of a sort over a trimmed at-scale listing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: Array.from({ length: 10 }, (_, i) => ({
+            id: `platform/direct-${String(i + 1)}`,
+            type: "skill",
+            version: "0.1.0",
+          })),
+        },
+      },
+      "/v1/catalog": {
+        body: {
+          ids: Array.from(
+            { length: 12 },
+            (_, i) => `platform/direct-${String(i + 1)}`,
+          ),
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const arthead = within(browser).getByRole("heading", {
+      name: "Artifacts",
+    }).parentElement as HTMLElement;
+    await waitFor(() => {
+      expect(
+        within(browser).getByTestId("listing-continuation").textContent,
+      ).toContain("10 of 12 artifacts shown.");
+    });
+
+    // The listing's own ordering makes no claim past the rows it draws, so it
+    // stands under the continuation row alone.
+    expect(within(browser).queryByTestId("listing-reach")).toBeNull();
+
+    // Ranking by a column does, so the reach line states which rows were
+    // ranked and how many stand outside them.
+    fireEvent.change(within(arthead).getByLabelText("Sort artifacts"), {
+      target: { value: "version" },
+    });
+    const reach = within(browser).getByTestId("listing-reach");
+    expect(reach.textContent).toContain(
+      "The sort covers the 10 artifacts this page loaded.",
+    );
+    expect(reach.textContent).toContain(
+      "2 more artifacts stand under this domain.",
+    );
+    expect(reach.textContent).not.toContain("Nothing on this page matched.");
+    expect(
+      within(reach)
+        .getByRole("link", { name: "Search the whole domain" })
+        .getAttribute("href"),
+    ).toBe(searchHref("scope:platform"));
+    // The reach line reports the same edge the continuation row does, so the
+    // two do not stand together.
+    expect(within(browser).queryByTestId("listing-continuation")).toBeNull();
+
+    // Returning to the listing's own ordering returns the page to the row that
+    // states the edge without a control's reach to qualify.
+    fireEvent.change(within(arthead).getByLabelText("Sort artifacts"), {
+      target: { value: "id" },
+    });
+    expect(within(browser).queryByTestId("listing-reach")).toBeNull();
+    expect(
+      within(browser).getByTestId("listing-continuation").textContent,
+    ).toContain("10 of 12 artifacts shown.");
   });
 
   // The compact treatment is the one the design pass fixed for this count: the
