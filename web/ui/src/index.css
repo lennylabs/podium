@@ -3365,8 +3365,14 @@ label:has(> input:disabled) {
   border-bottom: 1px solid var(--bd);
 }
 
+/* The count is a quantity beside the section label rather than a second
+   label, so it keeps the label's quiet tone and its monospace face but drops
+   the uppercasing and the letter spacing. Two uppercase runs in one header
+   row read as two competing headings. */
 .picker-count {
-  color: var(--sec);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--faint);
 }
 
 .picker-empty {

@@ -9052,6 +9052,14 @@ describe("the layer write flows", () => {
     expect(screen.getByTestId("group-picker-count").textContent).toBe(
       "4 of 4 match · scroll for more",
     );
+    // The count is a quantity beside the section label, so it carries neither
+    // the label class nor its uppercasing. Two uppercase runs in the header
+    // row read as two competing headings instead of a label and a count.
+    const head = screen.getByTestId("group-picker-count");
+    expect(head.className).toBe("picker-count");
+    expect(head.closest(".picker-head")?.querySelector(".label")?.textContent).toBe(
+      "Groups already granted",
+    );
     expect(
       within(picker)
         .getAllByRole("button")

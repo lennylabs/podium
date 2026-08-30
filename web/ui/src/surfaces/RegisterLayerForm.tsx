@@ -821,7 +821,7 @@ function GroupPicker({
     <div className="picker" data-testid="group-picker">
       <p className="picker-head">
         <span className="label">Groups already granted</span>
-        <span className="label picker-count" data-testid="group-picker-count">
+        <span className="picker-count" data-testid="group-picker-count">
           {matches.length} of {known.length} match{scrolls && ' · scroll for more'}
         </span>
       </p>
