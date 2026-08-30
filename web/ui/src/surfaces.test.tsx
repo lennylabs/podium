@@ -6866,7 +6866,7 @@ describe("read-only mode", () => {
     // take no key on a read-only registry rather than committing a move the
     // registry would refuse.
     for (const handle of screen.getAllByLabelText(/^Move .*arrow key$/)) {
-      expect(handle.closest("tr")?.getAttribute("draggable")).toBe("false");
+      expect(handle.getAttribute("draggable")).toBe("false");
       expect(handle.hasAttribute("disabled")).toBe(true);
     }
   });
@@ -9508,6 +9508,29 @@ describe("the layer write flows", () => {
     expect(store.effectAllowed).toBe("move");
   });
 
+  // The panel's instruction names the handle as what a drag starts from, and
+  // the row carries text a reader selects with the mouse. A draggable row
+  // started a reorder from a drag begun over the layer name or the source
+  // path, and it took that text out of the selection model.
+  it("makes only the handle draggable, and leaves the rest of the row alone", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layers: [adminLayer(), userLayer(), scratchLayer()] },
+      },
+      "/v1/layers/reorder": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    expect(layerHandle("alice-personal").getAttribute("draggable")).toBe(
+      "true",
+    );
+    for (const id of ["company", "alice-personal", "alice-scratch"]) {
+      expect(layerRow(id).getAttribute("draggable")).toBeNull();
+    }
+  });
+
   // The dragged row takes the slot of the row it is dropped onto, so it lands
   // above that row when it moves up the table and below it when it moves
   // down. The indicator marks the edge the row will land on, because an
@@ -10842,12 +10865,12 @@ function moveHandleLabel(id: string): string {
  * it, which is the state the drop indicator is drawn in. */
 function dragRowOver(from: string, onto: string): void {
   const dataTransfer = dragStore();
-  fireEvent.dragStart(layerRow(from), { dataTransfer });
+  fireEvent.dragStart(layerHandle(from), { dataTransfer });
   fireEvent.dragOver(layerRow(onto), { dataTransfer });
 }
 
 function dragRowOnto(from: string, onto: string): DragStore {
-  const source = layerRow(from);
+  const source = layerHandle(from);
   const target = layerRow(onto);
   const dataTransfer = dragStore();
   fireEvent.dragStart(source, { dataTransfer });
@@ -10876,8 +10899,14 @@ function dragStore(): DragStore {
   return store;
 }
 
+/** layerHandle is one row's reorder handle, which is the only part of the row
+ * a pointer drag picks up. */
+function layerHandle(id: string): HTMLElement {
+  return screen.getByLabelText(moveHandleLabel(id));
+}
+
 function layerRow(id: string): HTMLElement {
-  const row = screen.getByLabelText(moveHandleLabel(id)).closest("tr");
+  const row = layerHandle(id).closest("tr");
   if (row === null) {
     throw new Error(`no layer row for ${id}`);
   }

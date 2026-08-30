@@ -846,7 +846,14 @@ function LayerRow({
     <>
     <tr
       className={rowClass.join(" ")}
-      draggable={!readOnly}
+      // The row is a drop target rather than a drag source: `draggable` sits
+      // on the handle alone, which is what the panel's instruction and the
+      // handle column promise, and it is the whole of the row a pointer can
+      // pick up. A draggable row started a precedence reorder from a drag
+      // begun anywhere in it, and it took the row's text out of the
+      // selection model, so the source path could not be selected with the
+      // mouse. The dragstart the handle fires bubbles here, where the drag
+      // and its drop are handled together.
       onDragStart={(event) => {
         // The drag data store is what makes the drag a drag: a dragstart
         // that leaves it empty is a cancelled drag under the HTML model, so
