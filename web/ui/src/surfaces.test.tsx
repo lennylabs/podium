@@ -3808,6 +3808,46 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // Spec: §13.10 — the viewer links to extending or dependent artifacts. A
+  // reverse-index read that did not answer reports the failure inside the
+  // group whose members it would have carried, so the reader is told which
+  // relation went unreported rather than reading a bare failure band between
+  // the outbound group and the rest of the rail.
+  it("keeps the extended-by heading on the group whose reverse-index read failed", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "finance/ap/pay-invoice",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Pay invoice\n",
+          frontmatter: manifestDoc,
+        },
+      },
+      "/v1/dependents": {
+        status: 503,
+        body: { code: "registry.unavailable", message: "down" },
+      },
+    });
+    goTo("#/artifact/finance%2Fap%2Fpay-invoice");
+    render(<App />);
+    const relations = await screen.findByLabelText("Relations");
+    await within(relations).findByText(
+      "The registry did not answer this request.",
+    );
+    const groups = relations.querySelectorAll(".rail-group");
+    expect(
+      [...groups].map((group) => group.querySelector("p")?.textContent),
+    ).toEqual(["extends", "extended by"]);
+    // The failure band stands inside the group it belongs to.
+    expect(groups[1].textContent).toContain("registry.unavailable");
+    expect(groups[1].textContent).toContain(
+      "The registry did not answer this request.",
+    );
+  });
+
   // Spec: §13.10 — the viewer links to extending or dependent artifacts. The
   // dependents endpoint serves the reverse index alone, so the artifact's own
   // outbound extends reaches the rail from the manifest. A merged response

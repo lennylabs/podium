@@ -11,7 +11,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 
-import type { RefObject } from 'react';
+import type { ReactNode, RefObject } from 'react';
 
 import { ArtifactBody } from '../components/ArtifactBody';
 import { Breadcrumb } from '../components/Breadcrumb';
@@ -838,6 +838,18 @@ interface RelationChip {
  * accent on the edge this artifact declares and meta on the edges that end
  * here, so the two directions stay apart once the group labels have scrolled
  * out of the reader's eye. */
+/** RailGroup is one labelled band of the relations rail. It carries the label
+ * so a band that reports a state other than its members, such as a read that
+ * failed, still names the relation it stands for. */
+function RailGroup({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="rail-group">
+      <p className="label quiet">{label}</p>
+      {children}
+    </div>
+  );
+}
+
 function RailRelationGroup({
   label,
   chips,
@@ -850,8 +862,7 @@ function RailRelationGroup({
   direction: 'outbound' | 'inbound';
 }) {
   return (
-    <div className="rail-group">
-      <p className="label quiet">{chips.length > 1 ? `${label} · ${chips.length}` : label}</p>
+    <RailGroup label={chips.length > 1 ? `${label} · ${chips.length}` : label}>
       {chips.length === 0 ? (
         <EmptyState scope="inline">{absent}</EmptyState>
       ) : (
@@ -866,7 +877,7 @@ function RailRelationGroup({
           ))}
         </ul>
       )}
-    </div>
+    </RailGroup>
   );
 }
 
@@ -931,8 +942,10 @@ async function visibleExtends(declared: string): Promise<RelationChip[]> {
  * because §13.10 puts the extending artifacts on this surface and a reader
  * has to be told when there are none; a relation nobody declared stands no
  * group of its own. */
+const extendedBy = 'extended by';
+
 function inboundGroups(edges: DependencyEdge[]): { label: string; chips: RelationChip[]; absent: string }[] {
-  const groups = new Map<string, RelationChip[]>([['extended by', []]]);
+  const groups = new Map<string, RelationChip[]>([[extendedBy, []]]);
   for (const edge of edges) {
     const label = inboundLabel(edge.kind);
     const chips = groups.get(label) ?? [];
@@ -942,7 +955,7 @@ function inboundGroups(edges: DependencyEdge[]): { label: string; chips: Relatio
   return [...groups].map(([label, chips]) => ({
     label,
     chips,
-    absent: label === 'extended by' ? 'Nothing extends this artifact.' : `Nothing is ${label} this artifact.`,
+    absent: label === extendedBy ? 'Nothing extends this artifact.' : `Nothing is ${label} this artifact.`,
   }));
 }
 
@@ -971,7 +984,16 @@ function Relations({ artifact, frontmatter }: { artifact: LoadArtifactResponse; 
         />
       )}
       {edges.loading && <Loading label="Loading relations." />}
-      {edges.error !== null && <ErrorState error={edges.error} onRetry={edges.reload} />}
+      {/* A failed reverse-index read keeps the group heading the served
+          groups would have carried, for the same reason inboundGroups always
+          draws the extends group: the reader has to be told which relation
+          went unreported, and a bare failure band between the outbound group
+          and the rest of the rail names none. */}
+      {edges.error !== null && (
+        <RailGroup label={extendedBy}>
+          <ErrorState error={edges.error} onRetry={edges.reload} />
+        </RailGroup>
+      )}
       {edges.value !== null &&
         inboundGroups(edges.value).map((group) => (
           <RailRelationGroup
