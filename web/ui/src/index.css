@@ -158,6 +158,17 @@ code {
   overflow-wrap: break-word;
 }
 
+/* A code element is one token quoted inside running prose, and the mono face
+   alone reads as a typographic slip mid-sentence rather than as a quoted
+   identifier. The chip fill and the 4px radius are what marks it, and they are
+   set here rather than on the rendered body alone so the viewer draws the same
+   token the same way on every tab (§13.10). */
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--chip);
+}
+
 /* Most anchors in this interface are structural: a card, a listing row, a
    breadcrumb crumb, a sidebar entry. The surrounding structure is the
    affordance there, and the user-agent underline drawn under each one turns a
@@ -2494,11 +2505,6 @@ label:has(> input:disabled) {
   border-radius: 9px;
 }
 
-.prose code {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--chip);
-}
 
 /* A table has a min-content width of its own that no wrapping brings under
    the column width, so it scrolls sideways inside the container the rendering

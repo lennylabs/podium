@@ -103,4 +103,17 @@ describe('frontmatter property table', () => {
     expect(ruleValue('.property-items li + li::before', 'content').replace(/'/g, '"')).toBe('", "');
     expect(ruleValue('.property-items li + li::before', 'color')).toBe('var(--faint)');
   });
+
+  // The note under the panel quotes a frontmatter key inside a sentence. Left
+  // as bare mono it reads as a slip in the typeface rather than as a quoted
+  // identifier, and the same element in the rendered body on the tab beside it
+  // carries the chip fill, so one viewer would draw one token two ways.
+  // Spec: §13.10
+  it('draws the served note key as a code chip', () => {
+    render(<PropertyTable raw={raw} offerRaw />);
+    const token = screen.getByTestId('frontmatter-served-note').querySelector('code');
+    expect(token?.textContent).toBe('extends');
+    expect(declared(token as Element, 'background')).toBe('var(--chip)');
+    expect(declared(token as Element, 'border-radius')).toBe('4px');
+  });
 });
