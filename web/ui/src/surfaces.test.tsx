@@ -5721,6 +5721,42 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // Spec: §13.10
+  it("drops the header description while the Frontmatter tab stands it as a table row", async () => {
+    const description =
+      "Reconcile a supplier ledger against the general ledger.";
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "ops/ledger-reconciliation",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "Body.\n",
+          frontmatter: `---\nname: ledger-reconciliation\ndescription: ${description}\n---\n`,
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/ops%2Fledger-reconciliation");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    // The rendered tab carries no property table, so the header states the
+    // description.
+    expect(screen.getByTestId("artifact-lead").textContent).toBe(description);
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    // The table now carries the same sentence as its `description` row, so
+    // the header drops its paragraph rather than printing it twice.
+    expect(screen.getByTestId("frontmatter-table").textContent).toContain(
+      description,
+    );
+    expect(screen.queryByTestId("artifact-lead")).toBeNull();
+    // Leaving the tab returns the header's paragraph.
+    fireEvent.click(screen.getByRole("tab", { name: "Rendered" }));
+    expect(screen.getByTestId("artifact-lead").textContent).toBe(description);
+  });
+
   // Every exclusive one-row choice in the build is the same segmented control,
   // so the chosen segment is raised onto the surface colour over a chip track.
   // A switch that fills the chosen segment with the track colour instead

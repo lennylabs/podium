@@ -64,10 +64,11 @@ export function ArtifactViewer({
   viewing: string;
   onError: (err: unknown) => void;
 }) {
-  // The open tab lives here rather than in the tab set, because the rail
-  // beside it reads it: the Frontmatter tab already stands the same pairs
-  // full width in the content column, and the rail's own copy of them would
-  // put the table on the screen twice.
+  // The open tab lives here rather than in the tab set, because the header
+  // above it and the rail beside it both read it: the Frontmatter tab already
+  // stands the same pairs full width in the content column, so the rail's own
+  // copy of them and the header's description paragraph would each put a value
+  // the table already carries on the screen twice.
   const [tab, setTab] = useState<TabName>('rendered');
   const [latest, setLatest] = useState('');
   // The response the page is standing on. A version the registry cannot
@@ -230,6 +231,11 @@ export function ArtifactViewer({
       : { body: split.body, frontmatter: body.frontmatter === '' ? split.frontmatter : body.frontmatter };
 
   const description = descriptionOf(document.frontmatter, body.skill_raw ?? '');
+  // The description is read out of the frontmatter, so the Frontmatter tab
+  // stands it as the `description` row of its own table. Keeping the header
+  // paragraph there would print the same sentence twice within one screen,
+  // which is why the header states it only while another tab is open.
+  const frontmatterOpen = tab === 'frontmatter';
 
   return (
     <section className="surface artifact-viewer" aria-label="Artifact viewer">
@@ -247,7 +253,7 @@ export function ArtifactViewer({
           <SensitivityBadge sensitivity={body.sensitivity} />
           <DeprecatedBadge deprecated={body.deprecated} />
         </div>
-        <Lead text={description} />
+        {!frontmatterOpen && <Lead text={description} />}
         <DeprecationNotice artifact={body} />
         {artifact.loading && <Loading label="Loading the artifact." />}
         {artifact.error !== null && (
@@ -283,7 +289,7 @@ export function ArtifactViewer({
         artifact={body}
         layer={layerOf(layers.value, body)}
         frontmatter={document.frontmatter}
-        showFrontmatter={tab !== 'frontmatter'}
+        showFrontmatter={!frontmatterOpen}
       />
     </section>
   );
