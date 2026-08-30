@@ -11386,6 +11386,42 @@ describe("the command palette", () => {
     expect(screen.queryByTestId("palette")).toBeNull();
   });
 
+  // The reader's edits to the search surface's own field rewrite the hash
+  // without a navigation, so the route the shell last parsed trails the
+  // address bar. A palette handoff back to that trailing query still has to
+  // stand the surface up on it: otherwise the field, the result list, and the
+  // address bar name two different searches, and the link the reader copies
+  // answers with results the page never drew (§13.10).
+  it("stands the search surface up on a palette query the shell last parsed", async () => {
+    palettePage([{ id: "platform/review", type: "skill" }]);
+    render(<App />);
+    await screen.findByTestId("search-trigger");
+    // The route is entered from the catalog rather than landed on, so the
+    // surface is standing on the query the reader then edits.
+    goTo(searchHref("review"));
+    const field = await screen.findByLabelText("Search artifacts");
+    fireEvent.change(field, { target: { value: "lint" } });
+    await waitFor(() => {
+      expect(window.location.hash).toBe(searchHref("lint"));
+    });
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "review" },
+    });
+    fireEvent.keyDown(panel, { key: "Enter", metaKey: true });
+    expect(window.location.hash).toBe(searchHref("review"));
+    await waitFor(() => {
+      const surfaceField = screen.getByLabelText(
+        "Search artifacts",
+      ) as HTMLInputElement;
+      expect(surfaceField.value).toBe("review");
+    });
+    await waitFor(() => {
+      expect(lastSearch().get("query")).toBe("review");
+    });
+  });
+
   // Closing the panel hands focus back to the header's search trigger, and a
   // ⏎ the panel leaves uncancelled then activates that trigger as the
   // browser's default action for the key: the panel reopens over the artifact

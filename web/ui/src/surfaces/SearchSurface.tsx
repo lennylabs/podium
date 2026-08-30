@@ -18,7 +18,7 @@ import type { SearchFilters, SearchResponse } from "../api";
 import { loadDomain, searchArtifacts } from "../api";
 import { scopePaths } from "../domain";
 import { formatQueryLine, parseQueryLine } from "../query";
-import { replaceRoute, searchHref } from "../route";
+import { parseRoute, replaceRoute, searchHref } from "../route";
 import type { Async } from "../useAsync";
 import { useAsync, useErrorReport } from "../useAsync";
 
@@ -64,13 +64,38 @@ export function SearchSurface({
   // runs the palette's own parse over it. A query arriving as
   // "type:skill auth" opens with the skill pill applied and "auth" in the
   // field, which is the request the palette issued and the result set it
-  // listed. The shell remounts the surface on each query, so the parse seeds
-  // the state once per query and the reader's later edits stand.
+  // listed. The parse seeds the state on arrival, and the reader's later
+  // edits stand over it.
   const seed = parseQueryLine(query);
   const [type, setType] = useState(seed.type);
   const [scope, setScope] = useState(seed.scope);
   const [tags, setTags] = useState<string[]>(seed.tags);
   const [text, setText] = useState(seed.query);
+
+  // A navigation onto the search route reaches the surface here rather than
+  // through the query the shell hands down. The surface writes the reader's
+  // edits into the address bar without firing `hashchange`, so the query the
+  // shell last parsed trails what the field shows, and a palette handoff back
+  // to that trailing query hands down a value the shell reads as unchanged.
+  // Seeding on the address the navigation landed on leaves the field, the
+  // result list, and the address bar naming one search (§13.10).
+  useEffect(() => {
+    const onNavigate = () => {
+      const entered = parseRoute(window.location.hash);
+      if (entered === null || entered.name !== "search") {
+        return;
+      }
+      const landed = parseQueryLine(entered.query);
+      setType(landed.type);
+      setScope(landed.scope);
+      setTags(landed.tags);
+      setText(landed.query);
+    };
+    window.addEventListener("hashchange", onNavigate);
+    return () => {
+      window.removeEventListener("hashchange", onNavigate);
+    };
+  }, []);
 
   // A scope is a §4.2 domain path, so the dropdown offers every domain the
   // root read describes: its top-level entries, the subdomains those entries
