@@ -184,14 +184,30 @@ export function ArtifactViewer({
     if (artifact.error !== null) {
       // Nothing of this surface loaded, so the failure is the page rather
       // than a banner over a page that is still there.
+      //
+      // A pinned address arrives cold from a link, a bookmark, or a reload of
+      // the address the picker wrote after a pin the registry refused, and
+      // there the failure is the pin rather than the artifact: the catalog
+      // still holds the artifact at the versions it does have. The registry
+      // reports the two conditions apart, so the page does too, names the pin
+      // that failed, and offers the unpinned address the in-session refusal
+      // already offers. Reporting the artifact absent because one pin missed
+      // states something false about the catalog. Spec: §13.10.
+      const pinned = viewing !== '';
       return (
         <ErrorPage
           error={artifact.error}
-          title="No such artifact"
-          subject={id}
+          title={pinned ? 'No such version' : 'No such artifact'}
+          subject={pinned ? `${id}@${viewing}` : id}
           onRetry={retry}
           testID="artifact-failed"
-        />
+        >
+          {pinned && (
+            <a className="button primary" href={artifactHref(id)} data-testid="pin-show-latest">
+              Show latest
+            </a>
+          )}
+        </ErrorPage>
       );
     }
     return artifact.loading ? <Loading label="Loading the artifact." /> : null;

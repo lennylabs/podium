@@ -14374,6 +14374,64 @@ describe("a whole-surface failure", () => {
     expect(within(page).queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
+  // A pinned address that arrives cold carries two conditions the registry
+  // reports apart: an artifact that is not there, and an artifact that is
+  // there at versions the pin does not name. The page keeps them apart too,
+  // because the catalog still holds the artifact, and it offers the unpinned
+  // address the in-session refusal offers rather than only the catalog root.
+  it("names the pin rather than the artifact when a cold-loaded version does not resolve", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 404,
+        body: {
+          code: "registry.not_found",
+          message: "registry.not_found: version: invalid pin: no candidate matches",
+        },
+      },
+    });
+    goTo("#/artifact/eng%2Fdeploy@9.9.9");
+    render(<App />);
+    const page = await screen.findByTestId("artifact-failed");
+    expect(
+      within(page).getByRole("heading", { name: "No such version" }),
+    ).toBeTruthy();
+    expect(page.textContent).not.toContain("No such artifact");
+    expect(page.textContent).toContain("eng/deploy@9.9.9 does not resolve.");
+    const latest = within(page).getByRole("link", { name: "Show latest" });
+    expect(latest.getAttribute("href")).toBe(artifactHref("eng/deploy"));
+    // The catalog root stays reachable, and it steps back from primary now
+    // that a nearer recovery leads the row.
+    const back = within(page).getByRole("link", { name: "Back to catalog" });
+    expect(back.getAttribute("href")).toBe(domainHref(""));
+    expect(back.className).toBe("button");
+  });
+
+  // An unpinned address that does not resolve is still the artifact itself,
+  // and it is offered no version to fall back to.
+  it("keeps the artifact wording and offers no version recovery on an unpinned address", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 404,
+        body: {
+          code: "registry.not_found",
+          message: "registry.not_found: artifact eng/nope",
+        },
+      },
+    });
+    goTo("#/artifact/eng%2Fnope");
+    render(<App />);
+    const page = await screen.findByTestId("artifact-failed");
+    expect(
+      within(page).getByRole("heading", { name: "No such artifact" }),
+    ).toBeTruthy();
+    expect(within(page).queryByRole("link", { name: "Show latest" })).toBeNull();
+    expect(
+      within(page).getByRole("link", { name: "Back to catalog" }).className,
+    ).toBe("button primary");
+  });
+
   it("draws a failed domain read the same way, with a retry where the condition clears", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },

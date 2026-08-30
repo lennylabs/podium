@@ -447,6 +447,7 @@ export function ErrorPage({
   title,
   subject,
   onRetry,
+  children,
   testID,
 }: {
   error: unknown;
@@ -456,6 +457,11 @@ export function ErrorPage({
    * title states it, so the reader sees what was asked for. */
   subject?: string;
   onRetry?: () => void;
+  /** A recovery control belonging to the route that failed, placed first in
+   * the action row. A route that named something narrower than the catalog
+   * has somewhere nearer to send the reader than the catalog root, and this
+   * is where that control goes. */
+  children?: ReactNode;
   testID?: string;
 }) {
   const shown = concealRefusal(error);
@@ -474,6 +480,7 @@ export function ErrorPage({
         ? 'The request was refused'
         : title;
   const offerRetry = onRetry !== undefined && (envelope === null || envelope.retryable);
+  const offerRecovery = children !== undefined && children !== null && children !== false;
   // The way off is omitted on the route it leads to. The catalog read can fail
   // at the registry root, and there the link navigates to the route already on
   // screen: the panel stays exactly as it is, which reads as a second failed
@@ -498,15 +505,16 @@ export function ErrorPage({
         {envelope !== null && envelope.suggestedAction !== '' && (
           <p className="error-lead quiet">{envelope.suggestedAction}</p>
         )}
-        {(offerRetry || offerBack) && (
+        {(offerRetry || offerRecovery || offerBack) && (
           <div className="error-actions">
             {offerRetry && (
               <button type="button" className="button primary" onClick={onRetry}>
                 Retry
               </button>
             )}
+            {children}
             {offerBack && (
-              <a className={offerRetry ? 'button' : 'button primary'} href={domainHref('')}>
+              <a className={offerRetry || offerRecovery ? 'button' : 'button primary'} href={domainHref('')}>
                 Back to catalog
               </a>
             )}
