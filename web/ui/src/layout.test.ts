@@ -1377,15 +1377,19 @@ describe("frontmatter property table", () => {
   });
 
   // The rail is a 316px column, so its table is about 270px wide and a 180px
-  // key column would leave the value less than a third of the row. The rail's
-  // own floor is stated in `ch` of the key's face, so it holds a key of
-  // ordinary length on one line at whatever size that face is set at.
-  it("narrows the key column to an ordinary key's width inside the rail", () => {
+  // key column would leave the value less than a third of the row. The design
+  // fixes the rail's key at the width of `sensitivity`, the longest key it
+  // draws, and gives the value the rest. A wider floor spends the rail's
+  // remaining width on the key: at 16ch the key cell measured 135px of a 271px
+  // table and the value wrapped a description to one word a line before a
+  // disclosure control clipped it. The floor is stated in `ch` of the key's own
+  // mono face, so it holds that key on one line at whatever size the face is
+  // set at and no wider.
+  it("holds the rail's key column to the design's longest drawn key", () => {
     const key = railKeyStyle();
-    expect(key.minWidth).toBe("16ch");
-    expect(Number.parseInt(key.minWidth, 10)).toBeGreaterThanOrEqual(
-      "review_cadence".length,
-    );
+    const floor = Number.parseInt(key.minWidth, 10);
+    expect(key.minWidth).toBe(`${floor}ch`);
+    expect(floor).toBe("sensitivity".length);
   });
 
   // The key labels the row and the value carries the content, so the key is

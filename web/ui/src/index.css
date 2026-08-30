@@ -1790,14 +1790,17 @@ input[type="search"]::-webkit-search-cancel-button {
   background-color: var(--surf2);
 }
 
-/* The rail is a 316px column, so the table inside it is about 270px and a
-   180px key column would leave the value less than a third of the row. The
-   rail states its own floor in `ch` of the key's own mono face, so an ordinary
-   key such as `description` or `review_cadence` sits on one line at whatever
-   size that face is set at, and only a longer key falls back to the break
-   above. */
+/* The rail is a 316px column, so the table inside it is about 270px. The
+   design fixes the rail's key at 74px beside a value that takes the rest,
+   which is the width of `sensitivity`, the longest key it draws. A floor of
+   16ch plus the cell's 24px of padding resolved to 135px here, half the
+   table, and the value it left was narrow enough to wrap a description to one
+   word a line and then send it behind a disclosure control. The floor is
+   stated in `ch` of the key's own mono face so it tracks whatever size that
+   face is set at, and a key longer than the design's falls back to the break
+   above (§13.10). */
 .artifact-rail .property-table th {
-  min-width: 16ch;
+  min-width: 11ch;
 }
 
 /* A view switch that rides on a toolbar row is smaller than the one in a
