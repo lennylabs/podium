@@ -598,12 +598,17 @@ export function Modal({
   description,
   onClose,
   dismissible = true,
+  wide = false,
   children,
 }: {
   title: string;
   description?: string;
   onClose: () => void;
   dismissible?: boolean;
+  /** wide draws the dialog at the wider of the two widths the boards use. It
+   * is for content that divides the body between several columns, where the
+   * standard width leaves each column too narrow for its own label. */
+  wide?: boolean;
   children: ReactNode;
 }) {
   const headingID = useId();
@@ -646,7 +651,13 @@ export function Modal({
         }
       }}
     >
-      <div ref={dialog} className="modal" role="dialog" aria-modal="true" aria-labelledby={headingID}>
+      <div
+        ref={dialog}
+        className={wide ? 'modal modal-wide' : 'modal'}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingID}
+      >
         <header className="modal-head">
           <div className="modal-title-row">
             <h2 id={headingID}>{title}</h2>

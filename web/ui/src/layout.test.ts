@@ -1701,3 +1701,19 @@ describe("dialog footer", () => {
     expect(styled("modal-foot-note").flexGrow).toBe("1");
   });
 });
+
+// The reingest report divides its body between a row of five stat cards. At
+// the standard dialog width each card is about 118px, which is narrower than
+// "LINT FAILURES" needs on one line, so that label broke in two and the row
+// carried one two-line card beside four single-line ones. The wide modifier
+// is the width the board draws that dialog at. jsdom performs no layout, so
+// the case pins the declared width; the rendered row is checked in a browser.
+describe("dialog width", () => {
+  it("draws a standard dialog at the narrower of the two board widths", () => {
+    expect(styled("modal").width).toBe("680px");
+  });
+
+  it("widens a dialog whose body carries a row of columns", () => {
+    expect(styled("modal modal-wide").width).toBe("760px");
+  });
+});

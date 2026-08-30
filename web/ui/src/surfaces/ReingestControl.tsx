@@ -220,6 +220,7 @@ function IngestReport({
       title="Reingest finished"
       description={`${layerID} · ${elapsed(finishedAt - startedAt)}`}
       onClose={onDone}
+      wide
     >
       <section className="ingest-report modal-body" aria-label={`Reingest result for ${layerID}`}>
         {recorded && (
@@ -891,6 +892,7 @@ export function ReingestRunReport({
       title="Reingest all finished"
       description={`${String(outcomes.length)} ${layerWord} · ${elapsed(finishedAt - startedAt)}`}
       onClose={onDone}
+      wide
     >
       <section className="ingest-report modal-body" aria-label="Reingest all result">
         {detail !== null && (

@@ -631,3 +631,20 @@ describe('the finished fan-out report', () => {
     expect(text).toContain('Reingest acme/finance finished');
   });
 });
+
+// Both reports lay a row of five stat cards across the dialog body, and the
+// standard dialog width leaves each card too narrow for "LINT FAILURES" on
+// one line. Both ask for the wide dialog the board draws them at.
+describe('the report dialog width', () => {
+  it('asks for the wide dialog on the single-layer report', () => {
+    report({ layer: 'acme/platform-artifacts', accepted: 4, idempotent: 1, lint_failures: 0 });
+    expect(screen.getByRole('dialog', { name: /Reingest finished/ }).className).toContain('modal-wide');
+  });
+
+  it('asks for the wide dialog on the fan-out report', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    expect(screen.getByRole('dialog', { name: /Reingest all finished/ }).className).toContain('modal-wide');
+  });
+});

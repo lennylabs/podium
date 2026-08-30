@@ -3116,6 +3116,15 @@ label:has(> input:disabled) {
   overflow: hidden;
 }
 
+/* The reingest report widens the dialog, because its row of five stat cards
+   divides the dialog's body between them. At the standard width each card is
+   about 118px, which is under the width "LINT FAILURES" needs on one line, so
+   the last card takes a two-line label beside four single-line ones and the
+   row reads ragged. */
+.modal-wide {
+  width: 760px;
+}
+
 .modal-head {
   flex: none;
   padding: 18px 22px 14px;
