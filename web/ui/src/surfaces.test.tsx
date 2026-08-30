@@ -14300,6 +14300,49 @@ describe("the artifact viewer’s resources", () => {
     );
   });
 
+  // A nested resource path is longer than the rail is wide. It wraps at a
+  // directory boundary, so the file name and its extension stay together on
+  // one line: broken at an arbitrary character,
+  // `resources/examples/good-trace.json` ends a line as
+  // `resources/examples/good-tra`, which names no file.
+  it("breaks a nested rail resource path at its directory boundaries", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+          resources: { "resources/examples/good-trace.json": "body" },
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const section = screen.getByLabelText("Bundled resources");
+    const name = section.querySelector(
+      ".resource-chip > :first-child",
+    ) as HTMLElement;
+    expect(name.textContent).toBe("resources/examples/good-trace.json");
+    // One break opportunity per separator, and none inside a segment: each
+    // segment is a run the browser cannot wrap through, and the marks between
+    // them are where the row is allowed to fold.
+    const segments = [...name.querySelectorAll(".resource-segment")];
+    expect(segments.map((segment) => segment.textContent)).toEqual([
+      "resources",
+      "/examples",
+      "/good-trace.json",
+    ]);
+    expect(window.getComputedStyle(segments[2]).whiteSpace).toBe("nowrap");
+    expect(name.querySelectorAll("wbr").length).toBe(2);
+    expect(window.getComputedStyle(name).wordBreak).not.toBe("break-all");
+  });
+
   // The tab keeps the two deliveries as one list, takes the whole set at
   // once from the control above the table, and opens the selected row's
   // detail card under it.

@@ -2797,11 +2797,23 @@ label:has(> input:disabled) {
 }
 
 /* The name is the row's flexible half and can be longer than the rail is
-   wide, so it breaks inside itself rather than pushing the size off the
-   row. */
+   wide, so it wraps rather than pushing the size off the row. It wraps only
+   at the directory boundaries the markup marks: split mid-word,
+   `resources/attributes.json` ends its first line as
+   `resources/attributes.js` and `good-trace.json` breaks at its hyphen, both
+   of which name files that do not exist. A single segment wider than the row
+   has no boundary to wrap at and is clipped with an ellipsis instead. */
 .resource-chip > :first-child {
   min-width: 0;
-  word-break: break-all;
+}
+
+.resource-segment {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
 }
 
 /* A file fetched on demand is not in the page yet, so its row is outlined

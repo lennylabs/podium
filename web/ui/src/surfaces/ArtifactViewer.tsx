@@ -9,7 +9,7 @@
 // Authored source, and Resources, and each one disappears where the artifact
 // carries nothing for it rather than standing an empty panel in the layout.
 
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import type { ReactNode, RefObject } from 'react';
 
@@ -751,7 +751,7 @@ function RailResourceGroup({
         <ul className="rail-list">
           {rows.map((row) => (
             <li key={row.name} className={fetched ? 'resource-chip fetched' : 'resource-chip'}>
-              <span className="mono">{row.name}</span>
+              <ResourcePath name={row.name} />
               {fetched ? (
                 <a
                   className="mono quiet resource-size"
@@ -769,6 +769,29 @@ function RailResourceGroup({
         </ul>
       )}
     </div>
+  );
+}
+
+/** ResourcePath is a bundled file's path in the rail. The rail is narrower
+ * than a nested path, so the path is handed to the browser one segment at a
+ * time with a break opportunity between them and none inside them: a path
+ * that does not fit wraps at a directory boundary and each name stays whole.
+ * Left to break wherever it fits, `resources/attributes.json` ends its first
+ * line as `resources/attributes.js` and `good-trace.json` splits at its
+ * hyphen, both of which read as files that do not exist. */
+function ResourcePath({ name }: { name: string }) {
+  const segments = name.split('/');
+  return (
+    <span className="mono">
+      {segments.map((segment, index) => (
+        // The path is fixed for the row, so the position is the only key a
+        // repeated segment can take.
+        <Fragment key={index}>
+          <span className="resource-segment">{index === 0 ? segment : `/${segment}`}</span>
+          {index < segments.length - 1 ? <wbr /> : null}
+        </Fragment>
+      ))}
+    </span>
   );
 }
 
