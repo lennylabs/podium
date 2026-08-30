@@ -11784,8 +11784,34 @@ describe("the command palette", () => {
     });
   });
 
-  // The queries the page has run outlive the panel that ran them, because
-  // they are what the just-opened state lists.
+  // The empty list is fed by the panel's own handoffs, so it says what fills
+  // it. Stating that no query has been run on this page is contradicted by the
+  // search surface behind the scrim, which is listing the results of one the
+  // reader just ran there.
+  it("names what fills the recent queries rather than denying a query the page ran", async () => {
+    palettePage([{ id: "eng/deploy", type: "context" }], 1);
+    goTo(searchHref(""));
+    render(<App />);
+    const surface = await screen.findByLabelText("Search");
+    fireEvent.change(within(surface).getByLabelText("Search artifacts"), {
+      target: { value: "deploy" },
+    });
+    await waitFor(() => {
+      expect(lastSearch().get("query")).toBe("deploy");
+    });
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    const panel = screen.getByTestId("palette");
+    expect(panel.textContent).not.toContain("No query has been run");
+    expect(
+      within(panel).getByText(
+        "A query is listed here once it opens a result or reaches the search surface.",
+      ),
+    ).toBeTruthy();
+  });
+
+  // The queries the panel has acted on outlive the opening that ran them,
+  // because they are what the just-opened state lists.
   it("lists a query it ran among the recent queries of a later opening", async () => {
     palettePage([{ id: "platform/review", type: "skill" }], 1);
     render(<App />);

@@ -48,8 +48,13 @@ export function CommandPalette({
   trigger: RefObject<HTMLElement | null>;
   content: RefObject<HTMLElement | null>;
 }) {
-  // The queries this page has already run outlive one opening of the panel,
-  // so they are held out here where closing it cannot discard them.
+  // The queries this panel has acted on outlive one opening of it, so they are
+  // held out here where closing it cannot discard them. A query joins the list
+  // when it opens a result or reaches the search surface, which are the two
+  // ways the reader finishes with one. The panel issues a read on every
+  // keystroke, so a list of every query a read went out for would hold each
+  // prefix of the line as its own entry, and so would the search surface,
+  // which rewrites the route on every keystroke too.
   const [recents, setRecents] = useState<string[]>([]);
   const remember = (query: string) => {
     if (query === '') {
@@ -116,7 +121,7 @@ function PalettePanel({
   // holds a list, because a field that points at an option no page holds is
   // worse than one that points at nothing.
   const listed = typed !== '' && !results.loading && results.error === null && rows.length > 0;
-  // The just-opened panel lists the queries this page has run, and the arrows
+  // The just-opened panel lists the queries this panel has acted on, and the arrows
   // move over them the way they move over results. The two lists never appear
   // together, so one highlight walks whichever list is drawn and the footer
   // names the keys that act on it.
@@ -381,8 +386,8 @@ function PaletteFooter({ mode }: { mode: PaletteMode }) {
   );
 }
 
-/** PaletteHints is the just-opened panel: the queries this page has already
- * run, and the inline filter syntax, which is what teaches the query language
+/** PaletteHints is the just-opened panel: the queries this panel has acted on,
+ * and the inline filter syntax, which is what teaches the query language
  * the search surface exposes as pills. The recent queries are the panel's
  * listbox on this arm, so the arrows walk them and ⏎ runs the highlighted one,
  * which is what the footer names here. */
@@ -399,7 +404,13 @@ function PaletteHints({
     <>
       <p className="label">Recent queries</p>
       {recents.length === 0 ? (
-        <EmptyState scope="inline">No query has been run on this page yet.</EmptyState>
+        // The copy names what fills the list. It once stated that no query had
+        // been run on this page, which the reader can contradict by looking
+        // past the panel at the results of one they ran on the search surface
+        // behind it.
+        <EmptyState scope="inline">
+          A query is listed here once it opens a result or reaches the search surface.
+        </EmptyState>
       ) : (
         // The list carries the result list's own classes, because the arrows
         // move one highlight and a recent query drawn as an inset button
