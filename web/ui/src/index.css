@@ -1747,6 +1747,18 @@ input[type="search"]::-webkit-search-cancel-button {
   width: 100%;
 }
 
+/* The panel's table runs the whole content column, which puts a row's key and
+   its value a few hundred pixels apart, and a 1px divider is all that holds
+   the reader's line across that gap: a nine-row table reads as one block and
+   the eye loses which value belongs to which key. The design bands the rows
+   from the first row down, so the fill itself carries the row-to-row
+   separation at that width (§13.10). The rail's table is a 270px column where
+   the divider spans the whole row, and it already stands on the inset tone, so
+   it keeps one fill. */
+.property-table-panel tbody tr:nth-child(even) {
+  background-color: var(--surf2);
+}
+
 /* The rail is a 316px column, so the table inside it is about 270px and a
    180px key column would leave the value less than a third of the row. The
    rail states its own floor in `ch` of the key's own mono face, so an ordinary

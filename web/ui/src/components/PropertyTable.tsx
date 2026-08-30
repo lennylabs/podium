@@ -99,7 +99,15 @@ export function PropertyTable({
       {offerRaw && rawView ? (
         <RawBlock block={block} offending={0} />
       ) : (
-        <table className="data-table property-table" data-testid={testID}>
+        // The panel's table is banded and the rail's is not, so the class the
+        // banding hangs on is put on here beside the toggle that marks the
+        // panel rather than being inferred from an ancestor in the sheet.
+        <table
+          className={
+            offerRaw ? 'data-table property-table property-table-panel' : 'data-table property-table'
+          }
+          data-testid={testID}
+        >
           <tbody>
             {parsed.properties.map((property) => (
               <tr key={property.key}>
