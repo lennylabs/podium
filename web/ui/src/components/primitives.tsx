@@ -22,6 +22,11 @@ export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
  * full-width containers, where a second neutral fill states nothing. */
 export type BadgeTone = Tone | 'soft' | 'grant' | 'hollow' | 'marker' | 'count';
 
+/** TabCountTone is the tone a tab's trailing count or marker takes. The count
+ * is quiet mono text rather than a chip, so the tone sets its colour and
+ * nothing else. */
+export type TabCountTone = 'quiet' | 'danger' | 'accent';
+
 /**
  * CopyField renders a value the reader has to take away with them beside an
  * explicit Copy control. Every such value carries this control, because a
@@ -699,6 +704,11 @@ export function Modal({
  *
  * The ids are derived from a per-instance prefix, because two strips can
  * stand on one page and an id serves one element.
+ *
+ * A tab's count follows its label as quiet mono text after a word space. A
+ * bordered chip in that position reads as a control jammed against the label
+ * rather than as a figure the label carries, which is why the count takes no
+ * border, no fill, and no padding box.
  */
 export function TabStrip<Name extends string>({
   label,
@@ -708,7 +718,7 @@ export function TabStrip<Name extends string>({
   children,
 }: {
   label: string;
-  tabs: { name: Name; label: string; badge?: string; badgeTone?: BadgeTone }[];
+  tabs: { name: Name; label: string; count?: string; countTone?: TabCountTone }[];
   open: Name;
   onOpen: (name: Name) => void;
   children: ReactNode;
@@ -759,8 +769,11 @@ export function TabStrip<Name extends string>({
             }}
           >
             {entry.label}
-            {entry.badge !== undefined && entry.badge !== '' && (
-              <Badge tone={entry.badgeTone ?? 'quiet'}>{entry.badge}</Badge>
+            {entry.count !== undefined && entry.count !== '' && (
+              <>
+                {' '}
+                <span className={`tab-count tab-count-${entry.countTone ?? 'quiet'}`}>{entry.count}</span>
+              </>
             )}
           </button>
         ))}

@@ -15,7 +15,7 @@
 import { useState } from 'react';
 import type { RefObject } from 'react';
 
-import type { BadgeTone, Tone } from '../components/primitives';
+import type { TabCountTone, Tone } from '../components/primitives';
 import { Badge, CopyButton, Modal, TabStrip } from '../components/primitives';
 import type {
   BreakGlass,
@@ -498,9 +498,9 @@ function IngestDetailTabs({
   conflicts: IngestConflict[];
   advisories: IngestAdvisory[];
 }) {
-  type DetailTab = { name: IngestDetail; label: string; badge: string; badgeTone?: BadgeTone };
-  const listed = (name: IngestDetail, label: string, count: number, badgeTone?: BadgeTone): DetailTab[] =>
-    count === 0 ? [] : [{ name, label, badge: String(count), badgeTone }];
+  type DetailTab = { name: IngestDetail; label: string; count: string; countTone?: TabCountTone };
+  const listed = (name: IngestDetail, label: string, count: number, countTone?: TabCountTone): DetailTab[] =>
+    count === 0 ? [] : [{ name, label, count: String(count), countTone }];
   const tabs: DetailTab[] = [
     ...listed('accepted', 'Accepted', accepted.length),
     ...listed('rejected', 'Rejected', rejected.length, 'danger'),

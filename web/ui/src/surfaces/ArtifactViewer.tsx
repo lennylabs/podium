@@ -18,7 +18,7 @@ import { Breadcrumb } from '../components/Breadcrumb';
 import { CodeBlock, codeLines } from '../components/CodeBlock';
 import { usePopupDismiss } from '../components/focus';
 import { Lead } from '../components/Lead';
-import type { BadgeTone } from '../components/primitives';
+import type { TabCountTone } from '../components/primitives';
 import {
   CopyButton,
   DeprecatedBadge,
@@ -551,13 +551,13 @@ function Manifest({
   // prose reference in the body opens the Resources tab on the file it names
   // and the table is mounted by that press.
   const [selected, setSelected] = useState('');
-  const tabs: { name: TabName; label: string; badge: string; badgeTone?: BadgeTone }[] = [
-    { name: 'rendered', label: 'Rendered', badge: '' },
-    { name: 'frontmatter', label: 'Frontmatter', badge: invalid ? '!' : '', badgeTone: invalid ? 'danger' : 'quiet' },
-    ...(skillRaw === '' ? [] : [{ name: 'source' as TabName, label: 'Authored source', badge: '' }]),
+  const tabs: { name: TabName; label: string; count: string; countTone?: TabCountTone }[] = [
+    { name: 'rendered', label: 'Rendered', count: '' },
+    { name: 'frontmatter', label: 'Frontmatter', count: invalid ? '!' : '', countTone: invalid ? 'danger' : 'quiet' },
+    ...(skillRaw === '' ? [] : [{ name: 'source' as TabName, label: 'Authored source', count: '' }]),
     ...(resources.length === 0
       ? []
-      : [{ name: 'resources' as TabName, label: 'Resources', badge: String(resources.length) }]),
+      : [{ name: 'resources' as TabName, label: 'Resources', count: String(resources.length) }]),
   ];
   // A tab can disappear between renders, which is what happens when the
   // manifest arrives by link and the authored source it carried is cleared.

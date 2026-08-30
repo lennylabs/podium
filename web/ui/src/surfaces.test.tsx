@@ -4364,6 +4364,35 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // The count follows the label as quiet mono text after a word space. Drawn
+  // as a bordered chip it reads as a control jammed against the label rather
+  // than as a figure the label carries, so the count carries no badge box.
+  it("sets the tab count as plain text beside its label rather than as a chip", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: manifestDoc,
+          resources: { "checklist.md": "body", "rubric.md": "body" },
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const tab = screen.getByRole("tab", { name: /Resources/ });
+    expect(tab.textContent).toBe("Resources 2");
+    expect(tab.querySelector(".badge")).toBeNull();
+    const count = tab.querySelector(".tab-count");
+    expect(count?.textContent).toBe("2");
+  });
+
   // The authored source tab is a file view rather than a bare value beside a
   // control: a header states the file and its extent, a gutter numbers the
   // lines so a reader can quote one, and the file is takeable whole by Copy

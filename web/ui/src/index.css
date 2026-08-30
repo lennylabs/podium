@@ -2823,6 +2823,27 @@ label:has(> input:disabled) {
   font-weight: 600;
 }
 
+/* The figure a tab carries beside its label: how many resources the artifact
+   holds, how many rows an ingest list has, or the marker that says the
+   frontmatter failed to parse. It is set as quiet mono text after a word
+   space, because a bordered chip in that position reads as a control pressed
+   against the label rather than as a count the label carries. */
+.tab-count {
+  margin-left: 2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--meta);
+}
+
+.tab-count-danger {
+  color: var(--danger);
+}
+
+.tab-count-accent {
+  color: var(--link);
+}
+
 /* The version affordance in the artifact header. The closed control carries
    the badge typography of the badges beside it, because it states the
    version the page is standing on before it offers to change it. The field

@@ -242,7 +242,7 @@ describe('the finished reingest report', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '1 immutability conflict' }));
     const tabs = within(screen.getByRole('tablist')).getAllByRole('tab');
-    expect(tabs.map((tab) => tab.textContent)).toEqual(['Accepted1', 'Rejected1', 'Conflicts1']);
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Accepted 1', 'Rejected 1', 'Conflicts 1']);
     // The list the reader opened is the selected tab, and the panel under the
     // strip is that list.
     expect(screen.getByRole('tab', { name: /Conflicts/ }).getAttribute('aria-selected')).toBe('true');
