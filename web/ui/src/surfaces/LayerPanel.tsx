@@ -20,6 +20,7 @@ import type { ReingestOutcome, ReingestState } from "./ReingestControl";
 import {
   idleReingest,
   ReingestButton,
+  ReingestRunProgress,
   ReingestRunReport,
   ReingestStatus,
   reingestRefusal,
@@ -77,14 +78,22 @@ interface Refusal {
   retry: () => void;
 }
 
-/** Run is one "Reingest all" press: when it started, what each layer
- * answered, and when the last answer came back. The run reports nothing
- * until it ends, because the registry runs each layer's pipeline inside its
- * own request and a run that is still issuing them has no result to state. */
+/** Run is one "Reingest all" press: when it started, every layer it covers,
+ * what each of them answered so far, and when the last answer came back. The
+ * registry runs each layer's pipeline inside its own request, so a layer
+ * reports nothing until its own request returns; the run states which layers
+ * have answered, which one is open, and which are still queued, and holds the
+ * combined result until the last one is in. */
 interface Run {
   startedAt: number;
+  /** targets is every layer the run reingests, in the order it issues them. */
+  targets: string[];
   outcomes: ReingestOutcome[];
   finishedAt: number | null;
+  /** watching is whether the run's progress is held open over the page.
+   * "Stop waiting" closes it, and the requests stay with the registry, so
+   * the run still resolves into its report. */
+  watching: boolean;
 }
 
 /** Outcome is what the last committed write did, and whether the reader can
@@ -185,6 +194,23 @@ export function LayerPanel({
       />
     ) : null;
 
+  /** runProgress is the fan-out while it is still issuing requests. It is
+   * built beside the report and for the same reason: the run is a press that
+   * can hold the page for minutes, and a progress dialog rendered only under
+   * the panel's read guards is unmounted by an outage that fails a reload
+   * during the run. */
+  const runProgress =
+    run !== null && run.finishedAt === null && run.watching ? (
+      <ReingestRunProgress
+        targets={run.targets}
+        outcomes={run.outcomes}
+        startedAt={run.startedAt}
+        onStopWaiting={() => {
+          setRun((prev) => (prev === null ? prev : { ...prev, watching: false }));
+        }}
+      />
+    ) : null;
+
   // The loading state stands in for the panel on the first read alone. A
   // write reloads the list, and the reload reports loading again, so swapping
   // the whole panel out here would unmount the form that issued the write and
@@ -196,6 +222,7 @@ export function LayerPanel({
   if (layers.error !== null) {
     return (
       <>
+        {runProgress}
         {runReport}
         <ErrorState error={layers.error} onRetry={reloadPanel} />
       </>
@@ -268,7 +295,13 @@ export function LayerPanel({
    * run, and a refused layer sat behind that stack. */
   const reingestAll = async (): Promise<void> => {
     const targets = rows.map((row) => row.ID);
-    setRun({ startedAt: Date.now(), outcomes: [], finishedAt: null });
+    setRun({
+      startedAt: Date.now(),
+      targets,
+      outcomes: [],
+      finishedAt: null,
+      watching: true,
+    });
     const outcomes: ReingestOutcome[] = [];
     for (const id of targets) {
       // The fan-out opens no wait per layer. It reports every layer at once
@@ -286,6 +319,12 @@ export function LayerPanel({
         outcomes.push({ layerID: id, kind: "refused", error: err });
       }
       setRowReingest(id, idleReingest);
+      // The run publishes each answer as it arrives, so the layers that have
+      // reported are named with what they returned while the rest of the run
+      // is still open. Nothing is published for a request that has not
+      // returned, because the registry reports nothing until it does.
+      const answered = [...outcomes];
+      setRun((prev) => (prev === null ? prev : { ...prev, outcomes: answered }));
     }
     setRun((prev) =>
       prev === null ? prev : { ...prev, outcomes, finishedAt: Date.now() },
@@ -387,6 +426,7 @@ export function LayerPanel({
           </button>
         </div>
       </div>
+      {runProgress}
       {runReport}
       {/* §13.2.1 marks a read-only registry on its read responses, so the
           state is presented once here and every write control is unavailable

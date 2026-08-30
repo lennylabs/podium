@@ -914,6 +914,112 @@ export type ReingestOutcome =
   | { layerID: string; kind: 'summary'; summary: IngestSummary }
   | { layerID: string; kind: 'refused'; error: unknown };
 
+/** progressLine states what one finished layer's response carried, in the
+ * compact form the run's progress rows read at a glance. The finished report
+ * states the full breakdown; a row in a list the reader is watching tick
+ * carries the two counts that say whether the layer needs acting on. */
+function progressLine(outcome: ReingestOutcome): string {
+  if (outcome.kind === 'refused') {
+    return 'refused';
+  }
+  if (outcome.summary.accepted === undefined) {
+    return 'recorded';
+  }
+  const rejected = (outcome.summary.rejected ?? []).length;
+  return `${String(outcome.summary.accepted)} accepted · ${String(rejected)} rejected`;
+}
+
+/** ReingestRunProgress is the fan-out while it is still running. The registry
+ * runs the whole §7.3.1 pipeline inside each request and answers one layer at
+ * a time, so a run over several layers holds the page for as long as the
+ * layers take together, and the press that started it has to say what it is
+ * doing before it ends. Every layer in the run is listed: the ones that have
+ * answered carry what their own response returned, the one whose request is
+ * open is marked running, and the ones the run has not reached yet are marked
+ * queued. Nothing is drawn as progress inside a layer, because the request
+ * reports nothing until it returns.
+ *
+ * "Stop waiting" closes this dialog alone. The requests are already with the
+ * registry, which runs each pipeline to its end whatever this tab does, and
+ * the run still resolves into its report when the last one answers. */
+export function ReingestRunProgress({
+  targets,
+  outcomes,
+  startedAt,
+  onStopWaiting,
+}: {
+  /** targets is every layer the run will reingest, in the order it issues
+   * them, so a layer is listed before its own request is opened. */
+  targets: string[];
+  /** outcomes are the layers that have answered, in the order they answered.
+   * The run issues one request at a time, so the layer at this length is the
+   * one whose request is open. */
+  outcomes: ReingestOutcome[];
+  startedAt: number;
+  onStopWaiting: () => void;
+}) {
+  const done = outcomes.length;
+  const layerWord = targets.length === 1 ? 'layer' : 'layers';
+  return (
+    <Modal
+      title={`Reingesting ${String(targets.length)} ${layerWord}`}
+      description="One request per layer, run in sequence. Keep this tab open. Closing it abandons the wait rather than the ingest already in flight."
+      onClose={onStopWaiting}
+    >
+      <div className="run-progress modal-body" aria-label="Reingest all progress">
+        <ul className="run-progress-rows">
+          {targets.map((layerID, at) => {
+            const outcome = outcomes[at];
+            const running = at === done;
+            return (
+              <li
+                key={layerID}
+                className={running ? 'run-progress-row run-progress-row-running' : 'run-progress-row'}
+                data-testid={`reingest-progress-${layerID}`}
+              >
+                {outcome === undefined ? (
+                  <span
+                    className={running ? 'spinner' : 'run-mark run-mark-queued'}
+                    aria-hidden="true"
+                  />
+                ) : (
+                  <span className="run-mark run-mark-done" aria-hidden="true">
+                    ✓
+                  </span>
+                )}
+                <span className="mono run-progress-id">{layerID}</span>
+                <span className="run-progress-state mono quiet">
+                  {outcome === undefined ? (running ? 'running' : 'queued') : progressLine(outcome)}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+        <p className="run-progress-foot quiet">
+          <span className="mono">
+            Elapsed <RunningClock startedAt={startedAt} />
+          </span>
+          <span className="wait-clock-rule" aria-hidden="true" />
+          {/* The count is the one part of the footer that moves when the run
+              moves, so it is what is announced. The clock beside it advances
+              every second and would otherwise be read out with it. */}
+          <span role="status">
+            {String(done)} of {String(targets.length)} done
+          </span>
+          <span className="wait-clock-rule" aria-hidden="true" />
+          <span>A layer reports nothing until its request returns.</span>
+        </p>
+      </div>
+      <div className="modal-foot">
+        <span className="modal-foot-note quiet">Started {clock(startedAt)}.</span>
+        <button type="button" className="button-plain" onClick={onStopWaiting}>
+          Stop waiting
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
 /** counted adds up what the run's summaries carried. A layer the registry
  * only recorded contributes nothing, because it reports no counts. The
  * itemised rows are gathered rather than tallied, so the run report can open

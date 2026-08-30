@@ -10939,6 +10939,90 @@ describe("the layer write flows", () => {
     expect(report.textContent).toContain("alice-personal");
   });
 
+  // The run holds the page for as long as its layers take together, so it
+  // states what it is doing while it runs: every layer in the run is named,
+  // the ones that answered carry what their response returned, the open one
+  // is marked running, and the rest are marked queued.
+  it("names every layer in the run as it runs", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            adminLayer(),
+            { ...adminLayer(), ID: "security-baseline", Order: 2 },
+            userLayer(),
+          ],
+        },
+      },
+      "/v1/layers/reingest?id=company": {
+        body: { accepted: 3, idempotent: 1 },
+        deferred: true,
+      },
+      // The second layer's request stays open, which is what holds the run
+      // in the state the dialog reports.
+      "/v1/layers/reingest?id=security-baseline": { hangs: true },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Reingest all" }));
+    const progress = await screen.findByLabelText("Reingest all progress");
+    expect(
+      screen.getByRole("dialog", { name: /Reingesting 3 layers/ }),
+    ).toBeTruthy();
+    // The first layer answered, so its row states what it returned.
+    await waitFor(() => {
+      expect(screen.getByTestId("reingest-progress-company").textContent).toContain(
+        "3 accepted · 0 rejected",
+      );
+    });
+    expect(
+      screen.getByTestId("reingest-progress-security-baseline").textContent,
+    ).toContain("running");
+    expect(
+      screen.getByTestId("reingest-progress-alice-personal").textContent,
+    ).toContain("queued");
+    expect(progress.textContent).toContain("1 of 3 done");
+    // Nothing was issued for a layer the run has not reached.
+    expect(
+      requests
+        .filter((r) => r.url.startsWith("/v1/layers/reingest"))
+        .map((r) => r.url),
+    ).toEqual([
+      "/v1/layers/reingest?id=company",
+      "/v1/layers/reingest?id=security-baseline",
+    ]);
+  });
+
+  // Stopping the wait closes the dialog alone. The requests are already with
+  // the registry, so the run keeps going and still resolves into its report.
+  it("stops waiting on the run without abandoning it", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+      "/v1/layers/reingest?id=company": {
+        body: { accepted: 3, idempotent: 1 },
+        deferred: true,
+      },
+      "/v1/layers/reingest?id=alice-personal": {
+        body: { accepted: 2, idempotent: 6 },
+        deferred: true,
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Reingest all" }));
+    await screen.findByLabelText("Reingest all progress");
+    fireEvent.click(screen.getByRole("button", { name: "Stop waiting" }));
+    expect(screen.queryByLabelText("Reingest all progress")).toBeNull();
+    await screen.findByLabelText("Reingest all result");
+    expect(
+      requests.filter((r) => r.url.startsWith("/v1/layers/reingest")).length,
+    ).toBe(2);
+  });
+
   // The registry runs the whole ingest pipeline inside the request, so a
   // layer already reingesting must not be handed a second concurrent request.
   // The row trigger and the fan-out are one guard: while a row's own reingest
