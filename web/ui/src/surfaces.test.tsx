@@ -5787,6 +5787,53 @@ describe("the artifact viewer", () => {
       ).toBe("—");
     });
 
+    // An authored null is an absence the author wrote out. Printing the token
+    // makes `null` read as a value that was set, and it splits the two
+    // authored empties apart: `tags: []` takes the em dash while
+    // `license: null` prints a word. Every YAML null token takes the same em
+    // dash, and a quoted "null" is the string the author asked for.
+    // Spec: §13.10
+    it("states an authored null frontmatter value as an em dash", async () => {
+      stubHeights(60);
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": {
+          body: {
+            id: "eng/odd",
+            type: "context",
+            version: "0.1.0",
+            content_hash: "sha256:abc",
+            manifest_body: "# Odd\n",
+            frontmatter:
+              '---\nname: odd\ntags: []\nlicense: null\nretired: ~\nverdict: "null"\n---\n',
+          },
+        },
+        "/v1/dependents": { body: { edges: [] } },
+      });
+      goTo("#/artifact/eng%2Fodd");
+      render(<App />);
+      await screen.findByLabelText("Artifact viewer");
+
+      // The empty sequence and the two null tokens reach the same marker.
+      for (const key of ["tags", "license", "retired"]) {
+        const absent = screen.getByTestId(`property-absent-${key}`);
+        expect(absent.textContent).toBe("—");
+        expect(absent.getAttribute("aria-label")).toBe(`${key} has no value`);
+        expect(screen.queryByTestId(`property-value-${key}`)).toBeNull();
+      }
+      // A quoted null is a string, so the cell states the word the author
+      // wrote.
+      expect(screen.getByTestId("property-value-verdict").textContent).toBe(
+        "null",
+      );
+
+      // The full-width panel states the same absences.
+      fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+      const panel = screen.getByTestId("frontmatter-table");
+      expect(panel.querySelectorAll(".property-absent")).toHaveLength(3);
+      expect(panel.textContent).not.toContain("~");
+    });
+
     // A sequence value is several entries, and an entry is often a sentence.
     // Joined into one line, the separator runs into the entry's own full stop
     // and the cell reads as "invoice., A purchase order", where the reader

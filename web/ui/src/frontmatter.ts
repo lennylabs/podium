@@ -138,6 +138,15 @@ function valueText(source: string, value: unknown): string {
  * source, and its resolved value is the text inside them. */
 function scalarText(value: Scalar): string {
   if (value.type === Scalar.PLAIN && typeof value.source === 'string') {
+    // A plain scalar the core schema resolves to null is an authored absence:
+    // `license: null` and `license: ~` say what `license:` and `tags: []` say,
+    // and printing the token makes the word read as a value the author set
+    // rather than as the absent value it stands for. Every authored empty
+    // reaches the same em dash (§13.10). A quoted "null" is the string and
+    // keeps its text, because the author asked for the word.
+    if (value.value === null) {
+      return '';
+    }
     return value.source.replace(/\s+$/, '');
   }
   const resolved = value.value;
