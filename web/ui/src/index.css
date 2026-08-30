@@ -2610,6 +2610,16 @@ label:has(> input:disabled) {
   border-color: var(--link);
 }
 
+/* The route out of the empty-catalog arm. It takes its own line under the
+   sentence: run into the sentence it wrapped across the centred column and
+   broke the link's own words over two lines. */
+.search-empty-route {
+  display: block;
+  margin-top: 10px;
+  color: var(--link);
+  text-decoration: underline;
+}
+
 /* The page preset replaces a whole listing, so it takes the solid card the
    listing would have occupied. */
 .empty-page {

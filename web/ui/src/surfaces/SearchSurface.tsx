@@ -19,7 +19,7 @@ import { catalogArtifactIDs, loadDomain, searchArtifacts } from "../api";
 import { useOfferedCorrection } from "./correction";
 import { scopePaths } from "../domain";
 import { formatQueryLine, hasFilters, parseQueryLine, parseTypedLine } from "../query";
-import { parseRoute, replaceRoute, searchHref } from "../route";
+import { layersHref, parseRoute, replaceRoute, searchHref } from "../route";
 import type { Async } from "../useAsync";
 import { useAsync, useErrorReport } from "../useAsync";
 
@@ -234,19 +234,42 @@ export function SearchSurface({
   // it here. The read is issued only on the arm that has nothing to list, and
   // a catalog the caller cannot read leaves the arm as it was: the correction
   // is an offer, and a failure to make one is not a failure to report.
-  const noMatch =
-    queried && !search.loading && search.error === null && (body?.results ?? []).length === 0;
-  const catalog = useAsync<string[]>(
-    async () => (noMatch ? catalogArtifactIDs("") : []),
-    [noMatch],
+  const nothingListed =
+    !search.loading && search.error === null && (body?.results ?? []).length === 0;
+  const noMatch = queried && nothingListed;
+  // The same read is the catalog's own census, which is what tells a query
+  // that missed apart from a registry that holds nothing for any query to
+  // reach. It is issued whenever a request the reader narrowed came back
+  // empty, so the filtered browse is censused as well as the queried one; an
+  // unnarrowed browse is already the whole catalog and needs no second read.
+  const census = (queried || filtered) && nothingListed;
+  // The arm that issues no census resolves to null rather than to an empty
+  // listing, because the two are read apart below: an empty listing is the
+  // evidence that the registry holds nothing, and the hook carries the last
+  // resolved value through the render in which the read is re-issued. A
+  // census standing in for "not read yet" would report an empty catalog for
+  // that render, on the frame the reader's first keystroke lands.
+  const catalog = useAsync<string[] | null>(
+    async () => (census ? catalogArtifactIDs("") : null),
+    [census],
   );
   const correction = useOfferedCorrection(line, catalog.value ?? [], noMatch);
+  // An empty ID list is a registry holding no artifact, so no spelling and no
+  // filter could have matched and advice about the query sends the reader to
+  // refine a line against nothing. The arm is the one the palette takes over
+  // the same registry: it states what the catalog holds and points at the
+  // panel where a layer is registered. A catalog the caller cannot read
+  // leaves the query arm standing, because a failed census is not evidence of
+  // an empty registry (§13.10).
+  const bareCatalog =
+    (!filtered && !queried && nothingListed) ||
+    (census && !catalog.loading && catalog.value !== null && catalog.value.length === 0);
   // What the row and the list drew is also stated for a reader who cannot see
   // it. Typing a query or narrowing a filter swaps the count and can replace
   // the whole list with a sentence, and neither change moves focus, so
   // without a region the reader is told neither the new count nor that the
   // list emptied (§13.10).
-  const announcement = searchAnnouncement(search, filtered, queried);
+  const announcement = searchAnnouncement(search, bareCatalog);
 
   return (
     // The content column opens on the query field. A drawn "Search" title over
@@ -358,7 +381,7 @@ export function SearchSurface({
       <SearchResults
         search={search}
         filtered={filtered}
-        queried={queried}
+        bareCatalog={bareCatalog}
         correction={correction}
         onCorrect={(corrected) => {
           // The correction is a whole query line, so it is applied the way an
@@ -390,17 +413,16 @@ export function SearchSurface({
  * states the outcome. */
 function searchAnnouncement(
   search: Async<SearchResponse>,
-  filtered: boolean,
-  queried: boolean,
+  bareCatalog: boolean,
 ): string {
   if (search.loading || search.error !== null || search.value === null) {
     return "";
   }
   const results = search.value.results ?? [];
   if (results.length === 0) {
-    return filtered || queried
-      ? "No artifact matched."
-      : "The catalog holds no artifacts.";
+    return bareCatalog
+      ? "The catalog holds no artifacts."
+      : "No artifact matched.";
   }
   const matched = search.value.total_matched;
   return `${results.length} of ${matched} artifact${matched === 1 ? "" : "s"} matched.`;
@@ -577,7 +599,7 @@ function TokenEntry({
 function SearchResults({
   search,
   filtered,
-  queried,
+  bareCatalog,
   correction,
   continuing,
   onMore,
@@ -585,7 +607,7 @@ function SearchResults({
 }: {
   search: Async<SearchResponse>;
   filtered: boolean;
-  queried: boolean;
+  bareCatalog: boolean;
   correction: string | null;
   continuing: boolean;
   onMore: (step: number) => void;
@@ -606,15 +628,19 @@ function SearchResults({
     // The remedy names only what the reader can act on. A row standing at
     // "type: all" and "scope: all" with no tag pill has no filter to clear,
     // so offering that as the way out sends the reader looking for a control
-    // the page does not carry (§13.10). A row that also carries no query text
-    // issued a browse over the whole catalog, so an empty result set is a
-    // catalog holding nothing rather than a search that missed: there is no
-    // query to widen, and the way out is the one the sidebar tree already
-    // names for the same registry.
-    if (!filtered && !queried) {
+    // the page does not carry (§13.10). Over a registry the census found
+    // empty there is nothing for any query or any filter to reach, so the
+    // remedy is the one the palette gives over the same catalog: the arm
+    // states what the registry holds and routes to the panel where a layer is
+    // registered, rather than telling the reader to widen a line that cannot
+    // match.
+    if (bareCatalog) {
       return (
         <EmptyState title="The catalog holds no artifacts">
-          Register a layer to fill it.
+          No query can match until a layer is registered.{" "}
+          <a href={layersHref} className="search-empty-route">
+            Open the layer panel
+          </a>
         </EmptyState>
       );
     }

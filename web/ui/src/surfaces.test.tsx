@@ -3585,10 +3585,10 @@ describe("search", () => {
     goTo("#/search/");
     render(<App />);
     // The browse carried no query and no filter, so nothing was searched for
-    // and there is nothing to widen. The remedy is the one the sidebar tree
-    // names for the same registry.
+    // and there is nothing to widen. The remedy is the one the palette gives
+    // over the same registry.
     const empty = await screen.findByText(
-      "Register a layer to fill it.",
+      "No query can match until a layer is registered.",
     );
     expect(empty).toBeTruthy();
     expect(
@@ -3604,6 +3604,54 @@ describe("search", () => {
     ).toBeTruthy();
   });
 
+  // Spec: §13.10 — the palette and this surface answer the same registry, so
+  // a query run against a catalog holding nothing lands on the same arm in
+  // both: the reader is told what the registry holds and routed to the panel
+  // where a layer is registered, rather than told to widen a line that no
+  // registry content could ever match.
+  it("names the empty catalog rather than the query when the census finds nothing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/catalog": { body: { ids: [] } },
+    });
+    goTo("#/search/hello");
+    render(<App />);
+    const empty = (
+      await screen.findByText("No query can match until a layer is registered.")
+    ).closest(".empty") as HTMLElement;
+    expect(within(empty).getByText("The catalog holds no artifacts")).toBeTruthy();
+    // The arm carries the way out rather than a remedy the reader cannot act
+    // on, and the query advice is gone.
+    expect(
+      within(empty).getByRole("link", { name: "Open the layer panel" }).getAttribute("href"),
+    ).toBe(layersHref);
+    expect(screen.queryByText("Widen the query.")).toBeNull();
+    // A reader who cannot see the arm is told the same thing.
+    await waitFor(() => {
+      expect(screen.getByTestId("search-announcement").textContent).toBe(
+        "The catalog holds no artifacts.",
+      );
+    });
+  });
+
+  // Spec: §13.10 — a catalog the caller cannot read is no evidence of an
+  // empty registry, so the census failing leaves the query arm standing.
+  it("keeps the missed-query remedy when the census is refused", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+    });
+    goTo("#/search/hello");
+    render(<App />);
+    await screen.findByText("Widen the query.");
+    expect(
+      screen.queryByText("No query can match until a layer is registered."),
+    ).toBeNull();
+  });
+
   // Spec: §13.10
   it("names a filtered browse with no query as a search that matched nothing", async () => {
     stubRegistry({
@@ -3613,10 +3661,12 @@ describe("search", () => {
     goTo("#/search/");
     render(<App />);
     await screen.findByText(
-      "Register a layer to fill it.",
+      "No query can match until a layer is registered.",
     );
     // A filter applied with no query text is a request the reader issued, and
-    // the filter is a control the row carries, so the remedy names it.
+    // the filter is a control the row carries, so the remedy names it. The
+    // census the filtered browse issues is refused here, and a catalog the
+    // caller cannot read is no evidence of an empty registry.
     selectFilter("type", "skill");
     expect(
       await screen.findByText(
