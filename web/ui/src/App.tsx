@@ -924,19 +924,21 @@ function TreeNode({
             did not load
           </span>
         )}
-        {/* The outcome of an expansion that resolved to nothing is announced
-            rather than drawn. The row's right-aligned slot is narrow enough
-            that "no subdomains" clips to a fragment beside any name longer
-            than a few characters, and the sentence it clips to says nothing;
-            the visible outcome the reader gets is the toggle's spent glyph
-            and the domain page's own line. The status stays in the
-            accessibility tree so the reader who pressed the toggle and cannot
-            see the row is still told. */}
-        {emptied && (
-          <span className="assistive-only" role="status" data-testid="empty-domain">
-            {label} has no subdomains
-          </span>
-        )}
+        {/* The outcome of an expansion that resolved to nothing is carried by
+            the toggle's own name rather than drawn beside it. The row's
+            right-aligned slot is narrow enough that "no subdomains" clips to a
+            fragment beside any name longer than a few characters, and the
+            sentence it clips to says nothing; the visible outcome the reader
+            gets is the toggle's spent glyph and the domain page's own line.
+            The reader who pressed the toggle and cannot see the row keeps
+            focus on it, and the label it renames itself to states the outcome.
+
+            The row publishes no live region of its own. A per-row description
+            is static text that holds for as long as the row is drawn, so a
+            role="status" span here re-announces the same sentence on every
+            re-render the tree takes for a layer write, a reingest, or a
+            catalog refresh, and it competes with the result-set and
+            write-outcome announcements the surfaces publish. */}
       </div>
       {open && children !== null && children.length > 0 && (
         <CatalogTree

@@ -961,10 +961,10 @@ describe("the application shell", () => {
   });
 
   // A node whose level came back empty keeps the control the reader pressed,
-  // marked unavailable, and announces the outcome. The reader who pressed the
-  // toggle is left standing on it, and a row that dropped the button instead
-  // would take the reader's focus with it.
-  it("keeps the toggle in place and announces the outcome when a level comes back empty", async () => {
+  // marked unavailable, and renames itself to the outcome. The reader who
+  // pressed the toggle is left standing on it, and a row that dropped the
+  // button instead would take the reader's focus with it.
+  it("keeps the toggle in place and names the outcome when a level comes back empty", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": {
@@ -1007,21 +1007,73 @@ describe("the application shell", () => {
     // Keeping the reader's focus is all the control is still there for, so it
     // leaves the tab order and the next reader tabs past the row.
     expect(toggle.tabIndex).toBe(-1);
-    // The outcome is announced rather than drawn beside the name. The row's
-    // right-aligned slot is the design's "restricted" slot and is too narrow
-    // for the sentence, which clipped to a fragment beside any name longer
-    // than a few characters, so the status lives in the accessibility tree
-    // alone and names the domain it reports on.
-    const marker = within(tree).getByTestId("empty-domain");
-    expect(marker.getAttribute("role")).toBe("status");
-    expect(marker.textContent).toBe("ap has no subdomains");
-    expect(marker.className).toBe("assistive-only");
+    // The outcome reaches the accessibility tree through the toggle's name
+    // rather than being drawn beside it. The row's right-aligned slot is the
+    // design's "restricted" slot and is too narrow for the sentence, which
+    // clipped to a fragment beside any name longer than a few characters.
+    //
+    // The row publishes no live region. A per-row description is static text,
+    // so a role="status" span here would re-announce the same sentence on
+    // every re-render the tree takes for a layer write, a reingest, or a
+    // catalog refresh, competing with the announcements the surfaces publish.
+    expect(within(tree).queryByTestId("empty-domain")).toBeNull();
+    expect(
+      tree.querySelectorAll("[role='status'], [aria-live]"),
+    ).toHaveLength(0);
     expect(within(tree).queryByText("no subdomains")).toBeNull();
+    expect(within(tree).queryByText("ap has no subdomains")).toBeNull();
     expect(
       tree.querySelectorAll(".catalog-row > .catalog-marker"),
     ).toHaveLength(0);
     expect(within(tree).getByRole("link", { name: "ap" })).toBeTruthy();
     expect(tree.querySelectorAll("p")).toHaveLength(0);
+  });
+
+  // Spec: §13.10 — the sidebar stands beside every surface, so a live region
+  // it publishes outlives the surface the reader moved on to. An emptied row
+  // held its sentence for the rest of the session and read it out again on
+  // each of the tree's re-renders, next to the announcement the surface the
+  // reader is on publishes about its own results.
+  it("leaves the emptied row out of the live regions the surfaces publish", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            {
+              path: "finance",
+              name: "finance",
+              subdomains: [{ path: "finance/ap", name: "ap" }],
+            },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/load_domain?path=finance%2Fap&depth=2": {
+        body: { path: "finance/ap", subdomains: [], notable: [] },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    fireEvent.click(within(tree).getByRole("button", { name: "Expand finance" }));
+    fireEvent.click(within(tree).getByRole("button", { name: "Expand ap" }));
+    await waitFor(() => {
+      expect(
+        within(tree).getByRole("button", { name: "ap has no subdomains" }),
+      ).toBeTruthy();
+    });
+    goTo("#/search/");
+    const region = await screen.findByTestId("search-announcement");
+    await waitFor(() => {
+      expect(region.textContent).toBe("The catalog holds no artifacts.");
+    });
+    // The surface's own announcement is the only thing the reader hears.
+    expect([
+      ...document.querySelectorAll("[role='status'], [aria-live]"),
+    ]).toEqual([region]);
   });
 
   // A route onto a leaf domain opens its node and resolves the level to
