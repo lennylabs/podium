@@ -10,6 +10,7 @@ import { createPortal } from 'react-dom';
 import { ApiError } from '../api';
 import { atCatalogRoute, domainHref } from '../route';
 import { dismissAttribute, holdDismissal, useDialogFocus } from './focus';
+import { useScrollLock } from './scrolllock';
 
 export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
 
@@ -568,6 +569,11 @@ export function Modal({
   // place, and React reuses the element, so the title is what tells the focus
   // move that the dialog behind it is a different one.
   const dialog = useDialogFocus<HTMLDivElement>(true, title);
+  // The dialog is pinned to the viewport, so the surface it covers is held
+  // still under it. A wheel over the scrim would otherwise scroll the page
+  // behind the dialog, which is worst on the one-time secret, where the
+  // reader has no way back to what they were reading.
+  useScrollLock();
   // A dialog that withholds every dismissal route says so page-wide, so an
   // accelerator in the shell does not open an overlay over content the reader
   // cannot get back.

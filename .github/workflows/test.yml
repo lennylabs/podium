@@ -225,6 +225,15 @@ jobs:
         # artifact cannot be mistaken for a stale bundle.
         working-directory: web/ui
         run: npm test
+      - name: The UI's types check
+        # Neither the bundler nor the test runner type-checks: both strip
+        # types with esbuild rather than reading them, so a type error rides
+        # green through a passing build and a passing suite. A type predicate
+        # that had lost its narrowing sat in the committed tree until this
+        # step was added. It runs last because a type error is worth reading
+        # after the behaviour it might explain.
+        working-directory: web/ui
+        run: npm run typecheck
       - name: No unsanitized markup outside the sanitized rendering path
         # React admits already-sanitized markup only through
         # dangerouslySetInnerHTML, and the UI carries the attribute on one

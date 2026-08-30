@@ -15,7 +15,9 @@ import type { LayerSecretResult } from '../api';
  * the reveal, because a response that carries no secret leaves nothing to
  * acknowledge and the dialog around it stays ordinarily dismissible.
  */
-export function revealsSecret(result: LayerSecretResult): boolean {
+export function revealsSecret(
+  result: LayerSecretResult,
+): result is LayerSecretResult & { webhook_secret: string } {
   return result.webhook_secret !== undefined && result.webhook_secret !== '';
 }
 

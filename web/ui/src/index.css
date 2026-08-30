@@ -2863,11 +2863,14 @@ label:has(> input:disabled) {
 
 /* A write the reader reviews before sending is a dialog over a scrim. The
    panel scrolls its own body so a long form never pushes the footer, which
-   carries the submit, past the bottom of the viewport. */
+   carries the submit, past the bottom of the viewport. The scrim contains its
+   own scrolling, so reaching the end of the dialog's body does not hand the
+   remaining wheel to the surface underneath. */
 .modal-scrim {
   position: fixed;
   inset: 0;
   z-index: 40;
+  overscroll-behavior: contain;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3415,6 +3418,7 @@ label:has(> input:disabled) {
   position: fixed;
   inset: 0;
   z-index: 30;
+  overscroll-behavior: contain;
   display: flex;
   justify-content: center;
   padding-top: 96px;

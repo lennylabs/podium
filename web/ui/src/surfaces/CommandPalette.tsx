@@ -8,6 +8,7 @@ import { useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode, RefObject } from 'react';
 
 import { useDialogFocus } from '../components/focus';
+import { useScrollLock } from '../components/scrolllock';
 import { EmptyState, ErrorState, Loading, Magnifier, TypeBadge, formatVersion } from '../components/primitives';
 import type { ArtifactDescriptor, SearchResponse } from '../api';
 import { searchArtifacts } from '../api';
@@ -98,6 +99,10 @@ function PalettePanel({
   const dialog = useDialogFocus<HTMLDivElement>(true, undefined, (opener) =>
     navigated.current ? content.current : (opener ?? trigger.current),
   );
+  // The panel is pinned to the viewport, so the surface it covers is held
+  // still under it: a wheel over the scrim would otherwise slide the page
+  // around behind a panel that does not move with it.
+  useScrollLock();
 
   const typed = line.trim();
   const results = useAsync<SearchResponse>(

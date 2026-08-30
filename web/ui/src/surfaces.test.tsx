@@ -8555,6 +8555,41 @@ describe("the layer write flows", () => {
   // deferred here. The panel must hold the reveal across a reload that
   // reports loading, because the secret is served once and a panel that
   // remounted the form in its place would leave the reader with no copy.
+  // A local-path source is issued no webhook and therefore no secret, so the
+  // response carries neither field. The dialog has nothing unrecoverable to
+  // hand over: it states the outcome and stays ordinarily dismissible, with
+  // no shown-once block and no acknowledgement gating the close. Every other
+  // registration test supplies a secret, so this is the arm that fixes the
+  // no-secret contract revealsSecret exists to express.
+  it("registers a local layer without presenting a secret to acknowledge", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "GET /v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-local",
+            SourceType: "local",
+            Order: 1,
+            UserDefined: true,
+          },
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-local" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    await screen.findByText("Layer alice-local is registered.");
+    expect(screen.queryByLabelText("Webhook secret")).toBeNull();
+    expect(screen.queryByText("SHOWN ONCE")).toBeNull();
+    expect(screen.queryByLabelText("I have stored the secret.")).toBeNull();
+  });
+
   it("reveals a git layer’s webhook secret once and holds the reveal until it is acknowledged", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
@@ -9922,11 +9957,15 @@ describe("the layer write flows", () => {
     // cell, which is what keeps the table's columns at their own widths.
     expect(report.closest(".modal")).toBe(dialog);
     expect(within(dialog).getByText(/production-cluster-runbook/)).toBeTruthy();
+    // The dialog is pinned to the viewport, so the panel under it is held
+    // still while it is open rather than sliding around behind it.
+    expect(document.documentElement.style.overflow).toBe("hidden");
     // A dialog opened to be read can be left without acting on it.
     fireEvent.keyDown(document, { key: "Escape" });
     expect(
       screen.queryByLabelText("Reingest result for alice-personal"),
     ).toBeNull();
+    expect(document.documentElement.style.overflow).toBe("");
   });
 
   // A registry with no ingest runner wired records the intent and answers
@@ -11090,6 +11129,21 @@ describe("the command palette", () => {
     fireEvent.keyDown(panel, { key: "Escape" });
     expect(screen.queryByTestId("palette")).toBeNull();
     expect(document.activeElement).toBe(trigger);
+  });
+
+  // The panel is pinned to the viewport, so the surface under it is held
+  // still while it is open: a wheel over the scrim otherwise slides the page
+  // around behind a panel that does not move with it.
+  it("holds the page still while the panel is open and gives it back on close", async () => {
+    palettePage([]);
+    render(<App />);
+    const trigger = await screen.findByTestId("search-trigger");
+    expect(document.documentElement.style.overflow).toBe("");
+    fireEvent.click(trigger);
+    const panel = screen.getByTestId("palette");
+    expect(document.documentElement.style.overflow).toBe("hidden");
+    fireEvent.keyDown(panel, { key: "Escape" });
+    expect(document.documentElement.style.overflow).toBe("");
   });
 
   // The accelerator opens the panel from a surface where nothing holds focus,
