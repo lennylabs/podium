@@ -30,6 +30,7 @@ import {
   layersHref,
   routeKey,
   searchHref,
+  useDocumentTitle,
   useRoute,
   useTopOfNewRoute,
 } from './route';
@@ -94,6 +95,10 @@ export function App() {
   // A surface entered from a link is drawn into the document the reader was
   // already scrolled inside, so the shell puts the window back at the top.
   useTopOfNewRoute();
+
+  // One document draws every surface, so the tab and the history entry are
+  // named here rather than by the surface that happens to be mounted.
+  useDocumentTitle(route);
 
   useEffect(() => subscribeReadOnly(setReadOnly), []);
 

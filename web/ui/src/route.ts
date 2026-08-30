@@ -127,6 +127,20 @@ export function searchHref(query: string): string {
   return `#/search/${encodeURIComponent(query)}`;
 }
 
+/** domainTitle is what a domain page is titled. The breadcrumb above the
+ * title already carries the ancestry, so repeating the whole slash-separated
+ * path in the h1 states the reader's position twice and runs the title off the
+ * content column on a deep domain.
+ *
+ * The registry root has no leaf and is named for what it holds. §4.5.5 records
+ * that the root carries no description and no author-curated entries, so a
+ * title that named the position alone would head a screen whose every other
+ * part is a domain-shaped absence, and the entry screen would read as an empty
+ * domain instead of the top of the hierarchy. */
+export function domainTitle(path: string): string {
+  return path === '' ? 'All domains' : artifactLeaf(path);
+}
+
 export const layersHref = '#/layers';
 
 /** deletedLayersHref addresses the recovery surface. It hangs under the panel
@@ -162,6 +176,44 @@ export function routeKey(route: Route): string {
     case 'layers':
       return route.deleted ? 'layers/deleted' : 'layers';
   }
+}
+
+/** siteTitle is what every document title ends in, and it is the whole title
+ * of the served entry document. The bundle's `index.html` carries it alone,
+ * which is the title the server and the embed tests read out of the built
+ * bundle, so the route-named title is written over it once the shell runs. */
+const siteTitle = 'Podium';
+
+/** routeTitle names the surface a route selects, in the words the surface
+ * itself heads the page with. Every surface is drawn into one document, so a
+ * title left at the site name alone names none of them: the browser tab, the
+ * history entry, and a bookmark all read "Podium" whichever of the §13.10
+ * surfaces the reader is on.
+ *
+ * The name is taken from the route rather than from the read the surface
+ * issues, so the title is correct while the read is in flight and correct
+ * where it fails. */
+export function routeTitle(route: Route): string {
+  switch (route.name) {
+    case 'domain':
+      return domainTitle(route.path);
+    case 'search':
+      return 'Search';
+    case 'artifact':
+      return artifactLeaf(route.id);
+    case 'layers':
+      return route.deleted ? 'Recently unregistered' : 'Layers';
+  }
+}
+
+/** useDocumentTitle names the current surface in the document title.
+ *
+ * Spec: §13.10 */
+export function useDocumentTitle(route: Route): void {
+  const name = routeTitle(route);
+  useEffect(() => {
+    document.title = `${name} · ${siteTitle}`;
+  }, [name]);
 }
 
 /** useRoute tracks the location hash. A dialog that withholds every dismissal

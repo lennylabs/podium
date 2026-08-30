@@ -15,7 +15,7 @@ import {
   domainLabel,
   subdomainCountLabel,
 } from '../domain';
-import { domainHref, searchHref } from '../route';
+import { domainHref, domainTitle, searchHref } from '../route';
 import { useAsync, useErrorReport } from '../useAsync';
 
 // The browser lists the immediate children and follows a link for the rest,
@@ -29,24 +29,6 @@ const renderedDepth = 2;
  * A card grid stops being a map of the domain somewhere around here, so the
  * subdomains become count tiles and the artifacts a sortable table. */
 const atScale = 20;
-
-/** leafName is what the page is titled. The breadcrumb above the title already
- * carries the ancestry, so repeating the whole slash-separated path in the h1
- * states the reader's position twice and runs the title off the content column
- * on a deep domain.
- *
- * The registry root has no leaf and is named for what it holds. §4.5.5 records
- * that the root carries no description and no author-curated entries, so a
- * title that named the position alone would head a screen whose every other
- * part is a domain-shaped absence, and the entry screen would read as an empty
- * domain instead of the top of the hierarchy. */
-function leafName(path: string): string {
-  if (path === '') {
-    return 'All domains';
-  }
-  const segments = path.split('/');
-  return segments[segments.length - 1];
-}
 
 export function DomainBrowser({ path, onError }: { path: string; onError: (err: unknown) => void }) {
   const domain = useAsync(() => loadDomain(path, renderedDepth), [path]);
@@ -124,7 +106,7 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
     <section className="surface" aria-label="Domain browser">
       <Breadcrumb path={body.path} />
       <div className="domain-head">
-        <h1>{leafName(body.path)}</h1>
+        <h1>{domainTitle(body.path)}</h1>
         <div className="domain-counts">
           {/* The badge is what the catalog holds under the domain rather than
               what the listing returned, so a trimmed listing is not presented

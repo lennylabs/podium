@@ -2728,12 +2728,14 @@ describe("the domain browser", () => {
 });
 
 describe("search", () => {
-  // The design opens the search content column on the query field. A page
-  // title over a field already labelled "Search artifacts" restates the field
-  // and pushes it and the filter row down, so the surface carries no heading
-  // and the landmark label is what names it. The layer panel keeps its title,
+  // The design opens the search content column on the query field. A drawn
+  // page title over a field already labelled "Search artifacts" restates the
+  // field and pushes it and the filter row down, so the title is taken out of
+  // the visual flow. It stays in the document, because a reader navigating by
+  // heading reaches every other surface that way and this one answered no
+  // heading query at all (§13.10). The layer panel keeps its drawn title,
   // which is what tells the two apart.
-  it("opens on the query field rather than on a page title", async () => {
+  it("titles the surface for a reader navigating by heading, without drawing the title", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": { body: rootDomains },
@@ -2743,19 +2745,44 @@ describe("search", () => {
     goTo("#/search/review");
     render(<App />);
     const surface = await screen.findByLabelText("Search");
-    expect(within(surface).queryAllByRole("heading")).toEqual([]);
-    // The first thing the column draws is the field itself.
-    expect(surface.firstElementChild?.className).toBe("search-field");
+    const title = within(surface).getByRole("heading", { level: 1 });
+    expect(title.textContent).toBe("Search");
+    // The title is out of the visual flow, so the first thing the column
+    // draws is still the field itself.
+    expect(title.className).toBe("assistive-only");
+    expect(surface.firstElementChild).toBe(title);
+    expect(title.nextElementSibling?.className).toBe("search-field");
 
-    // The layer panel is the surface the design does title, so the absence
-    // above reads as this surface's own rule rather than as a shell that
-    // draws no headings at all.
+    // The layer panel is the surface the design does draw a title on, so the
+    // treatment above reads as this surface's own rule rather than as a shell
+    // that hides every heading.
     goTo("#/layers");
     render(<App />);
     const panel = await screen.findByLabelText("Layer panel");
-    expect(within(panel).getByRole("heading", { level: 1 }).textContent).toBe(
-      "Layers",
-    );
+    const drawn = within(panel).getByRole("heading", { level: 1 });
+    expect(drawn.textContent).toBe("Layers");
+    expect(drawn.className).toBe("");
+  });
+
+  // One document draws every surface, so a title left at the site name names
+  // none of them: the tab, the history entry, and a bookmark all read
+  // "Podium" whichever surface the reader is on (§13.10).
+  it("names the surface in the document title", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/search/review");
+    render(<App />);
+    await screen.findByLabelText("Search");
+    expect(document.title).toBe("Search · Podium");
+
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    expect(document.title).toBe("Layers · Podium");
   });
 
   it("carries the type, scope, and tag filters on the request it issues", async () => {

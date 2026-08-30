@@ -212,13 +212,17 @@ export function SearchSurface({
   const announcement = searchAnnouncement(search, filtered, queried);
 
   return (
-    // The content column opens on the query field. A "Search" title over a
-    // field already labelled "Search artifacts" restates the field and pushes
-    // it and the filter row down the page, so the surface carries none and is
-    // named for assistive technology by the landmark label alone. The layer
-    // panel does carry a title, because its header also holds a description
-    // and its write actions.
+    // The content column opens on the query field. A drawn "Search" title over
+    // a field already labelled "Search artifacts" restates the field and
+    // pushes it and the filter row down the page, so the title is taken out of
+    // the visual flow rather than out of the document. Every other §13.10
+    // surface heads its page with an h1, and a reader who navigates by heading
+    // found none at all here: the surface answered no heading query, so it
+    // could be neither reached nor identified that way. The layer panel does
+    // carry a drawn title, because its header also holds a description and its
+    // write actions.
     <section className="surface" aria-label="Search" ref={surface}>
+      <h1 className="assistive-only">Search</h1>
       {/* The field is a row rather than a bare input: the magnifier names it
           as the query field the way the top bar's trigger and the palette's
           own field do, and the border belongs to the row so the icon sits

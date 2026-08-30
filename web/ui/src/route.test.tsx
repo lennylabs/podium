@@ -14,6 +14,7 @@ import {
   layersHref,
   parseRoute,
   routeKey,
+  routeTitle,
   replaceRoute,
   searchHref,
   useRoute,
@@ -226,5 +227,33 @@ describe("useTopOfNewRoute", () => {
     // restores.
     stepBack(searchHref("deploy"), window.history.state);
     expect(scrollTo).not.toHaveBeenCalled();
+  });
+});
+
+// The shell draws every surface into one document, so the document title is
+// the only place the tab, the history entry, and a bookmark learn which
+// surface the reader is on.
+//
+// Spec: §13.10
+describe("routeTitle", () => {
+  it("names each surface the way the surface heads its own page", () => {
+    expect(routeTitle({ name: "domain", path: "" })).toBe("All domains");
+    expect(routeTitle({ name: "domain", path: "platform/ci" })).toBe("ci");
+    expect(routeTitle({ name: "search", query: "deploy" })).toBe("Search");
+    expect(
+      routeTitle({ name: "artifact", id: "platform/ci/deploy", version: "" }),
+    ).toBe("deploy");
+    expect(routeTitle({ name: "layers", deleted: false })).toBe("Layers");
+    expect(routeTitle({ name: "layers", deleted: true })).toBe(
+      "Recently unregistered",
+    );
+  });
+
+  // The name comes from the route rather than from the read the surface
+  // issues, so a pinned version does not retitle the artifact it pins.
+  it("titles a pinned artifact by its name", () => {
+    expect(
+      routeTitle({ name: "artifact", id: "platform/ci/deploy", version: "2" }),
+    ).toBe("deploy");
   });
 });
