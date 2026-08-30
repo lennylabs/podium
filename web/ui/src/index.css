@@ -1172,8 +1172,17 @@ button.version-notice-latest {
 }
 
 /* The identifier names the row and carries the link tone, which is what sets
-   it apart from the path and the badges beside it. The row is the affordance,
-   so the underline is drawn on hover rather than standing under every row. */
+   it apart from the path and the badges beside it. It is also the row's
+   anchor, so it is set a half point above the mono default and at the weight
+   the badges beside it carry: left at the plain mono size and weight it sits
+   under its own description and the row reads description-first. The row is
+   the affordance, so the underline is drawn on hover rather than standing
+   under every row. */
+.artifact-id {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
 .artifact-id:hover {
   text-decoration: underline;
 }
@@ -1359,8 +1368,15 @@ button.version-notice-latest {
    other row below the fold. The row therefore clips the description to three
    lines over the same 720px measure the domain header reads at, and the
    artifact's own page carries the whole field. */
+/* The description is secondary prose under the identifier, so it takes the
+   interface default size rather than the body prose size the document
+   inherits. At 15px/1.6 it was the largest text in the row, larger than the
+   subdomain card description in the same page, and it read ahead of the
+   identifier that names the artifact. */
 .artifact-description {
   margin: 4px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
   color: var(--sec);
   max-width: 720px;
   text-wrap: pretty;

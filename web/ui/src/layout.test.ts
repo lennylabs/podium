@@ -587,6 +587,43 @@ describe("artifact listing", () => {
       expect(declaredFor(row, "border-top")).toBe("1px solid var(--b2)");
     }
   });
+
+  // Board 14a sets the row identifier at 600 13.5px mono and the description
+  // under it at 13.5px, which is the interface default rather than the 15px
+  // body prose the document inherits. Left without a size the description
+  // inherited the body size and became the largest text in the row, larger
+  // than the subdomain card description in the same page, so the row read
+  // description-first. The case pins the identifier at or above the
+  // description's size and both at the interface default.
+  it("sets the identifier above the description in the row's type scale", () => {
+    const row = document.createElement("li");
+    row.className = "artifact-row";
+    const id = document.createElement("a");
+    id.className = "mono artifact-id";
+    const description = document.createElement("p");
+    description.className = "artifact-description";
+    row.append(id, description);
+    document.body.appendChild(row);
+    mounted.push(row);
+
+    const idSize = Number.parseFloat(window.getComputedStyle(id).fontSize);
+    const descriptionSize = Number.parseFloat(
+      window.getComputedStyle(description).fontSize,
+    );
+    expect(descriptionSize).toBe(13.5);
+    expect(idSize).toBe(13.5);
+    expect(idSize).toBeGreaterThanOrEqual(descriptionSize);
+    expect(window.getComputedStyle(id).fontWeight).toBe("600");
+    // The subdomain card description sits directly above the listing in the
+    // same page, so the two descriptions read at one size.
+    const subdomain = document.createElement("p");
+    subdomain.className = "subdomain-description";
+    document.body.appendChild(subdomain);
+    mounted.push(subdomain);
+    expect(Number.parseFloat(window.getComputedStyle(subdomain).fontSize)).toBe(
+      descriptionSize,
+    );
+  });
 });
 
 // The listings are ul elements. The user-agent indent that a ul carries puts
