@@ -6127,6 +6127,21 @@ describe("the layer panel", () => {
     expect(ingested.textContent).not.toContain("/Users/alice/registry");
   });
 
+  // The identifier names the row on both tables the reader crosses, so it is
+  // marked as the row's name and drawn heavier than the precedence line under
+  // it and the source path beside it (§13.10).
+  it("marks the layer identifier as the name of the row on the layer panel", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const name = screen.getByText("alice-personal");
+    expect(name.classList.contains("layer-name")).toBe(true);
+  });
+
   // A layer carrying no stored owner states its position alone. Appending an
   // empty owner clause would read as a field the reader could set from here.
   it("states the position alone on a row whose stored owner is unset", async () => {
@@ -10556,6 +10571,26 @@ describe("the layer write flows", () => {
     expect(container.classList.contains("table-scroll")).toBe(true);
     expect(container.tabIndex).toBe(0);
     expect(container.getAttribute("aria-label")).toBe("Recoverable layers");
+  });
+
+  // The restore table names its rows the same way the layer panel does, so
+  // the identifier carries the row-name treatment here too (§13.10).
+  it("marks the layer identifier as the name of the row on the restore table", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/layers?deleted=true": {
+        body: {
+          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+        },
+      },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    await screen.findByLabelText("Recently unregistered");
+    const name = screen.getByText("alice-personal");
+    expect(name.tagName).toBe("TD");
+    expect(name.classList.contains("layer-name")).toBe(true);
   });
 
   // A restore is a write like every other write in the panel, so it reports

@@ -1845,6 +1845,15 @@ input[type="search"]::-webkit-search-cancel-button {
   overflow-wrap: anywhere;
 }
 
+/* The identifier names the row on the layer panel and on the restore table,
+   the way `.artifact-id` names an artifact row, so it carries the same weight.
+   Left at the plain mono weight it reads as one more mono value beside the
+   precedence line under it and the source path next to it, and the row has no
+   text that scans as its name. */
+.layer-name {
+  font-weight: 600;
+}
+
 /* The precedence position sits under the name on its own line, so it reads at
    the same offset on every row whatever markers the name carries. */
 .layer-order {

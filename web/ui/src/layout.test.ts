@@ -869,6 +869,17 @@ describe("layer identifier cell", () => {
   });
 });
 
+// The identifier is the name of the row on the layer panel and on the restore
+// table. Drawn at the plain mono weight it read as one more mono value beside
+// the precedence line under it and the source path next to it, so it carries
+// the weight an artifact row's identifier carries.
+describe("layer name", () => {
+  it("draws the identifier at the weight an artifact row's identifier carries", () => {
+    expect(styled("layer-name").fontWeight).toBe("600");
+    expect(styled("layer-name").fontWeight).toBe(styled("artifact-id").fontWeight);
+  });
+});
+
 // The layer table's source cell holds an absolute path or a repository URL,
 // either of which can be several times the column's width. Wrapping one broke
 // it between characters over three or four lines and left the rows of one

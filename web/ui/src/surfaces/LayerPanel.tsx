@@ -909,7 +909,7 @@ function LayerRow({
             is the fact the panel is about, so it sits on its own line under
             the name where every row states it at the same offset. */}
         <div className="layer-id-cell">
-          <span>{layer.ID}</span>
+          <span className="layer-name">{layer.ID}</span>
           {ownedByCaller(layer, subject) && <Badge tone="accent">yours</Badge>}
         </div>
         <div className="layer-order quiet" data-testid="layer-order">

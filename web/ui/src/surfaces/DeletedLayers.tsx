@@ -220,7 +220,7 @@ function DeletedRow({
   const window = recoveryWindow(layer);
   return (
     <tr>
-      <td className="mono">{layer.ID}</td>
+      <td className="mono layer-name">{layer.ID}</td>
       <td className="source-col">
         <SourceCell layer={layer} />
       </td>
