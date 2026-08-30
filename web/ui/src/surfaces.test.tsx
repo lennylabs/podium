@@ -15932,6 +15932,52 @@ describe("keyboard semantics", () => {
     ).toBe("true");
   });
 
+  // The register form's source selector announces itself as a radio group,
+  // so it is one Tab stop with a roving tabindex and the arrows move the
+  // selection inside it.
+  it("moves the register form’s source radios with the arrows over a roving tabindex", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ identity_provider_configured: false }),
+      },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const source = screen.getByRole("radiogroup", { name: "Source" });
+    const radios = within(source).getAllByRole("radio");
+    expect(radios.map((radio) => radio.getAttribute("tabindex"))).toEqual([
+      "0",
+      "-1",
+    ]);
+    radios[0].focus();
+    fireEvent.keyDown(source, { key: "ArrowRight" });
+    expect(
+      radios.map((radio) => radio.getAttribute("aria-checked")),
+    ).toEqual(["false", "true"]);
+    expect(document.activeElement).toBe(radios[1]);
+    expect(radios.map((radio) => radio.getAttribute("tabindex"))).toEqual([
+      "-1",
+      "0",
+    ]);
+    // The local path field follows the selection the arrow made, so the
+    // arrows carry the same consequence a click does.
+    expect(screen.getByLabelText("Local path")).toBeTruthy();
+    // The arrows wrap rather than stopping at the edge, and Home lands on
+    // the first choice.
+    fireEvent.keyDown(source, { key: "ArrowDown" });
+    expect(
+      radios.map((radio) => radio.getAttribute("aria-checked")),
+    ).toEqual(["true", "false"]);
+    fireEvent.keyDown(source, { key: "End" });
+    expect(radios[1].getAttribute("aria-checked")).toBe("true");
+    fireEvent.keyDown(source, { key: "Home" });
+    expect(radios[0].getAttribute("aria-checked")).toBe("true");
+    expect(document.activeElement).toBe(radios[0]);
+  });
+
   // The palette's field and result list are a combobox over a listbox, so the
   // highlight the arrows move is named rather than only drawn.
   it("names the palette’s highlighted row through aria-activedescendant", async () => {

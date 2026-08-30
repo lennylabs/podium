@@ -594,18 +594,52 @@ function SourceChoice({ value, onChange }: { value: string; onChange: (next: str
     { id: 'git', label: 'Git repository' },
     { id: 'local', label: 'Local folder' },
   ];
+  // A radio group is one Tab stop and the arrows move the selection inside
+  // it, the same treatment the artifact viewer's tab strip carries. A reader
+  // announced into a group whose role promises the arrows finds nothing
+  // there when the segments are drawn as a plain row of buttons.
+  const onArrow = (event: KeyboardEvent<HTMLDivElement>) => {
+    const at = options.findIndex((option) => option.id === value);
+    let next = at;
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        next = (at + 1) % options.length;
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        next = (at + options.length - 1) % options.length;
+        break;
+      case 'Home':
+        next = 0;
+        break;
+      case 'End':
+        next = options.length - 1;
+        break;
+      default:
+        return;
+    }
+    event.preventDefault();
+    onChange(options[next].id);
+    // The focus follows the selection rather than staying on the segment the
+    // reader has already left.
+    event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]')[next]?.focus();
+  };
   return (
     <div className="field">
       <span className="label" id="register-source-label">
         Source
       </span>
-      <div className="segmented" role="radiogroup" aria-labelledby="register-source-label">
+      <div className="segmented" role="radiogroup" aria-labelledby="register-source-label" onKeyDown={onArrow}>
         {options.map((option) => (
           <button
             key={option.id}
             type="button"
             role="radio"
             aria-checked={value === option.id}
+            // The roving tabindex: the group is one Tab stop, and the
+            // selected segment is the one it lands on.
+            tabIndex={value === option.id ? 0 : -1}
             className={value === option.id ? 'segment segment-on' : 'segment'}
             onClick={() => {
               onChange(option.id);
