@@ -14,7 +14,7 @@ import type { ArtifactDescriptor, SearchResponse } from '../api';
 import { catalogArtifactIDs, searchArtifacts } from '../api';
 import { correctQueryLine } from './correction';
 import { hasFilters, parseQueryLine } from '../query';
-import { artifactHref, searchHref } from '../route';
+import { artifactHref, layersHref, searchHref } from '../route';
 import type { Async } from '../useAsync';
 import { useAsync } from '../useAsync';
 
@@ -129,6 +129,15 @@ function PalettePanel({
   const noMatch = typed !== '' && !results.loading && results.error === null && rows.length === 0;
   const catalog = useAsync<string[]>(async () => (noMatch ? catalogArtifactIDs('') : []), [noMatch]);
   const correction = noMatch ? correctQueryLine(typed, catalog.value ?? []) : null;
+  // The same read is the catalog's own census. An empty ID list is a registry
+  // holding no artifact, so no spelling and no filter could have matched, and
+  // advice about the query sends the reader to refine a line against nothing
+  // while the search surface behind the panel would report the same. The arm
+  // is the one the sidebar tree takes over the same registry: it states what
+  // the catalog holds and points at the panel where a layer is registered. A
+  // catalog the caller cannot read leaves the query arm standing, because a
+  // failed census is not evidence of an empty registry.
+  const bareCatalog = noMatch && !catalog.loading && catalog.error === null && (catalog.value ?? []).length === 0;
   // The result list is drawn only on the arm PaletteResults reaches with rows
   // in hand. `aria-expanded` and `aria-activedescendant` state the arm that
   // holds a list, because a field that points at an option no page holds is
@@ -148,18 +157,26 @@ function PalettePanel({
   // refused arm needs it as much as the no-match one does: the query still
   // reaches the search surface, which issues the read again on a surface that
   // can list the whole result set.
-  const offersSearch = typed !== '' && !results.loading && !listed;
+  // The empty-catalog arm carries no handoff, so ⏎ answers nothing there.
+  const offersSearch = typed !== '' && !results.loading && !listed && !bareCatalog;
   // Which list the panel is drawing, which is what the footer names its keys
   // against. A read still in flight keeps the legend the settled list will
   // carry rather than flickering through the bare arm on every keystroke.
-  const mode: PaletteMode =
-    typed === '' ? (listedRecents ? 'recents' : 'bare') : offersSearch ? 'search' : 'rows';
+  const mode: PaletteMode = typed === ''
+    ? listedRecents
+      ? 'recents'
+      : 'bare'
+    : bareCatalog
+      ? 'catalog'
+      : offersSearch
+        ? 'search'
+        : 'rows';
   // What the panel drew is also stated for a reader who cannot see it. The
   // count reaches them as the read settles, and the no-match arm, which
   // replaces the whole listbox with a sentence, reaches them at all:
   // `aria-activedescendant` names a row while there is one to name and says
   // nothing at the moment the list empties.
-  const announcement = resultAnnouncement(typed, results, rows);
+  const announcement = resultAnnouncement(typed, results, rows, bareCatalog);
 
   const openRow = (id: string) => {
     onRun(typed);
@@ -184,6 +201,15 @@ function PalettePanel({
     // renders are the ones this panel typed rather than the line read back as
     // free text.
     window.location.hash = searchHref(typed);
+    onClose();
+  };
+
+  // The query that reached the empty-catalog arm is abandoned rather than
+  // remembered, because the recent list is the queries this panel acted on and
+  // this one matched nothing that could have been there to match.
+  const openLayers = () => {
+    navigated.current = true;
+    window.location.hash = layersHref;
     onClose();
   };
 
@@ -314,8 +340,10 @@ function PalettePanel({
               index={index}
               typed={typed}
               correction={correction}
+              bareCatalog={bareCatalog}
               onOpen={openRow}
               onSearch={openSearch}
+              onLayers={openLayers}
               onCorrect={runRecent}
             />
           )}
@@ -341,9 +369,17 @@ function PalettePanel({
  * announcement is: the drawn sentence carries advice a reader acts on with
  * the panel in front of them, and the region states the outcome. A refused
  * read carries its own alert from ErrorState and is not restated here. */
-function resultAnnouncement(typed: string, results: Async<SearchResponse>, rows: ArtifactDescriptor[]): string {
+function resultAnnouncement(
+  typed: string,
+  results: Async<SearchResponse>,
+  rows: ArtifactDescriptor[],
+  bareCatalog: boolean,
+): string {
   if (typed === '' || results.loading || results.error !== null) {
     return '';
+  }
+  if (bareCatalog) {
+    return 'The catalog holds no artifacts.';
   }
   if (rows.length === 0) {
     return `No artifact matched “${typed}”.`;
@@ -361,7 +397,7 @@ function KeyCap({ children }: { children: ReactNode }) {
 
 /** PaletteMode is which list the panel is drawing, which is what fixes the
  * keys the footer names and the list the arrows walk. */
-type PaletteMode = 'rows' | 'recents' | 'bare' | 'search';
+type PaletteMode = 'rows' | 'recents' | 'bare' | 'search' | 'catalog';
 
 /** PaletteFooter is the keyboard legend. Escape sits at the right edge on its
  * own, because it leaves the panel rather than acting inside it. On an arm
@@ -369,7 +405,9 @@ type PaletteMode = 'rows' | 'recents' | 'bare' | 'search';
  * key over a panel nothing answers it on advertises an action the reader
  * cannot take. The just-opened arm names ⏎ as run, because it runs the
  * highlighted recent query, and drops ⌘⏎, because an empty line carries no
- * query to the search surface. */
+ * query to the search surface. The empty-catalog arm names no key but Escape,
+ * because a handoff to the search surface there reaches the same empty
+ * catalog. */
 function PaletteFooter({ mode }: { mode: PaletteMode }) {
   return (
     <p className="palette-footer quiet" data-testid="palette-footer">
@@ -478,8 +516,10 @@ function PaletteResults({
   index,
   typed,
   correction,
+  bareCatalog,
   onOpen,
   onSearch,
+  onLayers,
   onCorrect,
 }: {
   results: Async<SearchResponse>;
@@ -487,8 +527,10 @@ function PaletteResults({
   index: number;
   typed: string;
   correction: string | null;
+  bareCatalog: boolean;
   onOpen: (id: string) => void;
   onSearch: () => void;
+  onLayers: () => void;
   onCorrect: (query: string) => void;
 }) {
   if (results.loading) {
@@ -505,6 +547,25 @@ function PaletteResults({
           Run it on the search surface
         </button>
       </ErrorState>
+    );
+  }
+  if (bareCatalog) {
+    // The registry holds no artifact, so the query is not what failed and
+    // there is nothing for a spelling or a filter to reach. The arm states
+    // what the catalog holds, in the words the sidebar tree uses over the
+    // same registry, and hands the reader the panel where a layer is
+    // registered rather than the search surface, which would report the same
+    // empty catalog back.
+    return (
+      <div className="palette-empty" data-testid="palette-empty">
+        <p className="palette-empty-heading">The catalog holds no artifacts</p>
+        <p className="quiet palette-empty-body">
+          No query can match until a layer is registered.
+        </p>
+        <button type="button" onClick={onLayers}>
+          Open the layer panel
+        </button>
+      </div>
     );
   }
   if (rows.length === 0) {

@@ -12657,6 +12657,85 @@ describe("the command palette", () => {
     expect(within(panel).queryByTestId("palette-correction")).toBeNull();
   });
 
+  // A registry holding no artifact is not a query that missed. The panel once
+  // advised a spelling fix and offered the search surface, which reports the
+  // same empty catalog back, while the sidebar beside it already stated that
+  // the catalog holds no domains.
+  it("states the empty catalog rather than blaming the query when nothing is registered", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/load_artifact": { body: artifact },
+      "/v1/dependents": { body: { edges: [] } },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/catalog": { body: { ids: [] } },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    const field = within(panel).getByLabelText("Search artifacts");
+    fireEvent.change(field, { target: { value: "anything" } });
+    const empty = await within(panel).findByTestId("palette-empty");
+    await waitFor(() => {
+      expect(
+        within(empty).getByText("The catalog holds no artifacts"),
+      ).toBeTruthy();
+    });
+    expect(
+      within(empty).getByText("No query can match until a layer is registered.")
+        .textContent,
+    ).toBe("No query can match until a layer is registered.");
+    // The advice about the query and the handoff to a surface that reports the
+    // same catalog are both gone, and so is the key the legend named for it.
+    expect(within(panel).queryByText(/Try fewer words/)).toBeNull();
+    expect(
+      within(panel).queryByRole("button", {
+        name: "Run it on the search surface",
+      }),
+    ).toBeNull();
+    expect(screen.getByTestId("palette-footer").textContent).toBe("escclose");
+    expect(screen.getByTestId("palette-announcement").textContent).toBe(
+      "The catalog holds no artifacts.",
+    );
+    fireEvent.keyDown(panel, { key: "Enter" });
+    expect(screen.getByTestId("palette")).toBeTruthy();
+    expect(window.location.hash).toBe("#/");
+    // The one action left leads to the panel where a layer is registered.
+    fireEvent.click(
+      within(empty).getByRole("button", { name: "Open the layer panel" }),
+    );
+    expect(screen.queryByTestId("palette")).toBeNull();
+    expect(window.location.hash).toBe("#/layers");
+  });
+
+  // The arm turns on the catalog census rather than on the miss, so a registry
+  // that holds artifacts keeps the advice about the query.
+  it("keeps the query advice when the catalog holds an artifact", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/search_artifacts": { body: { total_matched: 0, results: [] } },
+      "/v1/load_artifact": { body: artifact },
+      "/v1/dependents": { body: { edges: [] } },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/catalog": { body: { ids: ["platform/review"] } },
+    });
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "zzqqxx" },
+    });
+    await within(panel).findByText(/Nothing matched “zzqqxx”/);
+    expect(within(panel).getByText(/Try fewer words/)).toBeTruthy();
+    expect(
+      within(panel).getByRole("button", {
+        name: "Run it on the search surface",
+      }),
+    ).toBeTruthy();
+  });
+
   // A reopened panel is a fresh one. A panel that held the line the reader
   // last typed puts the caret at its end with nothing selected, so the
   // "open and type" gesture appends to a finished query and searches for the
