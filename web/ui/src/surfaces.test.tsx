@@ -5979,7 +5979,10 @@ describe("the layer panel", () => {
       headers.map(
         (header) => header.querySelector(".label")?.textContent ?? "",
       ),
-    ).toEqual(["Move", "Layer", "Source", "Visibility", "Last ingest", ""]);
+    ).toEqual(["", "Layer", "Source", "Visibility", "Last ingest", ""]);
+    // The handle column and the actions column each carry a control that
+    // names itself, so neither takes a column title.
+    expect(headers[0].textContent).toBe("");
     expect(headers[5].textContent).toBe("");
   });
 
@@ -11063,8 +11066,11 @@ describe("the layer write flows", () => {
       "Artifacts",
       "Unregistered",
       "Erased on",
-      "Actions",
+      "",
     ]);
+    // The restore column carries a control that names itself, so it takes no
+    // column title.
+    expect(headers[5].textContent).toBe("");
   });
 
   // How much comes back on a restore is the second question this surface
@@ -13575,7 +13581,18 @@ describe("the artifact viewer’s resources", () => {
     await screen.findByLabelText("Artifact viewer");
     fireEvent.click(screen.getByRole("tab", { name: /Resources/ }));
     const table = screen.getByLabelText("Resources");
-    for (const header of within(table).getAllByRole("columnheader")) {
+    const headers = within(table).getAllByRole("columnheader");
+    // The download column carries no header, so the header row reads as the
+    // columns that name data. Every column that does name one is drawn in
+    // the section-label style.
+    expect(headers.map((header) => header.textContent)).toEqual([
+      "File",
+      "Format",
+      "Size",
+      "Delivery",
+      "",
+    ]);
+    for (const header of headers.slice(0, 4)) {
       expect(header.className).toContain("column-label");
     }
     const rows = within(table).getAllByRole("row").slice(1);

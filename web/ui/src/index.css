@@ -2829,8 +2829,19 @@ label:has(> input:disabled) {
   font-size: 12.5px;
 }
 
-.drag-cell {
+/* The handle column is 34px wide in the design, measured across the whole
+   column. The table's cell padding is not inside that figure by default,
+   because a table cell sizes content-box, so the declared width plus the
+   24px of shared cell padding drew a 58px column. The cell takes border-box
+   and carries just enough padding to seat the handle, so the column is the
+   width it is drawn at. The selector outranks the shared `.data-table td`
+   padding it narrows. */
+.data-table th.drag-cell,
+.data-table td.drag-cell {
+  box-sizing: border-box;
   width: 34px;
+  padding-right: 6px;
+  padding-left: 6px;
 }
 
 /* The layer row's actions. The column holds one action and an overflow

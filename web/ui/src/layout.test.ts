@@ -1034,10 +1034,11 @@ function layerTable(): {
   const head = document.createElement("thead");
   const headRow = document.createElement("tr");
   const headers: HTMLTableCellElement[] = [];
-  for (const label of ["Move", "Layer", "Source", "Visibility", "Last ingest", ""]) {
+  const labels = ["", "Layer", "Source", "Visibility", "Last ingest", ""];
+  for (const [index, label] of labels.entries()) {
     const header = document.createElement("th");
     header.textContent = label;
-    if (label === "Move") {
+    if (index === 0) {
       header.className = "drag-cell";
     }
     headRow.appendChild(header);
@@ -1073,6 +1074,19 @@ describe("layer table columns", () => {
     expect(width(layer)).toBeGreaterThan(width(source));
     expect(width(layer)).toBeGreaterThan(width(visibility));
     expect(width(layer)).toBeGreaterThan(width(ingest));
+  });
+
+  // The design draws the handle column at 34px across the whole column. A
+  // table cell sizes content-box by default, so the shared cell padding sat
+  // outside the declared width and the column came out at 58px.
+  it("counts the cell padding inside the handle column's declared width", () => {
+    const [handle] = layerTable().headers;
+    const style = window.getComputedStyle(handle);
+    expect(style.boxSizing).toBe("border-box");
+    expect(style.width).toBe("34px");
+    const padding =
+      Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+    expect(padding).toBeLessThan(34);
   });
 
   it("breaks a name longer than its column inside the cell", () => {
@@ -1151,7 +1165,7 @@ function restoreTable(): {
     "Artifacts",
     "Unregistered",
     "Erased on",
-    "Actions",
+    "",
   ]) {
     const header = document.createElement("th");
     header.textContent = label;
@@ -1202,6 +1216,19 @@ describe("restore table columns", () => {
     const { source } = restoreTable();
     expect(window.getComputedStyle(source).width).toBe("auto");
     expect(window.getComputedStyle(source).maxWidth).toBe("none");
+  });
+
+  // The design draws the handle column at 34px across the whole column. A
+  // table cell sizes content-box by default, so the shared cell padding sat
+  // outside the declared width and the column came out at 58px.
+  it("counts the cell padding inside the handle column's declared width", () => {
+    const [handle] = layerTable().headers;
+    const style = window.getComputedStyle(handle);
+    expect(style.boxSizing).toBe("border-box");
+    expect(style.width).toBe("34px");
+    const padding =
+      Number.parseFloat(style.paddingLeft) + Number.parseFloat(style.paddingRight);
+    expect(padding).toBeLessThan(34);
   });
 
   it("breaks a name longer than its column inside the cell", () => {

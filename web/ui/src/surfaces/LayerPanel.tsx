@@ -413,9 +413,10 @@ export function LayerPanel({
           <table className="data-table layer-table">
             <thead>
               <tr>
-                <th className="drag-cell">
-                  <span className="label">Move</span>
-                </th>
+                {/* The handle column carries no header. The control in it
+                    names itself, and the design draws the header row as the
+                    columns that name data (§13.10). */}
+                <th className="drag-cell" />
                 <th>
                   <span className="label">Layer</span>
                 </th>

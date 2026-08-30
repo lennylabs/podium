@@ -1051,7 +1051,9 @@ function ResourceTable({
             <th className="column-label">Format</th>
             <th className="column-label">Size</th>
             <th className="column-label">Delivery</th>
-            <th className="column-label">Action</th>
+            {/* The download column carries no header; the button in it
+                names itself. */}
+            <th />
           </tr>
         </thead>
         <tbody>

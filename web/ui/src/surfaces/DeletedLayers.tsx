@@ -148,9 +148,9 @@ export function DeletedLayers({
                 <th>
                   <span className="label">Erased on</span>
                 </th>
-                <th>
-                  <span className="label">Actions</span>
-                </th>
+                {/* The restore column carries no header, on the same terms
+                    as the layer panel: the control names itself. */}
+                <th />
               </tr>
             </thead>
             <tbody>
