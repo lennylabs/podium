@@ -17,7 +17,7 @@ import { Chevron, EmptyState, ErrorState, Loading, Magnifier } from "../componen
 import type { SearchFilters, SearchResponse } from "../api";
 import { loadDomain, searchArtifacts } from "../api";
 import { scopePaths } from "../domain";
-import { formatQueryLine, parseQueryLine } from "../query";
+import { formatQueryLine, hasFilters, parseQueryLine, parseTypedLine } from "../query";
 import { parseRoute, replaceRoute, searchHref } from "../route";
 import type { Async } from "../useAsync";
 import { useAsync, useErrorReport } from "../useAsync";
@@ -71,6 +71,37 @@ export function SearchSurface({
   const [scope, setScope] = useState(seed.scope);
   const [tags, setTags] = useState<string[]>(seed.tags);
   const [text, setText] = useState(seed.query);
+
+  // The field takes the same line the palette and the route take, so the
+  // inline syntax the palette teaches applies wherever it is typed. A
+  // finished `type:`, `scope:`, or `tag:` word is lifted out of the field and
+  // drawn as the pill it names, and the rest of the line stays query text.
+  // Without the lift the same string named one search in the address bar and
+  // ran another against the registry, because the route parses it and the
+  // field did not (§13.10).
+  const onTyped = (typed: string) => {
+    const lifted = parseTypedLine(typed);
+    if (!hasFilters(lifted)) {
+      // Nothing was lifted, so the line stands exactly as typed. Rewriting it
+      // from the parse would drop the trailing space the reader just entered
+      // and fold their word into the one before it.
+      setText(typed);
+      return;
+    }
+    if (lifted.type !== "") {
+      setType(lifted.type);
+    }
+    if (lifted.scope !== "") {
+      setScope(lifted.scope);
+    }
+    if (lifted.tags.length > 0) {
+      setTags((held) => [
+        ...held,
+        ...lifted.tags.filter((tag) => !held.includes(tag)),
+      ]);
+    }
+    setText(lifted.query);
+  };
 
   // A navigation onto the search route reaches the surface here rather than
   // through the query the shell hands down. The surface writes the reader's
@@ -201,7 +232,7 @@ export function SearchSurface({
           value={text}
           placeholder="Search artifacts"
           onChange={(event) => {
-            setText(event.target.value);
+            onTyped(event.target.value);
           }}
         />
       </div>

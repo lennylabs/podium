@@ -2786,6 +2786,44 @@ describe("search", () => {
     });
   });
 
+  // The palette teaches the inline filter syntax, so the field the search
+  // surface draws reads it too. A line typed into the field and the same line
+  // arriving on the route name one search: both apply the filters as pills
+  // and send the remaining words as the query text.
+  it("lifts a typed inline filter into the pill the route would have applied", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/");
+    render(<App />);
+    const field = await screen.findByLabelText("Search artifacts");
+    // A word is lifted once it is finished. The unfinished token stands as
+    // query text, so no filter is applied on the way to the value.
+    fireEvent.change(field, { target: { value: "type:ski" } });
+    await waitFor(() => {
+      expect(lastSearch().get("query")).toBe("type:ski");
+    });
+    expect(screen.getByLabelText("Filter by type")).toBeTruthy();
+
+    fireEvent.change(field, {
+      target: { value: "type:skill tag:review auth " },
+    });
+    expect(await screen.findByText("type: skill")).toBeTruthy();
+    expect(screen.getByText("tag: review")).toBeTruthy();
+    // The filters leave the field, so the line the reader sees is the query
+    // text alone, which is what the route-borne form of the same line shows.
+    expect((field as HTMLInputElement).value).toBe("auth");
+    await waitFor(() => {
+      const query = lastSearch();
+      expect(query.get("query")).toBe("auth");
+      expect(query.get("type")).toBe("skill");
+      expect(query.get("tags")).toBe("review");
+    });
+    expect(window.location.hash).toBe(searchHref("type:skill tag:review auth"));
+  });
+
   // The row states what it is and carries one control per filter. It offers
   // no chip per artifact type, because a row that spends its width on the
   // unapplied values of one filter states the filter set less clearly than

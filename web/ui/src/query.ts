@@ -72,3 +72,24 @@ export function formatQueryLine(filters: SearchFilters): string {
 export function hasFilters(filters: SearchFilters): boolean {
   return filters.type !== '' || filters.scope !== '' || filters.tags.length > 0;
 }
+
+/**
+ * parseTypedLine reads a line the reader is still typing into the search
+ * field. It is parseQueryLine over the words the reader has finished: a
+ * filter token becomes a filter once whitespace follows it, and the last word
+ * stands as query text until then, so `type:ski` does not apply a filter on
+ * the way to `type:skill`. The unfinished word is returned in `query` with
+ * whatever text the finished words left, which is where the field keeps it.
+ */
+export function parseTypedLine(line: string): SearchFilters {
+  const settled = /^(.*\s)(\S*)$/.exec(line);
+  if (settled === null) {
+    return { query: line, type: '', scope: '', tags: [] };
+  }
+  const filters = parseQueryLine(settled[1]);
+  const typing = settled[2];
+  if (typing !== '') {
+    filters.query = filters.query === '' ? typing : `${filters.query} ${typing}`;
+  }
+  return filters;
+}
