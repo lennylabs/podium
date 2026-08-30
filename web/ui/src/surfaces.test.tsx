@@ -5675,6 +5675,41 @@ describe("the artifact viewer", () => {
     expect(raw).toContain("release: 1.10");
   });
 
+  // An alias stands for the value its anchor names, and the tab states that
+  // its rows are parsed from the frontmatter. Printing the `*anch` token as
+  // the value reports a value the artifact does not carry, and it disagrees
+  // with the anchor's own row, whose `&anch` marker the same reading already
+  // drops (§13.10).
+  it("shows an alias as the value its anchor names", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "eng/anchored",
+          type: "context",
+          version: "0.1.0",
+          content_hash: "sha256:abc",
+          manifest_body: "Body.\n",
+          frontmatter:
+            "---\ntype: context\nanchors: &anch base\nref: *anch\nblock: &blk\n  inner: one\nblockref: *blk\nlist:\n  - *anch\n---\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/eng%2Fanchored");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    expect(screen.getByTestId("property-value-anchors").textContent).toBe(
+      "base",
+    );
+    expect(screen.getByTestId("property-value-ref").textContent).toBe("base");
+    expect(screen.getByTestId("property-value-blockref").textContent).toBe(
+      "inner: one",
+    );
+    expect(screen.getByTestId("property-value-list").textContent).toBe("base");
+  });
+
   it("drops the rail’s frontmatter section where the response yields no pairs", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },

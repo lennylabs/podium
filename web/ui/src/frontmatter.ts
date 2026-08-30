@@ -9,7 +9,16 @@
 // file. Both are split here before either half is used, so the parser is
 // handed a YAML mapping and the body is handed to the rendering path.
 
-import { isMap, isScalar, isSeq, parseDocument, Scalar, type Node } from 'yaml';
+import {
+  isAlias,
+  isMap,
+  isScalar,
+  isSeq,
+  parseDocument,
+  Scalar,
+  type Document,
+  type Node,
+} from 'yaml';
 
 /** Property is one row of the frontmatter property table. The value is text:
  * it is rendered as text and never as markup. */
@@ -88,7 +97,9 @@ export function parseFrontmatter(text: string): ParsedFrontmatter {
   if (!isMap(contents)) {
     return { properties: [], error: 'The frontmatter block is not a mapping.', line: 0 };
   }
-  const properties = contents.items.map((pair) => row(raw, pair.key, pair.value as unknown));
+  const properties = contents.items.map((pair) =>
+    row(raw, doc, pair.key, anchored(doc, pair.value)),
+  );
   return { properties, error: '', line: 0 };
 }
 
@@ -103,12 +114,29 @@ function describe(err: { message: string; linePos?: [{ line: number; col: number
 /** row builds one table row from a frontmatter pair. A sequence keeps its
  * entries apart so the table renders them as separate lines, and every other
  * value is one piece of text. */
-function row(source: string, key: unknown, value: unknown): Property {
+function row(source: string, doc: Document, key: unknown, value: unknown): Property {
   const name = isScalar(key) ? String(key.value ?? '') : '';
   if (isSeq(value)) {
-    return { key: name, value: '', items: value.items.map((item) => valueText(source, item)) };
+    return {
+      key: name,
+      value: '',
+      items: value.items.map((item) => valueText(source, anchored(doc, item))),
+    };
   }
   return { key: name, value: valueText(source, value), items: [] };
+}
+
+/** anchored replaces an alias with the node its anchor names. An alias is a
+ * reference rather than a value, so the token `*anch` is not what the artifact
+ * carries at that key, and the table promises the frontmatter as parsed
+ * (§13.10). An alias whose anchor the document does not define resolves to
+ * nothing and keeps its own node, so the row states the token the author wrote
+ * rather than an empty cell. */
+function anchored(doc: Document, value: unknown): unknown {
+  if (!isAlias(value)) {
+    return value;
+  }
+  return value.resolve(doc) ?? value;
 }
 
 /** valueText renders one frontmatter value as the text the table shows. The panel
