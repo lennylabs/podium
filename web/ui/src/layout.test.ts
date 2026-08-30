@@ -1721,3 +1721,32 @@ describe("dialog width", () => {
     expect(styled("modal modal-wide").width).toBe("760px");
   });
 });
+
+// The sidebar is banded: a navigation block, the catalog tree, and the
+// counts footer. The band boundaries are hairlines, and the catalog label
+// once carried margin alone, so the tree floated under the navigation rows
+// with no boundary while the footer below it drew one. jsdom performs no
+// layout, so the cases pin the declarations that draw the two rules; the
+// rendered sidebar is checked in a browser.
+describe("sidebar bands", () => {
+  /** band attaches an element carrying the given classes and returns it. */
+  function band(className: string): HTMLElement {
+    const element = document.createElement("div");
+    element.className = className;
+    document.body.appendChild(element);
+    mounted.push(element);
+    return element;
+  }
+
+  it("rules the catalog section off from the navigation block above it", () => {
+    expect(declaredFor(band("catalog-label"), "border-top")).toBe(
+      "1px solid var(--b2)",
+    );
+  });
+
+  it("draws the catalog rule in the same hairline the footer draws", () => {
+    expect(declaredFor(band("catalog-label"), "border-top")).toBe(
+      declaredFor(band("sidebar-footer"), "border-top"),
+    );
+  });
+});

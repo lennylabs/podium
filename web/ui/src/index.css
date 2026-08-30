@@ -361,9 +361,14 @@ h3 {
 
 /* The catalog section label heads the tree below it, with the depth of the
    hierarchy the tree navigates pushed to the far edge of the sidebar. The two
-   sit on a common baseline so the label and the figure read as one line. */
+   sit on a common baseline so the label and the figure read as one line. The
+   rule above the label closes the navigation block, so the sidebar reads as
+   banded zones rather than as rows floating in one column. It is the same
+   hairline the footer draws at the other end of the column. */
 .catalog-label {
-  margin: 18px 0 6px;
+  margin: 12px 0 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--b2);
   display: flex;
   align-items: baseline;
   gap: 8px;
