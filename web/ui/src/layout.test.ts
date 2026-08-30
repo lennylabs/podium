@@ -388,6 +388,28 @@ describe("artifact row keyword pill", () => {
   });
 });
 
+// The search filter row states what is narrowing the result set. Set at
+// regular weight inside 2px of vertical padding, the applied filters sat
+// shorter and lighter than the outlined controls beside them and read as
+// annotations rather than as the accent chips carrying the query. The cases
+// pin the padding every pill in the row shares and the weight the applied one
+// adds; jsdom performs no layout, so the rendered row is checked in a browser.
+describe("search filter pill", () => {
+  it("gives every pill in the row the filter row's padding", () => {
+    const style = styled("pill");
+
+    expect(style.paddingTop).toBe("6px");
+    expect(style.paddingBottom).toBe("6px");
+    expect(style.paddingLeft).toBe("11px");
+    expect(style.paddingRight).toBe("11px");
+  });
+
+  it("sets an applied filter in the weight that reads as an accent chip", () => {
+    expect(styled("pill pill-active").fontWeight).toBe("600");
+    expect(styled("pill").fontWeight).not.toBe("600");
+  });
+});
+
 // A sidebar tree label is the whole folded stretch of path a §4.5.5 sparse
 // chain collapsed into one entry, so it runs wider than the 268px sidebar. A
 // wrapping row breaks the toggle away from the label, drops the label onto the
