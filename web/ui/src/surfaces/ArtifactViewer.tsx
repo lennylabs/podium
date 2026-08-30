@@ -93,6 +93,13 @@ export function ArtifactViewer({
   if (viewed !== id) {
     setViewed(id);
     setLatest('');
+    // The open tab is not in the address, and this component survives the
+    // route change from one artifact to the next, so a tab that carried over
+    // would make the same artifact address open on a different panel
+    // depending on how the reader arrived, and a reload of that address would
+    // switch the panel back. Every artifact opens on the body §13.10 names
+    // first. Spec: §13.10.
+    setTab('rendered');
     // A layer list that was refused leaves the rail's visibility and ingested
     // rows unreported, and this component survives the route change from one
     // artifact to the next, so without re-issuing it here every later

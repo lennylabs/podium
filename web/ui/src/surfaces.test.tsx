@@ -5105,6 +5105,59 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // The open tab is not in the address, and the viewer survives the route
+  // change from one artifact to the next, so a tab that carried over would
+  // put the same artifact address on a different panel depending on how the
+  // reader arrived, and a reload of that address would switch the panel back.
+  // Every artifact opens on the rendered body.
+  // Spec: §13.10
+  it("opens the next artifact on the rendered body rather than the tab the previous one was left on", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact?id=eng%2Fdeploy": {
+        body: {
+          id: "eng/deploy",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Deploy\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/load_artifact?id=eng%2Fxss": {
+        body: {
+          id: "eng/xss",
+          type: "context",
+          version: "0.1.0",
+          content_hash: "sha256:def",
+          manifest_body: "# Escaping\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/eng%2Fdeploy");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    expect(
+      screen
+        .getByRole("tab", { name: /Frontmatter/ })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+
+    goTo("#/artifact/eng%2Fxss");
+    expect(await screen.findByRole("heading", { name: "xss" })).toBeTruthy();
+    expect(
+      screen.getByRole("tab", { name: "Rendered" }).getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(
+      screen
+        .getByRole("tab", { name: /Frontmatter/ })
+        .getAttribute("aria-selected"),
+    ).toBe("false");
+  });
+
   // A pin the registry refused is still the string the field opens on, so
   // reopening the picker on it with the caret at its end let the reader's
   // correction be appended to the refused pin: 0.1.0 typed into a field
