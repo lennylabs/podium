@@ -277,7 +277,15 @@ h3 {
   margin: 22px 0 8px;
 }
 
+/* The bar holds the wordmark, the search trigger and the appearance control,
+   and it is the only route out of a surface that runs past the viewport. Left
+   in flow it scrolled away with the page, so a reader at the foot of a
+   60-artifact listing had no visible navigation at all. It is stuck to the top
+   of the viewport instead, over the content that passes under it (§13.10). */
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -376,7 +384,23 @@ h3 {
   }
 }
 
+/* The section rows and the catalog tree stay on screen while the surface
+   beside them scrolls, so the column is stuck under the 52px bar and takes the
+   rest of the viewport. `align-self: start` is what leaves it a sticky box
+   rather than a grid item stretched to the row's full height, which has no
+   room left to move within and never sticks. */
 .sidebar {
+  position: sticky;
+  top: 52px;
+  z-index: 9;
+  align-self: start;
+  /* The stylesheet declares no global border box, so the column's own padding
+     would stand outside the height set here and run it 36px past the bottom of
+     the grid row. A sticky box is clamped by the bottom of its containing
+     block, and that overhang dragged the section rows up under the bar as the
+     page reached its foot. */
+  box-sizing: border-box;
+  height: calc(100vh - 52px);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -439,7 +463,15 @@ h3 {
   padding: 0 0 0 12px;
 }
 
+/* The column is bounded by the viewport, so the tree is what gives way when
+   the hierarchy runs longer than the space under the section rows: it takes
+   the leftover height and scrolls inside it, which keeps the pinned footer on
+   screen. `min-height: 0` is required for that, because a flex item's
+   automatic minimum is its content height and the tree would otherwise push
+   the footer out of the column instead of scrolling. */
 .catalog-tree {
+  flex: 1;
+  min-height: 0;
   padding-left: 0;
   overflow-y: auto;
 }
@@ -4175,6 +4207,16 @@ label:has(> input:disabled) {
      side of it. */
   .topbar-divider {
     display: none;
+  }
+
+  /* Below this width the sidebar is a band above the content rather than a
+     column beside it, so a sticky column of viewport height would hold the
+     whole screen and push the surface off it. The band scrolls away with the
+     page here, and the bar above it stays. The rule sits in this block rather
+     than in the earlier one for the same source-order reason. */
+  .sidebar {
+    position: static;
+    height: auto;
   }
 }
 

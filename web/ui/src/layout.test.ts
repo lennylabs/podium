@@ -78,9 +78,76 @@ function mediaRule(condition: string, selector: string): string {
   return "";
 }
 
+/** lastMediaRule returns the declarations of the last rule the stylesheet
+ * writes for one selector under the given media condition. A media condition
+ * adds no specificity, so where a breakpoint is declared in more than one
+ * block it is the last of them that the browser applies. */
+function lastMediaRule(condition: string, selector: string): string {
+  let found = "";
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      if (!(rule instanceof CSSMediaRule) || rule.conditionText !== condition) {
+        continue;
+      }
+      for (const inner of Array.from(rule.cssRules)) {
+        if (inner instanceof CSSStyleRule && inner.selectorText === selector) {
+          found = inner.style.cssText;
+        }
+      }
+    }
+  }
+  return found;
+}
+
 describe("shell layout", () => {
   it("gives the content column a zero minimum", () => {
     expect(styled("app-body").gridTemplateColumns).toBe("268px minmax(0, 1fr)");
+  });
+
+  // Neither the bar nor the sidebar held its place while the page scrolled, so
+  // at the foot of a listing taller than the viewport the wordmark, the search
+  // trigger, the appearance control and the Browse, Search and Layers rows had
+  // all gone by, leaving nothing visible to navigate by. Both are stuck to the
+  // viewport now, the sidebar under the 52px bar.
+  // Spec: §13.10
+  it("keeps the top bar on screen while the page scrolls", () => {
+    const bar = styled("topbar");
+    expect(bar.position).toBe("sticky");
+    expect(bar.top).toBe("0px");
+  });
+
+  it("keeps the sidebar navigation on screen under the top bar", () => {
+    const sidebar = styled("sidebar");
+    expect(sidebar.position).toBe("sticky");
+    expect(sidebar.top).toBe("52px");
+    // A grid item stretched to the row's height has no room to move within its
+    // container and never sticks, so the column starts its row and takes the
+    // viewport height the bar leaves.
+    expect(sidebar.alignSelf).toBe("start");
+    expect(sidebar.height).toBe("calc(100vh - 52px)");
+    // The stylesheet declares no global border box, so without this the
+    // column's padding stands outside that height, overhangs the grid row, and
+    // the sticky clamp drags the section rows under the bar at the foot of the
+    // page.
+    expect(sidebar.boxSizing).toBe("border-box");
+  });
+
+  // The column is bounded by the viewport, so a catalog longer than the space
+  // under the section rows scrolls inside the tree rather than pushing the
+  // pinned footer past the bottom of the column.
+  it("scrolls a long catalog tree inside the bounded sidebar", () => {
+    const tree = styled("catalog-tree");
+    expect(tree.overflowY).toBe("auto");
+    expect(tree.minHeight).toBe("0");
+    expect(tree.flexGrow).toBe("1");
+  });
+
+  // Below the narrow breakpoint the sidebar is a band above the content, and a
+  // sticky column of viewport height there would hold the whole screen.
+  it("returns the sidebar band to the flow at a narrow viewport", () => {
+    const sidebar = lastMediaRule("(max-width: 900px)", ".sidebar");
+    expect(sidebar).toContain("position: static");
+    expect(sidebar).toContain("height: auto");
   });
 
   it("lets the content element shrink below its content width", () => {
