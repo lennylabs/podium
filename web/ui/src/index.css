@@ -4440,12 +4440,15 @@ label:has(> input:disabled) {
 
 /* The appearance trigger the shell renders where no identity cluster stands.
    It reads as the shell's other quiet controls rather than as a button. */
+/* The trigger carries the disc alone. Its padding is square rather than the
+   wider horizontal pair a label needs, so the icon sits centred instead of
+   left-weighted in a box sized for text that is no longer there. The hit area
+   stays at 27px, which is what the 13px disc plus this padding gives. */
 .appearance-trigger {
-  gap: 6px;
-  padding: 5px 8px;
+  gap: 0;
+  padding: 7px;
   color: var(--meta);
-  font-size: 12.5px;
-  white-space: nowrap;
+  line-height: 0;
 }
 
 .appearance-trigger .contrast-disc {

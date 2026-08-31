@@ -1398,11 +1398,15 @@ function AppearanceMenu({
         data-testid="appearance-trigger"
         aria-controls={menuId}
         aria-expanded={open}
+        aria-label="Appearance"
         ref={trigger}
         onClick={toggle}
       >
+        {/* The disc stands alone, with no visible label beside it. The icon is
+            aria-hidden, so the aria-label above is the button's whole
+            accessible name and dropping it would leave a nameless control that
+            a screen reader announces as "button". */}
         <ContrastDisc />
-        Appearance
       </button>
       {open && (
         <div id={menuId} className="account-menu" data-testid="appearance-menu" ref={menu}>

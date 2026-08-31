@@ -15402,6 +15402,30 @@ describe("the shell’s identity cluster", () => {
   // point at the element they own, the same wiring the layer table's overflow
   // control carries.
   //
+  // The trigger draws the contrast disc and no visible label, and the disc is
+  // aria-hidden, so its aria-label is the button's whole accessible name. A
+  // change that drops the attribute leaves a control a screen reader announces
+  // as "button", which the rendered page looks no different for.
+  //
+  // Spec: §13.10
+  it("names the icon-only appearance trigger", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture() },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const trigger = await screen.findByTestId("appearance-trigger");
+    // Queryable by name, which is how an assistive technology reaches it.
+    expect(await screen.findByRole("button", { name: "Appearance" })).toBe(
+      trigger,
+    );
+    // The name comes from the attribute rather than from rendered text.
+    expect(trigger.textContent).toBe("");
+    expect(trigger.querySelector("svg")?.getAttribute("aria-hidden")).toBe(
+      "true",
+    );
+  });
+
   // Spec: §13.10
   it("points the appearance trigger at the popover it owns and claims no menu", async () => {
     stubRegistry({
