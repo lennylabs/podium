@@ -25,6 +25,7 @@ import { authControl, catalogScope, expiryControl, isSignedIn, readSession } fro
 import { catalogDepth, domainLabel, marksCurrentDomain } from './domain';
 import { useModalOpen, usePopupDismiss } from './components/focus';
 import {
+  ReportFailureTitle,
   artifactDomain,
   domainHref,
   layersHref,
@@ -98,8 +99,20 @@ export function App() {
   useTopOfNewRoute();
 
   // One document draws every surface, so the tab and the history entry are
-  // named here rather than by the surface that happens to be mounted.
-  useDocumentTitle(route);
+  // named here rather than by the surface that happens to be mounted. A
+  // surface whose read resolved nothing reports the failure it renders, and
+  // the report carries the route it was made on: a read that failed stays
+  // failed while the next route's read is in flight, so a report the reader
+  // has already left is dropped rather than naming the surface they are on.
+  const entered = routeKey(route);
+  const [failure, setFailure] = useState<{ key: string; name: string } | null>(null);
+  const reportFailure = useCallback(
+    (name: string | null) => {
+      setFailure(name === null ? null : { key: entered, name });
+    },
+    [entered],
+  );
+  useDocumentTitle(route, failure !== null && failure.key === entered ? failure.name : null);
 
   // A surface swapped into the same document announces nothing on its own,
   // and the link that was followed unmounts under the reader's focus.
@@ -138,7 +151,6 @@ export function App() {
   // previous query: the browser's back step is one such change, and a history
   // step also moves focus out of the dialog, which takes the panel's own
   // Escape handler with it and leaves the scrim as the only way out.
-  const entered = routeKey(route);
   useEffect(() => {
     setPaletteOpen(false);
   }, [entered]);
@@ -481,14 +493,16 @@ export function App() {
           {refused && !expired && route.name !== 'layers' ? (
             <RefusedCatalog error={catalogError} recovery={recovery} />
           ) : (
-            <Surface
-              route={route}
-              subject={subject}
-              readOnly={readOnly}
-              onCatalogOutcome={onCatalogOutcome}
-              onCatalogChange={reloadCatalog}
-              onReach={onReach}
-            />
+            <ReportFailureTitle.Provider value={reportFailure}>
+              <Surface
+                route={route}
+                subject={subject}
+                readOnly={readOnly}
+                onCatalogOutcome={onCatalogOutcome}
+                onCatalogChange={reloadCatalog}
+                onReach={onReach}
+              />
+            </ReportFailureTitle.Provider>
           )}
         </main>
       </div>

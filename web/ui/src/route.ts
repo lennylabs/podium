@@ -3,7 +3,7 @@
 // rewrite is involved. An artifact ID is a directory path that nests to
 // arbitrary depth, so every identifier in a route is encoded.
 
-import { useEffect, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 
 import { heldRoute, takeFocus } from './components/focus';
@@ -196,8 +196,9 @@ const siteTitle = 'Podium';
  * surfaces the reader is on.
  *
  * The name is taken from the route rather than from the read the surface
- * issues, so the title is correct while the read is in flight and correct
- * where it fails. */
+ * issues, so the title is correct while the read is in flight. A read that
+ * resolved nothing is named by `useDocumentTitle` from the failure the
+ * surface renders instead. */
 export function routeTitle(route: Route): string {
   switch (route.name) {
     case 'domain':
@@ -214,11 +215,39 @@ export function routeTitle(route: Route): string {
   }
 }
 
-/** useDocumentTitle names the current surface in the document title.
+/** ReportFailureTitle is how a surface whose read resolved nothing names the
+ * document for what it renders. The shell holds it, because one document
+ * draws every surface and one writer owns its title; a surface that wrote the
+ * title itself would be overwritten by the shell's own write on the next
+ * route change, or would leave a failure named over the surface that
+ * followed it. Reporting `null` withdraws the name.
  *
  * Spec: §13.10 */
-export function useDocumentTitle(route: Route): void {
-  const name = routeTitle(route);
+export const ReportFailureTitle = createContext<(name: string | null) => void>(() => {});
+
+/** useFailureTitle hands the shell the failure the caller renders, for as
+ * long as it is on screen. The identity of the reporting function moves with
+ * the route, so a surface that goes on rendering a stale failure while the
+ * next read is in flight re-reports under the route it is now on rather than
+ * naming the previous one. */
+export function useFailureTitle(name: string): void {
+  const report = useContext(ReportFailureTitle);
+  useEffect(() => {
+    report(name);
+    return () => {
+      report(null);
+    };
+  }, [name, report]);
+}
+
+/** useDocumentTitle names the current surface in the document title. A route
+ * that resolved nothing is named by the failure the surface renders instead
+ * of by the identifier that did not resolve: the tab, the history entry, and
+ * a bookmark otherwise name a thing the page underneath says is not there.
+ *
+ * Spec: §13.10 */
+export function useDocumentTitle(route: Route, failure: string | null): void {
+  const name = failure ?? routeTitle(route);
   useEffect(() => {
     document.title = `${name} · ${siteTitle}`;
   }, [name]);

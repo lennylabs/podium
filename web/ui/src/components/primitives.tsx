@@ -8,7 +8,7 @@ import { Fragment, useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api';
-import { atCatalogRoute, domainHref } from '../route';
+import { atCatalogRoute, domainHref, useFailureTitle } from '../route';
 import { dismissAttribute, registerModal, requestRetryFocus, useDialogFocus, useRetryFocus } from './focus';
 import { useScrollLock } from './scrolllock';
 
@@ -505,6 +505,10 @@ export function ErrorPage({
   // page reports the refusal and leaves the code line to name it.
   const heading =
     kind === 'unavailable' ? "Can't reach the registry" : kind === 'notFound' ? title : 'The request was refused';
+  // The route named something that did not load, so naming the document from
+  // the route names a thing this page says is not there. The page names it
+  // instead, in the same words it heads itself with.
+  useFailureTitle(heading);
   const offerRetry = onRetry !== undefined && (envelope === null || envelope.retryable);
   // A retry that refuses again is rendered as a fresh control, so the control
   // that was pressed takes the focus back rather than leaving the reader on

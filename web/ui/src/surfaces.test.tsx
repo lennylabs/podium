@@ -16176,6 +16176,59 @@ describe("a whole-surface failure", () => {
     expect(within(page).queryByRole("button", { name: "Retry" })).toBeNull();
   });
 
+  // The document title names the surface the route selects, and on a route
+  // that resolved nothing the identifier names a thing the page underneath
+  // says is not there: the tab, the history entry, and a bookmark all read
+  // the unresolved last segment. What the page renders is a failure, so that
+  // is what names the document (§13.10).
+  it("titles the document for the failure a route that resolves nothing renders", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 404,
+        body: {
+          code: "registry.not_found",
+          message: "registry.not_found: artifact does/not/exist",
+        },
+      },
+      "/v1/load_domain": { body: rootDomains },
+    });
+    goTo("#/artifact/does%2Fnot%2Fexist");
+    render(<App />);
+    await screen.findByTestId("artifact-failed");
+    await waitFor(() => {
+      expect(document.title).toBe("No such artifact · Podium");
+    });
+
+    // Leaving the failure puts the surface's own name back, so the failed
+    // title belongs to the route that failed rather than to the tab.
+    goTo(domainHref(""));
+    await screen.findByLabelText("Domain browser");
+    await waitFor(() => {
+      expect(document.title).toBe("All domains · Podium");
+    });
+  });
+
+  // The domain browser answers the same way.
+  it("titles the document for a domain that does not resolve", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        status: 404,
+        body: {
+          code: "registry.not_found",
+          message: "registry.not_found: domain nope/nothing",
+        },
+      },
+    });
+    goTo("#/domain/nope%2Fnothing");
+    render(<App />);
+    await screen.findByTestId("domain-failed");
+    await waitFor(() => {
+      expect(document.title).toBe("No such domain · Podium");
+    });
+  });
+
   // A pinned address that arrives cold carries two conditions the registry
   // reports apart: an artifact that is not there, and an artifact that is
   // there at versions the pin does not name. The page keeps them apart too,
