@@ -5,6 +5,7 @@
 import { ArtifactTable, SubdomainTiles } from './DomainAtScale';
 import { ArtifactRow } from '../components/ArtifactRow';
 import { Breadcrumb } from '../components/Breadcrumb';
+import { Prose } from '../components/Prose';
 import { Badge, Chevron, EmptyState, ErrorPage, Loading, PathLabel } from '../components/primitives';
 import type { DomainDescriptor } from '../api';
 import { catalogArtifactIDs, loadDomain } from '../api';
@@ -149,8 +150,15 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
           root is told what it is instead: §4.5.5 fixes that the root has no
           description to carry, so reporting the absence states a defect where
           there is none. */}
+      {/* §4.5.5 returns the requested domain's own long-form body here, which
+          is the markdown below the DOMAIN.md frontmatter. Drawn as a text node
+          it prints its own syntax and collapses every paragraph, list, and
+          heading onto one line, so it goes through the same sanitized
+          rendering path the artifact body takes. A domain that carries only a
+          frontmatter `description:` renders one paragraph through it, which is
+          what it already looked like. */}
       {body.description !== undefined && body.description !== '' ? (
-        <p className="lead">{body.description}</p>
+        <Prose body={body.description} className="prose lead" testID="domain-description" />
       ) : root ? (
         <p className="quiet lead">This is the top of the domain hierarchy, and every domain the registry holds sits below it.</p>
       ) : (

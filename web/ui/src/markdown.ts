@@ -1,7 +1,7 @@
-// The single rendering path for an artifact body. An artifact body is
-// markdown authored by whoever can write to a layer's source, and the viewer
-// renders it as a document on the registry's own origin, which is the origin
-// the session cookie is scoped to.
+// The single rendering path for a markdown body. An artifact's manifest body
+// and a domain's long-form body are both markdown authored by whoever can
+// write to a layer's source, and the UI renders each as a document on the
+// registry's own origin, which is the origin the session cookie is scoped to.
 //
 // The sanitizer runs on the rendered output rather than on the markdown
 // source, so a construct the renderer emits cannot bypass it and a construct
@@ -456,14 +456,19 @@ function nameRegion(element: Element, label: string): void {
 }
 
 /**
- * renderArtifactBody renders an artifact's markdown body to sanitized markup.
- * The return value is the only markup this UI hands to the browser as markup,
- * and it is safe to insert because it has been through the sanitizer here.
+ * renderProse renders a markdown body to sanitized markup. The return value is
+ * the only markup this UI hands to the browser as markup, and it is safe to
+ * insert because it has been through the sanitizer here.
  *
- * `resources` names the files the artifact bundles, which is what decides
- * whether a relative reference names a bundled file or another artifact.
+ * Both bodies the registry serves as prose reach it: an artifact's §4.4
+ * manifest body, and the §4.5.5 long-form body `load_domain` returns for the
+ * requested domain.
+ *
+ * `resources` names the files an artifact bundles, which is what decides
+ * whether a relative reference names a bundled file or another artifact. A
+ * body that bundles nothing passes none.
  */
-export function renderArtifactBody(body: string, resources: readonly string[] = []): string {
+export function renderProse(body: string, resources: readonly string[] = []): string {
   const rendered = marked.parse(body, { async: false, gfm: true }) as string;
   const sanitized = DOMPurify.sanitize(rendered, {
     // The HTML profile drops SVG and MathML, which no markdown renderer

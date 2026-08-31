@@ -1993,6 +1993,67 @@ describe("the domain browser", () => {
     );
   });
 
+  // Spec: §4.5.5 — the body below the DOMAIN.md frontmatter is long-form
+  // markdown, returned for the requested domain only. Drawn as a text node it
+  // printed its own syntax and collapsed every paragraph, list, and heading
+  // onto one line, so the header renders it the way the artifact viewer
+  // renders a manifest body.
+  it("renders the requested domain's markdown body as prose", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "legal",
+          description:
+            "## Scope\n\nContract review, NDAs, and vendor paperwork.\n\n- Start with the NDA checklist.\n- Escalate anything with an indemnity clause.\n\nSee the `contracts/` subdomain for the current templates.\n",
+          subdomains: [],
+          notable: [],
+        },
+      },
+    });
+    goTo("#/domain/legal");
+    render(<App />);
+    await screen.findByLabelText("Domain browser");
+    const description = screen.getByTestId("domain-description");
+    // Each construct reaches the reader as the element it names, so the
+    // paragraphs and the list items stand apart rather than running together.
+    expect(description.querySelector("h2")?.textContent).toBe("Scope");
+    expect(
+      [...description.querySelectorAll("li")].map((item) => item.textContent),
+    ).toEqual([
+      "Start with the NDA checklist.",
+      "Escalate anything with an indemnity clause.",
+    ]);
+    expect(description.querySelector("code")?.textContent).toBe("contracts/");
+    // None of the markup survives as characters the reader has to read past.
+    expect(description.textContent).not.toContain("##");
+    expect(description.textContent).not.toContain("`");
+  });
+
+  // A domain that carries no body of its own falls back to its one-line
+  // frontmatter description, which is one paragraph through the same path.
+  it("renders a one-line domain description as a single paragraph", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "legal",
+          description: "Contract review and vendor paperwork.",
+          subdomains: [],
+          notable: [],
+        },
+      },
+    });
+    goTo("#/domain/legal");
+    render(<App />);
+    await screen.findByLabelText("Domain browser");
+    const description = await screen.findByTestId("domain-description");
+    expect(description.querySelectorAll("p")).toHaveLength(1);
+    expect(description.textContent?.trim()).toBe(
+      "Contract review and vendor paperwork.",
+    );
+  });
+
   // A §4.5.5 sparse chain reaches the grid folded into one card whose title is
   // the whole stretch of path it crosses. A slash carries no break opportunity
   // of its own, so a card too narrow for the title broke it inside a segment
