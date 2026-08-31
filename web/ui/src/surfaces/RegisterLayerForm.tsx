@@ -401,20 +401,26 @@ export function RegisterLayerForm({
               </p>
             </fieldset>
           )}
-          {/* §4.6 fixes a user-defined layer's visibility at registration and
-              the registry discards a later patch of it, so the note is stated
-              on that class alone. An admin-defined layer's visibility is what
-              the update endpoint patches, and the panel's Edit control is
-              where that happens. */}
-          <p className="note" data-testid="visibility-note">
-            <span className="note-glyph" aria-hidden="true">
-              ⓘ
-            </span>
-            <span className="note-text">
-              {userDefined ? 'Visibility is fixed at registration.' : 'Visibility can be widened later from Edit. A grant cannot be withdrawn.'}
-            </span>
-          </p>
         </div>
+        {/* §4.6 fixes a user-defined layer's visibility at registration and
+            the registry discards a later patch of it, so the note is stated
+            on that class alone. An admin-defined layer's visibility is what
+            the update endpoint patches, and the panel's Edit control is
+            where that happens.
+
+            The note stands outside the scrolling body, between it and the
+            footer, because the form is taller than a laptop viewport: inside
+            the body it sat a couple of hundred pixels past the fold, so the
+            dialog opened saying nothing about whether visibility can be
+            changed later. */}
+        <p className="note modal-note" data-testid="visibility-note">
+          <span className="note-glyph" aria-hidden="true">
+            ⓘ
+          </span>
+          <span className="note-text">
+            {userDefined ? 'Visibility is fixed at registration.' : 'Visibility can be widened later from Edit. A grant cannot be withdrawn.'}
+          </span>
+        </p>
         <div className="modal-foot">
           {/* The registry appends a new layer at the end of the order, and
               the panel's last row is the one that wins, so the footer states

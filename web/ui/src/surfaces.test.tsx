@@ -9727,6 +9727,34 @@ describe("the layer write flows", () => {
     expect(style.overflow).toBe("hidden");
   });
 
+  // The register form is taller than a laptop viewport, so an element at its
+  // end stands a few hundred pixels below the fold of the scrolling body. The
+  // neutral note states whether visibility can be changed after registration,
+  // which the reader needs while reviewing the form rather than after
+  // discovering the body scrolls, so the note stands outside the body,
+  // between it and the footer (§13.10).
+  it("stands the neutral note outside the scrolling body, above the footer", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ identity_provider_configured: false }),
+      },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const form = screen.getByTestId("register-form");
+    const body = form.querySelector(".modal-body") as HTMLElement;
+    const note = screen.getByTestId("visibility-note");
+    expect(body.contains(note)).toBe(false);
+    expect(note.parentElement).toBe(form);
+    expect(note.nextElementSibling?.className).toBe("modal-foot");
+    // The pinned note keeps its height whatever the body holds, so the body
+    // is the part that gives way when the dialog outgrows the viewport.
+    expect(window.getComputedStyle(note).flexShrink).toBe("0");
+  });
+
   // The consequence and the neutral note sit next to each other at the foot
   // of the form and are told apart only by their fill, which does not say
   // which one states what the selection admits and which one is an aside.

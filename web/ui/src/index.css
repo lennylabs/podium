@@ -4047,6 +4047,16 @@ label:has(> input:disabled) {
   font-size: 13px;
 }
 
+/* A note the dialog states about the write itself, rather than about a field,
+   sits outside the scrolling body so it reads the moment the dialog opens. A
+   form taller than the viewport puts its last element a few hundred pixels
+   below the fold, and a standing note read only after a scroll is a note the
+   reader does not have when reviewing the form (§13.10). */
+.modal-note {
+  flex: none;
+  margin: 10px 22px 14px;
+}
+
 .copy-field {
   display: flex;
   align-items: center;
