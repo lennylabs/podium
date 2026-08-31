@@ -10939,6 +10939,55 @@ describe("the layer write flows", () => {
     );
   });
 
+  // A reorder is confirmed by a list read a round trip later, and an operator
+  // driving the handle presses the arrow key again before that read lands.
+  // Every press steps off the order the panel is showing, so a burst of
+  // presses walks the row one position per press instead of recomputing the
+  // same single step from the order the first press already left behind.
+  it("steps each arrow press off the move the press before it made", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
+        },
+      },
+      // The reorder answers a turn later, so the second press is made while
+      // the first request is still open, which is the window the burst falls
+      // into against a registry over a network.
+      "/v1/layers/reorder": { body: { layers: [] }, deferred: true },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const handle = screen.getByLabelText(moveHandleLabel("alice-personal"));
+    fireEvent.keyDown(handle, { key: "ArrowDown" });
+    fireEvent.keyDown(handle, { key: "ArrowDown" });
+    // The panel draws both steps at once, so the row is two positions down
+    // before the registry has confirmed either of them.
+    expect(
+      within(screen.getByLabelText("Layers"))
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => row.querySelector(".layer-name")?.textContent),
+    ).toEqual(["company", "alice-scratch", "bob-personal", "alice-personal"]);
+    expect(screen.getByTestId("panel-announcement").textContent).toBe(
+      "alice-personal moved to order 4 of 4.",
+    );
+    // Two open requests would race to stamp the endpoint's absolute order
+    // values, so the second press is issued once the first returns, and it
+    // names where two presses left the row.
+    await waitFor(() => {
+      expect(
+        bodies.filter((body) => body.includes("order")).at(-1),
+      ).toBe(
+        JSON.stringify({
+          order: ["alice-scratch", "bob-personal", "alice-personal"],
+        }),
+      );
+    });
+  });
+
   // The keyboard path is there for an operator who cannot see the rows swap,
   // so the move states where the layer landed in a polite live region rather
   // than reporting itself by the swap alone.
@@ -11018,6 +11067,17 @@ describe("the layer write flows", () => {
     await waitFor(() => {
       expect(screen.getByTestId("panel-announcement").textContent).toBe(
         "alice-personal moved to order 3 of 3.",
+      );
+    });
+    // The step down left the row last in its class block, so the step back
+    // up is a move the block can make and the one after it is the refusal.
+    fireEvent.keyDown(
+      screen.getByLabelText(moveHandleLabel("alice-personal")),
+      { key: "ArrowUp" },
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("panel-announcement").textContent).toBe(
+        "alice-personal moved to order 2 of 3.",
       );
     });
     fireEvent.keyDown(

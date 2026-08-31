@@ -162,6 +162,33 @@ export function LayerPanel({
   // and an unregister takes its own row away, so neither leaves anything on
   // the page that names what happened.
   const [outcome, setOutcome] = useState<Outcome>(noOutcome);
+  // The order the panel is showing ahead of the registry, as layer IDs. A
+  // reorder is committed against what the reader can see, and the list read
+  // that confirms it only answers a round trip later, so a second press
+  // arriving inside that window would otherwise recompute its step from the
+  // order the first press already left behind and re-send the same move. The
+  // panel holds the moved order here, renders from it, and steps every
+  // further press off it, so a burst of presses walks the row one position
+  // per press (§13.10).
+  const [moved, setMoved] = useState<string[] | null>(null);
+  // One reorder request is open at a time, because the endpoint assigns
+  // absolute order values from the request's own positions and two open
+  // requests would race to stamp them. A press made while one is open is
+  // held here and issued when it returns; a later press replaces the held
+  // one, because each request names the whole block's resulting order and
+  // the newest press already carries every press before it.
+  const sending = useRef(false);
+  const held = useRef<{ from: string; order: string[] } | null>(null);
+  // The moved order stands until the registry's own list read answers, which
+  // is what returns the rows to what the registry holds. A reload that lands
+  // while a further press is still in flight leaves it standing, so the rows
+  // do not fall back to the order the held request has not been issued
+  // against yet.
+  useEffect(() => {
+    if (layers.value !== null && !sending.current && held.current === null) {
+      setMoved(null);
+    }
+  }, [layers.value]);
   // The heading is where focus lands when a write removes the control it was
   // started from. The row's controls go with the row, and focus left on the
   // document body puts the reader back at the top of the page.
@@ -228,7 +255,7 @@ export function LayerPanel({
       </>
     );
   }
-  const rows = layers.value ?? [];
+  const rows = inMovedOrder(layers.value ?? [], moved);
 
   // One in-flight guard covers the whole surface. The registry runs the §7.3.1
   // ingest pipeline inside the request, so two open requests for one layer run
@@ -332,6 +359,43 @@ export function LayerPanel({
     afterWrite();
   };
 
+  /** sendReorder issues one reorder and then whatever press arrived while it
+   * was open. A refusal drops the held press and returns the rows to the
+   * order the registry holds, because the held press was composed onto a
+   * move the registry did not take. */
+  const sendReorder = (from: string, order: string[]) => {
+    sending.current = true;
+    reorderLayers(order).then(
+      () => {
+        clearRefusal(from);
+        const next = held.current;
+        held.current = null;
+        if (next !== null) {
+          sendReorder(next.from, next.order);
+          return;
+        }
+        sending.current = false;
+        afterWrite();
+      },
+      (err: unknown) => {
+        sending.current = false;
+        held.current = null;
+        setMoved(null);
+        recordRefusal(from, err, () => {
+          issueReorder(from, order);
+        });
+      },
+    );
+  };
+
+  const issueReorder = (from: string, order: string[]) => {
+    if (sending.current) {
+      held.current = { from, order };
+      return;
+    }
+    sendReorder(from, order);
+  };
+
   const commitMove = (from: string, onto: string) => {
     setDragging(null);
     setOver(null);
@@ -339,19 +403,12 @@ export function LayerPanel({
     if (order === null) {
       return;
     }
-    const send = () => {
-      reorderLayers(order).then(
-        () => {
-          clearRefusal(from);
-          setOutcome(announced(movedNote(rows, order, from)));
-          afterWrite();
-        },
-        (err: unknown) => {
-          recordRefusal(from, err, send);
-        },
-      );
-    };
-    send();
+    // The move is drawn and announced from the press rather than from the
+    // response, so a press made while a request is open reports where it put
+    // the row instead of standing on the previous press's confirmation.
+    setMoved(reordered(rows, order).map((row) => row.ID));
+    setOutcome(announced(movedNote(rows, order, from)));
+    issueReorder(from, order);
   };
 
   /** moveBy walks one layer a step through its own class block. It is the
@@ -686,6 +743,35 @@ async function listOrdered(): Promise<LayerRecord[]> {
     .filter((layer) => layer.UserDefined === true)
     .sort(byOrder);
   return [...admin, ...user];
+}
+
+/** reordered returns the whole table with one class block rearranged into
+ * `order`, which is the table the panel shows the moment a reorder is
+ * committed. The block is a contiguous run, so every row the order names
+ * takes a slot the block already occupied and no row outside it moves. */
+function reordered(rows: LayerRecord[], order: string[]): LayerRecord[] {
+  const block = order
+    .map((id) => rows.find((row) => row.ID === id))
+    .filter((row): row is LayerRecord => row !== undefined);
+  let at = 0;
+  return rows.map((row) => (order.includes(row.ID) ? block[at++] : row));
+}
+
+/** inMovedOrder renders the stored rows in the order the panel has committed
+ * but the registry has not confirmed yet. A moved order naming a different
+ * set of layers than the list read holds is a list that moved under it, so
+ * the read wins and the stored order is shown. */
+function inMovedOrder(
+  rows: LayerRecord[],
+  moved: string[] | null,
+): LayerRecord[] {
+  if (moved === null || moved.length !== rows.length) {
+    return rows;
+  }
+  const shown = moved
+    .map((id) => rows.find((row) => row.ID === id))
+    .filter((row): row is LayerRecord => row !== undefined);
+  return shown.length === rows.length ? shown : rows;
 }
 
 /** blockOf returns the contiguous run of rows a layer shares its class with,
