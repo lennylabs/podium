@@ -8700,6 +8700,58 @@ describe("the layer write flows", () => {
     expect(document.activeElement).toBe(items[1]);
   });
 
+  // The menu is drawn at the end of the document, so a Tab from inside it
+  // continues from the end of the page rather than from the row it belongs
+  // to. Focus landed on the skip link at the top of the document, or on the
+  // document body with the menu left open on screen, because a Tab off the
+  // end of the popup fires no focusin for the dismissal to read. jsdom moves
+  // no focus on Tab, so the case reads what the menu does with the key: it
+  // hands focus back to its trigger, it closes, and it leaves the key to the
+  // browser, whose own Tab carries on from the trigger's place in the row.
+  it("closes the row actions on Tab and hands focus back to the trigger", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const trigger = screen.getByRole("button", {
+      name: "More actions for alice-personal",
+    });
+
+    openRowActions();
+    const menu = screen.getByRole("menu", {
+      name: "More actions for alice-personal",
+    });
+    expect(document.activeElement).toBe(
+      within(menu).getAllByRole("menuitem")[0],
+    );
+
+    // fireEvent answers false for a key the handler took for itself, and the
+    // browser's Tab is what moves focus on from the trigger.
+    expect(fireEvent.keyDown(menu, { key: "Tab" })).toBe(true);
+    expect(document.activeElement).toBe(trigger);
+    await waitFor(() => {
+      expect(document.querySelectorAll(".row-menu").length).toBe(0);
+    });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+
+    // Shift+Tab leaves the same way, so the reader walking backwards out of
+    // the menu resumes at the control before the trigger.
+    openRowActions();
+    const reopened = screen.getByRole("menu", {
+      name: "More actions for alice-personal",
+    });
+    expect(fireEvent.keyDown(reopened, { key: "Tab", shiftKey: true })).toBe(
+      true,
+    );
+    expect(document.activeElement).toBe(trigger);
+    await waitFor(() => {
+      expect(document.querySelectorAll(".row-menu").length).toBe(0);
+    });
+  });
+
   // The menu overlays the table rather than taking space in it. Drawn in the
   // flow of the row's fixed-width actions cell it stretched that row to the
   // height of the menu, emptied every other cell in the row over that height,

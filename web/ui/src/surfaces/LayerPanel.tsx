@@ -1148,6 +1148,9 @@ function LayerRow({
             menuRef={menu}
             anchor={overflow}
             label={`More actions for ${layer.ID}`}
+            onDismiss={() => {
+              setOverflowOpen(false);
+            }}
             items={[
               {
                 label: "Edit",
@@ -1304,11 +1307,16 @@ function RowMenu({
   anchor,
   label,
   items,
+  onDismiss,
 }: {
   menuRef: RefObject<HTMLDivElement | null>;
   anchor: RefObject<HTMLElement | null>;
   label: string;
   items: { label: string; disabled: boolean; onSelect: () => void }[];
+  /** onDismiss closes the menu without taking focus anywhere, which is what a
+   * Tab out of it needs: the menu hands focus back to its trigger and the
+   * browser's own Tab carries on from there. */
+  onDismiss: () => void;
 }) {
   const [active, setActive] = useState(0);
   const placement = useAnchoredPlacement(anchor);
@@ -1321,7 +1329,20 @@ function RowMenu({
     focusItem(menuRef.current, 0);
   }, [menuRef]);
 
-  const onArrow = (event: KeyboardEvent<HTMLDivElement>) => {
+  const onKey = (event: KeyboardEvent<HTMLDivElement>) => {
+    // The menu is drawn at the end of the document, so a Tab from inside it
+    // continues from the end of the page rather than from the row it belongs
+    // to: focus landed on the skip link at the top of the document, or on the
+    // document body with the menu still open, because a Tab off the end of
+    // the portal fires no focusin for the dismissal to read. Focus goes back
+    // to the trigger and the menu closes, and the keypress is left to the
+    // browser, whose own Tab then moves on from the trigger's place in the
+    // row.
+    if (event.key === "Tab") {
+      anchor.current?.focus();
+      onDismiss();
+      return;
+    }
     let next = active;
     switch (event.key) {
       case "ArrowDown":
@@ -1353,7 +1374,7 @@ function RowMenu({
       role="menu"
       aria-label={label}
       style={placement}
-      onKeyDown={onArrow}
+      onKeyDown={onKey}
     >
       {items.map((item, index) => (
         <button
