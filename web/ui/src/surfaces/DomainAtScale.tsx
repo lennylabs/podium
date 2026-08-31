@@ -9,6 +9,7 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 
 import type { ArtifactDescriptor, DomainDescriptor } from "../api";
+import { ArtifactRow } from "../components/ArtifactRow";
 import {
   EmptyState,
   Magnifier,
@@ -453,11 +454,18 @@ export function ArtifactTable({
             <span className="label">Curated by the domain author</span>
             <span className="mono">{curated.length}</span>
           </div>
-          <ArtifactRows
-            rows={curated}
-            scope={scope}
-            region="Curated artifacts"
-          />
+          {/* The picks are drawn as listing rows rather than as a second
+              table. A table of their own brings its own column labels, so an
+              identical header row appeared twice inside one listing with only
+              the picks between them and the listing read as a table that had
+              broken in half. They sit above the header the table below them
+              carries, in the row the domain browser and the search surface
+              already draw, and the block's own head is what names them. */}
+          <ul className="artifact-list" aria-label="Curated artifacts">
+            {curated.map((artifact) => (
+              <ArtifactRow key={artifact.id} artifact={artifact} titled />
+            ))}
+          </ul>
         </div>
       )}
       {/* The rest carries no heading of its own. The picks above it are the

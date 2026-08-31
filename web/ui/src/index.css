@@ -4647,7 +4647,9 @@ label:has(> input:disabled) {
   opacity: 0.7;
 }
 
-.curated-block .data-table {
+/* The listing joins the head above it as one box: the head gives up its
+   bottom border and the rows give up their top corners. */
+.curated-block .artifact-list {
   border-radius: 0 0 9px 9px;
 }
 

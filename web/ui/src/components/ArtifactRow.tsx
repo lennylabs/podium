@@ -71,10 +71,16 @@ export function ArtifactRow({
   artifact,
   ranked = false,
   topScore = 0,
+  titled = false,
 }: {
   artifact: ArtifactDescriptor;
   ranked?: boolean;
   topScore?: number;
+  /** titled marks a row that already stands under a head naming what it is.
+   * The at-scale surface groups the domain author's picks under such a head,
+   * and a curated marker on every row under it states the head again once per
+   * row. */
+  titled?: boolean;
 }) {
   const version = artifact.version !== undefined && artifact.version !== '' ? artifact.version : '';
   const scored = ranked && topScore > 0;
@@ -130,7 +136,7 @@ export function ArtifactRow({
               the response does not report. The row therefore distinguishes
               what the response distinguishes, which is featured against the
               rest. */}
-          {artifact.source === 'featured' && <CuratedBadge />}
+          {artifact.source === 'featured' && !titled && <CuratedBadge />}
           <FoldedFromBadge foldedFrom={artifact.folded_from} />
           {scored && filled === 0 && <span className="quiet label">matched by meaning</span>}
         </div>
