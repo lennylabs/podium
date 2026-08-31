@@ -8193,11 +8193,20 @@ describe("the layer panel", () => {
     goTo("#/layers");
     render(<App />);
     const panel = within(await screen.findByLabelText("Layer panel"));
-    expect(
-      panel.getByText(/Sources the catalog is composed from/).textContent,
-    ).toContain(
-      "When two layers carry the same artifact ID, the higher precedence wins.",
+    // Spec: §4.6 ("Merge semantics for collisions"). The lead has to state
+    // that a same-ID collision is rejected unless the higher-precedence copy
+    // declares extends:. Copy promising that the higher precedence simply
+    // wins describes shadowing the registry refuses.
+    const lead = panel.getByText(
+      /Sources the catalog is composed from/,
+    ).textContent;
+    expect(lead).toContain(
+      "Two layers cannot both carry the same artifact ID: the collision is " +
+        "rejected at ingest unless the higher-precedence artifact declares " +
+        "extends:, and the order below decides which artifact that overlay " +
+        "merges onto.",
     );
+    expect(lead).not.toContain("the higher precedence wins");
     // The qualifier sits on the label's own line rather than in a paragraph
     // below the label.
     const label = panel.getByText(
