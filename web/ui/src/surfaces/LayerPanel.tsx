@@ -381,6 +381,13 @@ export function LayerPanel({
         sending.current = false;
         held.current = null;
         setMoved(null);
+        // The move was announced from the press, and the refusal returns the
+        // rows to the order the registry holds, so the announcement is
+        // replaced rather than left standing: a reader who was told where the
+        // layer landed is otherwise left with a statement the rows beside it
+        // contradict. The row draws the refusal itself, so the replacement is
+        // announced alone.
+        setOutcome(announced(refusedMoveNote(from)));
         recordRefusal(from, err, () => {
           issueReorder(from, order);
         });
@@ -862,6 +869,15 @@ function movedNote(
   const at = order.indexOf(id);
   const position = offset + at + 1;
   return `${id} moved to order ${String(position)} of ${String(rows.length)}.`;
+}
+
+/** refusedMoveNote states that a reorder the registry refused moved nothing.
+ * The press announced where it put the layer before the request was issued,
+ * and the refusal puts the rows back, so the live region has to retract that
+ * statement rather than hold it beside a row order that disagrees with it.
+ * The refusal's own reason is drawn on the row it was attempted on. */
+function refusedMoveNote(id: string): string {
+  return `${id} was not moved: the registry refused the reorder.`;
 }
 
 /** blockEdgeNote states why an arrow key moved nothing. A row at either end

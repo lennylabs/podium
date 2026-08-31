@@ -11343,6 +11343,54 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The move is announced from the press, before the registry has taken it.
+  // A refusal puts the rows back, so leaving that announcement standing tells
+  // a reader the layer moved while the rows beside it say it did not.
+  // Spec: §13.10
+  it("retracts the move announcement where the registry refuses the reorder", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
+        },
+      },
+      "/v1/layers/reorder": {
+        status: 403,
+        body: {
+          code: "auth.csrf_invalid",
+          message:
+            "The request was refused because it did not pass the browser-origin check.",
+          retryable: false,
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.keyDown(
+      screen.getByLabelText(moveHandleLabel("alice-personal")),
+      { key: "ArrowDown" },
+    );
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeTruthy();
+    });
+    // The rows are back in the order the registry holds, and the live region
+    // says so rather than holding the outcome the press announced.
+    expect(
+      within(screen.getByLabelText("Layers"))
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => row.querySelector(".layer-name")?.textContent)
+        .filter((name) => name !== undefined),
+    ).toEqual(["company", "alice-personal", "alice-scratch", "bob-personal"]);
+    const region = screen.getByTestId("panel-announcement");
+    expect(region.textContent).toBe(
+      "alice-personal was not moved: the registry refused the reorder.",
+    );
+    expect(region.className).toBe("assistive-only");
+  });
+
   // A step off the end of the block names no move §4.6 would compose, so the
   // key does what a drop across the class boundary does and sends nothing.
   it("sends no reorder where an arrow key steps off the end of the block", async () => {
