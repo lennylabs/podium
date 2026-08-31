@@ -185,7 +185,13 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
         // not: it reports what the fold left out, which is the one thing this
         // screen would otherwise fail to state.
         tailList
-      ) : compact && direct.length > 0 ? (
+      ) : compact ? (
+        // A domain past the threshold keeps the table when it holds nothing
+        // directly: the table states its own absence under the column labels,
+        // and swapping the whole component for a centred card left the reader
+        // on a surface that no longer resembled the one the tiles above it
+        // belong to.
+        //
         // The table filters the rows the response carried, so it is told
         // whether those rows are the whole domain: a filter over a trimmed
         // listing continues into the scoped search rather than reporting an

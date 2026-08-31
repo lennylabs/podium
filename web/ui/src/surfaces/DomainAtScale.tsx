@@ -341,6 +341,37 @@ export function ArtifactTable({
     column,
   );
 
+  // A domain past the subdomain threshold that holds nothing directly is
+  // still the at-scale surface, so it keeps the table it would have drawn and
+  // states the absence inside it. Substituting a centred card for the whole
+  // component drops the column labels, which are what tell the reader what
+  // the listing would have carried, and the region stops resembling the one
+  // the tiles above it belong to (§13.10).
+  //
+  // The controls stand down, because each of them acts on rows: a filter
+  // field, a type chip row carrying only All, and a sort over nothing are
+  // offers the surface cannot honour.
+  if (artifacts.length === 0) {
+    return (
+      <div className="artifact-table">
+        <div className="section-head">
+          <h2 className="label">Artifacts</h2>
+        </div>
+        <ArtifactRows
+          rows={[]}
+          scope={scope}
+          region="Artifacts in this domain"
+          empty={
+            <EmptyState title="No artifacts in this domain">
+              It exists to hold subdomains. Open one from the list above.
+            </EmptyState>
+          }
+        />
+        {tail}
+      </div>
+    );
+  }
+
   return (
     <div className="artifact-table">
       <div className="section-head">
@@ -568,12 +599,16 @@ function ArtifactRows({
   rows,
   scope,
   region,
+  empty,
 }: {
   rows: ArtifactDescriptor[];
   /** scope is the domain the page stands on, which the identifier column
    * states each row relative to. */
   scope: string;
   region: string;
+  /** empty is what the body carries in place of rows, drawn under the column
+   * labels so the header still explains the list it stands over. */
+  empty?: ReactNode;
 }) {
   return (
     <div
@@ -593,6 +628,13 @@ function ArtifactRows({
           </tr>
         </thead>
         <tbody>
+          {rows.length === 0 && empty !== undefined && (
+            <tr>
+              <td className="table-empty" colSpan={5}>
+                {empty}
+              </td>
+            </tr>
+          )}
           {rows.map((artifact) => (
             <tr key={artifact.id}>
               {/* The cell states the path under the domain the page is on,

@@ -4349,6 +4349,21 @@ label:has(> input:disabled) {
   min-width: 860px;
 }
 
+/* An empty at-scale listing keeps its column labels and states the absence in
+   the body under them, so the table is what frames the message. The page
+   preset's own card therefore stands down here: a bordered card drawn inside
+   a bordered table reads as a second surface nested in the first. */
+.data-table td.table-empty {
+  padding: 0;
+}
+
+.data-table td.table-empty .empty-page {
+  padding: 30px 20px;
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+
 /* The at-scale subdomain treatment: count tiles in a grid, or one per row. */
 .tile-grid,
 .tile-list {

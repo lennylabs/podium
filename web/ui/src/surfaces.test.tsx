@@ -14008,6 +14008,50 @@ describe("the trimmed listing", () => {
     ).toBeTruthy();
   });
 
+  // A domain past the threshold that holds nothing directly keeps the table
+  // it would have drawn, and states the absence under the column labels. The
+  // labels are what say what the listing would have carried, so dropping the
+  // table for a card leaves the reader with no account of the list and takes
+  // the surface off the at-scale treatment the tiles above it belong to.
+  //
+  // Spec: §13.10
+  it("keeps the at-scale table over an empty direct listing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "support",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `support/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: [],
+        },
+      },
+    });
+    goTo("#/domain/support");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const table = within(browser).getByLabelText("Artifacts");
+    expect(
+      [...table.querySelectorAll("th.column-label")].map((th) => th.textContent),
+    ).toEqual(["Artifact", "Type", "Version", "Tags", "Description"]);
+    // The absence is stated inside the table body rather than in a card that
+    // replaced it.
+    const message = within(table).getByText("No artifacts in this domain");
+    expect(message.closest("td.table-empty")).not.toBeNull();
+    expect(
+      within(table).getByText(
+        "It exists to hold subdomains. Open one from the list above.",
+      ),
+    ).toBeTruthy();
+    // The controls act on rows, and there are none.
+    expect(
+      within(browser).queryByLabelText("Filter in this domain"),
+    ).toBeNull();
+    expect(within(browser).queryByLabelText("Sort artifacts")).toBeNull();
+  });
+
   // The at-scale table states each identifier under the domain the page is
   // on. The heading names that domain already, so a cell carrying the whole
   // identifier spends the column on a prefix every row shares (§13.10).
