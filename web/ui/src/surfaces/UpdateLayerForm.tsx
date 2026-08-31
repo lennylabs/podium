@@ -42,6 +42,14 @@ export function UpdateLayerForm({
   // never happened. The field beside them names the members to add.
   const grantedGroups = layer.Groups ?? [];
   const grantedUsers = layer.Users ?? [];
+  // An axis the layer already grants is state rather than a choice, and it is
+  // drawn as such. Offered as a checkbox it was operable in appearance and
+  // inert in fact: the click changed nothing, the form still answered "Layer
+  // updated", and the row still carried the axis.
+  const grantedAxes = [
+    layer.Public === true ? "public" : "",
+    layer.Organization === true ? "organization" : "",
+  ].filter((axis) => axis !== "");
   const [groups, setGroups] = useState("");
   const [users, setUsers] = useState("");
   const [result, setResult] = useState<LayerSecretResult | null>(null);
@@ -191,28 +199,31 @@ export function UpdateLayerForm({
           {editableVisibility ? (
             <fieldset className="field">
               <legend className="label">Visibility</legend>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={isPublic}
-                  disabled={layer.Public === true}
-                  onChange={(event) => {
-                    setPublic(event.target.checked);
-                  }}
-                />
-                Public
-              </label>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={organization}
-                  disabled={layer.Organization === true}
-                  onChange={(event) => {
-                    setOrganization(event.target.checked);
-                  }}
-                />
-                Organization
-              </label>
+              <GrantedAxes axes={grantedAxes} />
+              {layer.Public !== true && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={isPublic}
+                    onChange={(event) => {
+                      setPublic(event.target.checked);
+                    }}
+                  />
+                  Public
+                </label>
+              )}
+              {layer.Organization !== true && (
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={organization}
+                    onChange={(event) => {
+                      setOrganization(event.target.checked);
+                    }}
+                  />
+                  Organization
+                </label>
+              )}
               <GrantedMembers label="Groups granted" members={grantedGroups} />
               <label className="field">
                 <span className="label">
@@ -239,14 +250,6 @@ export function UpdateLayerForm({
                   }}
                 />
               </label>
-              {/* The endpoint grants on each axis and revokes on none, so a grant
-                already stored cannot be taken back here and its control says so
-                rather than offering a change the registry would answer success
-                to without making. */}
-              <p className="quiet">
-                An axis already granted stays granted. Unregister the layer to
-                withdraw it.
-              </p>
             </fieldset>
           ) : (
             <div className="field">
@@ -310,6 +313,38 @@ export function UpdateLayerForm({
         </div>
       </form>
     </Modal>
+  );
+}
+
+/** GrantedAxes displays the axes the layer already grants, in the fixed order
+ * the panel's own visibility column uses, with the sentence that says why they
+ * cannot be taken back beside them. The endpoint grants on each axis and
+ * withdraws on none, so an axis already stored is not a control here: it is
+ * stated where the reader looking for the axis lands, at the top of the
+ * fieldset, rather than under the fields below it where the dialog's default
+ * scroll position leaves it out of view.
+ *
+ * Spec: §4.6
+ */
+function GrantedAxes({ axes }: { axes: readonly string[] }) {
+  if (axes.length === 0) {
+    return null;
+  }
+  return (
+    <div className="field">
+      <span className="label">Axes granted</span>
+      <span className="visibility-markers" aria-label="Axes granted">
+        {axes.map((axis) => (
+          <Badge key={axis} tone="grant">
+            {axis}
+          </Badge>
+        ))}
+      </span>
+      <p className="quiet">
+        An axis already granted stays granted. Unregister the layer to withdraw
+        it.
+      </p>
+    </div>
   );
 }
 

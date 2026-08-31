@@ -196,7 +196,8 @@ function factRows(facts: HTMLElement): (string | null | undefined)[][] {
 }
 
 function factValue(row: Element): string {
-  const value = row.querySelector("dd")?.cloneNode(true) as HTMLElement | undefined;
+  const value = row.querySelector("dd")?.cloneNode(true) as
+    HTMLElement | undefined;
   if (value === undefined) {
     return "";
   }
@@ -572,7 +573,9 @@ describe("the application shell", () => {
     const reads = requests
       .filter((r) => r.url.startsWith("/v1/load_domain"))
       .map((r) => r.url);
-    expect(reads).toContain("/v1/load_domain?path=platform%2Fci%2Flint&depth=2");
+    expect(reads).toContain(
+      "/v1/load_domain?path=platform%2Fci%2Flint&depth=2",
+    );
     expect([...new Set(reads)]).toEqual(reads);
   });
 
@@ -836,9 +839,9 @@ describe("the application shell", () => {
     expect(more.getAttribute("aria-expanded")).toBe("true");
     // The row folds the level back, so the reader who opened it can close it
     // from where the keyboard already is.
-    expect(within(tree).getByRole("button", { name: "\u2212 show fewer" })).toBe(
-      more,
-    );
+    expect(
+      within(tree).getByRole("button", { name: "\u2212 show fewer" }),
+    ).toBe(more);
     fireEvent.click(more);
     expect(within(tree).queryByText("sub10")).toBeNull();
     expect(document.activeElement).toBe(more);
@@ -1026,7 +1029,9 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    fireEvent.click(within(tree).getByRole("button", { name: "Expand finance" }));
+    fireEvent.click(
+      within(tree).getByRole("button", { name: "Expand finance" }),
+    );
     const toggle = within(tree).getByRole("button", { name: "Expand ap" });
     toggle.focus();
     fireEvent.click(toggle);
@@ -1053,9 +1058,9 @@ describe("the application shell", () => {
     // every re-render the tree takes for a layer write, a reingest, or a
     // catalog refresh, competing with the announcements the surfaces publish.
     expect(within(tree).queryByTestId("empty-domain")).toBeNull();
-    expect(
-      tree.querySelectorAll("[role='status'], [aria-live]"),
-    ).toHaveLength(0);
+    expect(tree.querySelectorAll("[role='status'], [aria-live]")).toHaveLength(
+      0,
+    );
     expect(within(tree).queryByText("no subdomains")).toBeNull();
     expect(within(tree).queryByText("ap has no subdomains")).toBeNull();
     expect(
@@ -1094,7 +1099,9 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    fireEvent.click(within(tree).getByRole("button", { name: "Expand finance" }));
+    fireEvent.click(
+      within(tree).getByRole("button", { name: "Expand finance" }),
+    );
     fireEvent.click(within(tree).getByRole("button", { name: "Expand ap" }));
     await waitFor(() => {
       expect(
@@ -1838,7 +1845,9 @@ describe("the domain browser", () => {
     const lifted = screen.getByText("Lifted from sparse subdomains");
     const head = lifted.parentElement;
     expect(head?.className).toContain("folded-head");
-    expect(within(head as HTMLElement).getByText("Not direct children")).toBeTruthy();
+    expect(
+      within(head as HTMLElement).getByText("Not direct children"),
+    ).toBeTruthy();
     const group = head?.parentElement;
     expect(group?.className).toContain("folded");
     expect(
@@ -2334,9 +2343,9 @@ describe("the domain browser", () => {
     const title = within(card).getByRole("link");
     const description = within(card).getByText("Platform engineering.");
     const counts = within(card).getByText("1 subdomain");
-    expect(parseFloat(window.getComputedStyle(description).fontSize)).toBeLessThan(
-      parseFloat(window.getComputedStyle(title).fontSize),
-    );
+    expect(
+      parseFloat(window.getComputedStyle(description).fontSize),
+    ).toBeLessThan(parseFloat(window.getComputedStyle(title).fontSize));
     expect(window.getComputedStyle(description).color).not.toBe(
       window.getComputedStyle(counts.parentElement as HTMLElement).color,
     );
@@ -2659,7 +2668,9 @@ describe("the domain browser", () => {
     // below the heading is scanned by.
     for (const count of ["2 ARTIFACTS", "1 SUBDOMAIN"]) {
       expect(
-        within(head as HTMLElement).getByText(count).className.split(" "),
+        within(head as HTMLElement)
+          .getByText(count)
+          .className.split(" "),
       ).toContain("badge-soft");
     }
   });
@@ -2788,7 +2799,9 @@ describe("the domain browser", () => {
     expect(within(browser).queryByText("No artifacts here")).toBeNull();
     // The header count and the group it refers to are what the screen holds.
     expect(within(browser).getByText("2 ARTIFACTS")).toBeTruthy();
-    expect(within(browser).getByText("Lifted from sparse subdomains")).toBeTruthy();
+    expect(
+      within(browser).getByText("Lifted from sparse subdomains"),
+    ).toBeTruthy();
     expect(within(browser).getByText("finance/ap/pay-invoice")).toBeTruthy();
   });
 });
@@ -3479,9 +3492,7 @@ describe("search", () => {
     expect(control.getAttribute("aria-disabled")).toBe("true");
     expect(screen.getAllByTestId("relevance-bars").length).toBe(10);
     fireEvent.click(control);
-    expect(
-      requests.filter((r) => r.url.includes("top_k=50")).length,
-    ).toBe(0);
+    expect(requests.filter((r) => r.url.includes("top_k=50")).length).toBe(0);
     // The results land on the same control, which is now live again and asks
     // for the next page.
     await waitFor(() => {
@@ -3586,7 +3597,9 @@ describe("search", () => {
     });
     goTo("#/search/");
     render(<App />);
-    expect(await screen.findByRole("link", { name: "eng/deploy" })).toBeTruthy();
+    expect(
+      await screen.findByRole("link", { name: "eng/deploy" }),
+    ).toBeTruthy();
     expect(screen.queryByText("matched by meaning")).toBeNull();
     expect(screen.queryAllByTestId("relevance-bars")).toEqual([]);
     expect(screen.queryByTestId("artifact-row-relevance")).toBeNull();
@@ -3658,9 +3671,7 @@ describe("search", () => {
     });
     goTo("#/search/nothing");
     render(<App />);
-    expect(
-      await screen.findByText("Widen the query."),
-    ).toBeTruthy();
+    expect(await screen.findByText("Widen the query.")).toBeTruthy();
   });
 
   // Spec: §13.10
@@ -3678,17 +3689,13 @@ describe("search", () => {
       "No query can match until a layer is registered.",
     );
     expect(empty).toBeTruthy();
-    expect(
-      screen.queryByText("Widen the query."),
-    ).toBeNull();
+    expect(screen.queryByText("Widen the query.")).toBeNull();
     // Typing a query makes the empty result the answer to that query, so the
     // no-match remedy returns.
     fireEvent.change(screen.getByLabelText("Search artifacts"), {
       target: { value: "deploy" },
     });
-    expect(
-      await screen.findByText("Widen the query."),
-    ).toBeTruthy();
+    expect(await screen.findByText("Widen the query.")).toBeTruthy();
   });
 
   // Spec: §13.10 — the palette and this surface answer the same registry, so
@@ -3708,11 +3715,15 @@ describe("search", () => {
     const empty = (
       await screen.findByText("No query can match until a layer is registered.")
     ).closest(".empty") as HTMLElement;
-    expect(within(empty).getByText("The catalog holds no artifacts")).toBeTruthy();
+    expect(
+      within(empty).getByText("The catalog holds no artifacts"),
+    ).toBeTruthy();
     // The arm carries the way out rather than a remedy the reader cannot act
     // on, and the query advice is gone.
     expect(
-      within(empty).getByRole("link", { name: "Open the layer panel" }).getAttribute("href"),
+      within(empty)
+        .getByRole("link", { name: "Open the layer panel" })
+        .getAttribute("href"),
     ).toBe(layersHref);
     expect(screen.queryByText("Widen the query.")).toBeNull();
     // A reader who cannot see the arm is told the same thing.
@@ -3747,18 +3758,14 @@ describe("search", () => {
     });
     goTo("#/search/");
     render(<App />);
-    await screen.findByText(
-      "No query can match until a layer is registered.",
-    );
+    await screen.findByText("No query can match until a layer is registered.");
     // A filter applied with no query text is a request the reader issued, and
     // the filter is a control the row carries, so the remedy names it. The
     // census the filtered browse issues is refused here, and a catalog the
     // caller cannot read is no evidence of an empty registry.
     selectFilter("type", "skill");
     expect(
-      await screen.findByText(
-        "Widen the query or clear a filter.",
-      ),
+      await screen.findByText("Widen the query or clear a filter."),
     ).toBeTruthy();
   });
 
@@ -3870,9 +3877,7 @@ describe("search", () => {
     // sentence names it.
     selectFilter("type", "skill");
     expect(
-      await screen.findByText(
-        "Widen the query or clear a filter.",
-      ),
+      await screen.findByText("Widen the query or clear a filter."),
     ).toBeTruthy();
   });
 
@@ -4343,18 +4348,18 @@ describe("the artifact viewer", () => {
       "extends",
     );
     expect(screen.queryByText(/shown as authored/)).toBeNull();
-    expect(
-      screen.getByTestId("frontmatter-served-note").textContent,
-    ).toContain("(key withheld)");
+    expect(screen.getByTestId("frontmatter-served-note").textContent).toContain(
+      "(key withheld)",
+    );
     // The note stands in the raw view too, which is the half that reads as
     // the authored file when nothing accounts for the removal.
     fireEvent.click(screen.getByRole("button", { name: "Raw YAML" }));
     expect(screen.getByTestId("raw-frontmatter").textContent).not.toContain(
       "extends",
     );
-    expect(
-      screen.getByTestId("frontmatter-served-note").textContent,
-    ).toContain("(key withheld)");
+    expect(screen.getByTestId("frontmatter-served-note").textContent).toContain(
+      "(key withheld)",
+    );
   });
 
   // Spec: §4.6 — when the caller cannot see the layer that contributes a
@@ -5245,10 +5250,12 @@ describe("the artifact viewer", () => {
     const notice = await screen.findByTestId("older-version");
     expect(notice.textContent).toContain("Viewing v1.0.0");
     expect(screen.getByRole("button", { name: "Go to v2.3.0" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /^Version v1.0.0/ })).toBeTruthy();
     expect(
-      screen.getByLabelText("Artifact viewer").textContent,
-    ).toContain("Older review");
+      screen.getByRole("button", { name: /^Version v1.0.0/ }),
+    ).toBeTruthy();
+    expect(screen.getByLabelText("Artifact viewer").textContent).toContain(
+      "Older review",
+    );
   });
 
   // The registry keeps serving a deprecated artifact and reports the lifecycle
@@ -5783,7 +5790,9 @@ describe("the artifact viewer", () => {
     goTo("#/artifact/eng%2Fxss");
     expect(await screen.findByRole("heading", { name: "xss" })).toBeTruthy();
     expect(
-      screen.getByRole("tab", { name: "Rendered" }).getAttribute("aria-selected"),
+      screen
+        .getByRole("tab", { name: "Rendered" })
+        .getAttribute("aria-selected"),
     ).toBe("true");
     expect(
       screen
@@ -7892,9 +7901,13 @@ describe("read-only mode", () => {
     await screen.findByTestId("read-only-banner");
     expect(screen.queryByText(/drag or press the arrow keys/)).toBeNull();
     expect(
-      screen.getByText(/reordering is unavailable while the registry is read-only/i),
+      screen.getByText(
+        /reordering is unavailable while the registry is read-only/i,
+      ),
     ).toBeTruthy();
-    expect(screen.queryByText(/Reordering takes effect on the next read/)).toBeNull();
+    expect(
+      screen.queryByText(/Reordering takes effect on the next read/),
+    ).toBeNull();
   });
 
   it("instructs the reorder where the registry serves writes", async () => {
@@ -8319,9 +8332,7 @@ describe("the layer write flows", () => {
     // Stopping the wait closes the dialog and nothing else: the request is
     // already with the registry, so the row still reports it is running and
     // its trigger stays held against a second pipeline over one source.
-    fireEvent.click(
-      within(wait).getByRole("button", { name: "Stop waiting" }),
-    );
+    fireEvent.click(within(wait).getByRole("button", { name: "Stop waiting" }));
     await waitFor(() => {
       expect(
         screen.queryByRole("dialog", { name: "Reingesting alice-personal" }),
@@ -8431,9 +8442,9 @@ describe("the layer write flows", () => {
     expect(shadowed?.querySelector("dd")?.textContent).toBe("—");
     // The pair takes the same mono key the visibility pair above it takes, so
     // the two read as one list rather than as a pair and an afterthought.
-    expect(
-      shadowed?.querySelector("dt")?.className.split(" "),
-    ).toContain("mono");
+    expect(shadowed?.querySelector("dt")?.className.split(" ")).toContain(
+      "mono",
+    );
   });
 
   // How many artifacts leave is the magnitude the reader decides against, and
@@ -9218,9 +9229,9 @@ describe("the layer write flows", () => {
     // The hold stands on the ID field, which reports itself invalid once the
     // reader has left it.
     fireEvent.blur(screen.getByLabelText("Layer ID"));
-    expect(
-      screen.getByLabelText("Layer ID").getAttribute("aria-invalid"),
-    ).toBe("true");
+    expect(screen.getByLabelText("Layer ID").getAttribute("aria-invalid")).toBe(
+      "true",
+    );
     // An unused ID releases the hold.
     fireEvent.change(screen.getByLabelText("Layer ID"), {
       target: { value: "company-archive" },
@@ -9751,9 +9762,9 @@ describe("the layer write flows", () => {
     // row read as two competing headings instead of a label and a count.
     const head = screen.getByTestId("group-picker-count");
     expect(head.className).toBe("picker-count");
-    expect(head.closest(".picker-head")?.querySelector(".label")?.textContent).toBe(
-      "Groups already granted",
-    );
+    expect(
+      head.closest(".picker-head")?.querySelector(".label")?.textContent,
+    ).toBe("Groups already granted");
     expect(
       within(picker)
         .getAllByRole("button")
@@ -10050,7 +10061,9 @@ describe("the layer write flows", () => {
     );
     expect(block.contains(url)).toBe(false);
     expect(
-      screen.getByText("Stored on the layer. You can look this up again any time."),
+      screen.getByText(
+        "Stored on the layer. You can look this up again any time.",
+      ),
     ).toBeTruthy();
     // The badge names the secret's field rather than heading both fields.
     const secretRow = within(block as HTMLElement)
@@ -10148,7 +10161,9 @@ describe("the layer write flows", () => {
     expect(done.className).toContain("primary");
     expect(foot!.contains(ack)).toBe(false);
     expect(
-      within(foot!).getByText("You can rotate the secret later if you need to."),
+      within(foot!).getByText(
+        "You can rotate the secret later if you need to.",
+      ),
     ).toBeTruthy();
     // The footer sits below the dialog's scrolling body rather than inside it.
     expect(
@@ -10187,7 +10202,9 @@ describe("the layer write flows", () => {
     });
     fireEvent.submit(screen.getByTestId("register-form"));
     await screen.findByLabelText("Webhook secret");
-    expect(screen.getByText("Layer alice-personal is registered.")).toBeTruthy();
+    expect(
+      screen.getByText("Layer alice-personal is registered."),
+    ).toBeTruthy();
   });
 
   // A rotation reveals the fresh secret on the same terms, so it states its
@@ -10303,6 +10320,75 @@ describe("the layer write flows", () => {
     expect(sent.users).toEqual(["alice@acme.com", "bob@acme.com"]);
   });
 
+  // The endpoint grants on each visibility axis and withdraws on none, so the
+  // Edit dialog states an axis the layer already grants instead of drawing a
+  // checkbox for it. A checkbox there was operable in appearance and inert in
+  // fact: clicking it changed nothing, saying nothing, and the row still
+  // carried the axis after the patch reported success. The sentence that says
+  // why the axis cannot be taken back sits with the axis, above the fields
+  // below it, so the reader looking for the control reads it.
+  //
+  // Spec: §4.6
+  it("states a granted visibility axis in the Edit dialog rather than drawing an inert checkbox", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "PUT /v1/layers/update": { body: { layer: adminLayer() } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    // The granted axis carries no control at all, and is stated as a marker.
+    expect(within(form).queryByLabelText("Organization")).toBeNull();
+    const granted = within(form).getByLabelText("Axes granted");
+    expect(within(granted).getByText("organization")).toBeTruthy();
+    // The axis the layer does not grant is still offered, and it toggles.
+    const open = within(form).getByLabelText("Public") as HTMLInputElement;
+    expect(open.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(open);
+    expect(open.checked).toBe(true);
+    // The withdrawal sentence stands ahead of the member fields, so it is in
+    // view where the axis is read rather than below the whole fieldset.
+    const note = within(form).getByText(
+      "An axis already granted stays granted. Unregister the layer to withdraw it.",
+    );
+    const field = within(form).getByLabelText(
+      "Group names to add, separated by commas",
+    );
+    expect(
+      note.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  // Registration is where visibility is chosen, and Edit only widens it, so
+  // the note that sends the reader to Edit says which way the change runs.
+  //
+  // Spec: §4.6
+  it("tells the register dialog's reader that Edit widens visibility and withdraws nothing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    // Edit patches the visibility of a tenant-wide layer alone, so the note
+    // that names it is read on that class.
+    fireEvent.change(screen.getByLabelText("Layer class"), {
+      target: { value: "admin" },
+    });
+    expect(
+      screen.getByTestId("visibility-note").querySelector(".note-text")
+        ?.textContent,
+    ).toBe(
+      "Visibility can be widened later from Edit. A grant cannot be withdrawn.",
+    );
+  });
+
   // An outcome that carries no secret closes through the same footer control
   // as the reveal that does. Left with the header's close icon alone, the
   // dialog offers no control the focus move can land on, so it opens on its
@@ -10327,7 +10413,9 @@ describe("the layer write flows", () => {
     });
     fireEvent.click(done);
     await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Layer updated" })).toBe(null);
+      expect(screen.queryByRole("dialog", { name: "Layer updated" })).toBe(
+        null,
+      );
     });
   });
 
@@ -10650,7 +10738,9 @@ describe("the layer write flows", () => {
     expect(screen.queryByTestId("palette")).toBeNull();
     // The dialog still holds the keyboard, so Escape leaves it and nothing
     // else, and the accelerator works again once it is gone.
-    expect((screen.getByLabelText("Layer ID") as HTMLInputElement).value).toBe("alice-per");
+    expect((screen.getByLabelText("Layer ID") as HTMLInputElement).value).toBe(
+      "alice-per",
+    );
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => {
       expect(screen.queryByLabelText("Layer ID")).toBeNull();
@@ -10821,13 +10911,10 @@ describe("the layer write flows", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const form = await screen.findByLabelText("Update company");
     // The endpoint applies a visibility patch on an admin-defined layer, so
-    // the form carries the axes and the patch carries what they name. It
-    // grants on each axis and revokes on none, so a stored grant is displayed
-    // as unavailable rather than offered as a change the registry answers
-    // success to without making.
-    expect(screen.getByLabelText("Organization").hasAttribute("disabled")).toBe(
-      true,
-    );
+    // the form carries the axes it can still grant. It grants on each axis and
+    // revokes on none, so a stored grant is stated rather than offered as a
+    // change the registry answers success to without making.
+    expect(screen.queryByLabelText("Organization")).toBeNull();
     fireEvent.click(screen.getByLabelText("Public"));
     fireEvent.change(
       screen.getByLabelText("Group names to add, separated by commas"),
@@ -11164,9 +11251,7 @@ describe("the layer write flows", () => {
     // values, so the second press is issued once the first returns, and it
     // names where two presses left the row.
     await waitFor(() => {
-      expect(
-        bodies.filter((body) => body.includes("order")).at(-1),
-      ).toBe(
+      expect(bodies.filter((body) => body.includes("order")).at(-1)).toBe(
         JSON.stringify({
           order: ["alice-scratch", "bob-personal", "alice-personal"],
         }),
@@ -11388,9 +11473,9 @@ describe("the layer write flows", () => {
     ).toBeTruthy();
     // The first layer answered, so its row states what it returned.
     await waitFor(() => {
-      expect(screen.getByTestId("reingest-progress-company").textContent).toContain(
-        "3 accepted · 0 rejected",
-      );
+      expect(
+        screen.getByTestId("reingest-progress-company").textContent,
+      ).toContain("3 accepted · 0 rejected");
     });
     expect(
       screen.getByTestId("reingest-progress-security-baseline").textContent,
@@ -12333,7 +12418,8 @@ describe("the layer write flows", () => {
         body: {
           code: "registry.conflict",
           message: "artifact ID eng/deploy already exists in layer acme-shared",
-          suggested_action: "Unregister the layer that carries eng/deploy, then restore.",
+          suggested_action:
+            "Unregister the layer that carries eng/deploy, then restore.",
         },
       },
     });
@@ -12460,9 +12546,7 @@ describe("the layer write flows", () => {
     const clock = surface.querySelector(".erase-clock") as HTMLElement;
     expect(clock.textContent).toContain(localDate(erases));
     expect(clock.textContent).not.toContain(erases.toISOString().slice(0, 10));
-    expect(clock.textContent).not.toContain(
-      `${String(erases.getFullYear())}-`,
-    );
+    expect(clock.textContent).not.toContain(`${String(erases.getFullYear())}-`);
     // The bar is between the date and the count, so the row reads as a clock
     // rather than as a date with a rule under it.
     const cells = Array.from(clock.children);
@@ -12549,7 +12633,9 @@ describe("the layer write flows", () => {
         "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
         "/v1/layers": {
           body: {
-            layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }],
+            layers: [
+              { ...userLayer(), DeletedAt: unregisteredAt.toISOString() },
+            ],
           },
         },
       });
@@ -13169,7 +13255,9 @@ describe("the command palette", () => {
     await screen.findByTestId("palette-heading");
     fireEvent.keyDown(reopened, { key: "Enter" });
     expect(window.location.hash).toBe("#/artifact/platform%2Freview");
-    expect(document.activeElement).toBe(document.getElementById("main-content"));
+    expect(document.activeElement).toBe(
+      document.getElementById("main-content"),
+    );
   });
 
   // The handoff carries the filters the palette parsed rather than the line
@@ -13300,11 +13388,15 @@ describe("the command palette", () => {
     });
     await within(panel).findByText("The registry did not answer this request.");
     expect(
-      within(panel).getByRole("button", { name: "Run it on the search surface" }),
+      within(panel).getByRole("button", {
+        name: "Run it on the search surface",
+      }),
     ).toBeTruthy();
     // The retry of the refused read stays beside it: the two are different
     // recoveries, and the handoff does not replace the retry.
-    expect(within(panel).getByRole("button", { name: "Try again" })).toBeTruthy();
+    expect(
+      within(panel).getByRole("button", { name: "Try again" }),
+    ).toBeTruthy();
     fireEvent.keyDown(panel, { key: "Enter" });
     expect(screen.queryByTestId("palette")).toBeNull();
     expect(window.location.hash).toBe("#/search/deploy");
@@ -13374,9 +13466,7 @@ describe("the command palette", () => {
     fireEvent.change(field, { target: { value: "the" } });
     const plain = await screen.findByText(/Nothing matched \u201cthe\u201d/);
     expect(plain.textContent).toBe("Nothing matched \u201cthe\u201d");
-    expect(
-      within(panel).getByText(/Try fewer words/).textContent,
-    ).toBe(
+    expect(within(panel).getByText(/Try fewer words/).textContent).toBe(
       "Try fewer words, or check the spelling. Search covers artifact names, descriptions, and tags.",
     );
     // The same line with a filter on it gains the advice to drop one.
@@ -13447,7 +13537,9 @@ describe("the command palette", () => {
     // The handoff to the search surface stays beside it: the correction
     // answers a typo, and the handoff answers a query the panel cannot list.
     expect(
-      within(panel).getByRole("button", { name: "Run it on the search surface" }),
+      within(panel).getByRole("button", {
+        name: "Run it on the search surface",
+      }),
     ).toBeTruthy();
     // Clicking the correction puts the corrected line in the field, which is
     // what issues the read again.
@@ -13979,9 +14071,10 @@ describe("the shell’s identity cluster", () => {
     });
     render(<App />);
     fireEvent.click(await screen.findByTestId("appearance-trigger"));
-    const appearance = within(
-      screen.getByTestId("appearance-menu"),
-    ).getByRole("group", { name: "Appearance" });
+    const appearance = within(screen.getByTestId("appearance-menu")).getByRole(
+      "group",
+      { name: "Appearance" },
+    );
     expect(
       within(appearance)
         .getAllByRole("button")
@@ -14367,7 +14460,9 @@ describe("the trimmed listing", () => {
     const browser = await screen.findByLabelText("Domain browser");
     const table = within(browser).getByLabelText("Artifacts");
     expect(
-      [...table.querySelectorAll("th.column-label")].map((th) => th.textContent),
+      [...table.querySelectorAll("th.column-label")].map(
+        (th) => th.textContent,
+      ),
     ).toEqual(["Artifact", "Type", "Version", "Tags", "Description"]);
     // The absence is stated inside the table body rather than in a card that
     // replaced it.
@@ -14424,7 +14519,9 @@ describe("the trimmed listing", () => {
     expect(table.textContent).not.toContain(scope);
     // The link still addresses the whole identifier, and carries it for a
     // reader who needs the row's absolute name.
-    expect(leaf.getAttribute("href")).toBe(artifactHref(`${scope}/pay-invoice`));
+    expect(leaf.getAttribute("href")).toBe(
+      artifactHref(`${scope}/pay-invoice`),
+    );
     expect(leaf.getAttribute("title")).toBe(`${scope}/pay-invoice`);
     expect(nested.getAttribute("href")).toBe(
       artifactHref(`${scope}/disputes/hold-payment`),
@@ -14484,9 +14581,7 @@ describe("the trimmed listing", () => {
       target: { value: "zzz" },
     });
     expect(
-      within(browser).getByText(
-        "Clear the filter to see every subdomain.",
-      ),
+      within(browser).getByText("Clear the filter to see every subdomain."),
     ).toBeTruthy();
     // The grid is gone, the caption that describes its ordering goes with it,
     // and the section count reports the filtered listing.
@@ -14504,9 +14599,7 @@ describe("the trimmed listing", () => {
       target: { value: "qqq" },
     });
     expect(
-      within(browser).getByText(
-        "Clear the filter or pick another type.",
-      ),
+      within(browser).getByText("Clear the filter or pick another type."),
     ).toBeTruthy();
     expect(within(browser).queryByLabelText("Artifacts")).toBeNull();
 
@@ -14643,9 +14736,7 @@ describe("the trimmed listing", () => {
       "15 more artifacts stand under this domain.",
     );
     expect(
-      within(browser).queryByText(
-        "Clear the filter or pick another type.",
-      ),
+      within(browser).queryByText("Clear the filter or pick another type."),
     ).toBeNull();
     expect(
       within(reach)
@@ -14932,21 +15023,15 @@ describe("the trimmed listing", () => {
     // off the All chip.
     fireEvent.click(artrow.getByRole("button", { name: "rule" }));
     expect(all.getAttribute("aria-pressed")).toBe("false");
-    expect(
-      within(browser).queryByRole("link", { name: "notes" }),
-    ).toBeNull();
+    expect(within(browser).queryByRole("link", { name: "notes" })).toBeNull();
     fireEvent.click(all);
-    expect(
-      within(browser).getByRole("link", { name: "notes" }),
-    ).toBeTruthy();
+    expect(within(browser).getByRole("link", { name: "notes" })).toBeTruthy();
 
     // The in-domain filter runs over the identifier the first column carries.
     fireEvent.change(artrow.getByLabelText("Filter in this domain"), {
       target: { value: "notes" },
     });
-    expect(
-      within(browser).queryByRole("link", { name: "lint" }),
-    ).toBeNull();
+    expect(within(browser).queryByRole("link", { name: "lint" })).toBeNull();
     fireEvent.change(artrow.getByLabelText("Filter in this domain"), {
       target: { value: "" },
     });
@@ -15014,7 +15099,6 @@ describe("the trimmed listing", () => {
       expect(input.className.split(" ")).toContain("filter-input");
     }
   });
-
 
   // The list arm is a denser row rather than the grid tile stretched across the
   // container. A full-width tile carrying only a name and a count leaves most
@@ -15563,7 +15647,9 @@ describe("the artifact viewer’s resources", () => {
     // row and names the absence rather than dropping it.
     fireEvent.click(rows[0]);
     const inline = [
-      ...screen.getByTestId("resource-detail-facts").querySelectorAll(".rail-fact"),
+      ...screen
+        .getByTestId("resource-detail-facts")
+        .querySelectorAll(".rail-fact"),
     ];
     expect(inline[3].textContent).toBe("content typenot recorded");
   });
@@ -15582,14 +15668,12 @@ describe("the artifact viewer’s resources", () => {
       { name: "the checklist" },
     );
     // Nothing in the body navigates out of the shell.
-    expect(
-      screen.getByTestId("artifact-body").querySelector("a"),
-    ).toBeNull();
+    expect(screen.getByTestId("artifact-body").querySelector("a")).toBeNull();
     fireEvent.click(reference);
     expect(
-      screen.getByRole("tab", { name: /Resources/ }).getAttribute(
-        "aria-selected",
-      ),
+      screen
+        .getByRole("tab", { name: /Resources/ })
+        .getAttribute("aria-selected"),
     ).toBe("true");
     expect(screen.getByTestId("resource-detail").textContent).toContain(
       "checklist.md",
@@ -15617,9 +15701,9 @@ describe("the artifact viewer’s resources", () => {
     expect(screen.getByTestId("resource-detail").textContent).toContain(
       "corpus.bin",
     );
-    expect(
-      table.getAllByRole("row").slice(1)[1].className,
-    ).toContain("row-selected");
+    expect(table.getAllByRole("row").slice(1)[1].className).toContain(
+      "row-selected",
+    );
   });
 
   // One file's size reads the same in every place the tab states it: the
@@ -15697,7 +15781,9 @@ describe("the artifact viewer’s resources", () => {
     // media type a second time.
     fireEvent.click(rows[3]);
     const pairs = [
-      ...screen.getByTestId("resource-detail-facts").querySelectorAll(".rail-fact"),
+      ...screen
+        .getByTestId("resource-detail-facts")
+        .querySelectorAll(".rail-fact"),
     ].map((fact) => fact.querySelector("dd")?.textContent);
     expect(pairs[0]).toBe("archive");
     expect(pairs[3]).toBe("application/gzip");
@@ -15822,7 +15908,9 @@ describe("a refused layer write", () => {
       "did not pass the browser-origin check",
     );
     expect(banner.textContent).toContain("Reload the web UI");
-    expect(within(banner).queryByRole("button", { name: "Try again" })).toBeNull();
+    expect(
+      within(banner).queryByRole("button", { name: "Try again" }),
+    ).toBeNull();
     expect(within(banner).getByTestId("not-retryable")).toBeTruthy();
     // Dismiss is the way out that remains.
     expect(
@@ -16242,7 +16330,8 @@ describe("a whole-surface failure", () => {
         status: 404,
         body: {
           code: "registry.not_found",
-          message: "registry.not_found: version: invalid pin: no candidate matches",
+          message:
+            "registry.not_found: version: invalid pin: no candidate matches",
         },
       },
     });
@@ -16282,7 +16371,9 @@ describe("a whole-surface failure", () => {
     expect(
       within(page).getByRole("heading", { name: "No such artifact" }),
     ).toBeTruthy();
-    expect(within(page).queryByRole("link", { name: "Show latest" })).toBeNull();
+    expect(
+      within(page).queryByRole("link", { name: "Show latest" }),
+    ).toBeNull();
     expect(
       within(page).getByRole("link", { name: "Back to catalog" }).className,
     ).toBe("button primary");
@@ -16570,9 +16661,10 @@ describe("keyboard semantics", () => {
     ]);
     radios[0].focus();
     fireEvent.keyDown(source, { key: "ArrowRight" });
-    expect(
-      radios.map((radio) => radio.getAttribute("aria-checked")),
-    ).toEqual(["false", "true"]);
+    expect(radios.map((radio) => radio.getAttribute("aria-checked"))).toEqual([
+      "false",
+      "true",
+    ]);
     expect(document.activeElement).toBe(radios[1]);
     expect(radios.map((radio) => radio.getAttribute("tabindex"))).toEqual([
       "-1",
@@ -16584,9 +16676,10 @@ describe("keyboard semantics", () => {
     // The arrows wrap rather than stopping at the edge, and Home lands on
     // the first choice.
     fireEvent.keyDown(source, { key: "ArrowDown" });
-    expect(
-      radios.map((radio) => radio.getAttribute("aria-checked")),
-    ).toEqual(["true", "false"]);
+    expect(radios.map((radio) => radio.getAttribute("aria-checked"))).toEqual([
+      "true",
+      "false",
+    ]);
     fireEvent.keyDown(source, { key: "End" });
     expect(radios[1].getAttribute("aria-checked")).toBe("true");
     fireEvent.keyDown(source, { key: "Home" });

@@ -411,7 +411,7 @@ export function RegisterLayerForm({
               ⓘ
             </span>
             <span className="note-text">
-              {userDefined ? 'Visibility is fixed at registration.' : 'Visibility can be changed later from Edit.'}
+              {userDefined ? 'Visibility is fixed at registration.' : 'Visibility can be widened later from Edit. A grant cannot be withdrawn.'}
             </span>
           </p>
         </div>
