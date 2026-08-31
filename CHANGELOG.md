@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Web UI path**: the bundled web UI is served at `/app/` instead of `/ui/`, and a registry started with `--web-ui` redirects `GET /` to it. `/ui/` is no longer served and no alias replaces it, so a reverse-proxy rule or a bookmark naming the old path must be updated. The browser-flow routes are unchanged: `/v1/ui/auth/sign-in`, `/v1/ui/auth/callback`, `/v1/ui/auth/sign-out`, and `/v1/ui/session` keep their paths, so no identity-provider client configuration and no registered redirect URI changes. A registry started without `--web-ui` answers `GET /` exactly as before.
+
 ### Fixed
 
 - **Search over an `extends:` child**: an artifact that inherited `description`, `tags`, `sensitivity`, or `search_visibility` from its parent was indexed and filtered under its own authored values, so `search_artifacts` could not find it by the description `load_artifact` served for it. Ingest now folds the pinned parent into those four indexed columns, and a search result carries the resolved sensitivity.
