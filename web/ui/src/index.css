@@ -4585,8 +4585,11 @@ label:has(> input:disabled) {
   margin: 14px 0 0;
 }
 
+/* The block takes the width of the content column it sits in. The tab strip,
+   the lede, and the take-away controls stacked above it all run the column's
+   full width, so a cap here would stand the panel's right edge inside them and
+   clip a long line while the column beside it stayed empty. */
 .source-block {
-  max-width: 840px;
   overflow: hidden;
   background: var(--surf);
   border: 1px solid var(--bd);

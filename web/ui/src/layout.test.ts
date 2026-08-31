@@ -181,6 +181,22 @@ describe("shell layout", () => {
     expect(styled("artifact-content").paddingLeft).toBe("30px");
     expect(styled("artifact-rail").paddingLeft).toBe("22px");
   });
+
+  // The code panel the Authored source tab and the Frontmatter tab's raw view
+  // share runs the width of the content column. The tab strip, the lede, and
+  // the take-away controls above it all run that width, so a cap on the panel
+  // would leave its right edge inside them and clip a long line while the
+  // column beside it stayed empty.
+  // Spec: §13.10
+  it("runs the code panel the width of the content column", () => {
+    // jsdom reports the empty string for a property no rule declares, which is
+    // what an element that takes its column's width reports here.
+    const pane = styled("source-pane").maxWidth;
+    const actions = styled("source-actions").maxWidth;
+    expect(pane).toBe("");
+    expect(actions).toBe("");
+    expect(styled("source-block").maxWidth).toBe(pane);
+  });
 });
 
 // The artifact body is author-controlled markdown, and a token or a table
