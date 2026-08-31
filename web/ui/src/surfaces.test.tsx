@@ -8752,6 +8752,7 @@ describe("the layer write flows", () => {
     expect(screen.queryByTestId("unregister-foot-note")).toBeNull();
     expect(confirm.getAttribute("aria-describedby")).toBeNull();
     expect(field.getAttribute("aria-describedby")).toBeNull();
+    expect(field.getAttribute("aria-invalid")).toBeNull();
     expect(confirm.hasAttribute("disabled")).toBe(true);
     // A near miss is still held, and the sentence states the hold.
     fireEvent.change(field, { target: { value: "alice-persona" } });
@@ -8762,10 +8763,15 @@ describe("the layer write flows", () => {
     expect(note.className).toContain("modal-foot-hold");
     expect(confirm.getAttribute("aria-describedby")).toBe(note.id);
     expect(field.getAttribute("aria-describedby")).toBe(note.id);
+    // The sentence is a description, so the field states the mismatch as its
+    // own condition too. Without it the field is announced as valid while the
+    // write is refused on what it holds.
+    expect(field.getAttribute("aria-invalid")).toBe("true");
     expect(confirm.hasAttribute("disabled")).toBe(true);
     fireEvent.change(field, { target: { value: "alice-personal" } });
     expect(screen.queryByTestId("unregister-foot-note")).toBeNull();
     expect(confirm.getAttribute("aria-describedby")).toBeNull();
+    expect(field.getAttribute("aria-invalid")).toBeNull();
     expect(confirm.hasAttribute("disabled")).toBe(false);
   });
 

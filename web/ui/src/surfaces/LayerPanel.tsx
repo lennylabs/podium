@@ -1580,6 +1580,13 @@ function UnregisterConfirmation({
             // The hold is stated in the footer, and a reader working in the
             // field never reaches that line, so the field points at it too.
             aria-describedby={stated ? holdID : undefined}
+            // The description alone is announced as prose beside a field that
+            // still reads as valid, so the field reports the mismatch as its
+            // own state as well, the way the register form's required fields
+            // do. It is armed by the same condition the sentence is, so the
+            // confirmation never opens on a field announced as invalid before
+            // the reader has typed anything (§13.10).
+            aria-invalid={stated ? true : undefined}
             onChange={(event) => {
               setTyped(event.target.value);
             }}
