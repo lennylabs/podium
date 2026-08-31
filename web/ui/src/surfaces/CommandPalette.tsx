@@ -389,7 +389,7 @@ function PalettePanel({
         <p className="assistive-only" role="status" aria-live="polite" data-testid="palette-announcement">
           {announcement}
         </p>
-        <PaletteFooter mode={mode} />
+        <PaletteFooter mode={mode} matched={results.value?.total_matched ?? rows.length} />
       </div>
     </div>
   );
@@ -441,8 +441,10 @@ type PaletteMode = 'rows' | 'recents' | 'bare' | 'search' | 'catalog';
  * highlighted recent query, and drops ⌘⏎, because an empty line carries no
  * query to the search surface. The empty-catalog arm names no key but Escape,
  * because a handoff to the search surface there reaches the same empty
- * catalog. */
-function PaletteFooter({ mode }: { mode: PaletteMode }) {
+ * catalog. The ⌘⏎ hint carries the total the search surface would list, so
+ * the reader decides whether the handoff is worth taking without reading the
+ * count off the field. */
+function PaletteFooter({ mode, matched }: { mode: PaletteMode; matched: number }) {
   return (
     <p className="palette-footer quiet" data-testid="palette-footer">
       {mode === 'rows' || mode === 'recents' ? (
@@ -457,7 +459,7 @@ function PaletteFooter({ mode }: { mode: PaletteMode }) {
       {mode === 'rows' && (
         <>
           <KeyCap>⌘⏎</KeyCap>
-          <span>all results</span>
+          <span>all {matched} results</span>
         </>
       )}
       {mode === 'search' && (

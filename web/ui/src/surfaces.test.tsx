@@ -13225,6 +13225,27 @@ describe("the command palette", () => {
     ).toBe(true);
   });
 
+  // The ⌘⏎ hint hands the query to the search surface, and the total it would
+  // list belongs on the hint. Stated as "all results" alone, the control says
+  // nothing about how much is behind it, so the reader has to read the count
+  // off the field to decide whether taking the handoff is worth it.
+  it("counts the results the ⌘⏎ handoff would list", async () => {
+    palettePage(
+      [{ id: "platform/review", type: "skill", version: "1.2.0" }],
+      143,
+    );
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "review" },
+    });
+    await within(panel).findByTestId("palette-row-aside");
+    expect(within(panel).getByTestId("palette-footer").textContent).toBe(
+      "\u2191\u2193navigate\u23ceopen\u2318\u23ceall 143 resultsescclose",
+    );
+  });
+
   // The just-opened panel draws each filter as its own chip under a label
   // naming what they are for. Run together as one line of prose, the three
   // read as a sentence about filtering rather than as three things a reader
