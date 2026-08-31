@@ -16,7 +16,7 @@ import { useOfferedCorrection } from './correction';
 import { hasFilters, parseQueryLine } from '../query';
 import { artifactHref, layersHref, searchHref } from '../route';
 import type { Async } from '../useAsync';
-import { useAsync } from '../useAsync';
+import { useAsync, useDebounced } from '../useAsync';
 
 /** paletteCap is how many rows the panel lists. The match count comes back
  * before the cap truncates the list, so the heading states both. */
@@ -124,11 +124,21 @@ function PalettePanel({
   useScrollLock();
 
   const typed = line.trim();
-  const results = useAsync<SearchResponse>(
+  // The read is keyed on the line once the reader has stopped typing it. Keyed
+  // on every keystroke it issued a whole §5 retrieval per character of the
+  // word, and left each superseded one in flight (§13.10).
+  const settled = useDebounced(typed);
+  const read = useAsync<SearchResponse>(
     async () =>
-      typed === '' ? { total_matched: 0, results: [] } : searchArtifacts(parseQueryLine(typed), paletteCap),
-    [typed],
+      settled === '' ? { total_matched: 0, results: [] } : searchArtifacts(parseQueryLine(settled), paletteCap),
+    [settled],
   );
+  // While the line is still resting, the read for what the field shows has not
+  // gone out yet, so the panel holds the state it holds for a read in flight.
+  // Settling the previous query's result set under the line on screen would
+  // answer a half-typed word with "nothing matched" and send the correction's
+  // catalog read out after it.
+  const results: Async<SearchResponse> = typed === settled ? read : { ...read, loading: true };
   const rows = results.value?.results ?? [];
   // A query that matched nothing is offered the nearest spelling the catalog
   // holds, because prose telling a reader to check the spelling leaves them
@@ -140,7 +150,16 @@ function PalettePanel({
   // catalog the caller cannot read leaves the arm as it was: the correction is
   // an offer, and a failure to make one is not a failure to report.
   const noMatch = typed !== '' && !results.loading && results.error === null && rows.length === 0;
-  const catalog = useAsync<string[]>(async () => (noMatch ? catalogArtifactIDs('') : []), [noMatch]);
+  // The arm that issues no census resolves to null rather than to an empty
+  // listing, because the two are read apart below: an empty listing is the
+  // evidence that the registry holds nothing, and the hook carries the last
+  // resolved value through the render in which the read is re-issued. A census
+  // standing in for "not read yet" reports an empty catalog for that render,
+  // on the frame the query the reader finished typing comes back empty.
+  const catalog = useAsync<string[] | null>(
+    async () => (noMatch ? catalogArtifactIDs('') : null),
+    [noMatch],
+  );
   const correction = useOfferedCorrection(typed, catalog.value ?? [], noMatch);
   // The same read is the catalog's own census. An empty ID list is a registry
   // holding no artifact, so no spelling and no filter could have matched, and
@@ -150,7 +169,8 @@ function PalettePanel({
   // the catalog holds and points at the panel where a layer is registered. A
   // catalog the caller cannot read leaves the query arm standing, because a
   // failed census is not evidence of an empty registry.
-  const bareCatalog = noMatch && !catalog.loading && catalog.error === null && (catalog.value ?? []).length === 0;
+  const bareCatalog =
+    noMatch && !catalog.loading && catalog.error === null && catalog.value !== null && catalog.value.length === 0;
   // The result list is drawn only on the arm PaletteResults reaches with rows
   // in hand. `aria-expanded` and `aria-activedescendant` state the arm that
   // holds a list, because a field that points at an option no page holds is

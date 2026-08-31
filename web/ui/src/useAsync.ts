@@ -77,3 +77,33 @@ export function useReachReport(reached: boolean, report: () => void): void {
     // a read that answered is what the effect keys on.
   }, [reached]);
 }
+
+/** typingPause is how long the query field rests before the read it keys goes
+ * out, in milliseconds. It is long enough that a word typed at speed costs
+ * one request and short enough that the list follows a reader who stops to
+ * look at it. */
+export const typingPause = 200;
+
+/** useDebounced holds a value still until the caller stops changing it, which
+ * is what keeps a request off every keystroke. A §5 search runs the BM25 and
+ * vector retrieval with an embedding call behind it, so a request per typed
+ * character costs one retrieval per character of the word and leaves every
+ * superseded one in flight. The value passes through on the first render, so
+ * a query arriving on the route is read without waiting (§13.10). */
+export function useDebounced<T>(value: T, delay: number = typingPause): T {
+  const [settled, setSettled] = useState(value);
+  useEffect(() => {
+    if (value === settled) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      setSettled(value);
+    }, delay);
+    return () => {
+      clearTimeout(timer);
+    };
+    // The pause restarts on every change, so the value is read once the
+    // caller has stopped changing it rather than once per change.
+  }, [value, settled, delay]);
+  return settled;
+}

@@ -219,6 +219,16 @@ function lastSearch(): URLSearchParams {
   return new URLSearchParams(last.split("?")[1] ?? "");
 }
 
+/** queriedSearches is the query text of every search the page issued that
+ * carried one, in order. A surface that reads on every keystroke lists one
+ * entry per character of the typed word. */
+function queriedSearches(): string[] {
+  return requests
+    .filter((r) => r.url.startsWith("/v1/search_artifacts"))
+    .map((r) => new URLSearchParams(r.url.split("?")[1] ?? "").get("query"))
+    .filter((query): query is string => query !== null);
+}
+
 /** addToken drives the filter row's token entry, which is how a tag is
  * added. */
 function addToken(label: string, value: string): void {
@@ -2938,6 +2948,28 @@ describe("search", () => {
       expect(lastSearch().get("query")).toBe("deploy runbook");
     });
     expect(window.location.hash).toBe(searchHref("deploy runbook"));
+  });
+
+  // Spec: §13.10 — the surface is a client over search_artifacts, and a §5
+  // search runs a retrieval with an embedding call behind it. The field rests
+  // before the read goes out, so a typed word costs one request rather than
+  // one per character with every superseded one left in flight.
+  it("issues one search for a typed word rather than one per keystroke", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/search/");
+    render(<App />);
+    const field = await screen.findByLabelText("Search artifacts");
+    for (const prefix of ["r", "re", "rev", "revi", "revie", "review"]) {
+      fireEvent.change(field, { target: { value: prefix } });
+    }
+    await waitFor(() => {
+      expect(lastSearch().get("query")).toBe("review");
+    });
+    expect(queriedSearches()).toEqual(["review"]);
   });
 
   // The row states what it is and carries one control per filter. It offers
@@ -12508,6 +12540,24 @@ describe("the command palette", () => {
     expect(screen.getByTestId("palette")).toBeTruthy();
   });
 
+  // Spec: §13.10 — the panel answers the same endpoint the search surface
+  // does, so the line it types rests before the read goes out. A read per
+  // keystroke cost a §5 retrieval per character of the word and left every
+  // superseded one in flight.
+  it("issues one search for a typed word rather than one per keystroke", async () => {
+    palettePage([{ id: "platform/review", type: "skill", version: "1.2.0" }]);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const field = within(screen.getByTestId("palette")).getByLabelText(
+      "Search artifacts",
+    );
+    for (const prefix of ["r", "re", "rev", "revi", "revie", "review"]) {
+      fireEvent.change(field, { target: { value: prefix } });
+    }
+    expect(await screen.findByTestId("palette-heading")).toBeTruthy();
+    expect(queriedSearches()).toEqual(["review"]);
+  });
+
   // The type and the version hold the row's right edge rather than running on
   // as prose after the path, the field row states the count on that same edge,
   // and each keystroke in the footer is drawn as the key it names.
@@ -13153,10 +13203,10 @@ describe("the command palette", () => {
     fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
       target: { value: "anything" },
     });
-    const empty = await within(panel).findByTestId("palette-empty");
-    expect(
-      within(empty).getByText("The catalog holds no artifacts"),
-    ).toBeTruthy();
+    // The census answers after the miss it explains, so the arm is awaited by
+    // its own heading rather than by the empty panel it replaces.
+    await within(panel).findByText("The catalog holds no artifacts");
+    const empty = within(panel).getByTestId("palette-empty");
     expect(
       within(empty).getByText(
         "No query can match until a layer is registered on the panel behind this one.",
@@ -13185,9 +13235,12 @@ describe("the command palette", () => {
     fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
       target: { value: "anything" },
     });
-    const empty = await within(panel).findByTestId("palette-empty");
+    // The census answers after the miss it explains, so the arm is awaited by
+    // the control it carries rather than by the empty panel it replaces.
     fireEvent.click(
-      within(empty).getByRole("button", { name: "Open the layer panel" }),
+      await within(panel).findByRole("button", {
+        name: "Open the layer panel",
+      }),
     );
     expect(window.location.hash).toBe("#/layers");
   });

@@ -21,7 +21,7 @@ import { scopePaths } from "../domain";
 import { formatQueryLine, hasFilters, parseQueryLine, parseTypedLine } from "../query";
 import { layersHref, parseRoute, replaceRoute, searchHref } from "../route";
 import type { Async } from "../useAsync";
-import { useAsync, useErrorReport } from "../useAsync";
+import { useAsync, useDebounced, useErrorReport } from "../useAsync";
 
 const resultCap = 10;
 
@@ -161,7 +161,12 @@ export function SearchSurface({
   const domains = useAsync(() => loadDomain("", scopeDepth), []);
   const scopeOptions = scopePaths(domains.value?.subdomains ?? [], "");
 
-  const filters: SearchFilters = { query: text, type, scope, tags };
+  // The request is keyed on the query once the reader has stopped typing it.
+  // Keyed on every keystroke it issued a whole §5 retrieval per character of
+  // the word, and left each superseded one in flight. A filter is applied by
+  // one press, so only the typed text rests (§13.10).
+  const settledText = useDebounced(text);
+  const filters: SearchFilters = { query: settledText, type, scope, tags };
   const key = JSON.stringify(filters);
   // The continuation raises the cap on the same request rather than paging,
   // because §5 search takes a result count and no offset. A new request is a
@@ -174,7 +179,14 @@ export function SearchSurface({
     setCapKey(key);
     setCap(resultCap);
   }
-  const search = useAsync(() => searchArtifacts(filters, cap), [key, cap]);
+  const read = useAsync(() => searchArtifacts(filters, cap), [key, cap]);
+  // While the query is still resting, the read for what the field shows has
+  // not gone out yet, so the surface holds the state it holds for a read in
+  // flight. Settling the previous query's result set under the line on screen
+  // would answer a half-typed word with "nothing matched" and send the
+  // correction's catalog read out after it.
+  const search: Async<SearchResponse> =
+    text === settledText ? read : { ...read, loading: true };
   // A continuation is the one read that must not replace the list it widens.
   // The reader pressed a control at the foot of the list, and swapping the
   // subtree for the loading line unmounts the control from under their focus,
@@ -182,7 +194,7 @@ export function SearchSurface({
   // top of the page. A raised cap against the settled request's own key is
   // that read, so the list it already carries stands while it is in flight
   // and the control stays the same element throughout (§13.10).
-  const continuing = search.loading && search.value !== null && cap > resultCap;
+  const continuing = read.loading && read.value !== null && cap > resultCap;
   // Where the continuation spends the cap, the control the reader pressed is
   // gone once its own results land, because §5 serves no more than the count
   // it just asked for. The focus would fall to the document body with it, so
@@ -195,7 +207,7 @@ export function SearchSurface({
   const handoff = useRef<{ key: string; from: number } | null>(null);
   useEffect(() => {
     const owed = handoff.current;
-    if (owed === null || search.loading) {
+    if (owed === null || read.loading) {
       return;
     }
     handoff.current = null;
@@ -210,7 +222,7 @@ export function SearchSurface({
     rows[owed.from]?.focus();
     // The handoff is owed by the read the press issued, so the settling of
     // that read is what the effect keys on.
-  }, [search.loading]);
+  }, [read.loading]);
   // A search is a page of the catalog like any other, so the query and the
   // filters live in the route rather than only in component state: the
   // address bar names the search that is on screen, a reload restores it, and
