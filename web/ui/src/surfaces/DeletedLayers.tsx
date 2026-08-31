@@ -174,12 +174,7 @@ export function DeletedLayers({
       >
         {restored}
       </p>
-      {refusal !== null && (
-        <p className="row-refusal" role="alert">
-          The registry refused that action and nothing changed.{' '}
-          <span className="mono">{refusal instanceof ApiError ? refusal.label : 'registry.unavailable'}</span>
-        </p>
-      )}
+      {refusal !== null && <RestoreRefusal error={refusal} />}
       {/* What a restore does, stated where the reader decides to press it.
           The precedence it returns to and the ID collision that refuses it
           are both outcomes the button alone does not name. */}
@@ -188,6 +183,27 @@ export function DeletedLayers({
         layer, the restore is refused and names it.
       </p>
     </section>
+  );
+}
+
+/** RestoreRefusal states a refused restore on the envelope's own terms, the
+ * way the layer panel states a refused reingest: the code, the message the
+ * registry wrote, and the remediation it suggested. A refusal names the
+ * layer the ID collided with and the step that clears an expired session,
+ * and the code alone carries neither, so the reader is left with a fact
+ * they cannot act on and a surface that does not keep the promise its own
+ * paragraph makes below it. */
+function RestoreRefusal({ error }: { error: unknown }) {
+  const envelope = error instanceof ApiError ? error : null;
+  return (
+    <div className="row-refusal" role="alert">
+      <p>
+        The registry refused that action and nothing changed.{' '}
+        <span className="mono">{envelope?.label ?? 'registry.unavailable'}</span>{' '}
+        {envelope !== null ? envelope.message : String(error)}
+      </p>
+      {envelope !== null && envelope.suggestedAction !== '' && <p>{envelope.suggestedAction}</p>}
+    </div>
   );
 }
 

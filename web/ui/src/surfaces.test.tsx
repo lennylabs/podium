@@ -12285,6 +12285,43 @@ describe("the layer write flows", () => {
     expect(surface.textContent).not.toContain("Nothing to erase");
   });
 
+  // The refusal the registry sends names the layer the artifact ID collided
+  // with and the step that clears the condition, which is what the reader has
+  // to act on. The surface prints the envelope's message and its suggested
+  // action beside the code, the way the layer panel prints a refused
+  // reingest.
+  it("states the registry's message and remediation on a refused restore", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": {
+        body: {
+          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+        },
+      },
+      "/v1/layers/restore": {
+        status: 409,
+        body: {
+          code: "registry.conflict",
+          message: "artifact ID eng/deploy already exists in layer acme-shared",
+          suggested_action: "Unregister the layer that carries eng/deploy, then restore.",
+        },
+      },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    await screen.findByLabelText("Recently unregistered");
+    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    const refusal = await screen.findByRole("alert");
+    expect(refusal.textContent).toContain("registry.conflict");
+    expect(refusal.textContent).toContain(
+      "artifact ID eng/deploy already exists in layer acme-shared",
+    );
+    expect(refusal.textContent).toContain(
+      "Unregister the layer that carries eng/deploy, then restore.",
+    );
+  });
+
   // A refused restore reports the refusal alone. Where a successful restore
   // came first, its outcome is dropped rather than left standing beside a
   // refusal of the next one.
