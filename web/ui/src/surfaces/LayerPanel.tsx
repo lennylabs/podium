@@ -1174,6 +1174,7 @@ function LayerRow({
             controls tripled the height of every row. */}
         <div className="row-action-bar">
           <ReingestButton
+            layerID={layer.ID}
             state={reingest}
             readOnly={readOnly}
             held={reingestHeld}

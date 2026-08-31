@@ -1809,7 +1809,9 @@ describe("the sign-in control", () => {
     await screen.findByLabelText("Layer panel");
     expect(screen.queryByTestId("sign-in")).toBeNull();
     expect(screen.queryByTestId("sign-out")).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Reingest" }).length).toBe(1);
+    expect(
+      screen.getAllByRole("button", { name: "Reingest alice-personal" }).length,
+    ).toBe(1);
     expect(screen.queryByText("yours")).toBeNull();
   });
 });
@@ -6911,7 +6913,10 @@ describe("the layer panel", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    expect(screen.getAllByRole("button", { name: "Reingest" }).length).toBe(2);
+    expect(
+      screen.getAllByRole("button", { name: /^Reingest (company|alice-personal)$/ })
+        .length,
+    ).toBe(2);
     // One row's actions are open at a time, so each row's menu is read on its
     // own turn.
     openRowActions("company");
@@ -6979,7 +6984,7 @@ describe("the layer panel", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     const cell = screen
-      .getByRole("button", { name: "Reingest" })
+      .getByRole("button", { name: "Reingest alice-personal" })
       .closest("td") as HTMLElement;
     expect(
       within(cell)
@@ -6991,6 +6996,29 @@ describe("the layer panel", () => {
     openRowActions();
     expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Unregister" })).toBeTruthy();
+  });
+
+  // The panel stacks one Reingest trigger per row, so the trigger names the
+  // layer it acts on the way its two row siblings already do. Named
+  // "Reingest" alone, a reader moving control by control rather than by
+  // table row hears the same word on every row and cannot tell which layer a
+  // press would reingest.
+  it("names each row's Reingest trigger after the layer it acts on", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    for (const id of ["company", "alice-personal"]) {
+      const trigger = screen.getByRole("button", { name: `Reingest ${id}` });
+      expect(trigger).toBe(reingestTrigger(id));
+      // The visible word stays the one the fixed-width column can hold.
+      expect(trigger.textContent).toBe("Reingest");
+    }
+    // No row trigger is left carrying the bare word as its whole name.
+    expect(screen.queryByRole("button", { name: "Reingest" })).toBeNull();
   });
 
   // The ownership marker is a property of a user-defined row alone. An
@@ -7208,7 +7236,9 @@ describe("the layer panel", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reingest alice-personal" }),
+    );
     const card = await screen.findByLabelText("Reingest refused");
     const cell = card.closest("td");
     expect(cell).not.toBeNull();
@@ -7947,7 +7977,12 @@ describe("read-only mode", () => {
     await screen.findByTestId("read-only-banner");
     openRowActions("company");
     openRowActions();
-    for (const name of ["Register layer", "Reingest all", "Reingest"]) {
+    for (const name of [
+      "Register layer",
+      "Reingest all",
+      "Reingest company",
+      "Reingest alice-personal",
+    ]) {
       for (const control of screen.getAllByRole("button", { name })) {
         expect(control.hasAttribute("disabled")).toBe(true);
       }
@@ -8020,7 +8055,7 @@ describe("read-only mode", () => {
     await screen.findByLabelText("Layer panel");
     expect(screen.queryByTestId("read-only-banner")).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Reingest" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: /^Reingest (?!all$)/ }).hasAttribute("disabled"),
     ).toBe(false);
   });
 
@@ -8103,7 +8138,7 @@ describe("read-only mode", () => {
     await screen.findByLabelText("Layer panel");
     expect(screen.getByTestId("read-only-banner")).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: "Reingest" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: /^Reingest (?!all$)/ }).hasAttribute("disabled"),
     ).toBe(true);
   });
 });
@@ -8379,7 +8414,7 @@ describe("the layer write flows", () => {
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": { body: { layer: "alice-personal", accepted: 1 } },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     await screen.findByLabelText("Reingest result for alice-personal");
     await waitFor(() => {
       expect(
@@ -8406,7 +8441,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     const wait = await screen.findByRole("dialog", {
       name: "Reingesting alice-personal",
     });
@@ -8426,7 +8461,7 @@ describe("the layer write flows", () => {
       screen.getByTestId("reingest-running-alice-personal").textContent,
     ).toContain("Reingesting alice-personal for 0:0");
     expect(
-      screen.getByRole("button", { name: "Reingest" }).hasAttribute("disabled"),
+      screen.getByRole("button", { name: /^Reingest (?!all$)/ }).hasAttribute("disabled"),
     ).toBe(true);
   });
 
@@ -11952,7 +11987,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getAllByRole("button", { name: "Reingest" })[0]);
+    fireEvent.click(screen.getAllByRole("button", { name: /^Reingest (?!all$)/ })[0]);
     const all = screen.getByRole("button", { name: "Reingest all" });
     expect(all.hasAttribute("disabled")).toBe(true);
     fireEvent.click(all);
@@ -11993,7 +12028,7 @@ describe("the layer write flows", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     fireEvent.click(screen.getByRole("button", { name: "Reingest all" }));
-    for (const trigger of screen.getAllByRole("button", { name: "Reingest" })) {
+    for (const trigger of screen.getAllByRole("button", { name: /^Reingest (?!all$)/ })) {
       expect(trigger.hasAttribute("disabled")).toBe(true);
     }
     await screen.findByLabelText("Reingest all result");
@@ -12123,7 +12158,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     await screen.findByLabelText("Reingest result for alice-personal");
     const counts = screen.getByLabelText("Ingest counts");
     expect(
@@ -12196,7 +12231,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     const report = await screen.findByLabelText(
       "Reingest result for alice-personal",
     );
@@ -12232,7 +12267,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     expect(await screen.findByTestId("reingest-recorded")).toBeTruthy();
   });
 
@@ -12269,7 +12304,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     await screen.findByLabelText("Reingest rejected");
     expect(screen.getByText("Nothing was ingested")).toBeTruthy();
     expect(screen.getByText("platform/lint@1.0.0")).toBeTruthy();
@@ -12297,7 +12332,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     await screen.findByLabelText(
       "Reingest alice-personal during a freeze window",
     );
@@ -12349,7 +12384,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     const refused = await screen.findByLabelText("Reingest refused");
     expect(refused.className).toContain("banner-annotation");
     // The marker leads the band.
@@ -12390,7 +12425,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     const refused = await screen.findByLabelText("Reingest refused");
     expect(refused.textContent).toContain("3 artifacts failed the lint gate");
     expect(refused.textContent).toContain(
@@ -12419,7 +12454,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     const refused = await screen.findByLabelText("Reingest refused");
     expect(refused.textContent).toContain("HTTP 403");
     expect(refused.textContent).not.toContain("registry.unavailable");
@@ -12442,7 +12477,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    fireEvent.click(screen.getByRole("button", { name: "Reingest" }));
+    fireEvent.click(screen.getByRole("button", { name: /^Reingest (?!all$)/ }));
     const refused = await screen.findByLabelText("Reingest refused");
     expect(refused.textContent).toContain("HTTP 503");
     expect(
@@ -12471,7 +12506,7 @@ describe("the layer write flows", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    const trigger = screen.getByRole("button", { name: "Reingest" });
+    const trigger = screen.getByRole("button", { name: /^Reingest (?!all$)/ });
     trigger.focus();
     fireEvent.click(trigger);
     // Disabling the focused control is what the browser does while the
@@ -12491,7 +12526,7 @@ describe("the layer write flows", () => {
     });
     await waitFor(() => {
       expect(document.activeElement).toBe(
-        screen.getByRole("button", { name: "Reingest" }),
+        screen.getByRole("button", { name: /^Reingest (?!all$)/ }),
       );
     });
   });
@@ -16475,7 +16510,7 @@ describe("a refused layer write", () => {
     });
     await waitFor(() => {
       expect(document.activeElement).toBe(
-        screen.getByRole("button", { name: "Reingest" }),
+        screen.getByRole("button", { name: /^Reingest (?!all$)/ }),
       );
     });
   });

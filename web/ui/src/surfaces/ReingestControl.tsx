@@ -95,12 +95,18 @@ export function reingestRefusal(err: unknown): ReingestState {
  * it opens, either under the row's controls or, for the finished report, over
  * the page. */
 export function ReingestButton({
+  layerID,
   state,
   readOnly,
   held,
   onStart,
   buttonRef,
 }: {
+  /** layerID names the layer in the button's accessible name. The panel
+   * stacks one trigger per row, so a reader moving control by control
+   * rather than by table row hears the same word on every one of them and
+   * cannot tell which layer a press would reingest. */
+  layerID: string;
   state: ReingestState;
   readOnly: boolean;
   /** held is the panel's own in-flight guard: a fan-out across every layer is
@@ -125,6 +131,7 @@ export function ReingestButton({
       // own refusal stands and clears it when the refusal is dismissed or
       // the next attempt opens.
       className={refusedReingest(state) ? 'action-refused' : undefined}
+      aria-label={`Reingest ${layerID}`}
       disabled={readOnly || held === true || state.kind === 'running'}
       onClick={() => {
         onStart();
