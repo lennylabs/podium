@@ -319,3 +319,47 @@ func TestLayerEndpoint_AdminAuthRequired(t *testing.T) {
 		t.Errorf("body missing auth.forbidden: %s", body)
 	}
 }
+
+// Spec: §14.10 — the advertised webhook URL is the URL the ingest endpoint
+// answers on. A layer id is an operator-chosen string that may contain a space
+// or a slash, so register percent-escapes it into a single path segment; the
+// unescaped form produces a request the {id} route never matches.
+func TestLayerEndpoint_RegisterGitLayer_WebhookURLEscapesLayerID(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker())
+	api := httptest.NewServer(endpoint.Handler())
+	defer api.Close()
+	ingest := httptest.NewServer(endpoint.WebhookHandler())
+	defer ingest.Close()
+
+	_, body := mustPost(t, api.URL, "/v1/layers", map[string]any{
+		"id": "team space/layer", "source_type": "git",
+		"repo": "https://github.com/acme/artifacts.git", "ref": "main",
+	})
+	var got server.LayerRegisterResponse
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\n%s", err, body)
+	}
+	if want := "/v1/ingest/webhook/team%20space%2Flayer"; got.WebhookURL != want {
+		t.Fatalf("WebhookURL = %q, want %q", got.WebhookURL, want)
+	}
+
+	// The advertised URL reaches the handler: the delivery is rejected for a
+	// missing signature (401) rather than lost to a routing 404.
+	req, err := http.NewRequest(http.MethodPost, ingest.URL+got.WebhookURL, strings.NewReader(`{"ref":"refs/heads/main"}`))
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST webhook: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		t.Errorf("POST %s = 404, advertised webhook URL does not reach the ingest endpoint", got.WebhookURL)
+	}
+}

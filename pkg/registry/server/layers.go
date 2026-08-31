@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -157,9 +158,14 @@ func (e *LayerEndpoint) WithPublicBaseURL(u string) *LayerEndpoint {
 // absolute URL a developer can paste into a Git host's webhook configuration;
 // otherwise it falls back to the relative path.
 //
+// The layer id is percent-escaped as a single path segment. A layer id is an
+// operator-chosen string that may contain a space or a slash, and pasting the
+// unescaped form into a Git host produces a request the {id} route never
+// matches, so the advertised URL would 404 forever instead of ingesting.
+//
 // spec: §14.10 step 3 — "The CLI prints the webhook URL it would expect."
 func (e *LayerEndpoint) webhookURL(layerID string) string {
-	path := "/v1/ingest/webhook/" + layerID
+	path := "/v1/ingest/webhook/" + url.PathEscape(layerID)
 	if e.publicBaseURL == "" {
 		return path
 	}
