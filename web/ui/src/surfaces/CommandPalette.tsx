@@ -459,7 +459,9 @@ function PaletteFooter({ mode, matched }: { mode: PaletteMode; matched: number }
       {mode === 'rows' && (
         <>
           <KeyCap>⌘⏎</KeyCap>
-          <span>all {matched} results</span>
+          <span>
+            all {matched} result{matched === 1 ? '' : 's'}
+          </span>
         </>
       )}
       {mode === 'search' && (

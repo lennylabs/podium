@@ -13407,6 +13407,24 @@ describe("the command palette", () => {
     );
   });
 
+  // A total of one is still a count the hint has to state, and the noun it
+  // carries is what the reader reads. "all 1 results" says the handoff lands
+  // on a list the panel already holds in full, in a form no other count on
+  // the surfaces uses.
+  it("agrees the ⌘⏎ hint's noun with a single match", async () => {
+    palettePage([{ id: "finance/ap/pay-invoice", type: "skill" }], 1);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+      target: { value: "invoice" },
+    });
+    await within(panel).findByTestId("palette-row-aside");
+    expect(within(panel).getByTestId("palette-footer").textContent).toBe(
+      "↑↓navigate⏎open⌘⏎all 1 resultescclose",
+    );
+  });
+
   // The just-opened panel draws each filter as its own chip under a label
   // naming what they are for. Run together as one line of prose, the three
   // read as a sentence about filtering rather than as three things a reader
