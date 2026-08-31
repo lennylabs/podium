@@ -1266,6 +1266,43 @@ describe("layer table columns", () => {
     }
   });
 
+  // The floor is wider than the container at an ordinary laptop viewport, so
+  // the column that falls outside it first is the last one, and that column
+  // carries the only route to reingest, edit, and unregister a layer: at a
+  // 1000px viewport the whole actions cell was drawn past the container's
+  // right edge with nothing on screen saying the table continued. The column
+  // is pinned to the trailing edge of the scroll container, so it is drawn
+  // inside the visible column at every scroll position. jsdom performs no
+  // layout, so the cases pin the declarations; the drawn column is checked in
+  // a browser.
+  it("pins the actions column to the trailing edge of the scroll container", () => {
+    const { body, headers } = layerTable();
+    const row = document.createElement("tr");
+    for (const className of ["drag-cell", "mono", "source-col", "", "mono", "row-actions"]) {
+      const cell = document.createElement("td");
+      cell.className = className;
+      row.appendChild(cell);
+    }
+    body.appendChild(row);
+    for (const cell of [headers[headers.length - 1], row.cells[5]]) {
+      const style = window.getComputedStyle(cell);
+      expect(style.position).toBe("sticky");
+      expect(style.right).toBe("0px");
+    }
+  });
+
+  // A pinned cell is painted over the cells that scroll beneath it, so it
+  // carries the ground its row is drawn on. Left transparent the scrolled
+  // source and visibility cells read through the row's controls.
+  it("gives the pinned actions cell its own ground", () => {
+    expect(ruleText(".layer-table td.row-actions")).toContain(
+      "background-color: var(--surf)",
+    );
+    expect(
+      ruleText(".layer-table tbody > tr:not(.row-detail):hover > td.row-actions"),
+    ).toContain("background-color: var(--chip)");
+  });
+
   // The panel a row control opens is a full-width cell in a row of its own, so
   // it is laid out from its top edge.
   it("lays the detail row's panel out from the top", () => {
@@ -1672,6 +1709,15 @@ function ruleText(selector: string): string {
   return "";
 }
 
+/** scrollbarRule returns the text of the rule declaring the given scrollbar
+ * part. The dialog body and the sideways-scrolling table container share one
+ * declaration, so the part is looked up by the group the two are named in. */
+function scrollbarRule(part: string): string {
+  return ruleText(
+    `.modal-body::-webkit-scrollbar${part}, .table-scroll::-webkit-scrollbar${part}`,
+  );
+}
+
 // The reingest summary's refused row states a layer, the §6.10 code its
 // refusal carried, and a message of no bounded length. The code is drawn as a
 // badge, and under the flex container's default stretch that badge took the
@@ -1887,10 +1933,8 @@ describe("dialog width", () => {
 // in a browser.
 describe("dialog body scroll", () => {
   it("draws a scrollbar on a dialog body rather than the overlay bar", () => {
-    expect(ruleText(".modal-body::-webkit-scrollbar")).toContain("width: 10px");
-    expect(ruleText(".modal-body::-webkit-scrollbar-thumb")).toContain(
-      "background: var(--bd)",
-    );
+    expect(scrollbarRule("")).toContain("width: 10px");
+    expect(scrollbarRule("-thumb")).toContain("background: var(--bd)");
   });
 
   it("reserves the bar's gutter so an overflowing body does not reflow", () => {
@@ -1902,6 +1946,29 @@ describe("dialog body scroll", () => {
   it("leaves the standard scrollbar properties off the dialog body", () => {
     expect(ruleText(".modal-body")).not.toContain("scrollbar-width");
     expect(ruleText(".modal-body")).not.toContain("scrollbar-color");
+  });
+});
+
+// A table that keeps its designed column widths below its floor is clipped at
+// its container's edge with the table's own right border drawn there, so the
+// last column still on screen reads as the table's last column. On the layer
+// panel at a 1000px viewport the source and the visibility columns were cut
+// and the panel a refusal opens ran past the edge with its message and its
+// Dismiss outside it, and the overlay bar painted nothing until a scroll was
+// already in progress, so nothing marked the clipping. The container takes the
+// same bar the dialog body does, on the other axis.
+describe("table scroll mark", () => {
+  it("draws a scrollbar on a sideways-scrolling table rather than the overlay bar", () => {
+    expect(scrollbarRule("")).toContain(".table-scroll::-webkit-scrollbar");
+    expect(scrollbarRule("")).toContain("height: 10px");
+    expect(scrollbarRule("-thumb")).toContain("background: var(--bd)");
+  });
+
+  // Either standard property takes precedence over the parts above and selects
+  // the overlay bar again.
+  it("leaves the standard scrollbar properties off the container", () => {
+    expect(ruleText(".table-scroll")).not.toContain("scrollbar-width");
+    expect(ruleText(".table-scroll")).not.toContain("scrollbar-color");
   });
 });
 

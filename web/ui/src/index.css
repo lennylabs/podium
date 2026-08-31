@@ -2185,6 +2185,34 @@ input[type="search"]::-webkit-search-cancel-button {
   width: 140px;
 }
 
+/* The actions column is pinned to the trailing edge of the scroll container,
+   so it is drawn inside the visible column at every scroll position. The
+   table keeps its designed widths down to an 860px floor and scrolls sideways
+   below it, and the column that falls outside first is the last one: a 700px
+   container against that floor drew the whole actions cell past its right
+   edge, which left a pointer with no route to reingest, edit, or unregister a
+   layer and nothing on screen saying the table continued (§13.10). A pinned cell is painted over the cells that
+   scroll beneath it, so it declares the ground its row is drawn on and the
+   rule that separates it from the column it now covers. */
+.layer-table th:last-child,
+.layer-table td.row-actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  border-left: 1px solid var(--b2);
+}
+
+.layer-table td.row-actions {
+  background-color: var(--surf);
+}
+
+/* The pinned cell carries its own ground, so it takes the row's raised tone
+   from here as well. Left on the row alone the tone stopped at the pinned
+   column and the row read as ending one column early. */
+.layer-table tbody > tr:not(.row-detail):hover > td.row-actions {
+  background-color: var(--chip);
+}
+
 /* Fixed layout takes the column widths from the header row and already bounds
    the cell, so the source cell's own width claim is dropped here. Its
    `max-width: 0` would otherwise clamp the cell's content box to nothing. */
@@ -3640,23 +3668,36 @@ label:has(> input:disabled) {
    these parts, and the bar it selects is the overlay bar again, which is the
    bar this rule exists to leave. The rule is on the shared body rather than
    on the one form, because every dialog that outgrows its viewport hides its
-   tail the same way. */
-.modal-body::-webkit-scrollbar {
+   tail the same way.
+
+   `.table-scroll` is declared here for the same reason on the other axis. A
+   table that keeps its designed column widths below its floor is clipped at
+   the container's edge with the table's own right border drawn there, so the
+   last column still on screen reads as the table's last column: on the layer
+   panel the source and the visibility columns were cut, and the panel a
+   refusal opens ran past the edge with its message and its Dismiss outside
+   it, behind no mark at all (§13.10). */
+.modal-body::-webkit-scrollbar,
+.table-scroll::-webkit-scrollbar {
   width: 10px;
+  height: 10px;
 }
 
-.modal-body::-webkit-scrollbar-track {
+.modal-body::-webkit-scrollbar-track,
+.table-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.modal-body::-webkit-scrollbar-thumb {
+.modal-body::-webkit-scrollbar-thumb,
+.table-scroll::-webkit-scrollbar-thumb {
   border: 3px solid transparent;
   border-radius: 6px;
   background: var(--bd);
   background-clip: content-box;
 }
 
-.modal-body::-webkit-scrollbar-thumb:hover {
+.modal-body::-webkit-scrollbar-thumb:hover,
+.table-scroll::-webkit-scrollbar-thumb:hover {
   background: var(--meta);
   background-clip: content-box;
 }
