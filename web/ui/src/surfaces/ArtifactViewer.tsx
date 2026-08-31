@@ -610,15 +610,22 @@ function AuthoredSource({ name, value }: { name: string; value: string }) {
         <span className="source-lede">
           The authored file, byte for byte. The Rendered tab shows the parsed body.
         </span>
-        <CopyButton value={value} />
-        <button
-          type="button"
-          onClick={() => {
-            downloadFile(inlineHref(value, false), name);
-          }}
-        >
-          Download {name}
-        </button>
+        {/* The two take-away controls stand together as one group, because
+            they take the same file and differ only in where it lands. The
+            copy report is reserved from the first render so no press reflows
+            the row, and inside the group it is placed ahead of the pair so
+            the empty slot does not stand between them. */}
+        <div className="source-take">
+          <CopyButton value={value} />
+          <button
+            type="button"
+            onClick={() => {
+              downloadFile(inlineHref(value, false), name);
+            }}
+          >
+            Download {name}
+          </button>
+        </div>
       </div>
       {/* The split lines rather than the value, because a trailing newline
           draws a line the gutter does not number and pulls the two columns

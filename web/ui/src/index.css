@@ -5284,6 +5284,21 @@ label:has(> input:disabled) {
   white-space: nowrap;
 }
 
+/* Copy and Download take the same file and stand as one group at the row's
+   end (§13.10). The copy report holds its width from the first render so the
+   press reflows nothing, and it is drawn ahead of the pair rather than
+   between them, where a slot that is empty until a press read as two
+   unrelated controls. */
+.source-take {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-take .copy-outcome {
+  order: -1;
+}
+
 /* The take-away control the raw block carries stands under it rather than
    over it, because the toggle that opened the view already holds the row
    above and two controls there read as one group. */

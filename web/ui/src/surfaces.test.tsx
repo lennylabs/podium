@@ -5193,6 +5193,64 @@ describe("the artifact viewer", () => {
     expect(within(pane).getByRole("button", { name: "Copy" })).toBeTruthy();
   });
 
+  // The two take-away controls stand side by side. The copy report holds its
+  // width from the first render so that a press reflows nothing, and that
+  // reservation is drawn ahead of the pair rather than between them: an empty
+  // slot standing between Copy and Download read as two unrelated controls in
+  // the row.
+  it("stands Copy and Download beside each other with the copy report ahead of them", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: manifestDoc,
+          skill_raw: "---\nname: review\n---\n\nBody line.\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    fireEvent.click(screen.getByRole("tab", { name: "Authored source" }));
+    const pane = screen.getByRole("tabpanel");
+    const copy = within(pane).getByRole("button", { name: "Copy" });
+    const download = within(pane).getByRole("button", {
+      name: "Download SKILL.md",
+    });
+    const group = copy.parentElement as HTMLElement;
+    expect(group.contains(download)).toBe(true);
+    expect(window.getComputedStyle(group).gap).toBe("8px");
+    // The group is a flex row, so what stands beside what is the order
+    // property against the document order, and only the children that take
+    // space in the row count.
+    const drawn = [...group.children]
+      .map((element, index) => ({
+        element,
+        index,
+        order: Number.parseInt(
+          window.getComputedStyle(element).order || "0",
+          10,
+        ),
+      }))
+      .sort((a, b) => a.order - b.order || a.index - b.index)
+      .map((entry) => entry.element)
+      .filter(
+        (element) => window.getComputedStyle(element).position !== "absolute",
+      );
+    expect(drawn[drawn.indexOf(copy) + 1]).toBe(download);
+    // The report still holds its place from the first render, so no press
+    // moves the pair.
+    const outcome = group.querySelector(".copy-outcome") as HTMLElement;
+    expect(drawn.indexOf(outcome)).toBeLessThan(drawn.indexOf(copy));
+    expect(window.getComputedStyle(outcome).display).toBe("inline-grid");
+  });
+
   // Every bundled file is retrievable from its own row: nothing is
   // previewed, so the row's action is the only path to the file. One binary
   // file puts the whole inline set into base64, and that row's action carries
