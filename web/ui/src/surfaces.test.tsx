@@ -6779,29 +6779,33 @@ describe("the artifact viewer", () => {
   // jsdom performs no layout, so the two heights the control reads are
   // stubbed and the clip itself is pinned in the layout case set.
   describe("the header description", () => {
-    /** stubHeights makes a clipped paragraph report the overrun a browser
-     * would measure on it, and an opened one report none. */
+    /** stubHeights makes a clipped element report the overrun a browser would
+     * measure on it, and an opened one report none. The clip is applied to a
+     * paragraph for a scalar and to the list itself for a sequence, so both
+     * element types are stubbed. */
     function stubHeights(scrollHeight: number) {
       const clientHeight = 60;
-      Object.defineProperty(HTMLParagraphElement.prototype, "scrollHeight", {
-        configurable: true,
-        get(this: HTMLParagraphElement) {
-          return this.classList.contains("clamped")
-            ? scrollHeight
-            : clientHeight;
-        },
-      });
-      Object.defineProperty(HTMLParagraphElement.prototype, "clientHeight", {
-        configurable: true,
-        get: () => clientHeight,
-      });
+      for (const type of [HTMLParagraphElement, HTMLUListElement]) {
+        Object.defineProperty(type.prototype, "scrollHeight", {
+          configurable: true,
+          get(this: HTMLElement) {
+            return this.classList.contains("clamped")
+              ? scrollHeight
+              : clientHeight;
+          },
+        });
+        Object.defineProperty(type.prototype, "clientHeight", {
+          configurable: true,
+          get: () => clientHeight,
+        });
+      }
     }
 
     afterEach(() => {
-      delete (HTMLParagraphElement.prototype as { scrollHeight?: number })
-        .scrollHeight;
-      delete (HTMLParagraphElement.prototype as { clientHeight?: number })
-        .clientHeight;
+      for (const type of [HTMLParagraphElement, HTMLUListElement]) {
+        delete (type.prototype as { scrollHeight?: number }).scrollHeight;
+        delete (type.prototype as { clientHeight?: number }).clientHeight;
+      }
     });
 
     function stubViewer(description: string) {
@@ -6815,6 +6819,29 @@ describe("the artifact viewer", () => {
             content_hash: "sha256:abc",
             manifest_body: "# Many tags\n",
             frontmatter: `---\nname: many-tags\ndescription: ${description}\n---\n`,
+          },
+        },
+        "/v1/dependents": { body: { edges: [] } },
+      });
+      goTo("#/artifact/edge%2Fmany-tags");
+      render(<App />);
+    }
+
+    /** stubTagged renders the viewer over an artifact whose frontmatter
+     * carries a sequence value long enough to overrun the rail's clip. */
+    function stubTagged() {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": {
+          body: {
+            id: "edge/many-tags",
+            type: "context",
+            version: "0.1.0",
+            content_hash: "sha256:abc",
+            manifest_body: "# Many tags\n",
+            frontmatter:
+              "---\nname: many-tags\ntags: [alpha, bravo, charlie, delta, echo," +
+              " foxtrot, golf, hotel, india, juliet]\n---\n",
           },
         },
         "/v1/dependents": { body: { edges: [] } },
@@ -7034,34 +7061,19 @@ describe("the artifact viewer", () => {
       ).toBeNull();
     });
 
-    // A sequence runs onto one line in the rail the way the design draws it,
-    // and that line wraps in the narrow column rather than being clipped. Each
-    // entry stays a list item, so a screen reader still counts them.
+    // A sequence carries no length bound either. Fifteen tags rendered whole
+    // made one rail cell 233px tall against the 39px every other row takes and
+    // pushed RELATIONS and RESOURCES off the first screen, so the rail reads a
+    // sequence at the same three lines it reads a scalar at. No entry is
+    // hidden: the whole sequence stays in the cell and the control opens it.
     // Spec: §13.10
-    it("wraps a sequence value in the rail's table", async () => {
+    it("clips a long sequence value in the rail's table and opens it on request", async () => {
       stubHeights(900);
-      stubRegistry({
-        "/v1/ui/session": { body: posture({ public_mode: true }) },
-        "/v1/load_artifact": {
-          body: {
-            id: "edge/many-tags",
-            type: "context",
-            version: "0.1.0",
-            content_hash: "sha256:abc",
-            manifest_body: "# Many tags\n",
-            frontmatter:
-              "---\nname: many-tags\ntags: [alpha, bravo, charlie, delta, echo," +
-              " foxtrot, golf, hotel, india, juliet]\n---\n",
-          },
-        },
-        "/v1/dependents": { body: { edges: [] } },
-      });
-      goTo("#/artifact/edge%2Fmany-tags");
-      render(<App />);
+      stubTagged();
       await screen.findByLabelText("Artifact viewer");
       const tags = screen.getByTestId("property-value-tags");
-      // No entry is dropped and none is cut: the whole sequence is in the
-      // cell, one entry per list item.
+      // No entry is dropped: the whole sequence is in the cell, one entry per
+      // list item, and only the box it flows in is clipped.
       expect(
         Array.from(tags.querySelectorAll("li")).map((item) => item.textContent),
       ).toEqual([
@@ -7076,9 +7088,41 @@ describe("the artifact viewer", () => {
         "india",
         "juliet",
       ]);
-      expect(tags.classList.contains("clamped")).toBe(false);
+      expect(tags.classList.contains("clamped")).toBe(true);
+      // The control names its own row, so a reader running down the rows tells
+      // it from the header's control and from the other rows' controls, and it
+      // names the region it opens.
+      const more = await screen.findByRole("button", {
+        name: "Show every tags entry",
+      });
+      expect(more.getAttribute("aria-expanded")).toBe("false");
+      expect(more.getAttribute("aria-controls")).toBe(tags.id);
+      expect(tags.id).not.toBe("");
+      fireEvent.click(more);
       expect(
-        screen.queryByRole("button", { name: "Show the whole tags value" }),
+        screen.getByTestId("property-value-tags").classList.contains("clamped"),
+      ).toBe(false);
+      // Collapsing restores the clip, so the control is not a one-way door.
+      fireEvent.click(
+        screen.getByRole("button", { name: "Show every tags entry" }),
+      );
+      expect(
+        screen.getByTestId("property-value-tags").classList.contains("clamped"),
+      ).toBe(true);
+    });
+
+    // A sequence the clip already holds carries no control, so a three-tag row
+    // stands at the height the design draws for it.
+    // Spec: §13.10
+    it("offers no control for a sequence value the clip already holds", async () => {
+      stubHeights(60);
+      stubTagged();
+      await screen.findByLabelText("Artifact viewer");
+      expect(
+        screen.getByTestId("property-value-tags").classList.contains("clamped"),
+      ).toBe(true);
+      expect(
+        screen.getByTestId("rail-frontmatter-table").querySelector("button"),
       ).toBeNull();
     });
 

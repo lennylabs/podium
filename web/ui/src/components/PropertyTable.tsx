@@ -11,7 +11,7 @@
 import { useState } from 'react';
 
 import { parseFrontmatter, splitDocument, type Property } from '../frontmatter';
-import { ClampedText } from './ClampedText';
+import { ClampedText, ClampMore, useClamp } from './ClampedText';
 import { CodeBlock, codeLines } from './CodeBlock';
 import { CopyButton } from './primitives';
 
@@ -156,36 +156,23 @@ function ServedNote() {
   );
 }
 
-/** PropertyValue is the content of one value cell. A sequence wraps whole on
- * both surfaces, because clipping it hides entries the author wrote behind a
- * control and a list of ten tags then reads as a list of four.
- *
- * A scalar wraps whole in the full-width panel and is clipped in the rail. The
- * panel is a tab of its own, it is wide, and it carries nothing under the table
- * to bury, which is what its line saying a long description wraps rather than
- * being clipped is scoped to. The rail is a 270px column with the relation
- * links standing under the table in the same scrolling column, where a
- * description of several hundred words made one cell 2,600px tall and put
- * EXTENDS and EXTENDED BY thousands of pixels below the fold, so the rail
- * reads a scalar at the three lines the header states the same string at
- * (§13.10). */
+/** PropertyValue is the content of one value cell. A value wraps whole in the
+ * full-width panel and is clipped in the rail, and that holds for a sequence
+ * the same way it holds for a scalar. The panel is a tab of its own, it is
+ * wide, and it carries nothing under the table to bury, which is what its line
+ * saying a long description wraps rather than being clipped is scoped to. The
+ * rail is a 270px column with the relation links standing under the table in
+ * the same scrolling column, where a description of several hundred words made
+ * one cell 2,600px tall and a fifteen-entry `tags` sequence made one 233px
+ * tall against the 39px every other row takes, putting EXTENDS, EXTENDED BY,
+ * and RESOURCES below the fold. The rail therefore reads every value at the
+ * three lines the header states the same string at, and offers the rest in
+ * place (§13.10). Clipping a sequence hides no entry: the entries stay in the
+ * document and the control opens them, which is the treatment the sibling
+ * scalar row in the same table already carries. */
 function PropertyValue({ property, clamp }: { property: Property; clamp: boolean }) {
   if (property.items.length > 0) {
-    // Both surfaces run the entries onto one line, which is the row the design
-    // draws and the height the rows around it take. Each entry is still a list
-    // item, so a wrapped entry stays one entry and a screen reader counts them;
-    // the sheet flows the items inline and draws the separator between them in
-    // the de-emphasized tone, which is what tells an entry ending in a full
-    // stop apart from the comma that follows it (§13.10).
-    return (
-      <ul className="property-items" data-testid={`property-value-${property.key}`}>
-        {property.items.map((item, index) => (
-          <li key={`${String(index)}:${item}`} className="property-value">
-            {item.trim() === '' ? <AbsentValue keyName={`${property.key}-${String(index)}`} /> : item}
-          </li>
-        ))}
-      </ul>
-    );
+    return <PropertyItems property={property} clamp={clamp} />;
   }
   if (property.value.trim() === '') {
     return <AbsentValue keyName={property.key} />;
@@ -207,6 +194,47 @@ function PropertyValue({ property, clamp }: { property: Property; clamp: boolean
     <span className="property-value" data-testid={`property-value-${property.key}`}>
       {property.value}
     </span>
+  );
+}
+
+/** PropertyItems is a sequence value. Both surfaces run the entries onto one
+ * line, which is the row the design draws and the height the rows around it
+ * take. Each entry is still a list item, so a wrapped entry stays one entry and
+ * a screen reader counts them; the sheet flows the items inline and draws the
+ * separator between them in the de-emphasized tone, which is what tells an
+ * entry ending in a full stop apart from the comma that follows it (§13.10).
+ *
+ * The rail clips the run at the shared three lines. The clip is applied to the
+ * list itself rather than to a wrapper, because the line count is read off the
+ * box the inline entries flow in. */
+function PropertyItems({ property, clamp }: { property: Property; clamp: boolean }) {
+  const clip = useClamp<HTMLUListElement>(property.items.join(' '));
+  const list = (
+    <ul
+      ref={clamp ? clip.ref : undefined}
+      id={clamp ? clip.region : undefined}
+      className={clamp && !clip.expanded ? 'property-items clamped' : 'property-items'}
+      data-testid={`property-value-${property.key}`}
+    >
+      {property.items.map((item, index) => (
+        <li key={`${String(index)}:${item}`} className="property-value">
+          {item.trim() === '' ? <AbsentValue keyName={`${property.key}-${String(index)}`} /> : item}
+        </li>
+      ))}
+    </ul>
+  );
+  if (!clamp) {
+    return list;
+  }
+  // The control names its own row, for the same reason the scalar's does: a
+  // reader running down the rail's property rows meets it out of the
+  // surrounding text and every row would otherwise offer the same unqualified
+  // "Show more".
+  return (
+    <>
+      {list}
+      <ClampMore clamp={clip} label={`Show every ${property.key} entry`} />
+    </>
   );
 }
 
