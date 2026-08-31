@@ -4056,17 +4056,18 @@ describe("the artifact viewer", () => {
     const title = heading.parentElement;
     expect(within(title as HTMLElement).getByText("SKILL")).toBeTruthy();
     expect(within(title as HTMLElement).getByText("v2.3.0")).toBeTruthy();
-    // The type and the version are the two badge weights the header holds
-    // apart: the type takes the outlined badge, and the version the filled
-    // soft one. Drawn in one treatment they read as a row of identical pills
-    // and the reader is given no order to read them in.
+    // The type states a fact and takes the outlined badge. The version is the
+    // one thing in the header a reader can press, so it takes the bordered
+    // control tone the design draws for the picker rather than the soft badge
+    // fill, which set the only control in the row at the lowest weight in it.
     const type = within(title as HTMLElement).getByText("SKILL");
     expect(type.className.split(" ")).toContain("badge");
     expect(type.className.split(" ")).not.toContain("badge-soft");
     const version = within(title as HTMLElement)
       .getByText("v2.3.0")
       .closest(".badge");
-    expect(version?.className.split(" ")).toContain("badge-soft");
+    expect(version?.className.split(" ")).toContain("version-picker-open");
+    expect(version?.className.split(" ")).not.toContain("badge-soft");
     // The breadcrumb is the one place the header states the path. A mono
     // line spelling the whole identifier under the badges repeats the trail
     // three lines above it, so the content column states the path once.

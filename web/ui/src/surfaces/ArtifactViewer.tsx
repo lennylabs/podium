@@ -422,7 +422,7 @@ function VersionPicker({
       <button
         type="button"
         ref={trigger}
-        className="badge badge-soft version-picker-open"
+        className="badge version-picker-open"
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={fieldId}

@@ -979,6 +979,31 @@ describe("badge tones", () => {
     expect(soft.borderTopColor).not.toBe(outline.borderTopColor);
   });
 
+  // The version affordance in the artifact header is the one pressable thing
+  // in a row of informational badges, so it takes the bordered control the
+  // design draws: the page surface behind body ink inside a visible edge.
+  // Given the soft badge tone it sat in the lightest fill and the quietest
+  // text in that row, which read as one more piece of metadata.
+  it("draws the version picker as a bordered control rather than a soft badge", () => {
+    const picker = document.createElement("button");
+    picker.className = "badge version-picker-open";
+    document.body.appendChild(picker);
+    mounted.push(picker);
+    expect(declaredFor(picker, "background")).toBe("var(--surf)");
+    expect(declaredFor(picker, "border-color")).toBe("var(--bd)");
+    expect(declaredFor(picker, "color")).toBe("var(--ink)");
+    const soft = document.createElement("span");
+    soft.className = "badge badge-soft";
+    document.body.appendChild(soft);
+    mounted.push(soft);
+    expect(declaredFor(picker, "background")).not.toBe(
+      declaredFor(soft, "background"),
+    );
+    expect(declaredFor(picker, "border-color")).not.toBe(
+      declaredFor(soft, "border-color"),
+    );
+  });
+
   // A bare figure stated inside a control takes the count tone: a filled pill
   // with no edge, set tighter and heavier than the informational badges.
   // Drawn as the outlined badge, the layer panel's recoverable figure read as
