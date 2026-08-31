@@ -3564,6 +3564,43 @@ label:has(> input:disabled) {
   min-height: 0;
   padding: 4px 22px 18px;
   overflow-y: auto;
+  /* The gutter is reserved whether or not the body overflows, so a dialog
+     whose content grows past the viewport does not reflow its fields sideways
+     the moment the bar appears. */
+  scrollbar-gutter: stable;
+}
+
+/* The Register form is taller than an ordinary laptop viewport, so its last
+   two elements, the line stating the consequence of the visibility selection
+   and the note on when visibility can be changed, stand below the fold. The
+   platform's overlay scrollbar paints nothing until a scroll begins, which
+   leaves a cut-off row as the only sign that anything follows. Declaring the
+   bar's own parts opts the body out of the overlay bar and onto one that is
+   drawn for as long as the body overflows, so the dialog says it continues
+   before the reader has touched it. The standard `scrollbar-width` and
+   `scrollbar-color` are deliberately absent: either one takes precedence over
+   these parts, and the bar it selects is the overlay bar again, which is the
+   bar this rule exists to leave. The rule is on the shared body rather than
+   on the one form, because every dialog that outgrows its viewport hides its
+   tail the same way. */
+.modal-body::-webkit-scrollbar {
+  width: 10px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background: var(--bd);
+  background-clip: content-box;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover {
+  background: var(--meta);
+  background-clip: content-box;
 }
 
 /* The footer's controls sit at the trailing edge, where the dialog's press is

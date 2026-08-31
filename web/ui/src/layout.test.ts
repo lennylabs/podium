@@ -1799,6 +1799,36 @@ describe("dialog width", () => {
   });
 });
 
+// A dialog body taller than the viewport scrolls inside the dialog, which
+// keeps the footer and its submit on screen. The Register form is taller than
+// an ordinary laptop viewport, so the line stating the consequence of the
+// visibility selection and the note on when visibility can be changed stand
+// below the fold, and the platform's overlay scrollbar paints nothing until a
+// scroll begins: a half-cut field row was the only sign that anything
+// followed. Declaring the bar's parts opts the body onto a bar that is drawn
+// for as long as the body overflows. jsdom computes no pseudo-element style,
+// so the cases read the rules the browser applies; the drawn bar is checked
+// in a browser.
+describe("dialog body scroll", () => {
+  it("draws a scrollbar on a dialog body rather than the overlay bar", () => {
+    expect(ruleText(".modal-body::-webkit-scrollbar")).toContain("width: 10px");
+    expect(ruleText(".modal-body::-webkit-scrollbar-thumb")).toContain(
+      "background: var(--bd)",
+    );
+  });
+
+  it("reserves the bar's gutter so an overflowing body does not reflow", () => {
+    expect(ruleText(".modal-body")).toContain("scrollbar-gutter: stable");
+  });
+
+  // Either standard property takes precedence over the parts above and
+  // selects the overlay bar again, which is the bar the parts exist to leave.
+  it("leaves the standard scrollbar properties off the dialog body", () => {
+    expect(ruleText(".modal-body")).not.toContain("scrollbar-width");
+    expect(ruleText(".modal-body")).not.toContain("scrollbar-color");
+  });
+});
+
 // The sidebar is banded: a navigation block, the catalog tree, and the
 // counts footer. The band boundaries are hairlines, and the catalog label
 // once carried margin alone, so the tree floated under the navigation rows
