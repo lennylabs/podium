@@ -1293,6 +1293,21 @@ describe("layer source cell", () => {
     expect(styled("source-detail-tail").marginRight).toBe("auto");
   });
 
+  // A repository URL carries its identity at its start, so the run that holds
+  // one is elided at its end. Given the path treatment it gave up the host and
+  // the owner and kept the segment every fork of one project shares, and two
+  // remotes drew the identical line.
+  it("elides a repository line at its end and holds it against the left edge", () => {
+    const whole = styled("source-detail-whole");
+    expect(whole.overflow).toBe("hidden");
+    expect(whole.textOverflow).toBe("ellipsis");
+    // The run declares no right-to-left direction, which is what moves the
+    // elision marker to the start of a line.
+    expect(whole.direction).not.toBe("rtl");
+    expect(whole.minWidth).toBe("0");
+    expect(whole.marginRight).toBe("auto");
+  });
+
   it("lets the source column take the width the other columns leave", () => {
     const column = styled("source-col");
     expect(column.maxWidth).toBe("0");

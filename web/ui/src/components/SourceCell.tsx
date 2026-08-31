@@ -35,7 +35,14 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
             <Badge tone="danger">no ref</Badge>
           )}
         </div>
-        <Detail value={layer.Repo ?? ''} />
+        {/* A remote is identified by what it starts with. The host and the
+            owner are what separate two repositories, and the final segment is
+            shared across every fork of one project, so the path clip that
+            holds a filesystem path's last segment out of the clip drew
+            git@github.com:alice/podium-personal-artifacts.git and the same
+            repository under bob as one identical string. The repository line
+            takes the opposite elision and keeps its start (§13.10). */}
+        <Detail value={layer.Repo ?? ''} clip="trailing" />
         {present(layer.Root) && <Detail value={rootLine(layer.Root)} />}
       </div>
     );
@@ -84,19 +91,34 @@ export function rootLine(root: string): string {
   return root.endsWith('/') ? root : `${root}/`;
 }
 
-/** Detail is one quiet location line under the source reference. The line is
- * split so that the clip falls on the leading directories and the identifying
- * final segment is always drawn: several layers under one parent share every
- * leading directory, and clipping from the right rendered them as the same
- * string, which stops the column telling the rows apart. The head gives up
- * its own leading characters to the clip, so what it keeps ends against the
- * tail and the line reads as one path. Where the tail alone is wider than the
- * cell, the head has already collapsed to the width of its own ellipsis and
- * the tail takes the same leading elision, so the line always states that it
- * is truncated. The title
- * attribute repeats the whole value because the head is still clipped where
- * the column is narrower than it. */
-function Detail({ value }: { value: string }) {
+/** Detail is one quiet location line under the source reference. A path line
+ * is split so that the clip falls on the leading directories and the
+ * identifying final segment is always drawn: several layers under one parent
+ * share every leading directory, and clipping from the right rendered them as
+ * the same string, which stops the column telling the rows apart. The head
+ * gives up its own leading characters to the clip, so what it keeps ends
+ * against the tail and the line reads as one path. Where the tail alone is
+ * wider than the cell, the head has already collapsed to the width of its own
+ * ellipsis and the tail takes the same leading elision, so the line always
+ * states that it is truncated. The title attribute repeats the whole value
+ * because the head is still clipped where the column is narrower than it.
+ *
+ * A `trailing` clip draws the value as one run elided at its end, for a value
+ * whose identity is at its start rather than in its final segment. */
+function Detail({
+  value,
+  clip = 'leading',
+}: {
+  value: string;
+  clip?: 'leading' | 'trailing';
+}) {
+  if (clip === 'trailing') {
+    return (
+      <div className="mono quiet source-detail" title={value}>
+        <span className="source-detail-whole">{value}</span>
+      </div>
+    );
+  }
   const { head, tail } = splitDetail(value);
   return (
     <div className="mono quiet source-detail" title={value}>

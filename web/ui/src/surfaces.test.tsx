@@ -8036,11 +8036,79 @@ describe("the layer panel", () => {
     expect(root.querySelector(".source-detail-tail")?.textContent).toBe(
       "artifacts/",
     );
-    // The repository line does carry leading directories, so it keeps the run
-    // that draws the elision marker.
+    // The repository line takes the opposite elision, so it carries neither
+    // run of the path split.
     const repo = lines[0];
-    expect(repo.querySelector(".source-detail-head")?.textContent).toBe(
-      "git@github.com:acme/",
+    expect(repo.querySelector(".source-detail-head")).toBeNull();
+    expect(repo.querySelector(".source-detail-whole")?.textContent).toBe(
+      "git@github.com:acme/artifacts.git",
+    );
+  });
+
+  // A repository is identified by its host and its owner, which sit at the
+  // start of the URL, and its final segment repeats across every fork of one
+  // project. Clipped like a filesystem path, the line gave up its start and
+  // held its last segment, so two layers pointing at different remotes drew
+  // the identical cell and the column stopped telling the rows apart. The
+  // repository line is one run elided at its end instead (§13.10).
+  it("elides a git repository line at its end so its owner survives the clip", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "alice-personal",
+              SourceType: "git",
+              Repo: "git@github.com:alice/podium-personal-artifacts.git",
+              Ref: "main",
+              Root: "registry/artifacts",
+              Order: 1,
+            },
+            {
+              ID: "bob-personal",
+              SourceType: "git",
+              Repo: "git@github.com:bob/podium-personal-artifacts.git",
+              Ref: "main",
+              Root: "registry/artifacts",
+              Order: 2,
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const repoLine = (id: string) =>
+      layerRow(id).querySelector(".source-detail-whole") as HTMLElement;
+    // The run the clip falls on holds the whole URL, so what it keeps starts
+    // at the host and runs through the owner.
+    expect(repoLine("alice-personal").textContent).toBe(
+      "git@github.com:alice/podium-personal-artifacts.git",
+    );
+    expect(repoLine("bob-personal").textContent).toBe(
+      "git@github.com:bob/podium-personal-artifacts.git",
+    );
+    // The path split held the last segment out of the clip, which is the half
+    // the two remotes share. Neither run is drawn on a repository line.
+    const repoCell = Array.from(
+      layerRow("alice-personal").querySelectorAll(".source-detail"),
+    )[0];
+    expect(repoCell.querySelector(".source-detail-head")).toBeNull();
+    expect(repoCell.querySelector(".source-detail-tail")).toBeNull();
+    const style = window.getComputedStyle(repoLine("alice-personal"));
+    expect(style.textOverflow).toBe("ellipsis");
+    expect(style.overflow).toBe("hidden");
+    // The path runs turn the line right-to-left to move the marker to its
+    // start; the repository run does not, so its marker falls at its end.
+    expect(style.direction).not.toBe("rtl");
+    // The root line below it is still a path and keeps the path treatment.
+    const root = Array.from(
+      layerRow("alice-personal").querySelectorAll(".source-detail"),
+    )[1];
+    expect(root.querySelector(".source-detail-tail")?.textContent).toBe(
+      "artifacts/",
     );
   });
 

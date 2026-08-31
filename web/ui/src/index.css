@@ -2227,6 +2227,22 @@ input[type="search"]::-webkit-search-cancel-button {
   direction: ltr;
 }
 
+/* A repository URL is told apart by its host and its owner, which sit at the
+   start of the string, while its final segment repeats across every fork of
+   one project. Clipped like a path, two remotes under different owners drew
+   the identical cell, and the gap the two elisions left between them read as
+   two values rather than one address. The line is one run elided at its end,
+   so the leading `git@github.com:owner/` survives the clip (§13.10). The
+   automatic margin holds it against the left edge under the flex line's end
+   alignment. */
+.source-detail-whole {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: auto;
+}
+
 /* The tail elides at its own start once the head has collapsed. Held out of
    the shrink entirely, a final segment wider than the cell overflowed the
    line's clip and was sliced mid-glyph with no marker, so the row stated a
