@@ -1401,13 +1401,20 @@ function UnregisterConfirmation({
   // does. Without the sentence the reader is left pressing a disabled control
   // that reports no reason, and a reader who has scrolled past the field or is
   // hearing the button announced has nothing to go on at all.
-  const held = typed !== layer.ID;
+  // The gate compares the typed value with its edges trimmed. An ID pasted
+  // with a trailing space reads on screen as the layer's own ID, so comparing
+  // it literally left a correct-looking field beside a dead button under a
+  // sentence telling the reader to type what they had already typed, with
+  // nothing on the page naming the whitespace. Trimming does not weaken the
+  // gate, because the trimmed value still has to be the whole ID (§13.10).
+  const entered = typed.trim();
+  const held = entered !== layer.ID;
   // The field is empty on the first paint, so the hold stands before the
   // reader has done anything. Stating it then would open the confirmation on a
   // sentence in the refusal colour, reading as an error the reader has already
   // caused; the field's own label carries the instruction until they have
   // typed. The sentence is stated once what they typed does not match.
-  const stated = held && typed !== "";
+  const stated = held && entered !== "";
   const holdID = useId();
   return (
     <Modal title={`Unregister ${layer.ID}`} onClose={onCancel}>
@@ -1482,7 +1489,7 @@ function UnregisterConfirmation({
             // commits only on the match the button gates on, so it cannot
             // issue the write from a half-typed ID.
             onKeyDown={(event) => {
-              if (event.key === "Enter" && typed === layer.ID) {
+              if (event.key === "Enter" && !held) {
                 onConfirm();
               }
             }}

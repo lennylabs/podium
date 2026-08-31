@@ -8036,6 +8036,43 @@ describe("the layer write flows", () => {
     expect(confirm.hasAttribute("disabled")).toBe(false);
   });
 
+  // An ID reaches the field by paste as often as by typing, and a paste
+  // carries whatever whitespace came with it. The pasted value reads on screen
+  // as the layer's own ID, so a literal comparison held the write on a field
+  // the reader has no reason to doubt. The gate compares the trimmed value,
+  // and Enter commits on the same match the button gates on.
+  it("accepts an unregister ID pasted with surrounding whitespace", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
+    await screen.findByLabelText("Unregister alice-personal");
+    const field = screen.getByLabelText("Type the layer ID to confirm");
+    const confirm = screen.getByRole("button", { name: "Unregister layer" });
+    fireEvent.change(field, { target: { value: "  alice-personal  " } });
+    expect(confirm.hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByTestId("unregister-foot-note")).toBeNull();
+    // Whitespace alone is an untouched field rather than a mismatch, so it
+    // opens no sentence in the refusal colour.
+    fireEvent.change(field, { target: { value: "   " } });
+    expect(confirm.hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByTestId("unregister-foot-note")).toBeNull();
+    fireEvent.change(field, { target: { value: "alice-personal\n" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (r) => r.url.startsWith("/v1/layers?") && r.method === "DELETE",
+        ),
+      ).toBe(true);
+    });
+  });
+
   // The destructive half and the recoverable half of the confirmation sit
   // side by side and differ only in their fill, so each leads with its own
   // glyph in a fixed gutter, the way the register form's consequence and note
