@@ -236,6 +236,33 @@ describe("rendered artifact body", () => {
     expect(descendantStyle("prose", "img").maxWidth).toBe("100%");
   });
 
+  // The chip fill and the 4px radius mark one token quoted inside a sentence.
+  // A fenced block is quoted whole and the `pre` card is what marks it, so
+  // the `code` a fence nests inside gives that treatment back. Left inherited,
+  // each line paints its own band to the width of its text and the block reads
+  // as ragged bars floating inside the card.
+  it("draws a fenced block on the card's own ground", () => {
+    const pre = document.createElement("pre");
+    const code = document.createElement("code");
+    pre.appendChild(code);
+    document.body.appendChild(pre);
+    mounted.push(pre);
+
+    const fenced = window.getComputedStyle(code);
+    expect(fenced.backgroundColor).toBe("rgba(0, 0, 0, 0)");
+    expect(fenced.padding).toBe("0px");
+    expect(fenced.borderRadius).toBe("0");
+    expect(fenced.display).toBe("block");
+
+    // The inline token keeps the chip it is marked with.
+    const inline = document.createElement("code");
+    document.body.appendChild(inline);
+    mounted.push(inline);
+    const quoted = window.getComputedStyle(inline);
+    expect(quoted.background).toBe("var(--chip)");
+    expect(quoted.padding).toBe("1px 5px");
+  });
+
   // The page title above the body is 29px/700. A body heading that inherits
   // the global scale draws an h1 at exactly that size and weight, so the
   // document's structure competes with the page's. The cases pin a scale

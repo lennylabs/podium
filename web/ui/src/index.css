@@ -210,6 +210,18 @@ code {
   background: var(--chip);
 }
 
+/* A fenced block is quoted whole, and the card the `pre` is drawn as is what
+   marks it. The chip above is the mark for one token inside a sentence, and
+   inherited by the `code` a fence nests inside the `pre` it fills each line
+   to the width of that line's text, so a block reads as a run of ragged bands
+   inside the card rather than as one ground (§13.10). */
+pre > code {
+  display: block;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+
 /* Most anchors in this interface are structural: a card, a listing row, a
    breadcrumb crumb, a sidebar entry. The surrounding structure is the
    affordance there, and the user-agent underline drawn under each one turns a
