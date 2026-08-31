@@ -6722,7 +6722,13 @@ describe("the artifact viewer", () => {
   });
 
   // Spec: §13.10
-  it("drops the header description while the Frontmatter tab stands it as a table row", async () => {
+  // The header's description belongs to the artifact rather than to the body
+  // being read, so switching tabs does not take it off the page. The
+  // Frontmatter tab restates it as the manifest's `description` row, and that
+  // repetition is accepted rather than resolved by hiding the header.
+  //
+  // Spec: §13.10
+  it("keeps the header description while the Frontmatter tab stands it as a table row", async () => {
     const description =
       "Reconcile a supplier ledger against the general ledger.";
     stubRegistry({
@@ -6742,26 +6748,31 @@ describe("the artifact viewer", () => {
     goTo("#/artifact/ops%2Fledger-reconciliation");
     render(<App />);
     await screen.findByLabelText("Artifact viewer");
-    // The rendered tab carries no property table, so the header states the
-    // description.
     expect(screen.getByTestId("artifact-lead").textContent).toBe(description);
     fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
-    // The table now carries the same sentence as its `description` row, so
-    // the header drops its paragraph rather than printing it twice.
+    // The table states the sentence as the manifest's own `description` row,
+    // and the header states it as the artifact's identity. Both stand.
     expect(screen.getByTestId("frontmatter-table").textContent).toContain(
       description,
     );
-    expect(screen.queryByTestId("artifact-lead")).toBeNull();
-    // Leaving the tab returns the header's paragraph.
-    fireEvent.click(screen.getByRole("tab", { name: "Rendered" }));
     expect(screen.getByTestId("artifact-lead").textContent).toBe(description);
+    // Every other tab keeps it too, so the header does not move as the reader
+    // walks the tab row.
+    for (const name of [/Authored source/, /Resources/, /^Rendered$/]) {
+      const tab = screen.queryByRole("tab", { name });
+      if (tab === null) continue;
+      fireEvent.click(tab);
+      expect(screen.getByTestId("artifact-lead").textContent).toBe(description);
+    }
   });
 
-  // A skill declares its description in the authored SKILL.md and its
-  // manifest must not carry the field (§4.3.4), so the Frontmatter tab's
-  // table has no `description` row to stand in the header's place. Dropping
-  // the header paragraph there takes the sentence off the page altogether
-  // rather than relocating it.
+  // A skill declares its description in the authored SKILL.md and its manifest
+  // must not carry the field (§4.3.4), so the header reads it from a different
+  // document than it does for every other type and the Frontmatter tab's table
+  // carries no `description` row at all. This pins that the sentence still
+  // reaches the header from SKILL.md and stays there across the tab switch,
+  // which is the arm where a header sourced only from the manifest would show
+  // nothing.
   //
   // Spec: §13.10
   it("keeps a skill's description in the header while the Frontmatter tab states no description row", async () => {
