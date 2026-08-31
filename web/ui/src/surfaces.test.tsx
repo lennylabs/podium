@@ -10277,6 +10277,44 @@ describe("the layer write flows", () => {
     );
   });
 
+  // The hold sentence is the only statement of why the submit is disabled,
+  // and it sits in the footer rather than beside the field the reader is
+  // working in. A reader who is not in that field is never told the hold
+  // appeared or cleared unless the line reports itself, so it is a polite
+  // status region and keeps its identity across the change (§13.10).
+  it("announces the register hold as it appears and clears", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const note = screen.getByTestId("register-foot-note");
+    expect(note.getAttribute("role")).toBe("status");
+    expect(note.getAttribute("aria-live")).toBe("polite");
+    // The hold arrives in the same node the region was announced on, so the
+    // sentence is read out as a change rather than mounting unheard.
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    expect(screen.getByTestId("register-foot-note")).toBe(note);
+    expect(note.textContent).toContain(
+      "Name the local path before registering.",
+    );
+    // Clearing the hold is announced from the same region.
+    fireEvent.change(screen.getByLabelText("Local path"), {
+      target: { value: "/Users/alice/reg" },
+    });
+    expect(screen.getByTestId("register-foot-note")).toBe(note);
+    expect(note.textContent).toContain("Registers at the end of the order");
+  });
+
+
   // A layer is addressed by its ID, and a registration without one is refused
   // by the registry with a message naming `source_type`, a field the form
   // never draws. The ID therefore carries the same requirement marker and the

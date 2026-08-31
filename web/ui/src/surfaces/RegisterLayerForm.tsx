@@ -443,9 +443,20 @@ export function RegisterLayerForm({
           {/* The registry appends a new layer at the end of the order, and
               the panel's last row is the one that wins, so the footer states
               where this registration lands rather than a fixed number. */}
+          {/* The sentence is the only statement of why the submit is
+              disabled, and it is written into a line the reader is not
+              looking at while they work through the fields. A field points
+              at it once the reader is in that field, which leaves a reader
+              who is elsewhere in the form with a hold that appears and clears
+              silently, so the line reports itself as a status region and is
+              read out on every change (§13.10). Polite rather than assertive,
+              because the hold moves from field to field while the reader is
+              typing and an assertive region interrupts the keystroke. */}
           <span
             className={stated === null ? 'quiet modal-foot-note' : 'modal-foot-note modal-foot-hold'}
             id={holdID}
+            role="status"
+            aria-live="polite"
             data-testid="register-foot-note"
           >
             {stated?.message ?? 'Registers at the end of the order, where the last row wins.'}
