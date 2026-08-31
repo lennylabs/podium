@@ -231,17 +231,6 @@ export function ArtifactViewer({
 
   const description = descriptionOf(document.frontmatter, body.skill_raw ?? '');
   const frontmatterOpen = tab === 'frontmatter';
-  // Where the manifest frontmatter declares the description, the Frontmatter
-  // tab stands it as the `description` row of its own table, and keeping the
-  // header paragraph there would print the same sentence twice within one
-  // screen, so the header drops it. A skill declares the field in the
-  // authored SKILL.md instead and its manifest must not carry it (§4.3.4),
-  // so that table stands nothing in the header's place and dropping the
-  // paragraph would take the description off the page entirely. The header
-  // keeps its paragraph wherever the table has no row to relocate it into.
-  //
-  // Spec: §13.10
-  const tableStatesDescription = declaredDescription(document.frontmatter) !== '';
 
   return (
     <section className="surface artifact-viewer" aria-label="Artifact viewer">
@@ -265,7 +254,16 @@ export function ArtifactViewer({
           />
           <DeprecatedBadge deprecated={body.deprecated} />
         </div>
-        {!(frontmatterOpen && tableStatesDescription) && <Lead text={description} />}
+        {/* The header states the description on every tab. It belongs to the
+            artifact rather than to the body being read, so it stays put while
+            the tabs below it change, and a reader who switches tabs does not
+            watch the page reflow around a paragraph appearing and vanishing.
+            The Frontmatter tab does restate the sentence in its `description`
+            row, and that repetition is accepted: the row is the manifest
+            reported verbatim, which is what that tab is for, while the header
+            is the artifact's own identity.
+            Spec: §13.10 */}
+        <Lead text={description} />
         <DeprecationNotice artifact={body} />
         {artifact.loading && <Loading label="Loading the artifact." />}
         {artifact.error !== null && (
