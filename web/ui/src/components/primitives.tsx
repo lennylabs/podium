@@ -313,6 +313,25 @@ export function CuratedBadge() {
 }
 
 /**
+ * SurfacedLabel marks a notable entry the domain author did not feature. The
+ * §4.5.5 notable list is drawn from two sources, and a row that carries no
+ * mark at all leaves the reader to infer the second source from the absence
+ * of the first, which is only legible to a reader who already knows the
+ * curated badge exists. Naming both halves states the distinction the
+ * response draws.
+ *
+ * It is a quiet label rather than a badge: the ranked half is the default
+ * case and the far larger one, so an outlined pill on every row of a listing
+ * competes with the type and the version beside it and the curated star stops
+ * standing out.
+ *
+ * Spec: §4.5.5
+ */
+export function SurfacedLabel() {
+  return <span className="quiet label">SURFACED BY USAGE</span>;
+}
+
+/**
  * FoldedFromBadge names the subdomain a §4.5.5 lifted entry was raised out of.
  * The row it sits on is not a child of the domain it is listed under, and the
  * badge is what says so, so it is drawn on the dashed edge the lifted group's

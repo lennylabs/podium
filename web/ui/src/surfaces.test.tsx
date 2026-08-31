@@ -2311,12 +2311,12 @@ describe("the domain browser", () => {
     expect(within(row).queryByText("curated")).toBeNull();
   });
 
-  // Spec: \u00a74.5.5 \u2014 the registry tags every notable entry the domain's
-  // featured: list does not name as "signal", whether or not a usage signal
-  // contributed to it. A marker naming usage on those rows lands on every row
-  // of a registry that has served no traffic and states a reason the response
-  // does not report, so the listing marks the featured rows alone.
-  it("marks a non-featured listing row with no source claim at all", async () => {
+  // Spec: \u00a74.5.5 \u2014 the notable list is selected from the domain's
+  // featured: entries and from the usage-ranked rest, and the listing names
+  // both halves. Marking the featured rows alone leaves the ranked rows
+  // stating nothing, which reads as the second source only to a reader who has
+  // already met a curated row somewhere else in the catalog.
+  it("marks a non-featured listing row as surfaced by usage", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": {
@@ -2343,8 +2343,18 @@ describe("the domain browser", () => {
     goTo("#/domain/platform");
     render(<App />);
     const browser = await screen.findByLabelText("Domain browser");
-    expect(within(browser).queryByText("surfaced by usage")).toBeNull();
-    // The distinction the response does draw survives beside it.
+    const surfaced = within(browser).getAllByText("SURFACED BY USAGE");
+    expect(surfaced).toHaveLength(1);
+    // The quiet label sits under the curated badge in weight: the ranked half
+    // is the larger one, and an outlined pill on every row of it would leave
+    // the author's picks with nothing to stand out against.
+    expect(surfaced[0].className).toContain("quiet");
+    expect(surfaced[0].className).not.toContain("badge");
+    // The row carrying the label is the signal one, and the featured row keeps
+    // the badge alone.
+    const rows = within(browser).getAllByRole("listitem");
+    expect(within(rows[0]).getByText("SURFACED BY USAGE")).toBeTruthy();
+    expect(within(rows[1]).queryByText("SURFACED BY USAGE")).toBeNull();
     expect(within(browser).getAllByText("\u2605 CURATED")).toHaveLength(1);
   });
 

@@ -2,7 +2,14 @@
 // receive the same descriptor, so both render this row and neither formats
 // the same field twice.
 
-import { CuratedBadge, FoldedFromBadge, SensitivityBadge, TypeBadge, formatVersion } from './primitives';
+import {
+  CuratedBadge,
+  FoldedFromBadge,
+  SensitivityBadge,
+  SurfacedLabel,
+  TypeBadge,
+  formatVersion,
+} from './primitives';
 import type { ArtifactDescriptor } from '../api';
 import { artifactHref, artifactLeaf } from '../route';
 
@@ -143,15 +150,19 @@ export function ArtifactRow({
                 them to the column at the row's right edge. */}
             {ranked && marks}
             <SensitivityBadge sensitivity={artifact.sensitivity} />
-            {/* The notable source is drawn on its "featured" arm alone. The
-                registry tags every entry the domain's featured: list does not
-                name as "signal" (§4.5.5), whether or not any usage signal
-                contributed to it, so a "surfaced by usage" marker lands on
-                every row of a registry that has served no traffic and states a
-                reason the response does not report. The row therefore
-                distinguishes what the response distinguishes, which is
-                featured against the rest. */}
-            {artifact.source === 'featured' && !titled && <CuratedBadge />}
+            {/* The §4.5.5 notable source, named on both its arms. The list is
+                selected from the domain's featured: entries and from the
+                usage-ranked rest, and marking the featured half alone leaves
+                the other half stating nothing, which a reader can only read as
+                the second source once they have seen a curated row elsewhere
+                in the catalog. A row under a head that already names its half
+                carries neither mark. */}
+            {!titled &&
+              (artifact.source === 'featured' ? (
+                <CuratedBadge />
+              ) : (
+                artifact.source === 'signal' && <SurfacedLabel />
+              ))}
             <FoldedFromBadge foldedFrom={artifact.folded_from} />
             {matchedByMeaning && <span className="quiet label">matched by meaning</span>}
           </span>
