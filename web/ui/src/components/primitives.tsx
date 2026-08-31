@@ -494,17 +494,15 @@ export function ErrorPage({
   const envelope = shown instanceof ApiError ? shown : null;
   const kind = errorPageKind(shown);
   const label = kind === 'notFound' ? 'NOT FOUND' : kind === 'unavailable' ? 'REGISTRY UNREACHABLE' : 'REFUSED';
-  // The caller's title states what the route asked for and did not get ("No
-  // such domain"), which a refusal carrying a §6.10 code has been classified
-  // enough to say. A refusal carrying no code has not: the status alone does
-  // not report that the domain is missing, so the page states that the
-  // request was refused and leaves the code line to report the status.
+  // The caller's title states that what the route named is not there ("No
+  // such domain"), which only a not-found belongs to. Every other refusal
+  // leaves the artifact or the domain where it was: an argument the registry
+  // rejected, a quota, or a status written in front of it says nothing about
+  // whether the identifier resolves, and the catalog behind the page goes on
+  // listing it. Announcing those as absent states something false, so the
+  // page reports the refusal and leaves the code line to name it.
   const heading =
-    kind === 'unavailable'
-      ? "Can't reach the registry"
-      : envelope !== null && envelope.code === ''
-        ? 'The request was refused'
-        : title;
+    kind === 'unavailable' ? "Can't reach the registry" : kind === 'notFound' ? title : 'The request was refused';
   const offerRetry = onRetry !== undefined && (envelope === null || envelope.retryable);
   // A retry that refuses again is rendered as a fresh control, so the control
   // that was pressed takes the focus back rather than leaving the reader on

@@ -16113,6 +16113,88 @@ describe("a whole-surface failure", () => {
     expect(page.textContent).toContain("registry.unavailable · retryable");
   });
 
+  // A coded refusal that is not a not-found leaves the artifact where it was.
+  // The registry rejected the argument the route carried, the catalog still
+  // lists the identifier, and a page headed "No such artifact" would state
+  // something the registry did not say.
+  it("reports a coded refusal as a refusal rather than as a missing artifact", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 400,
+        body: {
+          code: "registry.invalid_argument",
+          message:
+            "registry.invalid_argument: extends manifest for rel/child: merged frontmatter still names the extends parent",
+          retryable: false,
+        },
+      },
+    });
+    goTo("#/artifact/rel%2Fchild");
+    render(<App />);
+    const page = await screen.findByTestId("artifact-failed");
+    expect(
+      within(page).getByRole("heading", { name: "The request was refused" }),
+    ).toBeTruthy();
+    expect(page.textContent).not.toContain("No such artifact");
+    expect(page.textContent).toContain("REFUSED");
+    expect(page.textContent).not.toContain("does not resolve.");
+    expect(page.textContent).toContain(
+      "registry.invalid_argument · not retryable",
+    );
+  });
+
+  // The domain page answers the same way.
+  it("reports a coded refusal as a refusal rather than as a missing domain", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        status: 400,
+        body: {
+          code: "registry.invalid_argument",
+          message: "registry.invalid_argument: depth: not a number",
+          retryable: false,
+        },
+      },
+    });
+    goTo("#/domain/platform%2Fci");
+    render(<App />);
+    const page = await screen.findByTestId("domain-failed");
+    expect(
+      within(page).getByRole("heading", { name: "The request was refused" }),
+    ).toBeTruthy();
+    expect(page.textContent).not.toContain("No such domain");
+    expect(page.textContent).toContain(
+      "registry.invalid_argument · not retryable",
+    );
+  });
+
+  // The version a pinned address names is no more absent than the artifact
+  // is, and the refused pin keeps the unpinned address it can fall back to.
+  it("reports a refused pin as a refusal while keeping the way to the latest version", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        status: 400,
+        body: {
+          code: "registry.invalid_argument",
+          message: 'registry.invalid_argument: version: invalid pin: "@@bad"',
+          retryable: false,
+        },
+      },
+    });
+    goTo("#/artifact/rel%2Fchild@%40%40bad");
+    render(<App />);
+    const page = await screen.findByTestId("artifact-failed");
+    expect(
+      within(page).getByRole("heading", { name: "The request was refused" }),
+    ).toBeTruthy();
+    expect(page.textContent).not.toContain("No such version");
+    expect(
+      within(page).getByRole("link", { name: "Show latest" }),
+    ).toBeTruthy();
+  });
+
   // A refusal written by something in front of the registry carries a status
   // and no §6.10 envelope. The page states the status it received rather than
   // a code the registry never sent, it does not read the status as the domain
