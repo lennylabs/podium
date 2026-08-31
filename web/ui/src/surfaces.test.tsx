@@ -1545,15 +1545,23 @@ describe("the application shell", () => {
       screen.getByRole("button", { name: "Try again reading the catalog" }),
     );
 
+    // The failure marker clearing and the tree repopulating are two renders
+    // driven by two reads, so waiting only for the marker and then asserting
+    // the rows reads the tree in whichever state that render left it. Both
+    // belong in the wait: the recovered state is what the retry produces, and
+    // asserting the marker alone passes on a machine fast enough to land both
+    // in one paint and fails on one that does not.
     await waitFor(() => {
       expect(screen.queryByTestId("catalog-failed")).toBeNull();
+      expect(
+        within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
+      ).toHaveLength(2);
     });
-    expect(
-      within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
-    ).toHaveLength(2);
-    expect(screen.getByTestId("catalog-counts").textContent).toBe(
-      "1 layer · 312 artifacts",
-    );
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-counts").textContent).toBe(
+        "1 layer · 312 artifacts",
+      );
+    });
   });
 
   // The surface beside the sidebar owns its own read, and that read answering
@@ -1586,12 +1594,14 @@ describe("the application shell", () => {
     // this would be pressing a control the reader no longer has.
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
+    // The rows join the wait for the reason given on the sidebar's own retry
+    // above: the marker and the tree are two renders driven by two reads.
     await waitFor(() => {
       expect(screen.queryByTestId("catalog-failed")).toBeNull();
+      expect(
+        within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
+      ).toHaveLength(2);
     });
-    expect(
-      within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
-    ).toHaveLength(2);
     await waitFor(() => {
       expect(screen.getByTestId("catalog-counts").textContent).toBe(
         "1 layer · 312 artifacts",
@@ -1626,12 +1636,14 @@ describe("the application shell", () => {
     // control names the read it re-issues, so the two do not collide.
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
+    // The rows join the wait for the reason given on the sidebar's own retry
+    // above: the marker and the tree are two renders driven by two reads.
     await waitFor(() => {
       expect(screen.queryByTestId("catalog-failed")).toBeNull();
+      expect(
+        within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
+      ).toHaveLength(2);
     });
-    expect(
-      within(screen.getByLabelText("Catalog")).queryAllByRole("listitem"),
-    ).toHaveLength(2);
     await waitFor(() => {
       expect(screen.getByTestId("catalog-counts").textContent).toBe(
         "1 layer · 312 artifacts",
