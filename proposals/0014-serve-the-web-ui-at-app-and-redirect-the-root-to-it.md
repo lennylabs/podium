@@ -1,7 +1,7 @@
 # Proposal 0014: Serve the web UI at /app/ and redirect the root to it
 
 - Issue: (to be filed)
-- Status: Approved (2026-08-31). Signed off by the maintainer for
+- Status: Applied to spec (2026-08-31). Signed off by the maintainer for
   implementation, whole, with every step in the checklist in scope. Converged
   after 4 adversarial review rounds (6 findings fixed); "Resolved in adversarial
   review" records what each pass changed.
