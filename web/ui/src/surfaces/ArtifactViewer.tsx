@@ -701,10 +701,12 @@ function ArtifactRail({
       {hasFrontmatter && (
         <section aria-label="Frontmatter">
           <p className="label">Frontmatter</p>
-          {/* The rail wraps a value whole, which is what the design draws and
-              what the Frontmatter panel beside it states: clipping cut a
-              description mid-word behind a control of its own (§13.10). */}
-          <PropertyTable raw={frontmatter} testID="rail-frontmatter-table" />
+          {/* The rail clips a scalar value, because the relation links stand
+              under this table in the same scrolling column and a long
+              description otherwise pushes them thousands of pixels below the
+              fold. The Frontmatter panel's line about a value wrapping is
+              scoped to that panel, which carries no links under it (§13.10). */}
+          <PropertyTable raw={frontmatter} testID="rail-frontmatter-table" clampValues />
         </section>
       )}
       <Relations artifact={artifact} frontmatter={frontmatter} />

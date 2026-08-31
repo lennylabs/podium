@@ -11,6 +11,7 @@
 import { useState } from 'react';
 
 import { parseFrontmatter, splitDocument, type Property } from '../frontmatter';
+import { ClampedText } from './ClampedText';
 import { CodeBlock, codeLines } from './CodeBlock';
 import { CopyButton } from './primitives';
 
@@ -18,9 +19,16 @@ export function PropertyTable({
   raw,
   testID = 'frontmatter-table',
   offerRaw = false,
+  clampValues = false,
 }: {
   raw: string;
   testID?: string;
+  /** clampValues puts a scalar value under the shared three-line clip with a
+   * control of its own, which the rail asks for and the full-width panel does
+   * not. A description carries no length bound, and in the rail's narrow
+   * column an unclipped one runs for thousands of pixels and pushes the
+   * relation links §13.10 requires the viewer to carry off the fold. */
+  clampValues?: boolean;
   /** offerRaw stands the Table and Raw YAML views side by side, which the
    * full-width panel offers and the rail does not. It also carries the two
    * lines that state where the pairs came from and how their values are
@@ -111,7 +119,7 @@ export function PropertyTable({
                   {property.key}
                 </th>
                 <td>
-                  <PropertyValue property={property} />
+                  <PropertyValue property={property} clamp={clampValues} />
                 </td>
               </tr>
             ))}
@@ -148,13 +156,20 @@ function ServedNote() {
   );
 }
 
-/** PropertyValue is the content of one value cell. A value wraps whole on both
- * surfaces, which is what the design draws for the rail and what the panel's
- * own line under the table states: the value is the author's text and the cell
- * shows all of it. Clipping the rail's cells cut a description and a tag list
- * mid-word behind a control of their own, which contradicted that line and
- * appears in neither design reference (§13.10). */
-function PropertyValue({ property }: { property: Property }) {
+/** PropertyValue is the content of one value cell. A sequence wraps whole on
+ * both surfaces, because clipping it hides entries the author wrote behind a
+ * control and a list of ten tags then reads as a list of four.
+ *
+ * A scalar wraps whole in the full-width panel and is clipped in the rail. The
+ * panel is a tab of its own, it is wide, and it carries nothing under the table
+ * to bury, which is what its line saying a long description wraps rather than
+ * being clipped is scoped to. The rail is a 270px column with the relation
+ * links standing under the table in the same scrolling column, where a
+ * description of several hundred words made one cell 2,600px tall and put
+ * EXTENDS and EXTENDED BY thousands of pixels below the fold, so the rail
+ * reads a scalar at the three lines the header states the same string at
+ * (§13.10). */
+function PropertyValue({ property, clamp }: { property: Property; clamp: boolean }) {
   if (property.items.length > 0) {
     // Both surfaces run the entries onto one line, which is the row the design
     // draws and the height the rows around it take. Each entry is still a list
@@ -174,6 +189,19 @@ function PropertyValue({ property }: { property: Property }) {
   }
   if (property.value.trim() === '') {
     return <AbsentValue keyName={property.key} />;
+  }
+  if (clamp) {
+    // The control names its own row, because a reader running down the rail's
+    // property rows meets it out of the surrounding text and every row would
+    // otherwise offer the same unqualified "Show more".
+    return (
+      <ClampedText
+        text={property.value}
+        className="property-value"
+        testID={`property-value-${property.key}`}
+        moreLabel={`Show the whole ${property.key} value`}
+      />
+    );
   }
   return (
     <span className="property-value" data-testid={`property-value-${property.key}`}>

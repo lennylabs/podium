@@ -6685,8 +6685,8 @@ describe("the artifact viewer", () => {
       ).toBe(true);
       expect(screen.queryByRole("button", { name: "Show less" })).toBeNull();
       expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
-      // The rail states the same field in its property table, whole and
-      // with no control of its own.
+      // The rail states the same field in its property table, where the short
+      // line sits inside the clip and carries no control of its own.
       expect(screen.getByTestId("property-value-description").textContent).toBe(
         "No body at all.",
       );
@@ -6759,13 +6759,14 @@ describe("the artifact viewer", () => {
       expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
     });
 
-    // The rail's frontmatter cells carry the author's own text, and the
-    // Frontmatter panel on the tab beside them states that a long description
-    // wraps rather than being clipped. Clipped, the rail cut the value
-    // mid-word and stood a control of its own in the cell, which contradicts
-    // that line and appears in neither design reference.
+    // The rail is a summary column, and the relation links §13.10 requires the
+    // artifact viewer to carry stand under this table in the same scrolling
+    // column. A description of several hundred words rendered whole made one
+    // cell 2,600px tall and put EXTENDS and EXTENDED BY thousands of pixels
+    // below the fold, so the rail reads a scalar value at the three lines the
+    // header states the same string at and offers the rest in place.
     // Spec: §13.10
-    it("wraps a long property value in the rail's table", async () => {
+    it("clips a long property value in the rail's table and opens it on request", async () => {
       stubHeights(900);
       stubViewer("The invoice approval path routes each document.");
       await screen.findByLabelText("Artifact viewer");
@@ -6773,14 +6774,42 @@ describe("the artifact viewer", () => {
       expect(value.textContent).toBe(
         "The invoice approval path routes each document.",
       );
-      expect(value.classList.contains("clamped")).toBe(false);
-      // No control stands in the cell, under either the shared label or the
-      // per-row one the clip used to carry.
+      expect(value.classList.contains("clamped")).toBe(true);
+      // The control names its own row, so a reader running down the rows tells
+      // it from the header's control and from the other rows' controls.
+      const more = await screen.findByRole("button", {
+        name: "Show the whole description value",
+      });
+      expect(more.getAttribute("aria-expanded")).toBe("false");
+      fireEvent.click(more);
       expect(
-        screen.queryByRole("button", {
+        screen
+          .getByTestId("property-value-description")
+          .classList.contains("clamped"),
+      ).toBe(false);
+      // Collapsing restores the clip, so the control is not a one-way door.
+      fireEvent.click(
+        screen.getByRole("button", {
           name: "Show the whole description value",
         }),
-      ).toBeNull();
+      );
+      expect(
+        screen
+          .getByTestId("property-value-description")
+          .classList.contains("clamped"),
+      ).toBe(true);
+    });
+
+    // A value the clip already holds carries no control, so the rail's rows
+    // stand at the height the design draws for them.
+    // Spec: §13.10
+    it("offers no control for a property value the clip already holds", async () => {
+      stubHeights(60);
+      stubViewer("Pay a supplier invoice.");
+      await screen.findByLabelText("Artifact viewer");
+      expect(screen.getByTestId("property-value-description").textContent).toBe(
+        "Pay a supplier invoice.",
+      );
       expect(
         screen.getByTestId("rail-frontmatter-table").querySelector("button"),
       ).toBeNull();
