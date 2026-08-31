@@ -26,7 +26,6 @@ import {
   ErrorPage,
   ErrorState,
   Loading,
-  SensitivityBadge,
   TabStrip,
   TypeBadge,
   formatVersion,
@@ -241,6 +240,13 @@ export function ArtifactViewer({
     <section className="surface artifact-viewer" aria-label="Artifact viewer">
       <div className="artifact-content">
         <Breadcrumb path={domainOf(body.id)} current={artifactName(body.id)} />
+        {/* The header states the artifact's identity and the version being
+            read. It carries no sensitivity badge: the registry stamps a
+            classification on every artifact, so a badge here stands on every
+            page, states what the rail's frontmatter table states a screen
+            away, and pushes the version picker onto a second row under a long
+            identifier. A search result keeps the badge, where a classification
+            distinguishes one row from the rest. */}
         <div className="page-title">
           <h1>{artifactName(body.id)}</h1>
           <TypeBadge type={body.type} />
@@ -250,7 +256,6 @@ export function ArtifactViewer({
             viewing={viewing}
             onView={readVersion}
           />
-          <SensitivityBadge sensitivity={body.sensitivity} />
           <DeprecatedBadge deprecated={body.deprecated} />
         </div>
         {!frontmatterOpen && <Lead text={description} />}

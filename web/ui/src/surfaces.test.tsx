@@ -4193,14 +4193,14 @@ describe("the artifact viewer", () => {
     expect(title.nextElementSibling).toBe(lead);
   });
 
-  // A classification value states a level and never the axis it measures, so
-  // "internal" beside the type and the version reads as one more unnamed
-  // property of the artifact. The badge names the axis and carries the weight
-  // of the badges it sits with, because the classification is informational
-  // rather than an alert.
+  // The registry stamps a classification on every artifact, so a sensitivity
+  // badge in the header stands on every page and distinguishes none of them,
+  // while adding a third badge that wraps the version picker onto a second row
+  // under a long identifier. The header carries the type and the version, and
+  // the rail's frontmatter table states the classification on the same screen.
   //
-  // Spec: §4.3
-  it("names the axis the sensitivity badge measures at the weight of the badges beside it", async () => {
+  // Spec: §13.10
+  it("keeps the classification out of the header and states it in the rail", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_artifact": {
@@ -4223,9 +4223,20 @@ describe("the artifact viewer", () => {
       screen.getByLabelText("Artifact viewer"),
     ).getAllByRole("heading", { level: 1 })[0];
     const title = heading.parentElement as HTMLElement;
-    const classification = within(title).getByText("sensitivity: internal");
-    expect(within(title).getByText("SKILL").className).toBe(
-      classification.className,
+    expect(within(title).queryByText(/sensitivity/)).toBeNull();
+    expect(within(title).getByText("SKILL")).toBeTruthy();
+    expect(within(title).getByText("v2.3.0")).toBeTruthy();
+    // The rail states it, so the classification is on the screen rather than
+    // dropped from the viewer.
+    const rail = screen.getByTestId("rail-frontmatter-table");
+    expect(rail.textContent).toContain("sensitivity");
+    expect(rail.textContent).toContain("internal");
+    // The Frontmatter tab moves the same pairs full width, and the header
+    // stays free of the badge there too.
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    expect(within(title).queryByText(/sensitivity/)).toBeNull();
+    expect(screen.getByTestId("frontmatter-table").textContent).toContain(
+      "internal",
     );
   });
 

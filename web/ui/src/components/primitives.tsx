@@ -290,11 +290,14 @@ export function FoldedFromBadge({ foldedFrom }: { foldedFrom?: string }) {
 }
 
 /**
- * SensitivityBadge renders the artifact's sensitivity classification. The
- * value alone ("internal", "confidential") does not say which axis it
- * measures, so the badge names the axis and carries the same weight as the
- * type and version badges beside it: the classification is informational and
- * never an alert. The badge is absent on an unclassified artifact.
+ * SensitivityBadge renders the artifact's sensitivity classification in a
+ * listing or result row's metadata line. The value alone ("internal",
+ * "confidential") does not say which axis it measures, so the badge names the
+ * axis and carries the same weight as the type and version badges beside it:
+ * the classification is informational and never an alert. The badge is absent
+ * on an unclassified artifact. It is a row-level mark, so the artifact
+ * viewer's header does not draw it; the rail's frontmatter table states the
+ * classification on the artifact's own page.
  *
  * Spec: §4.3
  */
