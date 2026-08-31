@@ -230,11 +230,18 @@ export function ArtifactViewer({
       : { body: split.body, frontmatter: body.frontmatter === '' ? split.frontmatter : body.frontmatter };
 
   const description = descriptionOf(document.frontmatter, body.skill_raw ?? '');
-  // The description is read out of the frontmatter, so the Frontmatter tab
-  // stands it as the `description` row of its own table. Keeping the header
-  // paragraph there would print the same sentence twice within one screen,
-  // which is why the header states it only while another tab is open.
   const frontmatterOpen = tab === 'frontmatter';
+  // Where the manifest frontmatter declares the description, the Frontmatter
+  // tab stands it as the `description` row of its own table, and keeping the
+  // header paragraph there would print the same sentence twice within one
+  // screen, so the header drops it. A skill declares the field in the
+  // authored SKILL.md instead and its manifest must not carry it (§4.3.4),
+  // so that table stands nothing in the header's place and dropping the
+  // paragraph would take the description off the page entirely. The header
+  // keeps its paragraph wherever the table has no row to relocate it into.
+  //
+  // Spec: §13.10
+  const tableStatesDescription = declaredDescription(document.frontmatter) !== '';
 
   return (
     <section className="surface artifact-viewer" aria-label="Artifact viewer">
@@ -258,7 +265,7 @@ export function ArtifactViewer({
           />
           <DeprecatedBadge deprecated={body.deprecated} />
         </div>
-        {!frontmatterOpen && <Lead text={description} />}
+        {!(frontmatterOpen && tableStatesDescription) && <Lead text={description} />}
         <DeprecationNotice artifact={body} />
         {artifact.loading && <Loading label="Loading the artifact." />}
         {artifact.error !== null && (

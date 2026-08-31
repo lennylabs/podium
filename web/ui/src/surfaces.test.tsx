@@ -6388,6 +6388,44 @@ describe("the artifact viewer", () => {
     expect(screen.getByTestId("artifact-lead").textContent).toBe(description);
   });
 
+  // A skill declares its description in the authored SKILL.md and its
+  // manifest must not carry the field (§4.3.4), so the Frontmatter tab's
+  // table has no `description` row to stand in the header's place. Dropping
+  // the header paragraph there takes the sentence off the page altogether
+  // rather than relocating it.
+  //
+  // Spec: §13.10
+  it("keeps a skill's description in the header while the Frontmatter tab states no description row", async () => {
+    const description =
+      "Pay an invoice end to end, matching the purchase order and posting the payment.";
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "finance/ap/pay-invoice",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "Body.\n",
+          frontmatter: "---\ntype: skill\nversion: 1.0.0\nsensitivity: low\n---\n",
+          skill_raw: `---\nname: pay-invoice\ndescription: ${description}\n---\n\n# pay-invoice\n`,
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/finance%2Fap%2Fpay-invoice");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    expect(screen.getByTestId("artifact-lead").textContent).toBe(description);
+    fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
+    // The table carries no description row, so the header keeps its
+    // paragraph and the sentence stays on the page.
+    expect(screen.getByTestId("frontmatter-table").textContent).not.toContain(
+      description,
+    );
+    expect(screen.getByTestId("artifact-lead").textContent).toBe(description);
+  });
+
   // Every exclusive one-row choice in the build is the same segmented control,
   // so the chosen segment is raised onto the surface colour over a chip track.
   // A switch that fills the chosen segment with the track colour instead
