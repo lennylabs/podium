@@ -665,6 +665,43 @@ describe('the finished fan-out report', () => {
     expect(layers.textContent).toContain('4 accepted · 1 unchanged · 1 rejected · 0 conflicts · 0 lint failures');
   });
 
+  // While the run is in flight each layer is a bordered row with a mark and
+  // an outcome column, and the finished report re-rendered the same layers as
+  // running text: no border, no mark, and no column the counts lined up in.
+  // The report draws the same row the progress list draws. jsdom performs no
+  // layout, so the case pins the row, the mark, and the parts the row is
+  // built from; the rendered rows are checked against a browser.
+  it('draws every finished layer as the same row the run drew while it ran', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    const layers = within(screen.getByLabelText('What each layer returned')).getAllByRole('listitem');
+    expect(layers).toHaveLength(3);
+    for (const row of layers) {
+      expect(row.className).toContain('run-row');
+      expect(row.querySelector('.run-mark')).toBeTruthy();
+      expect(row.querySelector('.run-row-id')).toBeTruthy();
+      expect(row.querySelector('.run-row-state')).toBeTruthy();
+    }
+    // A refused layer returned no counts, so its mark says so rather than
+    // reading as an accepted one.
+    const refused = layers.find((row) => row.textContent?.includes('acme/ops'));
+    expect(refused?.querySelector('.run-mark-refused')).toBeTruthy();
+    expect(layers[0].querySelector('.run-mark-done')).toBeTruthy();
+  });
+
+  // Set as one string the breakdown wrapped inside a count, leaving "0" on
+  // one line and "lint failures" on the next. Each count is its own
+  // unbreakable part, so a wrap falls between counts.
+  it('keeps each count in the layer row unbreakable', () => {
+    render(
+      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+    );
+    const layers = within(screen.getByLabelText('What each layer returned')).getAllByRole('listitem');
+    const parts = [...layers[0].querySelectorAll('.run-row-part')].map((part) => part.textContent);
+    expect(parts).toEqual(['12 accepted', '3 unchanged', '0 rejected', '0 conflicts', '2 lint failures']);
+  });
+
   // The fan-out is client-side, so each layer's itemised rows are already in
   // hand. The run report states what needs attention on the same terms the
   // single-layer report states it, and opens the lists behind the counts it

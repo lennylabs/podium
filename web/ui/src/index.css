@@ -5236,7 +5236,7 @@ label:has(> input:disabled) {
   padding: 18px 22px 20px;
 }
 
-.run-progress-rows {
+.run-rows {
   list-style: none;
   display: flex;
   flex-direction: column;
@@ -5245,7 +5245,12 @@ label:has(> input:disabled) {
   padding: 0;
 }
 
-.run-progress-row {
+/* One layer of a fan-out, drawn the same while the run is in flight and after
+   it has finished: a mark, the layer id, and what that layer returned in a
+   column of its own. The finished report reuses the row so the reader scans
+   the same positions in both, rather than re-reading the run as prose once
+   the last request returns. */
+.run-row {
   display: flex;
   align-items: center;
   gap: 11px;
@@ -5258,12 +5263,12 @@ label:has(> input:disabled) {
 
 /* The open request is the one row the reader is waiting on, so it carries the
    accent edge every other in-flight state on this surface carries. */
-.run-progress-row-running {
+.run-row-running {
   border-color: var(--cbd);
   background: var(--wash);
 }
 
-.run-progress-row .spinner {
+.run-row .spinner {
   flex: none;
   width: 15px;
   height: 15px;
@@ -5293,16 +5298,40 @@ label:has(> input:disabled) {
   color: var(--surf2);
 }
 
-.run-progress-id {
+/* A layer whose request was refused answers with no counts, so its mark is
+   the danger tone rather than the accepted one. */
+.run-mark-refused {
+  background: var(--danger);
+  color: var(--surf2);
+}
+
+.run-row-id {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.run-progress-state {
+/* The outcome sits in its own right-hand column so one layer's counts line up
+   under the next one's. The finished breakdown is longer than the running
+   line, so the column wraps; each count is one unbreakable part, which keeps
+   a wrap between counts rather than inside one. */
+.run-row-state {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   margin-left: auto;
   padding-left: 12px;
   font-size: 11.5px;
+  text-align: right;
+}
+
+.run-row-part {
   white-space: nowrap;
+}
+
+/* The separator between two counts is its own flex item, and a flex item's
+   leading and trailing spaces are collapsed away, so it keeps them itself. */
+.run-row-sep {
+  white-space: pre;
 }
 
 /* The run's own figures: how long it has been going, how much of it is done,
@@ -5540,18 +5569,11 @@ button.stat-open {
   color: var(--link);
 }
 
-/* The fan-out's per-layer rows. Each states what one layer's own response
-   carried, under the run's combined counts, so the run is read as one result
-   and a layer that needs acting on is still named. */
-.run-layers {
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 9px 0 0;
-  padding: 0;
-  font-size: 13px;
-  line-height: 1.55;
+/* The fan-out's per-layer rows sit under the run's combined counts, so the
+   run is read as one result and a layer that needs acting on is still named
+   with what its own response returned. */
+.run-report-rows {
+  margin-top: 9px;
 }
 
 /* An itemised ingest list. Every entry carries an identifier, one or two

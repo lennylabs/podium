@@ -12,7 +12,7 @@
 // fan-out across every layer and a row changes only when its own request
 // returns.
 
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import type { RefObject } from 'react';
 
 import type { TabCountTone, Tone } from '../components/primitives';
@@ -978,14 +978,14 @@ export function ReingestRunProgress({
       onClose={onStopWaiting}
     >
       <div className="run-progress modal-body" aria-label="Reingest all progress">
-        <ul className="run-progress-rows">
+        <ul className="run-rows">
           {targets.map((layerID, at) => {
             const outcome = outcomes[at];
             const running = at === done;
             return (
               <li
                 key={layerID}
-                className={running ? 'run-progress-row run-progress-row-running' : 'run-progress-row'}
+                className={running ? 'run-row run-row-running' : 'run-row'}
                 data-testid={`reingest-progress-${layerID}`}
               >
                 {outcome === undefined ? (
@@ -998,9 +998,11 @@ export function ReingestRunProgress({
                     ✓
                   </span>
                 )}
-                <span className="mono run-progress-id">{layerID}</span>
-                <span className="run-progress-state mono quiet">
-                  {outcome === undefined ? (running ? 'running' : 'queued') : progressLine(outcome)}
+                <span className="mono run-row-id">{layerID}</span>
+                <span className="run-row-state mono quiet">
+                  <span className="run-row-part">
+                    {outcome === undefined ? (running ? 'running' : 'queued') : progressLine(outcome)}
+                  </span>
                 </span>
               </li>
             );
@@ -1167,12 +1169,29 @@ export function ReingestRunReport({
             )}
             <section aria-label="What each layer returned">
               <p className="label">Layers · {outcomes.length}</p>
-              <ul className="run-layers">
-                {outcomes.map((outcome) => (
-                  <li key={outcome.layerID}>
-                    <span className="mono">{outcome.layerID}</span> <span className="quiet">{layerLine(outcome)}</span>
-                  </li>
-                ))}
+              <ul className="run-rows run-report-rows">
+                {outcomes.map((outcome) => {
+                  const refusedLayer = outcome.kind === 'refused';
+                  return (
+                    <li key={outcome.layerID} className="run-row" data-testid={`reingest-layer-${outcome.layerID}`}>
+                      <span
+                        className={refusedLayer ? 'run-mark run-mark-refused' : 'run-mark run-mark-done'}
+                        aria-hidden="true"
+                      >
+                        {refusedLayer ? '!' : '✓'}
+                      </span>
+                      <span className="mono run-row-id">{outcome.layerID}</span>
+                      <span className="run-row-state mono quiet">
+                        {layerParts(outcome).map((part, at) => (
+                          <Fragment key={part}>
+                            {at > 0 && <span className="run-row-sep"> · </span>}
+                            <span className="run-row-part">{part}</span>
+                          </Fragment>
+                        ))}
+                      </span>
+                    </li>
+                  );
+                })}
               </ul>
             </section>
           </>
@@ -1205,17 +1224,25 @@ function refusalMessage(outcome: ReingestOutcome): string {
   return outcome.error instanceof ApiError ? outcome.error.message : String(outcome.error);
 }
 
-/** layerLine states what one layer's response carried, in the same words the
- * single-layer report's cards use. */
-function layerLine(outcome: ReingestOutcome): string {
+/** layerParts states what one layer's response carried, in the same words the
+ * single-layer report's cards use. Each count is returned on its own so the
+ * row can keep it unbroken: set as one string, the breakdown wrapped inside a
+ * count and left "0" on one line with "lint failures" on the next. */
+function layerParts(outcome: ReingestOutcome): string[] {
   if (outcome.kind === 'refused') {
-    return 'refused';
-  }
-  if (outcome.summary.accepted === undefined) {
-    return 'recorded · this registry runs no pipeline inside the request';
+    return ['refused'];
   }
   const summary = outcome.summary;
-  return `${String(summary.accepted)} accepted · ${String(summary.idempotent ?? 0)} unchanged · ${String((summary.rejected ?? []).length)} rejected · ${String((summary.conflicts ?? []).length)} conflicts · ${String(summary.lint_failures ?? 0)} lint failures`;
+  if (summary.accepted === undefined) {
+    return ['recorded', 'this registry runs no pipeline inside the request'];
+  }
+  return [
+    `${String(summary.accepted)} accepted`,
+    `${String(summary.idempotent ?? 0)} unchanged`,
+    `${String((summary.rejected ?? []).length)} rejected`,
+    `${String((summary.conflicts ?? []).length)} conflicts`,
+    `${String(summary.lint_failures ?? 0)} lint failures`,
+  ];
 }
 
 /** runText is the whole run as plain text, for a reader who carries the
