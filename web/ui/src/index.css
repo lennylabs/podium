@@ -2160,12 +2160,22 @@ input[type="search"]::-webkit-search-cancel-button {
    start of the line; the inner element restores left-to-right ordering so a
    leading separator is not reordered to the far end of the string. */
 .source-detail-head {
-  min-width: 0;
-  /* The head gives up every pixel of the shrink before the tail gives up one:
-     the flex algorithm distributes the negative free space in proportion to
-     the scaled shrink factors, so a factor this much larger than the tail's
-     drives the head to zero and freezes it there, and only what is still
-     over the cell reaches the tail. */
+  /* The head keeps room for its own ellipsis and for the separator that closes
+     it. Free to shrink to nothing, it was driven to a sliver a fraction of a
+     character wide on exactly the rows whose path is most truncated, the
+     ellipsis was never painted, and the cell stated a bare directory name that
+     a reader takes for the layer's whole source path. Two characters is the
+     marker and the separator, so what is left of the head still reads as a
+     directory prefix rather than as a second ellipsis against the tail's
+     (§13.10). The component draws no head at all where the value has no
+     leading directories, so this reserves width only where there is a prefix
+     to mark. */
+  min-width: 2ch;
+  /* The head gives up every pixel of the shrink down to that reserve before
+     the tail gives up one: the flex algorithm distributes the negative free
+     space in proportion to the scaled shrink factors, so a factor this much
+     larger than the tail's drives the head to its minimum and freezes it
+     there, and only what is still over the cell reaches the tail. */
   flex-shrink: 9999;
   overflow: hidden;
   text-overflow: ellipsis;

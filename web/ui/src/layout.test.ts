@@ -1222,7 +1222,6 @@ describe("layer source cell", () => {
     const head = styled("source-detail-head");
     expect(head.overflow).toBe("hidden");
     expect(head.textOverflow).toBe("ellipsis");
-    expect(head.minWidth).toBe("0");
     const tail = styled("source-detail-tail");
     expect(tail.getPropertyValue("flex")).toBe("0 1 auto");
     expect(tail.overflow).toBe("hidden");
@@ -1230,9 +1229,21 @@ describe("layer source cell", () => {
     expect(tail.direction).toBe("rtl");
     expect(tail.minWidth).toBe("0");
     // The negative free space goes in proportion to the scaled shrink
-    // factors, so the head's factor drives it to zero and freezes it there
-    // before the tail gives up a pixel.
+    // factors, so the head's factor drives it to its reserve and freezes it
+    // there before the tail gives up a pixel.
     expect(Number(head.flexShrink)).toBeGreaterThan(1000);
+  });
+
+  // The head stops shrinking while it can still draw its marker. Allowed to
+  // shrink to nothing it was left a sliver a fraction of a character wide on
+  // the rows whose path is most truncated, the browser painted no ellipsis at
+  // that width, and the cell stated a bare final directory name that reads as
+  // the layer's whole source path. The reserve is the marker and the
+  // separator that closes the run, so what the head keeps reads as a
+  // directory prefix.
+  it("reserves the head enough width to draw its own ellipsis", () => {
+    const head = styled("source-detail-head");
+    expect(head.minWidth).toBe("2ch");
   });
 
   // The head keeps the box the flex layout gives it, so eliding it at its end

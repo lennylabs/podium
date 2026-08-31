@@ -82,8 +82,9 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
  * string, which stops the column telling the rows apart. The head gives up
  * its own leading characters to the clip, so what it keeps ends against the
  * tail and the line reads as one path. Where the tail alone is wider than the
- * cell, the head has already collapsed and the tail takes the same leading
- * elision, so the line always states that it is truncated. The title
+ * cell, the head has already collapsed to the width of its own ellipsis and
+ * the tail takes the same leading elision, so the line always states that it
+ * is truncated. The title
  * attribute repeats the whole value because the head is still clipped where
  * the column is narrower than it. */
 function Detail({ value }: { value: string }) {
@@ -92,10 +93,15 @@ function Detail({ value }: { value: string }) {
     <div className="mono quiet source-detail" title={value}>
       {/* The head is elided at its start, so its own bidirectional
           isolation keeps a leading separator at the left of the run rather
-          than reordered to its end. */}
-      <span className="source-detail-head">
-        <bdi>{head}</bdi>
-      </span>
+          than reordered to its end. The run is drawn only where the value
+          carries leading directories, because it reserves the width of its
+          own ellipsis and an empty run then indented a value such as
+          `artifacts/` by two characters for a prefix it does not have. */}
+      {head !== '' && (
+        <span className="source-detail-head">
+          <bdi>{head}</bdi>
+        </span>
+      )}
       {/* The tail is elided at its start for the same reason, and isolates
           its own text so a separator is not reordered to the far end. */}
       <span className="source-detail-tail">

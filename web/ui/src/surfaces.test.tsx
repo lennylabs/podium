@@ -7634,6 +7634,47 @@ describe("the layer panel", () => {
     );
   });
 
+  // A value with no leading directories has no run to clip, and the run that
+  // carries the clip reserves the width of its own ellipsis, so drawing it
+  // empty indented such a value by the width of a marker it never paints.
+  it("draws no clipped run where a source detail has no leading directories", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "acme",
+              SourceType: "git",
+              Repo: "git@github.com:acme/artifacts.git",
+              Ref: "main",
+              Root: "artifacts",
+              Order: 1,
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const lines = Array.from(
+      layerRow("acme").querySelectorAll(".source-detail"),
+    );
+    const root = lines[lines.length - 1];
+    expect(root.textContent).toBe("artifacts/");
+    expect(root.querySelector(".source-detail-head")).toBeNull();
+    expect(root.querySelector(".source-detail-tail")?.textContent).toBe(
+      "artifacts/",
+    );
+    // The repository line does carry leading directories, so it keeps the run
+    // that draws the elision marker.
+    const repo = lines[0];
+    expect(repo.querySelector(".source-detail-head")?.textContent).toBe(
+      "git@github.com:acme/",
+    );
+  });
+
   // A source type is pluggable, so a type the panel has never seen still
   // renders: the chip carries its name and its fields sit behind a
   // disclosure.
