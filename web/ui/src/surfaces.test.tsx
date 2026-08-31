@@ -16952,6 +16952,39 @@ describe("keyboard semantics", () => {
     ).toBe("true");
   });
 
+  // The panel the tabs select is its own Tab stop. A prose body holds no
+  // focusable descendant, so without a tabindex on the panel the Tab order
+  // steps from the tab strip straight past the content into whatever follows
+  // it, and a keyboard reader can neither reach nor scroll the body.
+  it("puts the artifact viewer’s tab panel in the Tab order", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "eng/deploy",
+          type: "context",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "Reference content the agent loads on demand.\n",
+          frontmatter: "name: deploy\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/eng%2Fdeploy");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    const panel = screen.getByRole("tabpanel");
+    expect(panel.getAttribute("tabindex")).toBe("0");
+    // The panel holds no focusable descendant of its own, which is the case
+    // the tabindex exists for.
+    expect(
+      panel.querySelectorAll("a[href], button, input, select, textarea").length,
+    ).toBe(0);
+    panel.focus();
+    expect(document.activeElement).toBe(panel);
+  });
+
   // The register form's source selector announces itself as a radio group,
   // so it is one Tab stop with a roving tabindex and the arrows move the
   // selection inside it.

@@ -864,7 +864,16 @@ export function TabStrip<Name extends string>({
           </button>
         ))}
       </div>
-      <div role="tabpanel" id={`${prefix}panel-${open}`} aria-labelledby={`${prefix}tab-${open}`}>
+      <div
+        role="tabpanel"
+        id={`${prefix}panel-${open}`}
+        aria-labelledby={`${prefix}tab-${open}`}
+        // The panel is its own Tab stop. A panel holding only prose has no
+        // focusable descendant, so without this the Tab order steps from the
+        // tab strip past the content the strip selects, and a keyboard reader
+        // can neither reach nor scroll it.
+        tabIndex={0}
+      >
         {children}
       </div>
     </>
