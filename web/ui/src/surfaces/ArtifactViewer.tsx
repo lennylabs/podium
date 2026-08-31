@@ -684,7 +684,7 @@ function ArtifactRail({
             <dt className="mono">ingested</dt>
             <dd title={layer?.last_ingested_at ?? undefined}>{ingestedLine(layer)}</dd>
           </div>
-          <div className="rail-fact">
+          <div className="rail-fact rail-hash-fact">
             <dt className="mono">hash</dt>
             <dd className="mono rail-hash" title={artifact.content_hash}>
               <ContentHash hash={artifact.content_hash} />
@@ -750,12 +750,16 @@ function ArtifactRail({
 
 /** ContentHash draws a §6.4 content hash as the three runs the rail elides it
  * through: the lead, which names the algorithm and opens the digest, the
- * middle, which the rail clips, and the last digest characters, which stay
+ * middle, which the rail takes out, and the last digest characters, which stay
  * drawn because they are the other end a reader compares against another copy.
  * The runs together are the whole hash, so a reader who has to check the
- * digest gets it out of the page by selecting or copying the row. The clipped
- * run isolates its own text, so the right-to-left direction that moves its
- * ellipsis against the lead does not reorder the characters within it. */
+ * digest gets it out of the page by selecting or copying the row.
+ *
+ * The elided run is in the document at no width, and the marker beside it is
+ * what says the digest was cut. Left to the container's own ellipsis the run
+ * had to hold a width that drew the ellipsis and nothing else, and against a
+ * 173px rail no width did both (§13.10). The marker is out of the
+ * accessibility tree because the run it marks is read out whole. */
 function ContentHash({ hash }: { hash: string }) {
   const runs = splitHash(hash);
   return (
@@ -766,6 +770,13 @@ function ContentHash({ hash }: { hash: string }) {
       <span className="rail-hash-middle">
         <bdi>{runs.middle}</bdi>
       </span>
+      {/* A digest short enough to stand whole leaves the elided run empty,
+          and a marker over nothing states a cut that did not happen. */}
+      {runs.middle !== '' && (
+        <span className="rail-hash-ellipsis" aria-hidden="true">
+          …
+        </span>
+      )}
       <span className="rail-hash-tail">
         <bdi>{runs.tail}</bdi>
       </span>

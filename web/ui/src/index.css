@@ -3280,20 +3280,26 @@ label:has(> input:disabled) {
   text-overflow: ellipsis;
 }
 
-/* The clip falls at the middle run's start, so the ellipsis stands against
-   the lead and the row reads as one elided digest rather than as a value with
-   a gap in it. The run reverses direction to move the ellipsis there, and the
-   element inside restores left-to-right ordering so its characters keep their
-   own order. The middle gives up every pixel of the shrink before the trailing
-   characters give up one: the flex algorithm distributes the negative free
-   space in proportion to the scaled shrink factors, so a factor this much
-   larger drives the middle to zero and freezes it there. */
+/* The elided run keeps the digest in the document and takes none of the row's
+   width, and the marker beside it states the elision. Drawn by the container's
+   own ellipsis, the run had to be wide enough to fit that ellipsis and narrow
+   enough to draw nothing else, and no width did both: sized from its content
+   it competed for the row, and the fraction of a pixel that competition left
+   on the lead elided two characters of the algorithm the row is there to
+   state; held at one character Chrome dropped the ellipsis and the row read as
+   a whole short digest; held at more, the run filled the surplus with digest
+   characters that read as part of the trailing run (§13.10). */
 .rail-hash-middle {
-  min-width: 0;
-  flex-shrink: 9999;
+  flex: none;
+  width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  direction: rtl;
+}
+
+/* The elision marker stands between the two runs the row draws, so the value
+   reads as one digest with its middle taken out. It is the row's only drawn
+   sign of the elision and gives up no width. */
+.rail-hash-ellipsis {
+  flex: none;
 }
 
 /* The trailing characters are the last run to give a pixel up, because they
@@ -3311,7 +3317,6 @@ label:has(> input:disabled) {
   direction: rtl;
 }
 
-.rail-hash-middle > bdi,
 .rail-hash-tail > bdi {
   direction: ltr;
 }
@@ -3327,14 +3332,24 @@ label:has(> input:disabled) {
   font-size: 10.5px;
 }
 
-/* The copy confirmation is the control's report and never takes the row's
-   clip. Left shrinkable it was cut mid-word against the rail's edge, because
-   the digest runs beside it had already collapsed to nothing and the row had
-   no other pixel to give (§13.10). It is set at the button's size for the
-   same reason the button is: the width it holds is width the digest loses,
-   and at the row's own scale both ends of the digest stay drawn. */
+/* The copy confirmation reports under the row rather than on it. Held on the
+   row it reserved the width of "Not copied" from the first render, and the
+   rail's line is 173px: the reservation plus the control left the digest too
+   little to open with, so the lead collapsed to two characters and an
+   ellipsis and the row stated neither what was hashed nor an end long enough
+   to compare (§13.10). Taken out of the row's flow it costs the digest
+   nothing. The row's fact reserves the band it lands in, so the press still
+   moves nothing, and the report is set at the button's size because it is the
+   control's own report. */
+.rail-hash-fact {
+  position: relative;
+  padding-bottom: 15px;
+}
+
 .rail-hash .copy-outcome {
-  flex: none;
+  position: absolute;
+  right: 0;
+  bottom: 0;
   font-size: 10.5px;
 }
 

@@ -1144,39 +1144,48 @@ describe("provenance content hash", () => {
     const lead = styled("rail-hash-lead");
     expect(lead.minWidth).toBe("0");
     expect(lead.textOverflow).toBe("ellipsis");
+    // The elided run keeps the digest in the document at no width, so it
+    // takes nothing from the two runs the row draws. Sized from its own
+    // content it competed for the row's width, and the fraction of a pixel
+    // that competition left on the lead elided two characters of the
+    // algorithm: the row stated `sh… 9b32`, naming neither what was hashed nor
+    // a head long enough to compare against another copy.
     const middle = styled("rail-hash-middle");
     expect(middle.overflow).toBe("hidden");
-    expect(middle.textOverflow).toBe("ellipsis");
-    expect(middle.minWidth).toBe("0");
-    // The middle absorbs the whole clip before the trailing digest characters
-    // give up a pixel, so the end the reader compares stays drawn.
-    expect(Number(middle.flexShrink)).toBeGreaterThan(1000);
+    expect(middle.getPropertyValue("flex")).toBe("0 0 auto");
+    expect(middle.width).toBe("0px");
+    // The marker beside it is what states the cut, and it gives up no width
+    // either.
+    expect(styled("rail-hash-ellipsis").getPropertyValue("flex")).toBe(
+      "0 0 auto",
+    );
     const tail = styled("rail-hash-tail");
     expect(tail.getPropertyValue("flex")).toBe("0 0.0001 auto");
     expect(tail.textOverflow).toBe("ellipsis");
-    // The trailing characters are the last run to give a pixel up. The rail
-    // is narrower than the lead, the tail, and the row's controls together,
-    // so a lead held rigid takes the whole width and leaves the tail a sliver
-    // narrower than its own ellipsis: the digest then ends mid-character with
-    // nothing saying it was cut. The lead shortens ahead of the tail instead,
-    // and its own ellipsis marks the cut.
+    // The trailing characters are the last run to give a pixel up. Once the
+    // free space is gone, a lead held rigid takes the whole width and leaves
+    // the tail a sliver narrower than its own ellipsis: the digest then ends
+    // mid-character with nothing saying it was cut. The lead shortens ahead of
+    // the tail instead, and its own ellipsis marks the cut.
     expect(Number(lead.flexShrink)).toBeGreaterThan(Number(tail.flexShrink));
-    expect(Number(middle.flexShrink)).toBeGreaterThan(Number(lead.flexShrink));
   });
 
-  // The clip falls at the middle run's start, so the ellipsis stands against
-  // the lead and the row reads as one elided digest. The element inside
-  // restores the reading order, so the run's characters keep their own.
-  it("elides the clipped run at its start", () => {
-    expect(styled("rail-hash-middle").direction).toBe("rtl");
-    expect(descendantStyle("rail-hash-middle", "bdi").direction).toBe("ltr");
+  // The trailing run elides at its own start when it has to, so its ellipsis
+  // stands against the digest ahead of it. The element inside restores the
+  // reading order, so the run's characters keep their own.
+  it("elides the trailing run at its start", () => {
+    expect(styled("rail-hash-tail").direction).toBe("rtl");
+    expect(descendantStyle("rail-hash-tail", "bdi").direction).toBe("ltr");
   });
 
-  // The row reserves the copy outcome's place from the first render, so the
-  // digest runs beside it are already collapsed by the time the press lands.
-  // Shrinkable, the report was cut mid-word against the row's clip and stated
-  // an outcome the reader could not read.
-  it("holds the copy outcome out of the row's clip", () => {
+  // The copy report reports under the row rather than on it. Held on the row
+  // it reserved the width of "Not copied" from the first render, and against
+  // the rail's 173px line that reservation left the digest too little to open
+  // with: the lead collapsed to two characters and an ellipsis, so the row
+  // named neither the algorithm nor a head long enough to compare against
+  // another copy. Out of the row's flow it costs the digest nothing, and the
+  // fact reserves the band under the row so the press still moves nothing.
+  it("reports the copy outcome under the row rather than on it", () => {
     const row = document.createElement("dd");
     row.className = "mono rail-hash";
     const outcome = document.createElement("span");
@@ -1187,10 +1196,16 @@ describe("provenance content hash", () => {
     const button = document.createElement("button");
     row.appendChild(button);
     const style = window.getComputedStyle(outcome);
-    expect(style.getPropertyValue("flex")).toBe("0 0 auto");
-    // The report is set at the button's size, because the width it holds is
-    // width the digest gives up.
+    expect(style.position).toBe("absolute");
+    expect(style.bottom).toBe("0px");
+    // The report is set at the button's size, because it is the control's own
+    // report.
     expect(style.fontSize).toBe(window.getComputedStyle(button).fontSize);
+    // The band the report lands in is held open on the fact from the first
+    // render, and the fact is what positions it.
+    const fact = styled("rail-fact rail-hash-fact");
+    expect(fact.position).toBe("relative");
+    expect(Number.parseFloat(fact.paddingBottom)).toBeGreaterThan(0);
   });
 });
 

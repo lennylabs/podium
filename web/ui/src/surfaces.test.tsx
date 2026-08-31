@@ -203,9 +203,10 @@ function factValue(row: Element): string {
   }
   // The copy control's own parts are chrome rather than the value: the
   // button, the live region, and the outcome reports that hold their place on
-  // the row from the first render.
+  // the row from the first render. So is the content-hash row's elision
+  // marker, which states that the row draws less than it carries.
   for (const control of value.querySelectorAll(
-    'button, [role="status"], .copy-outcome',
+    'button, [role="status"], .copy-outcome, .rail-hash-ellipsis',
   )) {
     control.remove();
   }
@@ -4715,6 +4716,15 @@ describe("the artifact viewer", () => {
     );
     expect(hash.querySelector(".rail-hash-tail")?.textContent).toBe("8e5f");
     expect(hash.getAttribute("title")).toBe(contentHash);
+    // The elided run is in the document at no width, so the marker beside it
+    // is what says the digest was cut. It is out of the accessibility tree
+    // because the run it marks is read out whole.
+    const marker = hash.querySelector(".rail-hash-ellipsis");
+    expect(marker?.textContent).toBe("…");
+    expect(marker?.getAttribute("aria-hidden")).toBe("true");
+    // The fact holds the band the copy report lands in, which is what keeps
+    // the report off the line the digest is drawn on.
+    expect(hash.parentElement?.className).toContain("rail-hash-fact");
   });
 
   // The three runs the row draws the digest as are separate boxes, so a
@@ -4853,6 +4863,9 @@ describe("the artifact viewer", () => {
         ["hash", "sha256:ab74"],
       ]);
     });
+    // This digest is short enough to stand whole, so the row draws everything
+    // it carries and no marker states an elision that did not happen.
+    expect(provenance.querySelector(".rail-hash-ellipsis")).toBeNull();
   });
 
   // The viewer survives the route change from one artifact to the next, so a
