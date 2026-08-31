@@ -2860,8 +2860,17 @@ label:has(> input:disabled) {
   overflow-x: auto;
 }
 
+/* A table an author wrote in the body takes the same treatment as every table
+   the product draws: an outer card, a header row on the inset tone, and
+   horizontal dividers between rows with no vertical rule between columns. The
+   declarations are restated here rather than reusing `.data-table`, because
+   the rendering path emits a bare `<table>` from the markdown and carries no
+   class onto it. */
 .prose table {
   border-collapse: collapse;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 9px;
 }
 
 /* A cell reverts to `break-word`, which breaks a token too long for the cell
@@ -2871,8 +2880,14 @@ label:has(> input:disabled) {
 .prose th,
 .prose td {
   padding: 6px 10px;
-  border: 1px solid var(--bd);
+  border-bottom: 1px solid var(--b2);
+  text-align: left;
+  vertical-align: top;
   overflow-wrap: break-word;
+}
+
+.prose thead th {
+  background-color: var(--surf2);
 }
 
 .spinner {
