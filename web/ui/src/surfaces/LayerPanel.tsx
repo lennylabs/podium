@@ -1130,11 +1130,19 @@ function LayerRow({
         {/* The handle is a button so the reorder has an input path that is
             not a pointer drag. A keyboard-only operator focuses it and the
             arrow keys move the row through its block, which sends the same
-            request a drop sends. */}
+            request a drop sends. The accessible name tracks the read-only
+            state the way the visible precedence label does: a disabled handle
+            that still names the arrow keys reads to a screen reader as an
+            instruction the control refuses, and the sentence explaining why
+            sits elsewhere on the page (§13.2.1). */}
         <button
           type="button"
           className="drag-handle"
-          aria-label={`Move ${layer.ID}: press the up or down arrow key`}
+          aria-label={
+            readOnly
+              ? `Move ${layer.ID}: reordering is unavailable while the registry is read-only`
+              : `Move ${layer.ID}: press the up or down arrow key`
+          }
           disabled={readOnly}
           draggable={!readOnly}
           onKeyDown={(event) => {

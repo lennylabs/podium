@@ -8272,7 +8272,7 @@ describe("read-only mode", () => {
     // Reordering is a write too, so the rows carry no drag and the handles
     // take no key on a read-only registry rather than committing a move the
     // registry would refuse.
-    for (const handle of screen.getAllByLabelText(/^Move .*arrow key$/)) {
+    for (const handle of screen.getAllByLabelText(/^Move /)) {
       expect(handle.getAttribute("draggable")).toBe("false");
       expect(handle.hasAttribute("disabled")).toBe(true);
     }
@@ -8304,6 +8304,33 @@ describe("read-only mode", () => {
     expect(
       screen.queryByText(/Reordering takes effect on the next read/),
     ).toBeNull();
+  });
+
+  // The visible precedence label states the refusal once, but a reader
+  // tabbing the table hears only each handle's own name. A name that still
+  // names the arrow keys promises an interaction the disabled control
+  // refuses, so it states the read-only reason instead.
+  it("names the read-only refusal on every reorder handle", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": {
+        body: emptyDomain,
+        headers: { "X-Podium-Read-Only": "true" },
+      },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    await screen.findByTestId("read-only-banner");
+    const handles = screen.getAllByLabelText(/^Move /);
+    expect(handles).toHaveLength(2);
+    for (const handle of handles) {
+      expect(handle.getAttribute("aria-label")).toMatch(
+        /reordering is unavailable while the registry is read-only$/,
+      );
+    }
+    expect(screen.queryByLabelText(/arrow key$/)).toBeNull();
   });
 
   it("instructs the reorder where the registry serves writes", async () => {
