@@ -7750,6 +7750,51 @@ describe("the layer panel", () => {
     );
   });
 
+  // The registry stores a git layer's root as it was registered, so a root
+  // registered as `artifacts/` arrives carrying its own separator. The cell
+  // draws one separator either way: appending unconditionally drew that row
+  // as `artifacts//`.
+  it("draws a git root that already ends in a separator with one separator", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "acme-platform-artifacts",
+              SourceType: "git",
+              Repo: "git@github.com:acme/platform-artifacts.git",
+              Ref: "main",
+              Root: "artifacts/",
+              Order: 1,
+            },
+            {
+              ID: "acme-rules",
+              SourceType: "git",
+              Repo: "git@github.com:acme/rules.git",
+              Ref: "main",
+              Root: "rules",
+              Order: 2,
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const rootLineOf = (id: string) => {
+      const lines = Array.from(
+        layerRow(id).querySelectorAll(".source-detail"),
+      );
+      return lines[lines.length - 1];
+    };
+    const stored = rootLineOf("acme-platform-artifacts");
+    expect(stored.textContent).toBe("artifacts/");
+    expect(stored.getAttribute("title")).toBe("artifacts/");
+    expect(rootLineOf("acme-rules").textContent).toBe("rules/");
+  });
+
   // A value with no leading directories has no run to clip, and the run that
   // carries the clip reserves the width of its own ellipsis, so drawing it
   // empty indented such a value by the width of a marker it never paints.

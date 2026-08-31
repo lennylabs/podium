@@ -36,7 +36,7 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
           )}
         </div>
         <Detail value={layer.Repo ?? ''} />
-        {present(layer.Root) && <Detail value={`${layer.Root}/`} />}
+        {present(layer.Root) && <Detail value={rootLine(layer.Root)} />}
       </div>
     );
   }
@@ -73,6 +73,15 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
       )}
     </div>
   );
+}
+
+/** rootLine draws the git source's subpath as a directory, so a root reads as
+ * a location rather than as a file beside the repository line. The registry
+ * stores the root as it was registered, so a value that already ends in a
+ * separator keeps the one it carries: appending unconditionally drew a root
+ * registered as `artifacts/` with two. */
+export function rootLine(root: string): string {
+  return root.endsWith('/') ? root : `${root}/`;
 }
 
 /** Detail is one quiet location line under the source reference. The line is
@@ -135,6 +144,6 @@ function sourceFields(layer: LayerRecord): [string, string][] {
   return candidates.filter((entry): entry is [string, string] => present(entry[1]));
 }
 
-function present(value: string | undefined): boolean {
+function present(value: string | undefined): value is string {
   return value !== undefined && value !== '';
 }
