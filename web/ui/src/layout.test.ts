@@ -1139,10 +1139,8 @@ describe("provenance content hash", () => {
     expect(row.display).toBe("flex");
     expect(row.whiteSpace).toBe("nowrap");
     expect(row.overflow).toBe("hidden");
-    // The algorithm prefix and the digest's opening characters are held out
-    // of the clip while any other run can still give a pixel up, so the row
-    // names what was hashed. The lead elides rather than pushing the row's
-    // controls past the rail's edge.
+    // The lead elides at its own end rather than pushing the row's controls
+    // past the rail's edge.
     const lead = styled("rail-hash-lead");
     expect(lead.minWidth).toBe("0");
     expect(lead.textOverflow).toBe("ellipsis");
@@ -1154,12 +1152,16 @@ describe("provenance content hash", () => {
     // give up a pixel, so the end the reader compares stays drawn.
     expect(Number(middle.flexShrink)).toBeGreaterThan(1000);
     const tail = styled("rail-hash-tail");
-    expect(tail.getPropertyValue("flex")).toBe("0 1 auto");
+    expect(tail.getPropertyValue("flex")).toBe("0 0.0001 auto");
     expect(tail.textOverflow).toBe("ellipsis");
-    // The lead gives a pixel up only once the middle and the trailing
-    // characters have none left, so the algorithm prefix and the digest's
-    // opening characters stay drawn against a rail this narrow.
-    expect(Number(lead.flexShrink)).toBeLessThan(Number(tail.flexShrink));
+    // The trailing characters are the last run to give a pixel up. The rail
+    // is narrower than the lead, the tail, and the row's controls together,
+    // so a lead held rigid takes the whole width and leaves the tail a sliver
+    // narrower than its own ellipsis: the digest then ends mid-character with
+    // nothing saying it was cut. The lead shortens ahead of the tail instead,
+    // and its own ellipsis marks the cut.
+    expect(Number(lead.flexShrink)).toBeGreaterThan(Number(tail.flexShrink));
+    expect(Number(middle.flexShrink)).toBeGreaterThan(Number(lead.flexShrink));
   });
 
   // The clip falls at the middle run's start, so the ellipsis stands against

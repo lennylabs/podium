@@ -3233,14 +3233,16 @@ label:has(> input:disabled) {
   white-space: nowrap;
 }
 
-/* The lead is the last run to give a pixel up: the middle collapses first,
-   then the trailing characters, and a shrink factor this much smaller than
-   the tail's holds the algorithm prefix and the digest's opening characters
-   drawn while either of the others still has width. The lead yields only
-   once neither does, which is what keeps the row's controls inside the rail
-   instead of clipping a copy confirmation no one can then read. */
+/* The lead gives a pixel up after the middle and before the trailing
+   characters. The rail is narrower than the lead, the tail, and the row's
+   controls together, so one of the two ends has to shorten; held rigid, the
+   lead took the whole width and starved the tail to a sliver too narrow to
+   draw even its own ellipsis, and the digest ended mid-character with no
+   marker. Shrinking here instead elides the lead at its own end, which is
+   where the elision falls, so the row states the algorithm, opens the digest,
+   marks the cut, and closes on the characters a reader compares (§13.10). */
 .rail-hash-lead {
-  flex: 0 0.0001 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3262,11 +3264,15 @@ label:has(> input:disabled) {
   direction: rtl;
 }
 
-/* The trailing characters elide at their own start once the middle has
-   collapsed, so a rail narrower than the lead and the tail together still
-   states that the value is truncated instead of slicing it with no marker. */
+/* The trailing characters are the last run to give a pixel up, because they
+   are the other end the reader compares against another copy. A shrink factor
+   this much smaller than the lead's leaves them a fraction of a pixel short of
+   their content while the lead still has width, and a run short by a whole
+   pixel elides a character the reader came for. They give the rest up only
+   once the lead has none left, and they elide at their own start when they
+   do. */
 .rail-hash-tail {
-  flex: 0 1 auto;
+  flex: 0 0.0001 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
