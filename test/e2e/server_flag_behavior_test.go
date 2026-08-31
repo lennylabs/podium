@@ -35,7 +35,72 @@ func TestServerFlags_WebUIFlagMountsUI(t *testing.T) {
 	}
 }
 
-// without --web-ui the UI is not mounted; /app/ is not served.
+// requestNoFollow issues one request without following redirects and returns the
+// status and the Location header. getRaw and getStatus share a client that
+// follows redirects, so an assertion built on them reads the followed 200 from
+// /app/ and cannot tell a redirect from a direct serve.
+func requestNoFollow(t *testing.T, method, url string) (int, string) {
+	t.Helper()
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	req, err := http.NewRequest(method, url, nil)
+	if err != nil {
+		t.Fatalf("new %s %s request: %v", method, url, err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("%s %s: %v", method, url, err)
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode, resp.Header.Get("Location")
+}
+
+// Spec: §13.10 — a process that mounts the UI redirects the browser from the
+// root to it. The redirect registers as the exact-root pattern, so it answers
+// GET and HEAD on / and leaves every other path to the meta-tool catch-all.
+// /ui/ is no longer served and gets no redirect of its own.
+func TestServe_WebUI_RootRedirect(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"my-skill/ARTIFACT.md": smallteamLowArtifact("ui artifact"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()},
+		"serve", "--standalone", "--web-ui", "--layer-path", reg)
+
+	if st, loc := requestNoFollow(t, http.MethodGet, srv.BaseURL+"/"); st != http.StatusFound || loc != "/app/" {
+		t.Errorf("GET / = %d %q, want 302 /app/\nlog:\n%s", st, loc, srv.log())
+	}
+	// Go's mux answers HEAD from a GET pattern, so the browser's preflight of
+	// the root lands on the same redirect.
+	if st, loc := requestNoFollow(t, http.MethodHead, srv.BaseURL+"/"); st != http.StatusFound || loc != "/app/" {
+		t.Errorf("HEAD / = %d %q, want 302 /app/\nlog:\n%s", st, loc, srv.log())
+	}
+	// A non-GET root request falls through to the catch-all. The catch-all is
+	// free to change the status it returns, so the assertion is that POST /
+	// answers the same way as an unrouted path rather than as a redirect.
+	stRoot, locRoot := requestNoFollow(t, http.MethodPost, srv.BaseURL+"/")
+	stNope, _ := requestNoFollow(t, http.MethodPost, srv.BaseURL+"/nope")
+	if locRoot != "" || stRoot/100 == 3 {
+		t.Errorf("POST / = %d %q, want no redirect\nlog:\n%s", stRoot, locRoot, srv.log())
+	}
+	if stRoot != stNope {
+		t.Errorf("POST / = %d, POST /nope = %d; the root must delegate to the catch-all", stRoot, stNope)
+	}
+	// The old mount is gone outright: no alias, no redirect from it.
+	if st, loc := requestNoFollow(t, http.MethodGet, srv.BaseURL+"/ui/"); st == 200 || st/100 == 3 {
+		t.Errorf("GET /ui/ = %d %q, want neither a serve nor a redirect\nlog:\n%s", st, loc, srv.log())
+	}
+	if st, loc := requestNoFollow(t, http.MethodGet, srv.BaseURL+"/nope"); st == 200 || st/100 == 3 {
+		t.Errorf("GET /nope = %d %q, want neither a serve nor a redirect\nlog:\n%s", st, loc, srv.log())
+	}
+}
+
+// without --web-ui the UI is not mounted; /app/ is not served and the root
+// keeps the answer the meta-tool catch-all gives it.
 func TestServerFlags_NoWebUIByDefault(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -44,6 +109,10 @@ func TestServerFlags_NoWebUIByDefault(t *testing.T) {
 	srv := startServer(t, reg)
 	if st := getStatus(t, srv.BaseURL+"/app/"); st == 200 {
 		t.Errorf("GET /app/ = 200 without --web-ui; the UI must be opt-in")
+	}
+	// Spec: §13.10 — the root redirect is conditional on the flag.
+	if st, loc := requestNoFollow(t, http.MethodGet, srv.BaseURL+"/"); st/100 == 3 {
+		t.Errorf("GET / = %d %q without --web-ui, want no redirect\nlog:\n%s", st, loc, srv.log())
 	}
 }
 
