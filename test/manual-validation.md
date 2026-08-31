@@ -145,6 +145,10 @@ rm -rf "$WORK"
 | S48 | Register a layer through the panel and read the one-time secret | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S49 | Unregister a layer through the panel's confirmation | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S50 | A non-owner is refused on a destructive operation | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S51 | Browse the domain hierarchy through the web UI | standalone | none | none | none |
+| S52 | Search through the web UI with the type, scope, and tag filters | standalone | none | none | none |
+| S53 | Read an artifact through the viewer | standalone | none | none | none |
+| S54 | Author on disk, reingest from the panel, and materialize | standalone | none | none | none |
 
 ---
 
@@ -4980,3 +4984,510 @@ profile S47 signed in from cannot hold a second session.
 **Cleanup.** S50 is the last scenario on this stack, so run S44's teardown here:
 stop the server by its recorded PID, run `rm -rf "$WORK"`, and remove the IdP
 with `docker rm -f kc-podium` and `rm -rf "$KCERT"`.
+
+---
+
+## S51: Browse the domain hierarchy through the web UI
+
+**Goal.** Validate that the web UI's domain browser renders the structure
+`load_domain` returns: the root's subdomains, a nested domain, a domain large
+enough to change how it is presented, and a sparse chain the registry
+compresses into a single node.
+
+**Covers.** The §13.10 domain-browser surface, §4.5.5 domain rendering
+including passthrough-chain folding, and the §13.10 statement that the UI is a
+thin client over the same endpoints the CLI calls.
+
+**Why by hand.** The assertion is what a person sees in the tree and on the
+page. No Go test reads a browser rendering, and the UI's structure is derived
+from `load_domain` rather than served by it, so a divergence between the two is
+invisible to a test of either one alone.
+
+**Prerequisites.** None beyond the build. This is the stack S52, S53, and S54
+run on, so a change here reaches each of them.
+
+Run the isolation block from "How to use this document", then build the
+registry. The corpus is shaped to exercise the browser: `eng/teams` holds
+enough subdomains to change the presentation, and
+`ops/regional/emea/payables` is a chain of single-child domains.
+
+```bash
+mk() { podium artifact scaffold --type "$1" --description "$2" --force "$WORK/reg/$3" >/dev/null; }
+mkdir -p "$WORK/reg"
+mk context "How a production deploy runs, stage by stage, and when to roll back." eng/platform/deploy-runbook
+mk context "The deploy runbook with the canary stage made mandatory for tier-1 services." eng/platform/deploy-runbook-strict
+mk command "Roll a service back to its previous released image." eng/platform/rollback
+mk rule "Secrets never live in an artifact body, a manifest, or a bundled file." eng/security/secrets-policy
+mk skill "Pay an approved vendor invoice through the finance warehouse." finance/ap/pay-invoice
+mk agent "Reconcile a supplier ledger entry against the general ledger." ops/regional/emea/payables/reconcile
+for t in ads api billing checkout content core data growth identity infra loyalty media mobile notify payments pricing reporting risk search shipping storefront support tax trust; do
+  mk context "How the $t team runs its on-call rotation and what it pages for." "eng/teams/$t/oncall-guide"
+done
+```
+
+Give the runbook a body that carries a table, a fenced block, and a reference to
+another artifact, and bundle a file beside it. S53 reads this artifact.
+
+````bash
+cat > "$WORK/reg/eng/platform/deploy-runbook/ARTIFACT.md" <<'YAML'
+---
+type: context
+name: deploy-runbook
+version: 2.3.0
+description: How a production deploy runs, stage by stage, and when to roll back.
+tags: [deploy, platform, runbook]
+sensitivity: low
+---
+
+# Deploy runbook
+
+The production deploy runs in stages, and each stage gates the next.
+
+| Step | Owner | Duration |
+|:--|:--|--:|
+| Build and sign the image | CI | 6 min |
+| Canary to 5% of traffic | platform | 15 min |
+| Full rollout | platform | 8 min |
+
+Start the deploy from the release branch:
+
+```bash
+./scripts/deploy.sh --env production --canary 5
+```
+
+Roll back with [the rollback command](eng/platform/rollback) rather than
+reverting the branch.
+YAML
+mkdir -p "$WORK/reg/eng/platform/deploy-runbook/scripts"
+printf '#!/usr/bin/env bash\necho deploying\n' > "$WORK/reg/eng/platform/deploy-runbook/scripts/deploy.sh"
+````
+
+Give the second runbook an `extends:` on the first, and declare `tags` that omit
+one tag the parent carries. S52 and S53 both read the difference.
+
+```bash
+cat > "$WORK/reg/eng/platform/deploy-runbook-strict/ARTIFACT.md" <<'YAML'
+---
+type: context
+name: deploy-runbook-strict
+version: 1.0.0
+description: The deploy runbook with the canary stage made mandatory for tier-1 services.
+extends: eng/platform/deploy-runbook
+tags: [deploy, platform]
+sensitivity: low
+---
+
+# Strict deploy runbook
+
+Tier-1 services may not skip the canary stage.
+YAML
+cat > "$WORK/reg/finance/ap/pay-invoice/ARTIFACT.md" <<'YAML'
+---
+type: skill
+version: 1.2.0
+tags: [finance, ap, payments]
+sensitivity: medium
+---
+
+<!-- Skill body lives in SKILL.md. -->
+YAML
+cat > "$WORK/reg/finance/ap/pay-invoice/SKILL.md" <<'YAML'
+---
+name: pay-invoice
+description: Pay an approved vendor invoice through the finance warehouse.
+license: MIT
+---
+
+Confirm AP approval, validate the vendor, then submit the payment.
+YAML
+podium lint --registry "$WORK/reg" --offline
+```
+
+**Expect.** `lint: no issues.` A run that reports an error here has a malformed
+manifest, and every later step reads a registry that does not hold what the
+scenario assumes. The most common cause is the document's leading indentation
+landing inside a here-document; the blocks above are deliberately unindented.
+
+Start the registry with the UI mounted.
+
+```bash
+podium serve --standalone --web-ui --no-embeddings \
+  --layer-path "$WORK/reg" --bind 127.0.0.1:8462 > "$WORK/srv.log" 2>&1 &
+export SRV=$!
+for i in $(seq 1 40); do curl -sf http://127.0.0.1:8462/healthz >/dev/null && break; sleep 0.5; done
+grep 'ingested layer' "$WORK/srv.log"
+```
+
+**Expect.** `ingested layer reg from $WORK/reg (accepted=30, idempotent=0,
+rejected=0, advisories=0)`. A non-zero `rejected` or `advisories` means the
+corpus above did not land as written, and the counts every later step asserts
+will not match.
+
+**Steps.**
+
+1. Read the root domain from the API, so the UI has something to be checked
+   against rather than merely inspected.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8462/v1/load_domain?path=" \
+     | python3 -c 'import json,sys; d=json.load(sys.stdin); print([s["path"] for s in d["subdomains"]])'
+   ```
+
+   **Expect.** `['eng', 'finance/ap', 'ops/regional/emea/payables']`. The second
+   and third entries are already compressed by the registry: `finance` and `ops`
+   each hold a single child, so §4.5.5 folds the passthrough chain and the
+   response names the deepest node of each chain rather than its head.
+
+2. Open `http://127.0.0.1:8462/ui/` and read the root page and the sidebar.
+
+   **Expect.** The heading reads `All domains` with `30 ARTIFACTS` and
+   `3 DOMAINS` beside it. Three subdomain cards stand under `SUBDOMAINS`, named
+   for the three paths step 1 printed. The sidebar's `CATALOG` tree carries
+   `eng` with `platform`, `security`, and `teams` beneath it, and carries the
+   two compressed chains as `finance/ap` and `ops/regional/emea/payables`, each
+   drawn with its trailing node emphasized over the path that leads to it. The
+   footer reads `1 layer · 30 artifacts`. The card count and the tree must agree
+   with step 1: a UI that renders `finance` and `ops` as separate expandable
+   nodes is showing a hierarchy the registry did not return.
+
+3. Open the `eng/teams` domain, which holds more subdomains than a domain page
+   presents as cards.
+
+   **Expect.** The heading reads `teams` with `24 ARTIFACTS` and
+   `24 SUBDOMAINS`. The subdomain region carries a `Grid` and `List` control and
+   a `Show all 24 subdomains` control rather than drawing every card at once,
+   and the sidebar's `teams` node lists the first several children followed by
+   `+ 16 more`. This is the presentation change a domain of this size is
+   supposed to produce; a page that draws 24 cards with no such control is
+   rendering the small-domain treatment at a size it was not drawn for.
+
+4. Open the compressed chain from the sidebar by pressing
+   `ops/regional/emea/payables`, and compare it against the API.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8462/v1/load_domain?path=ops" \
+     | python3 -c 'import json,sys; d=json.load(sys.stdin); print([s["path"] for s in d["subdomains"]])'
+   ```
+
+   **Expect.** The API prints `['ops/regional/emea/payables']`, a single entry,
+   and the page the sidebar opened is the domain holding `reconcile`. Neither
+   `regional` nor `emea` is reachable as a page of its own from the tree,
+   because neither is a node the registry returned.
+
+5. Confirm the browser reads the same endpoint the CLI reads, rather than a
+   surface of its own.
+
+   ```bash
+   podium domain show --registry http://127.0.0.1:8462 eng/platform
+   ```
+
+   **Expect.** The CLI lists the same artifacts the `eng/platform` page shows,
+   under `notable:`: `deploy-runbook`, `deploy-runbook-strict`, and `rollback`. A disagreement
+   between the two means the UI is deriving its view from something other than
+   `load_domain`, which §13.10 does not permit.
+
+**Cleanup.** Leave the server running for S52, S53, and S54. S54 carries the
+teardown.
+
+---
+
+## S52: Search through the web UI with the type, scope, and tag filters
+
+**Goal.** Validate that the UI's search offers the same `type`, `scope`, and
+`tags` filters the SDK and CLI offer, that each filter changes the result set
+the way the CLI's does, and that the address the page writes names the search it
+ran.
+
+**Covers.** The §13.10 search surface and its filter set, and the §13.10
+statement that the UI is a thin client over the same endpoints.
+
+**Why by hand.** The assertion is that two independent surfaces agree. A Go test
+covers the endpoint; no test compares what the endpoint returns against what a
+browser renders for the same query, which is where the filters are applied to a
+reader.
+
+**Prerequisites.** The S51 stack, left running.
+
+**Steps.**
+
+1. Take the CLI's answers for the queries the UI will run. These are the
+   baseline every later step is checked against.
+
+   ```bash
+   R=http://127.0.0.1:8462
+   ids() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["total_matched"], [x["id"] for x in d["results"]])'; }
+   podium search --registry $R --json "deploy"                    | ids
+   podium search --registry $R --json --type command "deploy"     | ids
+   podium search --registry $R --json --tags runbook "deploy"     | ids
+   podium search --registry $R --json --tags nosuchtag "deploy"   | ids
+   podium search --registry $R --json --scope finance "invoice"   | ids
+   podium search --registry $R --json --scope eng "invoice"       | ids
+   ```
+
+   **Expect.** In order: `2` with both runbooks, `0`, `2` with both runbooks,
+   `0`, `1` with `finance/ap/pay-invoice`, and `0`. Flags precede the positional
+   query; a command written the other way round returns nothing and reads as an
+   empty result set rather than as a usage error.
+
+   The `--tags runbook` result is the one worth pausing on.
+   `deploy-runbook-strict` declares `tags: [deploy, platform]` and no `runbook`
+   tag, and it matches because it declares `extends:` and the merged manifest
+   carries the parent's tags. The `--tags nosuchtag` line is the negative
+   control for the same filter: without it, a filter that silently matched
+   everything would produce the same reading as one that works.
+
+2. Open `http://127.0.0.1:8462/ui/`, press the search control in the top bar,
+   and search for `deploy`.
+
+   **Expect.** The page reports `Showing 2 of 2 matches` and lists both
+   runbooks, matching the CLI's first line.
+
+3. Apply the type filter on the search surface and set it to `command`.
+
+   **Expect.** The count falls to `Showing 0 of 0 matches`, matching the CLI's
+   second line, and the type control reads `command` rather than `all`. Return
+   it to `all` and the two matches come back.
+
+4. Type the filter as an inline token instead of using the control. Clear the
+   field, type `type:command deploy`, and press Return.
+
+   **Expect.** The token is lifted out of the query and applied as the type
+   filter: the type control reads `command`, the field holds `deploy` alone, and
+   the count is `Showing 0 of 0 matches`. The literal string `type:command` must
+   not remain in the field and must not be searched as keyword text.
+
+5. Reload the page on the address the previous step produced.
+
+   **Expect.** The same filter, the same field contents, and the same count. The
+   address the page wrote and the search the page ran name one search, so
+   arriving at that address by reload renders what typing produced. A page that
+   shows a different result set after a reload has written an address that does
+   not describe the search it performed.
+
+6. Run the scope and tag cases against the UI and compare each against step 1.
+
+   **Expect.** `scope:finance invoice` reports `Showing 1 of 1 match` for
+   `finance/ap/pay-invoice`; `scope:eng invoice` reports `Showing 0 of 0
+   matches`; `tag:runbook deploy` reports `Showing 2 of 2 matches`. Each line
+   matches the CLI's answer for the same filter.
+
+**Cleanup.** Leave the server running for S53 and S54.
+
+---
+
+## S53: Read an artifact through the viewer
+
+**Goal.** Validate that the artifact viewer renders the body as markdown rather
+than as source, presents the frontmatter as a property table, links an artifact
+to the one it extends, lists bundled resources, and renders untrusted body
+markup without executing it.
+
+**Covers.** The §13.10 artifact-viewer surface, §4.3 manifest merging as it
+reaches a reader, and the §13.10 rendering of body content the registry does not
+control.
+
+**Why by hand.** The assertion is what a person sees rendered, and, for the last
+step, what a browser does not execute. No Go test reads a browser rendering or
+observes a script that failed to run.
+
+**Prerequisites.** The S51 stack, left running.
+
+**Steps.**
+
+1. Open `http://127.0.0.1:8462/ui/#/artifact/eng%2Fplatform%2Fdeploy-runbook`.
+
+   **Expect.** The heading reads `deploy-runbook` with its type and version
+   beside it. The body renders as markdown: the table appears as a table with
+   the column headings `Step`, `Owner`, and `Duration`, and the deploy command
+   appears in a code block. Neither is shown as raw text with pipes and
+   backticks, which is what a viewer that does not render markdown produces.
+   Three tabs stand above the body: `Rendered`, `Frontmatter`, and
+   `Resources 1`.
+
+2. Follow the reference the body carries to another artifact.
+
+   **Expect.** The words "the rollback command" are a link, and following it
+   opens `eng/platform/rollback` inside the viewer. The reference is authored as
+   the artifact ID `eng/platform/rollback`; a link that leaves the page for a
+   registry error rather than opening the artifact has not been resolved to a
+   route.
+
+3. Open the `Resources 1` tab.
+
+   **Expect.** The bundled `scripts/deploy.sh` is listed with its size, and a
+   download control sits beside it. The count in the tab label matches the one
+   file bundled beside the manifest.
+
+4. Open `#/artifact/eng%2Fplatform%2Fdeploy-runbook-strict` and read its
+   `Frontmatter` tab against what the file on disk declares.
+
+   ```bash
+   grep '^tags:' "$WORK/reg/eng/platform/deploy-runbook-strict/ARTIFACT.md"
+   ```
+
+   **Expect.** The file declares `tags: [deploy, platform]`. The property table
+   shows `deploy`, `platform`, and `runbook`, because the artifact declares
+   `extends:` and the viewer presents the merged manifest. The page also carries
+   a link to `eng/platform/deploy-runbook`, the artifact this one extends. The
+   inherited tag is the visible evidence that the merge reached the reader; a
+   table showing only the two declared tags is presenting the authored manifest
+   where the merged one is specified.
+
+5. Add an artifact whose body carries markup a reader must never execute, and
+   ingest it.
+
+   ```bash
+   podium artifact scaffold --type context \
+     --description "A probe artifact whose body carries markup a reader must never execute." \
+     --force "$WORK/reg/eng/security/render-probe" >/dev/null
+   cat > "$WORK/reg/eng/security/render-probe/ARTIFACT.md" <<'YAML'
+---
+type: context
+name: render-probe
+version: 1.0.0
+description: A probe artifact whose body carries markup a reader must never execute.
+sensitivity: low
+---
+
+# Render probe
+
+<script>window.__PWNED = true;</script>
+
+<img src=x onerror="window.__PWNED = true">
+
+<a href="javascript:window.__PWNED=true">a javascript url</a>
+
+<iframe src="https://example.com"></iframe>
+YAML
+   podium lint --registry "$WORK/reg" --offline
+   podium layer reingest --registry http://127.0.0.1:8462 reg | tail -1
+   ```
+
+   **Expect.** `lint: no issues.`, and the reingest accepts the new artifact.
+   The `javascript:` URL is written as raw HTML rather than as a markdown link
+   on purpose: authored as `[a javascript url](javascript:...)` lint refuses the
+   artifact with `lint.prose_reference` and it never reaches the renderer, which
+   would leave this step testing lint rather than the viewer.
+
+6. Open `#/artifact/eng%2Fsecurity%2Frender-probe` and read the rendered body.
+
+   **Expect.** The page shows the heading and three removal markers reading
+   `(image removed)`, `(link removed)`, and `(embed removed)`. The link's text
+   is still visible and the link is inert. Nothing renders an image, an inline
+   frame, or the script's source text.
+
+7. Confirm from the browser console that nothing in that body executed.
+
+   ```javascript
+   window.__PWNED
+   ```
+
+   **Expect.** `undefined`. Every one of the four vectors sets `window.__PWNED`
+   if it runs, so a defined value names a renderer that executed author-supplied
+   markup. This is the negative control the rendered page alone cannot give:
+   a body whose script silently failed for an unrelated reason would look
+   identical on screen.
+
+**Cleanup.** Leave the server running for S54.
+
+---
+
+## S54: Author on disk, reingest from the panel, and materialize
+
+**Goal.** Validate the loop an author actually runs: write an artifact into a
+`local` layer, bring it into the catalog from the web UI's layer panel, read it
+in the UI, and materialize it into a harness with `podium sync`.
+
+**Covers.** The §13.10 layer panel's reingest operation and its report, §7.3.1
+`local`-layer reingest and the immutability rule, and §7.5 filesystem delivery.
+
+**Why by hand.** The assertion spans a filesystem edit, a browser control, and a
+CLI materialization. Each half is covered by a test; nothing exercises the loop
+a person runs across all three.
+
+**Prerequisites.** The S51 stack, left running, with S53's `render-probe`
+ingested.
+
+**Steps.**
+
+1. Confirm the artifact this scenario adds is not in the catalog yet.
+
+   ```bash
+   curl -sS -o /dev/null -w '%{http_code}\n' \
+     "http://127.0.0.1:8462/v1/load_artifact?id=eng/platform/freeze"
+   ```
+
+   **Expect.** `404`. Without this baseline the later read establishes nothing.
+
+2. Write the artifact into the layer's directory. Do not reingest from the
+   terminal; the panel does it in the next step.
+
+   ```bash
+   podium artifact scaffold --type command \
+     --description "Freeze deploys for the duration of an incident." \
+     --force "$WORK/reg/eng/platform/freeze"
+   ```
+
+   **Expect.** The scaffold writes `ARTIFACT.md`. The registry still answers
+   `404` for it, because writing to a `local` layer's directory changes nothing
+   in the registry until an ingest runs.
+
+3. Open `http://127.0.0.1:8462/ui/#/layers` and press `Reingest` on the `reg`
+   row.
+
+   **Expect.** The row reports the request running, and a report opens when it
+   returns. The report reads `1 ACCEPTED`, `31 UNCHANGED`, `0 REJECTED`,
+   `0 CONFLICTS`, and `0 LINT FAILURES`. The accepted count is the artifact step
+   2 wrote, and the unchanged count is every artifact whose content the registry
+   already holds at that version: the 30 the stack started with plus the probe
+   S53 added. Running this scenario without S53 first gives `30 UNCHANGED`.
+
+4. Read the new artifact in the UI.
+
+   **Expect.** `eng/platform/freeze` is reachable from the `eng/platform`
+   domain page and opens in the viewer. The catalog counter in the footer has
+   risen by one.
+
+5. Edit the artifact without bumping its version, and reingest from the panel
+   again. This is the failure an author hits most often.
+
+   ```bash
+   sed -i '' 's/^description: Freeze deploys.*/description: Freeze every deploy for the duration of an incident./' \
+     "$WORK/reg/eng/platform/freeze/ARTIFACT.md"
+   ```
+
+   **Expect.** The report reads `0 ACCEPTED` and `1 CONFLICTS`, and its
+   `NEEDS ATTENTION` region states that a published version was republished with
+   different content and directs the author to bump the version. The registry
+   refuses the change rather than overwriting the stored bytes, which is the
+   §7.3.1 immutability rule reaching a reader. The artifact keeps the
+   description step 2 gave it.
+
+6. Bump the version and reingest from the panel once more.
+
+   ```bash
+   sed -i '' 's/^version: 0.1.0/version: 0.2.0/' \
+     "$WORK/reg/eng/platform/freeze/ARTIFACT.md"
+   ```
+
+   **Expect.** The report reads `1 ACCEPTED` and `0 CONFLICTS`, and the viewer
+   shows the new description at version `0.2.0`.
+
+7. Materialize the catalog into a harness and confirm the new artifact travels.
+
+   ```bash
+   mkdir -p "$WORK/proj" && cd "$WORK/proj"
+   podium init --registry http://127.0.0.1:8462 --harness claude-code
+   podium sync | grep -A1 'eng/platform/freeze'
+   ```
+
+   **Expect.** The sync output names `eng/platform/freeze  [reg]` with the path
+   it wrote beneath it. The artifact an author wrote to a directory in step 2 has
+   reached a harness-native file without any step outside this loop.
+
+**Cleanup.** S54 is the last scenario on this stack.
+
+```bash
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+rm -rf "$WORK"
+```
