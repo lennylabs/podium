@@ -965,10 +965,12 @@ const registryUnavailable = 'registry.unavailable';
  */
 function RegistrationRefusal({ refusal }: { refusal: unknown }) {
   if (!(refusal instanceof ApiError) || refusal.code === registryUnavailable) {
-    return <ErrorState error={refusal} />;
+    return <ErrorState error={refusal} write />;
   }
   if (refusal.code !== layerCapExceeded) {
-    return <ErrorState error={refusal} title="The registry refused this registration and no layer was created." />;
+    return (
+      <ErrorState error={refusal} write title="The registry refused this registration and no layer was created." />
+    );
   }
   return (
     <div className="banner banner-danger" role="alert" aria-label="Layer limit reached">

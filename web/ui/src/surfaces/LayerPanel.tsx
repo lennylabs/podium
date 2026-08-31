@@ -1223,6 +1223,7 @@ function LayerRow({
                one the registry names rather than a loop. */
             <ErrorState
               error={refusal.error}
+              write
               title="The registry refused that action and nothing changed."
               onRetry={refusal.retry}
             >

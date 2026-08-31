@@ -5446,6 +5446,55 @@ describe("the artifact viewer", () => {
     );
   });
 
+  // §13.10 requires an artifact the caller may not see to be indistinguishable
+  // from one that does not exist, and which of the two failure treatments a
+  // surface reaches does not change that. The banner a standing surface draws
+  // conceals a read's permission refusal exactly as the error page does, so a
+  // refusal answered to the version read states the not-found envelope and
+  // neither the code, the registry's message, nor its remediation reaches the
+  // reader.
+  //
+  // Spec: §13.10
+  it("conceals a refused version read in the banner the viewer keeps standing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_artifact": {
+        body: {
+          id: "platform/review",
+          type: "context",
+          version: "2.3.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Review\n",
+          frontmatter: "",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/artifact/platform%2Freview");
+    render(<App />);
+    await screen.findByLabelText("Artifact viewer");
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_artifact": {
+        status: 403,
+        body: {
+          code: "auth.forbidden",
+          message: "caller may not read platform/review",
+          retryable: false,
+          suggested_action: "Ask an administrator for access.",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    pinVersion("9.9.9");
+    const refusal = await screen.findByTestId("version-refused");
+    expect(refusal.textContent).toContain("registry.not_found");
+    expect(refusal.textContent).toContain("The registry has no record of it.");
+    expect(refusal.textContent).not.toContain("auth.forbidden");
+    expect(refusal.textContent).not.toContain("caller may not read");
+    expect(refusal.textContent).not.toContain("Ask an administrator");
+  });
+
   // The badge toggles aria-expanded, which states that something opened
   // without stating what or where it stands, and the field it discloses is
   // several elements away in the document. The badge therefore points at the
@@ -15713,6 +15762,32 @@ describe("a refused layer write", () => {
     expect(
       within(banner).getByRole("button", { name: "Dismiss" }),
     ).toBeTruthy();
+  });
+
+  // §13.10's concealment governs a read, whose refusal is collapsed into the
+  // not-found envelope. A write names a layer the panel is already listing to
+  // this caller, so its permission refusal conceals nothing and the panel
+  // presents the not-permitted state: the code, the message, and the
+  // remediation are the caller's to act on.
+  //
+  // Spec: §13.10
+  it("states a refused write’s permission decision rather than concealing it", async () => {
+    refusedPage({
+      status: 403,
+      body: {
+        code: "auth.forbidden",
+        message: "caller does not own alice-personal",
+        retryable: false,
+        suggested_action: "Ask an administrator to unregister it.",
+      },
+    });
+    render(<App />);
+    await refuseAnUnregister();
+    const banner = screen.getByRole("alert");
+    expect(banner.textContent).toContain("auth.forbidden");
+    expect(banner.textContent).toContain("does not own alice-personal");
+    expect(banner.textContent).toContain("Ask an administrator");
+    expect(banner.textContent).not.toContain("registry.not_found");
   });
 
   // Dismiss clears the row's refusal without driving another write, which is

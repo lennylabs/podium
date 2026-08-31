@@ -425,13 +425,15 @@ function errorPageKind(error: unknown): ErrorPageKind {
 const permissionCodes: ReadonlySet<string> = new Set<string>(['auth.forbidden', 'visibility.denied']);
 
 /** concealRefusal replaces a read's permission refusal with the not-found
- * envelope, so the page it renders is the one an artifact that does not exist
- * renders, down to the code at its foot. The single-artifact read conceals the
- * denial in the registry today (`pkg/registry/core`), and the concealment §13.10
- * requires is a property of the page rather than of that invariant: a read route
- * that later answered a refusal directly would otherwise disclose, through the
- * eyebrow, the message, and the code, that an artifact the caller may not see
- * exists.
+ * envelope, so what it renders, on the error page and in the banner alike, is
+ * what an artifact that does not exist renders, down to the code it states.
+ * Both failure treatments run it, because a refusal concealed on one surface
+ * and stated on another discloses through the difference. The single-artifact
+ * read conceals the denial in the registry today (`pkg/registry/core`), and the
+ * concealment §13.10 requires is a property of what the UI renders rather than
+ * of that invariant: a read route that later answered a refusal directly would
+ * otherwise disclose, through the eyebrow, the message, and the code, that an
+ * artifact the caller may not see exists.
  *
  * Spec: §13.10 */
 function concealRefusal(error: unknown): unknown {
@@ -579,6 +581,12 @@ export function ErrorPage({
  * refusal was about in `title` and puts the recovery control that belongs to
  * that surface in `children`, so the reader is offered a way on from inside
  * the same banner rather than from a page that is no longer there.
+ *
+ * A read's permission refusal is concealed here as it is on the error page,
+ * because §13.10's concealment rule is a property of what the UI renders and
+ * not of which of the two failure treatments a surface happened to reach.
+ *
+ * Spec: §13.10
  */
 export function ErrorState({
   error,
@@ -586,21 +594,29 @@ export function ErrorState({
   title = 'The registry did not answer this request.',
   testID,
   children,
+  write = false,
 }: {
   error: unknown;
   onRetry?: () => void;
   title?: string;
   testID?: string;
   children?: ReactNode;
+  /** The banner reports a write's refusal rather than a read's. A write names
+   * something the caller already knows is there, so its permission refusal
+   * conceals nothing and the caller is told the decision that was made: the
+   * layer panel presents the not-permitted state a refused write receives,
+   * and a concealed one would read as a layer that had disappeared. */
+  write?: boolean;
 }) {
-  const envelope = error instanceof ApiError ? error : null;
+  const shown = write ? error : concealRefusal(error);
+  const envelope = shown instanceof ApiError ? shown : null;
   const retryable = envelope === null || envelope.retryable;
   const retryControl = useRetryFocus<HTMLButtonElement>();
   return (
     <div className="banner banner-danger" role="alert" data-testid={testID}>
       <p className="banner-title">{title}</p>
       {envelope !== null && <p className="mono banner-code">{envelope.label}</p>}
-      <p>{envelope !== null ? envelopeMessage(envelope) : String(error)}</p>
+      <p>{envelope !== null ? envelopeMessage(envelope) : String(shown)}</p>
       {envelope !== null && envelope.suggestedAction !== '' && <p className="quiet">{envelope.suggestedAction}</p>}
       {onRetry !== undefined &&
         (retryable ? (

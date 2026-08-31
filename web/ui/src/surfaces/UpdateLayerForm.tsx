@@ -283,7 +283,7 @@ export function UpdateLayerForm({
           )}
           {refusal !== null && (
             <>
-              <ErrorState error={refusal} onRetry={send} />
+              <ErrorState error={refusal} write onRetry={send} />
               <button
                 type="button"
                 onClick={() => {
