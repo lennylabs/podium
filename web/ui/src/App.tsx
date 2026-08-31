@@ -454,6 +454,9 @@ export function App() {
             // The eager read runs at treeDepth, so it answers for the levels
             // of the top-level domains it returns.
             covered={treeDepth > 1}
+            // The same read carried the level under each top-level domain, so
+            // the tree draws both levels at once.
+            eagerOpen={treeDepth > 1}
           />
           {catalogEmpty && (
             <p className="quiet catalog-empty" data-testid="catalog-empty">
@@ -703,6 +706,7 @@ function CatalogTree({
   onOutcome,
   reach,
   covered,
+  eagerOpen,
 }: {
   nodes: DomainDescriptor[];
   parent: string;
@@ -717,6 +721,13 @@ function CatalogTree({
    * omission is an answer. A node in the second is at the read's edge, where
    * the same omission says only that the read stopped there. */
   covered: boolean;
+  /** eagerOpen renders the level under each of these nodes without waiting
+   * for the reader to expand it. It is set on the tree's top level, whose
+   * children the eager read already carried, so a reader landing on the shell
+   * sees two levels of the hierarchy instead of a row of collapsed roots. A
+   * level below that comes from a read the reader's own expansion issued, so
+   * it opens no further on its own. */
+  eagerOpen: boolean;
 }) {
   const [all, setAll] = useState(false);
   // The reader's own position is never one of the folded rows: a level whose
@@ -735,7 +746,10 @@ function CatalogTree({
   const shown = folded ? nodes.slice(0, siblingCap) : nodes;
 
   return (
-    <ul className="catalog-tree" aria-label="Catalog">
+    // Only the outermost list names the navigation. A nested level is a
+    // subtree of the same navigation, and repeating the name there gives a
+    // reader several controls called "Catalog" that are one navigation.
+    <ul className="catalog-tree" aria-label={parent === '' ? 'Catalog' : undefined}>
       {shown.map((node) => (
         <TreeNode
           key={node.path}
@@ -746,6 +760,7 @@ function CatalogTree({
           onOutcome={onOutcome}
           reach={reach}
           covered={covered}
+          eagerOpen={eagerOpen}
         />
       ))}
       {foldable && (
@@ -795,6 +810,7 @@ function TreeNode({
   onOutcome,
   reach,
   covered,
+  eagerOpen,
 }: {
   node: DomainDescriptor;
   parent: string;
@@ -808,13 +824,21 @@ function TreeNode({
   /** covered reports whether the read that produced this node also answered
    * for its children. See CatalogTree. */
   covered: boolean;
+  /** eagerOpen draws this node's own level without a press. See CatalogTree. */
+  eagerOpen: boolean;
 }) {
   const ancestor = onCurrentPath(node.path, current);
-  const [open, setOpen] = useState(ancestor);
+  const eager = node.subdomains;
+  // The level the eager read carried is drawn with the node rather than held
+  // behind its toggle, so the shell opens on two levels of the hierarchy. The
+  // open state is still the reader's from the first press onward: a node they
+  // close stays closed. Only a node the read answered for opens this way, so
+  // no row opens onto a level that is not in hand and the tree issues no read
+  // the reader did not ask for.
+  const [open, setOpen] = useState(ancestor || (eagerOpen && (eager?.length ?? 0) > 0));
   const [loaded, setLoaded] = useState<DomainDescriptor[] | null>(null);
   const [restricted, setRestricted] = useState(false);
   const [failed, setFailed] = useState(false);
-  const eager = node.subdomains;
   const label = domainLabel(node.path, parent);
   const children = eager ?? loaded;
   // The row is marked for the domain the reader is on and for every level a
@@ -1014,6 +1038,9 @@ function TreeNode({
           // Children this node read itself came from a read of the same
           // depth as the eager one, which answered for their levels too.
           covered={eager === undefined && treeDepth > 1}
+          // A level below the tree's top two is drawn because the reader
+          // expanded the node above it, so it opens no further on its own.
+          eagerOpen={false}
         />
       )}
     </li>

@@ -361,11 +361,8 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    // Both eager levels are in the response, so the second one is rendered
-    // from it rather than read again.
-    fireEvent.click(
-      within(tree).getAllByRole("button", { expanded: false })[0],
-    );
+    // Both eager levels are in the response, so the second one is drawn with
+    // the first rather than held behind a press or read again.
     expect(within(tree).getByText("ci")).toBeTruthy();
     expect(await screen.findByTestId("catalog-counts")).toBeTruthy();
     await waitFor(() => {
@@ -386,6 +383,33 @@ describe("the application shell", () => {
         true,
       );
     });
+  });
+
+  // The eager read carries two levels, and both are drawn on the route a
+  // reader lands on. A shell that opened on a row of collapsed roots would
+  // make the reader press before the tree showed anything below the top,
+  // while holding the level it pressed for in hand the whole time.
+  it("draws the level under each top-level domain with no press", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": { body: catalog },
+      "/v1/catalog": { body: catalogOf(1) },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+    });
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    expect(
+      within(tree).getByRole("button", { name: "Collapse platform" }),
+    ).toBeTruthy();
+    expect(within(tree).getByText("ci")).toBeTruthy();
+    // The level below the eager edge stays behind its own toggle, so the
+    // shell reads no deeper than the read it already issued.
+    expect(
+      within(tree).getByRole("button", { name: "Expand ci" }),
+    ).toBeTruthy();
+    expect(requests.some((r) => r.url.includes("path=platform%2Fci"))).toBe(
+      false,
+    );
   });
 
   // The footer states a figure, and a figure of one is stated in the singular
@@ -953,19 +977,19 @@ describe("the application shell", () => {
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
     const finance = within(tree).getByRole("button", {
-      name: "Expand finance",
+      name: "Collapse finance",
     });
     expect(
-      within(tree).getByRole("button", { name: "Expand eng" }),
+      within(tree).getByRole("button", { name: "Collapse eng" }),
+    ).toBeTruthy();
+    // The name is the row's own label, so the level drawn under finance
+    // carries named toggles of its own.
+    expect(
+      within(tree).getByRole("button", { name: "Expand ap" }),
     ).toBeTruthy();
     fireEvent.click(finance);
     expect(
-      within(tree).getByRole("button", { name: "Collapse finance" }),
-    ).toBeTruthy();
-    // The name is the row's own label, so the level the toggle opened carries
-    // named toggles of its own.
-    expect(
-      within(tree).getByRole("button", { name: "Expand ap" }),
+      within(tree).getByRole("button", { name: "Expand finance" }),
     ).toBeTruthy();
   });
 
@@ -993,15 +1017,15 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    const closed = within(tree).getByRole("button", { name: "Expand finance" });
-    expect(closed.querySelector("svg.chevron")).not.toBeNull();
-    expect(closed.textContent).toBe("");
-    fireEvent.click(closed);
     const open = within(tree).getByRole("button", {
       name: "Collapse finance",
     });
     expect(open.querySelector("svg.chevron")).not.toBeNull();
     expect(open.textContent).toBe("");
+    fireEvent.click(open);
+    const closed = within(tree).getByRole("button", { name: "Expand finance" });
+    expect(closed.querySelector("svg.chevron")).not.toBeNull();
+    expect(closed.textContent).toBe("");
   });
 
   // A §4.5.5 sparse chain arrives collapsed into one entry whose path holds
@@ -1084,9 +1108,8 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    fireEvent.click(
-      within(tree).getByRole("button", { name: "Expand finance" }),
-    );
+    // The eager read carried the level under finance, so the row is already
+    // drawn and the press under test is the one on the level below it.
     const toggle = within(tree).getByRole("button", { name: "Expand ap" });
     toggle.focus();
     fireEvent.click(toggle);
@@ -1154,9 +1177,6 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    fireEvent.click(
-      within(tree).getByRole("button", { name: "Expand finance" }),
-    );
     fireEvent.click(within(tree).getByRole("button", { name: "Expand ap" }));
     await waitFor(() => {
       expect(
@@ -1271,17 +1291,15 @@ describe("the application shell", () => {
     expect(within(tree).getByRole("link", { name: "eng" })).toBeTruthy();
     expect(within(tree).getByRole("link", { name: "finance" })).toBeTruthy();
     expect(tree.querySelectorAll(".tree-leaf")).toHaveLength(2);
-    // The domain that holds a level keeps its disclosure, and it is the only
-    // control in the tree.
+    // The domain that holds a level keeps its disclosure, and it is drawn
+    // open, so the level under it is on screen with its own row's control.
     const toggles = within(tree).getAllByRole("button");
-    expect(toggles).toHaveLength(1);
-    expect(toggles[0].getAttribute("aria-label")).toBe("Expand sales");
-    // A node at the read's edge is a different case: nothing is known about
-    // its level, so it keeps a disclosure that reads it.
-    fireEvent.click(toggles[0]);
-    expect(
-      within(tree).getByRole("button", { name: "Expand emea" }),
-    ).toBeTruthy();
+    expect(toggles.map((t) => t.getAttribute("aria-label"))).toEqual([
+      "Collapse sales",
+      // A node at the read's edge is a different case: nothing is known about
+      // its level, so it keeps a disclosure that reads it.
+      "Expand emea",
+    ]);
   });
 
   // A domain the registry refuses to open stays in the hierarchy and is not
@@ -1296,9 +1314,8 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    fireEvent.click(
-      within(tree).getAllByRole("button", { expanded: false })[0],
-    );
+    // The eager read drew the level under platform, so the only closed node
+    // in the tree is the one at that read's edge.
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/load_domain": {
@@ -1329,9 +1346,8 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    fireEvent.click(
-      within(tree).getAllByRole("button", { expanded: false })[0],
-    );
+    // The eager read drew the level under platform, so the only closed node
+    // in the tree is the one at that read's edge.
     stubRegistry({
       "/v1/load_domain": {
         status: 401,
@@ -1358,9 +1374,8 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    fireEvent.click(
-      within(tree).getAllByRole("button", { expanded: false })[0],
-    );
+    // The eager read drew the level under platform, so the only closed node
+    // in the tree is the one at that read's edge.
     stubRegistry({
       "/v1/load_domain": {
         status: 503,
@@ -1401,9 +1416,9 @@ describe("the application shell", () => {
     });
     render(<App />);
     const tree = await screen.findByLabelText("Catalog");
-    fireEvent.click(
-      within(tree).getAllByRole("button", { expanded: false })[0],
-    );
+    // The eager read drew the level under platform, so the only closed node
+    // in the tree is the one at that read's edge.
+    //
     // The registry stops answering, so the node's own level does not load and
     // the domain the reader then opens does not either.
     stubRegistry({
@@ -7764,10 +7779,8 @@ describe("the session-expiry transition", () => {
       },
     });
     // The node at the eager read's edge is the one that reads for itself, and
-    // that read is the refusal the transition hangs on.
-    fireEvent.click(
-      within(tree).getByRole("button", { name: "Expand platform/ci" }),
-    );
+    // that read is the refusal the transition hangs on. The level above it
+    // came with the eager read and is already drawn.
     fireEvent.click(within(tree).getByRole("button", { name: "Expand lint" }));
     await screen.findByTestId("session-ended");
     expect(screen.getByLabelText("Domain browser")).toBeTruthy();
