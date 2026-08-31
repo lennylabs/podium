@@ -1407,7 +1407,8 @@ button.version-notice-latest {
    grid would have stood. The top margin matches the section label it replaces
    and collapses into the next section's own, so the line takes a section's
    gap rather than a section's height. */
-.subdomains-absent {
+.subdomains-absent,
+.artifacts-absent {
   margin: 26px 0;
   font-size: 12.5px;
 }

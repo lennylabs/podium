@@ -2931,6 +2931,65 @@ describe("the domain browser", () => {
     ).toBeTruthy();
     expect(within(browser).getByText("finance/ap/pay-invoice")).toBeTruthy();
   });
+
+  // Spec: §13.10 — the header counts the subtree the §4.5.2 catalog read
+  // returned while the listing under it carries what the domain holds
+  // directly. A domain that carries everything one level down would draw a
+  // page-scope card saying no artifact is here directly under a badge
+  // counting one, and the two figures contradict each other. The subdomain
+  // cards already state where the counted entries sit, so the card stands
+  // down for a line naming that population.
+  it("states no artifact absence where the subdomains hold what the header counts", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "a/b",
+          description: "B.",
+          subdomains: [{ path: "a/b/c/d/e", name: "e" }],
+          notable: [],
+        },
+      },
+      "/v1/catalog": { body: { ids: ["a/b/c/d/e/deep-artifact"] } },
+    });
+    goTo("#/domain/a%2Fb");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    await waitFor(() => {
+      expect(within(browser).getByText("1 ARTIFACT")).toBeTruthy();
+    });
+    expect(within(browser).queryByText("No artifacts here")).toBeNull();
+    expect(within(browser).queryByText("Artifacts in this domain")).toBeNull();
+    const line = within(browser).getByText(
+      "Every artifact under this domain sits inside the subdomains above.",
+    );
+    expect(line.className.split(" ")).toContain("quiet");
+    expect(line.closest(".empty")).toBeNull();
+    // What the header counts is still reachable from the card above the line.
+    expect(within(browser).getByText("c/d/e")).toBeTruthy();
+  });
+
+  // A domain whose subdomains hold nothing either is a different state: no
+  // count contradicts the card, and the card is what states the absence.
+  it("keeps the artifact absence where the subtree holds nothing", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "a/b",
+          description: "B.",
+          subdomains: [{ path: "a/b/c", name: "c" }],
+          notable: [],
+        },
+      },
+      "/v1/catalog": { body: { ids: [] } },
+    });
+    goTo("#/domain/a%2Fb");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    expect(within(browser).getByText("Artifacts in this domain")).toBeTruthy();
+    expect(within(browser).getByText("No artifacts here")).toBeTruthy();
+  });
 });
 
 describe("search", () => {

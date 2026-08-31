@@ -92,6 +92,22 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
   // A catalog read that failed leaves the subtree unknown, and the page falls
   // back to what `load_domain` returned.
   const subtreeHeld = catalog.value === null ? null : catalog.value.length;
+  // The same reading applies to a domain that carries everything one level
+  // down. The header counts the subtree and the subdomain cards below it
+  // already state where those entries sit, so a page-scope card announcing
+  // that no artifact is here is drawn directly under a badge counting several,
+  // and the reader is told the domain both does and does not hold artifacts.
+  // Where the catalog establishes that nothing is published directly to the
+  // domain while the subtree carries entries, the card stands down for the
+  // one-line treatment the absent subdomain section already takes, and the
+  // line names the population the cards above account for.
+  const underSubdomains =
+    direct.length === 0 &&
+    folded.length === 0 &&
+    body.subdomains.length > 0 &&
+    held === 0 &&
+    subtreeHeld !== null &&
+    subtreeHeld > 0;
   // The trimmed listing is continued at the end of the list rather than
   // announced above it: the reader meets it where the returned edge is. It is
   // the list's own last row, so a listing that carries rows takes it inside
@@ -207,8 +223,17 @@ export function DomainBrowser({ path, onError }: { path: string; onError: (err: 
         />
       ) : (
         <>
-          <h2 className="label">Artifacts in this domain</h2>
-          {direct.length === 0 ? (
+          {underSubdomains ? null : <h2 className="label">Artifacts in this domain</h2>}
+          {underSubdomains ? (
+            <>
+              <p className="quiet artifacts-absent">
+                {root
+                  ? 'Every artifact the registry holds sits inside the domains above.'
+                  : 'Every artifact under this domain sits inside the subdomains above.'}
+              </p>
+              {tailList}
+            </>
+          ) : direct.length === 0 ? (
             <>
               <EmptyState title="No artifacts here">
                 Artifacts published directly to this domain appear here.
