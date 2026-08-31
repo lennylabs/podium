@@ -59,6 +59,11 @@ export function CopyField({
   );
 }
 
+/** defaultCopyLabel is the word a copy control carries when its caller names
+ * no other. It is also the marker for a control whose name CopyButton may
+ * extend with the value's subject. */
+const defaultCopyLabel = 'Copy';
+
 /**
  * CopyButton is the explicit copy control CopyField carries, on its own for a
  * surface that lays the value out itself. It reports the outcome beside
@@ -73,11 +78,19 @@ export function CopyField({
  * that knows what the value is names it in `subject`, so the announcement
  * says which of several values on the surface was taken.
  *
+ * `subject` also names the button itself. The register and rotation reveals
+ * put two of these side by side, one carrying the permanent webhook URL and
+ * one carrying the secret that is shown once, and a reader working from the
+ * tab order or a list of controls cannot tell two buttons both called Copy
+ * apart. The accessible name keeps the visible word first so that speaking
+ * the label still activates the control. A caller that passes its own
+ * `label` has already named the control, so that name is left alone.
+ *
  * Spec: §13.10
  */
 export function CopyButton({
   value,
-  label = 'Copy',
+  label = defaultCopyLabel,
   subject,
 }: {
   value: string;
@@ -85,10 +98,12 @@ export function CopyButton({
   subject?: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const accessibleName = subject !== undefined && label === defaultCopyLabel ? `${label} ${subject}` : undefined;
   return (
     <>
       <button
         type="button"
+        aria-label={accessibleName}
         onClick={() => {
           void navigator.clipboard?.writeText(value).then(
             () => {

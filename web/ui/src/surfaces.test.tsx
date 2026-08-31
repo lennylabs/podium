@@ -9847,7 +9847,15 @@ describe("the layer write flows", () => {
     // The secret is served here and nowhere else, so it carries an explicit
     // copy control rather than leaving the reader to select it. The URL
     // carries one too.
-    expect(screen.getAllByRole("button", { name: "Copy" }).length).toBe(2);
+    // Each control names the value it carries, so the two are told apart
+    // from the tab order without reading the row around them.
+    expect(
+      screen.getByRole("button", { name: "Copy Webhook URL" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Copy Webhook secret" }),
+    ).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: "Copy" }).length).toBe(0);
     const done = screen.getByRole("button", { name: "Done" });
     expect(done.hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByLabelText("I have stored the secret."));
@@ -10198,7 +10206,7 @@ describe("the layer write flows", () => {
       }
       const secretRow = screen.getByText("whsec-abc").closest(".copy-field");
       const copy = within(secretRow as HTMLElement).getByRole("button", {
-        name: "Copy",
+        name: "Copy Webhook secret",
       });
       fireEvent.click(copy);
       await waitFor(() => {
@@ -10602,6 +10610,12 @@ describe("the layer write flows", () => {
     expect(sent.groups).toEqual(["secops"]);
     await screen.findByLabelText("Webhook secret");
     expect(screen.getByText("whsec-rotated")).toBeTruthy();
+    // The rotation reveal carries the same pair of controls as registration,
+    // and each names its value rather than leaving two buttons called Copy.
+    expect(
+      screen.getByRole("button", { name: "Copy Webhook secret" }),
+    ).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: "Copy" }).length).toBe(0);
   });
 
   // Only a git source carries a webhook secret, and the registry refuses a
