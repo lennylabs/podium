@@ -464,7 +464,13 @@ export function renderArtifactBody(body: string, resources: readonly string[] = 
     // document inline rather than a URL, so no attribute test reaches what it
     // holds.
     ADD_TAGS: [...embedTags, ...formTags, ...graphicTags],
-    FORBID_ATTR: ['style', 'srcdoc'],
+    // `id` and `name` put a name into the document's own identifier namespace,
+    // which the shell around the body resolves by (`document.getElementById`
+    // for the skip link's target, and `aria-labelledby` and `aria-describedby`
+    // between the shell's own elements). An author-chosen identifier would
+    // duplicate one of those, so neither attribute survives; nothing this path
+    // renders reads either one back.
+    FORBID_ATTR: ['style', 'srcdoc', 'id', 'name'],
     // The fragment is taken rather than the string so the pass below runs on
     // the sanitizer's own output. Nothing between the two adds an element or
     // an attribute the sanitizer did not pass.

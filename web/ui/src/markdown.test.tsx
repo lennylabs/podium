@@ -421,3 +421,19 @@ describe("a body's sideways-scrolling regions", () => {
     expect(table.querySelector('.table-scroll')?.getAttribute('aria-label')).toBe('Table');
   });
 });
+
+// The shell resolves elements by id, so a body that carried its own ids would
+// put author-chosen names into the shell's id namespace.
+describe("a body's element identifiers", () => {
+  it('drops an id and a name the author wrote', () => {
+    const container = renderBody('<div id="main-content" name="probe">duplicate main id</div>\n');
+    expect(container.querySelector('#main-content')).toBeNull();
+    expect(container.querySelector('[name]')).toBeNull();
+    expect(container.textContent).toContain('duplicate main id');
+  });
+
+  it('renders a heading without an identifier of its own', () => {
+    const container = renderBody('# A heading\n');
+    expect(container.querySelector('h1')?.getAttribute('id')).toBeNull();
+  });
+});
