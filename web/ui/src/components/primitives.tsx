@@ -18,9 +18,10 @@ export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
  * `soft`, the filled borderless chip the badge alone draws, `grant`, the
  * filled chip that keeps the badge's outline, `hollow`, the outlined chip that
  * drops the fill, `marker`, the rounded chip that carries an accent dot, and
- * `count`, the filled pill a bare figure takes: the banner tones are
+ * `count`, the filled pill a bare figure takes, and `strong`, the filled
+ * accent pill a condition the reader cannot undo takes: the banner tones are
  * full-width containers, where a second neutral fill states nothing. */
-export type BadgeTone = Tone | 'soft' | 'grant' | 'hollow' | 'marker' | 'count';
+export type BadgeTone = Tone | 'soft' | 'grant' | 'hollow' | 'marker' | 'count' | 'strong';
 
 /** TabCountTone is the tone a tab's trailing count or marker takes. The count
  * is quiet mono text rather than a chip, so the tone sets its colour and
@@ -37,6 +38,11 @@ export type TabCountTone = 'quiet' | 'danger' | 'accent';
  * A badge sits beside the label for a field whose value carries a condition
  * the label alone does not state, which is how the webhook secret is marked
  * as shown once without a heading that would also cover the field above it.
+ * A field carrying one takes the accent label and the filled accent pill, so
+ * the condition reads louder than the label of the permanent value beside it.
+ * Drawn in the quiet label and the wash chip the informational badges use, the
+ * marker for a value that cannot be recovered carries no more weight than the
+ * one for a value that can.
  */
 export function CopyField({
   label,
@@ -51,8 +57,8 @@ export function CopyField({
 }) {
   return (
     <div className="copy-field">
-      <span className="label quiet">{label}</span>
-      {badge !== undefined && <Badge tone="accent">{badge}</Badge>}
+      <span className={badge === undefined ? 'label quiet' : 'label label-accent'}>{label}</span>
+      {badge !== undefined && <Badge tone="strong">{badge}</Badge>}
       {block ? <pre className="mono copy-value">{value}</pre> : <span className="mono copy-value">{value}</span>}
       <CopyButton value={value} subject={label} />
     </div>

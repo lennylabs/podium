@@ -9926,6 +9926,51 @@ describe("the layer write flows", () => {
     expect(within(secretRow).getByText("Webhook secret")).toBeTruthy();
   });
 
+  // The shown-once marker states that the value cannot be read again, so it
+  // carries the filled accent pill and its label carries the accent tone. The
+  // permanent webhook URL beside it keeps the quiet label, and the two fields
+  // read at the weights their values deserve. Drawn in the wash chip the
+  // informational badges use, the marker for the unrecoverable value would
+  // read no louder than the marker for a value the panel serves again.
+  //
+  // Spec: §13.10
+  it("draws the shown-once marker and its label in the accent tone", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "POST /v1/layers": {
+        body: {
+          layer: {
+            ID: "alice-personal",
+            SourceType: "git",
+            Order: 1,
+            UserDefined: true,
+          },
+          webhook_url:
+            "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+          webhook_secret: "whsec-abc",
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    fireEvent.change(screen.getByLabelText("Layer ID"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.submit(screen.getByTestId("register-form"));
+    const badge = await screen.findByText("SHOWN ONCE");
+    expect(badge.className).toContain("badge-strong");
+    expect(badge.className).not.toContain("badge-accent");
+    const secretLabel = screen.getByText("Webhook secret");
+    expect(secretLabel.className).toContain("label-accent");
+    // The permanent URL keeps the quiet label it had.
+    const urlLabel = screen.getByText("Webhook URL");
+    expect(urlLabel.className).toContain("quiet");
+    expect(urlLabel.className).not.toContain("label-accent");
+  });
+
   // The acknowledgement is the reader's own statement rather than part of the
   // credential the dashed block frames, and the control it gates closes the
   // dialog, so it belongs in the dialog's footer beside the note that names

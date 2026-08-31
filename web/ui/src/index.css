@@ -714,6 +714,16 @@ h3 {
   color: var(--faint);
 }
 
+/* A label in the accent tone marks the one field on a surface whose value
+   carries a condition the reader has to act on, which is how the webhook
+   secret's label separates from the permanent webhook URL's label above it.
+   The colour is the link tone rather than the accent fill, because the accent
+   is a surface colour and does not set small text on light paper. */
+.label-accent {
+  color: var(--link);
+  font-weight: 600;
+}
+
 /* A heading in the section-label role keeps the label typography and the
    heading's own vertical rhythm. The weight is stated because a heading
    element defaults to bold, which puts the label back in competition with
@@ -737,6 +747,21 @@ h2.label {
 .badge-accent {
   background: var(--wash);
   border-color: var(--cbd);
+}
+
+/* The strong tone is the filled accent pill. It is the badge's loudest marker
+   and states a condition the reader cannot recover from, such as a value that
+   is shown once. The accent tone beside it is a wash behind an accent edge,
+   which reads as one more chip in a row and is too quiet for that job. The
+   text takes the colour written for the accent fill so the pill stays legible
+   in both themes, where the fill itself does not change. */
+.badge-strong {
+  border-color: var(--acc);
+  background: var(--acc);
+  border-radius: 100px;
+  color: var(--on-acc);
+  font-weight: 700;
+  letter-spacing: 0.06em;
 }
 
 /* The curated marker is the one badge that asks to be found while scanning a
