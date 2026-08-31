@@ -160,7 +160,7 @@ If `multi_layer: true` is set but the safety check fails (manifest files are pre
 
 **Upgrade path.** A standalone deployment migrates to standard via `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` (covered in §13.4). Layer config, admin grants, and audit history are preserved; embeddings are re-computed against the target vector backend on first ingest.
 
-**Web UI.** When `podium serve` (standalone or standard) is started with `--web-ui` (or `PODIUM_WEB_UI=true`), the same process exposes a single-page web UI at `http://<bind>/ui/`. The UI is a static SPA bundled into the binary; it talks to the registry's HTTP API as any other consumer would. What it surfaces:
+**Web UI.** When `podium serve` (standalone or standard) is started with `--web-ui` (or `PODIUM_WEB_UI=true`), the same process exposes a single-page web UI at `http://<bind>/app/`. On that process `GET /` redirects the browser to `/app/`. A process started without the flag mounts neither the UI nor that redirect, and a request for `/` on it is answered as any path the registry does not register is answered on that deployment. The UI is a static SPA bundled into the binary; it talks to the registry's HTTP API as any other consumer would. What it surfaces:
 
 - **Domain browser**: hierarchical navigation matching `load_domain`'s structure.
 - **Search**: text input that calls `search_artifacts` with the same `type` / `scope` / `tags` filters as the SDK and CLI.

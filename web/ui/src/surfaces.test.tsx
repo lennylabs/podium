@@ -1813,6 +1813,41 @@ describe("the sign-in control", () => {
       "/v1/load_domain": { body: emptyDomain },
       "/v1/ui/auth/sign-out": { body: {} },
     });
+    // jsdom implements no navigation, and its Location members are
+    // non-configurable, so the destination is observed by standing a stub in
+    // window.location that records assign and delegates the members the page
+    // reads. Spec: §13.10 puts the UI at /app/, which is where a cleared
+    // session lands.
+    const realLocation = window.location;
+    const assign = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: {
+        assign,
+        get hash() {
+          return realLocation.hash;
+        },
+        set hash(value: string) {
+          realLocation.hash = value;
+        },
+        get href() {
+          return realLocation.href;
+        },
+        get origin() {
+          return realLocation.origin;
+        },
+        get pathname() {
+          return realLocation.pathname;
+        },
+        get search() {
+          return realLocation.search;
+        },
+        replace: (url: string) => realLocation.replace(url),
+        reload: () => realLocation.reload(),
+        toString: () => realLocation.toString(),
+      },
+    });
     render(<App />);
     // The sign-out entry point is the one the account menu carries, so the
     // cluster is opened first.
@@ -1825,6 +1860,14 @@ describe("the sign-in control", () => {
         url: "/v1/ui/auth/sign-out",
         method: "POST",
       });
+    });
+    await waitFor(() => {
+      expect(assign).toHaveBeenCalledWith("/app/");
+    });
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: realLocation,
     });
   });
 
@@ -17095,7 +17138,7 @@ describe("the artifact viewer’s resources", () => {
 
   // A §4.4 prose reference in the body that names a bundled file is followed
   // inside the viewer. The registry serves no per-artifact asset route, so
-  // left as authored the reference resolves against the /ui/ mount and the
+  // left as authored the reference resolves against the /app/ mount and the
   // reader leaves the SPA for a plain-text 404; the Resources tab holds the
   // file's only delivery, so the reference opens that tab on it (§13.10).
   it("opens the Resources tab on the file a body reference names", async () => {

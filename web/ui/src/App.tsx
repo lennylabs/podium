@@ -1493,7 +1493,7 @@ function SignOutButton({ path }: { path: string }) {
           // answers, and the page navigates once it returns.
           signOut(path).then(
             () => {
-              window.location.assign('/ui/');
+              window.location.assign('/app/');
             },
             () => {
               setFailed(true);

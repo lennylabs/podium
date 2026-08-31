@@ -32,10 +32,11 @@ func serveCmd(args []string) int {
 	// overrides PODIUM_PRESIGN_TTL_SECONDS and the registry.yaml
 	// object_store.presign_ttl_seconds key (env-or-flag wins over the file).
 	presignTTLSeconds := fs.String("presign-ttl-seconds", "", "presigned-URL TTL in seconds (overrides PODIUM_PRESIGN_TTL_SECONDS)")
-	// §13.10 Web UI: opt-in single-page UI at /ui/. The non-loopback bind is
-	// refused unless --web-ui-allow-public-bind is also set and an identity
-	// provider is configured (serverboot validates this).
-	webUI := fs.Bool("web-ui", false, "mount the bundled web UI at /ui/ (overrides PODIUM_WEB_UI)")
+	// §13.10 Web UI: opt-in single-page UI at /app/, with GET / redirecting
+	// to it. The non-loopback bind is refused unless
+	// --web-ui-allow-public-bind is also set and an identity provider is
+	// configured (serverboot validates this).
+	webUI := fs.Bool("web-ui", false, "mount the bundled web UI at /app/ (overrides PODIUM_WEB_UI)")
 	webUIAllowPublicBind := fs.Bool("web-ui-allow-public-bind", false, "allow the web UI on a non-loopback bind when an identity provider is configured (overrides PODIUM_WEB_UI_ALLOW_PUBLIC_BIND)")
 	// §6.3.4 browser acquisition flow: the enablement key and the sign-in
 	// window carry both a flag and a variable. The acquisition values are

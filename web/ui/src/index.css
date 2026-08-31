@@ -13,7 +13,7 @@
    The design pass fixes Space Grotesk for prose and UI, JetBrains Mono for
    identifiers, and Anton for the wordmark, and it names self-hosting as the
    remedy for a registry that reaches no font host. The three families below
-   are therefore bundled assets served from the /ui/ mount, so an air-gapped
+   are therefore bundled assets served from the /app/ mount, so an air-gapped
    deployment resolves every face the type scale was sized against. Each
    file is the latin subset of the upstream release; web/ui/src/fonts/README.md
    records the provenance and the licence. */

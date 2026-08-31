@@ -200,8 +200,8 @@ func TestBrowserAuth_CallbackSuccess(t *testing.T) {
 
 	resp := callback(t, ep, "state="+url.QueryEscape(loc.Query().Get("state"))+"&code=the-code", tx)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/ui/" {
-		t.Fatalf("status = %d, Location = %q, want 302 to /ui/", resp.StatusCode, resp.Header.Get("Location"))
+	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/app/" {
+		t.Fatalf("status = %d, Location = %q, want 302 to /app/", resp.StatusCode, resp.Header.Get("Location"))
 	}
 	session := cookieNamed(resp, server.CookieSession)
 	if session == nil {
@@ -312,8 +312,8 @@ func TestBrowserAuth_CallbackDeclinedConsent(t *testing.T) {
 			tx, &http.Cookie{Name: server.CookieSession, Value: "an-earlier-session"})
 		func() {
 			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/ui/" {
-				t.Fatalf("%s: status = %d, Location = %q, want 302 to /ui/", q, resp.StatusCode, resp.Header.Get("Location"))
+			if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/app/" {
+				t.Fatalf("%s: status = %d, Location = %q, want 302 to /app/", q, resp.StatusCode, resp.Header.Get("Location"))
 			}
 			if cookieNamed(resp, server.CookieSession) != nil {
 				t.Errorf("%s: the declined-consent outcome touched the session cookie", q)

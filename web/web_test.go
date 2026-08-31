@@ -12,7 +12,7 @@ import (
 
 // Spec: §13.10 — the built UI bundle ships inside the binary so a
 // single distribution covers the standalone deployment, and its entry
-// document sits at the root the file server mounts at /ui/.
+// document sits at the root the file server mounts at /app/.
 func TestAssets_HasIndex(t *testing.T) {
 	got, err := fs.ReadFile(web.Assets(), "index.html")
 	if err != nil {
@@ -24,8 +24,8 @@ func TestAssets_HasIndex(t *testing.T) {
 }
 
 // Spec: §13.10 — every script and stylesheet the built index references
-// resolves under the /ui/ mount. A reference is either relative to the
-// served index or rooted at /ui/, and either way the embedded set carries
+// resolves under the /app/ mount. A reference is either relative to the
+// served index or rooted at /app/, and either way the embedded set carries
 // the file it names. A reference rooted anywhere else leaves the mount and
 // the outer mux answers it with 404.
 func TestAssets_ReferencedEntryPointsResolve(t *testing.T) {
@@ -40,7 +40,7 @@ func TestAssets_ReferencedEntryPointsResolve(t *testing.T) {
 	for _, ref := range refs {
 		path, ok := bundlePath(ref)
 		if !ok {
-			t.Errorf("asset reference %q is rooted outside the /ui/ mount", ref)
+			t.Errorf("asset reference %q is rooted outside the /app/ mount", ref)
 			continue
 		}
 		if _, err := fs.ReadFile(web.Assets(), path); err != nil {
@@ -85,13 +85,13 @@ func TestAssets_EmbedsEveryCommittedFile(t *testing.T) {
 
 // bundlePath maps an asset reference from the built index onto its path
 // within the embedded bundle. It reports false when the reference is
-// rooted outside the /ui/ mount, which is the one form the mount cannot
+// rooted outside the /app/ mount, which is the one form the mount cannot
 // serve.
 func bundlePath(ref string) (string, bool) {
 	if !strings.HasPrefix(ref, "/") {
 		return strings.TrimPrefix(ref, "./"), true
 	}
-	if rest, ok := strings.CutPrefix(ref, "/ui/"); ok {
+	if rest, ok := strings.CutPrefix(ref, "/app/"); ok {
 		return rest, true
 	}
 	return "", false

@@ -36,7 +36,7 @@ const (
 
 // webUIRoot is where the callback returns the browser on success and on a
 // declined consent prompt (§7.3.4).
-const webUIRoot = "/ui/"
+const webUIRoot = "/app/"
 
 // BrowserAuthConfig configures the §6.3.4 browser acquisition routes.
 type BrowserAuthConfig struct {

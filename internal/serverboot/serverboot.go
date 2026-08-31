@@ -1266,8 +1266,15 @@ func run(ctx context.Context, stop func()) error {
 	// layer endpoint.
 	mux.Handle("/v1/admin/erase", layers.EraseHandler())
 	if cfg.webUI {
-		mux.Handle("/ui/", http.StripPrefix("/ui/", http.FileServer(http.FS(web.Assets()))))
-		log.Printf("web UI mounted at /ui/")
+		mux.Handle("/app/", http.StripPrefix("/app/", http.FileServer(http.FS(web.Assets()))))
+		// Spec: §13.10. The root redirect lives inside this block, so it
+		// exists exactly where the UI exists. The pattern is the exact-root
+		// form: a bare "/" is already held by the meta-tool catch-all below
+		// and a second registration panics, and a handler matching the whole
+		// "/" subtree would also redirect the retired /ui/ and resurrect it
+		// as an alias. Registering the method answers HEAD as well as GET.
+		mux.Handle("GET /{$}", http.RedirectHandler("/app/", http.StatusFound))
+		log.Printf("web UI mounted at /app/")
 		if cfg.webUIAuth {
 			// §7.3.4: the browser authentication routes. The enclosing block
 			// supplies the web-UI conjunct, and validate() has already run,
@@ -1562,7 +1569,8 @@ type Config struct {
 	// PODIUM_ALLOW_PUBLIC_BIND). Public mode refuses a non-loopback bind
 	// unless this is set.
 	allowPublicBind bool
-	// webUI mounts the §13.10 single-page web UI at /ui/ (--web-ui /
+	// webUI mounts the §13.10 single-page web UI at /app/ and redirects the
+	// root to it (--web-ui /
 	// PODIUM_WEB_UI). webUIAllowPublicBind (--web-ui-allow-public-bind /
 	// PODIUM_WEB_UI_ALLOW_PUBLIC_BIND) is the escape hatch that, together with
 	// a configured identity provider, lets the UI bind a non-loopback address.
