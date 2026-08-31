@@ -187,17 +187,19 @@ export function App() {
     setCatalogError(tree.error);
   }, [route.name, tree.loading, tree.error]);
 
-  // The footer counts. The layer list carries the layer count and the last
-  // ingest each layer reports, and the catalog's artifact count is the length
-  // of the unscoped catalog listing, which the registry does not truncate.
-  // Neither depends on where the reader is, so the
-  // route does not re-read them; a layer write does, through the panel's
-  // catalog-change signal, because a register or an unregister moves the very
-  // figures the footer states. That signal bumps the nonce, so the counts and
-  // the sidebar tree are re-read from the one event: a write that adds or
-  // removes a domain moves both, and refreshing only the counts left the tree
-  // standing on the catalog the reader arrived with until the page reloaded.
-  const counts = useAsync(() => readCounts(), [catalogNonce]);
+  // The footer counts, which also carry the depth marker beside the CATALOG
+  // label. The layer list carries the layer count and the last ingest each
+  // layer reports, and the catalog's artifact count is the length of the
+  // unscoped catalog listing, which the registry does not truncate. They are
+  // re-read on the same two signals the tree above them is: a layer write from
+  // this tab bumps the nonce, because a register or an unregister moves the
+  // very figures the footer states, and entering a route re-reads both. The
+  // route matters even though the counts do not depend on where the reader is,
+  // because a catalog change made outside this tab — another operator, a
+  // webhook ingest, a CLI register — reaches the tree on the next route the
+  // reader enters, and counts left behind then state totals that contradict
+  // the tree directly above them and the domain header beside it.
+  const counts = useAsync(() => readCounts(), [route.name, catalogNonce]);
 
   useEffect(() => {
     let live = true;
@@ -610,9 +612,9 @@ function CatalogDepth({ counts }: { counts: CatalogTotals | null }) {
  * what the reads returned and nothing else: a read that has not answered, and
  * the refused arm, leave it standing with no counts in it rather than
  * reporting a figure no response carried. A catalog read that failed
- * withdraws the figures and says so, because these are read once for the page
- * and a figure left standing over a registry that stopped answering is
- * presented as its current state. */
+ * withdraws the figures and says so, because the next read of them is a route
+ * or a layer write away and a figure left standing over a registry that
+ * stopped answering is presented as its current state. */
 function CatalogCounts({ counts, unavailable = false }: { counts: CatalogTotals | null; unavailable?: boolean }) {
   if (unavailable) {
     return (

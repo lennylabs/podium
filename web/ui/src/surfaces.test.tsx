@@ -1669,6 +1669,55 @@ describe("the application shell", () => {
     });
   });
 
+  // A catalog change made outside this tab — another operator, a webhook
+  // ingest, a CLI register — reaches the tree on the next route the reader
+  // enters. The counts and the depth marker are read from the same catalog,
+  // so the footer never states totals the tree above it contradicts.
+  it("re-reads the counts and the depth on the route the tree is re-read on", async () => {
+    const stubs: Record<string, Stub> = {
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: rootDomains },
+      "/v1/catalog": { body: { ids: ["platform/svc1", "finance/ap/pay"] } },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+    };
+    stubRegistry(stubs);
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-counts").textContent).toBe(
+        "1 layer · 2 artifacts",
+      );
+    });
+    expect(screen.getByTestId("catalog-depth").textContent).toBe("2 levels");
+
+    // The registry gains a layer, a domain, and an artifact under it, none of
+    // it issued from this tab.
+    stubs["/v1/load_domain"] = {
+      body: {
+        path: "",
+        subdomains: [
+          { path: "platform", name: "platform" },
+          { path: "finance", name: "finance" },
+          { path: "zeta", name: "zeta" },
+        ],
+        notable: [],
+      },
+    };
+    stubs["/v1/catalog"] = {
+      body: { ids: ["platform/svc1", "finance/ap/pay", "zeta/deep/nest/thing"] },
+    };
+    stubs["/v1/layers"] = { body: { layers: [adminLayer(), userLayer()] } };
+    goTo(layersHref);
+
+    await within(tree).findByText("zeta");
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-counts").textContent).toBe(
+        "2 layers · 3 artifacts",
+      );
+    });
+    expect(screen.getByTestId("catalog-depth").textContent).toBe("3 levels");
+  });
+
   // A read that returned a catalog holding no domain gets a line saying so.
   it("states that the catalog holds no domains", async () => {
     stubRegistry({
