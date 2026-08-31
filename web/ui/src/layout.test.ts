@@ -2099,6 +2099,36 @@ describe("sidebar bands", () => {
   });
 });
 
+// The copy confirmation reports an outcome beside the control that produced
+// it. Drawn only after the copy lands, it took its width from the value in
+// the row, which rewrapped and moved the acknowledgement and the Done button
+// of the secret reveal down between the two clicks that flow asks for. The
+// element is on the page from the first render and the copy reveals it, so
+// the row's geometry is the same before and after. jsdom performs no layout,
+// so the cases pin the declarations that hold the place; the rendered dialog
+// is checked in a browser.
+describe("copy confirmation", () => {
+  /** confirmation attaches a copy confirmation, optionally in its copied
+   * state, and returns it. */
+  function confirmation(copied: boolean): HTMLElement {
+    const element = document.createElement("span");
+    element.className = "quiet copy-confirmation";
+    if (copied) element.setAttribute("data-copied", "");
+    document.body.appendChild(element);
+    mounted.push(element);
+    return element;
+  }
+
+  it("keeps the confirmation's place while hiding it", () => {
+    expect(declaredFor(confirmation(false), "visibility")).toBe("hidden");
+    expect(declaredFor(confirmation(false), "display")).toBe("");
+  });
+
+  it("reveals the same element once the copy lands", () => {
+    expect(declaredFor(confirmation(true), "visibility")).toBe("visible");
+  });
+});
+
 // The monospace surfaces are verbatim: the authored source tab shows the file
 // byte for byte, the raw frontmatter view shows the block the registry serves,
 // and an artifact ID, a version constraint, or a hash is a value a reader

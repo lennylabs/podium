@@ -124,11 +124,14 @@ export function CopyButton({
       >
         {label}
       </button>
-      {copied && (
-        <span className="quiet" aria-hidden="true">
-          Copied
-        </span>
-      )}
+      {/* The confirmation holds its place from the first render and is only
+          revealed by the copy. Inserting it on the copy takes width from the
+          value beside it, which rewraps and grows the row, and in the register
+          dialog that moves the acknowledgement and the Done button the reader
+          clicks next out from under the pointer. */}
+      <span className="quiet copy-confirmation" data-copied={copied ? '' : undefined} aria-hidden="true">
+        Copied
+      </span>
       <span className="assistive-only" role="status" aria-live="polite" data-testid="copy-announcement">
         {copied ? (subject ? `${subject} copied to clipboard.` : 'Copied to clipboard.') : ''}
       </span>

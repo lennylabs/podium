@@ -4115,6 +4115,19 @@ label:has(> input:disabled) {
   flex-wrap: wrap;
 }
 
+/* The copy confirmation occupies its place before the copy and is revealed by
+   it, so the outcome never reflows the row or the controls under it (§13.10).
+   Hiding it with `display: none` gives the width back to the value beside it,
+   which rewraps on the copy and pushes the acknowledgement and the primary
+   action down between the two clicks the secret reveal asks for. */
+.copy-confirmation {
+  visibility: hidden;
+}
+
+.copy-confirmation[data-copied] {
+  visibility: visible;
+}
+
 .copy-field .copy-value {
   flex: 1 1 260px;
   min-width: 0;

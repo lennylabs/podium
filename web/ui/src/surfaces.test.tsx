@@ -201,7 +201,12 @@ function factValue(row: Element): string {
   if (value === undefined) {
     return "";
   }
-  for (const control of value.querySelectorAll('button, [role="status"]')) {
+  // The copy control's own parts are chrome rather than the value: the
+  // button, the live region, and the confirmation that holds its place on the
+  // row from the first render.
+  for (const control of value.querySelectorAll(
+    'button, [role="status"], .copy-confirmation',
+  )) {
     control.remove();
   }
   return value.textContent ?? "";
@@ -10686,6 +10691,80 @@ describe("the layer write flows", () => {
           .getByText("Copied")
           .getAttribute("aria-hidden"),
       ).toBe("true");
+    } finally {
+      if (original) {
+        Object.defineProperty(navigator, "clipboard", original);
+      } else {
+        delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+      }
+    }
+  });
+
+  // Copy and acknowledge are the two consecutive clicks the reveal asks for.
+  // A confirmation that is inserted by the copy takes width from the secret
+  // beside it, the value rewraps, and the acknowledgement and Done move down
+  // between those two clicks, so a click aimed at the checkbox lands on
+  // nothing. The confirmation is on the page from the first render and the
+  // copy only reveals it.
+  it("holds the copy confirmation's place so the acknowledgement does not move", async () => {
+    const written: string[] = [];
+    const clipboard = {
+      writeText: (text: string) => {
+        written.push(text);
+        return Promise.resolve();
+      },
+    };
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      value: clipboard,
+      configurable: true,
+    });
+    try {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+        "/v1/layers": { body: { layers: [] } },
+        "POST /v1/layers": {
+          body: {
+            layer: {
+              ID: "alice-personal",
+              SourceType: "git",
+              Order: 1,
+              UserDefined: true,
+            },
+            webhook_url:
+              "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+            webhook_secret: "whsec-abc",
+          },
+        },
+      });
+      goTo("#/layers");
+      render(<App />);
+      await screen.findByLabelText("Layer panel");
+      fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+      fireEvent.change(screen.getByLabelText("Layer ID"), {
+        target: { value: "alice-personal" },
+      });
+      fireEvent.submit(screen.getByTestId("register-form"));
+      await screen.findByLabelText("Webhook secret");
+      const secretRow = screen.getByText("whsec-abc").closest(".copy-field");
+      const confirmation = within(secretRow as HTMLElement).getByText("Copied");
+      // Before the copy the confirmation occupies its place and is hidden.
+      expect(confirmation.classList.contains("copy-confirmation")).toBe(true);
+      expect(confirmation.hasAttribute("data-copied")).toBe(false);
+      fireEvent.click(
+        within(secretRow as HTMLElement).getByRole("button", {
+          name: "Copy Webhook secret",
+        }),
+      );
+      await waitFor(() => {
+        expect(confirmation.hasAttribute("data-copied")).toBe(true);
+      });
+      // The copy reveals the same node rather than inserting one, so nothing
+      // below the secret is displaced.
+      expect(
+        within(secretRow as HTMLElement).getByText("Copied"),
+      ).toBe(confirmation);
+      expect(written).toEqual(["whsec-abc"]);
     } finally {
       if (original) {
         Object.defineProperty(navigator, "clipboard", original);
