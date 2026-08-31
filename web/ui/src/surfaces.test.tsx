@@ -12231,6 +12231,45 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The run's report replaces the progress dialog it opened over, so the
+  // control the reader pressed is not what held focus when the report
+  // mounted: the progress dialog was, and it is unmounting. Without a hand
+  // back the report closes onto the document body, and the next Tab restarts
+  // at the top of the shell, a whole catalog tree away from the table.
+  //
+  // Spec: §13.10
+  it("returns focus to Reingest all when the run's report closes", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
+      "/v1/layers/reingest?id=company": {
+        body: { accepted: 3, idempotent: 1 },
+      },
+      "/v1/layers/reingest?id=alice-personal": {
+        body: { accepted: 2, idempotent: 6 },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const all = () => screen.getByRole("button", { name: "Reingest all" });
+    fireEvent.click(all());
+    await screen.findByLabelText("Reingest all result");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Reingest all result")).toBeNull();
+    });
+    expect(document.activeElement).toBe(all());
+    // The Done control closes on the same terms as Escape.
+    fireEvent.click(all());
+    await screen.findByLabelText("Reingest all result");
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Reingest all result")).toBeNull();
+    });
+    expect(document.activeElement).toBe(all());
+  });
+
   // The run ends by re-reading the layer list, and an outage that began while
   // the fan-out was running refuses that read. The press issued a request per
   // layer, so what they answered is reported beside the outage rather than

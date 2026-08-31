@@ -1087,11 +1087,18 @@ export function ReingestRunReport({
   startedAt,
   finishedAt,
   onDone,
+  trigger,
 }: {
   outcomes: ReingestOutcome[];
   startedAt: number;
   finishedAt: number;
   onDone: () => void;
+  /** trigger is the control the run was started from. The report opens over
+   * the run's progress dialog and replaces it, so the progress dialog is what
+   * held focus when the report mounted; handing focus back to it would hand
+   * it to a node that has left the document, and the reader would resume on
+   * the document body a whole shell away from the table. */
+  trigger: RefObject<HTMLElement | null>;
 }) {
   const totals = counted(outcomes);
   const refused = outcomes.filter((outcome) => outcome.kind === 'refused');
@@ -1102,6 +1109,7 @@ export function ReingestRunReport({
       title="Reingest all finished"
       description={`${String(outcomes.length)} ${layerWord} · ${elapsed(finishedAt - startedAt)}`}
       onClose={onDone}
+      handBack={() => trigger.current}
       wide
     >
       <section className="ingest-report modal-body" aria-label="Reingest all result">

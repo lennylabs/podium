@@ -221,6 +221,11 @@ export function LayerPanel({
   // started from. The row's controls go with the row, and focus left on the
   // document body puts the reader back at the top of the page.
   const heading = useRef<HTMLHeadingElement>(null);
+  // The control the fan-out is started from, held so the run's report can
+  // hand focus back to it. The report opens over the run's progress dialog
+  // and replaces it, so what held focus as the report mounted is that dialog
+  // on its way out.
+  const reingestAllControl = useRef<HTMLButtonElement>(null);
 
   /** reloadPanel re-reads every read the panel owns. The panel's retry runs
    * it, because the outage that refused the layer list refused the deleted
@@ -246,6 +251,7 @@ export function LayerPanel({
         onDone={() => {
           setRun(null);
         }}
+        trigger={reingestAllControl}
       />
     ) : null;
 
@@ -520,6 +526,7 @@ export function LayerPanel({
           </button>
           <button
             type="button"
+            ref={reingestAllControl}
             disabled={readOnly || rows.length === 0 || reingesting}
             onClick={() => {
               void reingestAll();

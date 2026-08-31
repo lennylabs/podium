@@ -700,6 +700,7 @@ export function Modal({
   onClose,
   dismissible = true,
   wide = false,
+  handBack,
   children,
 }: {
   title: string;
@@ -710,6 +711,12 @@ export function Modal({
    * is for content that divides the body between several columns, where the
    * standard width leaves each column too narrow for its own label. */
   wide?: boolean;
+  /** handBack names the control focus returns to when the dialog closes, in
+   * place of whatever held focus as it opened. A dialog that replaces
+   * another one over the same surface needs it: the dialog it replaces is
+   * what held focus, and it is unmounting, so the default hands focus to a
+   * detached node and the reader is left on the document body. */
+  handBack?: (opener: HTMLElement | null) => HTMLElement | null;
   children: ReactNode;
 }) {
   const headingID = useId();
@@ -717,7 +724,7 @@ export function Modal({
   // outcome of its submission renders a second Modal in the first one's
   // place, and React reuses the element, so the title is what tells the focus
   // move that the dialog behind it is a different one.
-  const dialog = useDialogFocus<HTMLDivElement>(true, title);
+  const dialog = useDialogFocus<HTMLDivElement>(true, title, handBack);
   // The dialog is pinned to the viewport, so the surface it covers is held
   // still under it. A wheel over the scrim would otherwise scroll the page
   // behind the dialog, which is worst on the one-time secret, where the

@@ -6,6 +6,7 @@
 
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { RefObject } from 'react';
 
 import type { IngestSummary } from './api';
 import { ApiError } from './api';
@@ -15,6 +16,11 @@ import { unregisteredOn } from './surfaces/recovery';
 import { clock, elapsed, stopwatch } from './time';
 
 import './index.css';
+
+// The report hands focus back to the control the run was started from. These
+// cases render the report on its own, with no panel around it, so the ref
+// stands empty and the report hands focus to nothing.
+const runTrigger: RefObject<HTMLElement | null> = { current: null };
 
 const startedAt = Date.UTC(2026, 7, 26, 14, 3, 34);
 const finishedAt = Date.UTC(2026, 7, 26, 14, 6, 22);
@@ -649,7 +655,13 @@ describe('the finished fan-out report', () => {
   // counts, added up across the layers that answered with a summary.
   it('states the run and adds the counts up across every layer', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     const dialog = screen.getByRole('dialog', { name: /Reingest all finished/ });
     expect(dialog.textContent).toContain('3 layers');
@@ -673,7 +685,13 @@ describe('the finished fan-out report', () => {
   // built from; the rendered rows are checked against a browser.
   it('draws every finished layer as the same row the run drew while it ran', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     const layers = within(screen.getByLabelText('What each layer returned')).getAllByRole('listitem');
     expect(layers).toHaveLength(3);
@@ -695,7 +713,13 @@ describe('the finished fan-out report', () => {
   // unbreakable part, so a wrap falls between counts.
   it('keeps each count in the layer row unbreakable', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     const layers = within(screen.getByLabelText('What each layer returned')).getAllByRole('listitem');
     const parts = [...layers[0].querySelectorAll('.run-row-part')].map((part) => part.textContent);
@@ -708,7 +732,13 @@ describe('the finished fan-out report', () => {
   // itemises.
   it('names what needs attention across the run and opens the lists behind it', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     const attention = screen.getByLabelText('Needs attention');
     expect(attention.textContent).toContain('1 artifact rejected');
@@ -723,7 +753,13 @@ describe('the finished fan-out report', () => {
   // single-layer report applies, with the rest behind a count of them.
   it('lists the advisories the run raised and holds the rest behind see-all', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     const listed = screen.getByLabelText('Advisories');
     expect(listed.textContent).toContain('Advisories · non-blocking · 3');
@@ -737,7 +773,13 @@ describe('the finished fan-out report', () => {
   // is not drawn like the unchanged count beside it.
   it('tones the run counts the way the single-layer report tones them', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     const counts = within(screen.getByRole('dialog', { name: /Reingest all finished/ })).getByLabelText(
       'Ingest counts across the run',
@@ -751,7 +793,13 @@ describe('the finished fan-out report', () => {
   // it, and it is named with the code and the message its envelope carried.
   it('names the refused layers with their code and message', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     const refused = screen.getByLabelText('Refused layers');
     expect(refused.textContent).toContain('acme/ops');
@@ -767,7 +815,13 @@ describe('the finished fan-out report', () => {
   // the declaration; the rendered row is checked against a browser.
   it('keeps the refused layer id on one line', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     const id = within(screen.getByLabelText('Refused layers')).getByText('acme/ops');
     expect(id.className).toContain('attention-id');
@@ -779,7 +833,13 @@ describe('the finished fan-out report', () => {
   // attention row uses.
   it('draws the refusal message as prose that wraps within the card', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     const message = within(screen.getByLabelText('Refused layers')).getByText(/git source requires ref/);
     expect(message.className).toContain('attention-text');
@@ -793,7 +853,13 @@ describe('the finished fan-out report', () => {
   // itemised ingest entries beside it are drawn.
   it('sets the refusal message on its own line under the layer id and its code', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     const refused = screen.getByLabelText('Refused layers');
     const id = within(refused).getByText('acme/ops');
@@ -825,7 +891,13 @@ describe('the report dialog width', () => {
 
   it('asks for the wide dialog on the fan-out report', () => {
     render(
-      <ReingestRunReport outcomes={runOutcomes} startedAt={startedAt} finishedAt={finishedAt} onDone={() => undefined} />,
+      <ReingestRunReport
+        outcomes={runOutcomes}
+        startedAt={startedAt}
+        finishedAt={finishedAt}
+        onDone={() => undefined}
+        trigger={runTrigger}
+      />,
     );
     expect(screen.getByRole('dialog', { name: /Reingest all finished/ }).className).toContain('modal-wide');
   });
