@@ -3233,8 +3233,17 @@ label:has(> input:disabled) {
   white-space: nowrap;
 }
 
+/* The lead is the last run to give a pixel up: the middle collapses first,
+   then the trailing characters, and a shrink factor this much smaller than
+   the tail's holds the algorithm prefix and the digest's opening characters
+   drawn while either of the others still has width. The lead yields only
+   once neither does, which is what keeps the row's controls inside the rail
+   instead of clipping a copy confirmation no one can then read. */
 .rail-hash-lead {
-  flex: none;
+  flex: 0 0.0001 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The clip falls at the middle run's start, so the ellipsis stands against
@@ -3277,6 +3286,17 @@ label:has(> input:disabled) {
   flex: none;
   margin-left: 6px;
   padding: 1px 6px;
+  font-size: 10.5px;
+}
+
+/* The copy confirmation is the control's report and never takes the row's
+   clip. Left shrinkable it was cut mid-word against the rail's edge, because
+   the digest runs beside it had already collapsed to nothing and the row had
+   no other pixel to give (§13.10). It is set at the button's size for the
+   same reason the button is: the width it holds is width the digest loses,
+   and at the row's own scale both ends of the digest stay drawn. */
+.rail-hash .copy-confirmation {
+  flex: none;
   font-size: 10.5px;
 }
 

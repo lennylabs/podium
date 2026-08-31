@@ -1140,8 +1140,12 @@ describe("provenance content hash", () => {
     expect(row.whiteSpace).toBe("nowrap");
     expect(row.overflow).toBe("hidden");
     // The algorithm prefix and the digest's opening characters are held out
-    // of the clip, so the row still names what was hashed.
-    expect(styled("rail-hash-lead").getPropertyValue("flex")).toBe("0 0 auto");
+    // of the clip while any other run can still give a pixel up, so the row
+    // names what was hashed. The lead elides rather than pushing the row's
+    // controls past the rail's edge.
+    const lead = styled("rail-hash-lead");
+    expect(lead.minWidth).toBe("0");
+    expect(lead.textOverflow).toBe("ellipsis");
     const middle = styled("rail-hash-middle");
     expect(middle.overflow).toBe("hidden");
     expect(middle.textOverflow).toBe("ellipsis");
@@ -1152,6 +1156,10 @@ describe("provenance content hash", () => {
     const tail = styled("rail-hash-tail");
     expect(tail.getPropertyValue("flex")).toBe("0 1 auto");
     expect(tail.textOverflow).toBe("ellipsis");
+    // The lead gives a pixel up only once the middle and the trailing
+    // characters have none left, so the algorithm prefix and the digest's
+    // opening characters stay drawn against a rail this narrow.
+    expect(Number(lead.flexShrink)).toBeLessThan(Number(tail.flexShrink));
   });
 
   // The clip falls at the middle run's start, so the ellipsis stands against
@@ -1160,6 +1168,27 @@ describe("provenance content hash", () => {
   it("elides the clipped run at its start", () => {
     expect(styled("rail-hash-middle").direction).toBe("rtl");
     expect(descendantStyle("rail-hash-middle", "bdi").direction).toBe("ltr");
+  });
+
+  // The row reserves the copy confirmation's place from the first render, so
+  // the digest runs beside it are already collapsed by the time the copy
+  // lands. Shrinkable, the confirmation was cut mid-word against the row's
+  // clip and reported an outcome the reader could not read.
+  it("holds the copy confirmation out of the row's clip", () => {
+    const row = document.createElement("dd");
+    row.className = "mono rail-hash";
+    const confirmation = document.createElement("span");
+    confirmation.className = "quiet copy-confirmation";
+    row.appendChild(confirmation);
+    document.body.appendChild(row);
+    mounted.push(row);
+    const button = document.createElement("button");
+    row.appendChild(button);
+    const style = window.getComputedStyle(confirmation);
+    expect(style.getPropertyValue("flex")).toBe("0 0 auto");
+    // The report is set at the button's size, because the width it holds is
+    // width the digest gives up.
+    expect(style.fontSize).toBe(window.getComputedStyle(button).fontSize);
   });
 });
 
