@@ -7,7 +7,15 @@ import { useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import type { ReactNode, RefObject } from 'react';
 
-import { Banner, Chevron, ErrorState, Loading, Magnifier, PageBanner } from './components/primitives';
+import {
+  Banner,
+  Chevron,
+  ErrorState,
+  Loading,
+  Magnifier,
+  PageBanner,
+  RailPathLabel,
+} from './components/primitives';
 import type { DomainDescriptor } from './api';
 import {
   ApiError,
@@ -933,11 +941,13 @@ function TreeNode({
         )}
         {/* The label is the whole folded stretch of path the entry navigates
             across, and the row clips it to the sidebar's width, so it carries
-            the label as its title for a reader whose row is too narrow. */}
+            the label as its title for a reader whose row is too narrow. The
+            clipping falls on the ancestry rather than on the segment naming
+            the domain the row opens. */}
         {restricted ? (
           <>
             <span className="mono" title={label}>
-              {label}
+              <RailPathLabel path={label} />
             </span>
             <span className="catalog-marker" title="restricted" data-testid="restricted-domain">
               restricted
@@ -948,6 +958,11 @@ function TreeNode({
             className="mono"
             href={domainHref(node.path)}
             title={label}
+            // The label is drawn in two boxes so the row clips the ancestry
+            // rather than the name, and the name computed from the two runs
+            // of text carries a break between them. The link states its own
+            // name instead, so a reader hearing the row hears the path.
+            aria-label={label}
             // The domain holding an open artifact is where the page sits in
             // the hierarchy without being the page, so it takes the location
             // marker there and the page marker on a domain route. A chain
@@ -958,7 +973,7 @@ function TreeNode({
               isCurrent ? (currentIsPage && isCurrentPath ? 'page' : 'location') : undefined
             }
           >
-            {label}
+            <RailPathLabel path={label} />
           </a>
         )}
         {/* The failed arm states that this level did not load and claims

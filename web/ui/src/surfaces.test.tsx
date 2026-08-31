@@ -452,7 +452,7 @@ describe("the application shell", () => {
     await waitFor(() => {
       expect(screen.getByTestId("catalog-depth").textContent).toBe("5 levels");
     });
-    expect(sidebar.getByText("a/b/c/d/e")).toBeTruthy();
+    expect(sidebar.getByRole("link", { name: "a/b/c/d/e" })).toBeTruthy();
   });
 
   // The depth is stated in the singular at one, the way every other figure
@@ -577,6 +577,52 @@ describe("the application shell", () => {
       "/v1/load_domain?path=platform%2Fci%2Flint&depth=2",
     );
     expect([...new Set(reads)]).toEqual(reads);
+  });
+
+  // A §4.5.5 sparse chain is collapsed into one tree entry whose label is the
+  // whole stretch of path it crosses, and the sidebar row is one line that
+  // clips. Rendered as a single string the row lost its tail, so
+  // `finance/accounting/payables/reconciliation/supplier/ledger` reached the
+  // rail as `finance/accounting/payabl…` and the only part of the label naming
+  // the domain the row opens was the part removed. The row draws the ancestry
+  // and the name in boxes of their own, so the clipping falls on the ancestry.
+  it("draws the chain entry's own name in a box the row does not clip", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [
+            { path: "eng", name: "eng" },
+            {
+              path: "finance/accounting/payables/reconciliation/supplier/ledger",
+              name: "ledger",
+            },
+          ],
+          notable: [],
+        },
+      },
+      "/v1/catalog": { body: { ids: [] } },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/");
+    render(<App />);
+    const tree = within(await screen.findByLabelText("Sections"));
+    const chain = await tree.findByRole("link", {
+      name: "finance/accounting/payables/reconciliation/supplier/ledger",
+    });
+    expect(
+      chain.querySelector(".catalog-name")?.textContent,
+    ).toBe("ledger");
+    expect(chain.querySelector(".catalog-lead")?.textContent).toBe(
+      "finance/accounting/payables/reconciliation/supplier/",
+    );
+    // An entry standing on its own segment is one box, so the tree draws no
+    // empty ancestry beside it.
+    const plain = tree.getByRole("link", { name: "eng" });
+    expect(plain.querySelector(".catalog-name")?.textContent).toBe("eng");
+    expect(plain.querySelector(".catalog-lead")).toBeNull();
   });
 
   // A §4.5.5 sparse chain is collapsed into one tree entry, so the levels it
@@ -990,7 +1036,16 @@ describe("the application shell", () => {
       name: "support/escalations",
     });
     expect(folded.getAttribute("href")).toBe(domainHref("support/escalations"));
-    expect(within(tree).queryByText("escalations")).toBeNull();
+    // The row reads as the whole stretch of path it navigates across. The
+    // ancestry and the last segment are drawn in boxes of their own so the
+    // rail clips the ancestry rather than the name, and no row on screen
+    // reads as the bare segment.
+    expect(folded.textContent).toBe("support/escalations");
+    expect(
+      within(tree)
+        .queryAllByRole("link")
+        .map((row) => row.textContent),
+    ).not.toContain("escalations");
     // A row under the folded one carries its own segment alone, because the
     // label is relative to the parent the row hangs under.
     fireEvent.click(

@@ -580,10 +580,30 @@ describe("sidebar tree row", () => {
 
   it("clips a label wider than the row to an ellipsis inside it", () => {
     const label = rowChild("a", "mono");
+    expect(label.display).toBe("flex");
     expect(label.minWidth).toBe("0");
     expect(label.overflow).toBe("hidden");
-    expect(label.textOverflow).toBe("ellipsis");
     expect(label.whiteSpace).toBe("nowrap");
+  });
+
+  // The label of a collapsed chain is a whole stretch of path, and a row that
+  // clipped it as one string dropped its last segment, which is the only part
+  // naming the domain the row opens: the rail rendered
+  // `finance/accounting/payables/reconciliation/supplier/ledger` as
+  // `finance/accounting/payabl…`. The ancestry is the box that yields.
+  it("takes the row's shortfall out of the ancestry and keeps the name", () => {
+    const lead = rowChild("span", "catalog-lead");
+    const name = rowChild("span", "catalog-name");
+    expect(Number.parseFloat(lead.flexShrink)).toBeGreaterThan(1);
+    expect(lead.minWidth).toBe("0");
+    expect(lead.overflow).toBe("hidden");
+    expect(lead.textOverflow).toBe("ellipsis");
+    expect(Number.parseFloat(name.flexShrink)).toBe(0);
+    // A single segment wider than the sidebar is capped by the row rather than
+    // drawn past its border.
+    expect(name.maxWidth).toBe("100%");
+    expect(name.overflow).toBe("hidden");
+    expect(name.textOverflow).toBe("ellipsis");
   });
 
   it("keeps the toggle at its own width", () => {

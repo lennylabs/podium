@@ -8,6 +8,7 @@ import { Fragment, useEffect, useId, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api';
+import { splitDomainLabel } from '../domain';
 import { atCatalogRoute, domainHref, useFailureTitle } from '../route';
 import { dismissAttribute, registerModal, requestRetryFocus, useDialogFocus, useRetryFocus } from './focus';
 import { useScrollLock } from './scrolllock';
@@ -232,6 +233,28 @@ export function PathLabel({ path }: { path: string }) {
           {segment}
         </Fragment>
       ))}
+    </>
+  );
+}
+
+/**
+ * RailPathLabel draws a domain label on one line of the sidebar tree, where
+ * the row is a single line that clips rather than wrapping. A §4.5.5 sparse
+ * chain reaches the rail folded into one entry whose label is the whole
+ * stretch of path it crosses, and a label clipped as one string loses its
+ * tail, which is the segment naming the domain the row opens. The ancestry
+ * and the name are drawn in separate boxes so the row takes its shortfall out
+ * of the ancestry and the name stays on screen; the row still carries the
+ * whole path as its title.
+ *
+ * Spec: §13.10
+ */
+export function RailPathLabel({ path }: { path: string }) {
+  const { lead, name } = splitDomainLabel(path);
+  return (
+    <>
+      {lead !== '' && <span className="catalog-lead">{lead}</span>}
+      <span className="catalog-name">{name}</span>
     </>
   );
 }

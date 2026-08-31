@@ -549,11 +549,35 @@ h3 {
    left at that tone states the current domain by weight alone, which is not
    enough separation to find a position in a column of names. */
 .catalog-row > .mono {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--sec);
+}
+
+/* A §4.5.5 sparse chain arrives folded into one entry whose label is the whole
+   stretch of path it crosses, and the label is wider than the 268px sidebar.
+   The label is drawn in two boxes so the row takes its shortfall out of the
+   ancestry: the lead yields and clips to an ellipsis, and the last segment,
+   which is the only part naming the domain the row opens, stays on screen. */
+.catalog-lead {
+  flex-shrink: 999;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--sec);
+  color: var(--faint);
+}
+
+/* The name does not yield at all, so the row's shortfall falls on the ancestry
+   whatever the two lengths are. Its own cap is the row, which is what clips a
+   single segment wider than the sidebar rather than letting it run past the
+   border. */
+.catalog-name {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* The toggle keeps its width, because it is a control the reader aims at. */

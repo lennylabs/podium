@@ -15,6 +15,24 @@ export function domainLabel(path: string, parent: string): string {
   return pathUnder(path, parent);
 }
 
+/** splitDomainLabel cuts a label into the ancestry it crosses and the domain
+ * it names. A §4.5.5 sparse chain arrives folded into one entry, so its label
+ * is a whole stretch of path, and a row too narrow for it clips from the end:
+ * `finance/accounting/payables/reconciliation/supplier/ledger` reaches a
+ * 268px rail as `finance/accounting/payabl…`, which drops the only part of
+ * the label that names the domain the row opens. The two halves are drawn
+ * separately so the row yields the ancestry first and keeps the name. The
+ * trailing separator stays on the lead, because the halves sit in adjacent
+ * boxes and a separator on the name would be clipped away with the ancestry
+ * it belongs to. */
+export function splitDomainLabel(label: string): { lead: string; name: string } {
+  const cut = label.lastIndexOf('/');
+  if (cut === -1) {
+    return { lead: '', name: label };
+  }
+  return { lead: label.slice(0, cut + 1), name: label.slice(cut + 1) };
+}
+
 /** marksCurrentDomain reports whether the tree entry at `path` under `parent`
  * is the row that holds the domain the reader is on. A §4.5.5 sparse chain is
  * collapsed by the server into one entry, so the levels between `parent` and
