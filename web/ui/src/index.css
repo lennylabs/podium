@@ -1565,12 +1565,66 @@ textarea {
   caret-color: var(--acc);
 }
 
+/* Chrome derives a native checkbox's whole appearance from accent-color
+   rather than from color-scheme, so the warm accent forced a light-appearance
+   control onto the dark surface: an unchecked grant rendered as a solid pale
+   square, which reads as a grant already given. The box therefore draws its
+   own fill, border, and tick the way .field select draws its own chevron, so
+   both states come off the token set in both themes. Unchecked is a
+   transparent square behind a hairline border, and checked is the accent fill
+   behind a dark tick, which is the state pair the design inventory draws. */
 input[type="checkbox"] {
+  appearance: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* A native checkbox carried an intrinsic minimum size. Once the page paints
+     it the box is an ordinary element, so it has to refuse to shrink in the
+     flex rows it labels text inside. */
+  flex: none;
   width: 15px;
   height: 15px;
   margin: 0 8px 0 0;
   vertical-align: -2px;
-  accent-color: var(--acc);
+  border: 1.5px solid var(--bd);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="checkbox"]:checked {
+  border-color: var(--acc);
+  background: var(--acc);
+}
+
+/* The tick is the corner of a rotated box, the same construction the select's
+   chevron uses. It takes --on-acc, which stays dark in both themes because it
+   sits on the accent fill rather than on the page. */
+input[type="checkbox"]:checked::after {
+  content: "";
+  width: 3.5px;
+  height: 7px;
+  margin-top: -2px;
+  border-right: 2px solid var(--on-acc);
+  border-bottom: 2px solid var(--on-acc);
+  transform: rotate(45deg);
+}
+
+/* The page paints the box now, so it also owns the unavailable state the
+   browser used to grey on its own. */
+input[type="checkbox"]:disabled {
+  border-color: var(--b2);
+}
+
+input[type="checkbox"]:disabled:checked {
+  border-color: var(--b2);
+  background: var(--chip);
+}
+
+input[type="checkbox"]:disabled:checked::after {
+  border-right-color: var(--faint);
+  border-bottom-color: var(--faint);
 }
 
 /* Chrome draws its own clear control inside a search field, filled in a
@@ -2311,8 +2365,8 @@ textarea:disabled {
   cursor: not-allowed;
 }
 
-/* A checkbox draws itself from accent-color, and the browser already greys
-   the box when it is disabled, so it takes the pointer alone. */
+/* A checkbox carries its own disabled fill and border above, and a radio is
+   still greyed by the browser, so both take the pointer alone here. */
 input:disabled {
   cursor: not-allowed;
 }

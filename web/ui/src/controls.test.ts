@@ -105,7 +105,10 @@ describe("disabled controls", () => {
   it("leaves a disabled checkbox its own box and takes the pointer", () => {
     const box = control("input", "", "checkbox");
     expect(getComputedStyle(box).cursor).toBe("not-allowed");
-    expect(declared(box, "background")).toBe("");
+    // The text-field fill would swallow the box whole. It keeps the empty
+    // square the checkbox draws for itself and mutes only its border.
+    expect(declared(box, "background")).toBe("transparent");
+    expect(declared(box, "border-color")).toBe("var(--b2)");
   });
 
   it("leaves an enabled button pressable", () => {
@@ -115,5 +118,56 @@ describe("disabled controls", () => {
     mounted.push(button);
     expect(getComputedStyle(button).cursor).toBe("pointer");
     expect(declared(button, "background")).toBe("var(--acc)");
+  });
+});
+
+// Chrome derives a native checkbox's whole appearance from accent-color
+// rather than from color-scheme, so an accent-coloured box came back as a
+// light-appearance control whatever the theme said: on the dark surface an
+// unchecked visibility grant and the secret reveal's acknowledgement both
+// rendered as a solid pale square, which reads as a control already set. The
+// box paints both of its own states off the token set instead.
+describe("the checkbox's own paint", () => {
+  /** box attaches an enabled checkbox in the given checked state. */
+  function box(checked: boolean): HTMLInputElement {
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = checked;
+    document.body.appendChild(input);
+    mounted.push(input);
+    return input;
+  }
+
+  /** ruleFor returns the serialized declarations of the sheet rule carrying
+   * the given selector, which is how a pseudo-element rule is read: it
+   * matches no element, so `declared` cannot reach it. */
+  function ruleFor(selector: string): string {
+    for (const sheet of Array.from(document.styleSheets)) {
+      for (const rule of Array.from(sheet.cssRules)) {
+        if (rule instanceof CSSStyleRule && rule.selectorText === selector) {
+          return rule.cssText;
+        }
+      }
+    }
+    return "";
+  }
+
+  it("draws an unchecked box as an empty square behind a hairline border", () => {
+    const unchecked = box(false);
+    expect(declared(unchecked, "appearance")).toBe("none");
+    expect(declared(unchecked, "background")).toBe("transparent");
+    expect(declared(unchecked, "border")).toBe("1.5px solid var(--bd)");
+    // The browser paints nothing of its own now, so the accent no longer
+    // decides the control's appearance.
+    expect(declared(unchecked, "accent-color")).toBe("");
+  });
+
+  it("draws a checked box as the accent fill behind a dark tick", () => {
+    const checked = box(true);
+    expect(declared(checked, "background")).toBe("var(--acc)");
+    expect(declared(checked, "border-color")).toBe("var(--acc)");
+    expect(ruleFor('input[type="checkbox"]:checked::after')).toContain(
+      "var(--on-acc)",
+    );
   });
 });

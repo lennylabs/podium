@@ -8712,8 +8712,18 @@ describe("the layer write flows", () => {
     expect(select.borderRadius).toBe(text.borderRadius);
     expect(select.borderTopWidth).toBe(text.borderTopWidth);
     expect(select.appearance).toBe("none");
-    const box = window.getComputedStyle(screen.getByLabelText("Organization"));
-    expect(box.accentColor).toBe("var(--acc)");
+    // Chrome derives a native checkbox's appearance from accent-color rather
+    // than from color-scheme, so an accent-coloured box came back as a
+    // light-appearance control: on the dark surface an unchecked grant
+    // rendered as a solid pale square, which reads as a grant already given.
+    // The box paints both of its own states instead.
+    const grant = screen.getByLabelText("Organization");
+    const box = window.getComputedStyle(grant);
+    expect(box.appearance).toBe("none");
+    expect(box.background).toBe("rgba(0, 0, 0, 0)");
+    expect(box.accentColor).toBe("");
+    fireEvent.click(grant);
+    expect(window.getComputedStyle(grant).background).toBe("var(--acc)");
     // The text-input rule pads and fills the control, which is the wrong
     // treatment for a checkbox and is what it used to inherit here.
     expect(box.padding).not.toBe(text.padding);
