@@ -6392,24 +6392,15 @@ describe("the artifact viewer", () => {
 
     // A control that reports aria-expanded has to name the region the state
     // belongs to, or assistive technology announces "expanded" over nothing.
-    // The header and the rail each clip the same description on one page, so
-    // the two regions also have to carry distinct ids.
     // Spec: §13.10
-    it("points each clip control at the region it opens", async () => {
+    it("points the clip control at the region it opens", async () => {
       stubHeights(900);
       stubViewer("The invoice approval path routes each document.");
       await screen.findByLabelText("Artifact viewer");
       const lead = screen.getByTestId("artifact-lead");
-      const railValue = screen.getByTestId("property-value-description");
       const headerControl = screen.getByRole("button", { name: "Show more" });
-      const railControl = screen.getByRole("button", {
-        name: "Show the whole description value",
-      });
       expect(headerControl.getAttribute("aria-controls")).toBe(lead.id);
       expect(lead.id).not.toBe("");
-      expect(railControl.getAttribute("aria-controls")).toBe(railValue.id);
-      expect(railValue.id).not.toBe("");
-      expect(lead.id).not.toBe(railValue.id);
       // Opening the region keeps the association, so the announced state and
       // the named region stay in step.
       fireEvent.click(headerControl);
@@ -6463,14 +6454,13 @@ describe("the artifact viewer", () => {
       expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
     });
 
-    // The rail is a summary column, and the relation links §13.10 requires
-    // the viewer to carry stand under this table in the same scrolling
-    // column. A description of several hundred words rendered whole makes one
-    // row many screens tall and pushes those links off the fold, so the rail
-    // clips a scalar value at the three lines the header's own description
-    // reads at and offers the rest in place.
+    // The rail's frontmatter cells carry the author's own text, and the
+    // Frontmatter panel on the tab beside them states that a long description
+    // wraps rather than being clipped. Clipped, the rail cut the value
+    // mid-word and stood a control of its own in the cell, which contradicts
+    // that line and appears in neither design reference.
     // Spec: §13.10
-    it("clips a long property value in the rail's table and opens it on request", async () => {
+    it("wraps a long property value in the rail's table", async () => {
       stubHeights(900);
       stubViewer("The invoice approval path routes each document.");
       await screen.findByLabelText("Artifact viewer");
@@ -6478,40 +6468,24 @@ describe("the artifact viewer", () => {
       expect(value.textContent).toBe(
         "The invoice approval path routes each document.",
       );
-      expect(value.classList.contains("clamped")).toBe(true);
-      // The control names its own row, so it is distinguishable from the
-      // header's control and from the other rows' controls.
-      const more = await screen.findByRole("button", {
-        name: "Show the whole description value",
-      });
-      expect(more.getAttribute("aria-expanded")).toBe("false");
-      fireEvent.click(more);
+      expect(value.classList.contains("clamped")).toBe(false);
+      // No control stands in the cell, under either the shared label or the
+      // per-row one the clip used to carry.
       expect(
-        screen
-          .getByTestId("property-value-description")
-          .classList.contains("clamped"),
-      ).toBe(false);
-      // Collapsing restores the clip, so the control is not a one-way door.
-      fireEvent.click(
-        screen.getByRole("button", {
+        screen.queryByRole("button", {
           name: "Show the whole description value",
         }),
-      );
+      ).toBeNull();
       expect(
-        screen
-          .getByTestId("property-value-description")
-          .classList.contains("clamped"),
-      ).toBe(true);
+        screen.getByTestId("rail-frontmatter-table").querySelector("button"),
+      ).toBeNull();
     });
 
-    // A sequence one entry per line is unbounded in the rail's narrow column:
-    // a dozen tags run the frontmatter table past 700px on their own and push
-    // RELATIONS and RESOURCES off the fold, which is the state the clip
-    // exists to prevent. The rail runs the entries together on one line and
-    // clips that line like any other value, and the control opens the rest in
-    // place.
+    // A sequence runs onto one line in the rail the way the design draws it,
+    // and that line wraps in the narrow column rather than being clipped. Each
+    // entry stays a list item, so a screen reader still counts them.
     // Spec: §13.10
-    it("clips a sequence value in the rail's table and opens it on request", async () => {
+    it("wraps a sequence value in the rail's table", async () => {
       stubHeights(900);
       stubRegistry({
         "/v1/ui/session": { body: posture({ public_mode: true }) },
@@ -6533,20 +6507,26 @@ describe("the artifact viewer", () => {
       render(<App />);
       await screen.findByLabelText("Artifact viewer");
       const tags = screen.getByTestId("property-value-tags");
-      // No entry is dropped: the whole sequence is in the cell, on one line.
-      expect(tags.textContent).toBe(
-        "alpha, bravo, charlie, delta, echo, foxtrot, golf, hotel, india, juliet",
-      );
-      expect(tags.querySelectorAll("li")).toHaveLength(0);
-      expect(tags.classList.contains("clamped")).toBe(true);
-      // The rest is one control away rather than gone.
-      const more = await screen.findByRole("button", {
-        name: "Show the whole tags value",
-      });
-      fireEvent.click(more);
+      // No entry is dropped and none is cut: the whole sequence is in the
+      // cell, one entry per list item.
       expect(
-        screen.getByTestId("property-value-tags").classList.contains("clamped"),
-      ).toBe(false);
+        Array.from(tags.querySelectorAll("li")).map((item) => item.textContent),
+      ).toEqual([
+        "alpha",
+        "bravo",
+        "charlie",
+        "delta",
+        "echo",
+        "foxtrot",
+        "golf",
+        "hotel",
+        "india",
+        "juliet",
+      ]);
+      expect(tags.classList.contains("clamped")).toBe(false);
+      expect(
+        screen.queryByRole("button", { name: "Show the whole tags value" }),
+      ).toBeNull();
     });
 
     // The full-width Frontmatter panel states that its values are shown
@@ -6641,10 +6621,9 @@ describe("the artifact viewer", () => {
     });
 
     // A sequence value is several entries, and both surfaces run them onto one
-    // line: the rail joins the text and clips it, and the panel keeps the
-    // entries as list items the sheet flows inline. The markup is what carries
-    // the entry boundary either way, so no entry is dropped and no entry is
-    // merged into its neighbour.
+    // line as list items the sheet flows inline. The markup is what carries
+    // the entry boundary, so no entry is dropped and no entry is merged into
+    // its neighbour.
     // Spec: §13.10
     it("carries every entry of a sequence value on both surfaces", async () => {
       stubHeights(60);
@@ -6669,15 +6648,12 @@ describe("the artifact viewer", () => {
       render(<App />);
       await screen.findByLabelText("Artifact viewer");
 
-      // The rail runs the entries together, so its cell carries no list.
+      // The rail keeps the entries as list items and shows every one of them.
       expect(
-        screen
-          .getByTestId("property-value-tags")
-          .querySelectorAll("li"),
-      ).toHaveLength(0);
-      expect(screen.getByTestId("property-value-tags").textContent).toBe(
-        "finance, ap",
-      );
+        Array.from(
+          screen.getByTestId("property-value-tags").querySelectorAll("li"),
+        ).map((item) => item.textContent),
+      ).toEqual(["finance", "ap"]);
 
       fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
       const panel = screen.getByTestId("frontmatter-table");

@@ -69,7 +69,7 @@ describe('frontmatter property table', () => {
   });
 
   it('holds the rail to one fill', () => {
-    render(<PropertyTable raw={raw} testID="rail-frontmatter-table" clampValues />);
+    render(<PropertyTable raw={raw} testID="rail-frontmatter-table" />);
     expect(screen.getByTestId('rail-frontmatter-table').className.split(' ')).not.toContain(
       'property-table-panel',
     );

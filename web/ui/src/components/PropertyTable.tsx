@@ -11,7 +11,6 @@
 import { useState } from 'react';
 
 import { parseFrontmatter, splitDocument, type Property } from '../frontmatter';
-import { ClampedText } from './ClampedText';
 import { CodeBlock, codeLines } from './CodeBlock';
 import { CopyButton } from './primitives';
 
@@ -19,16 +18,9 @@ export function PropertyTable({
   raw,
   testID = 'frontmatter-table',
   offerRaw = false,
-  clampValues = false,
 }: {
   raw: string;
   testID?: string;
-  /** clampValues puts a value under the shared three-line clip with a control
-   * of its own, which the rail asks for and the full-width panel does not.
-   * Neither a description nor a sequence carries a length bound, and in the
-   * rail's narrow column an unclipped one runs for screens and pushes the
-   * relation links §13.10 requires the viewer to carry far below the fold. */
-  clampValues?: boolean;
   /** offerRaw stands the Table and Raw YAML views side by side, which the
    * full-width panel offers and the rail does not. It also carries the two
    * lines that state where the pairs came from and how their values are
@@ -119,7 +111,7 @@ export function PropertyTable({
                   {property.key}
                 </th>
                 <td>
-                  <PropertyValue property={property} clamp={clampValues} />
+                  <PropertyValue property={property} />
                 </td>
               </tr>
             ))}
@@ -156,41 +148,20 @@ function ServedNote() {
   );
 }
 
-/** PropertyValue is the content of one value cell. Every value wraps whole in
- * the full-width panel, which is wide and carries nothing under the table to
- * bury, and is clipped in the rail, where an unbounded row makes the table
- * taller than the rest of the page and pushes the relation links off the fold
- * (§13.10). A sequence is clipped the same way a scalar is: a dozen tags one
- * per line runs the rail's table past 700px on its own, which is the state the
- * clip exists to prevent. Both surfaces run a sequence onto one line; the rail
- * clips that line and the panel wraps it. */
-function PropertyValue({ property, clamp }: { property: Property; clamp: boolean }) {
+/** PropertyValue is the content of one value cell. A value wraps whole on both
+ * surfaces, which is what the design draws for the rail and what the panel's
+ * own line under the table states: the value is the author's text and the cell
+ * shows all of it. Clipping the rail's cells cut a description and a tag list
+ * mid-word behind a control of their own, which contradicted that line and
+ * appears in neither design reference (§13.10). */
+function PropertyValue({ property }: { property: Property }) {
   if (property.items.length > 0) {
-    if (clamp) {
-      // The rail runs the entries together on one line and clips the result,
-      // which is what the design draws: `tags | tracing, review, otel`. An
-      // entry that ends in a full stop then runs into the separator, and the
-      // full-width panel below is where such a sequence is read entry by
-      // entry. A blank entry takes the em dash the absent state uses, so a
-      // key the author left an empty entry in does not read as a doubled
-      // separator (§13.10).
-      const joined = property.items.map((item) => (item.trim() === '' ? '—' : item)).join(', ');
-      return (
-        <ClampedText
-          text={joined}
-          className="property-value"
-          testID={`property-value-${property.key}`}
-          moreLabel={`Show the whole ${property.key} value`}
-        />
-      );
-    }
-    // The full-width panel runs the entries onto one line too, which is the
-    // row the design draws and the height the rows around it take. Each entry
-    // is still a list item, so a wrapped entry stays one entry and a screen
-    // reader counts them; the sheet flows the items inline and draws the
-    // separator between them in the de-emphasized tone, which is what tells an
-    // entry ending in a full stop apart from the comma that follows it
-    // (§13.10).
+    // Both surfaces run the entries onto one line, which is the row the design
+    // draws and the height the rows around it take. Each entry is still a list
+    // item, so a wrapped entry stays one entry and a screen reader counts them;
+    // the sheet flows the items inline and draws the separator between them in
+    // the de-emphasized tone, which is what tells an entry ending in a full
+    // stop apart from the comma that follows it (§13.10).
     return (
       <ul className="property-items" data-testid={`property-value-${property.key}`}>
         {property.items.map((item, index) => (
@@ -203,19 +174,6 @@ function PropertyValue({ property, clamp }: { property: Property; clamp: boolean
   }
   if (property.value.trim() === '') {
     return <AbsentValue keyName={property.key} />;
-  }
-  if (clamp) {
-    // The control names its own row, because a reader running down the rail's
-    // property rows meets it out of the surrounding text and every row would
-    // otherwise offer the same unqualified "Show more".
-    return (
-      <ClampedText
-        text={property.value}
-        className="property-value"
-        testID={`property-value-${property.key}`}
-        moreLabel={`Show the whole ${property.key} value`}
-      />
-    );
   }
   return (
     <span className="property-value" data-testid={`property-value-${property.key}`}>
