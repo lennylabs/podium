@@ -31,6 +31,7 @@ import {
   routeKey,
   searchHref,
   useDocumentTitle,
+  useEnteredSurface,
   useRoute,
   useTopOfNewRoute,
 } from './route';
@@ -99,6 +100,10 @@ export function App() {
   // One document draws every surface, so the tab and the history entry are
   // named here rather than by the surface that happens to be mounted.
   useDocumentTitle(route);
+
+  // A surface swapped into the same document announces nothing on its own,
+  // and the link that was followed unmounts under the reader's focus.
+  const entering = useEnteredSurface(route, content);
 
   useEffect(() => subscribeReadOnly(setReadOnly), []);
 
@@ -354,6 +359,12 @@ export function App() {
       >
         Skip to content
       </button>
+      {/* The sentence a reader who cannot see the swap is told the surface
+          they entered by. It is polite, so it waits for whatever a surface is
+          already announcing rather than cutting it off. */}
+      <p className="assistive-only" role="status" aria-live="polite" data-testid="route-announcement">
+        {entering}
+      </p>
       <TopBar
         posture={posture}
         theme={theme}

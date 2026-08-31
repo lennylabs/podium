@@ -1079,10 +1079,11 @@ describe("the application shell", () => {
     await waitFor(() => {
       expect(region.textContent).toBe("The catalog holds no artifacts.");
     });
-    // The surface's own announcement is the only thing the reader hears.
+    // The surface's own announcement and the shell's route announcement are
+    // all the reader hears, and the tree contributes neither.
     expect([
       ...document.querySelectorAll("[role='status'], [aria-live]"),
-    ]).toEqual([region]);
+    ]).toEqual([screen.getByTestId("route-announcement"), region]);
   });
 
   // A route onto a leaf domain opens its node and resolves the level to
@@ -16034,5 +16035,87 @@ describe("keyboard semantics", () => {
     expect(focusable[0]).toBe(skip);
     fireEvent.click(skip);
     expect(document.activeElement).toBe(screen.getByRole("main"));
+  });
+
+  // Spec: §13.10 — every surface is drawn into the same document, so a link
+  // that changes the route replaces the content in place: the browser loads
+  // nothing and announces nothing, and the link the reader activated unmounts
+  // under their focus, which leaves focus on the document body and restarts
+  // the next Tab at the top of the shell.
+  it("moves focus to the content region and announces the surface a link enters", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "finance/ap",
+          subdomains: [],
+          notable: [{ id: "finance/ap/pay-invoice", type: "skill" }],
+        },
+      },
+      "/v1/load_artifact": {
+        body: {
+          id: "finance/ap/pay-invoice",
+          type: "skill",
+          version: "1.0.0",
+          content_hash: "sha256:abc",
+          manifest_body: "# Pay an invoice\n",
+          frontmatter: "name: pay-invoice\n",
+        },
+      },
+      "/v1/dependents": { body: { edges: [] } },
+    });
+    goTo("#/domain/finance%2Fap");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+    const row = within(browser).getByRole("link", {
+      name: /pay-invoice/,
+    });
+    row.focus();
+    fireEvent.click(row);
+    // The row goes with the surface it was part of, and focus goes with it.
+    goTo("#/artifact/finance%2Fap%2Fpay-invoice");
+    (document.activeElement as HTMLElement | null)?.blur();
+    await screen.findByLabelText("Artifact viewer");
+    expect(document.activeElement).toBe(screen.getByRole("main"));
+    await waitFor(() => {
+      expect(screen.getByTestId("route-announcement").textContent).toBe(
+        "Artifact finance/ap/pay-invoice",
+      );
+    });
+  });
+
+  // Focus that survives the route change is the reader's own position. The
+  // sidebar stands beside every surface, so a reader who navigated from a
+  // tree link is still on that link, and taking it to the content region
+  // would cost them the place they were walking the hierarchy from. The
+  // announcement is what tells them the page changed.
+  it("leaves focus on a control the route change did not remove", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "",
+          subdomains: [{ path: "finance", name: "finance" }],
+          notable: [],
+        },
+      },
+      "/v1/load_domain?path=finance&depth=2": {
+        body: { path: "finance", subdomains: [], notable: [] },
+      },
+      "/v1/search_artifacts": { body: { total_matched: 0 } },
+    });
+    goTo("#/");
+    render(<App />);
+    const tree = await screen.findByLabelText("Catalog");
+    const link = within(tree).getByRole("link", { name: "finance" });
+    link.focus();
+    fireEvent.click(link);
+    goTo("#/domain/finance");
+    await waitFor(() => {
+      expect(screen.getByTestId("route-announcement").textContent).toBe(
+        "Domain finance",
+      );
+    });
+    expect(document.activeElement).toBe(link);
   });
 });

@@ -3,9 +3,10 @@
 // rewrite is involved. An artifact ID is a directory path that nests to
 // arbitrary depth, so every identifier in a route is encoded.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 
-import { heldRoute } from './components/focus';
+import { heldRoute, takeFocus } from './components/focus';
 
 export type Route =
   | { name: 'domain'; path: string }
@@ -322,4 +323,71 @@ export function useTopOfNewRoute(): void {
       window.removeEventListener('hashchange', onChange);
     };
   }, []);
+}
+
+/** routeAnnouncement is what a live region states when the reader enters a
+ * surface. It names the surface by the identifier that addresses it, so two
+ * routes never state the same sentence: a live region whose text is unchanged
+ * is not read out a second time, and a reader who moved between two artifacts
+ * that share a leaf name would be told nothing.
+ *
+ * Spec: §13.10 */
+export function routeAnnouncement(route: Route): string {
+  switch (route.name) {
+    case 'domain':
+      return route.path === '' ? domainTitle('') : `Domain ${route.path}`;
+    case 'search':
+      return route.query === '' ? 'Search' : `Search results for ${route.query}`;
+    case 'artifact': {
+      const name = route.id === '' ? 'Artifact' : `Artifact ${route.id}`;
+      return route.version === '' ? name : `${name} at ${route.version}`;
+    }
+    case 'layers':
+      return routeTitle(route);
+  }
+}
+
+/**
+ * useEnteredSurface hands a route change to a reader who cannot see one. The
+ * shell draws every surface into one document, so following a link replaces
+ * the content in place: nothing is loaded, no heading is reached, and the
+ * browser announces nothing. The link the reader activated is part of the
+ * surface being replaced, so it unmounts under their focus and leaves focus
+ * on the document body, from where the next Tab restarts at the top of the
+ * shell.
+ *
+ * The entered surface is announced through the returned sentence, which the
+ * shell renders into a live region, and focus moves to the content region
+ * when the surface that was replaced took the reader's focus down with it.
+ * Focus that is still on a control the route change did not remove, such as
+ * a sidebar link the reader navigated from, is left where the reader put it.
+ *
+ * Spec: §13.10 */
+export function useEnteredSurface(route: Route, content: RefObject<HTMLElement | null>): string {
+  const entered = routeKey(route);
+  const [announced, setAnnounced] = useState('');
+  // The sentence is read through a ref so the effect keys on the entered
+  // surface alone. `useRoute` parses a fresh object on every hash event, and
+  // an effect that also depended on the sentence would still run once per
+  // surface, but a re-render that leaves the route where it is would re-enter
+  // it and re-announce a surface the reader never left.
+  const sentence = useRef('');
+  sentence.current = routeAnnouncement(route);
+  // The surface the shell opens on was not entered from anywhere. A reader
+  // arriving at it has the document load itself as the signal, and moving
+  // focus off the top of a page nobody navigated within takes the skip link
+  // out of reach of the first Tab.
+  const opened = useRef(true);
+  useEffect(() => {
+    if (opened.current) {
+      opened.current = false;
+      return;
+    }
+    setAnnounced(sentence.current);
+    const held = document.activeElement;
+    if (held === null || held === document.body) {
+      takeFocus(content.current);
+    }
+  }, [entered]);
+  return announced;
 }
