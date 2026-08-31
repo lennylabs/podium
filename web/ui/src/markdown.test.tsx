@@ -405,6 +405,26 @@ describe("a body's sideways-scrolling regions", () => {
     expect(container.querySelector('table')?.getAttribute('role')).toBeNull();
   });
 
+  it('bounds the name of a wide table instead of reciting every header', () => {
+    const headers = Array.from({ length: 12 }, (_, index) => `column_number_${index}_with_a_long_header`);
+    const row = `| ${headers.join(' | ')} |\n`;
+    const divider = `| ${headers.map(() => '---').join(' | ')} |\n`;
+    const container = renderBody(row + divider);
+    const label = container.querySelector('.table-scroll')?.getAttribute('aria-label') ?? '';
+    expect(label).toBe('Table: column_number_0_with_a_long_header and 11 more columns');
+    expect(label.length).toBeLessThan(100);
+  });
+
+  it('counts the columns of the header row alone, ignoring a row header in the body', () => {
+    const container = renderBody(
+      '<table><tr><th>Key</th><th>Value</th><th>Notes</th><th>Owner</th></tr>' +
+        '<tr><th>scope</th><td>org</td><td>-</td><td>alice</td></tr></table>\n',
+    );
+    expect(container.querySelector('.table-scroll')?.getAttribute('aria-label')).toBe(
+      'Table: Key and 3 more columns',
+    );
+  });
+
   it('makes a code fence a focusable region named by its language', () => {
     const container = renderBody('```bash\npodium serve --standalone\n```\n');
     const pre = container.querySelector('pre');

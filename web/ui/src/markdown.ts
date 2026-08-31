@@ -400,13 +400,33 @@ function codeBlockLabel(pre: Element): string {
   return 'Code block';
 }
 
+// The name is bounded, because a wide table's headers concatenated are an
+// announcement the reader hears in full every time focus lands on the region,
+// before reaching any of the cells the headers name. The header row is marked
+// up as one, so the reader can read the columns from the table itself; the
+// region's name only has to tell one table from another. It lists the headers
+// while the list stays short, and otherwise names the first column and counts
+// the rest.
+const maxNamedHeaders = 3;
+const maxLabelLength = 80;
+
 /** tableLabel names one table by its first header row, so the reader tabbing
  * into it is told what it holds rather than only that it is a table. */
 function tableLabel(table: Element): string {
-  const headers = [...table.querySelectorAll('th')]
-    .map((header) => header.textContent?.trim() ?? '')
+  // Only the first row's headers are read, so a row header inside the body
+  // is not counted as a column.
+  const headerRow = table.querySelector('tr');
+  const headers = [...(headerRow?.querySelectorAll('th') ?? [])]
+    .map((header) => header.textContent?.replace(/\s+/gu, ' ').trim() ?? '')
     .filter((text) => text !== '');
-  return headers.length === 0 ? 'Table' : `Table: ${headers.join(', ')}`;
+  if (headers.length === 0) {
+    return 'Table';
+  }
+  const listed = `Table: ${headers.join(', ')}`;
+  if (headers.length === 1 || (headers.length <= maxNamedHeaders && listed.length <= maxLabelLength)) {
+    return listed;
+  }
+  return `Table: ${headers[0]} and ${headers.length - 1} more columns`;
 }
 
 /** markScrollableRegions puts every sideways-scrolling box in the rendered
