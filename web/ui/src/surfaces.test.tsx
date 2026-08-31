@@ -10468,6 +10468,35 @@ describe("the layer write flows", () => {
     expect(screen.getByTestId("palette")).toBeTruthy();
   });
 
+  // Every modal owns the keyboard while it stands, not only the reveal that
+  // refuses dismissal. The palette mounts underneath the dialog on top, so it
+  // would take focus into a field the reader cannot see and the one Escape
+  // that follows would unmount both, discarding the form and everything typed
+  // into it.
+  it("refuses the command-palette accelerator while a dismissible dialog is open", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const id = await screen.findByLabelText("Layer ID");
+    fireEvent.change(id, { target: { value: "alice-per" } });
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.queryByTestId("palette")).toBeNull();
+    // The dialog still holds the keyboard, so Escape leaves it and nothing
+    // else, and the accelerator works again once it is gone.
+    expect((screen.getByLabelText("Layer ID") as HTMLInputElement).value).toBe("alice-per");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Layer ID")).toBeNull();
+    });
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.getByTestId("palette")).toBeTruthy();
+  });
+
   // A local source returns no secret, so the registration outcome carries
   // nothing the reader has to take away and the dialog dismisses the way
   // every other dialog does.

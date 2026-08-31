@@ -9,7 +9,7 @@ import { createPortal } from 'react-dom';
 
 import { ApiError } from '../api';
 import { atCatalogRoute, domainHref } from '../route';
-import { dismissAttribute, holdDismissal, requestRetryFocus, useDialogFocus, useRetryFocus } from './focus';
+import { dismissAttribute, registerModal, requestRetryFocus, useDialogFocus, useRetryFocus } from './focus';
 import { useScrollLock } from './scrolllock';
 
 export type Tone = 'neutral' | 'accent' | 'danger' | 'quiet';
@@ -676,10 +676,11 @@ export function Modal({
   // behind the dialog, which is worst on the one-time secret, where the
   // reader has no way back to what they were reading.
   useScrollLock();
-  // A dialog that withholds every dismissal route says so page-wide, so an
-  // accelerator in the shell does not open an overlay over content the reader
-  // cannot get back.
-  useEffect(() => (dismissible ? undefined : holdDismissal()), [dismissible]);
+  // The dialog says page-wide that it is open, so an accelerator in the shell
+  // does not open an overlay underneath it. A dialog that withholds every
+  // dismissal route says that too, and the shell keeps the address bar on the
+  // route it opened on for as long as it stands.
+  useEffect(() => registerModal(!dismissible), [dismissible]);
   useEffect(() => {
     if (!dismissible) {
       return;

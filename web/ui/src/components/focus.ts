@@ -305,59 +305,73 @@ export function usePopupDismiss<T extends HTMLElement>(
   return popup;
 }
 
-// holds carries one entry per dialog on the page that refuses every dismissal
-// route, each recording the location hash the dialog opened on. It is module
-// state because the accelerators that open an overlay live in the shell, above
-// whatever surface opened the dialog, and a dialog does not know what is
-// listening for a key it has no way to see. The recorded hash is what the
-// shell pins the address bar back to, because a history step tears down the
-// surface underneath the dialog and takes the dialog with it.
-const holds: { hash: string }[] = [];
-const heldListeners = new Set<() => void>();
+// modals carries one entry per modal dialog on the page, innermost last, each
+// recording the location hash the dialog opened on and whether it refuses
+// every dismissal route. It is module state because the accelerators that open
+// an overlay live in the shell, above whatever surface opened the dialog, and
+// a dialog does not know what is listening for a key it has no way to see. The
+// recorded hash is what the shell pins the address bar back to for a dialog
+// that holds, because a history step tears down the surface underneath the
+// dialog and takes the dialog with it.
+const modals: { hash: string; held: boolean }[] = [];
+const modalListeners = new Set<() => void>();
 
-function publishHeld(): void {
-  for (const listener of heldListeners) {
+function publishModals(): void {
+  for (const listener of modalListeners) {
     listener();
   }
 }
 
+function subscribeModals(listener: () => void): () => void {
+  modalListeners.add(listener);
+  return () => {
+    modalListeners.delete(listener);
+  };
+}
+
 /**
- * holdDismissal marks the page as carrying a dialog the reader cannot leave by
- * any route the dialog does not itself offer, and returns the release the
- * caller runs when that dialog goes away. Content shown once and unrecoverable
- * is what this is for: the one-time webhook secret withholds Escape, the scrim,
- * and the close control, and an overlay opened over it from elsewhere would
- * take focus and discard the credential when the reader followed it.
+ * registerModal marks the page as carrying a modal dialog and returns the
+ * release the caller runs when that dialog goes away. A modal owns the
+ * keyboard while it is open, so a page-level accelerator reads the page
+ * through the hooks below and opens nothing over it: a second `aria-modal`
+ * surface mounts underneath the one on top, takes focus into a field the
+ * reader cannot see, and the Escape that follows unmounts both, discarding
+ * the form the reader was filling in.
+ *
+ * `held` marks a dialog the reader cannot leave by any route the dialog does
+ * not itself offer. Content shown once and unrecoverable is what it is for:
+ * the one-time webhook secret withholds Escape, the scrim, and the close
+ * control, and the shell pins the address bar back for it as well.
  */
-export function holdDismissal(): () => void {
-  const entry = { hash: window.location.hash };
-  holds.push(entry);
-  publishHeld();
+export function registerModal(held: boolean): () => void {
+  const entry = { hash: window.location.hash, held };
+  modals.push(entry);
+  publishModals();
   let released = false;
   return () => {
     if (released) {
       return;
     }
     released = true;
-    const at = holds.indexOf(entry);
+    const at = modals.indexOf(entry);
     if (at >= 0) {
-      holds.splice(at, 1);
+      modals.splice(at, 1);
     }
-    publishHeld();
+    publishModals();
   };
 }
 
 /**
- * heldRoute is the location hash the innermost such dialog opened on, or null
- * when no dialog holds. The browser's Back gesture is the dismissal route a
- * dialog cannot refuse for itself: it fires no key event and no press the
- * dialog can see, and it unmounts the surface that renders the dialog. The
- * shell reads this on a hash change and pins the address bar back, so a
- * credential shown once survives the gesture and the acknowledgement stays
- * the one way out.
+ * heldRoute is the location hash the innermost dismissal-refusing dialog
+ * opened on, or null when no dialog holds. The browser's Back gesture is the
+ * dismissal route a dialog cannot refuse for itself: it fires no key event and
+ * no press the dialog can see, and it unmounts the surface that renders the
+ * dialog. The shell reads this on a hash change and pins the address bar back,
+ * so a credential shown once survives the gesture and the acknowledgement
+ * stays the one way out.
  */
 export function heldRoute(): string | null {
-  const held = holds.at(-1);
+  const held = modals.filter((entry) => entry.held).at(-1);
   return held === undefined ? null : held.hash;
 }
 
@@ -368,13 +382,21 @@ export function heldRoute(): string | null {
  */
 export function useDismissalHeld(): boolean {
   return useSyncExternalStore(
-    (listener) => {
-      heldListeners.add(listener);
-      return () => {
-        heldListeners.delete(listener);
-      };
-    },
-    () => holds.length > 0,
+    subscribeModals,
+    () => modals.some((entry) => entry.held),
+    () => false,
+  );
+}
+
+/**
+ * useModalOpen reports whether any modal dialog is open. The accelerator that
+ * opens the command palette reads it and does nothing while one is, so the
+ * dialog on top keeps the keyboard it took.
+ */
+export function useModalOpen(): boolean {
+  return useSyncExternalStore(
+    subscribeModals,
+    () => modals.length > 0,
     () => false,
   );
 }

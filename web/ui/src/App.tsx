@@ -23,7 +23,7 @@ import {
 import type { SessionPosture } from './session';
 import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
 import { catalogDepth, domainLabel, marksCurrentDomain } from './domain';
-import { useDismissalHeld, usePopupDismiss } from './components/focus';
+import { useModalOpen, usePopupDismiss } from './components/focus';
 import {
   artifactDomain,
   domainHref,
@@ -89,9 +89,9 @@ export function App() {
   const searchTrigger = useRef<HTMLButtonElement>(null);
   const content = useRef<HTMLElement>(null);
   const [theme, setTheme] = useTheme();
-  // A dialog that refuses every dismissal route holds the page, and the
-  // accelerator below is one of the routes it is refusing.
-  const dismissalHeld = useDismissalHeld();
+  // A modal dialog owns the keyboard while it is open, and the accelerator
+  // below is one of the keys it owns.
+  const modalOpen = useModalOpen();
 
   // A surface entered from a link is drawn into the document the reader was
   // already scrolled inside, so the shell puts the window back at the top.
@@ -108,11 +108,14 @@ export function App() {
   useEffect(() => subscribeReadOnly(setReadOnly), []);
 
   useEffect(() => {
-    // A dialog the reader can only leave by acknowledging it is showing
-    // content that is gone once it unmounts, and the palette would cover it,
-    // take focus, and navigate away from it on the first result opened. The
-    // accelerator is withheld for as long as such a dialog is on the page.
-    if (dismissalHeld) {
+    // The palette mounts as a second modal surface underneath the dialog on
+    // top, which covers it while it takes focus into a search field the
+    // reader cannot see, and the one Escape that follows unmounts both and
+    // discards the dialog and everything typed into it. A dialog the reader
+    // can only leave by acknowledging it loses content that is gone once it
+    // unmounts. The accelerator is withheld for as long as any modal dialog
+    // is on the page.
+    if (modalOpen) {
       return;
     }
     const onKey = (event: KeyboardEvent) => {
@@ -127,7 +130,7 @@ export function App() {
     return () => {
       window.removeEventListener('keydown', onKey);
     };
-  }, [dismissalHeld]);
+  }, [modalOpen]);
 
   // Entering a surface closes the panel, which is what opening a result from
   // it already does. A route change the panel did not issue leaves it
