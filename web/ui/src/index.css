@@ -2212,8 +2212,19 @@ input[type="search"]::-webkit-search-cancel-button {
    "organization". The table keeps its designed widths down to a floor and
    scrolls sideways inside this container below it, so every cell stays on the
    one line the design draws it on (§13.10). The container is focusable
-   because a region that scrolls must be reachable from the keyboard. */
+   because a region that scrolls must be reachable from the keyboard.
+
+   The container is positioned so that it is the containing block of what it
+   scrolls. An absolutely positioned descendant resolves against the nearest
+   positioned ancestor, and a static container is not one, so such a descendant
+   is laid out against the page and escapes the clip the overflow declares. The
+   assistive-only spans inside the restore table sit past the 1040px floor, and
+   from outside the clip they set the document's own scroll width wider than
+   the viewport: at 520px the page scrolled sideways and carried the fixed top
+   bar and the sidebar off with it, while the columns the scroll exists to
+   reach stayed cut off (§13.10). */
 .table-scroll {
+  position: relative;
   overflow-x: auto;
 }
 

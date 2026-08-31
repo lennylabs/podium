@@ -1334,6 +1334,17 @@ describe("layer table columns", () => {
     expect(styled("table-scroll").overflowX).toBe("auto");
   });
 
+  // An absolutely positioned descendant resolves against the nearest
+  // positioned ancestor, so inside a static scroll container it is laid out
+  // against the page and escapes the clip the overflow declares. The
+  // assistive-only spans in the restore table sit past the table's floor, and
+  // from outside the clip they set the document's scroll width wider than the
+  // viewport, which scrolled the whole page sideways at 520px and carried the
+  // fixed top bar and the sidebar out from under the content.
+  it("contains what it scrolls rather than letting it reach the document", () => {
+    expect(styled("table-scroll").position).toBe("relative");
+  });
+
   // A layer that matches on more than one visibility axis wraps its markers
   // over several lines and sets the row's height. Under the table default the
   // rest of the row stayed at the top of that height with an empty band below
