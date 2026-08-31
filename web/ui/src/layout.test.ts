@@ -1350,16 +1350,39 @@ describe("data table header row", () => {
 
 // A frontmatter value is authored, so it can be one unbroken token such as a
 // serialised nested map. A table takes its min-content width as an automatic
-// minimum, so a cell that cannot break sets the property table wider than the
-// rail that holds it and scrolls the whole document sideways. Both cells break
-// wherever they have to, which puts the table's minimum back at one character.
+// minimum, so a value that cannot break sets the property table wider than the
+// rail that holds it and scrolls the whole document sideways. The value breaks
+// wherever it has to, which puts the table's minimum back at one character.
 describe("frontmatter property table", () => {
-  it("breaks a key longer than its column inside the cell", () => {
-    expect(descendantStyle("property-table", "th").overflowWrap).toBe("anywhere");
+  // A key is an identifier, and a break inside it renders a name the author
+  // did not write: with `anywhere` the rail drew `review_cycle` as
+  // `review_cycl` over a lone `e` while the value stood beside the first half.
+  // `anywhere` also counts the break in the cell's min-content width, which is
+  // what let the value's claim on the table hold the key at its floor with the
+  // surplus spent elsewhere. `break-word` keeps the key whole in that width,
+  // so the column sizes to the longest key the table carries, and it still
+  // breaks a key too wide for the capped column.
+  it("keeps a key whole in the column's own width", () => {
+    const key = descendantStyle("property-table", "th");
+    expect(key.overflowWrap).toBe("break-word");
+    expect(key.overflowWrap).not.toBe("anywhere");
   });
 
   it("breaks a value longer than its column inside the cell", () => {
     expect(descendantStyle("property-table", "td").overflowWrap).toBe("anywhere");
+  });
+
+  // The key column now grows to its content, so an authored key long enough to
+  // outrun the table would push it past the content column and scroll the
+  // document sideways, which is the failure the break above covers. The cap
+  // bounds the column at twice the design's key width in the panel and at the
+  // rail's half of its narrower table.
+  it("caps how wide a long key can push the key column", () => {
+    expect(descendantStyle("property-table", "th").maxWidth).toBe("360px");
+    const rail = railKeyStyle();
+    const cap = Number.parseInt(rail.maxWidth, 10);
+    expect(rail.maxWidth).toBe(`${cap}ch`);
+    expect(cap).toBeGreaterThan(Number.parseInt(rail.minWidth, 10));
   });
 
   // Automatic table layout hands a column whatever surplus the table has left,
@@ -1386,8 +1409,8 @@ describe("frontmatter property table", () => {
   // remaining width on the key: at 16ch the key cell measured 135px of a 271px
   // table and the value wrapped a description to one word a line before a
   // disclosure control clipped it. The floor is stated in `ch` of the key's own
-  // mono face, so it holds that key on one line at whatever size the face is
-  // set at and no wider.
+  // mono face, so it tracks whatever size that face is set at, and a table
+  // whose keys are all longer sizes the column to them instead.
   it("holds the rail's key column to the design's longest drawn key", () => {
     const key = railKeyStyle();
     const floor = Number.parseInt(key.minWidth, 10);

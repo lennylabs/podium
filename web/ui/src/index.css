@@ -1793,18 +1793,26 @@ input[type="search"]::-webkit-search-cancel-button {
   background-color: var(--surf2);
 }
 
-/* Frontmatter is authored, so a key or a value can be one unbroken token such
-   as a serialised nested map. A table takes its min-content width as an
-   automatic minimum, and an unbreakable cell therefore sets the property table
-   wider than the column holding it: in the rail it renders past the right edge
-   of the window and scrolls the whole document sideways. Breaking a cell
-   wherever it has to puts the table's minimum back at one character, so the
-   table stays inside its column at every viewport width. The key column asks
-   for a share of the table so an unbreakable value cannot squeeze it down to
-   one character per line. */
-.property-table th,
+/* Frontmatter is authored, so a value can be one unbroken token such as a
+   serialised nested map. A table takes its min-content width as an automatic
+   minimum, and an unbreakable value therefore sets the property table wider
+   than the column holding it: in the rail it renders past the right edge of
+   the window and scrolls the whole document sideways. Breaking the value
+   wherever it has to puts its minimum back at one character, so the table
+   stays inside its column at every viewport width. */
 .property-table td {
   overflow-wrap: anywhere;
+}
+
+/* The key is an identifier the author wrote, and a break inside it reads as a
+   different name: `review_cycle` broken at the column edge draws
+   `review_cycl` over a lone `e`. `break-word` breaks the key only on a line
+   that cannot hold it and leaves the key whole in the column's min-content
+   width, so automatic table layout sizes the key column to the longest key
+   the table carries and every key stands on one line (§13.10). A key wider
+   than the cap below is the case that break then covers. */
+.property-table th {
+  overflow-wrap: break-word;
 }
 
 /* The design lays the frontmatter rows out on a fixed 180px key column beside
@@ -1817,7 +1825,12 @@ input[type="search"]::-webkit-search-cancel-button {
    and holds the key at the width stated below (§13.10).
    The width is a floor rather than a preference, because the value's claim
    outranks a preference and would otherwise squeeze the key to its
-   min-content. */
+   min-content.
+   The cap bounds what the key can take from the value: a key wider than it is
+   the pathological one, and holding it whole would push the table past the
+   content column and scroll the document sideways again. Twice the design's
+   column is about 26 characters of the key's mono face, past every key an
+   artifact carries in practice. */
 /* The key is the label of the row and the value is its content, so the key is
    set quiet and small while the value keeps the table's own size in `--ink`.
    A user agent renders a `th` bold and in the body colour, which puts the
@@ -1825,6 +1838,7 @@ input[type="search"]::-webkit-search-cancel-button {
    the names rather than down the values (§13.10). */
 .property-table th {
   min-width: 180px;
+  max-width: 360px;
   font-size: 11.5px;
   font-weight: 400;
   color: var(--faint);
@@ -1848,15 +1862,17 @@ input[type="search"]::-webkit-search-cancel-button {
 
 /* The rail is a 316px column, so the table inside it is about 270px. The
    design fixes the rail's key at 74px beside a value that takes the rest,
-   which is the width of `sensitivity`, the longest key it draws. A floor of
-   16ch plus the cell's 24px of padding resolved to 135px here, half the
-   table, and the value it left was narrow enough to wrap a description to one
-   word a line and then send it behind a disclosure control. The floor is
-   stated in `ch` of the key's own mono face so it tracks whatever size that
-   face is set at, and a key longer than the design's falls back to the break
-   above (§13.10). */
+   which is the width of `sensitivity`, the longest key it draws. The floor
+   holds that column for a table whose keys are all shorter, and a longer key
+   grows the column to itself. The cap is the rail's share of the panel's:
+   18ch plus the cell's 24px of padding is about half the table, and a wider
+   key would leave the value narrow enough to wrap a description to one word a
+   line and then send it behind a disclosure control. Both are stated in `ch`
+   of the key's own mono face so they track whatever size that face is set at
+   (§13.10). */
 .artifact-rail .property-table th {
   min-width: 11ch;
+  max-width: 18ch;
 }
 
 /* A view switch that rides on a toolbar row is smaller than the one in a
