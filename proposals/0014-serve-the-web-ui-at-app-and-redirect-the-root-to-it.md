@@ -1,7 +1,7 @@
 # Proposal 0014: Serve the web UI at /app/ and redirect the root to it
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-08-31). Signed off by the maintainer for
+- Status: Implemented (2026-08-31). Signed off by the maintainer for
   implementation, whole, with every step in the checklist in scope. Converged
   after 4 adversarial review rounds (6 findings fixed); "Resolved in adversarial
   review" records what each pass changed.
@@ -99,16 +99,16 @@ sections after sign-off.
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §13.10's mount sentence moves to `/app/` and gains
+- [x] **S1 · spec** — SPEC-1. §13.10's mount sentence moves to `/app/` and gains
       the root-redirect sentence and its unmounted case.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §7.3.4's declined-consent return target moves to
+- [x] **S2 · spec** — SPEC-2. §7.3.4's declined-consent return target moves to
       `/app/`, leaving the four route paths verbatim.
       Levels: —. Depends on: S1
-- [ ] **S3 · spec** — SPEC-3. §6.3.4's illustrative browser origin moves to
+- [x] **S3 · spec** — SPEC-3. §6.3.4's illustrative browser origin moves to
       `/app/` so the spec names one UI root.
       Levels: —. Depends on: S1
-- [ ] **S4 · code** — CODE-1, CODE-2, CODE-3, CODE-4, CODE-5, CODE-6, TEST-1,
+- [x] **S4 · code** — CODE-1, CODE-2, CODE-3, CODE-4, CODE-5, CODE-6, TEST-1,
       TEST-3. The whole path move: the mount and the root redirect, the Vite
       base, the callback redirect constant, the SPA's post-sign-out navigation
       and the assertion that pins it, the flag help, every existing assertion on
@@ -119,16 +119,16 @@ sections after sign-off.
       literal, and the CI rebuild gate fails a source edit that ships without the
       regenerated bundle.
       Levels: unit, integration, e2e. Depends on: S1, S2, S3
-- [ ] **S5 · test** — TEST-2. The end-to-end cases that pin the root redirect,
+- [x] **S5 · test** — TEST-2. The end-to-end cases that pin the root redirect,
       its conditionality on `--web-ui`, and the absence of any answer at `/ui/`.
       Levels: e2e. Depends on: S4
-- [ ] **S6 · docs** — DOCS-1. The `--web-ui` row in the CLI reference and the
+- [x] **S6 · docs** — DOCS-1. The `--web-ui` row in the CLI reference and the
       callback paragraph in the HTTP API reference.
       Levels: —. Depends on: S4
-- [ ] **S7 · docs** — DOCS-2. The eight hand-run scenario URLs in
+- [x] **S7 · docs** — DOCS-2. The eight hand-run scenario URLs in
       `test/manual-validation.md`.
       Levels: —. Depends on: S4
-- [ ] **S8 · docs** — DOCS-3. The `CHANGELOG.md` breaking-change entry.
+- [x] **S8 · docs** — DOCS-3. The `CHANGELOG.md` breaking-change entry.
       Levels: —. Depends on: S4
 
 ## Current state and the gap
