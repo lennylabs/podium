@@ -11,6 +11,7 @@
 // window remains. A row inside the accent window says so, because that is the
 // row a reader has to act on today.
 
+import type { RefObject } from 'react';
 import { useRef, useState } from 'react';
 
 import { accentDays, daysLeft, erasesOn, recoveryDays, unregisteredOn } from './recovery';
@@ -21,6 +22,28 @@ import { SourceCell } from '../components/SourceCell';
 import type { LayerRecord } from '../api';
 import { ApiError, listDeletedLayers, listLayers, restoreLayer } from '../api';
 import { useAsync, useReachReport } from '../useAsync';
+
+/** RecoveryHead is the surface's trail and title. The trail leads back to the
+ * panel, which is where the reader came from and where the layer this surface
+ * restores is listed again. The surface renders it whether or not the read
+ * answered, so the page names itself in either state. */
+function RecoveryHead({ heading }: { heading: RefObject<HTMLHeadingElement | null> }) {
+  return (
+    <>
+      <nav className="breadcrumb" aria-label="Breadcrumb">
+        <a href={layersHref}>Layers</a>
+        <span className="breadcrumb-sep" aria-hidden="true">
+          /
+        </span>
+        <span className="breadcrumb-here" aria-current="page">
+          Recently unregistered
+        </span>
+      </nav>
+      <h1 ref={heading}>Recently unregistered</h1>
+      <p className="lead">A layer stays restorable for {recoveryDays} days, after which it is erased.</p>
+    </>
+  );
+}
 
 export function DeletedLayers({
   onRestored,
@@ -55,8 +78,19 @@ export function DeletedLayers({
   if (deleted.loading && deleted.value === null) {
     return <Loading label="Loading the recoverable layers." />;
   }
+  // A refused read stands in for the table alone. The surface keeps its trail,
+  // its heading, and the sentence stating the recovery window, because the
+  // failure band names the outage and nothing else: a main region carrying a
+  // banner and no heading leaves a reader who arrived by the skip link, and a
+  // reader navigating by heading, with nothing naming the page they are on
+  // (§13.10).
   if (deleted.error !== null) {
-    return <ErrorState error={deleted.error} onRetry={deleted.reload} />;
+    return (
+      <section className="surface" aria-label="Recently unregistered">
+        <RecoveryHead heading={heading} />
+        <ErrorState error={deleted.error} onRetry={deleted.reload} />
+      </section>
+    );
   }
   const rows = deleted.value ?? [];
   const restore = (id: string) => {
@@ -89,19 +123,7 @@ export function DeletedLayers({
 
   return (
     <section className="surface" aria-label="Recently unregistered">
-      {/* The trail leads back to the panel, which is where the reader came
-          from and where the layer this surface restores is listed again. */}
-      <nav className="breadcrumb" aria-label="Breadcrumb">
-        <a href={layersHref}>Layers</a>
-        <span className="breadcrumb-sep" aria-hidden="true">
-          /
-        </span>
-        <span className="breadcrumb-here" aria-current="page">
-          Recently unregistered
-        </span>
-      </nav>
-      <h1 ref={heading}>Recently unregistered</h1>
-      <p className="lead">A layer stays restorable for {recoveryDays} days, after which it is erased.</p>
+      <RecoveryHead heading={heading} />
       {rows.length === 0 ? (
         // Restore is the only action this surface offers, and erasure is what
         // happens on its own when the window ends. Naming the empty state

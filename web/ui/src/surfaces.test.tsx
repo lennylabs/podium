@@ -16501,6 +16501,47 @@ describe("a registry that did not answer", () => {
       expect(document.activeElement).toBe(again);
     });
   });
+
+  // A surface that stands its banner in place of its own table keeps its
+  // heading over it. The skip link and a screen reader's heading navigation
+  // both land in the main region, and a region carrying a failure band and
+  // nothing else names neither the page the reader is on nor the way off it
+  // (§13.10).
+  it("keeps the layer panel's heading over the banner", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/layers": { rejects: true },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByRole("alert");
+    const main = screen.getByRole("main");
+    expect(
+      within(main).getByRole("heading", { level: 1 }).textContent,
+    ).toBe("Layers");
+    expect(main.textContent).toContain("Sources the catalog is composed from.");
+  });
+
+  it("keeps the recoverable surface's heading over the banner", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/layers/deleted": { rejects: true },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    await screen.findByRole("alert");
+    const main = screen.getByRole("main");
+    expect(
+      within(main).getByRole("heading", { level: 1 }).textContent,
+    ).toBe("Recently unregistered");
+    // The trail back to the panel is the way off a surface with no rows on
+    // it, so it stands with the heading.
+    expect(
+      within(main).getByRole("link", { name: "Layers" }).getAttribute("href"),
+    ).toBe("#/layers");
+  });
 });
 
 // A read that resolved nothing leaves no surface to stand a banner over, so

@@ -9,7 +9,7 @@
 // and treats the local operator as the administrator, and the panel is the
 // point of that deployment.
 
-import type { KeyboardEvent, RefObject } from "react";
+import type { KeyboardEvent, ReactNode, RefObject } from "react";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -116,6 +116,34 @@ function announced(text: string): Outcome {
 /** drawn holds an outcome the reader is left with no on-screen trace of. */
 function drawn(text: string): Outcome {
   return { text, visible: true };
+}
+
+/** PanelHead is the panel's title row: the title, what a layer is, and the
+ * panel's actions share one row, so the description states what the reader is
+ * looking at before the first row of the table asks them to infer it from the
+ * columns. The panel renders it whether or not the layer list read answered,
+ * because the heading is what names the page and a refused read leaves the
+ * action row with nothing to act on. */
+function PanelHead({
+  heading,
+  children,
+}: {
+  heading: RefObject<HTMLHeadingElement | null>;
+  /** The panel's actions. A caller that passes none draws no action row. */
+  children?: ReactNode;
+}) {
+  return (
+    <div className="panel-head">
+      <div>
+        <h1 ref={heading}>Layers</h1>
+        <p className="lead">
+          Sources the catalog is composed from. When two layers carry the same
+          artifact ID, the higher precedence wins.
+        </p>
+      </div>
+      {children !== undefined && <div className="panel-actions">{children}</div>}
+    </div>
+  );
 }
 
 export function LayerPanel({
@@ -246,13 +274,21 @@ export function LayerPanel({
   if (layers.loading && layers.value === null) {
     return <Loading label="Loading the layers." />;
   }
+  // A refused list read stands in for the table alone. The surface keeps its
+  // heading and the sentence under it, because the failure band names the
+  // outage and nothing else: a main region carrying a banner and no heading
+  // leaves a reader who arrived by the skip link, and a reader navigating by
+  // heading, with nothing naming the page they are on. The action row is
+  // dropped with the table it acts on, and the banner carries the retry
+  // (§13.10).
   if (layers.error !== null) {
     return (
-      <>
+      <section className="surface" aria-label="Layer panel">
+        <PanelHead heading={heading} />
         {runProgress}
         {runReport}
         <ErrorState error={layers.error} onRetry={reloadPanel} />
-      </>
+      </section>
     );
   }
   const rows = inMovedOrder(layers.value ?? [], moved);
@@ -441,16 +477,8 @@ export function LayerPanel({
       {/* The title, what a layer is, and the panel's actions share one row:
           the description states what the reader is looking at before the
           first row of the table asks them to infer it from the columns. */}
-      <div className="panel-head">
-        <div>
-          <h1 ref={heading}>Layers</h1>
-          <p className="lead">
-            Sources the catalog is composed from. When two layers carry the same
-            artifact ID, the higher precedence wins.
-          </p>
-        </div>
-        <div className="panel-actions">
-          {/* The recoverable link leads the row and states how much is still
+      <PanelHead heading={heading}>
+        {/* The recoverable link leads the row and states how much is still
             restorable, because that count is the one piece of panel state
             naming something on its way to being erased. The count is stated
             only where there is something to recover: a zero beside the link
@@ -488,8 +516,7 @@ export function LayerPanel({
           >
             Reingest all
           </button>
-        </div>
-      </div>
+      </PanelHead>
       {runProgress}
       {runReport}
       {/* §13.2.1 marks a read-only registry on its read responses, so the
