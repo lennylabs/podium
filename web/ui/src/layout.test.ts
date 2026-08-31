@@ -1639,6 +1639,44 @@ describe("restore table columns", () => {
     expect(header.right).toBe("0px");
     expect(header.backgroundColor).toBe("var(--surf2)");
   });
+
+  // The identifier is what the restore decision keys on, and reading the erase
+  // date and the countdown takes a scroll at a laptop viewport. Left in the
+  // scroll the layer column went off the left edge with the columns beneath
+  // it: the header row began at "Source", every row's first cell was blank,
+  // and the reader chose between rows carrying no name. The column is pinned
+  // to the container's left edge on the same terms as the action column at its
+  // right edge, and it paints its own ground and outranks the cells that
+  // follow it because a sticky cell declaring neither is scrolled through.
+  // Spec: §13.10
+  it("pins the layer column to the container's left edge", () => {
+    const { id, headers } = restoreTable();
+    const cell = window.getComputedStyle(id);
+    expect(cell.position).toBe("sticky");
+    expect(cell.left).toBe("0px");
+    expect(cell.zIndex).toBe("1");
+    expect(cell.backgroundColor).toBe("var(--surf)");
+    const header = window.getComputedStyle(headers[0]);
+    expect(header.position).toBe("sticky");
+    expect(header.left).toBe("0px");
+    expect(header.backgroundColor).toBe("var(--surf2)");
+  });
+
+  // The pinned identifier covers the column scrolling under it only while the
+  // table is wider than its container, so the rule that separates the two is
+  // drawn from the container's own width. Drawn at every width it boxed the
+  // identifier off as a column of its own on a table that does not scroll.
+  // The rule is a shadow, because the table collapses its borders and a
+  // collapsed border is painted with the table: it scrolled under the pinned
+  // cell and left the pinned column with no edge at the scroll position it
+  // exists for.
+  // Spec: §13.10
+  it("rules the pinned layer column off only while the table scrolls", () => {
+    expect(ruleText(".restore-table th:first-child, .restore-table td:first-child")).not.toContain(
+      "box-shadow",
+    );
+    expect(containerBlock("table-scroll", "1040px")).toContain("box-shadow: 1px 0 0 var(--b2)");
+  });
 });
 
 // The erase clock. The date, the depleting bar, and the count left are one

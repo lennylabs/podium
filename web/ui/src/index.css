@@ -2478,6 +2478,48 @@ input[type="search"]::-webkit-search-cancel-button {
   overflow-wrap: anywhere;
 }
 
+/* Which layer a row is is what the restore decision keys on, so the identifier
+   column is pinned to the container's left edge on the same terms as the action
+   column at its right edge. The table's floor is wider than the column the
+   surface is laid out in at a laptop viewport, so reading the erase date and
+   the countdown takes a scroll, and the identifier scrolled away with the
+   columns beneath it: the header row began at "Source", every row's first cell
+   was blank, and the reader chose between two rows carrying no name (§13.10).
+   The pinned cells carry their own ground and paint over the cells scrolling
+   beneath them, which is why the fill is declared here and the stacking is
+   raised above the cells that follow them in the row. */
+.restore-table th:first-child,
+.restore-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--surf);
+}
+
+.restore-table thead th:first-child {
+  background-color: var(--surf2);
+}
+
+.restore-table tbody > tr:not(.row-detail):hover > td:first-child {
+  background-color: var(--chip);
+}
+
+/* While the table is wider than its container the identifier column covers the
+   column scrolling under it, so it draws the rule that separates the two. The
+   table's floor is 1040px, so a container at least that wide holds every column
+   and the pin covers nothing; the rule drawn there boxed the identifier off as
+   a column of its own on a table that does not scroll. The rule is a shadow
+   rather than a border: the table collapses its borders, so a collapsed border
+   is painted with the table and scrolls under the pinned cell, which left the
+   pinned column with no visible edge at the one scroll position it exists
+   for. A shadow is painted with the cell and stays on its trailing edge. */
+@container table-scroll (width < 1040px) {
+  .restore-table th:first-child,
+  .restore-table td:first-child {
+    box-shadow: 1px 0 0 var(--b2);
+  }
+}
+
 /* §4.6 visibility is a union of independent axes, so a row carries one marker
    per matching axis and they read as one cell. The markers wrap as a row
    instead of flowing as inline text: a marker that names members is long
