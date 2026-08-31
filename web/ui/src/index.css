@@ -755,8 +755,16 @@ h3 {
   margin: 6px 0 12px;
 }
 
+/* An artifact name is a path segment, so its last token can run unbroken for
+   dozens of characters. Left at the default the heading takes that token as
+   its minimum width, grows past the content column, and is cut at the rail
+   divider with no sign that the name continues. The zero minimum lets the
+   flex item shrink to the column, and the break lets the token wrap inside
+   it, which is what the rail's own name row already does. */
 .page-title h1 {
   margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 /* The sentence a page states under its title. It supports the title rather

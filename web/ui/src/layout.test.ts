@@ -348,6 +348,16 @@ describe("rendered artifact body", () => {
     }
   });
 
+  // An artifact name whose last segment is one unbroken token measures wider
+  // than the content column. Without a zero minimum and a break the heading
+  // grows past the column and is clipped at the rail divider, so the name ends
+  // mid-glyph while the rail's own name row wraps the same string.
+  it("wraps a page title that holds one unbroken token", () => {
+    const title = descendantStyle("page-title", "h1");
+    expect(title.minWidth).toBe("0");
+    expect(title.overflowWrap).toBe("anywhere");
+  });
+
   // The levels step down, so a document that uses several of them reads as a
   // hierarchy rather than as one repeated size.
   it("steps the body heading levels down", () => {
