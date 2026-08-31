@@ -11646,6 +11646,59 @@ describe("the layer write flows", () => {
     expect(region.className).toBe("assistive-only");
   });
 
+  // The retry is the refused press again, so a retry that lands states where
+  // the layer went. Leaving the refusal standing over rows that have moved
+  // tells a reader the opposite of what happened.
+  // Spec: §13.10
+  it("announces the move where the retry of a refused reorder lands", async () => {
+    const stubs: Record<string, Stub> = {
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
+        },
+      },
+      "/v1/layers/reorder": {
+        status: 503,
+        body: {
+          code: "registry.unavailable",
+          message: "the registry did not answer",
+          retryable: true,
+        },
+      },
+    };
+    stubRegistry(stubs);
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.keyDown(
+      screen.getByLabelText(moveHandleLabel("alice-personal")),
+      { key: "ArrowDown" },
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("panel-announcement").textContent).toBe(
+        "alice-personal was not moved: the registry refused the reorder.",
+      );
+    });
+    // The registry takes the second attempt, and its list read answers with
+    // the order the retry landed.
+    stubs["/v1/layers/reorder"] = { body: { layers: [] } };
+    stubs["/v1/layers"] = {
+      body: { layers: [adminLayer(), scratchLayer(), userLayer(), bobLayer()] },
+    };
+    fireEvent.click(
+      within(screen.getByRole("alert")).getByRole("button", {
+        name: "Try again",
+      }),
+    );
+    await waitFor(() => {
+      expect(screen.queryByRole("alert")).toBeNull();
+    });
+    expect(screen.getByTestId("panel-announcement").textContent).toBe(
+      "alice-personal moved to order 3 of 4.",
+    );
+  });
+
   // A step off the end of the block names no move §4.6 would compose, so the
   // key does what a drop across the class boundary does and sends nothing.
   it("sends no reorder where an arrow key steps off the end of the block", async () => {

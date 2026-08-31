@@ -425,7 +425,11 @@ export function LayerPanel({
         // announced alone.
         setOutcome(announced(refusedMoveNote(from)));
         recordRefusal(from, err, () => {
-          issueReorder(from, order);
+          // The retry is the same press again, so it draws and announces the
+          // same move. Issuing the request alone would leave the refusal
+          // standing over a retry that landed, which is the statement the
+          // rows contradict that the arm above exists to prevent.
+          takeMove(from, order);
         });
       },
     );
@@ -439,6 +443,18 @@ export function LayerPanel({
     sendReorder(from, order);
   };
 
+  /** takeMove draws the resulting order, announces it, and issues the
+   * request. The move is drawn and announced from the press rather than from
+   * the response, so a press made while a request is open reports where it
+   * put the row instead of standing on the previous press's confirmation.
+   * Every path that sends a reorder goes through it, so no path leaves the
+   * live region holding the outcome of an earlier press. */
+  const takeMove = (from: string, order: string[]) => {
+    setMoved(reordered(rows, order).map((row) => row.ID));
+    setOutcome(announced(movedNote(rows, order, from)));
+    issueReorder(from, order);
+  };
+
   const commitMove = (from: string, onto: string) => {
     setDragging(null);
     setOver(null);
@@ -446,12 +462,7 @@ export function LayerPanel({
     if (order === null) {
       return;
     }
-    // The move is drawn and announced from the press rather than from the
-    // response, so a press made while a request is open reports where it put
-    // the row instead of standing on the previous press's confirmation.
-    setMoved(reordered(rows, order).map((row) => row.ID));
-    setOutcome(announced(movedNote(rows, order, from)));
-    issueReorder(from, order);
+    takeMove(from, order);
   };
 
   /** moveBy walks one layer a step through its own class block. It is the
