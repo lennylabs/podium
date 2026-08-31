@@ -43,8 +43,8 @@ export function useSecretAcknowledgement() {
 /**
  * SecretReveal draws the credential the registry returned once. A response
  * that carries no secret (a local-path source, or an update with no rotation)
- * carries no reveal, so the component renders the outcome alone and the caller
- * does not have to branch on the response itself.
+ * carries no reveal, so the component renders the outcome and its closing
+ * control alone and the caller does not have to branch on the response itself.
  *
  * The outcome is stated on both branches. The reveal is where naming the layer
  * matters most: the credential is unrecoverable, and a reader who is handed a
@@ -76,11 +76,22 @@ export function SecretReveal({
   children?: ReactNode;
 }) {
   if (!revealsSecret(result)) {
+    // The outcome closes through the same footer control as the reveal below
+    // it. Without one the dialog's only control is the header's close icon,
+    // which carries the dismissal marker, so focus opens on the dialog
+    // container and the reader has to find the corner or guess at Escape.
     return (
-      <div className="modal-body">
-        <Banner tone="accent">{outcome}</Banner>
-        {children}
-      </div>
+      <>
+        <div className="modal-body">
+          <Banner tone="accent">{outcome}</Banner>
+          {children}
+        </div>
+        <div className="modal-foot">
+          <button type="button" className="button primary" onClick={onDone}>
+            Done
+          </button>
+        </div>
+      </>
     );
   }
   return (

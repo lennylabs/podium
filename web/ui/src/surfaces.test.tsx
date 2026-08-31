@@ -10302,6 +10302,34 @@ describe("the layer write flows", () => {
     expect(sent.users).toEqual(["alice@acme.com", "bob@acme.com"]);
   });
 
+  // An outcome that carries no secret closes through the same footer control
+  // as the reveal that does. Left with the header's close icon alone, the
+  // dialog offers no control the focus move can land on, so it opens on its
+  // own container and the way out is a corner icon or a guess at Escape.
+  it("closes the update outcome through a Done control", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "PUT /v1/layers/update": { body: { layer: adminLayer() } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    fireEvent.submit(form);
+    const dialog = await screen.findByRole("dialog", { name: "Layer updated" });
+    const done = within(dialog).getByRole("button", { name: "Done" });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(done);
+    });
+    fireEvent.click(done);
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog", { name: "Layer updated" })).toBe(null);
+    });
+  });
+
   // Every patch carrying a rotation issues a fresh secret, so a second Save
   // changes while the first is open rotates again and replaces the value the
   // reveal is presenting as shown once.
