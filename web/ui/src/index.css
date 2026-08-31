@@ -3333,7 +3333,7 @@ label:has(> input:disabled) {
    no other pixel to give (§13.10). It is set at the button's size for the
    same reason the button is: the width it holds is width the digest loses,
    and at the row's own scale both ends of the digest stay drawn. */
-.rail-hash .copy-confirmation {
+.rail-hash .copy-outcome {
   flex: none;
   font-size: 10.5px;
 }
@@ -4206,17 +4206,36 @@ label:has(> input:disabled) {
   flex-wrap: wrap;
 }
 
-/* The copy confirmation occupies its place before the copy and is revealed by
-   it, so the outcome never reflows the row or the controls under it (§13.10).
-   Hiding it with `display: none` gives the width back to the value beside it,
-   which rewraps on the copy and pushes the acknowledgement and the primary
-   action down between the two clicks the secret reveal asks for. */
-.copy-confirmation {
+/* The copy outcome occupies its place before the press and one of its two
+   reports is revealed by it, so the outcome never reflows the row or the
+   controls under it (§13.10). Hiding a report with `display: none` gives the
+   width back to the value beside it, which rewraps on the press and pushes
+   the acknowledgement and the primary action down between the two clicks the
+   secret reveal asks for. The two reports are stacked in one grid cell so the
+   row reserves the wider of them once and neither press moves anything. */
+.copy-outcome {
+  display: inline-grid;
+}
+
+.copy-outcome > * {
+  grid-area: 1 / 1;
+}
+
+.copy-confirmation,
+.copy-failure {
   visibility: hidden;
 }
 
-.copy-confirmation[data-copied] {
+.copy-confirmation[data-copied],
+.copy-failure[data-failed] {
   visibility: visible;
+}
+
+/* A press that reached no clipboard is a failure and is coloured as one. Set
+   in the quiet tone beside a value the reader believes they have taken, it
+   reads as the confirmation it is reporting the absence of. */
+.copy-failure {
+  color: var(--danger);
 }
 
 .copy-field .copy-value {

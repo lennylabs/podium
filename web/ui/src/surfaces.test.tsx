@@ -202,10 +202,10 @@ function factValue(row: Element): string {
     return "";
   }
   // The copy control's own parts are chrome rather than the value: the
-  // button, the live region, and the confirmation that holds its place on the
-  // row from the first render.
+  // button, the live region, and the outcome reports that hold their place on
+  // the row from the first render.
   for (const control of value.querySelectorAll(
-    'button, [role="status"], .copy-confirmation',
+    'button, [role="status"], .copy-outcome',
   )) {
     control.remove();
   }
@@ -11002,6 +11002,80 @@ describe("the layer write flows", () => {
     expect(screen.getByText("whsec-rotated")).toBeTruthy();
   });
 
+  // `navigator.clipboard` is absent on every non-secure origin, so a registry
+  // served over plain HTTP on any host but localhost reaches this press on
+  // every copy it offers. A control that stayed at rest reads as one that was
+  // never pressed, and the operator ticks the acknowledgement and dismisses a
+  // secret they never took. The press reports the failure and sends the
+  // reader to the value still on the page.
+  it("reports a copy that reached no clipboard on the one-time secret", async () => {
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      value: undefined,
+      configurable: true,
+    });
+    try {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+        "/v1/layers": { body: { layers: [] } },
+        "POST /v1/layers": {
+          body: {
+            layer: {
+              ID: "alice-personal",
+              SourceType: "git",
+              Order: 1,
+              UserDefined: true,
+            },
+            webhook_url:
+              "https://registry.acme.com/v1/ingest/webhook/alice-personal",
+            webhook_secret: "whsec-abc",
+          },
+        },
+      });
+      goTo("#/layers");
+      render(<App />);
+      await screen.findByLabelText("Layer panel");
+      fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+      fireEvent.change(screen.getByLabelText("Layer ID"), {
+        target: { value: "alice-personal" },
+      });
+      fireEvent.submit(screen.getByTestId("register-form"));
+      await screen.findByLabelText("Webhook secret");
+      const secretRow = screen.getByText("whsec-abc").closest(".copy-field");
+      const failure = within(secretRow as HTMLElement).getByText("Not copied");
+      expect(failure.hasAttribute("data-failed")).toBe(false);
+      fireEvent.click(
+        within(secretRow as HTMLElement).getByRole("button", {
+          name: "Copy Webhook secret",
+        }),
+      );
+      await waitFor(() => {
+        expect(failure.hasAttribute("data-failed")).toBe(true);
+      });
+      // The announcement names the value that was missed and says where it
+      // still is, because the reader who cannot see the report is the one
+      // least able to find the secret again.
+      expect(
+        within(secretRow as HTMLElement).getByTestId("copy-announcement")
+          .textContent,
+      ).toBe(
+        "Webhook secret was not copied. The clipboard was not reachable, so select the value on the page and copy it yourself.",
+      );
+      // Nothing claims the copy landed.
+      expect(
+        within(secretRow as HTMLElement)
+          .getByText("Copied")
+          .hasAttribute("data-copied"),
+      ).toBe(false);
+    } finally {
+      if (original) {
+        Object.defineProperty(navigator, "clipboard", original);
+      } else {
+        delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+      }
+    }
+  });
+
   // The secret is served once, so the copy is the one action in the panel a
   // reader cannot repeat. A confirmation that only paints beside the control
   // reaches nobody driving the panel by screen reader, so the outcome is
@@ -11066,11 +11140,12 @@ describe("the layer write flows", () => {
         ).toBe("Webhook secret copied to clipboard.");
       });
       expect(written).toEqual(["whsec-abc"]);
-      // The visible confirmation is not read a second time beside the region.
+      // The visible reports are not read a second time beside the region.
       expect(
         within(secretRow as HTMLElement)
           .getByText("Copied")
-          .getAttribute("aria-hidden"),
+          .closest(".copy-outcome")
+          ?.getAttribute("aria-hidden"),
       ).toBe("true");
     } finally {
       if (original) {

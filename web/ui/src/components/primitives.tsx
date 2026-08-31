@@ -78,12 +78,21 @@ const defaultCopyLabel = 'Copy';
  * page to be selected and the control must not claim a copy that did not
  * occur.
  *
+ * A failure is reported as plainly as a success. `navigator.clipboard` is
+ * absent on every non-secure origin, so a registry served over plain HTTP on
+ * any host but localhost has no clipboard at all, and a control that stayed
+ * at rest on that press is indistinguishable from one that was never
+ * pressed.
+ * The reader who takes silence for a copy is the operator holding the
+ * one-time webhook secret, which the reveal destroys on dismissal, so the
+ * failed press says so and sends them to the value on the page.
+ *
  * The outcome is also carried by a live region, held on the page from the
  * first render and empty until a copy lands. The visible confirmation alone
  * announces nothing, and the one value that cannot be copied twice is the
  * one-time webhook secret the register dialog destroys on dismissal. A caller
  * that knows what the value is names it in `subject`, so the announcement
- * says which of several values on the surface was taken.
+ * says which of several values on the surface was taken or missed.
  *
  * `subject` also names the button itself. The register and rotation reveals
  * put two of these side by side, one carrying the permanent webhook URL and
@@ -104,7 +113,7 @@ export function CopyButton({
   label?: string;
   subject?: string;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [outcome, setOutcome] = useState<CopyOutcome>('rest');
   const accessibleName = subject !== undefined && label === defaultCopyLabel ? `${label} ${subject}` : undefined;
   return (
     <>
@@ -112,31 +121,61 @@ export function CopyButton({
         type="button"
         aria-label={accessibleName}
         onClick={() => {
-          void navigator.clipboard?.writeText(value).then(
+          const clipboard: Clipboard | undefined = navigator.clipboard;
+          if (clipboard === undefined) {
+            setOutcome('failed');
+            return;
+          }
+          void clipboard.writeText(value).then(
             () => {
-              setCopied(true);
+              setOutcome('copied');
             },
             () => {
-              setCopied(false);
+              setOutcome('failed');
             },
           );
         }}
       >
         {label}
       </button>
-      {/* The confirmation holds its place from the first render and is only
-          revealed by the copy. Inserting it on the copy takes width from the
+      {/* Both reports hold their place from the first render and one of them
+          is revealed by the press, stacked so the row reserves the wider of
+          the two once. Inserting a report on the press takes width from the
           value beside it, which rewraps and grows the row, and in the register
           dialog that moves the acknowledgement and the Done button the reader
           clicks next out from under the pointer. */}
-      <span className="quiet copy-confirmation" data-copied={copied ? '' : undefined} aria-hidden="true">
-        Copied
+      <span className="copy-outcome" aria-hidden="true">
+        <span className="quiet copy-confirmation" data-copied={outcome === 'copied' ? '' : undefined}>
+          Copied
+        </span>
+        <span className="copy-failure" data-failed={outcome === 'failed' ? '' : undefined}>
+          Not copied
+        </span>
       </span>
       <span className="assistive-only" role="status" aria-live="polite" data-testid="copy-announcement">
-        {copied ? (subject ? `${subject} copied to clipboard.` : 'Copied to clipboard.') : ''}
+        {announcement(outcome, subject)}
       </span>
     </>
   );
+}
+
+/** CopyOutcome is what the last press of a copy control did: nothing yet,
+ * took the value, or reached no clipboard and left it on the page. */
+type CopyOutcome = 'rest' | 'copied' | 'failed';
+
+/** announcement is the live region's text for an outcome. The failed press
+ * names the value it did not take and says where the value still is, because
+ * the reader who cannot see the control's report is the one least able to
+ * find the value again. */
+function announcement(outcome: CopyOutcome, subject?: string): string {
+  if (outcome === 'copied') {
+    return subject !== undefined ? `${subject} copied to clipboard.` : 'Copied to clipboard.';
+  }
+  if (outcome === 'failed') {
+    const named = subject !== undefined ? `${subject} was not copied.` : 'The value was not copied.';
+    return `${named} The clipboard was not reachable, so select the value on the page and copy it yourself.`;
+  }
+  return '';
 }
 
 /**

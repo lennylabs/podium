@@ -1172,21 +1172,21 @@ describe("provenance content hash", () => {
     expect(descendantStyle("rail-hash-middle", "bdi").direction).toBe("ltr");
   });
 
-  // The row reserves the copy confirmation's place from the first render, so
-  // the digest runs beside it are already collapsed by the time the copy
-  // lands. Shrinkable, the confirmation was cut mid-word against the row's
-  // clip and reported an outcome the reader could not read.
-  it("holds the copy confirmation out of the row's clip", () => {
+  // The row reserves the copy outcome's place from the first render, so the
+  // digest runs beside it are already collapsed by the time the press lands.
+  // Shrinkable, the report was cut mid-word against the row's clip and stated
+  // an outcome the reader could not read.
+  it("holds the copy outcome out of the row's clip", () => {
     const row = document.createElement("dd");
     row.className = "mono rail-hash";
-    const confirmation = document.createElement("span");
-    confirmation.className = "quiet copy-confirmation";
-    row.appendChild(confirmation);
+    const outcome = document.createElement("span");
+    outcome.className = "copy-outcome";
+    row.appendChild(outcome);
     document.body.appendChild(row);
     mounted.push(row);
     const button = document.createElement("button");
     row.appendChild(button);
-    const style = window.getComputedStyle(confirmation);
+    const style = window.getComputedStyle(outcome);
     expect(style.getPropertyValue("flex")).toBe("0 0 auto");
     // The report is set at the button's size, because the width it holds is
     // width the digest gives up.
@@ -2212,6 +2212,40 @@ describe("copy confirmation", () => {
 
   it("reveals the same element once the copy lands", () => {
     expect(declaredFor(confirmation(true), "visibility")).toBe("visible");
+  });
+
+  /** failure attaches a copy failure report, optionally in its failed state,
+   * and returns it. */
+  function failure(failed: boolean): HTMLElement {
+    const element = document.createElement("span");
+    element.className = "copy-failure";
+    if (failed) element.setAttribute("data-failed", "");
+    document.body.appendChild(element);
+    mounted.push(element);
+    return element;
+  }
+
+  // A press that reaches no clipboard reports the same way the copy does, and
+  // from the same reserved place. Drawn only on the failure it would take its
+  // width from the value in the row, which is the reflow the confirmation was
+  // held in place to prevent.
+  it("keeps the failure report's place while hiding it", () => {
+    expect(declaredFor(failure(false), "visibility")).toBe("hidden");
+    expect(declaredFor(failure(false), "display")).toBe("");
+    expect(declaredFor(failure(true), "visibility")).toBe("visible");
+  });
+
+  // The two reports share one grid cell, so the row reserves the wider of
+  // them once and neither press moves anything beside it.
+  it("stacks the two reports in one cell", () => {
+    const outcome = document.createElement("span");
+    outcome.className = "copy-outcome";
+    const child = document.createElement("span");
+    outcome.appendChild(child);
+    document.body.appendChild(outcome);
+    mounted.push(outcome);
+    expect(declaredFor(outcome, "display")).toBe("inline-grid");
+    expect(declaredFor(child, "grid-area")).toBe("1 / 1");
   });
 });
 
