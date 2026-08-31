@@ -123,22 +123,31 @@ export function ArtifactRow({
             {ranked ? artifact.id : artifactLeaf(artifact.id)}
           </a>
           {!ranked && <span className="mono quiet artifact-path">{artifact.id}</span>}
-          {/* A ranked row keeps its type and version inline, beside the
-              identifier its relevance is measured on. A listing row moves
-              them to the column at the row's right edge. */}
-          {ranked && marks}
-          <SensitivityBadge sensitivity={artifact.sensitivity} />
-          {/* The notable source is drawn on its "featured" arm alone. The
-              registry tags every entry the domain's featured: list does not
-              name as "signal" (§4.5.5), whether or not any usage signal
-              contributed to it, so a "surfaced by usage" marker lands on every
-              row of a registry that has served no traffic and states a reason
-              the response does not report. The row therefore distinguishes
-              what the response distinguishes, which is featured against the
-              rest. */}
-          {artifact.source === 'featured' && !titled && <CuratedBadge />}
-          <FoldedFromBadge foldedFrom={artifact.folded_from} />
-          {scored && filled === 0 && <span className="quiet label">matched by meaning</span>}
+          {/* The marks are one group rather than loose siblings of the
+              identifier. An identifier that fills the row otherwise leaves the
+              first mark behind on its line and wraps the rest, which draws one
+              cluster of metadata as two lines and separates the type from its
+              version. Grouped, the cluster wraps as a unit. The group is empty
+              on a row that carries no mark at all, and CSS drops it so the
+              head's gap does not print after the identifier. */}
+          <span className="artifact-row-marks">
+            {/* A ranked row keeps its type and version inline, beside the
+                identifier its relevance is measured on. A listing row moves
+                them to the column at the row's right edge. */}
+            {ranked && marks}
+            <SensitivityBadge sensitivity={artifact.sensitivity} />
+            {/* The notable source is drawn on its "featured" arm alone. The
+                registry tags every entry the domain's featured: list does not
+                name as "signal" (§4.5.5), whether or not any usage signal
+                contributed to it, so a "surfaced by usage" marker lands on
+                every row of a registry that has served no traffic and states a
+                reason the response does not report. The row therefore
+                distinguishes what the response distinguishes, which is
+                featured against the rest. */}
+            {artifact.source === 'featured' && !titled && <CuratedBadge />}
+            <FoldedFromBadge foldedFrom={artifact.folded_from} />
+            {scored && filled === 0 && <span className="quiet label">matched by meaning</span>}
+          </span>
         </div>
         {/* A manifest carries no required description, and the row's aside
             column holds the row's height whether the line is drawn or not, so

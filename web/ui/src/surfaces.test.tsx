@@ -3489,6 +3489,45 @@ describe("search", () => {
     expect(screen.queryByText(/score 8/)).toBeNull();
   });
 
+  // Spec: §13.10 — the row's type, version and sensitivity are one cluster.
+  // Drawn as loose siblings of the identifier they wrap one at a time, so an
+  // identifier that fills the row leaves the type badge on its line and sends
+  // the version and the sensitivity badge to the next one, which prints one
+  // group of metadata as two lines.
+  it("keeps the type, the version and the sensitivity badge in one wrapping group", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts": {
+        body: {
+          query: "kafka",
+          total_matched: 1,
+          results: [
+            {
+              id: "platform/observability/telemetry/pipelines/ingestion/streaming/kafka-consumer-lag",
+              type: "skill",
+              version: "0.1.0",
+              score: 4.2,
+              sensitivity: "low",
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/search/kafka");
+    render(<App />);
+    const link = await screen.findByRole("link", {
+      name: "platform/observability/telemetry/pipelines/ingestion/streaming/kafka-consumer-lag",
+    });
+    const head = link.parentElement as HTMLElement;
+    const marks = head.querySelector(".artifact-row-marks") as HTMLElement;
+    expect(marks).toBeTruthy();
+    // The group is the identifier's own sibling, so the head wraps it whole.
+    expect(marks.parentElement).toBe(head);
+    for (const mark of ["SKILL", "v0.1.0", "sensitivity: low"]) {
+      expect(within(marks).getByText(mark)).toBeTruthy();
+    }
+  });
+
   // Spec: §13.10 — the count names what it counts. Two bare numerals leave a
   // reader to guess what the second one is, and the domain listing states its
   // own count with the noun, so the two surfaces read alike.

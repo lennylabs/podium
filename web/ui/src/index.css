@@ -1321,6 +1321,25 @@ button.version-notice-latest {
   gap: 8px;
 }
 
+/* The type, the version and the sensitivity badge are one cluster, so they
+   move to the next line together when the identifier fills the row. Left as
+   siblings of the identifier they wrap one at a time, which strands the type
+   badge at the end of the identifier's line with its version a line below.
+   The group still wraps internally, so a cluster wider than the row on its
+   own breaks inside itself instead of overflowing. */
+.artifact-row-marks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A row with no marks renders the group empty, and an empty flex item still
+   takes the head's gap after the identifier. */
+.artifact-row-marks:empty {
+  display: none;
+}
+
 /* The identifier names the row and carries the link tone, which is what sets
    it apart from the path and the badges beside it. It is also the row's
    anchor, so it is set a half point above the mono default and at the weight
