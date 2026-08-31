@@ -2226,6 +2226,11 @@ input[type="search"]::-webkit-search-cancel-button {
 .table-scroll {
   position: relative;
   overflow-x: auto;
+  /* The container names itself so the cells inside it can ask how wide it is.
+     A pinned column only covers another column while the table is wider than
+     this container, and the ground and the rule that state the cover are
+     drawn from that answer rather than at every width. */
+  container: table-scroll / inline-size;
 }
 
 .layer-table th:nth-child(2) {
@@ -2258,26 +2263,38 @@ input[type="search"]::-webkit-search-cancel-button {
    below it, and the column that falls outside first is the last one: a 700px
    container against that floor drew the whole actions cell past its right
    edge, which left a pointer with no route to reingest, edit, or unregister a
-   layer and nothing on screen saying the table continued (§13.10). A pinned cell is painted over the cells that
-   scroll beneath it, so it declares the ground its row is drawn on and the
-   rule that separates it from the column it now covers. */
+   layer and nothing on screen saying the table continued (§13.10). */
 .layer-table th:last-child,
 .layer-table td.row-actions {
   position: sticky;
   right: 0;
   z-index: 1;
-  border-left: 1px solid var(--b2);
 }
 
-.layer-table td.row-actions {
-  background-color: var(--surf);
-}
+/* A pinned cell is painted over the cells that scroll beneath it, so while the
+   table is wider than its container the actions column declares the ground its
+   row is drawn on and the rule that separates it from the column it covers.
+   The table's floor is 860px, so a container at least that wide holds every
+   column and the pin covers nothing. Drawn there too, the rule ran the full
+   height of a table that does not scroll and the actions cells sat on their own
+   ground, which boxed the table off one column early; the design draws all rows
+   on one grid separated by horizontal hairlines (§13.10). */
+@container table-scroll (width < 860px) {
+  .layer-table th:last-child,
+  .layer-table td.row-actions {
+    border-left: 1px solid var(--b2);
+  }
 
-/* The pinned cell carries its own ground, so it takes the row's raised tone
-   from here as well. Left on the row alone the tone stopped at the pinned
-   column and the row read as ending one column early. */
-.layer-table tbody > tr:not(.row-detail):hover > td.row-actions {
-  background-color: var(--chip);
+  .layer-table td.row-actions {
+    background-color: var(--surf);
+  }
+
+  /* The pinned cell carries its own ground, so it takes the row's raised tone
+     from here as well. Left on the row alone the tone stopped at the pinned
+     column and the row read as ending one column early. */
+  .layer-table tbody > tr:not(.row-detail):hover > td.row-actions {
+    background-color: var(--chip);
+  }
 }
 
 /* Fixed layout takes the column widths from the header row and already bounds

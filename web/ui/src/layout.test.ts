@@ -1389,16 +1389,36 @@ describe("layer table columns", () => {
     }
   });
 
-  // A pinned cell is painted over the cells that scroll beneath it, so it
-  // carries the ground its row is drawn on. Left transparent the scrolled
-  // source and visibility cells read through the row's controls.
-  it("gives the pinned actions cell its own ground", () => {
-    expect(ruleText(".layer-table td.row-actions")).toContain(
-      "background-color: var(--surf)",
-    );
+  // A pinned cell is painted over the cells that scroll beneath it, so while
+  // the table is wider than its container the actions cell carries the ground
+  // its row is drawn on and the rule that separates it from the column it
+  // covers. Left transparent the scrolled source and visibility cells read
+  // through the row's controls.
+  it("gives the pinned actions cell its own ground while the table scrolls", () => {
+    // The scroll container names itself so the cells inside it can ask how
+    // wide it is.
+    expect(ruleText(".table-scroll")).toContain("container: table-scroll / inline-size");
+    const block = containerBlock("table-scroll", "860px");
+    expect(block).toContain("border-left: 1px solid var(--b2)");
+    expect(block).toContain("background-color: var(--surf)");
+    expect(block).toContain("background-color: var(--chip)");
+  });
+
+  // The table's floor is 860px, so a container at least that wide holds every
+  // column and the pinned cell covers nothing. Drawn there as well, the rule
+  // ran the full height of a table that does not scroll and the actions cells
+  // sat on a ground of their own, so the table read as boxed off one column
+  // early. The design draws all rows on one grid separated by horizontal
+  // hairlines.
+  // Spec: §13.10
+  it("draws no rule or ground on the actions column while the table fits", () => {
+    const pinned = ruleText(".layer-table th:last-child, .layer-table td.row-actions");
+    expect(pinned).toContain("position: sticky");
+    expect(pinned).not.toContain("border-left");
+    expect(ruleText(".layer-table td.row-actions")).toBe("");
     expect(
       ruleText(".layer-table tbody > tr:not(.row-detail):hover > td.row-actions"),
-    ).toContain("background-color: var(--chip)");
+    ).toBe("");
   });
 
   // The panel a row control opens is a full-width cell in a row of its own, so
@@ -1805,6 +1825,27 @@ function ruleText(selector: string): string {
     }
   }
   return "";
+}
+
+/** containerBlock returns the text of the container query block whose prelude
+ * names the given container and condition. jsdom evaluates no container
+ * query, so a case pinning one reads the rules the condition holds. */
+function containerBlock(name: string, condition: string): string {
+  const blocks: string[] = [];
+  for (const sheet of Array.from(document.styleSheets)) {
+    for (const rule of Array.from(sheet.cssRules)) {
+      const text = rule.cssText;
+      const prelude = text.slice(0, text.indexOf("{"));
+      if (
+        prelude.startsWith("@container") &&
+        prelude.includes(name) &&
+        prelude.includes(condition)
+      ) {
+        blocks.push(text);
+      }
+    }
+  }
+  return blocks.join("\n");
 }
 
 /** scrollbarRule returns the text of the rule declaring the given scrollbar
