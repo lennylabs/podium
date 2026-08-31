@@ -686,13 +686,25 @@ function SearchResults({
       </EmptyState>
     );
   }
-  // A lexical score is comparable only inside the result set it came back in,
-  // so the relevance indicator ranks each row against the strongest score
-  // here rather than against a fixed scale.
-  const topScore = results.reduce(
-    (top, artifact) => Math.max(top, artifact.score ?? 0),
-    0,
-  );
+  // The registry returns the results in its final ranked order, and the row's
+  // relevance indicator is drawn from that position. The descriptor's score is
+  // the pre-rerank lexical score, which the §12 usage rerank and the §4.7.3
+  // dependency rerank reorder past without rewriting, so a set can be listed
+  // in an order its own scores contradict.
+  //
+  // The score still says how a row matched. The registry fuses a result found
+  // by vector similarity alone in with a zero score, which omitempty puts on
+  // the wire as an absent one, so such a row carries a label. A set where no
+  // row carries a score is not that case: an empty query returns every match
+  // at score zero, and a registry serving BM25 alone (§13.10
+  // `--no-embeddings`) runs no vector retrieval to fuse in. Labelling those
+  // rows would state a match the deployment never performed, so the label is
+  // drawn only where some row in the set did score.
+  const lexicalSet = results.some((artifact) => (artifact.score ?? 0) > 0);
+  // A set that scored nothing was not ranked by relevance at all: an empty
+  // query is the deterministic §4.7 listing. Passing a count of zero draws no
+  // indicator, so an alphabetical listing is not presented as a ranking.
+  const rankedCount = lexicalSet ? results.length : 0;
   const withheld = body.total_matched - results.length;
   // A result the cap withheld is reachable from the foot of the list. The
   // step asks for one page more, bounded by what is still withheld and by the
@@ -711,12 +723,14 @@ function SearchResults({
         </p>
       )}
       <ul className="artifact-list">
-        {results.map((artifact) => (
+        {results.map((artifact, index) => (
           <ArtifactRow
             key={artifact.id}
             artifact={artifact}
             ranked
-            topScore={topScore}
+            rank={index}
+            resultCount={rankedCount}
+            matchedByMeaning={lexicalSet && (artifact.score ?? 0) <= 0}
           />
         ))}
       </ul>

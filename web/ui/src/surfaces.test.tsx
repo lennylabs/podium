@@ -3585,16 +3585,16 @@ describe("search", () => {
     // The classification names its axis on the row as it does in the viewer.
     expect(screen.getByText("sensitivity: internal")).toBeTruthy();
     expect(screen.getByText("matched by meaning")).toBeTruthy();
-    // Relevance is drawn as bars ranked against the strongest score in the
-    // set, and no row states a score. The vector-only row draws no bars and
-    // still occupies the column, so the rows stay aligned.
+    // Relevance is drawn as bars taken from the row's position in the ranked
+    // set, and no row states a score. The vector-only row is ranked like any
+    // other and draws its position's bars beside its label, because the
+    // absent score says how it matched rather than how strongly.
     const indicators = screen.getAllByTestId("relevance-bars");
     expect(indicators.map((el) => el.getAttribute("data-filled"))).toEqual([
       "4",
-      "1",
-      "0",
+      "3",
+      "2",
     ]);
-    expect(indicators[2].childElementCount).toBe(0);
     // The indicator leads the row instead of trailing the badges. A badge row
     // is only as wide as the values that row happens to carry, so an indicator
     // drawn after it lands on a different x position on every row.
@@ -3608,6 +3608,43 @@ describe("search", () => {
       expect(indicator.closest(".artifact-row-head")).toBeNull();
     }
     expect(screen.queryByText(/score 8/)).toBeNull();
+  });
+
+  // Spec: §13.10 — the search surface lists the results in the order the
+  // registry returned them, and the relevance indicator states that order.
+  // The descriptor's score is the pre-rerank lexical score: the §12 usage
+  // rerank and the §4.7.3 dependency rerank reorder the set afterwards and
+  // leave the score untouched (`pkg/registry/core/core.go`), so a reranked
+  // set reaches the page listed against its own scores. An indicator drawn
+  // from the score puts the weakest bar at the top of the list.
+  it("draws the relevance indicator from the returned order, not the score", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/search_artifacts": {
+        body: {
+          query: "alpha",
+          total_matched: 2,
+          results: [
+            { id: "boundary/other", type: "context", score: 0.18 },
+            { id: "team/alpha", type: "context", score: 0.3 },
+          ],
+        },
+      },
+    });
+    goTo("#/search/alpha");
+    render(<App />);
+    expect(
+      await screen.findByRole("link", { name: "boundary/other" }),
+    ).toBeTruthy();
+    const indicators = screen.getAllByTestId("relevance-bars");
+    expect(indicators.map((el) => el.getAttribute("data-filled"))).toEqual([
+      "4",
+      "2",
+    ]);
+    expect(indicators.map((el) => el.getAttribute("aria-label"))).toEqual([
+      "relevance 4 of 4",
+      "relevance 2 of 4",
+    ]);
   });
 
   // Spec: §13.10 — the row's type, version and sensitivity are one cluster.
