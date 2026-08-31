@@ -105,9 +105,15 @@ function Detail({ value }: { value: string }) {
           than reordered to its end. The run is drawn only where the value
           carries leading directories, because it reserves the width of its
           own ellipsis and an empty run then indented a value such as
-          `artifacts/` by two characters for a prefix it does not have. */}
+          `artifacts/` by two characters for a prefix it does not have. The
+          reserve is capped at the head's own length, because a head shorter
+          than the reserve draws the spare width as a gap before the tail and
+          a path such as `/tmp` then reads as the two values `/` and `tmp`. */}
       {head !== '' && (
-        <span className="source-detail-head">
+        <span
+          className="source-detail-head"
+          style={{ ['--head-reserve' as string]: headReserve(head) }}
+        >
           <bdi>{head}</bdi>
         </span>
       )}
@@ -118,6 +124,14 @@ function Detail({ value }: { value: string }) {
       </span>
     </div>
   );
+}
+
+/** headReserve is the width the head holds against the clip: enough for its
+ * own ellipsis and the separator that closes it, or its whole length where
+ * that is shorter. The head is drawn in a monospaced face, so one character
+ * of the value is one `ch`. */
+export function headReserve(head: string): string {
+  return `${String(Math.min(head.length, 2))}ch`;
 }
 
 /** splitDetail divides a location line into the head the cell may clip and

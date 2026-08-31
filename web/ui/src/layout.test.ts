@@ -1240,10 +1240,13 @@ describe("layer source cell", () => {
   // that width, and the cell stated a bare final directory name that reads as
   // the layer's whole source path. The reserve is the marker and the
   // separator that closes the run, so what the head keeps reads as a
-  // directory prefix.
+  // directory prefix. The component caps the reserve at the head's own
+  // length, because a head shorter than the reserve drew the spare width as a
+  // gap before the tail; two characters is what a head with directories of its
+  // own holds, and the fallback covers a head the component leaves unmeasured.
   it("reserves the head enough width to draw its own ellipsis", () => {
     const head = styled("source-detail-head");
-    expect(head.minWidth).toBe("2ch");
+    expect(head.minWidth).toBe("var(--head-reserve, 2ch)");
   });
 
   // The head keeps the box the flex layout gives it, so eliding it at its end

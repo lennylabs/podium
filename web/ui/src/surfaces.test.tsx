@@ -7750,6 +7750,42 @@ describe("the layer panel", () => {
     );
   });
 
+  // A path of one segment leaves the head holding the leading separator on
+  // its own. The head reserved two characters against the clip whatever it
+  // held, the browser drew the spare character as whitespace between the two
+  // runs, and `/tmp` read as the two values `/` and `tmp`. The reserve is
+  // capped at the head's own length, so a head that fits whole draws flush
+  // against the tail (§13.10).
+  it("draws a single-segment source path with no gap after its separator", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            { ID: "one", SourceType: "local", LocalPath: "/tmp", Order: 1 },
+            {
+              ID: "two",
+              SourceType: "local",
+              LocalPath: "/usr/local",
+              Order: 2,
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const head = (id: string) =>
+      layerRow(id).querySelector(".source-detail-head") as HTMLElement;
+    expect(head("one").textContent).toBe("/");
+    expect(head("one").style.getPropertyValue("--head-reserve")).toBe("1ch");
+    // A head with directories of its own still holds room for the ellipsis
+    // and the separator that closes it.
+    expect(head("two").textContent).toBe("/usr/");
+    expect(head("two").style.getPropertyValue("--head-reserve")).toBe("2ch");
+  });
+
   // The registry stores a git layer's root as it was registered, so a root
   // registered as `artifacts/` arrives carrying its own separator. The cell
   // draws one separator either way: appending unconditionally drew that row

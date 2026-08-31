@@ -2169,8 +2169,11 @@ input[type="search"]::-webkit-search-cancel-button {
      directory prefix rather than as a second ellipsis against the tail's
      (§13.10). The component draws no head at all where the value has no
      leading directories, so this reserves width only where there is a prefix
-     to mark. */
-  min-width: 2ch;
+     to mark, and it caps the reserve at the head's own length: a head of a
+     single character carries no ellipsis at any width, and a two-character
+     reserve was drawn as whitespace between the runs, so a path such as
+     `/tmp` read as the two values `/` and `tmp`. */
+  min-width: var(--head-reserve, 2ch);
   /* The head gives up every pixel of the shrink down to that reserve before
      the tail gives up one: the flex algorithm distributes the negative free
      space in proportion to the scaled shrink factors, so a factor this much
