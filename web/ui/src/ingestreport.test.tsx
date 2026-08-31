@@ -177,9 +177,47 @@ describe('the finished reingest report', () => {
       ],
     });
     const counts = screen.getByLabelText('Ingest counts');
-    fireEvent.click(within(counts).getByRole('button', { name: '2' }));
+    fireEvent.click(within(counts).getByRole('button', { name: 'accepted, 2, open the list' }));
     const listed = within(screen.getByLabelText('Accepted artifacts')).getAllByRole('listitem');
     expect(listed.map((item) => item.textContent)).toEqual(['platform/deploy@2.0.0', 'platform/release@3.1.0']);
+  });
+
+  // The label sits beside the count rather than inside the control, so a
+  // reader who reaches the tile without seeing the label would otherwise hear
+  // a bare numeral. Each itemised count names its category and what activating
+  // it opens.
+  it('names the category and the action on every count that opens a list', () => {
+    report({
+      accepted: 2,
+      idempotent: 1,
+      lint_failures: 3,
+      artifacts: [
+        { id: 'platform/deploy', version: '2.0.0', status: 'accepted' },
+        { id: 'platform/lint', version: '1.4.0', status: 'unchanged' },
+        { id: 'platform/release', version: '3.1.0', status: 'accepted' },
+      ],
+      rejected: [{ artifact_id: 'platform/deploy', code: 'ingest.sensitivity_floor', reason: 'above the floor' }],
+      conflicts: [
+        {
+          artifact_id: 'platform/lint',
+          version: '1.0.0',
+          old_hash: 'sha256:aaa',
+          new_hash: 'sha256:bbb',
+          code: 'ingest.immutable_violation',
+        },
+      ],
+    });
+    const counts = screen.getByLabelText('Ingest counts');
+    expect(
+      within(counts)
+        .getAllByRole('button')
+        .map((button) => button.getAttribute('aria-label')),
+    ).toEqual(['accepted, 2, open the list', 'rejected, 1, open the list', 'conflicts, 1, open the list']);
+    // The name is the whole accessible name, so no tile is reachable as a
+    // bare numeral.
+    for (const numeral of ['2', '1']) {
+      expect(within(counts).queryByRole('button', { name: numeral })).toBeNull();
+    }
   });
 
   // Nothing accepted is nothing to open, and nothing to tone as an outcome

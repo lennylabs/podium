@@ -403,7 +403,13 @@ type StatTone = Tone | 'ok';
  * opens that list; a count it does not carries a caption saying so, because
  * a number that looks like every other number and opens nothing reads as a
  * dead control. A tone is applied only where the count is non-zero, so a
- * clean snapshot is not tinted as though it needed acting on. */
+ * clean snapshot is not tinted as though it needed acting on.
+ *
+ * The label is drawn beside the count rather than inside the control, so the
+ * control names its category in an `aria-label`. Without it the whole
+ * accessible name is a bare numeral, and a reader who cannot see the label
+ * beside it reaches the tile as "1, button" with nothing saying what it counts
+ * or what it opens. */
 function Stat({
   label,
   count,
@@ -421,7 +427,12 @@ function Stat({
   return (
     <div className={`stat stat-${applied}`}>
       {onOpen !== undefined && count > 0 ? (
-        <button type="button" className="stat-count stat-open" onClick={onOpen}>
+        <button
+          type="button"
+          className="stat-count stat-open"
+          aria-label={`${label}, ${String(count)}, open the list`}
+          onClick={onOpen}
+        >
           {count}
         </button>
       ) : (
