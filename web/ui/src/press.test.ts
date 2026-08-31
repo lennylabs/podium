@@ -21,6 +21,29 @@ afterEach(() => {
   }
 });
 
+/** attach mounts an element of the given tag and classes and returns it. */
+function attach(tag: string, className = ""): HTMLElement {
+  const element = document.createElement(tag);
+  element.className = className;
+  document.body.appendChild(element);
+  mounted.push(element);
+  return element;
+}
+
+/** bodyRow mounts a table carrying the given classes and returns one body row,
+ * which is the element a listing table's pointer rule is written against. The
+ * cell classes name the cells the row holds, so a case can build the row that
+ * stands in for an empty table as well as an ordinary one. */
+function bodyRow(tableClass: string, ...cells: string[]): HTMLTableRowElement {
+  const table = attach("table", tableClass) as HTMLTableElement;
+  const body = table.appendChild(document.createElement("tbody"));
+  const row = body.appendChild(document.createElement("tr"));
+  for (const cell of cells) {
+    row.appendChild(document.createElement("td")).className = cell;
+  }
+  return row;
+}
+
 /** button attaches an enabled button carrying the given classes. */
 function button(className = ""): HTMLButtonElement {
   const element = document.createElement("button");
@@ -196,6 +219,72 @@ describe("pointer feedback", () => {
           expect(stated).toContain(":not(:disabled)");
         }
       }
+    }
+  });
+
+  // The design pass fixes one step toward `chip` for a listing entry under
+  // the pointer, so the reader sees which row or card a click will land on.
+  it("raises a listing row and a subdomain card under the pointer", () => {
+    for (const [tag, className] of [
+      ["li", "artifact-row"],
+      ["li", "subdomain"],
+      ["li", "tile"],
+    ] as const) {
+      expect(stateDeclared(attach(tag, className), ":hover", "background")).toBe(
+        "var(--chip)",
+      );
+    }
+  });
+
+  it("raises a listing table's row under the pointer", () => {
+    for (const tableClass of [
+      "data-table layer-table",
+      "data-table restore-table",
+      "data-table artifact-rows",
+    ]) {
+      expect(
+        stateDeclared(bodyRow(tableClass, "mono"), ":hover", "background-color"),
+      ).toBe("var(--chip)");
+    }
+  });
+
+  it("keeps the soft badge's box on a raised entry", () => {
+    const row = attach("li", "artifact-row");
+    const badge = row.appendChild(document.createElement("span"));
+    badge.className = "badge badge-soft";
+    expect(stateDeclared(badge, ":hover", "border-color")).toBe("var(--bd)");
+    const cell = bodyRow("data-table layer-table", "source-col").cells[0];
+    const marker = cell.appendChild(document.createElement("span"));
+    marker.className = "badge badge-soft";
+    expect(stateDeclared(marker, ":hover", "border-color")).toBe("var(--bd)");
+  });
+
+  // A detail panel is a row of its own under the row that opened it, so it
+  // does not light up as a second entry.
+  it("leaves a detail panel where it is", () => {
+    const detail = bodyRow("data-table layer-table", "");
+    detail.className = "row-detail";
+    expect(stateDeclared(detail, ":hover", "background-color")).toBe("");
+  });
+
+  // The message an empty listing carries answers no click, and its cell paints
+  // the table's own ground over the row's, whatever the row is drawn in.
+  it("keeps the empty-listing message on the table's ground", () => {
+    const absent = bodyRow("data-table artifact-rows", "table-empty");
+    const cell = absent.querySelector<HTMLElement>(".table-empty");
+    expect(cell).not.toBeNull();
+    expect(getComputedStyle(cell as HTMLElement).backgroundColor).toBe(
+      "var(--surf)",
+    );
+  });
+
+  // The property table and the resources table list an artifact's own fields,
+  // where a row is not a target.
+  it("leaves a table of fields unraised", () => {
+    for (const tableClass of ["data-table property-table", "data-table"]) {
+      expect(
+        stateDeclared(bodyRow(tableClass, "mono"), ":hover", "background-color"),
+      ).toBe("");
     }
   });
 

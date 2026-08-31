@@ -2467,6 +2467,48 @@ button.action-refused:hover:where(:not(:disabled)) {
   transform: translateY(1px);
 }
 
+/* The entries a listing is made of take the same step. A row in a domain
+   listing or a result set and a card in the subdomain map are targets, and
+   the design pass gives a target under the pointer one step toward `chip`
+   with no transform and no shadow change (§13.10). Without it the only
+   feedback was the identifier's underline, which is drawn on the width of the
+   text rather than of the row, and the card answered with its title underline
+   while its own fill stayed where it was, so a pointer resting between two
+   entries said nothing about which one the click would land on. */
+.artifact-row:hover,
+.subdomain:hover,
+.tile:hover {
+  background: var(--chip);
+}
+
+/* The listing tables take the step on their body rows. The tables that list
+   an entity the reader acts on are named one by one: the layer table and the
+   restore table each carry a row's controls, and the at-scale artifact table
+   is the domain listing at the density where it becomes a table. The property
+   table and the resources table are excluded, because a row there is a field
+   of the artifact above it and nothing about it is a target. A row the
+   controls opened is a full-width panel of its own, so it is excluded too and
+   the pair does not light up as two entries. */
+.layer-table tbody > tr:not(.row-detail):hover,
+.restore-table tbody > tr:not(.row-detail):hover,
+.artifact-rows tbody > tr:hover {
+  background-color: var(--chip);
+}
+
+/* The soft badge is a filled chip whose edge is declared transparent, so on a
+   raised entry its fill and the ground behind it are one colour and the
+   badge's box disappears: the layer table's source marker read as bare text
+   for as long as the pointer was on its row. It takes the edge it already
+   reserves, which puts the box back and moves nothing beside it. */
+.artifact-row:hover .badge-soft,
+.subdomain:hover .badge-soft,
+.tile:hover .badge-soft,
+.layer-table tbody > tr:not(.row-detail):hover .badge-soft,
+.restore-table tbody > tr:not(.row-detail):hover .badge-soft,
+.artifact-rows tbody > tr:hover .badge-soft {
+  border-color: var(--bd);
+}
+
 /* A checkbox carries its meaning in the text beside it, so the label mutes
    with the box it labels. */
 label:has(> input:disabled) {
@@ -4428,9 +4470,13 @@ label:has(> input:disabled) {
 /* An empty at-scale listing keeps its column labels and states the absence in
    the body under them, so the table is what frames the message. The page
    preset's own card therefore stands down here: a bordered card drawn inside
-   a bordered table reads as a second surface nested in the first. */
+   a bordered table reads as a second surface nested in the first. The cell
+   also paints the table's own ground, which is what keeps the listing's
+   pointer step off it: the message names an absence and answers no click, and
+   a cell's own fill is painted over the row's. */
 .data-table td.table-empty {
   padding: 0;
+  background-color: var(--surf);
 }
 
 .data-table td.table-empty .empty-page {
