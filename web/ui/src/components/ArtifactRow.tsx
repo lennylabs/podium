@@ -72,6 +72,7 @@ export function ArtifactRow({
   ranked = false,
   topScore = 0,
   titled = false,
+  dense = false,
 }: {
   artifact: ArtifactDescriptor;
   ranked?: boolean;
@@ -81,6 +82,13 @@ export function ArtifactRow({
    * and a curated marker on every row under it states the head again once per
    * row. */
   titled?: boolean;
+  /** dense marks a row drawn beside the at-scale artifact table, which clips
+   * every description to one line and carries the tags in a column of their
+   * own. A row that keeps the listing treatment beside that table draws the
+   * same kind of entry at roughly twice the height, so the block above the
+   * table pushes it down the page and the surface reads as two listings
+   * rather than one (§13.10). */
+  dense?: boolean;
 }) {
   const version = artifact.version !== undefined && artifact.version !== '' ? artifact.version : '';
   const scored = ranked && topScore > 0;
@@ -98,7 +106,7 @@ export function ArtifactRow({
     </>
   );
   return (
-    <li className="artifact-row">
+    <li className={dense ? 'artifact-row artifact-row-dense' : 'artifact-row'}>
       {/* The relevance column. The indicator leads the row rather than
           trailing the badges, because a badge row is as wide as the values it
           happens to carry: drawn after it, the bars land on a different x
@@ -160,7 +168,7 @@ export function ArtifactRow({
         ) : (
           <p className="artifact-description quiet absent-description">No description.</p>
         )}
-        {artifact.tags !== undefined && artifact.tags.length > 0 && (
+        {!dense && artifact.tags !== undefined && artifact.tags.length > 0 && (
           <ul className="tag-list">
             {artifact.tags.map((tag) => (
               <li key={tag} className="tag">

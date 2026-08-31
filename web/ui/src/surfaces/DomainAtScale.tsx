@@ -460,10 +460,16 @@ export function ArtifactTable({
               the picks between them and the listing read as a table that had
               broken in half. They sit above the header the table below them
               carries, in the row the domain browser and the search surface
-              already draw, and the block's own head is what names them. */}
+              already draw, and the block's own head is what names them.
+
+              The rows are drawn at the table's density. The table under them
+              clips every description to one line and carries the tags in a
+              column, so a pick keeping the listing treatment stood at roughly
+              twice the height of the row for the same artifact below it and
+              pushed the table down the page. */}
           <ul className="artifact-list" aria-label="Curated artifacts">
             {curated.map((artifact) => (
-              <ArtifactRow key={artifact.id} artifact={artifact} titled />
+              <ArtifactRow key={artifact.id} artifact={artifact} titled dense />
             ))}
           </ul>
         </div>

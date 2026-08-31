@@ -1587,6 +1587,15 @@ button.version-notice-latest {
   overflow: hidden;
 }
 
+/* The one-line clip a row drawn beside the at-scale artifact table reads at.
+   That table clips every description to one line, so a three-line description
+   above it draws the same kind of entry at a different density and moves the
+   table down the page by the difference. */
+.artifact-row-dense .artifact-description {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
 .tag-list {
   display: flex;
   flex-wrap: wrap;

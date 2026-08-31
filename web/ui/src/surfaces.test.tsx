@@ -16376,6 +16376,69 @@ describe("the trimmed listing", () => {
     // marker of its own: drawn there it states the head again on every row.
     expect(within(pick[0]).queryByText("★ CURATED")).toBeNull();
   });
+
+  // Spec: §13.10 — the picks and the rest of the listing are the same kind of
+  // entry on one screen, so they are drawn at one density. The table clips
+  // every description to one line and carries the tags in a column of its
+  // own; a pick that kept the listing treatment wrapped its description over
+  // three lines and stacked a row of tag pills under it, which drew the pick
+  // at roughly twice the height of the row for the same artifact below it and
+  // pushed the table down the page once per pick.
+  it("draws the picks at the density of the table beneath them", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ public_mode: true }) },
+      "/v1/load_domain": {
+        body: {
+          path: "platform",
+          subdomains: Array.from({ length: 24 }, (_, i) => ({
+            path: `platform/d${String(i)}`,
+            name: `d${String(i)}`,
+          })),
+          notable: [
+            {
+              id: "platform/deploy",
+              type: "skill",
+              version: "2.0.0",
+              description: "Ship a release.",
+              tags: ["scale", "direct"],
+              source: "featured",
+            },
+            {
+              id: "platform/lint",
+              type: "rule",
+              version: "1.0.0",
+              description: "Lint a manifest.",
+              tags: ["scale"],
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/domain/platform");
+    render(<App />);
+    const browser = await screen.findByLabelText("Domain browser");
+
+    const picks = within(browser).getByRole("list", {
+      name: "Curated artifacts",
+    });
+    // The block's own rows, rather than every list item under it: a row that
+    // draws its tags draws them as list items of its own.
+    const pick = [...picks.children];
+    expect(pick).toHaveLength(1);
+
+    // The description holds one line, the way the description column of the
+    // table below does.
+    const line = within(pick[0] as HTMLElement).getByText("Ship a release.");
+    expect(window.getComputedStyle(line).webkitLineClamp).toBe("1");
+
+    // The tags stand in the table's own column. Repeated as pills under the
+    // description, they add a row to the pick that no row of the table
+    // carries.
+    expect(within(pick[0] as HTMLElement).queryByText("scale")).toBeNull();
+    expect(within(pick[0] as HTMLElement).queryByText("direct")).toBeNull();
+    const table = within(browser).getByRole("table");
+    expect(within(table).getByText("scale")).toBeTruthy();
+  });
 });
 
 describe("the anonymous framing", () => {
