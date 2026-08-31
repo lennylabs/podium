@@ -61,6 +61,10 @@ func TestEnrichEnvelope_RetryableByCode(t *testing.T) {
 		"registry.not_found":              false,
 		"registry.invalid_argument":       false,
 		"auth.forbidden":                  false,
+		// §6.3.4: both browser-flow codes are permanent for the request that
+		// took them.
+		"auth.csrf_invalid":    false,
+		"auth.exchange_failed": false,
 	}
 	for code, want := range cases {
 		e := &ErrorResponse{Code: code, Message: "x"}
@@ -83,6 +87,26 @@ func TestEnrichEnvelope_SuggestedActionSpecExample(t *testing.T) {
 	}
 }
 
+// Spec: §6.10 — auth.token_expired and auth.untrusted_token carry the
+// verbatim remediation the amended entries state. Each names both accepted
+// credential locations, because the registry verifies the same token whether
+// a gateway forwarded it in the configured token header or the registry
+// obtained it through the §6.3.4 exchange.
+func TestEnrichEnvelope_SuggestedActionCredentialLocations(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"auth.token_expired":   "Refresh the token. For 'injected-session-token' the runtime reissues it; for 'oidc-jwt' a gateway forwards a new token, and a browser session is renewed by signing in again.",
+		"auth.untrusted_token": "Verify the token reaching the registry comes from the issuer and audience configured for 'oidc-jwt' (PODIUM_OAUTH_ISSUER, PODIUM_OAUTH_AUDIENCE). A gateway-forwarded token is corrected at the gateway; a browser session is re-established by signing in again.",
+	}
+	for code, want := range cases {
+		e := &ErrorResponse{Code: code, Message: "x"}
+		enrichEnvelope(e)
+		if e.SuggestedAction != want {
+			t.Errorf("code %q: suggested_action = %q, want %q", code, e.SuggestedAction, want)
+		}
+	}
+}
+
 // spec: SS 6.10 — the quota and unavailable codes all carry a
 // non-empty operator remediation; an unmapped code carries none and is
 // left untouched.
@@ -94,6 +118,12 @@ func TestEnrichEnvelope_SuggestedActionCoverage(t *testing.T) {
 		"quota.materialize_rate_exceeded",
 		"quota.layer_count_exceeded",
 		"quota.storage_exceeded",
+		// §6.3.4 / §6.10: the browser-flow codes, and the two oidc-jwt codes
+		// whose remediation names both accepted credential locations.
+		"auth.csrf_invalid",
+		"auth.exchange_failed",
+		"auth.token_expired",
+		"auth.untrusted_token",
 	}
 	for _, code := range withHint {
 		e := &ErrorResponse{Code: code, Message: "x"}

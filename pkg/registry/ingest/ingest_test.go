@@ -3,10 +3,12 @@ package ingest_test
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
@@ -121,6 +123,53 @@ func TestIngest_IdempotentOnSameContent(t *testing.T) {
 				t.Errorf("run #%d: Accepted=%d Idempotent=%d", i, res.Accepted, res.Idempotent)
 			}
 		}
+	}
+}
+
+// Spec: §7.3.1 — Ingested lists every pair present in the layer after the
+// snapshot, and the two outcomes it covers are counted separately, so each
+// pair records whether this run newly stored it. A reader that itemises the
+// accepted count reads that flag.
+func TestIngest_IngestedMarksTheNewlyAcceptedPairs(t *testing.T) {
+	t.Parallel()
+	st := newStore(t)
+	first := fstest.MapFS{
+		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Glossary"))},
+	}
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    first,
+	}); err != nil {
+		t.Fatalf("first ingest: %v", err)
+	}
+	second := fstest.MapFS{
+		"company-glossary/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Glossary"))},
+		"deploy-runbook/ARTIFACT.md":   &fstest.MapFile{Data: []byte(contextArtifact("Runbook"))},
+	}
+	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    second,
+	})
+	if err != nil {
+		t.Fatalf("second ingest: %v", err)
+	}
+	if res.Accepted != 1 || res.Idempotent != 1 {
+		t.Fatalf("Accepted=%d Idempotent=%d, want 1 and 1", res.Accepted, res.Idempotent)
+	}
+	accepted := map[string]bool{}
+	for _, a := range res.Ingested {
+		accepted[a.ArtifactID] = a.Accepted
+	}
+	if len(accepted) != 2 {
+		t.Fatalf("Ingested = %+v, want both pairs", res.Ingested)
+	}
+	if !accepted["deploy-runbook"] {
+		t.Errorf("deploy-runbook: Accepted=false, want true (this run stored it)")
+	}
+	if accepted["company-glossary"] {
+		t.Errorf("company-glossary: Accepted=true, want false (the content was unchanged)")
 	}
 }
 
@@ -493,5 +542,47 @@ func TestIngest_NestedArtifactsIngestedSeparately(t *testing.T) {
 		if _, err := st.GetManifest(context.Background(), "tenant-1", id, "1.0.0"); err != nil {
 			t.Errorf("GetManifest(%q): %v", id, err)
 		}
+	}
+}
+
+// denyFS wraps a MapFS and refuses to read one directory, standing in for a
+// snapshot directory the process cannot open (an unreadable mount, a
+// permission-denied path under a local layer root).
+type denyFS struct {
+	fstest.MapFS
+	deny string
+}
+
+func (d denyFS) ReadDir(name string) ([]fs.DirEntry, error) {
+	if name == d.deny {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: fs.ErrPermission}
+	}
+	return d.MapFS.ReadDir(name)
+}
+
+// Spec: §7.3.1 — a snapshot directory that cannot be read is the layer's
+// source being unreachable, so the pipeline returns the source-unreachable
+// sentinel and the handler codes it ingest.source_unreachable rather than
+// letting it fall through unclassified to registry.unavailable.
+// Matrix: §6.10 (ingest.source_unreachable)
+func TestIngest_UnreadableSnapshotDirectoryIsSourceUnreachable(t *testing.T) {
+	t.Parallel()
+	fsys := denyFS{
+		MapFS: fstest.MapFS{
+			"finance/ap/pay-invoice/ARTIFACT.md": &fstest.MapFile{Data: []byte(contextArtifact("Pay an invoice"))},
+			"locked/keep":                        &fstest.MapFile{Data: []byte("x")},
+		},
+		deny: "locked",
+	}
+	_, err := ingest.Ingest(context.Background(), newStore(t), ingest.Request{
+		TenantID: "tenant-1",
+		LayerID:  "team-shared",
+		Files:    fsys,
+	})
+	if err == nil {
+		t.Fatalf("Ingest accepted a snapshot with an unreadable directory")
+	}
+	if !errors.Is(err, source.ErrSourceUnreachable) {
+		t.Errorf("error %q is not source.ErrSourceUnreachable", err)
 	}
 }

@@ -141,6 +141,14 @@ rm -rf "$WORK"
 | S44 | The web UI on a directly reachable `oidc-jwt` registry | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S45 | The runbook's read-only write set matches what the registry rejects | standard | none | pgvector | severable Postgres, S3 |
 | S46 | Install the Helm chart into a cluster | standard (Kubernetes) | none | none | kind, helm, kubectl, Docker |
+| S47 | Sign in through the UI and read a layer an anonymous caller does not get | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S48 | Register a layer through the panel and read the one-time secret | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S49 | Unregister a layer through the panel's confirmation | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S50 | A non-owner is refused on a destructive operation | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S51 | Browse the domain hierarchy through the web UI | standalone | none | none | none |
+| S52 | Search through the web UI with the type, scope, and tag filters | standalone | none | none | none |
+| S53 | Read an artifact through the viewer | standalone | none | none | none |
+| S54 | Author on disk, reingest from the panel, and materialize | standalone | none | none | none |
 
 ---
 
@@ -2479,9 +2487,14 @@ through verification to resolved visibility.
   claim on the access token. When no farm is available, skip that part and
   record the skip and the reason.
 
-A Podium client behind an `oidc-jwt` registry sends no credential of its own
-(§6.3.3), so both parts obtain the access token from the IdP directly. The steps
-implement a raw device-code exchange with `curl`.
+A Podium client behind a gateway that has already authenticated the caller sends
+no credential of its own (§6.3.3). This registry is directly reachable and
+enables no browser flow, so both parts obtain the access token from the IdP
+themselves and present it in the configured token header. A CLI, an SDK, or
+another API client obtains that token through the device-code flow, and on a
+registry that enables the §6.3.4 browser flow a browser obtains it through the
+registry's own code exchange. The steps implement a raw device-code exchange
+with `curl`.
 
 **Steps (baseline part).**
 
@@ -2639,7 +2652,7 @@ implement a raw device-code exchange with `curl`.
   and whose group claim carries the test user's membership. When that claim
   carries a name other than `groups`, the name is the value step 7 exports in
   `PODIUM_OAUTH_GROUPS_CLAIM`.
-- The startup log carries `identity provider: oidc-jwt (verifying forwarded
+- The startup log carries `identity provider: oidc-jwt (verifying caller
   tokens against accepted issuers ...)` naming the configured issuer. An IdP
   whose discovery document publishes no `access_token_issuer`, or publishes one
   equal to the configured issuer, leaves the configured issuer as the sole
@@ -2654,7 +2667,9 @@ implement a raw device-code exchange with `curl`.
   the Prerequisites has no `eng-internal` layer and records the skip in place of
   this line.
 - `anon handbook` returns `200` and `anon deploy` returns `404`: a request
-  carrying no token is anonymous and sees public visibility only.
+  carrying no bearer credential in the configured token header is anonymous and
+  sees public visibility only. This registry enables no browser flow, so that
+  header is the only location it accepts a credential in.
 - The tampered request returns `401` with `auth.untrusted_token` and
   `details.token_iss` naming the token's issuer.
 
@@ -3892,20 +3907,27 @@ names, which is what the defect was about; the placeholder hostname is not.
 ## S44: The web UI on a directly reachable `oidc-jwt` registry
 
 **Goal.** Validate that the web UI served by a directly reachable `oidc-jwt`
-registry runs no acquisition flow of its own, resolves identity from what the
-request carries, and therefore shows a browser only the public artifacts.
+registry running the §6.3.4 browser flow resolves identity from what the request
+carries: a browser that presents no credential reads the public artifacts, sees
+neither restricted layer, and is offered the sign-in control the flow's
+enablement puts on the page.
 
-**Covers.** The §13.11 web-UI authentication paragraph, `oidc-jwt` on a
-directly reachable registry (§6.3.3), and §4.6 visibility for an anonymous
-caller.
+**Covers.** The §13.10 web-UI authentication paragraph, `oidc-jwt` on a
+directly reachable registry (§6.3.3), the §6.3.4 browser-flow enablement guard,
+the §7.3.4 posture read, and §4.6 visibility for an anonymous caller.
 
-**Why by hand.** The assertion is what a person sees in the artifact list. No
-Go test reads a browser rendering, which is why the previous §13.11 text could
-claim the UI ran a device-code flow with an in-browser verification handoff and
-no test contradicted it.
+**Why by hand.** The assertion is what a person sees in the artifact list and in
+the page's authentication control. No Go test reads a browser rendering, which is
+why the previous §13.10 text could claim the UI ran a device-code flow with an
+in-browser verification handoff and no test contradicted it.
 
-**Prerequisites.** A local Keycloak serving an `https` issuer the host trusts,
-and one access token it issued for the negative control in step 5.
+**This is the stack the browser-flow scenarios run on.** S47 through S50 take
+their prerequisites and steps 1 to 4 from here and then sign in, so a change to
+the Keycloak registration or the serve invocation below reaches each of them.
+
+**Prerequisites.** A local Keycloak serving an `https` issuer the host trusts, a
+confidential client registered for the authorization-code flow, and one access
+token it issued for the negative control in step 5.
 
 The registry fetches the OIDC discovery document and the JWKS at startup, so
 the issuer has to be reachable and its certificate has to verify. Two failures
@@ -3964,26 +3986,68 @@ misconfigured:
    `curl` that needs `-k` means the trust store step did not take, and the
    registry will refuse the issuer for the same reason.
 
-4. Register a client that issues a full access token. The built-in `admin-cli`
-   client is not usable here: Keycloak 26 issues it a *lightweight* access token
-   carrying only `exp, iat, jti, iss, typ, azp, sid, scope`, with no `sub` and no
-   `aud` and a sixty-second lifetime. `pkg/identity/oidc_jwt.go` requires an
-   audience and a subject, so that token cannot authenticate at all, and it would
-   expire between here and step 5.
+4. Register a confidential client that issues a full access token, completes the
+   authorization-code flow against the registry's callback, and grants the scope
+   that carries the group claim. The built-in `admin-cli` client is not usable
+   here: Keycloak 26 issues it a *lightweight* access token carrying only
+   `exp, iat, jti, iss, typ, azp, sid, scope`, with no `sub` and no `aud` and a
+   sixty-second lifetime. `pkg/identity/oidc_jwt.go` requires an audience and a
+   subject, so that token cannot authenticate at all, and it would expire between
+   here and step 5.
 
    ```bash
    KC="docker exec kc-podium /opt/keycloak/bin/kcadm.sh"
    $KC config credentials --server http://localhost:8080 --realm master --user admin --password admin
    $KC create clients -r master \
-     -s clientId=podium -s enabled=true -s publicClient=true \
-     -s directAccessGrantsEnabled=true -s standardFlowEnabled=false \
+     -s clientId=podium -s enabled=true -s publicClient=false \
+     -s directAccessGrantsEnabled=true -s standardFlowEnabled=true \
+     -s 'redirectUris=["http://127.0.0.1:8153/v1/ui/auth/callback"]' \
      -s 'attributes."client.use.lightweight.access.token.enabled"=false' \
      -s 'attributes."access.token.lifespan"=1800'
    CID=$($KC get clients -r master -q clientId=podium --fields id --format csv --noquotes)
    $KC create clients/$CID/protocol-mappers/models -r master \
      -s name=podium-aud -s protocol=openid-connect -s protocolMapper=oidc-audience-mapper \
      -s 'config."included.client.audience"=podium' -s 'config."access.token.claim"=true'
+   export KC_SECRET="$($KC get clients/$CID/client-secret -r master --fields value --format csv --noquotes)"
+   echo "client secret length: ${#KC_SECRET}"
    ```
+
+   **Expect.** A non-zero secret length. `publicClient=false` is what makes
+   Keycloak generate one, and prerequisite 5, step 3, and every scenario that
+   signs in read it. `standardFlowEnabled=true` and the redirect URI are what let
+   the browser complete the authorization-code flow against the callback path the
+   registry serves on `http://127.0.0.1:8153`. `directAccessGrantsEnabled=true`
+   stays because step 5's password grant still needs it.
+
+   Register the client scope that carries the group claim, create the realm group
+   the group-scoped layer is keyed on, and put the `admin` user in it.
+
+   ```bash
+   $KC create client-scopes -r master -s name=groups -s protocol=openid-connect \
+     -s 'attributes."include.in.token.scope"=true' || true
+   SCID=$($KC get client-scopes -r master --fields id,name --format csv --noquotes | grep ',groups$' | cut -d, -f1)
+   $KC create client-scopes/$SCID/protocol-mappers/models -r master \
+     -s name=groups -s protocol=openid-connect -s protocolMapper=oidc-group-membership-mapper \
+     -s 'config."claim.name"=groups' -s 'config."full.path"=false' \
+     -s 'config."access.token.claim"=true' -s 'config."id.token.claim"=true' || true
+   $KC update clients/$CID/optional-client-scopes/$SCID -r master
+   $KC create groups -r master -s name=podium-comp
+   GID=$($KC get groups -r master -q search=podium-comp --fields id --format csv --noquotes)
+   ADMIN_UID=$($KC get users -r master -q username=admin --fields id --format csv --noquotes)
+   $KC update users/$ADMIN_UID/groups/$GID -r master \
+     -s realm=master -s userId=$ADMIN_UID -s groupId=$GID -n
+   ```
+
+   **Expect.** The scope, the mapper, the group, and the membership are created,
+   and the scope is assigned to the `podium` client as an optional client scope.
+   A Keycloak version that already ships a `groups` client scope reports the
+   creation as a conflict, which the `|| true` absorbs; the assignment is what
+   that version needs. Without the assignment the client grants no such scope:
+   Keycloak validates a requested scope against the client's default and optional
+   client scopes and answers `invalid_scope`, so a sign-in would stop at the
+   authorization endpoint on the scope set the browser flow sends by default.
+   `full.path=false` makes the claim value `podium-comp` rather than a group
+   path, which is the value step 3's group mapping reads.
 
    `kcadm` targets `http://localhost:8080` from inside the container on purpose.
    `--server https://localhost:8443` fails with "Console is not active, but
@@ -3998,7 +4062,7 @@ misconfigured:
    ```bash
    export ISSUER="https://127.0.0.1:8443/realms/master"
    export TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
-     -d grant_type=password -d client_id=podium \
+     -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
      -d username=admin -d password=admin \
      | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
    python3 - <<'PY'
@@ -4013,6 +4077,11 @@ misconfigured:
    **Expect.** A `sub` value, and an `aud` that includes `podium`. An empty `sub`
    or a missing `aud` means the client registration in prerequisite 4 did not
    take, and steps 5 to 7 cannot run.
+
+   `client_secret` is required because prerequisite 4 registers a confidential
+   client, and Keycloak requires client authentication on the token endpoint for
+   one. A request without it answers `invalid_client`, `curl -fsS` exits
+   non-zero, and `TOKEN` is left empty before the registry is ever started.
 
    `aud` is a JSON array, typically `['podium', 'master-realm', 'account']`. Take
    the `podium` element alone for the audience the registry is configured with:
@@ -4032,15 +4101,18 @@ misconfigured:
    export AUD="podium"                                  # the podium element of the aud array
    export SUBJECT="<the sub value prerequisite 5 printed>"
    export RESTRICTED_ID="salary-bands"                  # used by steps 5 and 7
+   export GROUP_ARTIFACT_ID="comp-policy"               # used by S47
    ```
 
-2. Build a registry with one public layer and one restricted layer, giving the
-   restricted artifact a name that cannot be confused with the public one.
+2. Build a registry with one public layer, one user-scoped layer, and one
+   group-scoped layer, giving each restricted artifact a name that cannot be
+   confused with the public one.
 
    ```bash
-   mkdir -p "$WORK/pub/handbook" "$WORK/priv/salary-bands"
+   mkdir -p "$WORK/pub/handbook" "$WORK/priv/salary-bands" "$WORK/comp/comp-policy"
    podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
    podium artifact scaffold --type context --description "Salary bands" --force "$WORK/priv/salary-bands"
+   podium artifact scaffold --type context --description "Compensation policy" --force "$WORK/comp/comp-policy"
    cat > "$WORK/registry.yaml" <<YAML
    registry:
      identity_provider:
@@ -4054,6 +4126,9 @@ misconfigured:
        - id: private-comp
          source: { local: { path: $WORK/priv } }
          visibility: { users: [$SUBJECT] }
+       - id: comp-readers-policy
+         source: { local: { path: $WORK/comp } }
+         visibility: { groups: [comp-readers] }
    YAML
    ```
 
@@ -4063,29 +4138,67 @@ misconfigured:
    the very token step 5 uses, and step 5 then fails for a reason unrelated to
    what this scenario tests.
 
-3. Start the registry with the UI enabled and record the PID.
+   The `groups:` value is the layer group name rather than the claim value the
+   IdP emits. Step 3 maps the claim value `podium-comp` onto `comp-readers`, so
+   the group a signed-in token carries reaches a visibility decision. This layer
+   is what S47 reads after signing in, and it is invisible to an anonymous
+   caller for the same reason `private-comp` is.
+
+3. Start the registry with the UI and the §6.3.4 browser flow enabled, and
+   record the PID. The acquisition values are environment-only, because one of
+   them is a client credential and a credential passed on the command line is
+   readable from the process table.
 
    ```bash
+   export PODIUM_WEB_UI_AUTH=true
+   export PODIUM_WEB_UI_OAUTH_CLIENT_ID=podium
+   export PODIUM_WEB_UI_OAUTH_CLIENT_SECRET="$KC_SECRET"
+   export PODIUM_WEB_UI_REDIRECT_URI="http://127.0.0.1:8153/v1/ui/auth/callback"
+   export PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT="$ISSUER/protocol/openid-connect/auth"
+   export PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT="$ISSUER/protocol/openid-connect/token"
+   export PODIUM_WEB_UI_AUTH_TRANSACTION_TTL=10m
+   export PODIUM_IDP_GROUP_MAPPING=podium-comp=comp-readers
    podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" \
      --web-ui --bind 127.0.0.1:8153 > "$WORK/srv.log" 2>&1 &
    export SRV=$!
    sleep 3
    ```
 
-4. Confirm the identity provider is switched on before asserting what the UI
-   hides.
+   `PODIUM_WEB_UI_OAUTH_SCOPES` is left unset, so the redirect sends the default
+   set `openid profile email groups`, which is the set prerequisite 4's client
+   now grants.
+
+   No audience key is set here. Step 2's `registry.yaml` carries
+   `identity_provider.audience`, and the sign-in redirect asks the IdP for the
+   registry's resolved audience, so the token the cookie carries verifies under
+   §6.3.3 like a token any other consumer presents. This stack is the
+   operator-facing check on that rule: a redirect built by reading
+   `PODIUM_OAUTH_AUDIENCE` would carry an empty audience here, and S47's catalog
+   read after signing in would fail with `401` `auth.untrusted_token`.
+
+   The bind stays `127.0.0.1:8153`, which is a loopback `http` origin and is the
+   origin prerequisite 4's redirect URI names. A registry started with the
+   browser flow enabled and any acquisition value missing exits before listening
+   with `config.web_ui_auth_unconfigured`, so a failure here is read from
+   `$WORK/srv.log` rather than from the browser.
+
+4. Confirm the identity provider is switched on, and that the browser flow is
+   mounted, before asserting what the UI hides.
 
    ```bash
    curl -fsS http://127.0.0.1:8153/healthz; echo
    grep 'identity provider' "$WORK/srv.log"
+   grep 'browser sign-in' "$WORK/srv.log"
    PODIUM_CONFIG_FILE="$WORK/registry.yaml" podium config show --server | grep '^identity_provider '
    ```
 
    **Expect.** `/healthz` reports `{"mode":"ready"}` rather than `mode: public`,
-   the log line reads `identity provider: oidc-jwt (verifying forwarded tokens
-   against accepted issuers $ISSUER)`, and `config show` prints `oidc-jwt`. A
-   registry in public mode shows every artifact to everyone and would make step 6
-   pass for the wrong reason.
+   the log line reads `identity provider: oidc-jwt (verifying caller tokens
+   against accepted issuers $ISSUER)`, a second line reads `web UI browser
+   sign-in mounted at /v1/ui/auth/sign-in (§6.3.4)`, and `config show` prints
+   `oidc-jwt`. A registry in public mode shows every artifact to everyone and
+   would make step 6 pass for the wrong reason. A missing sign-in line means the
+   browser flow is off, and S47 through S50 cannot run.
 
    `config show` takes its path from `PODIUM_CONFIG_FILE` and defines no
    `--config` flag, which `serve` does; passing `--config` exits 1 with `flag
@@ -4107,22 +4220,28 @@ misconfigured:
    scenario passes on nothing. This step is also what gives step 7 its meaning.
 
 6. Load the UI with no credential: no gateway in front, no header, no prior
-   `podium login`. Open `http://127.0.0.1:8153/ui/` in a browser to see what a
-   person sees, and issue the same call the page makes so the result is
-   machine-checkable. The SPA fetches `/v1/load_domain` on load
-   (`web/app.js:37`, through the bare `fetch` at `web/app.js:12`).
+   `podium login`, and no session cookie. Open `http://127.0.0.1:8153/ui/` in a
+   private browser window to see what a person sees, and issue the reads the
+   scenario turns on directly, which is the machine-checkable path. On load the
+   React bundle issues the posture read and the catalog reads it draws the page
+   from, each carrying whatever the browser attaches and nothing else, which
+   here is nothing.
 
    ```bash
    curl -sS "http://127.0.0.1:8153/v1/load_domain?path="; echo
    curl -sS "http://127.0.0.1:8153/v1/search_artifacts?query=salary"; echo
    ```
 
-   **Expect.** HTTP 200. The `notable` list carries the public artifact and not
-   the restricted one, and the search for the restricted artifact's name reports
-   `total_matched: 0`. In the browser the page lists the public artifact only,
-   reports no authentication error, and shows no login prompt, verification URL,
-   or device code, because from the registry's side nothing failed: the request
-   carried no bearer value and resolved as anonymous.
+   **Expect.** HTTP 200. The `notable` list carries the public artifact and
+   neither restricted one, and the search for the restricted artifact's name
+   reports `total_matched: 0`. In the browser the page renders the same catalog
+   scope, reports no authentication error, and shows a sign-in control: this
+   deployment enables the browser flow and this caller resolves no subject,
+   which is the case the §13.10 sign-in control rule renders sign-in for. The
+   page shows no verification URL and no device code, because the registry runs
+   no device-code flow for a browser, and it shows neither the account cluster
+   nor the sign-out control inside it, because the same rule renders those for a
+   caller who resolves a subject.
 
 7. Confirm the restricted artifact is invisible rather than merely absent from a
    list, by requesting it directly with no credential.
@@ -4144,16 +4263,12 @@ misconfigured:
    meaningful is step 5, where the same id returned the artifact in full to the
    authenticated caller. Run step 5 first and compare the two.
 
-**Known gap this records.** A directly reachable UI showing only public
-artifacts is current behavior rather than a defect. The shipped SPA attaches no
-credential: every network call it makes goes through one bare same-origin
-`fetch` with no headers (`web/app.js:12`), used by its three call sites,
-`/v1/load_domain`, `/v1/search_artifacts`, and `/v1/load_artifact`.
-In-browser authentication is deferred to its own proposal, and this scenario
-pins what the spec now says so a later change to the UI has to move that text
-with it.
-
-**Cleanup.** Stop the server by its recorded PID and remove `$WORK`.
+**Cleanup.** The teardown is conditional on whether the run continues. S47
+through S50 sign in against this stack, so when any of them is being run, leave
+the registry running, keep `$WORK`, and keep Keycloak and `$KCERT` in place, and
+let the last of them perform the teardown. When none of them is being run, stop
+the server by its recorded PID, run `rm -rf "$WORK"`, and remove the IdP with
+`docker rm -f kc-podium` and `rm -rf "$KCERT"`.
 
 ---
 
@@ -4172,7 +4287,11 @@ works from its list. The value is that the list matches the running registry.
 Until the §13.2.1 correction the list named `podium login`-driven token issuance
 against a session table, sending a reader looking for a credential-issuing
 endpoint that has never existed, and no test compared the list to the routes the
-registry registers.
+registry registers. A registry that enables the §6.3.4 browser flow does serve
+the §7.3.4 authentication routes, and none of them joins the write set: each is
+served unchanged in read-only mode, none mints a registry credential, and none
+writes registry state. This stack enables neither the web UI nor the browser
+flow, so it registers none of them, which is what step 4 confirms.
 
 **Prerequisites.** The S21 standard-deployment stack with a severable Postgres
 primary. When it is unavailable, skip and record the skip.
@@ -4199,8 +4318,10 @@ them into S21 permanently if its setup already reaches this state.
    ```
 
    **Expect.** Both enumerate ingest webhooks, layer admin operations, freeze
-   toggles, admin grants, and tenant management. Neither names token issuance,
-   a login endpoint, or a session table.
+   toggles, admin grants, and tenant management. Neither write-set list names
+   token issuance or a session table. `docs/reference/http-api.md` documents the
+   §7.3.4 authentication route paths outside that list, and those routes are no
+   members of it.
 
 3. Issue each write request and read the error code from the body rather than
    the status class. `$PORT` is the port S21 bound, `127.0.0.1:8118` unless it
@@ -4251,19 +4372,30 @@ them into S21 permanently if its setup already reaches this state.
    so this step asserts nothing about them. Add the assertion when that is
    settled.
 
-4. Confirm the struck clause named an endpoint that does not exist.
+4. Confirm this stack registers neither the registry's authentication routes nor
+   the posture read, so the write set the two documents enumerate is the whole of
+   what an operator can reach here.
 
    ```bash
-   for p in /v1/login /v1/auth/token /v1/token; do
+   for p in /v1/ui/auth/sign-in /v1/ui/auth/callback /v1/ui/auth/sign-out /v1/ui/session; do
      printf '%s ' "$p"
      curl -s -o /dev/null -w '%{http_code}\n' "http://127.0.0.1:$PORT$p"
    done
    ```
 
-   **Expect.** 404 on each, because the registry registers no auth, login, or
-   token route. This is what made the struck clause wrong rather than merely
-   stale: an operator could not have exercised the write path it described even
-   when the registry was healthy.
+   **Expect.** 404 on each, for two different reasons. Sign-in, the callback, and
+   sign-out are mounted only when both conjuncts hold, and neither holds here:
+   this stack enables neither the web UI nor the browser flow. The posture read
+   is mounted on the web UI alone, and the web UI is off, which is what accounts
+   for its 404. This stack also configures no identity provider, so nothing
+   refuses any of the four probes ahead of route matching. A stack that does
+   mount them answers each of these paths rather than `registry.read_only`,
+   because none of them is a write.
+
+   The clause proposal 0012 struck named a write endpoint the registry does not
+   serve. That is what made it wrong rather than merely stale: an operator could
+   not have exercised the write path it described even when the registry was
+   healthy.
 
 5. Confirm the read path still serves, so step 3's rejections are read-only mode
    rather than a registry that is simply down.
@@ -4504,4 +4636,858 @@ rather than trying to avoid them.
 helm uninstall podium
 kind delete cluster --name podium-s46
 docker rmi ghcr.io/lennylabs/podium:0.0.0-dev
+```
+
+---
+
+## S47: Sign in through the UI and read a layer an anonymous caller does not get
+
+**Goal.** Validate that the browser signs in through the registry, that the
+registry performs the code exchange server-side and returns the resulting token
+in an `HttpOnly` cookie, and that the signed-in page reads a group-scoped layer
+the same browser could not read a moment earlier.
+
+**Covers.** §6.3.4 browser acquisition, the §7.3.4 sign-in, callback, sign-out,
+and posture routes, the §6.3.3 second accepted credential location, §6.3.1 group
+mapping, and §4.6 group-scoped visibility.
+
+**Why by hand.** The assertion is a redirect chain a person completes at the
+IdP's own login page and the view the page renders afterwards. No Go test drives
+a browser through a live IdP, and no Go test reads what the page shows.
+
+**Prerequisites.** The S44 stack: run S44's Prerequisites and steps 1 to 4, and
+leave the registry running. When Keycloak or the `mkcert` CA is unavailable, skip
+and record the skip.
+
+**Steps.**
+
+1. Read the deployment's posture as the page does, before signing in.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8153/v1/ui/session"; echo
+   ```
+
+   **Expect.** HTTP 200 with `identity_provider_configured: true`,
+   `public_mode: false`, and `browser_auth` reporting `enabled: true` with
+   `sign_in_path: /v1/ui/auth/sign-in` and
+   `sign_out_path: /v1/ui/auth/sign-out`. There is no `subject` key, because
+   this request carries no credential. The read needs no credential and refuses
+   no request for lack of one.
+
+2. Take the anonymous baseline for the group-scoped artifact.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8153/v1/load_artifact?id=$GROUP_ARTIFACT_ID" -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** `registry.not_found` at HTTP 404. Without this baseline step 4
+   establishes nothing: an artifact that is visible to everyone would produce the
+   same reading afterwards.
+
+3. Open `http://127.0.0.1:8153/ui/` in a private browser window and click the
+   sign-in control. Keycloak's login page appears; sign in as `admin` with the
+   password `admin`.
+
+   **Expect.** The browser leaves the registry for the authorization endpoint,
+   returns to `http://127.0.0.1:8153/ui/` after the login, and the account
+   cluster stands where the sign-in control was: the top bar carries the
+   caller's own subject instead of a Sign in button, and the sign-out control
+   sits inside the menu that cluster opens. A browser that lands on an
+   `invalid_scope` or `invalid_redirect_uri` error page at Keycloak means
+   prerequisite 4's client scope or redirect URI did not take.
+
+4. Read the group-scoped artifact in the signed-in page. Open the compensation
+   policy from the catalog.
+
+   **Expect.** The artifact the same browser could not see in step 2 renders in
+   full. That result requires each of the following. The callback exchanged the
+   code server-side and returned the IdP-signed token in
+   `__Host-podium_session`. The token carries the `groups` claim value
+   `podium-comp`, because the granted scope carries it. The registry's
+   `PODIUM_IDP_GROUP_MAPPING` rewrites that value to the layer group name
+   `comp-readers`. A page that renders the public
+   handbook and refuses the compensation policy means the group claim did not
+   reach the token, which is read from the browser's own network panel on the
+   `load_artifact` response rather than guessed at.
+
+   A `401` `auth.untrusted_token` on the catalog read after signing in means the
+   token carries an audience the registry does not accept. On this stack that is
+   the resolved-audience rule failing, because the audience lives in
+   `registry.yaml` rather than in the environment.
+
+5. Confirm no credential is reachable from JavaScript. In the browser console,
+   read the document's cookies.
+
+   ```javascript
+   document.cookie
+   ```
+
+   **Expect.** The result names neither `__Host-podium_session` nor
+   `__Host-podium_auth`. Both cookies are `HttpOnly`, so the page holds no token
+   and an injected script on this origin can read none. This is the property the
+   registry-mediated flow exists for, and the page rendering author-controlled
+   markdown on the same origin is why.
+
+6. Open the account cluster from the subject in the top bar, press Sign out
+   inside the menu, then reload.
+
+   **Expect.** The page returns to the anonymous view: the compensation policy
+   is gone from the catalog and the sign-in control is back. Signing out clears
+   both cookies. The registry holds no session state to clear, so the same
+   result follows on any replica.
+
+**Cleanup.** As S44, on the same terms: leave the stack running when S48 through
+S50 follow, and run S44's teardown only when this is the last scenario executed.
+
+---
+
+## S48: Register a layer through the panel and read the one-time secret
+
+**Goal.** Validate that a signed-in reader registers a layer of their own from
+the layer panel, that the registry returns the webhook URL and the HMAC secret
+once, and that the panel presents the secret as shown once and never served
+again.
+
+**Covers.** §7.3.1 layer registration through the UI, the §13.10 layer panel,
+the §6.3.4 session credential on a write, and the §6.3.4 browser-origin gate on
+a same-origin write.
+
+**Why by hand.** The assertion is that a person reads a credential on screen,
+is told it is shown once, and can still copy it. No Go test reads a rendering,
+and a secret the panel returned but did not present is indistinguishable from
+one it presented badly in an API-level test.
+
+**Prerequisites.** The S44 stack with a signed-in session, meaning S47 steps 1
+to 3 completed and the browser still signed in.
+
+**Steps.**
+
+1. Create a Git repository the layer can source from.
+
+   ```bash
+   mkdir -p "$WORK/own-repo" && cd "$WORK/own-repo" && git init -q
+   podium artifact scaffold --type skill --description "Roll a release" "$WORK/own-repo/release"
+   git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "add release skill"
+   ```
+
+2. Open the layer panel in the signed-in page, press Register layer, and fill
+   the form. Choose "Your own layer" as the class and "Git repository" as the
+   source, give `$WORK/own-repo` as the repository, `main` as the ref, and
+   `own-release` as the layer ID.
+
+   **Expect.** The form states that a layer of your own is visible to you alone
+   and counts against the layer limit an administrator sets. The registration is
+   stored user-defined with the signed-in caller as its owner and its visibility
+   fixed to that subject, whatever visibility the request carried, which is why
+   the form offers no visibility axes on this class.
+
+3. Read what the panel returns.
+
+   **Expect.** The reveal carries a "Shown once" label, the layer's webhook URL
+   and its HMAC secret with a copy control on each, and a Done control that
+   stays disabled until the reader ticks the acknowledgement. The reveal holds
+   the screen until then, so a secret is not lost to an accidental navigation.
+   Tick the acknowledgement, press Done, and confirm the panel returns to the
+   layer list. Whether the secret is served again is a property of the API,
+   which step 4 probes.
+
+4. Confirm the layer is listed as this caller's and that the secret is not
+   served again.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8153/v1/layers" | python3 -m json.tool | grep -i -e '"ID"' -e secret
+   ```
+
+   **Expect.** `own-release` is listed, and no line carries a secret value. The
+   secret is returned on registration and on a rotation and is redacted from
+   every other response, so once the reveal is dismissed it cannot be read back.
+   In the panel the row carries the "yours" marker, which the panel draws by
+   comparing the layer's stored owner against the subject the posture read
+   reports. The list read itself is unfiltered: it reports every layer in the
+   tenant to any caller who can reach it, and the marker is a rendering of
+   ownership rather than a filter.
+
+5. **Negative control.** Confirm the write needed the session. Issue the same
+   registration from the terminal, which carries no cookie.
+
+   ```bash
+   curl -sS -X POST "http://127.0.0.1:8153/v1/layers" \
+     -H 'Content-Type: application/json' \
+     -d '{"id":"own-release-2","source_type":"git","repo":"'"$WORK/own-repo"'","ref":"main","user_defined":true}' \
+     -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** `auth.forbidden` at HTTP 403 rather than a second registered
+   layer. A user-defined layer's owner is derived from the authenticated
+   registrant, and this request resolves no subject. A `200` here means the
+   panel's registration in step 2 established nothing about the session.
+
+**Cleanup.** As S44, on the same terms: leave the stack running when S49 or S50
+follows, and run S44's teardown only when this is the last scenario executed.
+
+---
+
+## S49: Unregister a layer through the panel's confirmation
+
+**Goal.** Validate that the panel's unregister control states what unregistering
+does before it does it, that it holds the write until the reader performs a
+deliberate act distinct from the press on the row, and that the unregistered
+layer moves into the recoverable list.
+
+**Covers.** §7.3.1 unregister through the UI, the §13.10 layer panel's
+confirmation for a write whose effect reaches other callers, and the §8.4
+recovery window.
+
+**Why by hand.** The assertion is that a destructive action cannot be taken by a
+single press and that the reader is told both halves of what it does. Both are
+properties of a rendering.
+
+**Prerequisites.** The S44 stack with the signed-in session and the
+`own-release` layer S48 registered.
+
+**Steps.**
+
+1. In the layer panel, press Unregister on the `own-release` row.
+
+   **Expect.** A confirmation appears rather than the layer disappearing, and no
+   write is issued by this press. The confirmation states both halves of what
+   unregistering does: it names the layer, says its artifacts disappear from
+   every caller's view the next time they sync, and says the layer stays
+   recoverable for the deployment's retention window, naming the date it is
+   erased on, rather than being erased now.
+
+2. Attempt to complete the unregister without performing the confirmation's own
+   act.
+
+   **Expect.** The confirmation carries a "Type the layer ID to confirm" field,
+   and the "Unregister layer" control stays disabled until the typed value
+   equals the layer ID. No write is issued before that, so the action cannot be
+   taken by a second press on the row.
+
+3. Type `own-release` into the confirmation field and press Unregister layer.
+
+   **Expect.** The write is issued, the row leaves the layer list, and the layer
+   appears under the recently-unregistered list the panel draws from the
+   tenant's tombstoned layers, where it stays until the retention window lapses.
+   Cancelling instead leaves the layer registered and issues no write.
+
+4. Confirm the registry agrees with the panel.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8153/v1/layers" | grep -c own-release || true
+   ```
+
+   **Expect.** The live list no longer carries `own-release`. The layer is
+   restorable from the panel's recovery control until the §8.4 window runs out,
+   which is what makes this an unregister rather than an erasure.
+
+**Cleanup.** As S44, on the same terms: leave the stack running when S50 follows,
+and run S44's teardown only when this is the last scenario executed.
+
+---
+
+## S50: A non-owner is refused on a destructive operation
+
+**Goal.** Validate that the registry refuses a layer write from a signed-in
+caller who neither owns the layer nor is a tenant admin, and that the panel
+reports the refusal on the row without claiming to know why.
+
+**Covers.** The §7.3.1 layer-write authorization rule, `auth.forbidden`, and the
+§13.10 panel's treatment of a refused write.
+
+**Why by hand.** The assertion is that a second person, signed in through the
+same UI, sees the layer and is refused the operation. The refusal's rendering is
+the part no Go test reads, and the panel presenting per-owner scoping as
+server-enforced while the server failed open is the defect this closes.
+
+**Prerequisites.** The S44 stack, and a layer owned by the `admin` user. Run S48
+to register `own-release` and stop before S49, or re-register it. A second
+browser profile, or a second browser, that has never signed in to this stack.
+`__Host-podium_session` is one cookie per origin per browser profile and
+Keycloak's own SSO cookie is per profile as well, so a second window of the
+profile S47 signed in from cannot hold a second session.
+
+**Steps.**
+
+1. Create a second realm user.
+
+   ```bash
+   $KC create users -r master -s username=bob -s enabled=true
+   $KC set-password -r master --username bob --new-password bob
+   ```
+
+   Read bob's `sub` the way prerequisite 5 read admin's, so step 2 has a value
+   to compare the posture body against.
+
+   ```bash
+   export BOB_SUBJECT="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
+     -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
+     -d username=bob -d password=bob \
+     | python3 -c "import base64,json,sys; p=json.load(sys.stdin)['access_token'].split('.')[1]; p+='='*(-len(p)%4); print(json.loads(base64.urlsafe_b64decode(p))['sub'])")"
+   echo "$BOB_SUBJECT"
+   ```
+
+   **Expect.** A `sub` value that differs from `$SUBJECT`, the admin `sub` S44
+   exported. The subject claim is `sub` by default, so neither value is a login
+   name and the two are distinguished by comparison rather than by reading a
+   username out of them.
+
+2. Open `http://127.0.0.1:8153/ui/` in the second browser profile, sign in as
+   `bob` with the password `bob`, and open the layer panel. Do not use a private
+   window of the profile S47 signed in from: every window of a profile shares
+   one cookie jar, so bob's callback would replace the admin session rather than
+   establish a second one, and Keycloak's SSO cookie on that profile would
+   return the sign-in without a prompt and mint a token for `admin`.
+
+   Confirm the session this window holds is bob's before pressing anything
+   destructive. Read the posture route in that same window, from the address bar
+   or from the network panel.
+
+   ```text
+   http://127.0.0.1:8153/v1/ui/session
+   ```
+
+   **Expect.** The body reports `subject` equal to `$BOB_SUBJECT`, which differs
+   from `$SUBJECT`. A body whose `subject` equals `$SUBJECT` means the sign-in
+   reused the admin profile's SSO session, and every later step in this scenario
+   would then exercise the owner arm of the rule rather than the non-owner arm
+   it exists to test. The panel
+   lists `own-release` along with the layers `registry.yaml` declares.
+   `GET /v1/layers` is unfiltered, so bob reads the whole tenant's layer list.
+   The `own-release` row carries no "yours" marker, because bob's subject is not
+   its stored owner.
+
+3. Press Unregister on the `own-release` row and complete the confirmation as
+   S49 step 3 does.
+
+   **Expect.** The layer stays registered. The row reports that the registry
+   refused that action and that nothing changed, and it names the code
+   `auth.forbidden`. It reports neither who owns the layer nor the state of the
+   session, because the refusal carries neither. The Try again and Dismiss
+   controls are both offered, and every other control on the row stays live.
+
+4. Confirm the refusal came from the authorization rule rather than from the
+   panel.
+
+   **Expect.** The `DELETE /v1/layers` request in the browser's network panel
+   answered `403` with `auth.forbidden`. A `200` means the server let a
+   non-owner delete another caller's layer, which is the failure this scenario
+   exists to catch.
+
+5. Confirm the owner is still authorized. Return to the window S47 signed in
+   from, whose session step 2 left untouched because bob signed in from a
+   separate profile, and press Unregister on the same row.
+
+   **Expect.** The confirmation appears and the write succeeds. Without this
+   step a registry refusing every caller would pass step 3 for the wrong reason.
+
+**Cleanup.** S50 is the last scenario on this stack, so run S44's teardown here:
+stop the server by its recorded PID, run `rm -rf "$WORK"`, and remove the IdP
+with `docker rm -f kc-podium` and `rm -rf "$KCERT"`.
+
+---
+
+## S51: Browse the domain hierarchy through the web UI
+
+**Goal.** Validate that the web UI's domain browser renders the structure
+`load_domain` returns: the root's subdomains, a nested domain, a domain large
+enough to change how it is presented, and a sparse chain the registry
+compresses into a single node.
+
+**Covers.** The §13.10 domain-browser surface, §4.5.5 domain rendering
+including passthrough-chain folding, and the §13.10 statement that the UI is a
+thin client over the same endpoints the CLI calls.
+
+**Why by hand.** The assertion is what a person sees in the tree and on the
+page. No Go test reads a browser rendering, and the UI's structure is derived
+from `load_domain` rather than served by it, so a divergence between the two is
+invisible to a test of either one alone.
+
+**Prerequisites.** None beyond the build. This is the stack S52, S53, and S54
+run on, so a change here reaches each of them.
+
+Run the isolation block from "How to use this document", then build the
+registry. The corpus is shaped to exercise the browser: `eng/teams` holds
+enough subdomains to change the presentation, and
+`ops/regional/emea/payables` is a chain of single-child domains.
+
+```bash
+mk() { podium artifact scaffold --type "$1" --description "$2" --force "$WORK/reg/$3" >/dev/null; }
+mkdir -p "$WORK/reg"
+mk context "How a production deploy runs, stage by stage, and when to roll back." eng/platform/deploy-runbook
+mk context "The deploy runbook with the canary stage made mandatory for tier-1 services." eng/platform/deploy-runbook-strict
+mk command "Roll a service back to its previous released image." eng/platform/rollback
+mk rule "Secrets never live in an artifact body, a manifest, or a bundled file." eng/security/secrets-policy
+mk skill "Pay an approved vendor invoice through the finance warehouse." finance/ap/pay-invoice
+mk agent "Reconcile a supplier ledger entry against the general ledger." ops/regional/emea/payables/reconcile
+for t in ads api billing checkout content core data growth identity infra loyalty media mobile notify payments pricing reporting risk search shipping storefront support tax trust; do
+  mk context "How the $t team runs its on-call rotation and what it pages for." "eng/teams/$t/oncall-guide"
+done
+```
+
+Give the runbook a body that carries a table, a fenced block, and a reference to
+another artifact, and bundle a file beside it. S53 reads this artifact.
+
+````bash
+cat > "$WORK/reg/eng/platform/deploy-runbook/ARTIFACT.md" <<'YAML'
+---
+type: context
+name: deploy-runbook
+version: 2.3.0
+description: How a production deploy runs, stage by stage, and when to roll back.
+tags: [deploy, platform, runbook]
+sensitivity: low
+---
+
+# Deploy runbook
+
+The production deploy runs in stages, and each stage gates the next.
+
+| Step | Owner | Duration |
+|:--|:--|--:|
+| Build and sign the image | CI | 6 min |
+| Canary to 5% of traffic | platform | 15 min |
+| Full rollout | platform | 8 min |
+
+Start the deploy from the release branch:
+
+```bash
+./scripts/deploy.sh --env production --canary 5
+```
+
+Roll back with [the rollback command](eng/platform/rollback) rather than
+reverting the branch.
+YAML
+mkdir -p "$WORK/reg/eng/platform/deploy-runbook/scripts"
+printf '#!/usr/bin/env bash\necho deploying\n' > "$WORK/reg/eng/platform/deploy-runbook/scripts/deploy.sh"
+````
+
+Give the second runbook an `extends:` on the first, and declare `tags` that omit
+one tag the parent carries. S52 and S53 both read the difference.
+
+```bash
+cat > "$WORK/reg/eng/platform/deploy-runbook-strict/ARTIFACT.md" <<'YAML'
+---
+type: context
+name: deploy-runbook-strict
+version: 1.0.0
+description: The deploy runbook with the canary stage made mandatory for tier-1 services.
+extends: eng/platform/deploy-runbook
+tags: [deploy, platform]
+sensitivity: low
+---
+
+# Strict deploy runbook
+
+Tier-1 services may not skip the canary stage.
+YAML
+cat > "$WORK/reg/finance/ap/pay-invoice/ARTIFACT.md" <<'YAML'
+---
+type: skill
+version: 1.2.0
+tags: [finance, ap, payments]
+sensitivity: medium
+---
+
+<!-- Skill body lives in SKILL.md. -->
+YAML
+cat > "$WORK/reg/finance/ap/pay-invoice/SKILL.md" <<'YAML'
+---
+name: pay-invoice
+description: Pay an approved vendor invoice through the finance warehouse.
+license: MIT
+---
+
+Confirm AP approval, validate the vendor, then submit the payment.
+YAML
+podium lint --registry "$WORK/reg" --offline
+```
+
+**Expect.** `lint: no issues.` A run that reports an error here has a malformed
+manifest, and every later step reads a registry that does not hold what the
+scenario assumes. The most common cause is the document's leading indentation
+landing inside a here-document; the blocks above are deliberately unindented.
+
+Start the registry with the UI mounted.
+
+```bash
+podium serve --standalone --web-ui --no-embeddings \
+  --layer-path "$WORK/reg" --bind 127.0.0.1:8462 > "$WORK/srv.log" 2>&1 &
+export SRV=$!
+for i in $(seq 1 40); do curl -sf http://127.0.0.1:8462/healthz >/dev/null && break; sleep 0.5; done
+grep 'ingested layer' "$WORK/srv.log"
+```
+
+**Expect.** `ingested layer reg from $WORK/reg (accepted=30, idempotent=0,
+rejected=0, advisories=0)`. A non-zero `rejected` or `advisories` means the
+corpus above did not land as written, and the counts every later step asserts
+will not match.
+
+**Steps.**
+
+1. Read the root domain from the API, so the UI has something to be checked
+   against rather than merely inspected.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8462/v1/load_domain?path=" \
+     | python3 -c 'import json,sys; d=json.load(sys.stdin); print([s["path"] for s in d["subdomains"]])'
+   ```
+
+   **Expect.** `['eng', 'finance/ap', 'ops/regional/emea/payables']`. The second
+   and third entries are already compressed by the registry: `finance` and `ops`
+   each hold a single child, so §4.5.5 folds the passthrough chain and the
+   response names the deepest node of each chain rather than its head.
+
+2. Open `http://127.0.0.1:8462/ui/` and read the root page and the sidebar.
+
+   **Expect.** The heading reads `All domains` with `30 ARTIFACTS` and
+   `3 DOMAINS` beside it. Three subdomain cards stand under `SUBDOMAINS`, named
+   for the three paths step 1 printed. The sidebar's `CATALOG` tree carries
+   `eng` with `platform`, `security`, and `teams` beneath it, and carries the
+   two compressed chains as `finance/ap` and `ops/regional/emea/payables`, each
+   drawn with its trailing node emphasized over the path that leads to it. The
+   footer reads `1 layer · 30 artifacts`. The card count and the tree must agree
+   with step 1: a UI that renders `finance` and `ops` as separate expandable
+   nodes is showing a hierarchy the registry did not return.
+
+3. Open the `eng/teams` domain, which holds more subdomains than a domain page
+   presents as cards.
+
+   **Expect.** The heading reads `teams` with `24 ARTIFACTS` and
+   `24 SUBDOMAINS`. The subdomain region carries a `Grid` and `List` control and
+   a `Show all 24 subdomains` control rather than drawing every card at once,
+   and the sidebar's `teams` node lists the first several children followed by
+   `+ 16 more`. This is the presentation change a domain of this size is
+   supposed to produce; a page that draws 24 cards with no such control is
+   rendering the small-domain treatment at a size it was not drawn for.
+
+4. Open the compressed chain from the sidebar by pressing
+   `ops/regional/emea/payables`, and compare it against the API.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8462/v1/load_domain?path=ops" \
+     | python3 -c 'import json,sys; d=json.load(sys.stdin); print([s["path"] for s in d["subdomains"]])'
+   ```
+
+   **Expect.** The API prints `['ops/regional/emea/payables']`, a single entry,
+   and the page the sidebar opened is the domain holding `reconcile`. Neither
+   `regional` nor `emea` is reachable as a page of its own from the tree,
+   because neither is a node the registry returned.
+
+5. Confirm the browser reads the same endpoint the CLI reads, rather than a
+   surface of its own.
+
+   ```bash
+   podium domain show --registry http://127.0.0.1:8462 eng/platform
+   ```
+
+   **Expect.** The CLI lists the same artifacts the `eng/platform` page shows,
+   under `notable:`: `deploy-runbook`, `deploy-runbook-strict`, and `rollback`. A disagreement
+   between the two means the UI is deriving its view from something other than
+   `load_domain`, which §13.10 does not permit.
+
+**Cleanup.** Leave the server running for S52, S53, and S54. S54 carries the
+teardown.
+
+---
+
+## S52: Search through the web UI with the type, scope, and tag filters
+
+**Goal.** Validate that the UI's search offers the same `type`, `scope`, and
+`tags` filters the SDK and CLI offer, that each filter changes the result set
+the way the CLI's does, and that the address the page writes names the search it
+ran.
+
+**Covers.** The §13.10 search surface and its filter set, and the §13.10
+statement that the UI is a thin client over the same endpoints.
+
+**Why by hand.** The assertion is that two independent surfaces agree. A Go test
+covers the endpoint; no test compares what the endpoint returns against what a
+browser renders for the same query, which is where the filters are applied to a
+reader.
+
+**Prerequisites.** The S51 stack, left running.
+
+**Steps.**
+
+1. Take the CLI's answers for the queries the UI will run. These are the
+   baseline every later step is checked against.
+
+   ```bash
+   R=http://127.0.0.1:8462
+   ids() { python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["total_matched"], [x["id"] for x in d["results"]])'; }
+   podium search --registry $R --json "deploy"                    | ids
+   podium search --registry $R --json --type command "deploy"     | ids
+   podium search --registry $R --json --tags runbook "deploy"     | ids
+   podium search --registry $R --json --tags nosuchtag "deploy"   | ids
+   podium search --registry $R --json --scope finance "invoice"   | ids
+   podium search --registry $R --json --scope eng "invoice"       | ids
+   ```
+
+   **Expect.** In order: `2` with both runbooks, `0`, `2` with both runbooks,
+   `0`, `1` with `finance/ap/pay-invoice`, and `0`. Flags precede the positional
+   query; a command written the other way round returns nothing and reads as an
+   empty result set rather than as a usage error.
+
+   The `--tags runbook` result is the one worth pausing on.
+   `deploy-runbook-strict` declares `tags: [deploy, platform]` and no `runbook`
+   tag, and it matches because it declares `extends:` and the merged manifest
+   carries the parent's tags. The `--tags nosuchtag` line is the negative
+   control for the same filter: without it, a filter that silently matched
+   everything would produce the same reading as one that works.
+
+2. Open `http://127.0.0.1:8462/ui/`, press the search control in the top bar,
+   and search for `deploy`.
+
+   **Expect.** The page reports `Showing 2 of 2 matches` and lists both
+   runbooks, matching the CLI's first line.
+
+3. Apply the type filter on the search surface and set it to `command`.
+
+   **Expect.** The count falls to `Showing 0 of 0 matches`, matching the CLI's
+   second line, and the type control reads `command` rather than `all`. Return
+   it to `all` and the two matches come back.
+
+4. Type the filter as an inline token instead of using the control. Clear the
+   field, type `type:command deploy`, and press Return.
+
+   **Expect.** The token is lifted out of the query and applied as the type
+   filter: the type control reads `command`, the field holds `deploy` alone, and
+   the count is `Showing 0 of 0 matches`. The literal string `type:command` must
+   not remain in the field and must not be searched as keyword text.
+
+5. Reload the page on the address the previous step produced.
+
+   **Expect.** The same filter, the same field contents, and the same count. The
+   address the page wrote and the search the page ran name one search, so
+   arriving at that address by reload renders what typing produced. A page that
+   shows a different result set after a reload has written an address that does
+   not describe the search it performed.
+
+6. Run the scope and tag cases against the UI and compare each against step 1.
+
+   **Expect.** `scope:finance invoice` reports `Showing 1 of 1 match` for
+   `finance/ap/pay-invoice`; `scope:eng invoice` reports `Showing 0 of 0
+   matches`; `tag:runbook deploy` reports `Showing 2 of 2 matches`. Each line
+   matches the CLI's answer for the same filter.
+
+**Cleanup.** Leave the server running for S53 and S54.
+
+---
+
+## S53: Read an artifact through the viewer
+
+**Goal.** Validate that the artifact viewer renders the body as markdown rather
+than as source, presents the frontmatter as a property table, links an artifact
+to the one it extends, lists bundled resources, and renders untrusted body
+markup without executing it.
+
+**Covers.** The §13.10 artifact-viewer surface, §4.3 manifest merging as it
+reaches a reader, and the §13.10 rendering of body content the registry does not
+control.
+
+**Why by hand.** The assertion is what a person sees rendered, and, for the last
+step, what a browser does not execute. No Go test reads a browser rendering or
+observes a script that failed to run.
+
+**Prerequisites.** The S51 stack, left running.
+
+**Steps.**
+
+1. Open `http://127.0.0.1:8462/ui/#/artifact/eng%2Fplatform%2Fdeploy-runbook`.
+
+   **Expect.** The heading reads `deploy-runbook` with its type and version
+   beside it. The body renders as markdown: the table appears as a table with
+   the column headings `Step`, `Owner`, and `Duration`, and the deploy command
+   appears in a code block. Neither is shown as raw text with pipes and
+   backticks, which is what a viewer that does not render markdown produces.
+   Three tabs stand above the body: `Rendered`, `Frontmatter`, and
+   `Resources 1`.
+
+2. Follow the reference the body carries to another artifact.
+
+   **Expect.** The words "the rollback command" are a link, and following it
+   opens `eng/platform/rollback` inside the viewer. The reference is authored as
+   the artifact ID `eng/platform/rollback`; a link that leaves the page for a
+   registry error rather than opening the artifact has not been resolved to a
+   route.
+
+3. Open the `Resources 1` tab.
+
+   **Expect.** The bundled `scripts/deploy.sh` is listed with its size, and a
+   download control sits beside it. The count in the tab label matches the one
+   file bundled beside the manifest.
+
+4. Open `#/artifact/eng%2Fplatform%2Fdeploy-runbook-strict` and read its
+   `Frontmatter` tab against what the file on disk declares.
+
+   ```bash
+   grep '^tags:' "$WORK/reg/eng/platform/deploy-runbook-strict/ARTIFACT.md"
+   ```
+
+   **Expect.** The file declares `tags: [deploy, platform]`. The property table
+   shows `deploy`, `platform`, and `runbook`, because the artifact declares
+   `extends:` and the viewer presents the merged manifest. The page also carries
+   a link to `eng/platform/deploy-runbook`, the artifact this one extends. The
+   inherited tag is the visible evidence that the merge reached the reader; a
+   table showing only the two declared tags is presenting the authored manifest
+   where the merged one is specified.
+
+5. Add an artifact whose body carries markup a reader must never execute, and
+   ingest it.
+
+   ```bash
+   podium artifact scaffold --type context \
+     --description "A probe artifact whose body carries markup a reader must never execute." \
+     --force "$WORK/reg/eng/security/render-probe" >/dev/null
+   cat > "$WORK/reg/eng/security/render-probe/ARTIFACT.md" <<'YAML'
+---
+type: context
+name: render-probe
+version: 1.0.0
+description: A probe artifact whose body carries markup a reader must never execute.
+sensitivity: low
+---
+
+# Render probe
+
+<script>window.__PWNED = true;</script>
+
+<img src=x onerror="window.__PWNED = true">
+
+<a href="javascript:window.__PWNED=true">a javascript url</a>
+
+<iframe src="https://example.com"></iframe>
+YAML
+   podium lint --registry "$WORK/reg" --offline
+   podium layer reingest --registry http://127.0.0.1:8462 reg | tail -1
+   ```
+
+   **Expect.** `lint: no issues.`, and the reingest accepts the new artifact.
+   The `javascript:` URL is written as raw HTML rather than as a markdown link
+   on purpose: authored as `[a javascript url](javascript:...)` lint refuses the
+   artifact with `lint.prose_reference` and it never reaches the renderer, which
+   would leave this step testing lint rather than the viewer.
+
+6. Open `#/artifact/eng%2Fsecurity%2Frender-probe` and read the rendered body.
+
+   **Expect.** The page shows the heading and three removal markers reading
+   `(image removed)`, `(link removed)`, and `(embed removed)`. The link's text
+   is still visible and the link is inert. Nothing renders an image, an inline
+   frame, or the script's source text.
+
+7. Confirm from the browser console that nothing in that body executed.
+
+   ```javascript
+   window.__PWNED
+   ```
+
+   **Expect.** `undefined`. Every one of the four vectors sets `window.__PWNED`
+   if it runs, so a defined value names a renderer that executed author-supplied
+   markup. This is the negative control the rendered page alone cannot give:
+   a body whose script silently failed for an unrelated reason would look
+   identical on screen.
+
+**Cleanup.** Leave the server running for S54.
+
+---
+
+## S54: Author on disk, reingest from the panel, and materialize
+
+**Goal.** Validate the loop an author actually runs: write an artifact into a
+`local` layer, bring it into the catalog from the web UI's layer panel, read it
+in the UI, and materialize it into a harness with `podium sync`.
+
+**Covers.** The §13.10 layer panel's reingest operation and its report, §7.3.1
+`local`-layer reingest and the immutability rule, and §7.5 filesystem delivery.
+
+**Why by hand.** The assertion spans a filesystem edit, a browser control, and a
+CLI materialization. Each half is covered by a test; nothing exercises the loop
+a person runs across all three.
+
+**Prerequisites.** The S51 stack, left running, with S53's `render-probe`
+ingested.
+
+**Steps.**
+
+1. Confirm the artifact this scenario adds is not in the catalog yet.
+
+   ```bash
+   curl -sS -o /dev/null -w '%{http_code}\n' \
+     "http://127.0.0.1:8462/v1/load_artifact?id=eng/platform/freeze"
+   ```
+
+   **Expect.** `404`. Without this baseline the later read establishes nothing.
+
+2. Write the artifact into the layer's directory. Do not reingest from the
+   terminal; the panel does it in the next step.
+
+   ```bash
+   podium artifact scaffold --type command \
+     --description "Freeze deploys for the duration of an incident." \
+     --force "$WORK/reg/eng/platform/freeze"
+   ```
+
+   **Expect.** The scaffold writes `ARTIFACT.md`. The registry still answers
+   `404` for it, because writing to a `local` layer's directory changes nothing
+   in the registry until an ingest runs.
+
+3. Open `http://127.0.0.1:8462/ui/#/layers` and press `Reingest` on the `reg`
+   row.
+
+   **Expect.** The row reports the request running, and a report opens when it
+   returns. The report reads `1 ACCEPTED`, `31 UNCHANGED`, `0 REJECTED`,
+   `0 CONFLICTS`, and `0 LINT FAILURES`. The accepted count is the artifact step
+   2 wrote, and the unchanged count is every artifact whose content the registry
+   already holds at that version: the 30 the stack started with plus the probe
+   S53 added. Running this scenario without S53 first gives `30 UNCHANGED`.
+
+4. Read the new artifact in the UI.
+
+   **Expect.** `eng/platform/freeze` is reachable from the `eng/platform`
+   domain page and opens in the viewer. The catalog counter in the footer has
+   risen by one.
+
+5. Edit the artifact without bumping its version, and reingest from the panel
+   again. This is the failure an author hits most often.
+
+   ```bash
+   sed -i '' 's/^description: Freeze deploys.*/description: Freeze every deploy for the duration of an incident./' \
+     "$WORK/reg/eng/platform/freeze/ARTIFACT.md"
+   ```
+
+   **Expect.** The report reads `0 ACCEPTED` and `1 CONFLICTS`, and its
+   `NEEDS ATTENTION` region states that a published version was republished with
+   different content and directs the author to bump the version. The registry
+   refuses the change rather than overwriting the stored bytes, which is the
+   §7.3.1 immutability rule reaching a reader. The artifact keeps the
+   description step 2 gave it.
+
+6. Bump the version and reingest from the panel once more.
+
+   ```bash
+   sed -i '' 's/^version: 0.1.0/version: 0.2.0/' \
+     "$WORK/reg/eng/platform/freeze/ARTIFACT.md"
+   ```
+
+   **Expect.** The report reads `1 ACCEPTED` and `0 CONFLICTS`, and the viewer
+   shows the new description at version `0.2.0`.
+
+7. Materialize the catalog into a harness and confirm the new artifact travels.
+
+   ```bash
+   mkdir -p "$WORK/proj" && cd "$WORK/proj"
+   podium init --registry http://127.0.0.1:8462 --harness claude-code
+   podium sync | grep -A1 'eng/platform/freeze'
+   ```
+
+   **Expect.** The sync output names `eng/platform/freeze  [reg]` with the path
+   it wrote beneath it. The artifact an author wrote to a directory in step 2 has
+   reached a harness-native file without any step outside this loop.
+
+**Cleanup.** S54 is the last scenario on this stack.
+
+```bash
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+rm -rf "$WORK"
 ```

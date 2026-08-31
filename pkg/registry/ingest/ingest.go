@@ -22,6 +22,7 @@ import (
 	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/audit"
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
+	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
@@ -374,6 +375,12 @@ type Result struct {
 type IngestedArtifact struct {
 	ArtifactID string
 	Version    string
+	// Accepted is true when this snapshot newly stored the pair and false
+	// when the pair matched the stored content and was a no-op. The two
+	// outcomes are counted separately in Accepted and Idempotent, so a
+	// reader that wants the artifacts behind either count needs the
+	// distinction carried per pair.
+	Accepted bool
 }
 
 // EmbeddingFailure names an artifact whose post-ingest embedding
@@ -813,7 +820,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			return nil, err
 		}
 		res.Accepted++
-		res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version})
+		res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version, Accepted: true})
 
 		// §7.3.2 — artifact.deprecated fires only when a manifest update
 		// "flipped deprecated: true", i.e. a prior non-deprecated version
@@ -984,7 +991,13 @@ func walkLayer(fsys fs.FS, layerID string) ([]filesystem.ArtifactRecord, error) 
 	var out []filesystem.ArtifactRecord
 	walkErr := fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			// spec: §6.10 — a directory of the snapshot that cannot be read is
+			// the layer's source being unreachable, the same condition the git
+			// provider reports when its fetch fails. Without the sentinel this
+			// reaches the handler unclassified and is coded
+			// registry.unavailable, which tells the reader the registry did not
+			// answer when the registry answered and the source is the problem.
+			return fmt.Errorf("%w: %v", source.ErrSourceUnreachable, err)
 		}
 		if d.IsDir() {
 			if strings.HasPrefix(d.Name(), ".") && p != "." {
@@ -1079,6 +1092,23 @@ func newlyUnlistedAdvisory(dr store.DomainRecord, prevRaw string, seen bool) *li
 	}
 }
 
+// invalidArtifactError carries a manifest-parse failure under
+// ErrInvalidArtifact without spelling the sentinel into the message. The
+// message is the operator-facing text, and it already names the artifact and
+// the parse position; repeating the code there would duplicate the envelope's
+// own code field.
+type invalidArtifactError struct{ cause error }
+
+func (e invalidArtifactError) Error() string   { return e.cause.Error() }
+func (e invalidArtifactError) Unwrap() []error { return []error{ErrInvalidArtifact, e.cause} }
+
+// invalidArtifact classifies a manifest the parser cannot decode as a fault in
+// the layer's content. spec: §7.3.1 — the refusal is an ingest rejection of the
+// artifact. Without the sentinel the failure reaches the server's unclassified
+// default, which reports the registry as unavailable and advises a retry that
+// reproduces the same parse failure until the source is corrected.
+func invalidArtifact(cause error) error { return invalidArtifactError{cause: cause} }
+
 func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecord, error) {
 	dir := dirOf(artifactPath)
 	id := dirToCanonical(dir)
@@ -1095,7 +1125,7 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 	}
 	a, err := manifest.ParseArtifact(bytes)
 	if err != nil {
-		return filesystem.ArtifactRecord{}, fmt.Errorf("%s: %w", id, err)
+		return filesystem.ArtifactRecord{}, fmt.Errorf("%s: %w", id, invalidArtifact(err))
 	}
 	rec := filesystem.ArtifactRecord{
 		ID:            id,
@@ -1112,7 +1142,7 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		}
 		s, err := manifest.ParseSkill(skillBytes)
 		if err != nil {
-			return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, err)
+			return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, invalidArtifact(err))
 		}
 		rec.Skill = s
 		rec.SkillBytes = skillBytes
@@ -1120,7 +1150,9 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 	// Walk the artifact's directory for bundled resources.
 	walkErr := fs.WalkDir(fsys, dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return err
+			// spec: §6.10 — an unreadable directory under the artifact package
+			// is the same source-unreachable condition walkLayer reports.
+			return fmt.Errorf("%w: %v", source.ErrSourceUnreachable, err)
 		}
 		if d.IsDir() {
 			// spec: §4.2/§4.4 — stop at a nested artifact-package boundary so

@@ -1,6 +1,9 @@
 package e2e
 
 import (
+	"io"
+	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -58,4 +61,62 @@ func TestStandaloneLayer_NoRegistryAnywhereRefuses(t *testing.T) {
 	res := runPodium(t, t.TempDir(), env, "layer", "register", "--id", "x", "--local", t.TempDir())
 	cliWantExit(t, res, 2, "no registry configured")
 	cliContains(t, res.Stderr, "--registry is required", "missing registry error")
+}
+
+// spec: §7.3.1 — the layer-write authorization rule is not live on a registry
+// that configures no identity provider, which is the standalone posture
+// §13.10's web UI targets. `podium layer register --user-defined --owner
+// alice` stores a user-defined layer whose owner is alice, and the local
+// operator, who resolves no subject, still unregisters it. The list read
+// confirms the stored class and owner first, so the unregister reaches the
+// user-defined branch the carve-out governs rather than the admin-defined
+// branch that is permissive on its own. --user-defined is required in the
+// invocation: the CLI sends owner only inside that branch, so a bare --owner
+// would register an admin-defined layer with an empty owner.
+func TestStandaloneLayer_UserDefinedOwnerManagedByLocalOperator(t *testing.T) {
+	t.Parallel()
+	lp := writeRegistry(t, map[string]string{
+		"finance/forecast/ARTIFACT.md": contextArtifact("An artifact in alice's user-defined layer."),
+	})
+	srv := startServer(t, "")
+
+	reg := runPodium(t, "", nil, "layer", "register",
+		"--id", "alice-personal", "--local", lp,
+		"--user-defined", "--owner", "alice@acme.com",
+		"--registry", srv.BaseURL)
+	cliWantExit(t, reg, 0, "user-defined layer register on a standalone registry")
+
+	// The list response marshals store.LayerConfig, whose fields carry no
+	// JSON tags, so the class and the owner are spelled Go-side.
+	listed := standaloneLayerList(t, srv.BaseURL)
+	for _, want := range []string{`"ID":"alice-personal"`, `"UserDefined":true`, `"Owner":"alice@acme.com"`} {
+		if !strings.Contains(listed, want) {
+			t.Fatalf("layer list missing %s:\n%s", want, listed)
+		}
+	}
+
+	un := runPodium(t, "", nil, "layer", "unregister", "--registry", srv.BaseURL, "alice-personal")
+	cliWantExit(t, un, 0, "local operator unregisters a user-defined layer owned by alice")
+	if after := standaloneLayerList(t, srv.BaseURL); strings.Contains(after, "alice-personal") {
+		t.Errorf("layer still listed after unregister:\n%s", after)
+	}
+}
+
+// standaloneLayerList reads GET /v1/layers with the whitespace between JSON
+// tokens removed, so a field assertion is one substring.
+func standaloneLayerList(t *testing.T, baseURL string) string {
+	t.Helper()
+	resp, err := http.Get(baseURL + "/v1/layers")
+	if err != nil {
+		t.Fatalf("GET /v1/layers: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /v1/layers: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /v1/layers = %d: %s", resp.StatusCode, body)
+	}
+	return strings.Join(strings.Fields(string(body)), "")
 }

@@ -1,9 +1,11 @@
 name: test
 
-# Per-PR + per-push CI gate. Runs the Go suite, the SDK suites, and
-# uploads coverage. Three jobs run in parallel so a slow Python suite
-# doesn't block Go feedback (and vice versa). The full nightly sweep
-# adds lint + matrix-audit + coverage-budget; see nightly.yml.
+# Per-PR + per-push CI gate. Runs the Go suite, the SDK suites, and the
+# web-UI lane that rebuilds the committed §13.10 bundle and fails if the
+# working tree differs, and it uploads coverage. The jobs run in parallel
+# so a slow Python suite doesn't block Go feedback (and vice versa). The
+# full nightly sweep adds lint + matrix-audit + coverage-budget; see
+# nightly.yml.
 
 on:
   pull_request:
@@ -182,3 +184,112 @@ jobs:
         run: |
           npm install
           npm test
+
+  web:
+    name: web-ui
+    runs-on: ubuntu-latest
+    # The §13.10 UI bundle is committed so go:embed resolves and a clean
+    # clone builds with only a Go toolchain. This job is what keeps the
+    # committed output trustworthy: it rebuilds from source and fails on
+    # any working-tree difference.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+      - name: Build the UI bundle
+        working-directory: web/ui
+        run: |
+          npm ci
+          npm run build
+      - name: Rebuilding the bundle leaves the working tree unchanged
+        # The built bundle is the only generated artifact the build adds to
+        # the tree, so the predicate covers the whole working tree rather
+        # than web/bundle alone. A cache directory, a stats emission, or a
+        # lockfile rewrite anywhere else fails the check too. npm ci writes
+        # web/ui/node_modules, which the node_modules/ .gitignore entry
+        # already excludes.
+        run: |
+          if ! git diff --exit-code || [ -n "$(git status --porcelain)" ]; then
+            echo "rebuilding the UI bundle changed the working tree;"
+            echo "run 'npm run build' in web/ui and commit the result"
+            git status --porcelain
+            exit 1
+          fi
+      - name: UI unit tests
+        # The §13.10 surfaces and the sanitizer are covered by the UI's own
+        # test runner, which renders the components into a DOM and stubs the
+        # registry reads they issue. It runs after the diff check so a test
+        # artifact cannot be mistaken for a stale bundle.
+        working-directory: web/ui
+        run: npm test
+      - name: The UI's types check
+        # Neither the bundler nor the test runner type-checks: both strip
+        # types with esbuild rather than reading them, so a type error rides
+        # green through a passing build and a passing suite. A type predicate
+        # that had lost its narrowing sat in the committed tree until this
+        # step was added. It runs last because a type error is worth reading
+        # after the behaviour it might explain.
+        working-directory: web/ui
+        run: npm run typecheck
+      - name: No unsanitized markup outside the sanitized rendering path
+        # React admits already-sanitized markup only through
+        # dangerouslySetInnerHTML, and the UI carries the attribute on one
+        # sanitized rendering path. The check names no path: it fails when the
+        # UI's own source tree carries more than one occurrence, and when the
+        # occurrences span more than one file, which is the property the
+        # constraint states without fixing where the sanitized renderer lives.
+        # The scope is the UI's own tree at web/ui because site/ renders
+        # build-time authored content and is outside this control, and because
+        # the bundler resolves imports from anywhere under its root. The
+        # committed bundle sits at web/bundle, outside that scope, so React's
+        # own minified occurrence is not matched. The step asserts its scope
+        # exists and treats any grep status other than match or no-match as a
+        # failure, so a relocated source tree fails the job rather than
+        # emptying the scope and reporting success.
+        run: |
+          if [ ! -d web/ui/src ]; then
+            echo "the UI source tree is no longer at web/ui/src; rescope this check"
+            exit 1
+          fi
+          rc=0
+          matches=$(grep -rn 'dangerouslySetInnerHTML' web/ui \
+            --exclude-dir=node_modules) || rc=$?
+          case "$rc" in
+            0 | 1) ;;
+            *)
+              echo "grep exited $rc while scanning web/ui; the check inspected nothing"
+              exit 1
+              ;;
+          esac
+          # grep -rn emits one line per matching line, so counting lines
+          # would score two occurrences on a single JSX row as one. Count
+          # the matches themselves with -o.
+          occurrences=$(grep -ro 'dangerouslySetInnerHTML' web/ui \
+            --exclude-dir=node_modules | grep -c . || true)
+          files=$(printf '%s\n' "$matches" | cut -d: -f1 | sort -u | grep -c . || true)
+          if [ "$occurrences" -gt 1 ] || [ "$files" -gt 1 ]; then
+            echo "dangerouslySetInnerHTML is permitted on one sanitized rendering path only;"
+            echo "found $occurrences occurrences across $files files:"
+            printf '%s\n' "$matches"
+            exit 1
+          fi
+      - name: No reference to the removed vanilla SPA
+        run: |
+          rc=0
+          hits=$(grep -rn 'web/app\.js' . \
+            --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=proposals) || rc=$?
+          case "$rc" in
+            0 | 1) ;;
+            *)
+              echo "grep exited $rc while scanning the repository; the check inspected nothing"
+              exit 1
+              ;;
+          esac
+          if [ -n "$hits" ]; then
+            echo "the vanilla SPA script was removed; these references are stale:"
+            echo "$hits"
+            exit 1
+          fi

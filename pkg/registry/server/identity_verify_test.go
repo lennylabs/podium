@@ -275,3 +275,78 @@ func TestVerify_NoVerifierServesAnonymously(t *testing.T) {
 		t.Errorf("status = %d, want 200 (anonymous passthrough)", resp.StatusCode)
 	}
 }
+
+// Spec: §6.10 — the client-visible message names no credential location.
+// Under oidc-jwt the registry accepts the token in the configured token
+// header and, where the §6.3.4 browser flow is enabled, in the
+// __Host-podium_session cookie, so a message written about a forwarded token
+// is false on one of them. Each message is asserted verbatim against the
+// §6.10 entry, which nothing else in the suite reaches: the route-level cases
+// assert the code alone.
+func TestVerify_UntrustedTokenMessageNamesNoLocation(t *testing.T) {
+	t.Parallel()
+	const issuer = "https://acme.okta.com/oauth2/default"
+	cases := []struct {
+		name    string
+		err     error
+		want    string
+		details bool
+	}{
+		{
+			name:    "issuer carried",
+			err:     &identity.UntrustedTokenError{Issuer: issuer, Reason: "aud mismatch"},
+			want:    "Token from issuer '" + issuer + "' failed verification.",
+			details: true,
+		},
+		{
+			name: "no issuer",
+			err:  &identity.UntrustedTokenError{Reason: "malformed"},
+			want: "The token could not be verified.",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			ts := verifyFixture(t, func(*http.Request) (layer.Identity, error) {
+				return layer.Identity{}, tc.err
+			})
+			resp, err := http.Get(ts.URL + "/v1/search_artifacts?query=secret")
+			if err != nil {
+				t.Fatalf("GET: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("status = %d, want 401", resp.StatusCode)
+			}
+			e := decodeEnvelope(t, resp)
+			if e.Code != "auth.untrusted_token" {
+				t.Fatalf("code = %q, want auth.untrusted_token", e.Code)
+			}
+			if e.Message != tc.want {
+				t.Errorf("message = %q, want %q", e.Message, tc.want)
+			}
+			if tc.details && e.Details["token_iss"] != issuer {
+				t.Errorf("details.token_iss = %v, want %q", e.Details["token_iss"], issuer)
+			}
+		})
+	}
+}
+
+// Spec: §6.10 — auth.token_expired's canonical message is provider-neutral
+// and location-neutral, and it stands unchanged under the second accepted
+// credential location.
+func TestVerify_TokenExpiredMessage(t *testing.T) {
+	t.Parallel()
+	ts := verifyFixture(t, func(*http.Request) (layer.Identity, error) {
+		return layer.Identity{}, fmt.Errorf("%w: token is expired", identity.ErrTokenExpired)
+	})
+	resp, err := http.Get(ts.URL + "/v1/search_artifacts?query=secret")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+	e := decodeEnvelope(t, resp)
+	if e.Message != "The authenticated token has expired." {
+		t.Errorf("message = %q, want the §6.10 canonical message", e.Message)
+	}
+}

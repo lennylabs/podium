@@ -215,3 +215,161 @@ func TestStartupConfig_WebUIAllowed(t *testing.T) {
 		})
 	}
 }
+
+// browserFlowConfig returns a StartupConfig that satisfies every conjunct of
+// the §13.10 browser-flow guard. Each refusal case below breaks exactly one
+// conjunct of it, so the case names the conjunct under test.
+func browserFlowConfig() server.StartupConfig {
+	return server.StartupConfig{
+		WebUIAuth:                       true,
+		WebUI:                           true,
+		IdentityProvider:                "oidc-jwt",
+		WebUIOAuthClientID:              "podium-web-ui",
+		WebUIOAuthClientSecret:          "s3cr3t",
+		WebUIRedirectURI:                "https://podium.acme.com/v1/ui/auth/callback",
+		WebUIOAuthAuthorizationEndpoint: "https://idp.acme.com/authorize",
+		WebUIOAuthTokenEndpoint:         "https://idp.acme.com/token",
+	}
+}
+
+// Spec: §13.10 ("Browser-flow configuration guard") / §6.3.4 — enabling the
+// browser flow on a configuration that fails one conjunct fails startup with
+// config.web_ui_auth_unconfigured, naming the failed conjunct.
+func TestStartupConfig_BrowserFlowRefused(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		// mutate breaks one conjunct of the satisfied configuration.
+		mutate func(*server.StartupConfig)
+		// names is the substring the refusal carries so the operator can see
+		// which conjunct failed.
+		names string
+	}{
+		{"web UI disabled", func(c *server.StartupConfig) { c.WebUI = false }, "PODIUM_WEB_UI"},
+		{"no identity provider", func(c *server.StartupConfig) { c.IdentityProvider = "" }, "oidc-jwt"},
+		{"public mode with no provider", func(c *server.StartupConfig) {
+			c.IdentityProvider = ""
+			c.PublicMode = true
+		}, "oidc-jwt"},
+		{"trusted-headers", func(c *server.StartupConfig) { c.IdentityProvider = "trusted-headers" }, "oidc-jwt"},
+		{"injected-session-token", func(c *server.StartupConfig) { c.IdentityProvider = "injected-session-token" }, "oidc-jwt"},
+		{"no client id", func(c *server.StartupConfig) { c.WebUIOAuthClientID = "" }, "PODIUM_WEB_UI_OAUTH_CLIENT_ID"},
+		{"no client secret", func(c *server.StartupConfig) { c.WebUIOAuthClientSecret = "" }, "PODIUM_WEB_UI_OAUTH_CLIENT_SECRET"},
+		{"no redirect uri", func(c *server.StartupConfig) { c.WebUIRedirectURI = "" }, "PODIUM_WEB_UI_REDIRECT_URI"},
+		{"no authorization endpoint", func(c *server.StartupConfig) { c.WebUIOAuthAuthorizationEndpoint = "" }, "PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT"},
+		{"no token endpoint", func(c *server.StartupConfig) { c.WebUIOAuthTokenEndpoint = "" }, "PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT"},
+		{"redirect uri is non-loopback http", func(c *server.StartupConfig) {
+			c.WebUIRedirectURI = "http://podium.acme.com/v1/ui/auth/callback"
+		}, "PODIUM_WEB_UI_REDIRECT_URI"},
+		{"redirect uri is no URL", func(c *server.StartupConfig) {
+			c.WebUIRedirectURI = "podium.acme.com/v1/ui/auth/callback"
+		}, "PODIUM_WEB_UI_REDIRECT_URI"},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := browserFlowConfig()
+			c.mutate(&cfg)
+			err := cfg.Validate()
+			if !errors.Is(err, server.ErrWebUIAuthUnconfigured) {
+				t.Fatalf("got %v, want ErrWebUIAuthUnconfigured", err)
+			}
+			if !strings.Contains(err.Error(), c.names) {
+				t.Errorf("refusal does not name the failed conjunct %q: %v", c.names, err)
+			}
+		})
+	}
+}
+
+// Spec: §6.3.4 — the device-code flow's PODIUM_OAUTH_AUTHORIZATION_ENDPOINT is
+// not accepted in place of PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT. The
+// guard reads no device-code value at all, so an operator who sets only that
+// key gets a startup refusal naming the key the browser flow needs rather than
+// a redirect to nowhere. Not parallel: it sets a process-wide variable.
+func TestStartupConfig_BrowserFlowRejectsDeviceCodeEndpoint(t *testing.T) {
+	t.Setenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", "https://idp.acme.com/device/authorize")
+	cfg := browserFlowConfig()
+	cfg.WebUIOAuthAuthorizationEndpoint = ""
+	err := cfg.Validate()
+	if !errors.Is(err, server.ErrWebUIAuthUnconfigured) {
+		t.Fatalf("got %v, want ErrWebUIAuthUnconfigured", err)
+	}
+	if !strings.Contains(err.Error(), "PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT") {
+		t.Errorf("refusal does not name the key the browser flow reads: %v", err)
+	}
+}
+
+// Spec: §13.10 ("The guard's ordering") — the browser-flow guard runs after
+// the shipped public-mode exclusion, so public mode alongside oidc-jwt keeps
+// failing with config.public_mode_with_idp even with the flow enabled.
+// Matrix: §6.10 (config.public_mode_with_idp)
+func TestStartupConfig_BrowserFlowOrdersAfterPublicModeExclusion(t *testing.T) {
+	t.Parallel()
+	cfg := browserFlowConfig()
+	cfg.PublicMode = true
+	if err := cfg.Validate(); !errors.Is(err, server.ErrPublicModeWithIdP) {
+		t.Errorf("got %v, want ErrPublicModeWithIdP", err)
+	}
+}
+
+// Spec: §13.10 / §6.3.4 — a configuration satisfying every conjunct starts.
+// The redirect-URI conjunct admits an https URL and an http URL whose host is
+// a loopback address, which are the two forms a browser treats as a secure
+// context.
+func TestStartupConfig_BrowserFlowAccepted(t *testing.T) {
+	t.Parallel()
+	for _, redirect := range []string{
+		"https://podium.acme.com/v1/ui/auth/callback",
+		"http://127.0.0.1:8080/v1/ui/auth/callback",
+		"http://localhost:8080/v1/ui/auth/callback",
+	} {
+		redirect := redirect
+		t.Run(redirect, func(t *testing.T) {
+			t.Parallel()
+			cfg := browserFlowConfig()
+			cfg.WebUIRedirectURI = redirect
+			if err := cfg.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// Spec: §13.10 — a configuration that enables no browser flow reaches no
+// conjunct of the guard, which includes the shipped web-UI-only configuration
+// (--web-ui alone).
+func TestStartupConfig_BrowserFlowDisabledReachesNoConjunct(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		cfg  server.StartupConfig
+	}{
+		{"web UI alone", server.StartupConfig{WebUI: true}},
+		{"nothing set", server.StartupConfig{}},
+		{"web UI under oidc-jwt with no acquisition values", server.StartupConfig{WebUI: true, IdentityProvider: "oidc-jwt"}},
+		{"web UI under trusted-headers", server.StartupConfig{WebUI: true, IdentityProvider: "trusted-headers"}},
+		{"web UI in public mode", server.StartupConfig{WebUI: true, PublicMode: true}},
+		{"acquisition values without the enablement key", func() server.StartupConfig {
+			c := browserFlowConfig()
+			c.WebUIAuth = false
+			c.WebUI = false
+			return c
+		}()},
+		{"a redirect URI the conjunct would refuse, flow off", func() server.StartupConfig {
+			c := browserFlowConfig()
+			c.WebUIAuth = false
+			c.WebUIRedirectURI = "http://podium.acme.com/v1/ui/auth/callback"
+			return c
+		}()},
+	}
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			if err := c.cfg.Validate(); err != nil {
+				t.Errorf("Validate() = %v, want nil", err)
+			}
+		})
+	}
+}

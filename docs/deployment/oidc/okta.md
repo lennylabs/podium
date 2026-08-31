@@ -58,7 +58,7 @@ registry:
 
 Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config and the registry ignores it without reporting an error.
 
-`oidc-jwt` is the registry's side of the flow: it verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`. Developers obtain that token by completing the device-code flow from the CLI, which the next step configures. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
+`oidc-jwt` is the registry's side of the flow: it verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`. A CLI, an SDK, or another API client obtains that token by completing the device-code flow the next step configures, and on a registry that enables the browser flow a browser obtains it through the registry's own authorization-code exchange, which the registry returns in the `__Host-podium_session` cookie. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
 
 The registry reads group membership from the token's `groups` claim, mapped to group names by the `IdpGroupMapping` adapter, or from the SCIM directory when SCIM is configured (see below). Restart the registry.
 

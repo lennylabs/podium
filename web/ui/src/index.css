@@ -1,0 +1,5894 @@
+/* The token set the design pass fixed, one name per role, in both themes.
+   No component hard-codes a colour: the dark theme is the same component
+   with a different token set. The light values are the default, an
+   unconfigured visitor's prefers-color-scheme switches the palette, and a
+   data-theme attribute on the root element overrides both.
+
+   Each data-theme arm re-declares the whole token set, which is what makes
+   the override win in both directions. A light arm declaring color-scheme
+   alone loses every colour to the dark media query on a visitor whose
+   operating system reports dark, which leaves dark surfaces under a
+   light-declared color-scheme.
+
+   The design pass fixes Space Grotesk for prose and UI, JetBrains Mono for
+   identifiers, and Anton for the wordmark, and it names self-hosting as the
+   remedy for a registry that reaches no font host. The three families below
+   are therefore bundled assets served from the /ui/ mount, so an air-gapped
+   deployment resolves every face the type scale was sized against. Each
+   file is the latin subset of the upstream release; web/ui/src/fonts/README.md
+   records the provenance and the licence. */
+
+@font-face {
+  font-family: "Space Grotesk";
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url("./fonts/space-grotesk.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("./fonts/jetbrains-mono.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Anton";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/anton.woff2") format("woff2");
+}
+
+:root,
+:root[data-theme="light"] {
+  --page: #f4f1ea;
+  --surf: #ffffff;
+  --surf2: #fcfbf6;
+  /* The sidebar's ground is its own token because the two themes place it
+     differently against the top bar: the light theme paints both the same
+     white, and the dark theme drops the sidebar a step below the bar so the
+     navigation column reads as inset under a raised bar. Painting it `surf`
+     in both merges the two planes in the dark theme. */
+  --nav-surf: #ffffff;
+  --ink: #14130f;
+  --sec: #43413a;
+  --meta: #63604f;
+  --faint: #6f6c5e;
+  --bd: #d9d5c6;
+  --b2: #e4e0d2;
+  --chip: #eae7d9;
+  --acc: #ffa424;
+  --acc-deep: #f2861a;
+  /* The pointer states of the two filled controls. They are tokens rather
+     than a filter on the fill, because a filled control has to darken by the
+     same step in both themes, and the dark theme's accent is the plain `acc`
+     value where `acc-deep` is not. */
+  --acc-hover: #f2861a;
+  --danger-hover: #8f2915;
+  --on-acc: #14130f;
+  --link: #a8480a;
+  --wash: #fff3e2;
+  --cbd: #f5cd9b;
+  --danger: #b3341c;
+  --danger-bg: #fdeee9;
+  --danger-bd: #f0c4b8;
+  --on-danger: #ffffff;
+  --ok: #3f8f66;
+  --scrim: rgba(20, 19, 15, 0.42);
+  --font-ui: "Space Grotesk", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-display: "Anton", var(--font-ui);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page: #0c0f16;
+    --surf: #171b28;
+    --surf2: #141824;
+    --nav-surf: #141824;
+    --ink: #eaeef7;
+    --sec: #c4cbdb;
+    --meta: #9aa3ba;
+    --faint: #7a8399;
+    --bd: #2b3145;
+    --b2: #232838;
+    --chip: #212739;
+    --acc: #ffa424;
+    --acc-deep: #ffa424;
+    --acc-hover: #f2861a;
+    --danger-hover: #e2543a;
+    --link: #ffa424;
+    --wash: rgba(255, 164, 36, 0.1);
+    --cbd: #4a3a22;
+    --danger: #ff6b4a;
+    --danger-bg: rgba(255, 107, 74, 0.12);
+    --danger-bd: #5c2a1e;
+    --on-danger: #14130f;
+    --ok: #5fbf8f;
+    --scrim: rgba(6, 8, 13, 0.62);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0c0f16;
+  --surf: #171b28;
+  --surf2: #141824;
+  --nav-surf: #141824;
+  --ink: #eaeef7;
+  --sec: #c4cbdb;
+  --meta: #9aa3ba;
+  --faint: #7a8399;
+  --bd: #2b3145;
+  --b2: #232838;
+  --chip: #212739;
+  --acc-deep: #ffa424;
+  --acc-hover: #f2861a;
+  --danger-hover: #e2543a;
+  --link: #ffa424;
+  --wash: rgba(255, 164, 36, 0.1);
+  --cbd: #4a3a22;
+  --danger: #ff6b4a;
+  --danger-bg: rgba(255, 107, 74, 0.12);
+  --danger-bd: #5c2a1e;
+  --on-danger: #14130f;
+  --ok: #5fbf8f;
+  --scrim: rgba(6, 8, 13, 0.62);
+}
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.mono,
+code,
+pre {
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+/* JetBrains Mono ships programming ligatures under `liga` and `calt`, so with
+   the defaults the face draws `>=` as a single `≥` glyph, and `<=`, `!=`,
+   `->`, `=>`, and `===` likewise. Every mono surface here is verbatim: the
+   authored source tab shows the file byte for byte, the raw frontmatter view
+   shows the block the registry serves, and an artifact ID or a hash is a value
+   a reader copies by eye. A substituted glyph on any of them shows characters
+   the author did not write. `none` covers the contextual set as well, which is
+   where the coding ligatures live, so no `font-feature-settings` is needed.
+
+   The selector list mirrors every rule that sets `font-family: var(--font-mono)`.
+   A case in typography.test.ts pins that correspondence, so a new mono surface
+   that forgets this rule fails the suite rather than silently ligating. */
+.mono,
+code,
+pre,
+.catalog-row > .catalog-marker,
+.breadcrumb,
+.label,
+.badge,
+.version-notice-pin,
+.tag,
+.keyword,
+.tab-count,
+.picker-count,
+.data-table th.column-label,
+.stat-count,
+button.stat-count.stat-open,
+.stat-label {
+  font-variant-ligatures: none;
+}
+
+/* An identifier set in mono is user-authored and unbounded, and a content
+   hash is long by construction, so it wraps inside whatever holds it rather
+   than running past the edge. The value is break-word rather than anywhere
+   because anywhere also shrinks a column's intrinsic width, which breaks a
+   table timestamp that would otherwise fit. Preformatted blocks keep their
+   own horizontal scroll, so they are excluded. */
+.mono,
+code {
+  overflow-wrap: break-word;
+}
+
+/* A code element is one token quoted inside running prose, and the mono face
+   alone reads as a typographic slip mid-sentence rather than as a quoted
+   identifier. The chip fill and the 4px radius are what marks it, and they are
+   set here rather than on the rendered body alone so the viewer draws the same
+   token the same way on every tab (§13.10). */
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--chip);
+}
+
+/* A fenced block is quoted whole, and the card the `pre` is drawn as is what
+   marks it. The chip above is the mark for one token inside a sentence, and
+   inherited by the `code` a fence nests inside the `pre` it fills each line
+   to the width of that line's text, so a block reads as a run of ragged bands
+   inside the card rather than as one ground (§13.10). */
+pre > code {
+  display: block;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
+
+/* Most anchors in this interface are structural: a card, a listing row, a
+   breadcrumb crumb, a sidebar entry. The surrounding structure is the
+   affordance there, and the user-agent underline drawn under each one turns a
+   page of navigation into a page of link text. The underline is therefore off
+   by default and restored where a link sits inside running prose, which is
+   the one place its position is not already obvious. */
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+/* A card or a tile is drawn as one target: a bordered box holding a name, a
+   description and what stands under it, with a chevron stating that it opens.
+   The anchor is the name alone, so without this the reader who aims at the
+   box hits the 20px name line or nothing at all. The overlay covers the
+   positioned ancestor the card establishes, which makes the whole box the
+   anchor's hit area while the accessible name stays the name the anchor
+   wraps. Nothing else inside such a card is interactive, so the overlay
+   covers no other control. */
+.stretched-link::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+/* The box the overlay covers carries the focus ring, so the shell's own ring
+   is dropped here: drawn as well it rings the name inside the ring around the
+   box the keyboard is about to follow. */
+.stretched-link:focus-visible {
+  box-shadow: none;
+}
+
+/* Rendered markdown is running prose, so an inline link carries the
+   underline: nothing else in the paragraph marks where it starts and ends. */
+.prose a {
+  text-decoration: underline;
+}
+
+h1 {
+  font-size: 29px;
+  letter-spacing: -0.025em;
+  margin: 0 0 10px;
+}
+
+h2 {
+  font-size: 21px;
+  letter-spacing: -0.02em;
+  margin: 30px 0 10px;
+}
+
+h3 {
+  font-size: 19px;
+  margin: 22px 0 8px;
+}
+
+/* The bar holds the wordmark, the search trigger and the appearance control,
+   and it is the only route out of a surface that runs past the viewport. Left
+   in flow it scrolled away with the page, so a reader at the foot of a
+   60-artifact listing had no visible navigation at all. It is stuck to the top
+   of the viewport instead, over the content that passes under it (§13.10). */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  height: 52px;
+  padding: 0 16px;
+  background: var(--surf);
+  border-bottom: 1px solid var(--bd);
+}
+
+/* The wordmark is the inline mark beside the Anton lockup the design pass
+   fixed: a filled circle over a bar, then the name in uppercase. */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--ink);
+}
+
+.wordmark-mark {
+  width: 24px;
+  height: 17px;
+}
+
+.wordmark-mark-disc {
+  fill: var(--acc-deep);
+}
+
+.wordmark-mark-bar {
+  fill: var(--ink);
+}
+
+.wordmark-text {
+  font-family: var(--font-display);
+  font-size: 18px;
+  font-weight: 400;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.spacer {
+  flex: 1;
+}
+
+/* The skip link is the first Tab stop and is drawn only while it holds focus.
+   It is moved off-screen rather than hidden, because `display: none` and
+   `visibility: hidden` take an element out of the Tab order and there would be
+   nothing to focus. */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 20;
+  background: var(--surf);
+}
+
+.skip-link:focus {
+  left: 12px;
+  top: 10px;
+}
+
+/* The content column is minmax(0, 1fr) rather than 1fr because a grid track's
+   automatic minimum is its min-content width, which lets a wide table or a
+   long identifier push the column past the viewport and scroll the whole
+   document sideways. A zero minimum keeps the column inside the shell and
+   leaves the overflow to the containers that already scroll. */
+.app-body {
+  display: grid;
+  grid-template-columns: 268px minmax(0, 1fr);
+  min-height: calc(100vh - 52px);
+}
+
+/* The sidebar is a fixed 268px, so under about 900px of viewport the column
+   beside it holds less than 600px and a surface's own header runs out of it:
+   the layer panel's actions were cut off at the right edge of the content
+   column. Below that width the sidebar becomes a band above the content and
+   carries its divider on its bottom edge, so the surface holds the whole
+   viewport. */
+@media (max-width: 900px) {
+  /* The band takes the height its own rows need and the surface takes the
+     rest. Left to the grid's automatic tracks the leftover height is shared
+     between them, which opened a gap under the tree and pushed the page title
+     down the viewport. */
+  .app-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--bd);
+  }
+
+  .content {
+    padding: 22px 18px 36px;
+  }
+}
+
+/* The section rows and the catalog tree stay on screen while the surface
+   beside them scrolls, so the column is stuck under the 52px bar and takes the
+   rest of the viewport. `align-self: start` is what leaves it a sticky box
+   rather than a grid item stretched to the row's full height, which has no
+   room left to move within and never sticks. */
+.sidebar {
+  position: sticky;
+  top: 52px;
+  z-index: 9;
+  align-self: start;
+  /* The stylesheet declares no global border box, so the column's own padding
+     would stand outside the height set here and run it 36px past the bottom of
+     the grid row. A sticky box is clamped by the bottom of its containing
+     block, and that overhang dragged the section rows up under the bar as the
+     page reached its foot. */
+  box-sizing: border-box;
+  height: calc(100vh - 52px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 16px;
+  background: var(--nav-surf);
+  border-right: 1px solid var(--bd);
+}
+
+.sidebar a {
+  padding: 6px 10px;
+  border-radius: 7px;
+  text-decoration: none;
+  color: var(--ink);
+  font-size: 13.5px;
+}
+
+.sidebar a:hover {
+  background: var(--chip);
+}
+
+/* The section rows are otherwise uniform, so the surface the reader is on is
+   stated by filling its row and setting it apart in weight. The inactive rows
+   step back to the secondary ink, which is what makes the fill read as a
+   position rather than as a hover that stuck. */
+.sidebar a.section-link {
+  color: var(--sec);
+  padding: 8px 10px;
+}
+
+.sidebar a.section-link-current {
+  background: var(--chip);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* The catalog section label heads the tree below it, with the depth of the
+   hierarchy the tree navigates pushed to the far edge of the sidebar. The two
+   sit on a common baseline so the label and the figure read as one line. The
+   rule above the label closes the navigation block, so the sidebar reads as
+   banded zones rather than as rows floating in one column. It is the same
+   hairline the footer draws at the other end of the column. */
+.catalog-label {
+  margin: 12px 0 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--b2);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.catalog-depth {
+  margin-left: auto;
+  font-size: 10.5px;
+}
+
+.catalog-tree,
+.catalog-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 12px;
+}
+
+/* The column is bounded by the viewport, so the tree is what gives way when
+   the hierarchy runs longer than the space under the section rows: it takes
+   the leftover height and scrolls inside it, which keeps the pinned footer on
+   screen. `min-height: 0` is required for that, because a flex item's
+   automatic minimum is its content height and the tree would otherwise push
+   the footer out of the column instead of scrolling. */
+.catalog-tree {
+  flex: 1;
+  min-height: 0;
+  padding-left: 0;
+  overflow-y: auto;
+}
+
+/* The sentence that stands in for an empty catalog sits under the tree,
+   indented to the level a first row would occupy. */
+.catalog-empty {
+  margin: 0;
+  padding: 2px 0 2px 24px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.catalog-empty p {
+  margin: 0;
+}
+
+/* The sidebar's own retry sits inside a 12px block, so it takes the block's
+   scale rather than the page's button scale. */
+.catalog-retry {
+  margin: 6px 0 0;
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
+.catalog-node {
+  font-size: 13px;
+}
+
+/* A row is one line: the toggle, then the label. The label is the whole
+   folded stretch of path the entry navigates across, so a §4.5.5 sparse chain
+   puts a string on it that is wider than the 268px sidebar. Wrapping it would
+   drop it onto its own line at the sidebar's left padding and cut it
+   mid-segment against the border, so the label shrinks and clips to an
+   ellipsis inside the row instead, and carries the whole path as its title. */
+.catalog-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 6px 0;
+  border-radius: 0 6px 6px 0;
+  /* The row is one line of a list the reader scans, so it sets its own
+     leading rather than taking the page's reading line-height. Board 14a
+     draws a 27px row: 13px of name between 6px of padding on each side. The
+     row owns the whole box, because the label inside it is an anchor in one
+     arm and a span in the other, and a box drawn on the label would size the
+     two differently. */
+  line-height: 1.15;
+}
+
+/* The tree row is the sidebar's own metric, so its label drops the padding
+   and the type scale the sidebar's section links carry. Left at those, an
+   anchor label boxed the row out to 38px against the design's 27px, and the
+   tree ran 40 percent past the fold it was drawn to fit inside. */
+.catalog-row > .mono {
+  padding: 0;
+  font-size: inherit;
+}
+
+/* The current row is filled across its whole width, so the hover is drawn on
+   the row too. Left on the label, it filled the label's box alone, which is
+   the text itself once the label carries no padding. */
+.catalog-row:not(.catalog-row-current):hover {
+  background: var(--chip);
+}
+
+.catalog-row > .mono:hover {
+  background: none;
+}
+
+/* The tree is a list the reader scans for one entry, so its names step back
+   to the secondary ink the way the section rows above them do. The sidebar's
+   anchor rule sets every link in the column at the primary ink, and a tree
+   left at that tone states the current domain by weight alone, which is not
+   enough separation to find a position in a column of names. */
+.catalog-row > .mono {
+  display: flex;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  color: var(--sec);
+}
+
+/* A §4.5.5 sparse chain arrives folded into one entry whose label is the whole
+   stretch of path it crosses, and the label is wider than the 268px sidebar.
+   The label is drawn in two boxes so the row takes its shortfall out of the
+   ancestry: the lead yields and clips to an ellipsis, and the last segment,
+   which is the only part naming the domain the row opens, stays on screen. */
+.catalog-lead {
+  flex-shrink: 999;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--faint);
+}
+
+/* The name does not yield at all, so the row's shortfall falls on the ancestry
+   whatever the two lengths are. Its own cap is the row, which is what clips a
+   single segment wider than the sidebar rather than letting it run past the
+   border. */
+.catalog-name {
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The toggle keeps its width, because it is a control the reader aims at. */
+.catalog-row > .tree-toggle,
+.catalog-row > .tree-leaf {
+  flex: none;
+}
+
+/* A state marker annotates the name beside it, so it is drawn small and
+   quiet rather than in the section-label type: the label's 11px uppercase
+   with tracking is wide enough that a marker in it pushes the name it
+   annotates out of the row. The marker also yields the row's shortfall
+   before the name does, which is why its shrink factor is the larger one.
+   Either item clips to an ellipsis and carries its text as a title. */
+.catalog-row > .catalog-marker {
+  flex-shrink: 999;
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--faint);
+}
+
+/* The domain the page is showing is filled with the accent wash and carries
+   an inset accent bar, which is what states the reader's position in a tree
+   whose rows are otherwise uniform. */
+.catalog-row-current {
+  background: linear-gradient(90deg, var(--wash), transparent);
+  box-shadow: inset 3px 0 var(--acc);
+  font-weight: 600;
+}
+
+/* The current row comes back to the primary ink, so the tree separates it
+   from its siblings by tone as well as by weight. The selector covers the
+   restricted arm too, which draws its name in a span rather than a link. */
+.catalog-row-current .mono {
+  color: var(--ink);
+}
+
+/* The remainder row sits at the level it opens and reads as an annotation on
+   it, so it takes the quiet colour and the row's own metrics rather than the
+   page's button scale. */
+.catalog-more {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 2px 8px 2px 20px;
+  border: none;
+  background: none;
+  color: var(--faint);
+  font-size: 12px;
+  text-align: left;
+}
+
+.catalog-more:hover {
+  color: var(--ink);
+}
+
+.tree-toggle,
+.tree-leaf {
+  padding: 0 4px;
+  margin: 0;
+  border: none;
+  background: none;
+  color: var(--faint);
+  font-size: 13.5px;
+  line-height: 1;
+}
+
+/* A node whose level came back empty keeps its control in the slot so the
+   reader's focus survives, and the marker glyph states that the slot no
+   longer opens anything. */
+.tree-toggle-empty {
+  cursor: default;
+}
+
+/* The toggle's marker is the shell's chevron, turned a quarter clockwise when
+   the level below the row is open. The row states which way it points through
+   aria-expanded already, so the rotation reads that rather than a second class
+   that would have to be kept in step with it. */
+.tree-toggle .chevron {
+  display: block;
+  width: 9px;
+  height: 9px;
+}
+
+.tree-toggle[aria-expanded="true"] .chevron {
+  transform: rotate(90deg);
+}
+
+/* A leaf has nothing to open, so its row holds the toggle's slot open and
+   draws nothing in it, which keeps the labels of a level on one left edge.
+   The slot is the chevron's width plus the toggle's padding, so the left edge
+   holds when a row's type changes. */
+.tree-leaf {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+}
+
+/* The footer is pinned to the bottom of the sidebar. */
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--b2);
+  font-size: 10.5px;
+}
+
+.sidebar-footer p {
+  margin: 0;
+}
+
+.content {
+  padding: 26px 30px 40px;
+  max-width: 1120px;
+  min-width: 0;
+}
+
+/* The trail above the page title. It reads as one dimmed path in the same
+   monospace the identifiers use, so the eye takes it as position rather than
+   as a row of actions: the ancestors are muted, the slashes between them are
+   fainter still, and the segment the reader already stands on is plain ink
+   text carrying no link. */
+.breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--faint);
+}
+
+/* Each crumb carries the separator that precedes it, so the pair wraps as one
+   unit and no line ends on a trailing slash. */
+.breadcrumb-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.breadcrumb a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.breadcrumb a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+}
+
+.breadcrumb-sep {
+  color: var(--b2);
+}
+
+.breadcrumb-here {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* The page title row. The heading names the page and the badges qualifying
+   it sit beside it on the same line, aligned on the heading's baseline, so
+   the title is the first large text a reader meets. The heading's own margin
+   is dropped here because the row carries the spacing under it. */
+.page-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  /* The header states the path in the breadcrumb alone, so this row sits
+     directly over the description and carries the gap between them. */
+  margin: 6px 0 12px;
+}
+
+/* An artifact name is a path segment, so its last token can run unbroken for
+   dozens of characters. Left at the default the heading takes that token as
+   its minimum width, grows past the content column, and is cut at the rail
+   divider with no sign that the name continues. The zero minimum lets the
+   flex item shrink to the column, and the break lets the token wrap inside
+   it, which is what the rail's own name row already does. */
+.page-title h1 {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The sentence a page states under its title. It supports the title rather
+   than competing with it, so it takes the secondary ink the subdomain card's
+   and the listing row's descriptions take. Left at the primary ink it carries
+   the same weight as the heading above it and the body below it, and the
+   header block reads as one flat slab. `.quiet` is declared after this rule,
+   so the absent placeholder still reads in the quiet tone. */
+.lead {
+  max-width: 720px;
+  color: var(--sec);
+  text-wrap: pretty;
+}
+
+/* The control that opens a clipped field. It sits on its own row under the
+   text so it does not narrow the measure. */
+.clamp-more {
+  display: block;
+  margin: 6px 0 0;
+  padding: 2px 8px;
+  font-size: 12.5px;
+}
+
+.quiet {
+  color: var(--meta);
+}
+
+.label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+/* A label in the accent tone marks the one field on a surface whose value
+   carries a condition the reader has to act on, which is how the webhook
+   secret's label separates from the permanent webhook URL's label above it.
+   The colour is the link tone rather than the accent fill, because the accent
+   is a surface colour and does not set small text on light paper. */
+.label-accent {
+  color: var(--link);
+  font-weight: 600;
+}
+
+/* A heading in the section-label role keeps the label typography and the
+   heading's own vertical rhythm. The weight is stated because a heading
+   element defaults to bold, which puts the label back in competition with
+   the page title the label sits under. */
+h2.label {
+  font-weight: 600;
+  margin: 26px 0 12px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 7px;
+  margin-right: 6px;
+  border-radius: 5px;
+  border: 1px solid var(--bd);
+  background: var(--surf2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.badge-accent {
+  background: var(--wash);
+  border-color: var(--cbd);
+}
+
+/* The strong tone is the filled accent pill. It is the badge's loudest marker
+   and states a condition the reader cannot recover from, such as a value that
+   is shown once. The accent tone beside it is a wash behind an accent edge,
+   which reads as one more chip in a row and is too quiet for that job. The
+   text takes the colour written for the accent fill so the pill stays legible
+   in both themes, where the fill itself does not change. */
+.badge-strong {
+  border-color: var(--acc);
+  background: var(--acc);
+  border-radius: 100px;
+  color: var(--on-acc);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+/* The curated marker is the one badge that asks to be found while scanning a
+   listing, so it carries weight and tracking the informational badges beside
+   it do not. */
+.badge-curated {
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.badge-quiet {
+  color: var(--meta);
+}
+
+/* The lifted marker states that the row is not a child of the domain it is
+   listed under, which is a different kind of fact from the type, the version,
+   and the tags the row also carries. It therefore takes the dashed edge the
+   lifted group's own container carries and drops the fill, so the marker reads
+   as provenance at a glance instead of as one more chip in the row. */
+.badge-folded {
+  border-style: dashed;
+  background: none;
+  color: var(--meta);
+  letter-spacing: 0.05em;
+}
+
+/* The soft tone is the badge's second neutral. It is drawn as a filled chip
+   with no visible edge, so a badge carrying a secondary fact (a version, a
+   count, a source type) reads at a lower weight than the outlined badge
+   standing next to it. Without it every neutral badge takes the outline and
+   the two weights the design separates render alike. The border is declared
+   transparent rather than removed, so a soft badge and an outlined badge in
+   the same row keep the same box and sit on one baseline. */
+.badge-soft {
+  border-color: transparent;
+  background: var(--chip);
+  color: var(--meta);
+}
+
+/* The grant tone is the filled chip that keeps the badge's outline. A
+   visibility marker states the grant the row is listed under, which is the
+   fact the layer panel's visibility column exists to carry, so it is set one
+   step above the soft source chip beside it: the outline and the body tone
+   separate the two, and without them a row's grant statement reads at the
+   same weight as the chip naming where the layer came from. */
+.badge-grant {
+  background: var(--chip);
+  color: var(--sec);
+}
+
+/* The hollow tone is the grant tone's counterpart: the same box and mono face
+   with the fill dropped and the edge kept, in the metadata tone. The layer
+   panel's visibility column states an absent grant with it, so a row granting
+   on no axis carries a marker of the same size and geometry as a row that
+   grants, and the column reads as one row of markers whatever the grant state.
+   Set as plain body text the same statement read as a cell that had failed to
+   render its marker. */
+.badge-hollow {
+  background: none;
+  color: var(--meta);
+}
+
+/* The marker tone states a property of the response rather than of the thing
+   the badge sits beside, which is how the trimmed-listing pill stands among
+   the header's count chips. It takes the same filled chip in the metadata
+   tone as those counts and separates itself by its rounded edge and by an
+   accent dot. An accent fill or an accent edge would read as a warning, and
+   the marker must read as neither content nor error. */
+.badge-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-color: transparent;
+  border-radius: 100px;
+  background: var(--chip);
+  color: var(--meta);
+}
+
+.badge-marker::before {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--acc);
+}
+
+/* The count tone is the bare figure a control states beside its own label. It
+   is drawn as a filled pill with no edge, tighter and heavier than the
+   informational badges, because a figure sitting inside a link or a button
+   takes its meaning from the label it follows rather than from a box of its
+   own. Given the outlined badge the tabular markers take, the same figure
+   reads as a boxed input parked next to the label. */
+.badge-count {
+  padding: 1px 6px;
+  border-color: transparent;
+  border-radius: 100px;
+  background: var(--chip);
+  color: var(--meta);
+  font-size: 10.5px;
+  font-weight: 600;
+}
+
+.badge-danger {
+  background: var(--danger-bg);
+  border-color: var(--danger-bd);
+  color: var(--danger);
+}
+
+.banner {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--surf2);
+}
+
+.banner-accent {
+  background: var(--wash);
+  border-color: var(--cbd);
+}
+
+.banner-danger {
+  background: var(--danger-bg);
+  border-color: var(--danger-bd);
+}
+
+/* A banner that carries a leading glyph holds it in a fixed gutter, so a
+   statement that wraps keeps its left edge under the first line. The danger
+   tone takes the glyph in its own colour, because the mark is what separates
+   the destructive statement from the reassuring one beside it. */
+.banner-lead {
+  display: flex;
+  gap: 11px;
+}
+
+.banner-glyph {
+  flex: none;
+  width: 11px;
+  color: var(--faint);
+  line-height: 1.5;
+}
+
+.banner-danger .banner-glyph {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner-title {
+  margin: 0 0 4px;
+  font-weight: 600;
+}
+
+.banner-code {
+  color: var(--danger);
+}
+
+/* A banner that annotates one row of a table rather than the page stays about
+   one row tall: the marker leads, the statement and the envelope's words sit
+   beside it, and the recovery is pushed to the right edge on the statement's
+   own line. Stacked, the same content read as a page-level failure block. */
+.banner-annotation {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.banner-annotation .banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.banner-annotation .badge {
+  flex: none;
+  margin-top: 2px;
+}
+
+.banner-annotation .banner-actions {
+  flex: none;
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.banner-annotation .banner-actions button {
+  margin-right: 0;
+}
+
+.banner-detail {
+  margin: 0;
+  color: var(--sec);
+  font-size: 12.5px;
+  line-height: 1.55;
+  max-width: 700px;
+  text-wrap: pretty;
+}
+
+/* A control that only closes what it is drawn in carries no border, so the
+   recovery beside it is the one control the band offers. */
+.button-plain {
+  border-color: transparent;
+  background: transparent;
+  color: var(--meta);
+}
+
+/* The pinned-version notice is one row rather than a titled block: the version
+   being read, the fact that it is not the latest, and the way back to it. The
+   version is set in the mono face the version badge one line above uses, so
+   the reader matches the two at a glance, and it carries the same `v` prefix
+   that badge carries. A stacked heading and a chromed button restated the
+   header's own fact at the weight of a warning the reader has to act on. */
+.version-notice {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex-wrap: wrap;
+}
+
+.version-notice-pin {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+/* The way back is the version itself, underlined, because it returns the
+   reader to a version the page already names rather than starting an action:
+   a button chrome in a one-line notice reads as the heavier of the two. */
+button.version-notice-latest {
+  margin: 0 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--link);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+}
+
+/* A whole-surface failure is a card the reader lands on rather than a strip
+   pinned to the top of an otherwise empty column, so it is centered in the
+   content area and drawn in the surface tone: the page did not go wrong, the
+   thing the route named is not there. The danger tone is reserved for a
+   failure that sits beside content it is about. */
+.error-page {
+  display: flex;
+  justify-content: center;
+  padding-top: 48px;
+}
+
+.error-card {
+  width: 100%;
+  max-width: 560px;
+  padding: 34px 26px;
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  background: var(--surf);
+  text-align: center;
+}
+
+.error-kind {
+  margin: 0 0 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--faint);
+}
+
+.error-title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.error-lead {
+  margin: 0 auto 16px;
+  max-width: 400px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--sec);
+}
+
+.error-actions {
+  display: flex;
+  gap: 9px;
+  justify-content: center;
+}
+
+/* The row spaces itself, so the trailing margin every control carries would
+   sit the pair off-center. */
+.error-actions button,
+.error-actions .button {
+  margin-right: 0;
+}
+
+/* The code is what a reader quotes in a bug report and nothing they act on,
+   so it sits under the action at the smallest size the page uses. */
+.error-code {
+  margin: 14px 0 0;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.artifact-list,
+.subdomain-grid,
+.relation-list,
+/* A frontmatter value in the property table. A value with no spaces in it
+   breaks inside the cell rather than widening the rail. The rail renders a
+   clipped value as a paragraph, whose user-agent margin would otherwise set
+   that row apart from the rows around it. */
+.property-value {
+  margin: 0;
+  /* A value the author wrote across several lines, a YAML block scalar or a
+     nested mapping, keeps its line breaks: collapsing them runs the lines
+     into one and contradicts the panel's own line saying the values are
+     shown verbatim. The indent a nested key sits at is part of that
+     structure, so spaces are kept too, and the text still wraps. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* A sequence value flows onto one line, `tags | tracing, review, otel`, which
+   is the row the design draws and the height every other row in the table
+   takes. Stacked one entry per line, a twelve-tag sequence turns a single row
+   into a block of bullets and pushes the keys below it off the reader's first
+   screen. The entries stay separate list items so a screen reader still counts
+   them and a wrapped entry stays one entry; only the layout runs them
+   together. The separator is drawn rather than authored, and it takes the
+   de-emphasized tone, so an entry that ends in a full stop is still told apart
+   from the comma that follows it. */
+.property-items {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.property-items li {
+  display: inline;
+}
+
+.property-items li + li::before {
+  content: ', ';
+  color: var(--faint);
+}
+
+/* The em dash standing for a key the author left empty. It is the absence
+   itself rather than a value, so it takes the de-emphasized tone the other
+   absent states use. */
+.property-absent {
+  color: var(--faint);
+}
+
+/* The listings are ul elements, so they carry the user-agent list indent and
+   marker until they are reset. Left in place, the indent pushes a listing 40px
+   right of the section label that heads it and past the right edge of the
+   content column, and each listing draws its own left spacing from the row or
+   card inside it. */
+.artifact-list,
+.subdomain-grid,
+.relation-list {
+  padding: 0;
+  list-style: none;
+}
+
+.tag-list {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+}
+
+.subdomain {
+  position: relative;
+  padding: 12px 14px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--surf);
+  cursor: pointer;
+}
+
+/* The card is the anchor's hit area, so it carries the focus ring the shell
+   draws everywhere else on the anchor's behalf. Drawn around the name alone
+   it would ring a fifth of what the keyboard is about to follow. */
+.subdomain:has(.stretched-link:focus-visible),
+.tile:has(.stretched-link:focus-visible) {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
+}
+
+/* The border belongs to the listing rather than to each entry: a domain's
+   artifacts and a result set are one bordered container whose rows are
+   separated by a hairline, so a listing reads as a single table instead of a
+   stack of loose boxes. overflow hidden keeps the first and last rows inside
+   the container's rounded corners. */
+.artifact-list {
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  overflow: hidden;
+  background: var(--surf);
+}
+
+/* The lifted group holds entries a §4.5.5 sparse chain folded up into this
+   domain, which are not its children. The dashed container is what carries
+   that: drawn with the solid border the direct listing takes, the group reads
+   as a second listing of the same standing. The list inside gives its border
+   up to the container and keeps a hairline over the first row, so the group
+   reads as one box with a titled head rather than as a box inside a box. */
+.folded {
+  margin-top: 26px;
+  padding: 14px 16px;
+  border: 1px dashed var(--bd);
+  border-radius: 11px;
+  background: var(--surf2);
+}
+
+/* The caption shares the label's line. It qualifies the label rather than
+   standing on its own, and baseline alignment sits the two on one rule
+   despite the size between them. */
+.folded-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.folded-head > .label {
+  margin: 0;
+}
+
+.folded-head > .quiet {
+  font-size: 12.5px;
+}
+
+.folded > .artifact-list {
+  border: 0;
+  border-top: 1px solid var(--b2);
+  border-radius: 0;
+  background: none;
+}
+
+/* The container already pads the group, so the rows keep their vertical
+   rhythm and give up the horizontal padding the bordered listing needs. */
+.folded > .artifact-list > .artifact-row {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* A row is up to three columns: a ranked row's relevance indicator at the left
+   edge, the artifact and what it says about itself in the middle, and its type
+   and version pinned to the right edge, so a reader scanning a listing for a
+   type reads one column down the page. */
+.artifact-row {
+  padding: 12px 14px;
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+}
+
+.artifact-row + .artifact-row {
+  border-top: 1px solid var(--b2);
+}
+
+.artifact-row-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.artifact-row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The type, the version and the sensitivity badge are one cluster, so they
+   move to the next line together when the identifier fills the row. Left as
+   siblings of the identifier they wrap one at a time, which strands the type
+   badge at the end of the identifier's line with its version a line below.
+   The group still wraps internally, so a cluster wider than the row on its
+   own breaks inside itself instead of overflowing. */
+.artifact-row-marks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+/* A row with no marks renders the group empty, and an empty flex item still
+   takes the head's gap after the identifier. */
+.artifact-row-marks:empty {
+  display: none;
+}
+
+/* The identifier names the row and carries the link tone, which is what sets
+   it apart from the path and the badges beside it. It is also the row's
+   anchor, so it is set a half point above the mono default and at the weight
+   the badges beside it carry: left at the plain mono size and weight it sits
+   under its own description and the row reads description-first. The row is
+   the affordance, so the underline is drawn on hover rather than standing
+   under every row. */
+.artifact-id {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.artifact-id:hover {
+  text-decoration: underline;
+}
+
+/* The relevance column. The indicator leads the row so it holds one x
+   position down a result set. Drawn after the badges instead, it moves with
+   whichever of type, version, and sensitivity a row happens to carry, and the
+   bars stop reading as a column. The column is present on every row of a
+   scored result set, including the vector-only row that draws no bars, so the
+   row bodies align. */
+.artifact-row-relevance {
+  flex: none;
+  padding-top: 3px;
+}
+
+.artifact-row-aside {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.artifact-path,
+.artifact-version {
+  font-size: 12.5px;
+}
+
+/* The subdomains are a map of one level: a card per immediate child, laid out
+   across the content width so the reader takes the level in at a glance
+   instead of scrolling a column of full-width rows. */
+.subdomain-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .subdomain-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* A domain that nests nothing states it in one line where the label and the
+   grid would have stood. The top margin matches the section label it replaces
+   and collapses into the next section's own, so the line takes a section's
+   gap rather than a section's height. */
+.subdomains-absent,
+.artifacts-absent {
+  margin: 26px 0;
+  font-size: 12.5px;
+}
+
+.subdomain {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.subdomain > p {
+  margin: 0;
+  flex: 1;
+}
+
+/* The card carries three tiers: the name, what the domain holds, and the two
+   figures under it. The description is the tier the reader reads, so it takes
+   the secondary ink the artifact row's description takes and a size under the
+   card title's. Left at the body size in the quiet tone it is the largest and
+   the palest text in the card, and it reads as a second counts line. */
+.subdomain-description {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--sec);
+  text-wrap: pretty;
+}
+
+/* The absent case, for the reason `.artifact-description.quiet` states: the
+   description colour is declared after `.quiet` and would otherwise win. */
+.subdomain-description.quiet {
+  color: var(--meta);
+}
+
+/* The card title is the card's name, set in the ink the card is drawn in.
+   Drawn in the link tone it reads as an inline link sitting inside the card
+   rather than as the card's own name, and the chevron at the right edge is
+   what states the card opens the domain. The compact tile states the same
+   thing the same way. */
+.subdomain-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+/* The pointer anywhere over the card is over the anchor, so the name answers
+   for the whole box rather than for the line the pointer happens to be on. */
+.subdomain:hover .subdomain-name > span {
+  text-decoration: underline;
+}
+
+/* A sparse chain arrives folded into one entry, so a card title can be a long
+   slash-separated path. A slash offers no break opportunity, and the `.mono`
+   break-word rule leaves the flex item's intrinsic minimum at its max-content
+   width, so without a zero minimum the title runs past the card, widens the
+   grid track, and scrolls the whole document sideways. The break value is
+   anywhere, which lowers that minimum, and the path wraps inside the card. */
+.subdomain-name > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.subdomain-name .chevron {
+  width: 9px;
+  height: 9px;
+  margin-left: auto;
+  flex: none;
+  color: var(--faint);
+}
+
+.subdomain-counts {
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+}
+
+/* The domain title and what the response counted sit on one line: the counts
+   qualify the name, and a line of their own under the h1 reads as a second
+   claim about the domain. The counts align to the title's baseline rather
+   than its box, which is what the top offset buys, and the row wraps so a
+   long leaf name keeps them from being pushed off the content column. */
+.domain-head {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin: 0 0 8px;
+}
+
+.domain-head h1 {
+  margin: 0;
+}
+
+.domain-counts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 9px;
+}
+
+/* The relevance indicator. The four bars rise left to right, and the
+   container holds its width where a row draws none, so a vector-only match
+   keeps its row aligned with the ranked rows above it. */
+.relevance {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  width: 26px;
+  height: 14px;
+}
+
+.relevance-bar {
+  width: 4px;
+  border-radius: 1px;
+  background: var(--bd);
+}
+
+.relevance-bar:nth-child(1) {
+  height: 8px;
+}
+
+.relevance-bar:nth-child(2) {
+  height: 10px;
+}
+
+.relevance-bar:nth-child(3) {
+  height: 12px;
+}
+
+.relevance-bar:nth-child(4) {
+  height: 14px;
+}
+
+.relevance-bar-filled {
+  background: var(--acc);
+}
+
+/* A description is an author-controlled field with no length bound, and a row
+   is a listing element: one artifact whose description runs to several
+   hundred words would otherwise take the height of a screen and push every
+   other row below the fold. The row therefore clips the description to three
+   lines over the same 720px measure the domain header reads at, and the
+   artifact's own page carries the whole field. */
+/* The description is secondary prose under the identifier, so it takes the
+   interface default size rather than the body prose size the document
+   inherits. At 15px/1.6 it was the largest text in the row, larger than the
+   subdomain card description in the same page, and it read ahead of the
+   identifier that names the artifact. */
+.artifact-description {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--sec);
+  max-width: 720px;
+  text-wrap: pretty;
+}
+
+/* The absent case. `.quiet` is declared above this block, so the description
+   colour would otherwise win over it and the placeholder would read at the
+   weight of a description the artifact does not carry. */
+.artifact-description.quiet {
+  color: var(--meta);
+}
+
+/* The placeholder that stands where an artifact or a subdomain carries no
+   description. Colour alone does not separate it from a real description: set
+   upright beside siblings that carry one, it reads as a description whose text
+   happens to say "No description." The italic marks it as prose the interface
+   wrote rather than a field the author filled in. */
+.absent-description {
+  font-style: italic;
+}
+
+/* The three-line clip a description reads at. The listing row always clips,
+   and the artifact header clips until the reader opens it. */
+.artifact-description,
+.clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+
+/* The one-line clip a row drawn beside the at-scale artifact table reads at.
+   That table clips every description to one line, so a three-line description
+   above it draws the same kind of entry at a different density and moves the
+   table down the page by the difference. */
+.artifact-row-dense .artifact-description {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* A keyword is a value the API treats as an identifier, so a pill is set in the
+   mono face at the small quiet tone the type table assigns those values. In the
+   body sans at the body tone a row of pills outweighed the mono path above it
+   and became the second thing read after the artifact name. */
+.tag {
+  padding: 2px 7px;
+  border-radius: 100px;
+  background: var(--chip);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--meta);
+}
+
+/* A domain keyword and an artifact tag are different things: the keyword is a
+   term the domain author curates for the whole subtree, and the tag labels one
+   artifact. Drawn with the same filled chip they read as one vocabulary, so the
+   keyword takes an outline over the page ground at the larger mono size and the
+   tag keeps the fill. */
+.keyword {
+  padding: 3px 9px;
+  border-radius: 100px;
+  border: 1px solid var(--b2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--meta);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 10px 0;
+}
+
+/* A field the submit is held on marks the requirement beside its label, so the
+   reason the submit is disabled is legible at the field as well as in the
+   footer note the reader reaches after scrolling past it. */
+.label-required {
+  color: var(--danger);
+}
+
+.field input:not([type="checkbox"]) {
+  padding: 8px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  color: var(--ink);
+  font: inherit;
+}
+
+/* A select and a checkbox are drawn by the browser from the operating
+   system palette unless the page overrides it, which is how the register
+   form ended up with a white select and a white checkbox on a dark
+   surface. The color-scheme declaration on each theme arm settles the parts
+   the page cannot reach, the popup list and the checkbox tick, and the rules
+   below give the closed control the same border, radius, and type the text
+   inputs carry so one form reads as one set of controls. The native
+   indicator goes with the appearance, so the field draws its own chevron. */
+.field select {
+  appearance: none;
+  padding: 8px 30px 8px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  color: var(--ink);
+  font: inherit;
+}
+
+.field:has(select) {
+  position: relative;
+}
+
+.field:has(select)::after {
+  content: "";
+  position: absolute;
+  right: 13px;
+  bottom: 16px;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--meta);
+  border-bottom: 1.5px solid var(--meta);
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+
+/* The caret is one of the interaction tokens, so it is set once for every
+   field the reader types into rather than per control. Left to the browser
+   it takes the text colour, which is how the search surface's query drew an
+   ink caret beside a palette query drawing the accent one. */
+input:not([type="checkbox"]):not([type="radio"]),
+textarea {
+  caret-color: var(--acc);
+}
+
+/* Chrome derives a native checkbox's whole appearance from accent-color
+   rather than from color-scheme, so the warm accent forced a light-appearance
+   control onto the dark surface: an unchecked grant rendered as a solid pale
+   square, which reads as a grant already given. The box therefore draws its
+   own fill, border, and tick the way .field select draws its own chevron, so
+   both states come off the token set in both themes. Unchecked is a
+   transparent square behind a hairline border, and checked is the accent fill
+   behind a dark tick, which is the state pair the design inventory draws. */
+input[type="checkbox"] {
+  appearance: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* A native checkbox carried an intrinsic minimum size. Once the page paints
+     it the box is an ordinary element, so it has to refuse to shrink in the
+     flex rows it labels text inside. */
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0 8px 0 0;
+  vertical-align: -2px;
+  border: 1.5px solid var(--bd);
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+}
+
+input[type="checkbox"]:checked {
+  border-color: var(--acc);
+  background: var(--acc);
+}
+
+/* The tick is the corner of a rotated box, the same construction the select's
+   chevron uses. It takes --on-acc, which stays dark in both themes because it
+   sits on the accent fill rather than on the page. */
+input[type="checkbox"]:checked::after {
+  content: "";
+  width: 3.5px;
+  height: 7px;
+  margin-top: -2px;
+  border-right: 2px solid var(--on-acc);
+  border-bottom: 2px solid var(--on-acc);
+  transform: rotate(45deg);
+}
+
+/* The page paints the box now, so it also owns the unavailable state the
+   browser used to grey on its own. */
+input[type="checkbox"]:disabled {
+  border-color: var(--b2);
+}
+
+input[type="checkbox"]:disabled:checked {
+  border-color: var(--b2);
+  background: var(--chip);
+}
+
+input[type="checkbox"]:disabled:checked::after {
+  border-right-color: var(--faint);
+  border-bottom-color: var(--faint);
+}
+
+/* Chrome draws its own clear control inside a search field, filled in a
+   saturated blue no token in the set carries, so it lands as the one
+   non-accent colour on the surface it sits in. Every search field here draws
+   the affordances it wants, the palette's magnifier and match count among
+   them, and none of them asks for a clear control. */
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* The magnifier is drawn at whatever size its caller asks for, and it never
+   shrinks in the flex row it sits in. */
+.magnifier {
+  flex: none;
+}
+
+/* The search field is a row holding the magnifier and the query. The border
+   is the row's, so the icon reads as sitting inside the field. */
+.search-field {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  color: var(--meta);
+}
+
+.search-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+}
+
+/* The focus ring belongs to the row, because the row is what the reader sees
+   as the field. The input inside it draws none of its own, which would ring
+   a transparent borderless box sitting within the ring already drawn. */
+.search-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.search-field:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
+}
+
+/* The filter row: the fixed filter set on the left and the result count at
+   the row's right. */
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0 16px;
+}
+
+.filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.result-count {
+  margin: 0 0 0 auto;
+  font-size: 12.5px;
+}
+
+/* The count reads as one sentence with the two numerals carrying it, so the
+   words stay at the quiet tone the paragraph sets and only the numbers lift
+   to ink. */
+.result-count strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+/* The row names itself, so a reader arriving at a filtered search reads what
+   the pills beside the label are. */
+.filter-label {
+  color: var(--meta);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 11px;
+  margin: 0;
+  border: 1px solid var(--bd);
+  border-radius: 100px;
+  background: var(--surf);
+  color: var(--ink);
+  font-size: 12.5px;
+}
+
+/* An applied filter states what is narrowing the result set, so it carries the
+   accent as a filled chip and the extra weight that separates it from the
+   outlined pills standing for the filters that are still open. */
+.pill-active {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--on-acc);
+  font-weight: 600;
+}
+
+.pill-remove {
+  padding: 0 2px;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.pill-add {
+  border-style: dashed;
+  color: var(--meta);
+}
+
+/* An enumerable filter is added from a dropdown drawn as the outlined pill
+   its applied state replaces. A native select is as wide as its widest option,
+   so the scope control stretched to the deepest domain path in the catalog and
+   opened a dead gap between its label and its indicator. The pill draws the
+   closed label and the chevron itself, which sets the width from the label,
+   and the select is laid over the pill transparently so the reader still
+   operates the browser's own control and its popup list. */
+.pill-select {
+  position: relative;
+  border-color: var(--bd);
+  color: var(--meta);
+}
+
+.pill-select select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: none;
+  border-radius: 100px;
+  background: none;
+  font: inherit;
+  opacity: 0;
+}
+
+.pill-select-label {
+  font-size: 12.5px;
+}
+
+.pill-select .chevron {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  transform: rotate(90deg);
+}
+
+/* The focus ring the shell draws everywhere else lands on the select, which is
+   transparent, so the pill carries it on the select's behalf. */
+.pill-select:has(select:focus-visible) {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
+}
+
+.pill-entry input {
+  width: 130px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.pill-entry button {
+  padding: 0 6px;
+  margin: 0;
+  border: none;
+  background: none;
+  font-size: 12.5px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--b2);
+  text-align: left;
+  vertical-align: top;
+  font-size: 13.5px;
+}
+
+/* The header row is drawn on the inset tone so it separates from the listing
+   below it. Every data table takes it from here, so the layer panel, the
+   restore table, and the at-scale artifact table read as one treatment. The
+   row-header cells inside a body row are excluded: a `th scope="row"` labels
+   its own row and belongs to the listing. */
+.data-table thead th {
+  background-color: var(--surf2);
+}
+
+/* Frontmatter is authored, so a value can be one unbroken token such as a
+   serialised nested map. A table takes its min-content width as an automatic
+   minimum, and an unbreakable value therefore sets the property table wider
+   than the column holding it: in the rail it renders past the right edge of
+   the window and scrolls the whole document sideways. Breaking the value
+   wherever it has to puts its minimum back at one character, so the table
+   stays inside its column at every viewport width. */
+.property-table td {
+  overflow-wrap: anywhere;
+}
+
+/* The key is an identifier the author wrote, and a break inside it reads as a
+   different name: `review_cycle` broken at the column edge draws
+   `review_cycl` over a lone `e`. `break-word` breaks the key only on a line
+   that cannot hold it and leaves the key whole in the column's min-content
+   width, so automatic table layout sizes the key column to the longest key
+   the table carries and every key stands on one line (§13.10). A key wider
+   than the cap below is the case that break then covers. */
+.property-table th {
+  overflow-wrap: break-word;
+}
+
+/* The design lays the frontmatter rows out on a fixed 180px key column beside
+   a value column that takes the rest, so a key such as `type` stands beside
+   what it labels at every table width. Automatic table layout hands a column
+   whatever surplus the table has left over, and a key column stated only as a
+   share of the table therefore grows with the table: across the full main
+   column the frontmatter tab put a three-character key more than 300px from
+   its value. The value asks for the whole table, which sends the surplus there
+   and holds the key at the width stated below (§13.10).
+   The width is a floor rather than a preference, because the value's claim
+   outranks a preference and would otherwise squeeze the key to its
+   min-content.
+   The cap bounds what the key can take from the value: a key wider than it is
+   the pathological one, and holding it whole would push the table past the
+   content column and scroll the document sideways again. Twice the design's
+   column is about 26 characters of the key's mono face, past every key an
+   artifact carries in practice. */
+/* The key is the label of the row and the value is its content, so the key is
+   set quiet and small while the value keeps the table's own size in `--ink`.
+   A user agent renders a `th` bold and in the body colour, which puts the
+   heavier half of the row on the field name and runs the reader's eye down
+   the names rather than down the values (§13.10). */
+.property-table th {
+  min-width: 180px;
+  max-width: 360px;
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--faint);
+}
+
+.property-table td {
+  width: 100%;
+}
+
+/* The panel's table runs the whole content column, which puts a row's key and
+   its value a few hundred pixels apart, and a 1px divider is all that holds
+   the reader's line across that gap: a nine-row table reads as one block and
+   the eye loses which value belongs to which key. The design bands the rows
+   from the first row down, so the fill itself carries the row-to-row
+   separation at that width (§13.10). The rail's table is a 270px column where
+   the divider spans the whole row, and it already stands on the inset tone, so
+   it keeps one fill. */
+.property-table-panel tbody tr:nth-child(even) {
+  background-color: var(--surf2);
+}
+
+/* The rail is a 316px column, so the table inside it is about 270px. The
+   design fixes the rail's key at 74px beside a value that takes the rest,
+   which is the width of `sensitivity`, the longest key it draws. The floor
+   holds that column for a table whose keys are all shorter, and a longer key
+   grows the column to itself. The cap is the rail's share of the panel's:
+   18ch plus the cell's 24px of padding is about half the table, and a wider
+   key would leave the value narrow enough to wrap a description to one word a
+   line and then send it behind a disclosure control. Both are stated in `ch`
+   of the key's own mono face so they track whatever size that face is set at
+   (§13.10). */
+.artifact-rail .property-table th {
+  min-width: 11ch;
+  max-width: 18ch;
+}
+
+/* A view switch that rides on a toolbar row is smaller than the one in a
+   form, so the track and its segments tighten. The fills stay the shared
+   ones, because a reader who learns the control on the register form reads
+   the same selection here. */
+.source-actions .segmented,
+.section-head .segmented {
+  padding: 2px;
+  border-radius: 8px;
+}
+
+.source-actions .segment,
+.section-head .segment {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.property-note {
+  max-width: 840px;
+  margin-top: 14px;
+  font-size: 12.5px;
+}
+
+.raw-line {
+  display: block;
+}
+
+/* The line the parser complained about, marked in the destructive
+   background so the reader is shown the failure rather than only its
+   coordinates. */
+.raw-line-offending {
+  background: var(--danger-bg);
+}
+
+/* The same mark carried down the gutter, so the number of the line the
+   parser named reads as part of the marked row rather than beside it. */
+.source-gutter-offending {
+  background: var(--danger-bg);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+/* The layer table's identifier cell. The name and the marker qualifying it are
+   one wrapping row with a gap, the same way the page title and the artifact row
+   head carry their badges. Left to inline flow the name and the badge touch,
+   because a badge sets its own trailing margin and no leading one. */
+.layer-id-cell {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 7px;
+  /* The column is a fixed proportion of the table, so a name longer than it
+     breaks inside the cell rather than pushing out over the source beside
+     it. */
+  overflow-wrap: anywhere;
+}
+
+/* The identifier names the row on the layer panel and on the restore table,
+   the way `.artifact-id` names an artifact row, so it carries the same weight.
+   Left at the plain mono weight it reads as one more mono value beside the
+   precedence line under it and the source path next to it, and the row has no
+   text that scans as its name. */
+.layer-name {
+  font-weight: 600;
+}
+
+/* The precedence position sits under the name on its own line, so it reads at
+   the same offset on every row whatever markers the name carries. */
+.layer-order {
+  margin-top: 3px;
+  font-size: 11.5px;
+}
+
+/* The layer table's source cell. The chip and the reference share the first
+   line, and the location details sit under them in the quiet tone, so a long
+   repository URL or absolute path sits below the fact the reader scans for
+   rather than through it. */
+.source-cell {
+  min-width: 0;
+}
+
+.source-ref {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-bottom: 3px;
+}
+
+.source-ref .badge {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* The source column asks the table for nothing of its own, so the columns
+   around it take their natural widths and this one takes what is left. A
+   detail line is then clipped to that width rather than broken between
+   characters: breaking an absolute path or a repository URL mid-token stacked
+   one source over three or four lines and left the rows of one table at
+   unequal heights. The title attribute keeps the whole value reachable. */
+.source-col {
+  width: 100%;
+  max-width: 0;
+}
+
+/* A detail line is one row of two runs: the leading directories, which the
+   cell clips, and the final segment, which it holds out of the clip. Clipping
+   the whole line from the right left several layers under one parent
+   rendering the identical string, so the column stopped telling the rows
+   apart. The tail's automatic right margin takes the spare width while the
+   line fits, which keeps a short line against the left edge. */
+.source-detail {
+  display: flex;
+  justify-content: flex-end;
+  overflow: hidden;
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+/* The head's elision falls at its start, so the characters it keeps end
+   flush against the tail and the two runs read as one path. Elided at its
+   end, the head kept the box the flex layout gave it and the ellipsis landed
+   wherever the last whole character fitted, which left up to a character of
+   slack before the tail and drew the cell as two values with a space between
+   them. The right-to-left direction moves the clip and the ellipsis to the
+   start of the line; the inner element restores left-to-right ordering so a
+   leading separator is not reordered to the far end of the string. */
+.source-detail-head {
+  /* The head keeps room for its own ellipsis and for the separator that closes
+     it. Free to shrink to nothing, it was driven to a sliver a fraction of a
+     character wide on exactly the rows whose path is most truncated, the
+     ellipsis was never painted, and the cell stated a bare directory name that
+     a reader takes for the layer's whole source path. Two characters is the
+     marker and the separator, so what is left of the head still reads as a
+     directory prefix rather than as a second ellipsis against the tail's
+     (§13.10). The component draws no head at all where the value has no
+     leading directories, so this reserves width only where there is a prefix
+     to mark, and it caps the reserve at the head's own length: a head of a
+     single character carries no ellipsis at any width, and a two-character
+     reserve was drawn as whitespace between the runs, so a path such as
+     `/tmp` read as the two values `/` and `tmp`. */
+  min-width: var(--head-reserve, 2ch);
+  /* The head gives up every pixel of the shrink down to that reserve before
+     the tail gives up one: the flex algorithm distributes the negative free
+     space in proportion to the scaled shrink factors, so a factor this much
+     larger than the tail's drives the head to its minimum and freezes it
+     there, and only what is still over the cell reaches the tail. */
+  flex-shrink: 9999;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+}
+
+.source-detail-head > bdi,
+.source-detail-tail > bdi {
+  direction: ltr;
+}
+
+/* A repository URL is told apart by its host and its owner, which sit at the
+   start of the string, while its final segment repeats across every fork of
+   one project. Clipped like a path, two remotes under different owners drew
+   the identical cell, and the gap the two elisions left between them read as
+   two values rather than one address. The line is one run elided at its end,
+   so the leading `git@github.com:owner/` survives the clip (§13.10). The
+   automatic margin holds it against the left edge under the flex line's end
+   alignment. */
+.source-detail-whole {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-right: auto;
+}
+
+/* The tail elides at its own start once the head has collapsed. Held out of
+   the shrink entirely, a final segment wider than the cell overflowed the
+   line's clip and was sliced mid-glyph with no marker, so the row stated a
+   repository name that was not the layer's beside sibling rows that all
+   carried a leading ellipsis. */
+.source-detail-tail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  margin-right: auto;
+}
+
+/* The layer table lays its columns out to fixed proportions rather than to
+   its content. Sized from the content, the source column's `width: 100%` took
+   every spare pixel and the identifier column collapsed to min-content, so a
+   name such as `eng-shared-context-library` broke over four lines beside an
+   ellipsised path in a column four times as wide, and the column the reader
+   identifies the row by was the narrowest one in the table. The proportions
+   are the design's grid, which gives the layer 1.5fr against 1fr for the
+   source and the visibility and 0.9fr for the ingest time. */
+.layer-table {
+  table-layout: fixed;
+  min-width: 860px;
+}
+
+/* The fixed proportions are read off the table's own width, so a container
+   narrower than the widths they add up to drives every column below the
+   min-content of the token inside it: at a 700px viewport an identifier
+   rendered one character to the line and the row grew to several hundred
+   pixels, and at 900px the visibility markers clipped part-way through
+   "organization". The table keeps its designed widths down to a floor and
+   scrolls sideways inside this container below it, so every cell stays on the
+   one line the design draws it on (§13.10). The container is focusable
+   because a region that scrolls must be reachable from the keyboard.
+
+   The container is positioned so that it is the containing block of what it
+   scrolls. An absolutely positioned descendant resolves against the nearest
+   positioned ancestor, and a static container is not one, so such a descendant
+   is laid out against the page and escapes the clip the overflow declares. The
+   assistive-only spans inside the restore table sit past the 1040px floor, and
+   from outside the clip they set the document's own scroll width wider than
+   the viewport: at 520px the page scrolled sideways and carried the fixed top
+   bar and the sidebar off with it, while the columns the scroll exists to
+   reach stayed cut off (§13.10). */
+.table-scroll {
+  position: relative;
+  overflow-x: auto;
+  /* The container names itself so the cells inside it can ask how wide it is.
+     A pinned column only covers another column while the table is wider than
+     this container, and the ground and the rule that state the cover are
+     drawn from that answer rather than at every width. */
+  container: table-scroll / inline-size;
+}
+
+.layer-table th:nth-child(2) {
+  width: 27%;
+}
+
+.layer-table th:nth-child(3) {
+  width: 18%;
+}
+
+.layer-table th:nth-child(4) {
+  width: 18%;
+}
+
+.layer-table th:nth-child(5) {
+  width: 16%;
+}
+
+/* The actions column carries no heading, so the width the row's control bar
+   needs is declared on the header cell the fixed layout reads it from. Left
+   to the remainder the bar ran out of its own column and over the ingest
+   time beside it. */
+.layer-table th:last-child {
+  width: 140px;
+}
+
+/* The actions column is pinned to the trailing edge of the scroll container,
+   so it is drawn inside the visible column at every scroll position. The
+   table keeps its designed widths down to an 860px floor and scrolls sideways
+   below it, and the column that falls outside first is the last one: a 700px
+   container against that floor drew the whole actions cell past its right
+   edge, which left a pointer with no route to reingest, edit, or unregister a
+   layer and nothing on screen saying the table continued (§13.10). */
+.layer-table th:last-child,
+.layer-table td.row-actions {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+}
+
+/* A pinned cell is painted over the cells that scroll beneath it, so while the
+   table is wider than its container the actions column declares the ground its
+   row is drawn on and the rule that separates it from the column it covers.
+   The table's floor is 860px, so a container at least that wide holds every
+   column and the pin covers nothing. Drawn there too, the rule ran the full
+   height of a table that does not scroll and the actions cells sat on their own
+   ground, which boxed the table off one column early; the design draws all rows
+   on one grid separated by horizontal hairlines (§13.10). */
+@container table-scroll (width < 860px) {
+  .layer-table th:last-child,
+  .layer-table td.row-actions {
+    border-left: 1px solid var(--b2);
+  }
+
+  .layer-table td.row-actions {
+    background-color: var(--surf);
+  }
+
+  /* The pinned cell carries its own ground, so it takes the row's raised tone
+     from here as well. Left on the row alone the tone stopped at the pinned
+     column and the row read as ending one column early. */
+  .layer-table tbody > tr:not(.row-detail):hover > td.row-actions {
+    background-color: var(--chip);
+  }
+}
+
+/* Fixed layout takes the column widths from the header row and already bounds
+   the cell, so the source cell's own width claim is dropped here. Its
+   `max-width: 0` would otherwise clamp the cell's content box to nothing. */
+.layer-table .source-col {
+  width: auto;
+  max-width: none;
+}
+
+/* The layer table lays itself out from its content, and the ingest column is
+   now the width of "0m ago", which is narrower than its own heading. The
+   headings name the columns and are short enough to hold one line each. */
+.layer-table th {
+  white-space: nowrap;
+}
+
+/* The visibility column carries one marker per matching axis and wraps to
+   several lines on a layer that matches on more than one, which sets the row's
+   height. Under the table default every other cell stayed pinned to the top of
+   that height, so the layer name, the source, the ingest time, and the row's
+   controls sat in the first line's worth of the row with an empty band beneath
+   them and the row read as a short row with a stack of markers hanging off it.
+   The design draws the row as one tier with every cell on its midline, so the
+   cells centre and only the markers span the full height (§13.10). The detail
+   row a control opens is excluded: it is a full-width panel in a row of its
+   own, and it is laid out from its top edge. */
+.layer-table tbody > tr:not(.row-detail) > td {
+  vertical-align: middle;
+}
+
+/* The restore table carries the same source cell and needs the same treatment.
+   Sized from its content the source column's `width: 100%` took every spare
+   pixel, the layer column collapsed to min-content, and an ordinary identifier
+   such as `gamma-layer` broke mid-token over two lines beside an ellipsised
+   path six times as wide, with the erase countdown wrapping for the same
+   reason. The proportions are the design's grid for this surface, which gives
+   the layer the widest content column and the source about two thirds of
+   it (§13.10). The proportions are read off the table's own width, so the
+   table keeps them down to a floor wide enough for its six columns and
+   scrolls sideways inside `.table-scroll` below it: at a 1000px viewport the
+   "Unregistered" header ran out of its cell and abutted "Erased on", and the
+   header row read as one token. */
+.restore-table {
+  table-layout: fixed;
+  min-width: 1040px;
+}
+
+.restore-table th:nth-child(1) {
+  width: 26%;
+}
+
+.restore-table th:nth-child(2) {
+  width: 15%;
+}
+
+/* The artifact-count column is the design's narrow column between the source
+   and the dates. It is wide enough for its own header and for the marker that
+   states the count is unreported, which broke over two lines in a column
+   sized to the count alone. */
+.restore-table th:nth-child(3) {
+  width: 10%;
+}
+
+.restore-table td:nth-child(3) {
+  white-space: nowrap;
+}
+
+/* The unregistered column carries a stamp that names its zone, so it is
+   sized for the zone name as well as for the time and holds the two on one
+   row. Broken over two lines the stamp read as two data. */
+.restore-table th:nth-child(4) {
+  width: 15%;
+}
+
+.restore-table td:nth-child(4) {
+  white-space: nowrap;
+}
+
+/* The erase column carries a date, a bar, and a count on one row, and the
+   floor above is what keeps the three of them on that row. */
+.restore-table th:nth-child(5) {
+  width: 21%;
+}
+
+.restore-table th:last-child {
+  width: 120px;
+}
+
+/* The restore control is the row's only action, and the table's floor is wider
+   than the column the surface is laid out in at a 1280px viewport, so the
+   overflow fell on the action: the button was cut through its own label, and
+   scrolling the container far enough to read it took the layer identifier off
+   the left edge, which left the reader able to see which layer a row is or the
+   control that restores it and never both. The action column is pinned to the
+   container's right edge, so it stays whole at every width the table scrolls
+   at (§13.10). It carries its own ground, because the cells scrolling under a
+   sticky cell show through one that declares none, and the header cell keeps
+   the inset tone the header row is drawn on. */
+.restore-table th:last-child,
+.restore-table td:last-child {
+  position: sticky;
+  right: 0;
+  background-color: var(--surf);
+}
+
+.restore-table thead th:last-child {
+  background-color: var(--surf2);
+}
+
+/* The hovered row lifts to the chip tone, and the pinned cell paints its own
+   ground over that, so it takes the row's tone as well. Left on the surface
+   fill the action column read as a hole punched in the lit row. */
+.restore-table tbody > tr:not(.row-detail):hover > td:last-child {
+  background-color: var(--chip);
+}
+
+.restore-table .source-col {
+  width: auto;
+  max-width: none;
+}
+
+.restore-table th {
+  white-space: nowrap;
+}
+
+/* The identifier column is a fixed proportion of the table, so a name longer
+   than it breaks inside the cell rather than pushing out over the source
+   beside it. */
+.restore-table td:first-child {
+  overflow-wrap: anywhere;
+}
+
+/* Which layer a row is is what the restore decision keys on, so the identifier
+   column is pinned to the container's left edge on the same terms as the action
+   column at its right edge. The table's floor is wider than the column the
+   surface is laid out in at a laptop viewport, so reading the erase date and
+   the countdown takes a scroll, and the identifier scrolled away with the
+   columns beneath it: the header row began at "Source", every row's first cell
+   was blank, and the reader chose between two rows carrying no name (§13.10).
+   The pinned cells carry their own ground and paint over the cells scrolling
+   beneath them, which is why the fill is declared here and the stacking is
+   raised above the cells that follow them in the row. */
+.restore-table th:first-child,
+.restore-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--surf);
+}
+
+.restore-table thead th:first-child {
+  background-color: var(--surf2);
+}
+
+.restore-table tbody > tr:not(.row-detail):hover > td:first-child {
+  background-color: var(--chip);
+}
+
+/* While the table is wider than its container the identifier column covers the
+   column scrolling under it, so it draws the rule that separates the two. The
+   table's floor is 1040px, so a container at least that wide holds every column
+   and the pin covers nothing; the rule drawn there boxed the identifier off as
+   a column of its own on a table that does not scroll. The rule is a shadow
+   rather than a border: the table collapses its borders, so a collapsed border
+   is painted with the table and scrolls under the pinned cell, which left the
+   pinned column with no visible edge at the one scroll position it exists
+   for. A shadow is painted with the cell and stays on its trailing edge. */
+@container table-scroll (width < 1040px) {
+  .restore-table th:first-child,
+  .restore-table td:first-child {
+    box-shadow: 1px 0 0 var(--b2);
+  }
+}
+
+/* §4.6 visibility is a union of independent axes, so a row carries one marker
+   per matching axis and they read as one cell. The markers wrap as a row
+   instead of flowing as inline text: a marker that names members is long
+   enough to break over its own words in a column this narrow, which put every
+   axis on a line of its own and made a four-axis row three times the height of
+   a one-axis row. A marker wider than the column is ellipsised inside itself,
+   which keeps the axis on one line and marks that its members are cut. */
+.visibility-markers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.visibility-markers .badge {
+  display: inline-flex;
+  max-width: 100%;
+  margin-right: 0;
+  white-space: nowrap;
+}
+
+/* A marker too wide for the cell clips its member names and keeps its
+   remainder count, so the reader is always told how many members the axis
+   carries beyond the ones it names. */
+.visibility-markers .marker-named {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.visibility-markers .marker-extra {
+  flex: none;
+  white-space: pre;
+}
+
+.ingest-ref {
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
+}
+
+.source-fields > summary {
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.source-fields dl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 8px;
+  margin: 4px 0 0;
+  font-size: 11.5px;
+}
+
+.source-fields dl > div {
+  display: contents;
+}
+
+.source-fields dt::after {
+  content: ":";
+}
+
+/* An unknown type's field values are clipped on the same terms as a known
+   type's detail line, so an unfamiliar row keeps the height of a familiar
+   one. */
+.source-fields dd {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.row-refusal {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 12.5px;
+}
+
+/* The refusal carries the registry's message and the remediation it sent on
+   lines of their own, so the lines are spaced against each other rather than
+   against the paragraphs the surface sets around them. */
+.row-refusal p {
+  margin: 0;
+}
+
+.row-refusal p + p {
+  margin-top: 4px;
+}
+
+button,
+.button {
+  padding: 6px 12px;
+  margin-right: 6px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf2);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13.5px;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.button.primary {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: var(--on-acc);
+}
+
+/* The destructive confirm. It is filled in the danger tone so the press that
+   takes a layer from every caller does not read as the press beside it that
+   dismisses the dialog, and it falls back to the outlined tone while the
+   typed gate holds it, so an unavailable control does not look pressable. */
+.button.danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-danger);
+}
+
+/* A control the registry will refuse reads as unavailable before it is
+   pressed. Two states depend on it: a read-only registry mutes every write
+   control at once rather than answering a failure per press, and a gated
+   dialog holds its confirm until the gate is satisfied. Without the muted
+   tone the accent fill stays on a dead button and the only feedback for a
+   press is silence. The rule sits after .button.primary and .button.danger
+   so it overrides their fills, and before .button.danger:disabled, which is
+   more specific and keeps the destructive confirm in its own quiet tone. */
+button:disabled,
+.button:disabled,
+input:not([type="checkbox"]):not([type="radio"]):disabled,
+select:disabled,
+textarea:disabled {
+  background: var(--chip);
+  border-color: var(--b2);
+  color: var(--faint);
+  cursor: not-allowed;
+}
+
+/* A checkbox carries its own disabled fill and border above, and a radio is
+   still greyed by the browser, so both take the pointer alone here. */
+input:disabled {
+  cursor: not-allowed;
+}
+
+.button.danger:disabled {
+  background: var(--danger-bg);
+  border-color: var(--danger-bd);
+  color: var(--danger);
+  cursor: not-allowed;
+}
+
+/* The control a refused write was attempted from. The refusal is drawn on
+   the row and on the action that produced it, so a reader looking at a stack
+   of identical row actions can tell which one the banner under the row
+   belongs to. It is outlined rather than filled, because the control is still
+   live and pressing it re-issues the write. The rule sits after the disabled
+   block so a control refused on a read-only registry keeps the refusal tone
+   rather than the muted one. */
+button.action-refused {
+  border-color: var(--danger-bd);
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+/* Pointer feedback. The design pass fixes one step of darkening under the
+   pointer and a 1px drop on press, and without either a control answers a
+   hover and a press with nothing at all.
+
+   The base rule is written so that its specificity matches the `.button` half
+   of the rule that paints the control, and `:where()` keeps the pseudo-classes
+   from raising it further. A variant that paints its own ground later in this
+   file (a tab, a segment, a row-menu item) therefore keeps its fill and states
+   its own hover, and only a control wearing the shared chrome takes the shared
+   step. The two filled variants darken their own fill, and the refused control
+   darkens its outline so the press that re-issues the write keeps the tone
+   that says it was refused. */
+:where(button, .button):hover:where(:not(:disabled)) {
+  background: var(--chip);
+}
+
+.button.primary:hover:where(:not(:disabled)) {
+  background: var(--acc-hover);
+  border-color: var(--acc-hover);
+}
+
+.button.danger:hover:where(:not(:disabled)) {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+
+/* The quiet accent control carries no chrome to darken, so it answers the
+   pointer with the accent wash the accent surfaces elsewhere use. */
+.button.link-action:hover:where(:not(:disabled)) {
+  background: var(--wash);
+}
+
+button.action-refused:hover:where(:not(:disabled)) {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+:where(button, .button):active:where(:not(:disabled)) {
+  transform: translateY(1px);
+}
+
+/* The entries a listing is made of take the same step. A row in a domain
+   listing or a result set and a card in the subdomain map are targets, and
+   the design pass gives a target under the pointer one step toward `chip`
+   with no transform and no shadow change (§13.10). Without it the only
+   feedback was the identifier's underline, which is drawn on the width of the
+   text rather than of the row, and the card answered with its title underline
+   while its own fill stayed where it was, so a pointer resting between two
+   entries said nothing about which one the click would land on. */
+.artifact-row:hover,
+.subdomain:hover,
+.tile:hover {
+  background: var(--chip);
+}
+
+/* The listing tables take the step on their body rows. The tables that list
+   an entity the reader acts on are named one by one: the layer table and the
+   restore table each carry a row's controls, and the at-scale artifact table
+   is the domain listing at the density where it becomes a table. The property
+   table and the resources table are excluded, because a row there is a field
+   of the artifact above it and nothing about it is a target. A row the
+   controls opened is a full-width panel of its own, so it is excluded too and
+   the pair does not light up as two entries. */
+.layer-table tbody > tr:not(.row-detail):hover,
+.restore-table tbody > tr:not(.row-detail):hover,
+.artifact-rows tbody > tr:hover {
+  background-color: var(--chip);
+}
+
+/* The soft badge is a filled chip whose edge is declared transparent, so on a
+   raised entry its fill and the ground behind it are one colour and the
+   badge's box disappears: the layer table's source marker read as bare text
+   for as long as the pointer was on its row. It takes the edge it already
+   reserves, which puts the box back and moves nothing beside it. */
+.artifact-row:hover .badge-soft,
+.subdomain:hover .badge-soft,
+.tile:hover .badge-soft,
+.layer-table tbody > tr:not(.row-detail):hover .badge-soft,
+.restore-table tbody > tr:not(.row-detail):hover .badge-soft,
+.artifact-rows tbody > tr:hover .badge-soft {
+  border-color: var(--bd);
+}
+
+/* A checkbox carries its meaning in the text beside it, so the label mutes
+   with the box it labels. */
+label:has(> input:disabled) {
+  color: var(--faint);
+  cursor: not-allowed;
+}
+
+:focus-visible {
+  outline: none;
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
+}
+
+/* An artifact body is markdown authored by whoever can write to the layer, so
+   nothing it holds may widen the column it renders in. A long unbroken token
+   breaks inside the word when the line offers no other break opportunity, and
+   `anywhere` rather than `break-word` so the break also lowers the element's
+   min-content width, which is what a grid track measures. Without it the body
+   grows the column, the shell scrolls sideways, and the top bar and the
+   sidebar leave the viewport. */
+.prose {
+  max-width: 760px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Body prose in the rendered document takes the secondary ink, which is the
+   body-text role every other reading surface here already uses. Without a
+   colour of its own it inherits the primary ink from `body`, so a paragraph
+   is drawn at the same weight as the heading above it and the document loses
+   the contrast that separates its structure from its text. The headings keep
+   the primary ink, and paragraphs open slightly wider than the global
+   line-height because a full-width document column reads at 1.65. */
+.prose p,
+.prose li {
+  color: var(--sec);
+}
+
+.prose p {
+  line-height: 1.65;
+}
+
+/* Left to the user agent a list takes a 40px indent and the global leading,
+   so the markers of a numbered procedure sit visibly inset from the
+   paragraph column above them and the steps read tighter than the prose
+   around them. The design pass fixes a 22px indent, which keeps the marker
+   in the prose column and leaves a hanging indent under it for a wrapped
+   item, and opens the leading to 1.75 because a list is read one item at a
+   time. The indent is the inline start so a right-to-left document indents
+   from its own leading edge. */
+.prose ol,
+.prose ul {
+  margin: 0 0 16px;
+  padding-inline-start: 22px;
+  line-height: 1.75;
+}
+
+/* A heading inside the body is the document's structure, and the page title
+   above it is the page's. Without a scale of its own the body inherits the
+   global one, where h1 is 29px/700, so a markdown h1 draws at the size and
+   weight of the artifact's own title and the two compete. The design pass
+   fixes the body heading at 20px/600, which is the size the top authored
+   level takes here; h1 sits one step above it because a document that uses
+   both levels still needs them to differ, and the deeper levels step down.
+   Every level stays under the page title in both size and weight. */
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+  margin: 26px 0 10px;
+}
+
+.prose h1:first-child,
+.prose h2:first-child,
+.prose h3:first-child,
+.prose h4:first-child,
+.prose h5:first-child,
+.prose h6:first-child {
+  margin-top: 0;
+}
+
+.prose h1 {
+  font-size: 22px;
+}
+
+.prose h2 {
+  font-size: 20px;
+}
+
+.prose h3 {
+  font-size: 17px;
+}
+
+.prose h4,
+.prose h5,
+.prose h6 {
+  font-size: 15px;
+}
+
+/* An image carries an intrinsic width the author picked and no break
+   opportunity at all, so it scales down to the column instead. */
+.prose img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* A §4.4 prose reference to a file the artifact bundles. The file has no
+   address of its own on this origin, so the reference is a control that opens
+   the Resources tab on it. It draws as the inline link the author wrote,
+   because the reader followed a reference either way. */
+.prose button.resource-reference {
+  /* The control sits inside a sentence, so it takes the paragraph's own box:
+     the shell's button rule otherwise gives it a margin and a centred line of
+     its own, which opens a gap on both sides of the reference. */
+  display: inline;
+  font: inherit;
+  color: var(--link);
+  background: none;
+  border: none;
+  margin: 0;
+  padding: 0;
+  text-align: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* An anchor the sanitizer left without a destination. It draws as body text
+   rather than as a link, and the note beside it says the destination was
+   removed, so the reader does not click a link that goes nowhere. */
+.prose a.link-stripped {
+  color: inherit;
+  text-decoration: none;
+  cursor: default;
+}
+
+.prose a.link-stripped::after {
+  content: " (link removed)";
+  font-size: 12px;
+  color: var(--meta);
+}
+
+/* The note left where an image whose source the sanitizer refused stood. It
+   holds the image's alt text, and the removal is named beside it so the
+   reader sees a refusal rather than a broken image. */
+.prose .image-stripped {
+  color: var(--meta);
+}
+
+.prose .image-stripped::after {
+  content: " (image removed)";
+  font-size: 12px;
+  color: var(--meta);
+}
+
+/* The note left where an embedded document stood. Such an element draws
+   nothing of its own once the viewer refuses its source, so without the note
+   the paragraph the author wrote it in disappears and the reader cannot tell
+   a refusal from a body that failed to ingest. */
+.prose .embed-stripped {
+  color: var(--meta);
+}
+
+.prose .embed-stripped::after {
+  content: " (embed removed)";
+  font-size: 12px;
+  color: var(--meta);
+}
+
+/* The note left where a form control stood. The control is removed with its
+   subtree, because its text is a label the author wrote for it and leaving
+   that text behind reads as prose. The note is what tells the reader the
+   viewer refused the control rather than that the body lost a passage. */
+.prose .form-stripped {
+  color: var(--meta);
+}
+
+.prose .form-stripped::after {
+  content: "(form removed)";
+  font-size: 12px;
+  color: var(--meta);
+}
+
+/* The note left where a drawing stood. An `svg` the viewer refuses draws
+   nothing, so without the note the paragraph the author wrote it in is empty
+   and the reader cannot tell a refusal from a body that failed to ingest. */
+.prose .graphic-stripped {
+  color: var(--meta);
+}
+
+.prose .graphic-stripped::after {
+  content: "(graphic removed)";
+  font-size: 12px;
+  color: var(--meta);
+}
+
+/* A quoted aside carries no marker of its own once the user-agent indent is
+   dropped, so the rule on the left is what separates it from the paragraph
+   above it, and the quieter ink is what marks it as borrowed rather than
+   authored here. The user-agent default indents symmetrically by 40px and
+   leaves the ink at body colour, which reads as a paragraph the author
+   mysteriously indented. */
+.prose blockquote {
+  margin: 16px 0;
+  padding: 4px 0 4px 16px;
+  border-left: 2px solid var(--b2);
+  color: var(--sec);
+}
+
+.prose blockquote > :first-child {
+  margin-top: 0;
+}
+
+.prose blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+.prose pre {
+  padding: 12px;
+  overflow-x: auto;
+  background: var(--surf2);
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+}
+
+
+/* A table has a min-content width of its own that no wrapping brings under
+   the column width, so it scrolls sideways inside the container the rendering
+   path wraps it in. The container carries the scrolling rather than the table
+   itself, because a focusable named region on the table element replaces the
+   table semantics a screen reader navigates the cells by. */
+.prose .table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* A table an author wrote in the body takes the same treatment as every table
+   the product draws: an outer card, a header row on the inset tone, and
+   horizontal dividers between rows with no vertical rule between columns. The
+   declarations are restated here rather than reusing `.data-table`, because
+   the rendering path emits a bare `<table>` from the markdown and carries no
+   class onto it. */
+.prose table {
+  border-collapse: collapse;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+}
+
+/* A cell reverts to `break-word`, which breaks a token too long for the cell
+   without lowering the table's min-content width. The table then keeps the
+   column widths its content asks for and scrolls, rather than collapsing every
+   heading into one character per line. */
+.prose th,
+.prose td {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--b2);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+
+.prose thead th {
+  background-color: var(--surf2);
+}
+
+.spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  border: 2px solid var(--bd);
+  border-top-color: var(--acc);
+  border-radius: 50%;
+  animation: spin 900ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
+/* An absence is drawn as its own box so it does not read as content the
+   surface failed to draw, and it is set quieter and smaller than the listing
+   or the section label it stands under. A bare paragraph at body weight makes
+   the missing thing the loudest thing in the column. */
+.empty {
+  margin: 0;
+  color: var(--faint);
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.empty p {
+  margin: 0;
+}
+
+/* The title states the absence and the body under it says what would appear
+   there, so the title takes the surface's own ink while the body stays quiet.
+   Both at the same tone would leave the card a block of grey with no line to
+   read first. */
+.empty-title {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.empty-page .empty-title + .empty-body {
+  margin-top: 6px;
+}
+
+/* The body is capped short of the card so the sentence wraps into a centred
+   block rather than running the full width of the listing it replaced. */
+.empty-page .empty-body {
+  max-width: 340px;
+  margin-inline: auto;
+}
+
+/* The correction the no-match arm offers, drawn under the sentence it
+   answers. The chip is a control rather than a word inside the sentence,
+   because pressing it is what puts the corrected line in the query field. */
+.search-correction {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.search-correction-chip {
+  padding: 5px 11px;
+  border: 1px solid var(--b2);
+  border-radius: 7px;
+  background: var(--surf);
+  color: var(--link);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.search-correction-chip:hover {
+  border-color: var(--link);
+}
+
+/* The route out of the empty-catalog arm. It takes its own line under the
+   sentence: run into the sentence it wrapped across the centred column and
+   broke the link's own words over two lines. */
+.search-empty-route {
+  display: block;
+  margin-top: 10px;
+  color: var(--link);
+  text-decoration: underline;
+}
+
+/* The page preset replaces a whole listing, so it takes the solid card the
+   listing would have occupied. */
+.empty-page {
+  padding: 26px;
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  background: var(--surf);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* The inline preset stands for one section of the artifact rail, beside
+   sections that hold content, so its border is dashed: the box marks where
+   the members would sit without claiming to be one of them. */
+.empty-inline {
+  padding: 14px;
+  border: 1px dashed var(--bd);
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* The panel's head puts the title and its description on the left and the
+   actions on the same line, right-aligned, so the description sits under the
+   title rather than being pushed down the page by the controls. */
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+/* The title column asks for 320px before the row wraps, so a column too
+   narrow to hold the title beside the controls drops the controls to a line
+   of their own rather than squeezing the description to a few words a line. */
+.panel-head > :first-child {
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-left: auto;
+  flex: none;
+}
+
+/* The precedence label carries its winning-end qualifier on the same line,
+   in the body face, so the label states which end of the table wins. */
+.precedence-label {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 20px 0 6px;
+}
+
+/* A live region carries text for assistive technology alone. It stays in the
+   accessibility tree, so it is taken out of the visual flow rather than
+   hidden with `display: none` or `visibility: hidden`, which would remove it
+   from that tree and silence the announcement. */
+.assistive-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The panel's closing line: the caller's own layer count against the cap,
+   then what a reorder does, separated by a hairline. */
+.panel-foot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  font-size: 12.5px;
+}
+
+.foot-divider {
+  width: 1px;
+  height: 12px;
+  background: var(--bd);
+}
+
+/* The page banner sits between the top bar and the grid, full width. */
+.page-banner {
+  margin: 0;
+  border-width: 0 0 1px;
+  border-radius: 0;
+}
+
+/* The artifact viewer is two columns: the content at 1fr and the rail
+   beside it, on the inset ground with a hairline divider. The rail is a
+   column of the page rather than a card, so it runs the whole height of the
+   content area and reaches its right edge. That means the viewer draws
+   across the area the other surfaces sit inset within: the content element
+   drops its padding and its measure for this surface, and the two columns
+   carry the padding instead. The selector keys off the viewer being the
+   surface that mounted, so the viewer's own loading and failure arms, which
+   are ordinary cards, keep the inset ground. */
+.content:has(> .artifact-viewer) {
+  max-width: none;
+  padding: 0;
+}
+
+/* A banner standing over the viewer, such as the expired-session notice,
+   would otherwise sit against the edges the flush surface removed. */
+.content:has(> .artifact-viewer) > .banner {
+  margin: 26px 30px 0;
+}
+
+.artifact-viewer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 316px;
+  min-height: 100%;
+}
+
+.artifact-content {
+  min-width: 0;
+  padding: 26px 30px 40px;
+}
+
+.artifact-rail {
+  padding: 26px 22px 40px;
+  background: var(--surf2);
+  border-left: 1px solid var(--bd);
+}
+
+/* The rail is a fixed 316px, so under about 1100px of viewport the column
+   beside it holds less than 300px and the rendered markdown stops being
+   readable. The rail moves under the content there and carries its divider
+   on its top edge. */
+@media (max-width: 1100px) {
+  .artifact-viewer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .artifact-rail {
+    border-left: 0;
+    border-top: 1px solid var(--bd);
+  }
+}
+
+.artifact-rail section {
+  margin-bottom: 22px;
+}
+
+/* Provenance stands as a borderless list of labelled values, so the bordered
+   tables and cards below it read as the sections the rail is built around.
+   The key column is fixed so the values line up down one edge. */
+.rail-facts {
+  margin: 6px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.rail-fact {
+  display: flex;
+  gap: 10px;
+}
+
+.rail-fact dt {
+  flex: none;
+  width: 88px;
+  color: var(--meta);
+  font-size: 11px;
+}
+
+.rail-fact dd {
+  margin: 0;
+  min-width: 0;
+  font-size: 12.5px;
+  word-break: break-word;
+}
+
+/* The content-hash row. A 71-character digest is several times the width of
+   the rail, so the row carries the whole value and clips it, the way the
+   layer table's source column carries a whole path. Elided into the text
+   itself, the digest was readable only by hovering the row, and a reader
+   checking it against a build or a signature could neither select it nor have
+   it read out. The row is three runs: the lead, which names the algorithm and
+   opens the digest, the middle, which takes the clip, and the last digest
+   characters, which stay drawn as the other end the reader compares. */
+.rail-hash {
+  display: flex;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* The lead gives a pixel up after the middle and before the trailing
+   characters. The rail is narrower than the lead, the tail, and the row's
+   controls together, so one of the two ends has to shorten; held rigid, the
+   lead took the whole width and starved the tail to a sliver too narrow to
+   draw even its own ellipsis, and the digest ended mid-character with no
+   marker. Shrinking here instead elides the lead at its own end, which is
+   where the elision falls, so the row states the algorithm, opens the digest,
+   marks the cut, and closes on the characters a reader compares (§13.10). */
+.rail-hash-lead {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The elided run keeps the digest in the document and takes none of the row's
+   width, and the marker beside it states the elision. Drawn by the container's
+   own ellipsis, the run had to be wide enough to fit that ellipsis and narrow
+   enough to draw nothing else, and no width did both: sized from its content
+   it competed for the row, and the fraction of a pixel that competition left
+   on the lead elided two characters of the algorithm the row is there to
+   state; held at one character Chrome dropped the ellipsis and the row read as
+   a whole short digest; held at more, the run filled the surplus with digest
+   characters that read as part of the trailing run (§13.10). */
+.rail-hash-middle {
+  flex: none;
+  width: 0;
+  overflow: hidden;
+}
+
+/* The elision marker stands between the two runs the row draws, so the value
+   reads as one digest with its middle taken out. It is the row's only drawn
+   sign of the elision and gives up no width. */
+.rail-hash-ellipsis {
+  flex: none;
+}
+
+/* The trailing characters are the last run to give a pixel up, because they
+   are the other end the reader compares against another copy. A shrink factor
+   this much smaller than the lead's leaves them a fraction of a pixel short of
+   their content while the lead still has width, and a run short by a whole
+   pixel elides a character the reader came for. They give the rest up only
+   once the lead has none left, and they elide at their own start when they
+   do. */
+.rail-hash-tail {
+  flex: 0 0.0001 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+}
+
+.rail-hash-tail > bdi {
+  direction: ltr;
+}
+
+/* The row's copy control. A selection across the three runs carries a line
+   break between each pair, so the control is how the digest leaves the page
+   whole. It sits at the row's end and gives up none of its own width, so the
+   clip stays on the digest beside it. */
+.rail-hash button {
+  flex: none;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10.5px;
+}
+
+/* The copy confirmation reports under the row rather than on it. Held on the
+   row it reserved the width of "Not copied" from the first render, and the
+   rail's line is 173px: the reservation plus the control left the digest too
+   little to open with, so the lead collapsed to two characters and an
+   ellipsis and the row stated neither what was hashed nor an end long enough
+   to compare (§13.10). Taken out of the row's flow it costs the digest
+   nothing. The row's fact reserves the band it lands in, so the press still
+   moves nothing, and the report is set at the button's size because it is the
+   control's own report. */
+.rail-hash-fact {
+  position: relative;
+  padding-bottom: 15px;
+}
+
+.rail-hash .copy-outcome {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  font-size: 10.5px;
+}
+
+.rail-list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+}
+
+/* A rail section header that states how many rows it holds. The figure sits
+   on the far edge so the header reads as a label and a count rather than as
+   a two-word label. */
+.rail-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.rail-section-count {
+  margin-left: auto;
+}
+
+/* A bundled file stands on its own bordered row, the treatment the relation
+   chips use, because a run of bare mono lines gives the reader no boundary
+   between one file and the next. The size sits on the opposite edge, where
+   it says what opening the file costs. */
+.resource-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+/* The name is the row's flexible half and can be longer than the rail is
+   wide, so it wraps rather than pushing the size off the row. It wraps only
+   at the directory boundaries the markup marks: split mid-word,
+   `resources/attributes.json` ends its first line as
+   `resources/attributes.js` and `good-trace.json` breaks at its hyphen, both
+   of which name files that do not exist. A single segment wider than the row
+   has no boundary to wrap at and is clipped with an ellipsis instead. */
+.resource-chip > :first-child {
+  min-width: 0;
+}
+
+.resource-segment {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+/* A file fetched on demand is not in the page yet, so its row is outlined
+   rather than filled and its size carries the retrieval action. */
+.resource-chip.fetched {
+  border-style: dashed;
+  background: none;
+}
+
+.resource-size {
+  flex: none;
+  margin-left: auto;
+}
+
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 18px 0 14px;
+  border-bottom: 1px solid var(--bd);
+}
+
+.tab {
+  margin: 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  background: none;
+}
+
+.tab-open {
+  border-bottom-color: var(--acc);
+  font-weight: 600;
+}
+
+/* The figure a tab carries beside its label: how many resources the artifact
+   holds, how many rows an ingest list has, or the marker that says the
+   frontmatter failed to parse. It is set as quiet mono text after a word
+   space, because a bordered chip in that position reads as a control pressed
+   against the label rather than as a count the label carries. */
+.tab-count {
+  margin-left: 2px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--meta);
+}
+
+.tab-count-danger {
+  color: var(--danger);
+}
+
+.tab-count-accent {
+  color: var(--link);
+}
+
+/* The version affordance in the artifact header. The closed control carries
+   the badge typography of the badges beside it, because it states the
+   version the page is standing on before it offers to change it. It is drawn
+   as a bordered control over the page surface in body ink, which is the one
+   pressable thing in a header row of informational badges; the soft badge
+   tone it used to take set it in the lightest fill and the quietest text in
+   that row, so the only control there read as the least prominent piece of
+   metadata in it. The field it discloses is taken out of the flow so opening
+   it does not push the description and the tabs down the page. */
+.version-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.version-picker-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-color: var(--bd);
+  background: var(--surf);
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 11.5px;
+}
+
+.version-picker-caret {
+  font-size: 8px;
+  color: var(--meta);
+}
+
+.version-picker-field {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 6px);
+  left: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--surf);
+}
+
+.version-picker input {
+  width: 110px;
+  padding: 4px 8px;
+  border: 1px solid var(--bd);
+  border-radius: 6px;
+  background: var(--surf);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* The handle column is 34px wide in the design, measured across the whole
+   column. The table's cell padding is not inside that figure by default,
+   because a table cell sizes content-box, so the declared width plus the
+   24px of shared cell padding drew a 58px column. The cell takes border-box
+   and carries just enough padding to seat the handle, so the column is the
+   width it is drawn at. The selector outranks the shared `.data-table td`
+   padding it narrows. */
+.data-table th.drag-cell,
+.data-table td.drag-cell {
+  box-sizing: border-box;
+  width: 34px;
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
+/* The layer row's actions. The column holds one action and an overflow
+   control on a single line, which is what keeps every row on one grid; the
+   panels a control opens are drawn under the bar. */
+.row-actions {
+  width: 120px;
+}
+
+.row-action-bar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.row-action-bar button {
+  margin-right: 0;
+  white-space: nowrap;
+}
+
+.row-overflow {
+  padding: 6px 9px;
+  color: var(--meta);
+}
+
+/* The menu overlays the table rather than taking space in it. Drawn in the
+   flow of the fixed-width actions cell it stretched its row to the height of
+   the menu, emptied every other cell over that height, and pushed every row
+   below it down the page, so a reader who opened a menu lost the row they
+   were reading. It is drawn into the document and placed against its trigger
+   in viewport coordinates, which leaves the table's geometry unchanged while
+   it is open. Placed against the cell instead it was cut off at the bottom of
+   the table, because the table scrolls sideways inside a container that clips
+   what overflows it. */
+.row-menu {
+  position: fixed;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 160px;
+  margin-top: 6px;
+  overflow: hidden;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 24%);
+}
+
+/* The menu is one panel holding rows, so an item inside it is drawn flat.
+   Left with the ordinary control tone each item outlined itself in the same
+   fill the panel carries, which put an outline inside an outline and a
+   doubled rule between the two items, and the menu read as a stack of
+   buttons in a box. The rows are separated by the panel's own hairline and
+   take a fill only under the pointer or the keyboard. They run the width of
+   the panel, which is why the panel clips what overflows it: a square fill
+   behind a rounded corner leaves a notch. */
+.row-menu button {
+  padding: 8px 12px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--sec);
+  text-align: left;
+}
+
+.row-menu button + button {
+  border-top: 1px solid var(--b2);
+}
+
+.row-menu button:hover:not(:disabled),
+.row-menu button:focus-visible {
+  background: var(--chip);
+  color: var(--ink);
+}
+
+/* The panel clips what overflows it, so the shell's ring, drawn outside the
+   element, is cut off at the row's edges. The focused row draws it inside
+   itself instead. */
+.row-menu button:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--acc);
+}
+
+/* An item the registry would refuse mutes where it stands. The shared
+   disabled tone fills and outlines the control, which puts the box back. */
+.row-menu button:disabled {
+  background: transparent;
+  color: var(--faint);
+}
+
+/* A panel a row control opens is read or acted on, so it is drawn across the
+   whole table in a row of its own directly under the layer it belongs to.
+   Drawn inside the fixed-width actions column it stretched the row to the
+   height of the panel and emptied every other cell over that height. */
+.row-detail > td {
+  padding-top: 0;
+}
+
+/* The detail row belongs to the row above it, so the rule between the two is
+   dropped and the pair reads as one row. */
+.layer-table tr:has(+ .row-detail) > td {
+  border-bottom: 0;
+}
+
+.row-detail .banner {
+  margin: 0 0 6px;
+}
+
+/* The handle is a button so the reorder is reachable from the keyboard, and
+   it is drawn as the glyph it was rather than as a bordered control. */
+.drag-handle {
+  padding: 2px 4px;
+  margin-right: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: none;
+  color: var(--faint);
+  font: inherit;
+  line-height: 1;
+  cursor: grab;
+}
+
+.drag-handle:hover:not(:disabled) {
+  color: var(--meta);
+}
+
+.drag-handle:disabled {
+  border-color: transparent;
+  background: none;
+  cursor: default;
+}
+
+/* Drag to reorder: the row lifts with an accent border and the row it would
+   drop onto carries a 2px accent indicator on the edge the dragged row will
+   land on. The move commits on drop. */
+.row-dragging td {
+  background: var(--wash);
+  border-color: var(--acc);
+}
+
+.row-drop-above td {
+  box-shadow: inset 0 2px 0 var(--acc);
+}
+
+.row-drop-below td {
+  box-shadow: inset 0 -2px 0 var(--acc);
+}
+
+.accent {
+  color: var(--link);
+}
+
+/* The erase clock: the deadline, the depleting bar, and the count left, laid
+   out as one row. Stacked, the bar sat on the line under the date and read as
+   an underline of it rather than as a gauge. */
+.erase-clock {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  white-space: nowrap;
+}
+
+/* The depleting bar. It draws how much of the recovery window is left, and
+   the row states the same count beside it. The fill is neutral for as long as
+   the window is comfortable, so the accent is left to mean the layer is close
+   to erasure rather than to mean the row exists. The unfilled remainder is
+   drawn on the inset tone, so a window most of the way through reads as a
+   part-full track rather than as a short rule. */
+.depleting {
+  flex: none;
+  width: 54px;
+  height: 4px;
+  border-radius: 100px;
+  background: linear-gradient(
+    to right,
+    var(--depleting-fill, var(--meta)) var(--remaining),
+    var(--b2) var(--remaining)
+  );
+}
+
+.depleting-urgent {
+  --depleting-fill: var(--acc);
+}
+
+.secret-reveal {
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  border: 1px dashed var(--cbd);
+  border-radius: 11px;
+  background: var(--wash);
+}
+
+/* The acknowledgement is a row of its own under the block that frames the
+   credential, and the control it gates sits in the dialog's footer. */
+.secret-ack {
+  display: flex;
+  align-items: center;
+  font-size: 13.5px;
+  color: var(--sec);
+}
+
+/* A write the reader reviews before sending is a dialog over a scrim. The
+   panel scrolls its own body so a long form never pushes the footer, which
+   carries the submit, past the bottom of the viewport. The scrim contains its
+   own scrolling, so reaching the end of the dialog's body does not hand the
+   remaining wheel to the surface underneath. */
+.modal-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  overscroll-behavior: contain;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* The scrim's vertical padding is the modal's height budget: whatever it
+     takes is height the dialog's body cannot use, and the register form is
+     the tallest dialog here. 24px keeps the dialog clear of the viewport
+     edges and gives its body back the rest. */
+  padding: 24px 16px;
+  background: var(--scrim);
+}
+
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: 680px;
+  max-width: 100%;
+  max-height: 100%;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  box-shadow: 0 30px 70px -28px var(--scrim);
+  overflow: hidden;
+}
+
+/* The reingest report widens the dialog, because its row of five stat cards
+   divides the dialog's body between them. At the standard width each card is
+   about 118px, which is under the width "LINT FAILURES" needs on one line, so
+   the last card takes a two-line label beside four single-line ones and the
+   row reads ragged. */
+.modal-wide {
+  width: 760px;
+}
+
+.modal-head {
+  flex: none;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--b2);
+}
+
+.modal-title-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.modal-title-row h2 {
+  margin: 0;
+  font-size: 19px;
+}
+
+.modal-close {
+  margin-left: auto;
+  margin-right: 0;
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+  color: var(--meta);
+}
+
+.modal-lead {
+  margin: 7px 0 0;
+  max-width: 580px;
+  color: var(--sec);
+  text-wrap: pretty;
+}
+
+/* The form is the dialog's scrolling column: its body takes the space the
+   header and the footer leave and scrolls within it. A flex item defaults to
+   its content's height, so each level needs an explicit floor before the body
+   will scroll instead of pushing the footer, and the footer carries the
+   submit. */
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.modal-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 22px 18px;
+  overflow-y: auto;
+  /* The gutter is reserved whether or not the body overflows, so a dialog
+     whose content grows past the viewport does not reflow its fields sideways
+     the moment the bar appears. */
+  scrollbar-gutter: stable;
+}
+
+/* The Register form is taller than an ordinary laptop viewport, so its last
+   two elements, the line stating the consequence of the visibility selection
+   and the note on when visibility can be changed, stand below the fold. The
+   platform's overlay scrollbar paints nothing until a scroll begins, which
+   leaves a cut-off row as the only sign that anything follows. Declaring the
+   bar's own parts opts the body out of the overlay bar and onto one that is
+   drawn for as long as the body overflows, so the dialog says it continues
+   before the reader has touched it. The standard `scrollbar-width` and
+   `scrollbar-color` are deliberately absent: either one takes precedence over
+   these parts, and the bar it selects is the overlay bar again, which is the
+   bar this rule exists to leave. The rule is on the shared body rather than
+   on the one form, because every dialog that outgrows its viewport hides its
+   tail the same way.
+
+   `.table-scroll` is declared here for the same reason on the other axis. A
+   table that keeps its designed column widths below its floor is clipped at
+   the container's edge with the table's own right border drawn there, so the
+   last column still on screen reads as the table's last column: on the layer
+   panel the source and the visibility columns were cut, and the panel a
+   refusal opens ran past the edge with its message and its Dismiss outside
+   it, behind no mark at all (§13.10). */
+.modal-body::-webkit-scrollbar,
+.table-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.modal-body::-webkit-scrollbar-track,
+.table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modal-body::-webkit-scrollbar-thumb,
+.table-scroll::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background: var(--bd);
+  background-clip: content-box;
+}
+
+.modal-body::-webkit-scrollbar-thumb:hover,
+.table-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--meta);
+  background-clip: content-box;
+}
+
+/* The footer's controls sit at the trailing edge, where the dialog's press is
+   aimed in every board. A footer that carries a note reached that edge through
+   the note's `flex: 1`; one without a note left its buttons against the leading
+   edge, so the same application drew its dialog footers two ways. */
+.modal-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  padding: 14px 22px;
+  border-top: 1px solid var(--b2);
+  background: var(--surf2);
+}
+
+.modal-foot-note {
+  flex: 1;
+  font-size: 12.5px;
+}
+
+/* The footer note states where the registration lands while the form is ready
+   to send, and names the field holding the submit while one is. The hold reads
+   in the refusal colour so it is not mistaken for the standing note. */
+.modal-foot-hold {
+  color: var(--danger);
+}
+
+.modal-foot button {
+  margin-right: 0;
+}
+
+/* A short set of exclusive choices that fits on one row: every choice is read
+   without opening anything, which is what the source selector, the appearance
+   switch, and the in-page view switches want and a select does not give. The
+   track carries the chip fill and the chosen segment is raised onto the
+   surface, so the selection reads as the segment standing above the rest. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  width: fit-content;
+  padding: 3px;
+  border-radius: 9px;
+  background: var(--chip);
+}
+
+.segment {
+  margin: 0;
+  padding: 7px 16px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--meta);
+  font: inherit;
+}
+
+.segment-on {
+  background: var(--surf);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.visibility {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 0;
+  padding: 0;
+  margin: 14px 0 0;
+}
+
+/* Guidance that qualifies the fields above it inside a form. It is set at the
+   dense size the form's other explanatory strings use, because at the body
+   size it becomes the largest run of text in the dialog and outweighs the
+   field labels and the checkbox titles it is explaining. */
+.field-note {
+  margin: 9px 0 0;
+  font-size: 12.5px;
+}
+
+.visibility-lead {
+  margin: 0;
+  font-size: 12.5px;
+}
+
+/* The four grants are one set, and the whole set belongs above the dialog's
+   fold: stacked in a single column the last two axes and the line stating what
+   the selection admits sat a few hundred pixels below it at the design's own
+   1440x900, with nothing above the fold saying the set continued (§13.10). Two
+   columns halve the set's height. An axis that has been turned on carries a
+   member field and spans both columns, so the tokens keep the dialog's full
+   width. */
+.visibility-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: start;
+  gap: 8px;
+}
+
+.vis-card-wide {
+  grid-column: 1 / -1;
+}
+
+/* Two short fields that qualify the field above them share a row, so the
+   pair reads as one setting rather than as two unrelated inputs. */
+.field-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+/* Each grant carries what it admits, because the axis name alone reads as a
+   term the reader has to already know and a mis-read grant admits the wrong
+   people. A selected card takes the accent so the selection is legible at a
+   glance rather than from the tick alone. */
+.vis-card {
+  display: flex;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+}
+
+.vis-card-on {
+  border-color: var(--acc-deep);
+  background: var(--wash);
+}
+
+.vis-card input[type="checkbox"] {
+  margin-top: 3px;
+  flex: none;
+}
+
+.vis-card-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.vis-card-name {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.vis-card-desc {
+  margin: 2px 0 0;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+.token-input {
+  margin: 9px 0 0;
+}
+
+.token-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.token {
+  padding: 3px 9px;
+  border-radius: 6px;
+  background: var(--chip);
+  font-size: 12.5px;
+}
+
+/* A token removes the member it names, so it carries the remove glyph inside
+   itself rather than beside it: the whole token is one target, which is the
+   size a reader clicking a 12px chip needs. */
+.token-drop {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--bd);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.token-drop:hover {
+  border-color: var(--acc-deep);
+}
+
+/* The group typeahead sits in the flow under the input rather than over it,
+   so the dialog does not have to grow around an overlay. Three rows are
+   visible and the rest scroll, which bounds the dialog whatever the registry
+   holds. */
+.picker {
+  margin: 8px 0 0;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf2);
+}
+
+.picker-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--bd);
+}
+
+/* The count is a quantity beside the section label rather than a second
+   label, so it keeps the label's quiet tone and its monospace face but drops
+   the uppercasing and the letter spacing. Two uppercase runs in one header
+   row read as two competing headings. */
+.picker-count {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.picker-empty {
+  margin: 0;
+  padding: 9px 10px;
+  color: var(--faint);
+  font-size: 12.5px;
+}
+
+/* The box holds three whole 32px rows and half of a fourth, so a list longer
+   than three ends on a row that is visibly cut off. Ending on the border
+   instead reads as the whole list, which contradicts the count in the header.
+   The half row is why pickerVisibleRows in RegisterLayerForm.tsx is 3. */
+.picker-rows {
+  max-height: 112px;
+  overflow-y: auto;
+}
+
+/* The cut-off row fades out so the cut reads as more list below rather than
+   as a row drawn wrong. The fade is drawn only while the list is longer than
+   the box, because a fade over a list that fits hides nothing. */
+.picker-rows-scrolls {
+  mask-image: linear-gradient(180deg, #000 76%, transparent 100%);
+}
+
+.picker-row {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.picker-row:hover {
+  background: var(--wash);
+}
+
+/* The row the arrow keys are on. It is drawn the same way a hover is, because
+   the pointer and the keyboard are selecting the same thing. */
+.picker-row-on {
+  background: var(--wash);
+}
+
+/* The footer states the keys. It sits on the inset tone under a divider so it
+   reads as a note about the list rather than as another row in it. */
+.picker-foot {
+  margin: 0;
+  padding: 8px 10px;
+  border-top: 1px solid var(--bd);
+  border-radius: 0 0 7px 7px;
+  background: var(--page);
+  color: var(--faint);
+  font-size: 11.5px;
+}
+
+.consequence {
+  display: flex;
+  gap: 11px;
+  margin: 4px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--cbd);
+  border-radius: 9px;
+  background: var(--wash);
+  font-size: 13px;
+}
+
+/* The consequence and the note sit next to each other at the foot of the
+   register form and differ only in their fill, which is not enough to tell an
+   advisory from the statement of what the selection admits. Each carries a
+   leading glyph in its own gutter: the consequence in the accent tone it is
+   filled with, and the note in the faint tone the panel gives an aside. The
+   gutter holds its width so a wrapped message keeps its left edge. */
+.note-glyph {
+  flex: none;
+  width: 11px;
+  color: var(--faint);
+  line-height: 1.5;
+}
+
+.consequence .note-glyph {
+  color: var(--link);
+}
+
+/* The consequence names every granted member, so a registration granting a
+   couple of dozen users wrapped to eight rows and pushed the note and the
+   dialog footer out of the modal body. The members are already listed as
+   tokens directly above the line, so it clips at two rows. The clip sits on
+   the text rather than on the padded box, because `overflow: hidden` clips at
+   the padding edge and a clipped box renders a sliced third row inside its
+   own bottom padding. */
+.consequence-text {
+  flex: 1;
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+
+.note {
+  display: flex;
+  gap: 11px;
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  background: var(--surf2);
+  color: var(--sec);
+  font-size: 13px;
+}
+
+/* A note the dialog states about the write itself, rather than about a field,
+   sits outside the scrolling body so it reads the moment the dialog opens. A
+   form taller than the viewport puts its last element a few hundred pixels
+   below the fold, and a standing note read only after a scroll is a note the
+   reader does not have when reviewing the form (§13.10). */
+.modal-note {
+  flex: none;
+  margin: 10px 22px 14px;
+}
+
+.copy-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  flex-wrap: wrap;
+}
+
+/* The copy outcome occupies its place before the press and one of its two
+   reports is revealed by it, so the outcome never reflows the row or the
+   controls under it (§13.10). Hiding a report with `display: none` gives the
+   width back to the value beside it, which rewraps on the press and pushes
+   the acknowledgement and the primary action down between the two clicks the
+   secret reveal asks for. The two reports are stacked in one grid cell so the
+   row reserves the wider of them once and neither press moves anything. */
+.copy-outcome {
+  display: inline-grid;
+}
+
+.copy-outcome > * {
+  grid-area: 1 / 1;
+}
+
+.copy-confirmation,
+.copy-failure {
+  visibility: hidden;
+}
+
+.copy-confirmation[data-copied],
+.copy-failure[data-failed] {
+  visibility: visible;
+}
+
+/* A press that reached no clipboard is a failure and is coloured as one. Set
+   in the quiet tone beside a value the reader believes they have taken, it
+   reads as the confirmation it is reporting the absence of. */
+.copy-failure {
+  color: var(--danger);
+}
+
+.copy-field .copy-value {
+  flex: 1 1 260px;
+  min-width: 0;
+  padding: 6px 10px;
+  overflow-x: auto;
+  background: var(--surf2);
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+}
+
+/* The registry the page is served from, set behind the wordmark by a rule
+   and read as an identifier rather than as prose. */
+/* The host is the row's one expendable item. A flex item does not shrink
+   below its min-content width on its own, so a long host name held the row
+   open and pushed the controls beside it off a narrow viewport. A zero
+   minimum lets it give way first and truncate. */
+.topbar-host {
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 12px;
+  border-left: 1px solid var(--b2);
+  font-size: 11px;
+  color: var(--faint);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.topbar-divider {
+  width: 1px;
+  height: 22px;
+  background: var(--b2);
+}
+
+/* The search trigger opens the palette. It is a button drawn as a field,
+   because the query is typed in the palette rather than here. */
+.search-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 300px;
+  max-width: 300px;
+  min-width: 150px;
+  height: 32px;
+  margin: 0;
+  padding: 0 10px;
+  background: var(--surf2);
+  color: var(--meta);
+}
+
+.key-hint {
+  margin-left: auto;
+  padding: 1px 5px;
+  border: 1px solid var(--bd);
+  border-radius: 5px;
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.docs-link {
+  color: var(--link);
+  font-size: 12.5px;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+/* The identity cluster and the menu behind it. */
+.account {
+  position: relative;
+}
+
+.account-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border-color: transparent;
+  background: transparent;
+}
+
+.avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 100px;
+  background: var(--chip);
+  font-size: 10.5px;
+}
+
+.account-menu {
+  position: absolute;
+  top: 38px;
+  right: 0;
+  z-index: 20;
+  min-width: 240px;
+  padding: 12px 14px;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+  box-shadow: 0 30px 60px -24px var(--scrim);
+}
+
+/* The appearance switch stands between the label above it and the quota
+   below, so it carries the row spacing the menu's paragraphs carry. */
+.account-menu .segmented {
+  margin: 10px 0;
+}
+
+/* The appearance trigger the shell renders where no identity cluster stands.
+   It reads as the shell's other quiet controls rather than as a button. */
+.appearance-trigger {
+  gap: 6px;
+  padding: 5px 8px;
+  color: var(--meta);
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.appearance-trigger .contrast-disc {
+  flex: none;
+}
+
+/* The bar's items are about 790px wide together, so on a narrow viewport one
+   row of them ran past the right edge: the account cluster left the viewport
+   and the appearance control could only be reached by scrolling the document
+   sideways, and the squeezed search trigger wrapped its label onto the key
+   hint. Below the shell's narrow breakpoint the bar wraps instead. The search
+   trigger takes a row of its own, which leaves the first row holding the
+   wordmark and the account cluster.
+
+   The block sits after the rules it overrides. A media condition adds no
+   specificity, so the same declaration written earlier in the file loses to
+   the component rule below. */
+@media (max-width: 900px) {
+  .topbar {
+    flex-wrap: wrap;
+    height: auto;
+    padding: 8px 12px;
+  }
+
+  .search-trigger {
+    order: 1;
+    flex: 1 1 100%;
+    max-width: none;
+  }
+
+  /* The rows separate the clusters the dividers separated on one row, and a
+     divider left beside the wrap point reads as a rule with nothing on one
+     side of it. */
+  .topbar-divider {
+    display: none;
+  }
+
+  /* Below this width the sidebar is a band above the content rather than a
+     column beside it, so a sticky column of viewport height would hold the
+     whole screen and push the surface off it. The band scrolls away with the
+     page here, and the bar above it stays. The rule sits in this block rather
+     than in the earlier one for the same source-order reason. */
+  .sidebar {
+    position: static;
+    height: auto;
+  }
+}
+
+/* The command palette sits over a scrim, 96px from the top, on whatever page
+   it was opened from. */
+.palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  overscroll-behavior: contain;
+  display: flex;
+  justify-content: center;
+  padding-top: 96px;
+  background: var(--scrim);
+}
+
+.palette {
+  width: 660px;
+  max-width: calc(100% - 32px);
+  height: fit-content;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  box-shadow: 0 30px 60px -24px var(--scrim);
+  overflow: hidden;
+}
+
+/* The field row holds the magnifier, the query, and the match count. The
+   count is right-aligned onto the same edge the rows below align their type
+   and version onto. The row is the panel's own header rather than a form
+   field set inside it: the panel is already the thing the reader is typing
+   into, so an enclosing box and a focus ring would fence off the one control
+   the panel exists for. The divider beneath it separates the query from what
+   it produced, and the accent caret is what marks the row as live. */
+.palette-field {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--b2);
+}
+
+.palette-magnifier {
+  display: inline-flex;
+  flex: none;
+  color: var(--meta);
+}
+
+.palette-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  color: var(--ink);
+  font: inherit;
+  font-size: 16px;
+}
+
+/* The row carries no ring of its own, and a ring around the field would draw
+   the box the header deliberately does without. Focus is legible from the
+   caret sitting in the query. */
+.palette-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+/* The panel is full-bleed so the header divider and the footer reach both
+   edges, which means everything between them carries its own inset. The body
+   carries the vertical padding alone and hands the horizontal inset to each
+   block inside it, because the result rows are the one block that has to
+   reach both edges: the selected row is tinted across the whole panel, and an
+   inset on the body would draw that tint as a box floating inside it. */
+.palette-body {
+  padding: 8px 0;
+}
+
+.palette-body > * {
+  padding-left: 16px;
+  padding-right: 16px;
+}
+
+.palette-body > .palette-rows {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.palette-count {
+  flex: none;
+  font-size: 11px;
+}
+
+.palette-rows {
+  list-style: none;
+  margin: 8px 0;
+  padding: 0;
+}
+
+/* The return glyph on a recent query, held at a fixed width so the queries
+   themselves line up in one column. */
+.palette-recent-mark {
+  flex: none;
+  width: 15px;
+  font-size: 11px;
+}
+
+/* A row spans the panel and carries the inset itself, so the selection tint
+   below reaches both edges. The button border and radius come off for the
+   same reason: the arrows move the selection down a list, and a row that
+   rounds and outlines itself when it is reached reads as a box the selection
+   entered rather than as the next row down. */
+.palette-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin: 0;
+  padding: 9px 16px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+/* The selection is moved by the arrow keys and never by the pointer, so it
+   carries an accent bar at the row's leading edge on top of the wash tint. A
+   tint alone reads as a hover state, and hover is the one thing a keyboard
+   reader has no way to produce. */
+.palette-row-selected {
+  background: var(--wash);
+  box-shadow: inset 2px 0 var(--acc);
+}
+
+/* Every row's artifact name is the part that opens, so it is set in the link
+   colour the rest of the catalog gives an artifact name. It shrinks alongside
+   the path: holding the name at its intrinsic width drove the path of a
+   long-named artifact to zero width, and a zero-width column renders no
+   ellipsis, so the row stated no location at all. */
+.palette-row-name {
+  min-width: 9ch;
+  overflow: hidden;
+  color: var(--link);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A path longer than the panel is clipped rather than wrapped, so every row
+   keeps one line and the column at the right edge stays where it is. The floor
+   is what the clipping needs: an ellipsis has to have a box to render in. */
+.palette-row-path {
+  min-width: 9ch;
+  overflow: hidden;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The type and the version are the row's right-hand column, so they are set
+   apart from each other the way the design board sets them: a badge whose
+   right edge and a version whose left edge each land on one x down the whole
+   list. The pair is held at the panel's right edge, so a version rendered at
+   its intrinsic width drags the badge left by however many glyphs that
+   version happens to carry, and v1.10.0 beside v1.2.0 puts the two CONTEXT
+   badges at different x. The version column therefore carries a floor wide
+   enough for an ordinary semver string, which fixes both edges for every row
+   that fits it. */
+.palette-row-aside {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.palette-row-aside .badge {
+  margin-right: 0;
+}
+
+.palette-row-version {
+  flex: none;
+  min-width: 7ch;
+  font-size: 11px;
+}
+
+/* The inline filter syntax is the palette's form of the pills the search
+   surface renders, so each filter is drawn as its own chip inside a box of
+   its own. Run together as one line of prose, the three read as a sentence
+   about filtering rather than as three things that can be typed. */
+.palette-syntax {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 6px;
+  padding: 11px 13px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: var(--surf2);
+  font-size: 12px;
+}
+
+.palette-syntax-chip {
+  padding: 3px 8px;
+  border-radius: 5px;
+  background: var(--chip);
+  color: var(--meta);
+  font-size: 11.5px;
+}
+
+/* The no-match arm holds the panel open at the height the result list would
+   have taken, centred under the field, so a query that matched nothing does
+   not shrink the panel to a single line. */
+.palette-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 34px 24px 30px;
+  text-align: center;
+}
+
+.palette-empty-heading {
+  margin: 0;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.palette-empty-body {
+  margin: 0;
+  max-width: 400px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* The correction the no-match arm offers. The chip is drawn as a control
+   rather than as a word inside the sentence, because clicking it is what puts
+   the corrected line in the field. */
+.palette-correction {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+
+.palette-correction-chip {
+  padding: 5px 11px;
+  border: 1px solid var(--b2);
+  border-radius: 7px;
+  background: var(--surf);
+  color: var(--link);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.palette-correction-chip:hover {
+  border-color: var(--link);
+}
+
+.palette-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 9px 16px;
+  border-top: 1px solid var(--b2);
+  font-size: 11.5px;
+}
+
+/* One keystroke drawn as the key it names. */
+.key-cap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--surf);
+  border: 1px solid var(--b2);
+  border-radius: 4px;
+  color: var(--meta);
+  font-size: 10px;
+}
+
+/* The end-of-list continuation for a trimmed listing. It reads as a system
+   message about the listing rather than as content or as an error. */
+.listing-continuation {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--bd);
+}
+
+/* The domain listing's continuation is the list's own final row: it sits
+   inside the same card as the artifacts, on the quieter surface and behind an
+   accent mark, so it reads as the edge of the listing rather than as a note
+   about the page. */
+.listing-tail {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  padding: 14px 18px;
+  background: var(--surf2);
+}
+
+.artifact-row + .listing-tail {
+  border-top: 1px solid var(--b2);
+}
+
+.listing-tail-mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  margin-top: 7px;
+  border-radius: 50%;
+  background: var(--acc);
+}
+
+.listing-tail-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.listing-tail-line {
+  margin: 0;
+  max-width: 640px;
+  color: var(--sec);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* The at-scale section header: the label and the count on the left, the
+   controls over the listing pushed to the row's right edge. At this count the
+   listing needs a filter, and a filter under its own label above the grid
+   costs a row the compact treatment exists to save. */
+.section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 26px 0 12px;
+}
+
+.section-head > h2.label {
+  margin: 0;
+}
+
+.section-count {
+  font-size: 11px;
+}
+
+/* The controls that close the row sit on its right edge. The subdomain row
+   closes with its filter and the view toggle beside it, and the artifact row
+   closes with the sort control, because the chips it filters by belong beside
+   the label they narrow. */
+.section-head .sort-control,
+.subdomain-tiles .section-head .filter-field {
+  margin-left: auto;
+}
+
+/* The filter is a row holding the magnifier and the query, the way the search
+   field on the search surface is. The border is the row's, so the icon reads
+   as sitting inside the field ahead of the placeholder. */
+.filter-field {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 220px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  color: var(--meta);
+  font-size: 12.5px;
+}
+
+.filter-input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* The focus ring belongs to the row, for the reason the search field's does:
+   the row is what the reader sees as the field. */
+.filter-input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+.filter-field:focus-within {
+  border-color: var(--acc);
+  box-shadow: 0 0 0 3px rgba(255, 164, 36, 0.16);
+}
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  color: var(--meta);
+  font-size: 12.5px;
+}
+
+.sort-control select {
+  border: none;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+/* A column label marks the column rather than acting on it: the ordering is
+   chosen by the sort control above the table. */
+.data-table th.column-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--meta);
+}
+
+/* The author's own picks are a block of their own under an accent header, so
+   a curated row is distinguishable from a surfaced one without a badge on
+   every row. */
+.curated-block {
+  margin-bottom: 12px;
+}
+
+.curated-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--cbd);
+  border-bottom: none;
+  border-radius: 9px 9px 0 0;
+  background: var(--wash);
+  color: var(--link);
+}
+
+.curated-head .label {
+  color: inherit;
+}
+
+.curated-head .mono {
+  font-size: 10.5px;
+  opacity: 0.7;
+}
+
+/* The listing joins the head above it as one box: the head gives up its
+   bottom border and the rows give up their top corners. */
+.curated-block .artifact-list {
+  border-radius: 0 0 9px 9px;
+}
+
+/* The at-scale artifact table lays itself out from its content, and its
+   description column alone asks for more than a narrow content column holds.
+   Nothing above it clipped what it asked for, so at a 1024px viewport the
+   table rendered past the right edge of the window, scrolled the whole
+   document sideways with the top bar and the sidebar on it, and broke an
+   identifier such as `big/direct-01` across two lines. The floor is the width
+   the design draws the five columns at, and below it the table scrolls
+   sideways inside the `.table-scroll` container it sits in, which is the same
+   treatment the layer table and the restore table carry (§13.10). */
+.artifact-rows {
+  min-width: 860px;
+}
+
+/* An empty at-scale listing keeps its column labels and states the absence in
+   the body under them, so the table is what frames the message. The page
+   preset's own card therefore stands down here: a bordered card drawn inside
+   a bordered table reads as a second surface nested in the first. The cell
+   also paints the table's own ground, which is what keeps the listing's
+   pointer step off it: the message names an absence and answers no click, and
+   a cell's own fill is painted over the row's. */
+.data-table td.table-empty {
+  padding: 0;
+  background-color: var(--surf);
+}
+
+.data-table td.table-empty .empty-page {
+  padding: 30px 20px;
+  border: none;
+  border-radius: 0;
+  background: none;
+}
+
+/* The at-scale subdomain treatment: count tiles in a grid, or one per row. */
+.tile-grid,
+.tile-list {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.tile-grid {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+}
+
+/* The list arm packs tighter than the grid, because a row that reads at grid
+   spacing costs a screen per dozen children. */
+.tile-list {
+  gap: 4px;
+}
+
+.tile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 9px;
+  cursor: pointer;
+}
+
+/* A tile is a name and what stands under it. The name is set in the ink the
+   rest of the tile is drawn in: a grid of two dozen underlined accent links
+   reads as a page of link text rather than as a map of the domain. */
+.tile-name {
+  font-weight: 600;
+  font-size: 12.5px;
+  color: var(--ink);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.tile:hover .tile-name {
+  text-decoration: underline;
+}
+
+.tile-count {
+  font-size: 10.5px;
+}
+
+/* The list arm is the same tile at row density. The grid tile stretched to the
+   container width states no more than the grid did and costs a card of height
+   per child, so the row puts the name, the description and the count on one
+   line and gives the width to the description. */
+.tile-row {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 12px;
+}
+
+.tile-row .tile-name {
+  flex: none;
+  min-width: 150px;
+}
+
+.tile-row .tile-description {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+  font-size: 12.5px;
+}
+
+.tile-row .tile-count {
+  flex: none;
+  margin-left: auto;
+}
+
+/* What closes the grid: the control that opens the rest of it, and the
+   caption stating what ordered it. Both read as notes about the listing, so
+   they share one row under it rather than stacking into two. */
+.tile-foot {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* The control that opens the rest of the grid is a disclosure over the tiles
+   above it rather than an action on the domain, so it drops the button fill
+   and takes the quiet dashed edge the "+ tag" chip on the search filter row
+   already carries. Drawn in the default button tone it read as the loudest
+   control on the surface, louder than the Grid and List toggle beside it. */
+.tile-more {
+  border-style: dashed;
+  background: none;
+  color: var(--meta);
+  font-size: 12.5px;
+}
+
+.tile-order {
+  font-size: 12px;
+}
+
+/* A one-line clip. It goes on an element inside a table cell rather than on
+   the cell itself, because the block display a text-overflow clip needs takes
+   a cell out of the row's layout and staggers the row's separator and
+   baselines column by column. */
+.clipped {
+  display: block;
+  max-width: 420px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* A tag list standing in a table cell is one column of a row rather than a
+   block under a card, so it drops the block margin the card treatment carries.
+   The margin pushed the row's chips a line below the text in the cells beside
+   them. */
+.data-table td .tag-list {
+  margin: 0;
+}
+
+/* The resource table's selected row and the card it drives. */
+.row-selected td {
+  background: var(--wash);
+}
+
+/* The accent bar marks the row's leading edge once. An inset shadow on every
+   cell repeats the bar at each column boundary, so the tinted row reads as
+   one outlined box per column rather than as a single selected row. */
+.row-selected td:first-child {
+  box-shadow: inset 2px 0 0 var(--acc);
+}
+
+/* The file name carries the row's selection, so it is a button that reads as
+   the cell's text: the row's tint and accent bar are the selected state the
+   reader sees, and the button contributes the focus ring and the keyboard
+   path. The transparent border reserves the width the focus ring's border
+   takes, so focusing a name does not shift the column. */
+.resource-name {
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.resource-detail {
+  margin-top: 10px;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* The card names the file it describes on its own tinted strip, so the
+   property grid under it reads as the file's attributes rather than as four
+   more rows continuing the table above. */
+.resource-detail-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: var(--surf2);
+  border-bottom: 1px solid var(--bd);
+}
+
+/* The action sits beside the grid rather than under it, because it retrieves
+   the file the grid describes and the card is wider than the grid needs. It
+   wraps under the grid where the column is too narrow to hold both. */
+.resource-detail-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  padding: 14px;
+}
+
+.resource-detail-body .rail-facts {
+  margin: 0;
+}
+
+.resource-detail-body .button {
+  flex: none;
+}
+
+/* The set-level download is the per-row Download action taken over the whole
+   table, so it sits at the table's right edge above the action column. Left
+   of the table it read as a heading over the file column instead of as the
+   counterpart to the buttons under it. */
+.download-all {
+  display: block;
+  margin: 0 0 10px auto;
+}
+
+/* The recoverable-layers link leads the panel's action row as a quiet accent
+   control rather than as another button. */
+.link-action {
+  border-color: transparent;
+  background: transparent;
+  color: var(--link);
+}
+
+/* The recoverable count rides the link as the same badge every other count in
+   the UI uses, so it reads as a figure rather than as part of the label. The
+   badge sets its own trailing margin for listing use, which here would push
+   the count off the link's right padding. */
+.link-action .badge {
+  margin-right: 0;
+  margin-left: 7px;
+}
+
+.rail-group {
+  margin-top: 8px;
+}
+
+/* A relation names one artifact and leads to it, so each one stands on its
+   own bordered row inside its direction's group rather than wrapping into a
+   paragraph of links. The identifier can be longer than the rail is wide and
+   breaks inside itself. */
+.relation-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--bd);
+  border-radius: 8px;
+  background: var(--surf);
+  margin-bottom: 6px;
+}
+
+/* The chip's direction marker. It is decorative, so the direction it stands
+   for is carried by the group label rather than by the dot alone, and colour
+   is the only thing that separates the two tones. */
+.relation-dot {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--meta);
+}
+
+.relation-dot.outbound {
+  background: var(--acc);
+}
+
+.relation-chip a {
+  word-break: break-all;
+}
+
+/* The authored source panel. The lede and the take-away controls sit on one
+   line above the block, and the block states the file and its extent in a
+   header over a numbered gutter. The gutter and the code share one
+   line-height so the numbers stay in register with the lines they count. */
+.source-pane {
+  --source-line: 1.75;
+}
+
+.source-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.source-lede {
+  margin-right: auto;
+  font-size: 13.5px;
+  color: var(--sec);
+}
+
+.source-actions button {
+  margin-right: 0;
+  white-space: nowrap;
+}
+
+/* Copy and Download take the same file and stand as one group at the row's
+   end (§13.10). The copy report holds its width from the first render so the
+   press reflows nothing, and it is drawn ahead of the pair rather than
+   between them, where a slot that is empty until a press read as two
+   unrelated controls. */
+.source-take {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.source-take .copy-outcome {
+  order: -1;
+}
+
+/* The take-away control the raw block carries stands under it rather than
+   over it, because the toggle that opened the view already holds the row
+   above and two controls there read as one group. */
+.source-actions-under {
+  margin: 14px 0 0;
+}
+
+/* The block takes the width of the content column it sits in. The tab strip,
+   the lede, and the take-away controls stacked above it all run the column's
+   full width, so a cap here would stand the panel's right edge inside them and
+   clip a long line while the column beside it stayed empty. */
+.source-block {
+  overflow: hidden;
+  background: var(--surf);
+  border: 1px solid var(--bd);
+  border-radius: 11px;
+}
+
+.source-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  background: var(--surf2);
+  border-bottom: 1px solid var(--b2);
+  font-size: 11.5px;
+  color: var(--sec);
+}
+
+.source-head .quiet {
+  margin-left: auto;
+}
+
+.source-lines {
+  display: flex;
+  min-width: 0;
+}
+
+.source-gutter {
+  flex: none;
+  padding: 14px 0 16px;
+  background: var(--surf2);
+  border-right: 1px solid var(--b2);
+  color: var(--faint);
+  font-size: 12.5px;
+  line-height: var(--source-line);
+  text-align: right;
+  user-select: none;
+}
+
+.source-gutter div {
+  padding: 0 10px;
+}
+
+.source-code {
+  min-width: 0;
+  margin: 0;
+  padding: 14px 16px 16px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: var(--source-line);
+  white-space: pre;
+}
+
+/* The wait a reingest opens. The registry runs the whole ingest pipeline
+   inside the request and reports nothing until it returns, so the dialog
+   carries one spinner, what is running, and a clock: how long the request has
+   been open, and the wall-clock stamp it opened at. The reader who has waited
+   long enough leaves through the footer's control, which closes the wait and
+   leaves the request with the registry. */
+.reingest-wait {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 13px;
+  padding: 22px 22px 24px;
+  text-align: center;
+}
+
+/* The wait has one thing to say, so its spinner is the size of the statement
+   beside it rather than the inline size a line of text carries. */
+.spinner-large {
+  width: 34px;
+  height: 34px;
+  margin: 0 0 3px;
+  border-width: 3px;
+}
+
+.reingest-wait .wait-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.reingest-wait .wait-note {
+  margin: 0;
+  max-width: 380px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--faint);
+  text-wrap: pretty;
+}
+
+/* The clock is set apart from the statement above it, because it is the one
+   part of the dialog that changes while the reader watches. */
+.reingest-wait .wait-clock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 3px 0 0;
+  padding: 7px 13px;
+  border: 1px solid var(--b2);
+  border-radius: 100px;
+  background: var(--surf2);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+
+.wait-clock-rule {
+  width: 1px;
+  height: 11px;
+  background: var(--b2);
+}
+
+/* The fan-out while it is still running. The registry runs one layer's whole
+   pipeline inside one request and answers them in sequence, so the dialog
+   lists every layer in the run: the ones that have answered carry what their
+   response returned, the open one is marked running, and the rest are marked
+   queued. The list is what changes while the reader watches, so it is the
+   body, and the run's own figures sit under it. */
+.run-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 22px 20px;
+}
+
+.run-rows {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+}
+
+/* One layer of a fan-out, drawn the same while the run is in flight and after
+   it has finished: a mark, the layer id, and what that layer returned in a
+   column of its own. The finished report reuses the row so the reader scans
+   the same positions in both, rather than re-reading the run as prose once
+   the last request returns. */
+.run-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 13px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: var(--surf2);
+  font-size: 12.5px;
+}
+
+/* The open request is the one row the reader is waiting on, so it carries the
+   accent edge every other in-flight state on this surface carries. */
+.run-row-running {
+  border-color: var(--cbd);
+  background: var(--wash);
+}
+
+.run-row .spinner {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+}
+
+/* A queued layer's marker is an outline rather than a filled mark, because
+   nothing has happened to it yet. */
+.run-mark {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.run-mark-queued {
+  border: 1.5px dashed var(--bd);
+}
+
+.run-mark-done {
+  background: var(--ok);
+  color: var(--surf2);
+}
+
+/* A layer whose request was refused answers with no counts, so its mark is
+   the danger tone rather than the accepted one. */
+.run-mark-refused {
+  background: var(--danger);
+  color: var(--surf2);
+}
+
+.run-row-id {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* The outcome sits in its own right-hand column so one layer's counts line up
+   under the next one's. The finished breakdown is longer than the running
+   line, so the column wraps; each count is one unbreakable part, which keeps
+   a wrap between counts rather than inside one. */
+.run-row-state {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin-left: auto;
+  padding-left: 12px;
+  font-size: 11.5px;
+  text-align: right;
+}
+
+.run-row-part {
+  white-space: nowrap;
+}
+
+/* The separator between two counts is its own flex item, and a flex item's
+   leading and trailing spaces are collapsed away, so it keeps them itself. */
+.run-row-sep {
+  white-space: pre;
+}
+
+/* The run's own figures: how long it has been going, how much of it is done,
+   and why no layer reports a fraction of itself. */
+.run-progress-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 12.5px;
+}
+
+/* The finished reingest report. The counts lead, because they say whether
+   anything needs acting on, and each is a card rather than a bullet so the
+   number is read before the word beside it. A tone is carried only by a
+   non-zero rejected or conflicts count, which is what the reader has to act
+   on; everything else stays neutral. */
+.ingest-report {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding-top: 16px;
+}
+
+.stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+
+.stat {
+  flex: 1 1 0;
+  min-width: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 13px 14px;
+  border: 1px solid var(--b2);
+  border-radius: 10px;
+  background: var(--surf2);
+}
+
+.stat-danger {
+  border-color: var(--danger-bd);
+  background: var(--danger-bg);
+}
+
+.stat-accent {
+  border-color: var(--cbd);
+  background: var(--wash);
+}
+
+/* The second selector carries the same type onto a count drawn as a button.
+   The button reset below sets `font: inherit` on `button.stat-open`, which
+   outranks a lone class, so a count that opens a list would otherwise fall
+   back to the body font and read as the smallest number in the row. */
+.stat-count,
+button.stat-count.stat-open {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* The tone rules below select on two classes, so the color stays out of the
+   button-qualified selector above; a third-component match there would
+   outrank them and flatten every count to the neutral ink. */
+.stat-count {
+  color: var(--ink);
+}
+
+.stat-danger .stat-count {
+  color: var(--danger);
+}
+
+.stat-accent .stat-count {
+  color: var(--link);
+}
+
+/* A snapshot that accepted something is the one outcome the report reads as
+   good, so the count carries the success token. The card itself stays
+   neutral: tinting it would put a fourth ground in a row of five cards and
+   compete with the two tints that mean something needs acting on. */
+.stat-ok .stat-count {
+  color: var(--ok);
+}
+
+/* A count the response itemises opens that list, so it is a control. It is
+   drawn as the number itself with an underline, because a button chrome in a
+   row of five cards competes with the counts it sits among. */
+button.stat-open {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+}
+
+.stat-count.stat-open {
+  align-self: flex-start;
+}
+
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.stat-caption {
+  font-size: 10.5px;
+  color: var(--faint);
+}
+
+.attention {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.attention > .label {
+  margin: 0;
+}
+
+/* The row is a line of text: a glyph or an identifier, sometimes a §6.10 code
+   badge, and a message of no bounded length beside them. Under the default
+   stretch every item takes the height of the wrapped message, and an item
+   carrying a border is then drawn as an empty rectangle with its text against
+   the top edge, which is what the refused row of the reingest summary did to
+   the code badge. Baseline alignment sizes each item to its own text and sets
+   them on the message's first line. */
+.attention-row {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
+  padding: 12px 14px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: var(--surf2);
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--sec);
+}
+
+.attention-glyph {
+  flex: none;
+  color: var(--faint);
+}
+
+/* An identifier in the row is a token the operator copies back into a gate,
+   such as the layer id the unregister confirmation asks to be typed. As a
+   flex item it takes min-content as its automatic minimum, so beside a long
+   message it shrank to the width of the longest unbreakable run and drew
+   `hr-layer` as `hr-` over `layer`, leaving it ambiguous whether the hyphen
+   belongs to the id. The identifier keeps its own text width and the message
+   beside it absorbs the rest of the row. */
+.attention-id {
+  flex: none;
+}
+
+/* A refusal message carries whatever the envelope wrote, including a
+   filesystem path with no break opportunity in it. Left to the default the
+   run of characters is wider than the row's min-content, so the row overflowed
+   its card and the tail of the message was clipped at the modal edge, where
+   the remediation the message states is the only place it is stated. The
+   message breaks inside the token instead. */
+.attention-text {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A row whose message is an envelope's own text carries no bound on its
+   length, and on one line beside an identifier and a code badge that message
+   is set in whatever width they leave: a refused layer's `ingest.*` message
+   wrapped into a narrow column against the card's right edge with the rest of
+   the card empty. The stacked form puts the identifier and the badge on their
+   own line and gives the message the card's full width, which is how the
+   itemised ingest entries beside it are already drawn. */
+.attention-stack {
+  display: block;
+}
+
+.attention-stack .attention-text {
+  margin-top: 5px;
+}
+
+.attention-danger {
+  border-color: var(--danger-bd);
+  background: var(--danger-bg);
+}
+
+.attention-danger .attention-glyph {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.attention-danger button.stat-open {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.attention-accent {
+  border-color: var(--cbd);
+  background: var(--wash);
+}
+
+.attention-accent .attention-glyph {
+  color: var(--link);
+  font-weight: 700;
+}
+
+.attention-accent button.stat-open {
+  color: var(--link);
+  font-weight: 600;
+}
+
+.advisories > .label {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  margin: 0 0 9px;
+}
+
+.advisories button.stat-open {
+  margin-left: auto;
+  color: var(--link);
+}
+
+/* The fan-out's per-layer rows sit under the run's combined counts, so the
+   run is read as one result and a layer that needs acting on is still named
+   with what its own response returned. */
+.run-report-rows {
+  margin-top: 9px;
+}
+
+/* An itemised ingest list. Every entry carries an identifier, one or two
+   §6.10 codes, and a message of no bounded length, so each is a bordered card
+   rather than a bulleted line: the default disc marker sets a long artifact
+   id against a hanging indent and runs the code and the reason together. The
+   advisory rows in the summary use the same cards, because they are the same
+   kind of entry read in a narrower place. */
+.ingest-entries {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+}
+
+.ingest-entry {
+  padding: 11px 13px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: var(--surf2);
+}
+
+/* A conflict is the one entry the reader has to act on rather than read, so
+   it carries the accent edge the attention row beside it uses. */
+.ingest-entry-accent {
+  border-color: var(--cbd);
+  background: var(--wash);
+}
+
+.ingest-entry-head,
+.attention-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 0;
+  font-size: 12.5px;
+  word-break: break-word;
+}
+
+/* An attention row's head shares that line layout and keeps the row's own type
+   size, so the identifier is not set smaller than the message under it. */
+.attention-head {
+  font-size: inherit;
+}
+
+.ingest-entry-text {
+  margin: 5px 0 0;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--sec);
+}
+
+/* The stored and incoming hashes differ somewhere inside one long
+   unbreakable run, so they are set one under the other against their labels
+   rather than inline, where the reader has to find the difference in a
+   sentence. */
+.ingest-hashes {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 9px 0 0;
+  font-size: 11.5px;
+}
+
+.ingest-hashes dt,
+.ingest-hashes dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+/* The line under the tabs stating what the open list means for the layer. */
+.ingest-detail-lede {
+  margin: 0 0 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--sec);
+}
+
+/* The report's tab strip is a flex item of a column that already sets the
+   gap between its parts, so the strip's own page margins would be added to
+   that gap rather than replacing it. */
+.ingest-report .tabs {
+  margin: 0;
+}
+
+.advisory-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 0 0 3px;
+  font-size: 12.5px;
+}
+
+.advisory-message {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--sec);
+}
+
+/* The at-scale table's continuation past the returned edge. It carries the
+   same accent mark and quiet surface as the listing's own end-of-list row,
+   because it reports the same fact about the same trimmed listing, and it
+   sits over the rows the table drew rather than replacing them. */
+.listing-reach {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  margin-top: 12px;
+  padding: 14px 18px;
+  border: 1px solid var(--b2);
+  border-radius: 9px;
+  background: var(--surf2);
+}

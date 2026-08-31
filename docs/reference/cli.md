@@ -117,7 +117,7 @@ podium logout [--registry <url>]
 
 When `--issuer` is unset, `podium login` probes the resolved registry URL for RFC 8414 authorization-server metadata at `/.well-known/oauth-authorization-server` and reads the device-authorization and token endpoints from it. The registry process does not serve that document itself, so discovery succeeds only when a fronting proxy or gateway publishes it; otherwise pass `--issuer` (or set `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`). Setting `PODIUM_NO_BROWSER` to a truthy value (`1`, `true`, `yes`, or `on`) has the same effect as `--no-browser` for headless and CI environments. Tokens cache in the OS keychain keyed by registry URL; multiple registries can be authenticated simultaneously.
 
-`podium login` is a no-op when the resolved registry is a filesystem path or one of the loopback defaults, `http://127.0.0.1:8080` or `http://localhost:8080`. It reports that the registry needs no authentication and exits. A single-node server published at any other URL runs the full device-code flow, so a deployment that configures `oidc-jwt` authenticates through this command.
+`podium login` is a no-op when the resolved registry is a filesystem path or one of the loopback defaults, `http://127.0.0.1:8080` or `http://localhost:8080`. It reports that the registry needs no authentication and exits. A single-node server published at any other URL runs the full device-code flow, so a deployment that configures `oidc-jwt` authenticates the CLI through this command. Where the registry enables the browser flow, the registry signs a browser in through its own authorization-code exchange instead.
 
 ---
 
@@ -135,6 +135,7 @@ podium serve [--standalone] [--strict]
              [--no-embeddings] [--presign-ttl-seconds <n>]
              [--sign registry-key]
              [--web-ui] [--web-ui-allow-public-bind]
+             [--web-ui-auth] [--web-ui-auth-transaction-ttl <duration>]
 ```
 
 Each flag overrides the matching `PODIUM_*` env var for the duration of the process.
@@ -152,7 +153,9 @@ Each flag overrides the matching `PODIUM_*` env var for the duration of the proc
 | `--presign-ttl-seconds <n>` | Presigned-URL TTL in seconds. Overrides `PODIUM_PRESIGN_TTL_SECONDS` and the `object_store.presign_ttl_seconds` key in `registry.yaml`. |
 | `--sign registry-key` | Enable registry-managed-key signing on ingest. The only accepted value is `registry-key`. Overrides `PODIUM_SIGN`. |
 | `--web-ui` | Mount the bundled web UI at `/ui/`. Overrides `PODIUM_WEB_UI`. |
-| `--web-ui-allow-public-bind` | Allow the web UI on a non-loopback bind when an identity provider is configured. Overrides `PODIUM_WEB_UI_ALLOW_PUBLIC_BIND`. |
+| `--web-ui-allow-public-bind` | Allow the web UI on a non-loopback bind when an identity provider is configured, so a UI reachable beyond the loopback interface is served only by a registry that resolves a caller's identity and filters what it serves by that identity. Overrides `PODIUM_WEB_UI_ALLOW_PUBLIC_BIND`. |
+| `--web-ui-auth` | Sign the browser in through the registry with the OAuth authorization-code flow. Requires `--web-ui`, `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, public mode off, and the browser-flow acquisition values in the environment-variable table below, including `PODIUM_WEB_UI_REDIRECT_URI`, which must be an `https` URL or an `http` URL whose host is a loopback address. A configuration that fails one of those conjuncts aborts startup with `config.web_ui_auth_unconfigured`, and the [error-code catalog](error-codes) states the whole guard. Overrides `PODIUM_WEB_UI_AUTH`. |
+| `--web-ui-auth-transaction-ttl <duration>` | Sign-in window as a Go duration, `10m` by default. It is the `Max-Age` of the pre-authorization cookie the sign-in route sets. Overrides `PODIUM_WEB_UI_AUTH_TRANSACTION_TTL`. |
 
 Zero-flag (`podium serve` alone) auto-enters the standalone configuration when no config is found at `~/.podium/registry.yaml`. Disable with `PODIUM_NO_AUTOSTANDALONE=1` or `--strict`.
 
@@ -437,7 +440,7 @@ podium layer list [--deleted]
 
 ### `podium layer reorder`
 
-Re-sequences the layer list. Reordering a user-defined layer requires no admin role. Reordering an admin-defined layer requires the per-tenant `admin` role, and a caller without it is rejected with `auth.forbidden`. An id that names no configured layer returns `registry.not_found`.
+Re-sequences the layer list. Reordering a user-defined layer requires no admin role: it is authorized to that layer's stored owner or to a caller holding the per-tenant `admin` role. Reordering an admin-defined layer requires the per-tenant `admin` role, and a caller without it is rejected with `auth.forbidden`, as is a caller authorized on neither arm. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits the request. An id that names no configured layer returns `registry.not_found`.
 
 ```
 podium layer reorder <id> [<id> ...]
@@ -447,7 +450,7 @@ The argument order is precedence, lowest to highest.
 
 ### `podium layer unregister`
 
-Removes a layer. Admin layers require admin rights; user-defined layers can be removed by the registrant.
+Removes a layer. An admin-defined layer is removed by a caller holding the per-tenant `admin` role. A user-defined layer is removed by its stored owner or by a tenant admin, and a caller authorized on neither arm is rejected with `auth.forbidden`. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits the request.
 
 ```
 podium layer unregister <id>
@@ -744,7 +747,10 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_PRESIGN_TTL_SECONDS` | Override for presigned URL TTL. |
 | `PODIUM_VERIFY_SIGNATURES` | `never`, `medium-and-above` (default), `always`. |
 | `PODIUM_IDENTITY_PROVIDER` | Consumer side (MCP server and SDKs): `oauth-device-code` (default) or `injected-session-token`. Registry process: `injected-session-token`, `oidc-jwt`, or `trusted-headers`. `oauth-device-code` has no server-side verifier, so setting it on the registry aborts startup with `config.identity_provider_unverified`. |
-| `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` | OAuth provider config. |
+| `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` | OAuth provider config. `PODIUM_OAUTH_AUDIENCE` carries the registry's resolved audience, which both acquisition flows send: the device-code flow sends the value the client resolves, and the registry's browser sign-in redirect sends the value the registry resolved. `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` is the device-authorization endpoint of the device-code flow, and the browser flow does not read it; the browser flow redirects to `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` alone, and a configuration that sets the device-code key and leaves the web-UI one empty aborts startup with `config.web_ui_auth_unconfigured`. |
+| `PODIUM_WEB_UI_OAUTH_CLIENT_ID`, `PODIUM_WEB_UI_OAUTH_CLIENT_SECRET`, `PODIUM_WEB_UI_REDIRECT_URI`, `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT` | Registry-process boot settings, environment only and no `podium serve` flag. The browser flow's acquisition values: the OAuth client identifier and credential the registry presents, the callback URL the IdP returns the browser to, and the IdP endpoints the sign-in route redirects to and the callback exchanges the code at. Each is required where `--web-ui-auth` is set. |
+| `PODIUM_WEB_UI_OAUTH_SCOPES` | Registry-process boot setting, environment only. Space-delimited scope set the browser sign-in redirect sends. Default `openid profile email groups`, which is the set both shipped acquisition paths default to, because a token issued without the scope carrying the group claim narrows every group-scoped visibility decision for that caller. |
+| `PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT` | Registry-process boot setting, environment only. Deadline on the callback's token-endpoint request, 10 seconds by default. An unset, unparsable, or non-positive value takes the default, so no configuration removes the bound. |
 | `PODIUM_SESSION_TOKEN`, `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE` | Injected-token sources. `PODIUM_SESSION_TOKEN` is the default variable the CLI, the MCP server, and the SDKs read; `PODIUM_SESSION_TOKEN_ENV` names a different variable to read it from, and `PODIUM_SESSION_TOKEN_FILE` names a file to read it from. |
 | `PODIUM_TOKEN` | Registry credential a `kind: marketplace` sync target renders under. When set it takes precedence over the session token and the `podium login` keychain token for that render. |
 | `PODIUM_PUBLIC_MODE` | Equivalent of `--public-mode`. |

@@ -72,7 +72,7 @@ registry:
 
 Every server-side key nests under the top-level `registry:` mapping. A document that starts at `endpoint:` or `identity_provider:` parses to an empty config and the registry ignores it without reporting an error.
 
-`oidc-jwt` is the registry's side of the flow: it verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`. Developers obtain that token by running `podium login`, which completes the device-code flow against the same IdP. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`, because the registry ships no request-time verifier for it. The [OIDC cookbooks](oidc/) give the per-IdP values for `issuer:` and `audience:`.
+`oidc-jwt` is the registry's side of the flow: it verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`. A CLI, an SDK, or another API client obtains that token by running `podium login`, which completes the device-code flow against the same IdP, and on a registry that enables the browser flow a browser obtains it through the registry's own authorization-code exchange, which the registry returns in the `__Host-podium_session` cookie. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`, because the registry ships no request-time verifier for it. The [OIDC cookbooks](oidc/) give the per-IdP values for `issuer:` and `audience:`.
 
 Run behind a TLS-terminating reverse proxy in production. The registry listens on HTTP only.
 
@@ -176,7 +176,7 @@ Public mode is appropriate when both of the following hold:
 - The deployment is intentionally open beyond a single user, such as a demo registry, an evaluation pilot, or an internal-public catalog.
 - The audit log should record that anonymous-public access was the deployment's intent rather than a misconfiguration.
 
-For everyday team use, enable the `oidc-jwt` provider instead. Developers authenticate once with `podium login`, and the audit log then records the authenticated subject on every call. See [Access control](access-control).
+For everyday team use, enable the `oidc-jwt` provider instead. Each developer authenticates the CLI once with `podium login`, and the audit log then records the authenticated subject on every call. See [Access control](access-control).
 
 ---
 

@@ -8,10 +8,13 @@ package e2e
 // serverboot/config unit tests, which do not need a bound listener.
 
 import (
+	"encoding/json"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // `podium serve --web-ui` mounts the bundled SPA at /ui/.
@@ -122,5 +125,173 @@ func TestServerFlags_SignRejectsUnknown(t *testing.T) {
 	}
 	if !strings.Contains(out.Stderr, "config.invalid_sign_mode") {
 		t.Errorf("stderr missing config.invalid_sign_mode: %s", out.Stderr)
+	}
+}
+
+// Spec: §13.10 ("Browser-flow configuration guard") — one representative
+// refusal driven through the binary: --web-ui-auth without --web-ui fails the
+// web-UI conjunct, so the process exits non-zero before binding a listener and
+// names config.web_ui_auth_unconfigured together with the conjunct that failed.
+// The remaining conjuncts are covered by the pkg/registry/server guard table,
+// which needs no bound listener.
+func TestServe_WebUIAuthUnconfiguredRefused(t *testing.T) {
+	t.Parallel()
+	out := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+		"serve", "--standalone", "--web-ui-auth")
+	if out.Exit == 0 {
+		t.Fatalf("serve --web-ui-auth without --web-ui exit = 0, want non-zero\nstderr=%s", out.Stderr)
+	}
+	combined := out.Stderr + out.Stdout
+	if !strings.Contains(combined, "config.web_ui_auth_unconfigured") {
+		t.Errorf("output missing config.web_ui_auth_unconfigured:\n%s", combined)
+	}
+	if !strings.Contains(combined, "PODIUM_WEB_UI") {
+		t.Errorf("refusal does not name the failed conjunct:\n%s", combined)
+	}
+}
+
+// webUIAuthEnv returns the §6.3.4 acquisition values for a registry fronted by
+// idp. They carry an environment variable and no flag, so every point of the
+// route-mount product supplies them this way. The redirect URI is a loopback
+// http URL, which the §13.10 redirect-URI conjunct admits; no case drives the
+// callback, so it names no bound port of the server under test.
+func webUIAuthEnv(idp *oidcTestIdP) []string {
+	return []string{
+		"PODIUM_IDENTITY_PROVIDER=oidc-jwt",
+		"PODIUM_OAUTH_ISSUER=" + idp.srv.URL,
+		"PODIUM_OAUTH_AUDIENCE=https://podium.acme.example",
+		"SSL_CERT_FILE=" + idp.caFile,
+		"PODIUM_WEB_UI_OAUTH_CLIENT_ID=podium-web-ui",
+		"PODIUM_WEB_UI_OAUTH_CLIENT_SECRET=s3cr3t",
+		"PODIUM_WEB_UI_REDIRECT_URI=http://127.0.0.1:8080/v1/ui/auth/callback",
+		"PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT=" + idp.srv.URL + "/authorize",
+		"PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT=" + idp.srv.URL + "/token",
+	}
+}
+
+// signInResponse issues the sign-in GET without following the redirect, so the
+// test observes the status the route returns and the Set-Cookie it carries.
+func signInResponse(t *testing.T, baseURL string, cookies ...*http.Cookie) *http.Response {
+	t.Helper()
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	req, err := http.NewRequest(http.MethodGet, baseURL+"/v1/ui/auth/sign-in", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	for _, c := range cookies {
+		req.AddCookie(c)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("GET sign-in: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp
+}
+
+// transactionMaxAge returns the Max-Age the response sets on the §7.3.4
+// pre-authorization cookie, or -1 when the response sets no such cookie.
+func transactionMaxAge(resp *http.Response) int {
+	for _, c := range resp.Cookies() {
+		if c.Name == "__Host-podium_auth" {
+			return c.MaxAge
+		}
+	}
+	return -1
+}
+
+// Spec: §7.3.4 / §13.10 — the browser authentication routes mount inside the
+// block that already serves /ui/, under the one enablement key. Each case
+// starts one binary at one point of the enablement, key-carrier, and sign-in
+// window axes, and observes whether an authentication route answers and what
+// window the served pre-authorization cookie carries.
+func TestServe_WebUIAuthRouteMount(t *testing.T) {
+	t.Parallel()
+	t.Run("flow off", webUIAuthFlowOff)
+	t.Run("environment carrier, default window", webUIAuthEnvDefaultTTL)
+	t.Run("flag carrier, configured window", webUIAuthFlagConfiguredTTL)
+}
+
+// webUIAuthFlowOff drives the flow-off point: a registry serving the UI with
+// no browser flow registers none of the routes, and a stale session cookie
+// against it resolves as anonymous rather than as a subject. It configures no
+// identity provider, which is the stack fact that fixes the status of a path
+// the registry does not register.
+func webUIAuthFlowOff(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"my-skill/ARTIFACT.md": smallteamLowArtifact("ui artifact"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()},
+		"serve", "--standalone", "--web-ui", "--layer-path", reg)
+
+	stale := &http.Cookie{Name: "__Host-podium_session", Value: "stale.token.value"}
+	if resp := signInResponse(t, srv.BaseURL); resp.StatusCode != 404 {
+		t.Errorf("GET sign-in with the flow off = %d, want 404\nlog:\n%s", resp.StatusCode, srv.log())
+	}
+	st, body := gwHeaderGet(t, srv.BaseURL+"/v1/ui/session", map[string]string{"Cookie": stale.Name + "=" + stale.Value})
+	if st != 200 {
+		t.Fatalf("GET /v1/ui/session = %d, want 200\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+	var posture struct {
+		Subject     string `json:"subject"`
+		BrowserAuth struct {
+			Enabled bool `json:"enabled"`
+		} `json:"browser_auth"`
+	}
+	if err := json.Unmarshal(body, &posture); err != nil {
+		t.Fatalf("decode posture: %v (%s)", err, body)
+	}
+	if posture.BrowserAuth.Enabled {
+		t.Errorf("browser_auth.enabled = true with the flow off: %s", body)
+	}
+	if posture.Subject != "" {
+		t.Errorf("a stale session cookie resolved subject %q, want anonymous", posture.Subject)
+	}
+}
+
+// webUIAuthEnvDefaultTTL drives the environment-carrier point at the default
+// window: with the flow enabled through the environment variables the sign-in route answers, and the pre-authorization cookie
+// carries the default sign-in window as its Max-Age.
+func webUIAuthEnvDefaultTTL(t *testing.T) {
+	t.Parallel()
+	requireCustomTrustStore(t)
+	idp := startOIDCTestIdP(t, "")
+	env := append([]string{"HOME=" + t.TempDir(), "PODIUM_WEB_UI=true", "PODIUM_WEB_UI_AUTH=true"}, webUIAuthEnv(idp)...)
+	srv := startServerArgs(t, env, "serve", "--standalone")
+
+	resp := signInResponse(t, srv.BaseURL)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("GET sign-in = %d, want 302\nlog:\n%s", resp.StatusCode, srv.log())
+	}
+	if got := transactionMaxAge(resp); got != 600 {
+		t.Errorf("__Host-podium_auth Max-Age = %d, want the 10m default (600)", got)
+	}
+}
+
+// webUIAuthFlagConfiguredTTL drives the flag-carrier point at a configured
+// window. The enablement key and the sign-in window carry both
+// a flag and an environment variable, so this point reaches the field through
+// `podium serve` flag registration, which no environment point reaches, and it
+// pins the configured window on the served cookie.
+func webUIAuthFlagConfiguredTTL(t *testing.T) {
+	t.Parallel()
+	requireCustomTrustStore(t)
+	idp := startOIDCTestIdP(t, "")
+	env := append([]string{"HOME=" + t.TempDir()}, webUIAuthEnv(idp)...)
+	srv := startServerArgs(t, env,
+		"serve", "--standalone", "--web-ui", "--web-ui-auth", "--web-ui-auth-transaction-ttl", "90s")
+
+	resp := signInResponse(t, srv.BaseURL)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("GET sign-in = %d, want 302\nlog:\n%s", resp.StatusCode, srv.log())
+	}
+	if got := transactionMaxAge(resp); got != 90 {
+		t.Errorf("__Host-podium_auth Max-Age = %d, want the configured 90", got)
 	}
 }

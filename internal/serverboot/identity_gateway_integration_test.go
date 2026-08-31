@@ -184,7 +184,7 @@ func TestGatewayIntegration_OIDCJWTVisibility(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
 	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
-	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil))
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil, false))
 
 	alice := idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"}))
 	bob := idp.sign(t, gwClaims(idp.issuer(), "bob@acme.com", nil))
@@ -211,7 +211,7 @@ func TestGatewayIntegration_OIDCJWTVerificationErrors(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
 	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
-	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil))
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil, false))
 
 	// Wrong audience -> 401 auth.untrusted_token, with details.token_iss.
 	wrongAud := gwClaims(idp.issuer(), "alice@acme.com", nil)
@@ -265,7 +265,7 @@ func TestGatewayIntegration_OIDCJWTGroupMapping(t *testing.T) {
 	idp := newJWKSIdP(t)
 	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
 	mapping := identity.NewIdpGroupMapping(map[string]string{"00g1engOID": "engineering"})
-	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", mapping))
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", mapping, false))
 
 	// A token carrying only the raw IdP group value sees the engineering layer,
 	// because the IdpGroupMapping rewrites 00g1engOID -> engineering (§6.3.1).
@@ -283,7 +283,7 @@ func TestGatewayIntegration_OIDCJWTGroupMapping(t *testing.T) {
 	// with a named group claim: the same raw value arriving as a single string
 	// under the configured claim name maps to engineering too.
 	named := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0, identity.WithGroupsClaim(adfsGroupsClaimURI))
-	namedTS := gatewayServer(t, oidcJWTVerifier(named, "", mapping))
+	namedTS := gatewayServer(t, oidcJWTVerifier(named, "", mapping, false))
 	claims := gwClaims(idp.issuer(), "carol@acme.com", nil)
 	claims[adfsGroupsClaimURI] = "00g1engOID"
 	if st, _ := loadArtifact(t, namedTS.URL, "eng/secret", bearer(idp.sign(t, claims))); st != 200 {
@@ -295,7 +295,7 @@ func TestGatewayIntegration_OIDCJWTCustomTokenHeader(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
 	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
-	ts := gatewayServer(t, oidcJWTVerifier(verifier, "X-Forwarded-Access-Token", nil))
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "X-Forwarded-Access-Token", nil, false))
 
 	alice := idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"}))
 	// The token must arrive in the configured header, parsed as "Bearer <token>".
@@ -335,7 +335,7 @@ func TestGatewayIntegration_OIDCJWTSplitIssuerAndClaimNames(t *testing.T) {
 	if got, want := verifier.AcceptedIssuers(), []string{idp.issuer(), fedIssuer}; !slices.Equal(got, want) {
 		t.Fatalf("AcceptedIssuers() = %v, want %v", got, want)
 	}
-	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil))
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil, false))
 
 	adfsToken := func(sub, group string) string {
 		t.Helper()
@@ -398,7 +398,7 @@ func TestGatewayIntegration_OIDCJWTEmptyClaimNamesKeepDefaults(t *testing.T) {
 	if got, want := verifier.AcceptedIssuers(), []string{idp.issuer()}; !slices.Equal(got, want) {
 		t.Fatalf("AcceptedIssuers() = %v, want %v", got, want)
 	}
-	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil))
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil, false))
 
 	alice := idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"}))
 	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(alice)); st != 200 {
@@ -424,7 +424,7 @@ func TestGatewayIntegration_OIDCJWTAccessTokenIssuerEqualsIssuer(t *testing.T) {
 	if got, want := verifier.AcceptedIssuers(), []string{idp.issuer()}; !slices.Equal(got, want) {
 		t.Fatalf("AcceptedIssuers() = %v, want %v", got, want)
 	}
-	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil))
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil, false))
 
 	alice := idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"}))
 	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(alice)); st != 200 {

@@ -21,12 +21,60 @@ Every call carries an OAuth-attested identity. The registry validates the JWT si
 The registry resolves the caller through the provider named by its `PODIUM_IDENTITY_PROVIDER`. The registry-process values are `injected-session-token`, `oidc-jwt`, and `trusted-headers`.
 
 - `injected-session-token`: runtime-issued signed JWT. The deployment configures the registry to trust the runtime's signing key at startup through `PODIUM_RUNTIME_KEYS_PATH`, which names a file written with `podium admin runtime register --keys-file`, and the registry verifies the signature on every call.
-- `oidc-jwt`: a gateway forwards the caller's token. The registry verifies the signature, `iss`, and `aud` against the issuer's JWKS.
+- `oidc-jwt`: an IdP-signed token the registry verifies itself. The registry verifies the signature, `iss`, and `aud` against the issuer's JWKS. The token reaches the registry in one of two locations: in the configured token header, whether a gateway forwarded it or a CLI, an SDK, or another API client presents one it acquired through the device-code flow, or in the `__Host-podium_session` cookie, where the registry obtained it for a browser through the sign-in routes below. The registry reads the configured token header first, and it reads the cookie only where that header carries no `Bearer` credential and the browser flow is enabled on that registry. A request that carries a bearer credential in neither location is anonymous rather than rejected and sees public visibility only.
 - `trusted-headers`: an authenticating reverse proxy asserts the identity in `X-Podium-User-Sub`, `X-Podium-User-Email`, `X-Podium-User-Groups`, and `X-Podium-User-Org`, optionally authenticated with `X-Podium-Proxy-Secret`.
 
 `oauth-device-code` is the consumer-side provider. The MCP server and the SDKs acquire the token through an interactive device-code flow on first use, cache it in the OS keychain, and refresh it transparently. The registry ships no request-time verifier for it, so setting it on the registry process aborts startup with `config.identity_provider_unverified`.
 
 In public-mode deployments, the OAuth flow is skipped; the registry serves anonymously. The audit log records `caller.identity = "system:public"`.
+
+### Browser session
+
+Where the registry serves the web UI and the browser flow is enabled (`--web-ui-auth` / `PODIUM_WEB_UI_AUTH`), the registry signs the browser in itself. It redirects the browser to the identity provider, performs the authorization-code exchange server-side, and returns the resulting IdP-signed token to the browser in a cookie. That token is the same credential `oidc-jwt` accepts in the configured token header, so the browser flow adds no credential kind and the registry keeps no session record. The flow sets the two cookies below and no others. Both carry the `__Host-` prefix, `HttpOnly`, `Secure`, `Path=/`, and `SameSite=Lax`, so neither is readable from the page.
+
+| Cookie | Carries | Lifetime |
+|:--|:--|:--|
+| `__Host-podium_session` | the access token the callback obtained | the token's own `exp`, so the cookie carries no `Max-Age` |
+| `__Host-podium_auth` | the single-use pre-authorization transaction: the `state` and the PKCE `code_verifier` the sign-in route minted | the configured transaction TTL (`PODIUM_WEB_UI_AUTH_TRANSACTION_TTL`, 10 minutes by default) |
+
+The registry registers the three routes below only where the browser flow is enabled. A registry that boots with the flow disabled serves none of them, and a request for one of those paths is answered as any path the registry does not register is answered on that deployment.
+
+```
+GET  /v1/ui/auth/sign-in     mint the transaction and redirect to the identity provider
+GET  /v1/ui/auth/callback    exchange the authorization code and set the session cookie
+POST /v1/ui/auth/sign-out    clear both cookies
+```
+
+`GET /v1/ui/auth/sign-in` mints the `state` and the PKCE `code_verifier` for one transaction, returns both in `__Host-podium_auth`, and redirects the browser to the configured authorization endpoint.
+
+`GET /v1/ui/auth/callback` compares the returned `state` against `__Host-podium_auth` before inspecting anything else in the query. A callback whose cookie is absent, expired, or carries a different `state` is refused with `403 auth.csrf_invalid`. A query carrying the identity provider's `error` parameter runs no exchange, returns the browser to `/ui/` without establishing or replacing a session, and takes no error code. Otherwise the callback exchanges the code at the configured token endpoint: an identity provider the registry cannot reach, and one whose token endpoint answers with a `5xx`, are each refused with `500 registry.unavailable`, and an exchange the identity provider answers and refuses is refused with `502 auth.exchange_failed`. On success the callback returns the access token in `__Host-podium_session`. Every response the callback emits clears `__Host-podium_auth`, which is what makes the transaction single-use.
+
+`POST /v1/ui/auth/sign-out` clears both cookies on every request it serves.
+
+**Browser-origin gate.** The registry refuses a state-changing request that carries cross-site browser-origin evidence with `403 auth.csrf_invalid`, before the handler runs and whatever credential authenticated the request. A request is state-changing when its method is other than `GET`, `HEAD`, or `OPTIONS`. Browser-origin evidence is cross-site when the request carries a `Sec-Fetch-Site` header whose value is other than `same-origin` or `none`, or an `Origin` header whose host and port differ from the host and port the request's own `Host` header names. The scheme is not compared, because an HTTP `Host` header carries none and a registry behind a TLS-terminating gateway cannot observe the browser-facing one. A state-changing request carrying neither header carries no browser-origin evidence and is admitted, which is what a CLI, an SDK, or any other non-browser client sends. The sign-in and callback routes sit outside the gate: each answers on `GET`, and a browser that already holds `__Host-podium_session` sends it on both, so a gate covering them would refuse every re-sign-in. The gate reads the request rather than the deployment, so it runs on a registry that enables no browser flow and on one that serves no web UI.
+
+### Session posture
+
+```
+GET /v1/ui/session
+```
+
+Reports the deployment's identity posture and the caller's own resolved subject. The registry registers it wherever it serves the web UI, whether or not the browser flow is enabled. It requires no credential and refuses no request for lack of one; a request that carries one has it verified only so the response can report `subject`, and a request that resolves no subject is answered `200` with `subject` absent.
+
+```json
+{
+  "identity_provider_configured": true,
+  "public_mode": false,
+  "browser_auth": {
+    "enabled": true,
+    "sign_in_path": "/v1/ui/auth/sign-in",
+    "sign_out_path": "/v1/ui/auth/sign-out"
+  },
+  "subject": "alice@acme.com"
+}
+```
+
+`identity_provider_configured` reports whether an identity provider is configured and never names which one. `public_mode` reports whether public mode is engaged. `browser_auth.enabled` reports whether the browser flow is enabled on this deployment, and `sign_in_path` and `sign_out_path` are present only when it is, because the flow's routes are registered only then. `subject` is the verified subject of the request that asked, present only when one resolves. The response carries no other field, and in particular no issuer, client identifier, endpoint, or other configuration value. A registry started without the web UI never registers this path and answers a request for it as it answers any path it does not register.
 
 ---
 
@@ -264,6 +312,8 @@ Returns the per-subtree domain analysis report for the path (the same report `po
 
 ## Layer management
 
+**Layer write authorization.** The write operations in this section, meaning `POST /v1/layers`, `DELETE /v1/layers`, `/v1/layers/update`, `/v1/layers/restore`, `/v1/layers/reorder`, and `/v1/layers/reingest`, are gated. On a stored layer that is user-defined, the operation is authorized to that layer's stored `owner` or to a caller holding the per-tenant `admin` role. On a stored layer that is admin-defined, it is authorized to a tenant admin alone, whatever that layer's stored `owner` field names, because on an admin-defined layer that field is supplied by the requesting caller and names no authorized subject. On `POST /v1/layers` the gate applies when the request's `id` names a layer that already exists in the tenant, and the arm taken is decided by the stored layer's class and stored owner rather than by anything in the request body; a layer that is soft-deleted and still inside its recovery window is a layer that exists for this rule. A registration whose `id` names no stored layer is authorized to a caller the admin arm admits or to a caller who resolves a verified subject, and where that registration resolves to a user-defined layer and a subject resolves, the stored `owner` is that subject. A caller authorized by neither arm is refused with `403 auth.forbidden`, whether that caller resolves a different subject or resolves none at all. A registration whose existence lookup fails is refused with `500 registry.unavailable` and writes nothing. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so no caller can hold the admin role or resolve as an owner and these endpoints admit the request there.
+
 ### Register a layer
 
 ```
@@ -283,7 +333,7 @@ Body:
 }
 ```
 
-`id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. The response is `201 Created` with the stored layer and, for a `git` source, the webhook URL and HMAC secret to register on the source repo:
+`id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. A request whose `id` names a layer that already exists in the tenant is a write against that layer and is authorized against it under the rule above, so a caller neither arm authorizes is refused with `403 auth.forbidden` rather than overwriting it. The response is `201 Created` with the stored layer and, for a `git` source, the webhook URL and HMAC secret to register on the source repo:
 
 ```json
 {
@@ -305,7 +355,7 @@ GET /v1/layers
 POST /v1/layers/reingest?id={id}
 ```
 
-Forces a fresh snapshot of the layer regardless of the trigger model. The body is optional and carries a break-glass override during a freeze window:
+Forces a fresh snapshot of the layer regardless of the trigger model. Reingesting an admin-defined layer is authorized to a tenant admin, and reingesting a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden` before any Git fetch runs. The body is optional and carries a break-glass override during a freeze window:
 
 ```json
 { "break_glass": true, "justification": "...", "approvers": ["...", "..."] }
@@ -317,7 +367,7 @@ Forces a fresh snapshot of the layer regardless of the trigger model. The body i
 POST /v1/layers/reorder
 ```
 
-Body: `{ "order": ["layer-a", "layer-b", "layer-c"] }`. The `order` array re-sequences the named layers. Reordering an admin-defined layer requires admin authorization.
+Body: `{ "order": ["layer-a", "layer-b", "layer-c"] }`. The `order` array re-sequences the named layers. Reordering an admin-defined layer is authorized to a tenant admin, and reordering a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden`.
 
 ### Update a layer
 
@@ -326,7 +376,7 @@ POST /v1/layers/update?id={id}
 PUT  /v1/layers/update?id={id}
 ```
 
-Patches the layer. A non-zero body field replaces the corresponding value; a zero field leaves it unchanged. The patchable fields are visibility (`public`, `organization`, `groups`, `users`), `ref`, `root`, `local_path`, `owner`, `force_push_policy`, and a webhook-secret rotation (`rotate_webhook_secret`). On a user-defined layer the registry ignores the `owner` and visibility fields and still answers `200 OK`, because that layer's owner and its implicit `users: [<owner>]` visibility are fixed at registration; the remaining fields apply as described. The identifying fields (`id`, `source_type`) are immutable.
+Patches the layer. A non-zero body field replaces the corresponding value; a zero field leaves it unchanged. The patchable fields are visibility (`public`, `organization`, `groups`, `users`), `ref`, `root`, `local_path`, `owner`, `force_push_policy`, and a webhook-secret rotation (`rotate_webhook_secret`). On a user-defined layer the registry ignores the `owner` and visibility fields and still answers `200 OK` to a caller the rule above authorizes, because that layer's owner and its implicit `users: [<owner>]` visibility are fixed at registration; the remaining fields apply as described. The identifying fields (`id`, `source_type`) are immutable.
 
 ### Unregister
 
@@ -334,7 +384,7 @@ Patches the layer. A non-zero body field replaces the corresponding value; a zer
 DELETE /v1/layers?id={id}
 ```
 
-Soft-deletes the layer and the artifacts ingested from it, recoverable within the retention window.
+Soft-deletes the layer and the artifacts ingested from it, recoverable within the retention window. Unregistering an admin-defined layer is authorized to a tenant admin, and unregistering a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden`.
 
 ### List soft-deleted layers and restore
 
@@ -343,7 +393,7 @@ GET  /v1/layers?deleted=true
 POST /v1/layers/restore?id={id}
 ```
 
-`GET /v1/layers?deleted=true` lists the soft-deleted layers still inside the recovery window. `POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and its artifacts.
+`GET /v1/layers?deleted=true` lists the soft-deleted layers still inside the recovery window. `POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and its artifacts. Restoring an admin-defined layer is authorized to a tenant admin, and restoring a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden`.
 
 ---
 
@@ -454,7 +504,7 @@ POST /v1/admin/reembed?artifact={id}&version={v}&only_missing={bool}&since={rfc3
 
 Recomputes embeddings over the tenant. With no query parameters it reembeds every artifact. `artifact` (with a required `version`) scopes the run to one artifact; `only_missing=true` limits it to artifacts without a current embedding; `since` limits it to artifacts ingested at or after an RFC 3339 timestamp.
 
-A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so no caller can hold the admin role and this endpoint admits the request there. The exception is specific to re-embed.
+A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so no caller can hold the admin role and this endpoint admits the request there. The layer write endpoints admit the request on such a registry for the same reason, which the layer write authorization rule under [Layer management](#layer-management) states.
 
 ### Erase a user (GDPR)
 

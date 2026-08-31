@@ -410,11 +410,13 @@ Built-in identity providers:
   runtime's signing key at startup through `PODIUM_RUNTIME_KEYS_PATH`,
   written with `podium admin runtime register --keys-file`; the registry
   verifies signatures on every call.
-- **`oidc-jwt`** and **`trusted-headers`**: registry-process providers for a
-  deployment that runs the registry behind a gateway that already authenticated
-  the caller. `oidc-jwt` verifies the forwarded IdP-signed token on every
-  request. `trusted-headers` reads the identity the gateway injects as request
-  headers. See
+- **`oidc-jwt`** and **`trusted-headers`**: registry-process providers.
+  `oidc-jwt` serves a deployment where the registry verifies the caller's
+  IdP-signed token itself on every request, whether a gateway forwarded that
+  token or the registry obtained it for a browser through its own
+  authorization-code exchange. `trusted-headers` serves a deployment that runs
+  the registry behind a gateway that already authenticated the caller, and
+  reads the identity that gateway injects as request headers. See
   [Gateway-delegated identity](../deployment/gateway-delegated-identity).
 
 A filesystem-source registry has no identity by definition:

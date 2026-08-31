@@ -229,6 +229,12 @@ func mlVisServer(t *testing.T, home string, layers []mlVisLayer, pemPath string)
 		"PODIUM_CONFIG_FILE=" + cfgPath,
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+		// spec: §7.3.1 — the layer-write authorization rule is live here
+		// (an identity provider is configured and public mode is off), and
+		// an admin-defined layer's write is authorized to a tenant admin.
+		// The grant goes to a subject no case in this file drives as a
+		// caller, so every per-caller visibility assertion stands.
+		"PODIUM_BOOTSTRAP_ADMINS=ops@acme.com",
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
 		"PODIUM_RUNTIME_KEYS_PATH=" + injSeedRuntimeKeys(t, pemPath),
 	}, "serve", "--standalone")
@@ -504,9 +510,12 @@ func TestMultiLayer_PerCallerWinnerAndPinnedParentStable(t *testing.T) {
 
 	// The org publishes a new patch v1.0.1 with a different marker and reingests
 	// the org layer. The reingest needs a verified token (injected-session-token
-	// mode verifies every caller-identity route); reingest is not admin-gated.
+	// mode verifies every caller-identity route), and the org layer is
+	// declaratively configured and therefore admin-defined, so §7.3.1
+	// authorizes its reingest to a tenant admin. ops@acme.com holds the
+	// bootstrap grant this file's server installs; alice does not.
 	mlWriteArtifact(t, orgRoot, "eng/runbook", "1.0.1", "org-base-v101", "")
-	ri := runPodium(t, "", []string{"PODIUM_SESSION_TOKEN=" + alice},
+	ri := runPodium(t, "", []string{"PODIUM_SESSION_TOKEN=" + mlToken(t, priv, "ops@acme.com")},
 		"layer", "reingest", "--registry", srv.BaseURL, "org")
 	if ri.Exit != 0 {
 		t.Fatalf("org layer reingest exit=%d stderr=%s stdout=%s", ri.Exit, ri.Stderr, ri.Stdout)

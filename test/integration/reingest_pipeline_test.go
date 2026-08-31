@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,5 +238,74 @@ func TestReingestPipeline_FreezeAndBreakGlass(t *testing.T) {
 	resp2.Body.Close()
 	if okStatus != http.StatusOK {
 		t.Fatalf("break-glass reingest status = %d, want 200", okStatus)
+	}
+}
+
+// Spec: §7.3.1 / §6.10 — a manual reingest whose source holds an artifact with
+// undecodable YAML frontmatter is refused as a content fault. The refusal
+// carries ingest.lint_failed with retryable false and a remediation naming the
+// source, because the registry is healthy and every retry of the same source
+// reproduces the same parse failure. Before this was classified, the failure
+// fell through to registry.unavailable, which reports the registry as the
+// problem and advises a retry and a look at its health endpoint.
+func TestReingestPipeline_MalformedFrontmatterIsContentFault(t *testing.T) {
+	t.Parallel()
+	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "reg.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite: %v", err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	ctx := context.Background()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+
+	layerDir := t.TempDir()
+	artDir := filepath.Join(layerDir, "x", "y")
+	if err := os.MkdirAll(artDir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	malformed := "---\ntype: context\nversion: 1.0.0\ndescription: d\nweird: [unclosed\n---\n\nbody\n"
+	if err := os.WriteFile(filepath.Join(artDir, "ARTIFACT.md"), []byte(malformed), 0o644); err != nil {
+		t.Fatalf("write artifact: %v", err)
+	}
+	if err := st.PutLayerConfig(ctx, store.LayerConfig{
+		TenantID: "t", ID: "badlayer", SourceType: "local", LocalPath: layerDir,
+	}); err != nil {
+		t.Fatalf("PutLayerConfig: %v", err)
+	}
+
+	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
+		WithReingestRunner(localReingestRunner(st, nil))
+	ts := httptest.NewServer(endpoint.Handler())
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Post(ts.URL+"/v1/layers/reingest?id=badlayer", "application/json", nil)
+	if err != nil {
+		t.Fatalf("reingest: %v", err)
+	}
+	var m map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&m)
+	resp.Body.Close()
+
+	if resp.StatusCode != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 422 (body %v)", resp.StatusCode, m)
+	}
+	if m["code"] != "ingest.lint_failed" {
+		t.Errorf("code = %v, want ingest.lint_failed", m["code"])
+	}
+	if m["retryable"] != false {
+		t.Errorf("retryable = %v, want false: the same source fails identically", m["retryable"])
+	}
+	action, _ := m["suggested_action"].(string)
+	if action == "" {
+		t.Errorf("suggested_action empty; the refusal must name the remediation")
+	}
+	if strings.Contains(action, "health endpoint") {
+		t.Errorf("suggested_action = %q sends the operator to the registry's health endpoint for a content fault", action)
+	}
+	msg, _ := m["message"].(string)
+	if !strings.Contains(msg, "x/y") {
+		t.Errorf("message = %q does not name the offending artifact", msg)
 	}
 }

@@ -66,9 +66,10 @@ func newDefault() *Registry {
 	_ = r.Register("injected-session-token", func(c Config) (Provider, error) {
 		return InjectedSessionToken{TokenSource: c.TokenSource, Verify: c.Verify}, nil
 	})
-	// §6.3.3 registry-process providers: a gateway fronts the registry and the
-	// registry verifies the forwarded token (oidc-jwt) or trusts gateway-set
-	// identity headers (trusted-headers). They are registered so the server's
+	// §6.3.3 registry-process providers: the registry verifies the caller's
+	// token itself (oidc-jwt), whether a gateway forwarded it or the registry
+	// obtained it through the §6.3.4 exchange, or trusts the identity headers a
+	// fronting gateway sets (trusted-headers). They are registered so the server's
 	// startup guard (identityVisibilityGuard) treats them as selected and
 	// requires a request-time verifier to be wired; selecting one on a build
 	// that does not install the verifier fails closed rather than serving an

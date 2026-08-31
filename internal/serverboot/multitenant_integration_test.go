@@ -85,7 +85,7 @@ func TestMultiTenant_OIDCJWTRoutesByOrg(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
 	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
-	ts := multiTenantServer(t, oidcJWTVerifier(verifier, "", nil), true)
+	ts := multiTenantServer(t, oidcJWTVerifier(verifier, "", nil, false), true)
 
 	acme := bearer(orgToken(t, idp, "alice@acme.com", "acme"))
 	globex := bearer(orgToken(t, idp, "bob@globex.com", "globex"))
@@ -117,7 +117,7 @@ func TestMultiTenant_OIDCJWTUnknownOrgRejected(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
 	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
-	ts := multiTenantServer(t, oidcJWTVerifier(verifier, "", nil), true)
+	ts := multiTenantServer(t, oidcJWTVerifier(verifier, "", nil, false), true)
 
 	// A verified token whose org_id names no provisioned tenant is rejected with
 	// auth.tenant_unknown (the token verified; the failure is tenancy).

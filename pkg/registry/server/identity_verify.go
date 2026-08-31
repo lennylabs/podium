@@ -84,27 +84,34 @@ func pathRequiresIdentity(p string) bool {
 // An expired token reports auth.token_expired; every other failure reports
 // auth.untrusted_runtime with details.runtime_iss naming the offending
 // issuer when the token carried one (matching the §6.10 canonical example).
+//
+// The messages name no credential location. Under oidc-jwt the registry
+// accepts the token in the configured token header and, where the §6.3.4
+// browser flow is enabled, in the __Host-podium_session cookie, and it
+// verifies the two identically, so a message written about a forwarded token
+// is false on one of them.
 func (s *Server) writeIdentityError(w http.ResponseWriter, err error) {
 	if errors.Is(err, identity.ErrTokenExpired) {
-		// §6.10 amendment: provider-neutral message (an expired oidc-jwt token
-		// is refreshed by the gateway, not the runtime); the per-provider
-		// refresher is carried in the registry's suggested_action.
+		// §6.10: the message is provider-neutral and location-neutral; the
+		// per-provider refresher is carried in the registry's
+		// suggested_action.
 		writeError(w, http.StatusUnauthorized, "auth.token_expired",
 			"The authenticated token has expired.")
 		return
 	}
-	// §6.3.3: a gateway-forwarded oidc-jwt token that fails signature, iss, or
-	// aud verification. Distinct from auth.untrusted_runtime: details.token_iss
-	// names the forwarded token's issuer (not a registered runtime).
+	// §6.3.3: an oidc-jwt token that fails signature, iss, or aud
+	// verification, in either accepted credential location. Distinct from
+	// auth.untrusted_runtime: details.token_iss names the rejected token's
+	// issuer (not a registered runtime).
 	var ult *identity.UntrustedTokenError
 	if errors.As(err, &ult) {
 		if ult.Issuer != "" {
 			writeErrorDetails(w, http.StatusUnauthorized, "auth.untrusted_token",
-				"Forwarded token from issuer '"+ult.Issuer+"' failed verification.",
+				"Token from issuer '"+ult.Issuer+"' failed verification.",
 				map[string]any{"token_iss": ult.Issuer})
 		} else {
 			writeError(w, http.StatusUnauthorized, "auth.untrusted_token",
-				"The forwarded token could not be verified.")
+				"The token could not be verified.")
 		}
 		return
 	}

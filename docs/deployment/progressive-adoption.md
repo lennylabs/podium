@@ -54,7 +54,7 @@ Goal: stop public visibility after identity works.
 - If multiple OIDC groups exist (engineering, sales, support, etc.) and some artifacts are team-specific, introduce group-based visibility on a second layer, for example `engineering-internal` with `groups: [engineering]`.
 - Audit a week of `visibility.denied` events to confirm callers are not blocked from artifacts they should see.
 
-**Exit criteria:** an unauthenticated caller sees an empty catalog, because no layer is public any more. Under `oidc-jwt` a request carrying no token is anonymous rather than rejected, so it resolves to public visibility only. A user from a different OIDC org cannot see the artifacts. Group-scoped layers, if any, work as expected.
+**Exit criteria:** an unauthenticated caller sees an empty catalog, because no layer is public any more. Under `oidc-jwt` a request whose configured token header carries no `Bearer` credential is anonymous rather than rejected, so it resolves to public visibility only; where the registry enables the browser flow, such a request is anonymous only when it also presents no valid session cookie. A user from a different OIDC org cannot see the artifacts. Group-scoped layers, if any, work as expected.
 
 ---
 

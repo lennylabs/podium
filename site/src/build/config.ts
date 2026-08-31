@@ -45,7 +45,11 @@ export function loadConfig(overrides: Partial<SiteConfig> = {}): SiteConfig {
     editBase: "https://github.com/lennylabs/podium/edit/main",
     repoUrl: "https://github.com/lennylabs/podium",
     version: overrides.version ?? readVersion(repoRoot),
-    searchIndexLimitBytes: 600 * 1024,
+    // The browser-session, posture-read, and layer-write-authorization
+    // sections the HTTP API and CLI references gained put the index a little
+    // over the previous 600kB budget. The budget is raised deliberately rather
+    // than paid for by dropping reference content.
+    searchIndexLimitBytes: 640 * 1024,
     ...overrides,
   };
 }

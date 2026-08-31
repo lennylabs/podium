@@ -43,7 +43,7 @@ Ingest:
 $ git add SKILL.md ARTIFACT.md && git commit -m "Add run-variance-analysis@1.0.0"
 $ git push    # opens or updates a PR; CI runs `podium lint`; reviewers approve; merge.
 # The Git provider's webhook fires; the registry ingests automatically.
-# If the webhook was missed, an admin (or the layer owner) can reingest manually:
+# If the webhook was missed, a tenant admin can reingest manually:
 $ podium layer reingest org-defaults
 artifact: finance/close-reporting/run-variance-analysis@1.0.0   layer: org-defaults
 ```

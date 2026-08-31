@@ -1,0 +1,765 @@
+// Search over the catalog. §13.10 fixes the filter set to the ones the SDK
+// and the CLI carry, which are type, scope, and tags, so this surface offers
+// those and no others. Every argument is optional, so a request with no query
+// text is a browse over the filters.
+//
+// The row is drawn as the design pass fixed it: the label names the row, an
+// applied filter is a filled pill carrying its own remove control, a filter
+// whose values the registry can enumerate is added from an outlined dropdown,
+// and one whose values it cannot is added through a token entry. The result
+// count sits at the right of the same row.
+
+import { useEffect, useRef, useState } from "react";
+
+import { ArtifactRow } from "../components/ArtifactRow";
+import { usePopupDismiss } from "../components/focus";
+import { Chevron, EmptyState, ErrorState, Loading, Magnifier } from "../components/primitives";
+import type { SearchFilters, SearchResponse } from "../api";
+import { catalogArtifactIDs, loadDomain, searchArtifacts } from "../api";
+import { useOfferedCorrection } from "./correction";
+import { scopePaths } from "../domain";
+import { formatQueryLine, hasFilters, parseQueryLine, parseTypedLine } from "../query";
+import { layersHref, parseRoute, replaceRoute, searchHref } from "../route";
+import type { Async } from "../useAsync";
+import { useAsync, useDebounced, useErrorReport } from "../useAsync";
+
+const resultCap = 10;
+
+/** searchPage is how many further results one continuation request asks for,
+ * and searchCapMax is the largest `top_k` §5 accepts: a request above it is
+ * refused with INVALID_ARGUMENT rather than served, so the cap stops there
+ * and the recovery line stands alone for a match count past it. */
+const searchPage = 20;
+const searchCapMax = 50;
+
+/** scopeDepth is how deep the scope dropdown reads the domain tree. It is the
+ * depth the sidebar tree opens at, so every domain the reader can see without
+ * expanding a node can also be named as a scope. A depth of 1 returns the
+ * top-level entries with empty subtrees, which offered fewer scopes than the
+ * tree beside it already listed. */
+const scopeDepth = 2;
+
+/** firstClassTypes are the §4.3 types every registry carries, which is what
+ * the type dropdown can offer. An extension type registers through the
+ * TypeProvider SPI and no response enumerates the registered set, so a filter
+ * on one arrives through the palette's `type:` syntax or through the route,
+ * and the row renders it as the pill any applied type takes. */
+const firstClassTypes = [
+  "skill",
+  "agent",
+  "context",
+  "command",
+  "rule",
+  "hook",
+  "mcp-server",
+];
+
+export function SearchSurface({
+  query,
+  onError,
+}: {
+  query: string;
+  onError: (err: unknown) => void;
+}) {
+  // The route query carries the same line the palette types, so the surface
+  // runs the palette's own parse over it. A query arriving as
+  // "type:skill auth" opens with the skill pill applied and "auth" in the
+  // field, which is the request the palette issued and the result set it
+  // listed. The parse seeds the state on arrival, and the reader's later
+  // edits stand over it.
+  const seed = parseQueryLine(query);
+  const [type, setType] = useState(seed.type);
+  const [scope, setScope] = useState(seed.scope);
+  const [tags, setTags] = useState<string[]>(seed.tags);
+  const [text, setText] = useState(seed.query);
+
+  // The field takes the same line the palette and the route take, so the
+  // inline syntax the palette teaches applies wherever it is typed. A
+  // finished `type:`, `scope:`, or `tag:` word is lifted out of the field and
+  // drawn as the pill it names, and the rest of the line stays query text.
+  // Without the lift the same string named one search in the address bar and
+  // ran another against the registry, because the route parses it and the
+  // field did not (§13.10).
+  const applyLifted = (lifted: SearchFilters) => {
+    if (lifted.type !== "") {
+      setType(lifted.type);
+    }
+    if (lifted.scope !== "") {
+      setScope(lifted.scope);
+    }
+    if (lifted.tags.length > 0) {
+      setTags((held) => [
+        ...held,
+        ...lifted.tags.filter((tag) => !held.includes(tag)),
+      ]);
+    }
+    setText(lifted.query);
+  };
+
+  const onTyped = (typed: string) => {
+    const lifted = parseTypedLine(typed);
+    if (!hasFilters(lifted)) {
+      // Nothing was lifted, so the line stands exactly as typed. Rewriting it
+      // from the parse would drop the trailing space the reader just entered
+      // and fold their word into the one before it.
+      setText(typed);
+      return;
+    }
+    applyLifted(lifted);
+  };
+
+  // ⏎ settles the word the reader is still on. Between keystrokes a filter
+  // token is lifted only once whitespace follows it, so `type:ski` does not
+  // filter on the way to `type:skill`, and a line submitted with no trailing
+  // space kept its token as query text while the route the surface wrote for
+  // the same line parsed it as a filter: one address named two searches, and
+  // which one ran depended on whether the reader had typed it or reloaded it.
+  // Submitting is the reader saying the word is finished, so the whole line is
+  // parsed the way the route and the palette parse it (§13.10).
+  const onSubmitted = () => {
+    const settled = parseQueryLine(text);
+    if (!hasFilters(settled)) {
+      return;
+    }
+    applyLifted(settled);
+  };
+
+  // A navigation onto the search route reaches the surface here rather than
+  // through the query the shell hands down. The surface writes the reader's
+  // edits into the address bar without firing `hashchange`, so the query the
+  // shell last parsed trails what the field shows, and a palette handoff back
+  // to that trailing query hands down a value the shell reads as unchanged.
+  // Seeding on the address the navigation landed on leaves the field, the
+  // result list, and the address bar naming one search (§13.10).
+  useEffect(() => {
+    const onNavigate = () => {
+      const entered = parseRoute(window.location.hash);
+      if (entered === null || entered.name !== "search") {
+        return;
+      }
+      const landed = parseQueryLine(entered.query);
+      setType(landed.type);
+      setScope(landed.scope);
+      setTags(landed.tags);
+      setText(landed.query);
+    };
+    window.addEventListener("hashchange", onNavigate);
+    return () => {
+      window.removeEventListener("hashchange", onNavigate);
+    };
+  }, []);
+
+  // A scope is a §4.2 domain path, so the dropdown offers every domain the
+  // root read describes: its top-level entries, the subdomains those entries
+  // carry, and every segment a §4.5.5 folded chain crossed on the way to one.
+  // A scope matches by prefix and the browser navigates to each of those
+  // domains, so a list drawn from the top-level entry paths alone would hide a
+  // domain that both surfaces answer for. The read is an enhancement to the
+  // row rather than the surface's own catalog read: a failure leaves the
+  // dropdown offering the unscoped search alone and is neither reported to the
+  // shell nor drawn, because the search itself still answers.
+  const domains = useAsync(() => loadDomain("", scopeDepth), []);
+  const scopeOptions = scopePaths(domains.value?.subdomains ?? [], "");
+
+  // The request is keyed on the query once the reader has stopped typing it.
+  // Keyed on every keystroke it issued a whole §5 retrieval per character of
+  // the word, and left each superseded one in flight. A filter is applied by
+  // one press, so only the typed text rests (§13.10).
+  const settledText = useDebounced(text);
+  const filters: SearchFilters = { query: settledText, type, scope, tags };
+  const key = JSON.stringify(filters);
+  // The continuation raises the cap on the same request rather than paging,
+  // because §5 search takes a result count and no offset. A new request is a
+  // new result set, so the cap drops back to the first page when the query or
+  // a filter changes; it is reset during the render that reads the new key so
+  // the raised cap never issues a request against the new filters.
+  const [cap, setCap] = useState(resultCap);
+  const [capKey, setCapKey] = useState(key);
+  if (capKey !== key) {
+    setCapKey(key);
+    setCap(resultCap);
+  }
+  const read = useAsync(() => searchArtifacts(filters, cap), [key, cap]);
+  // While the query is still resting, the read for what the field shows has
+  // not gone out yet, so the surface holds the state it holds for a read in
+  // flight. Settling the previous query's result set under the line on screen
+  // would answer a half-typed word with "nothing matched" and send the
+  // correction's catalog read out after it.
+  const search: Async<SearchResponse> =
+    text === settledText ? read : { ...read, loading: true };
+  // A continuation is the one read that must not replace the list it widens.
+  // The reader pressed a control at the foot of the list, and swapping the
+  // subtree for the loading line unmounts the control from under their focus,
+  // which drops it to the document body and sends the next Tab back to the
+  // top of the page. A raised cap against the settled request's own key is
+  // that read, so the list it already carries stands while it is in flight
+  // and the control stays the same element throughout (§13.10).
+  const continuing = read.loading && read.value !== null && cap > resultCap;
+  // Where the continuation spends the cap, the control the reader pressed is
+  // gone once its own results land, because §5 serves no more than the count
+  // it just asked for. The focus would fall to the document body with it, so
+  // the surface hands it to the first result the press appended, which is
+  // where the reader was reading. The handoff records the request it belongs
+  // to, so a query edited while the widened read is in flight lands on its
+  // own result set rather than moving the focus into a list the reader did
+  // not ask for (§13.10).
+  const surface = useRef<HTMLElement>(null);
+  const handoff = useRef<{ key: string; from: number } | null>(null);
+  useEffect(() => {
+    const owed = handoff.current;
+    if (owed === null || read.loading) {
+      return;
+    }
+    handoff.current = null;
+    const root = surface.current;
+    if (root === null || owed.key !== key) {
+      return;
+    }
+    if (root.querySelector("[data-testid='search-continue']") !== null) {
+      return;
+    }
+    const rows = root.querySelectorAll<HTMLElement>("a.artifact-id");
+    rows[owed.from]?.focus();
+    // The handoff is owed by the read the press issued, so the settling of
+    // that read is what the effect keys on.
+  }, [read.loading]);
+  // A search is a page of the catalog like any other, so the query and the
+  // filters live in the route rather than only in component state: the
+  // address bar names the search that is on screen, a reload restores it, and
+  // the reader can send it to someone else. The entry is replaced rather than
+  // pushed because a pushed entry per keystroke would bury whatever the
+  // reader was looking at before the search under one step per character.
+  const line = formatQueryLine(filters);
+  useEffect(() => {
+    replaceRoute(searchHref(line));
+  }, [line]);
+  useErrorReport(search.error, onError);
+  const body = search.value;
+  const filtered = type !== "" || scope !== "" || tags.length > 0;
+  const queried = text !== "";
+  // A query that matched nothing is offered the nearest spelling the catalog
+  // holds, which is the recovery the palette offers over the same query and
+  // the same catalog. The palette hands its query to this surface, so a
+  // correction that survives the handoff is the one the reader was already
+  // being offered. No endpoint answers "did you mean", so the vocabulary is
+  // the §4.5.2 catalog of canonical IDs and the correction is derived from
+  // it here. The read is issued only on the arm that has nothing to list, and
+  // a catalog the caller cannot read leaves the arm as it was: the correction
+  // is an offer, and a failure to make one is not a failure to report.
+  const nothingListed =
+    !search.loading && search.error === null && (body?.results ?? []).length === 0;
+  const noMatch = queried && nothingListed;
+  // The same read is the catalog's own census, which is what tells a query
+  // that missed apart from a registry that holds nothing for any query to
+  // reach. It is issued whenever a request the reader narrowed came back
+  // empty, so the filtered browse is censused as well as the queried one; an
+  // unnarrowed browse is already the whole catalog and needs no second read.
+  const census = (queried || filtered) && nothingListed;
+  // The arm that issues no census resolves to null rather than to an empty
+  // listing, because the two are read apart below: an empty listing is the
+  // evidence that the registry holds nothing, and the hook carries the last
+  // resolved value through the render in which the read is re-issued. A
+  // census standing in for "not read yet" would report an empty catalog for
+  // that render, on the frame the reader's first keystroke lands.
+  const catalog = useAsync<string[] | null>(
+    async () => (census ? catalogArtifactIDs("") : null),
+    [census],
+  );
+  const correction = useOfferedCorrection(line, catalog.value ?? [], noMatch);
+  // An empty ID list is a registry holding no artifact, so no spelling and no
+  // filter could have matched and advice about the query sends the reader to
+  // refine a line against nothing. The arm is the one the palette takes over
+  // the same registry: it states what the catalog holds and points at the
+  // panel where a layer is registered. A catalog the caller cannot read
+  // leaves the query arm standing, because a failed census is not evidence of
+  // an empty registry (§13.10).
+  const bareCatalog =
+    (!filtered && !queried && nothingListed) ||
+    (census && !catalog.loading && catalog.value !== null && catalog.value.length === 0);
+  // What the row and the list drew is also stated for a reader who cannot see
+  // it. Typing a query or narrowing a filter swaps the count and can replace
+  // the whole list with a sentence, and neither change moves focus, so
+  // without a region the reader is told neither the new count nor that the
+  // list emptied (§13.10).
+  const announcement = searchAnnouncement(search, bareCatalog);
+
+  return (
+    // The content column opens on the query field. A drawn "Search" title over
+    // a field already labelled "Search artifacts" restates the field and
+    // pushes it and the filter row down the page, so the title is taken out of
+    // the visual flow rather than out of the document. Every other §13.10
+    // surface heads its page with an h1, and a reader who navigates by heading
+    // found none at all here: the surface answered no heading query, so it
+    // could be neither reached nor identified that way. The layer panel does
+    // carry a drawn title, because its header also holds a description and its
+    // write actions.
+    <section className="surface" aria-label="Search" ref={surface}>
+      <h1 className="assistive-only">Search</h1>
+      {/* The field is a row rather than a bare input: the magnifier names it
+          as the query field the way the top bar's trigger and the palette's
+          own field do, and the border belongs to the row so the icon sits
+          inside it. */}
+      <div className="search-field">
+        <Magnifier />
+        <input
+          className="search-input"
+          type="search"
+          aria-label="Search artifacts"
+          value={text}
+          placeholder="Search artifacts"
+          onChange={(event) => {
+            onTyped(event.target.value);
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              onSubmitted();
+            }
+          }}
+        />
+      </div>
+      <div className="filter-row">
+        <span className="filter-label mono">Filters</span>
+        {type === "" ? (
+          <FilterSelect
+            label="type"
+            options={firstClassTypes}
+            onSelect={setType}
+          />
+        ) : (
+          <FilterPill
+            label="type"
+            value={type}
+            onRemove={() => {
+              setType("");
+            }}
+          />
+        )}
+        {scope === "" ? (
+          <FilterSelect
+            label="scope"
+            options={scopeOptions}
+            onSelect={setScope}
+          />
+        ) : (
+          <FilterPill
+            label="scope"
+            value={scope}
+            onRemove={() => {
+              setScope("");
+            }}
+          />
+        )}
+        {tags.map((tag) => (
+          <FilterPill
+            key={tag}
+            label="tag"
+            value={tag}
+            onRemove={() => {
+              setTags(tags.filter((held) => held !== tag));
+            }}
+          />
+        ))}
+        <TokenEntry
+          label="tag"
+          onAdd={(tag) => {
+            setTags((held) => (held.includes(tag) ? held : [...held, tag]));
+          }}
+        />
+        {/* The match count is taken before the cap truncates the list, so
+            fewer results than matches is the ordinary outcome. The trailing
+            noun names what the second numeral counts, which two bare numerals
+            leave the reader to guess at. */}
+        {body !== null && (
+          <p className="result-count quiet" data-testid="result-count">
+            Showing <strong>{(body.results ?? []).length}</strong> of{" "}
+            <strong>{body.total_matched}</strong>{" "}
+            {body.total_matched === 1 ? "match" : "matches"}
+          </p>
+        )}
+      </div>
+      {/* The region is rendered on every state of the surface, empty until a
+          read settles. A region mounted at the moment its text arrives is not
+          in the accessibility tree when the change happens, and the
+          announcement is dropped. */}
+      <p
+        className="assistive-only"
+        role="status"
+        aria-live="polite"
+        data-testid="search-announcement"
+      >
+        {announcement}
+      </p>
+      <SearchResults
+        search={search}
+        filtered={filtered}
+        bareCatalog={bareCatalog}
+        correction={correction}
+        onCorrect={(corrected) => {
+          // The correction is a whole query line, so it is applied the way an
+          // arriving route is: the filters it carried through stand and the
+          // rewritten text replaces what the reader typed.
+          const spelled = parseQueryLine(corrected);
+          setType(spelled.type);
+          setScope(spelled.scope);
+          setTags(spelled.tags);
+          setText(spelled.query);
+        }}
+        continuing={continuing}
+        onMore={(step) => {
+          handoff.current = { key, from: (body?.results ?? []).length };
+          setCap((held) => Math.min(held + step, searchCapMax));
+        }}
+      />
+    </section>
+  );
+}
+
+/** searchAnnouncement is what the result state says to a reader who cannot
+ * see it. It is empty while a read is in flight and while one is refused, so
+ * a settled result set is announced once rather than every partial state on
+ * the way to it, and a refused read carries its own alert from ErrorState.
+ * The empty arms are worded for the region rather than repeated from the
+ * page, the way the palette's announcement is: the drawn sentence carries the
+ * remedy a reader acts on with the row in front of them, and the region
+ * states the outcome. */
+function searchAnnouncement(
+  search: Async<SearchResponse>,
+  bareCatalog: boolean,
+): string {
+  if (search.loading || search.error !== null || search.value === null) {
+    return "";
+  }
+  const results = search.value.results ?? [];
+  if (results.length === 0) {
+    return bareCatalog
+      ? "The catalog holds no artifacts."
+      : "No artifact matched.";
+  }
+  const matched = search.value.total_matched;
+  return `${results.length} of ${matched} artifact${matched === 1 ? "" : "s"} matched.`;
+}
+
+/** FilterPill is one applied filter. It names the filter it applies as well
+ * as the value, so a row carrying several reads as the request it issues, and
+ * it carries the control that removes it. */
+function FilterPill({
+  label,
+  value,
+  onRemove,
+}: {
+  label: string;
+  value: string;
+  onRemove: () => void;
+}) {
+  return (
+    <span className="pill pill-active">
+      {label}: {value}
+      <button
+        type="button"
+        className="pill-remove"
+        aria-label={`Remove the ${value} filter`}
+        onClick={onRemove}
+      >
+        ✕
+      </button>
+    </span>
+  );
+}
+
+/** FilterSelect applies a filter whose values are enumerable, which is the
+ * type and the scope. It reads as the unapplied state of the pill that
+ * replaces it: the closed control names the filter and the unfiltered read it
+ * currently stands for. */
+function FilterSelect({
+  label,
+  options,
+  onSelect,
+}: {
+  label: string;
+  options: string[];
+  onSelect: (value: string) => void;
+}) {
+  // A native select is as wide as its widest option, so the scope control
+  // stretched to the deepest domain path in the catalog and left a dead gap
+  // between its label and its indicator. The pill draws the closed label and
+  // the chevron itself, which takes the width from the label, and the select
+  // is laid over the pill transparently so the control the reader operates is
+  // still the browser's own.
+  return (
+    <span className="pill pill-select">
+      <span className="pill-select-label" aria-hidden="true">
+        {label}: all
+      </span>
+      <Chevron />
+      <select
+        aria-label={`Filter by ${label}`}
+        value=""
+        onChange={(event) => {
+          onSelect(event.target.value);
+        }}
+      >
+        <option value="">{label}: all</option>
+        {options.map((option) => (
+          <option key={option} value={option}>
+            {label}: {option}
+          </option>
+        ))}
+      </select>
+    </span>
+  );
+}
+
+/** TokenEntry adds a filter value the registry cannot enumerate, which is
+ * every tag. It opens on a press, takes one value, and closes. */
+function TokenEntry({
+  label,
+  onAdd,
+}: {
+  label: string;
+  onAdd: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [typed, setTyped] = useState("");
+  const trigger = useRef<HTMLButtonElement>(null);
+  // The entry is a transient popup, so it dismisses on Escape and on a press
+  // or a focus move outside itself. Without that, a reader who opened it to
+  // look loses the add control for the rest of the session, because the
+  // field stands in the button's place until a value is submitted.
+  const owed = useRef(false);
+  const entry = usePopupDismiss<HTMLSpanElement>(
+    open,
+    () => {
+      owed.current = true;
+      setTyped("");
+      setOpen(false);
+    },
+    trigger,
+  );
+  // usePopupDismiss hands focus back to the trigger, but the trigger is
+  // unmounted while the field stands in its place, so the focus lands on
+  // nothing. Every exit records that the button is owed the focus, and it
+  // takes it once it is back. A submitted value closes the field the same way
+  // a dismissal does, so without this a reader who applied a tag filter by
+  // keyboard was left on the document body with the filter row gone from
+  // under them.
+  useEffect(() => {
+    if (open || !owed.current) {
+      return;
+    }
+    owed.current = false;
+    trigger.current?.focus();
+  }, [open]);
+
+  const commit = () => {
+    const value = typed.trim();
+    if (value !== "") {
+      onAdd(value);
+    }
+    owed.current = true;
+    setTyped("");
+    setOpen(false);
+  };
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        className="pill pill-add"
+        ref={trigger}
+        onClick={() => {
+          setOpen(true);
+        }}
+      >
+        + {label}
+      </button>
+    );
+  }
+  return (
+    <span className="pill pill-entry" ref={entry}>
+      <input
+        type="text"
+        aria-label={`Add a ${label} filter`}
+        // The dashed pill this field replaces carries the only statement of
+        // what the control takes, and it is gone once the field is open. The
+        // placeholder restates it, so the open field does not read as an empty
+        // capsule with a lone Add button at its right.
+        placeholder={`Filter by ${label}`}
+        value={typed}
+        autoFocus
+        onChange={(event) => {
+          setTyped(event.target.value);
+        }}
+        // The default action is refused because the add control takes the
+        // focus back as the field closes, and the browser would then read the
+        // same ⏎ as an activation of the button now under it and reopen the
+        // field the reader just submitted.
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.preventDefault();
+            commit();
+          }
+        }}
+      />
+      <button type="button" onClick={commit}>
+        Add
+      </button>
+    </span>
+  );
+}
+
+function SearchResults({
+  search,
+  filtered,
+  bareCatalog,
+  correction,
+  continuing,
+  onMore,
+  onCorrect,
+}: {
+  search: Async<SearchResponse>;
+  filtered: boolean;
+  bareCatalog: boolean;
+  correction: string | null;
+  continuing: boolean;
+  onMore: (step: number) => void;
+  onCorrect: (query: string) => void;
+}) {
+  if (search.loading && !continuing) {
+    return <Loading label="Searching." />;
+  }
+  if (search.error !== null) {
+    return <ErrorState error={search.error} onRetry={search.reload} />;
+  }
+  const body = search.value;
+  if (body === null) {
+    return null;
+  }
+  const results = body.results ?? [];
+  if (results.length === 0) {
+    // The remedy names only what the reader can act on. A row standing at
+    // "type: all" and "scope: all" with no tag pill has no filter to clear,
+    // so offering that as the way out sends the reader looking for a control
+    // the page does not carry (§13.10). Over a registry the census found
+    // empty there is nothing for any query or any filter to reach, so the
+    // remedy is the one the palette gives over the same catalog: the arm
+    // states what the registry holds and routes to the panel where a layer is
+    // registered, rather than telling the reader to widen a line that cannot
+    // match.
+    if (bareCatalog) {
+      return (
+        <EmptyState title="The catalog holds no artifacts">
+          No query can match until a layer is registered.{" "}
+          <a href={layersHref} className="search-empty-route">
+            Open the layer panel
+          </a>
+        </EmptyState>
+      );
+    }
+    return (
+      <EmptyState title="Nothing matched">
+        {filtered
+          ? "Widen the query or clear a filter."
+          : "Widen the query."}
+        {/* The correction answers a misspelling, which widening the query
+            does not: a reader who typed the word wrong has no shorter way in.
+            It is drawn only when the catalog holds a spelling near the typed
+            one, and running it rewrites the field rather than the filters. */}
+        {correction !== null && (
+          <span className="search-correction" data-testid="search-correction">
+            <span className="quiet">Did you mean</span>{" "}
+            <button
+              type="button"
+              className="mono search-correction-chip"
+              onClick={() => {
+                onCorrect(correction);
+              }}
+            >
+              {/* The chip names the rewritten query text alone. The filters
+                  the correction carried through are already drawn as pills
+                  beside the field, and restating them in the chip offers the
+                  reader a line they can see is applied. */}
+              {parseQueryLine(correction).query}
+            </button>
+          </span>
+        )}
+      </EmptyState>
+    );
+  }
+  // The registry returns the results in its final ranked order, and the row's
+  // relevance indicator is drawn from that position. The descriptor's score is
+  // the pre-rerank lexical score, which the §12 usage rerank and the §4.7.3
+  // dependency rerank reorder past without rewriting, so a set can be listed
+  // in an order its own scores contradict.
+  //
+  // The score still says how a row matched. The registry fuses a result found
+  // by vector similarity alone in with a zero score, which omitempty puts on
+  // the wire as an absent one, so such a row carries a label. A set where no
+  // row carries a score is not that case: an empty query returns every match
+  // at score zero, and a registry serving BM25 alone (§13.10
+  // `--no-embeddings`) runs no vector retrieval to fuse in. Labelling those
+  // rows would state a match the deployment never performed, so the label is
+  // drawn only where some row in the set did score.
+  const lexicalSet = results.some((artifact) => (artifact.score ?? 0) > 0);
+  // A set that scored nothing was not ranked by relevance at all: an empty
+  // query is the deterministic §4.7 listing. Passing a count of zero draws no
+  // indicator, so an alphabetical listing is not presented as a ranking.
+  const rankedCount = lexicalSet ? results.length : 0;
+  const withheld = body.total_matched - results.length;
+  // A result the cap withheld is reachable from the foot of the list. The
+  // step asks for one page more, bounded by what is still withheld and by the
+  // largest count §5 serves, and a step of zero means the cap is spent and
+  // narrowing the request is the only way further. It is measured against the
+  // results on the page rather than against the requested cap, so a
+  // continuation in flight leaves the control the reader is standing on
+  // mounted and labelled until the results it asked for land.
+  const step = Math.min(searchPage, withheld, searchCapMax - results.length);
+  return (
+    <>
+      {withheld > 0 && (
+        <p className="quiet">
+          Narrow the result set with a filter, drill into a subdomain, or run a
+          more specific query.
+        </p>
+      )}
+      <ul className="artifact-list">
+        {results.map((artifact, index) => (
+          <ArtifactRow
+            key={artifact.id}
+            artifact={artifact}
+            ranked
+            rank={index}
+            resultCount={rankedCount}
+            matchedByMeaning={lexicalSet && (artifact.score ?? 0) <= 0}
+          />
+        ))}
+      </ul>
+      {step > 0 && (
+        <div className="listing-continuation" data-testid="search-continuation">
+          {/* The control carries aria-disabled rather than disabled while
+              the request it issued is in flight: a disabled control leaves
+              the focus order, and the browser hands the focus of the reader
+              who just pressed it to the document body. It keeps its element,
+              its label, and its place, and refuses a second press until the
+              results land. */}
+          <button
+            type="button"
+            className="button"
+            data-testid="search-continue"
+            aria-disabled={continuing ? true : undefined}
+            onClick={() => {
+              if (!continuing) {
+                onMore(step);
+              }
+            }}
+          >
+            Load {step} more
+          </button>
+          <p className="quiet">
+            {continuing ? "Loading more results." : "Ranked by relevance."}
+          </p>
+        </div>
+      )}
+    </>
+  );
+}

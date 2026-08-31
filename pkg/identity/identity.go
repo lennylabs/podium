@@ -18,10 +18,11 @@ var (
 	ErrUntrustedRuntime = errors.New("identity: untrusted_runtime")
 	// ErrTokenExpired maps to auth.token_expired in §6.10.
 	ErrTokenExpired = errors.New("identity: token_expired")
-	// ErrUntrustedToken maps to auth.untrusted_token in §6.10. A
-	// gateway-forwarded oidc-jwt token failed signature, iss, or aud
-	// verification against the accepted issuers and the issuer JWKS
-	// (§6.3.3).
+	// ErrUntrustedToken maps to auth.untrusted_token in §6.10. An
+	// oidc-jwt token failed signature, iss, or aud verification against the
+	// accepted issuers and the issuer JWKS (§6.3.3), in either accepted
+	// credential location: the configured token header, or the
+	// __Host-podium_session cookie where the §6.3.4 browser flow is enabled.
 	ErrUntrustedToken = errors.New("identity: untrusted_token")
 	// ErrDeviceCodeRequired surfaces the device-code flow URL and code
 	// to the caller; the caller is responsible for displaying both.

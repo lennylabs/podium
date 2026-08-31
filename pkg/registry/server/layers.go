@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -157,9 +158,14 @@ func (e *LayerEndpoint) WithPublicBaseURL(u string) *LayerEndpoint {
 // absolute URL a developer can paste into a Git host's webhook configuration;
 // otherwise it falls back to the relative path.
 //
+// The layer id is percent-escaped as a single path segment. A layer id is an
+// operator-chosen string that may contain a space or a slash, and pasting the
+// unescaped form into a Git host produces a request the {id} route never
+// matches, so the advertised URL would 404 forever instead of ingesting.
+//
 // spec: §14.10 step 3 — "The CLI prints the webhook URL it would expect."
 func (e *LayerEndpoint) webhookURL(layerID string) string {
-	path := "/v1/ingest/webhook/" + layerID
+	path := "/v1/ingest/webhook/" + url.PathEscape(layerID)
 	if e.publicBaseURL == "" {
 		return path
 	}
@@ -187,6 +193,67 @@ func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoi
 func (e *LayerEndpoint) WithIdentityResolver(fn func(*http.Request) layer.Identity) *LayerEndpoint {
 	e.identify = fn
 	return e
+}
+
+// authorizeLayerWrite implements the §7.3.1 layer-write authorization rule
+// for a write against a stored layer. On a user-defined layer the operation
+// is authorized to the layer's stored Owner or to a tenant admin. On an
+// admin-defined layer it is authorized to a tenant admin alone, whatever the
+// stored Owner names: that field is assigned from the request body on
+// register and patchable on update, so it names no verified subject. A caller
+// authorized by neither arm, including one that resolves no subject at all,
+// gets the returned error, which every caller turns into 403 auth.forbidden.
+//
+// The owner comparison reads the caller through the same identity resolver
+// the register handler derives a user-defined layer's owner from, so the
+// subject compared here is the subject stored there.
+//
+// Spec: §7.3.1
+func (e *LayerEndpoint) authorizeLayerWrite(r *http.Request, cfg store.LayerConfig) error {
+	if cfg.UserDefined {
+		if caller := e.identify(r); caller.IsAuthenticated && caller.Sub != "" && caller.Sub == cfg.Owner {
+			return nil
+		}
+	}
+	return e.authAdmin(r)
+}
+
+// lookupLayerForWrite reports whether id names a layer that exists in the
+// tenant for the §7.3.1 layer-write authorization rule, and returns it. A
+// layer that is soft-deleted and still inside its §8.4 recovery window
+// exists for that rule, so the lookup covers both the live set and the
+// tenant's tombstoned layers.
+//
+// IMPLEMENTOR'S CHOICE (proposal 0013, "The layer-ownership defect"): the
+// store call sequence is GetLayerConfig first, and the ListDeletedLayerConfigs
+// scan only when that answers store.ErrNotFound. That is the discrimination
+// unregister and reingest already run, extended with restore's scan arm, and
+// it keeps the common live-layer registration to one store call. A failed
+// call on either read is returned as an error rather than collapsed into
+// "no such layer", because a store failure establishes neither that the ID is
+// unused nor who owns the layer that holds it; update's collapse of every
+// GetLayerConfig failure into 404 is safe there only because not-found
+// refuses on update and admits on register.
+//
+// Spec: §7.3.1, §8.4
+func (e *LayerEndpoint) lookupLayerForWrite(ctx context.Context, id string) (store.LayerConfig, bool, error) {
+	cfg, err := e.store.GetLayerConfig(ctx, e.tenantID, id)
+	if err == nil {
+		return cfg, true, nil
+	}
+	if !errors.Is(err, store.ErrNotFound) {
+		return store.LayerConfig{}, false, fmt.Errorf("layers: look up %s: %w", id, err)
+	}
+	deleted, err := e.store.ListDeletedLayerConfigs(ctx, e.tenantID)
+	if err != nil {
+		return store.LayerConfig{}, false, fmt.Errorf("layers: scan tombstoned layers for %s: %w", id, err)
+	}
+	for _, l := range deleted {
+		if l.ID == id {
+			return l, true, nil
+		}
+	}
+	return store.LayerConfig{}, false, nil
 }
 
 // WithMaxUserLayers overrides the §7.3.1 per-identity cap on
@@ -489,13 +556,12 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
 		return
 	}
-	// Mutating an admin-defined layer requires admin authorization; a
-	// user-defined layer belongs to its registrant (§4.7.2).
-	if !cfg.UserDefined {
-		if err := e.authAdmin(r); err != nil {
-			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
-			return
-		}
+	// spec: §7.3.1 — the layer-write authorization rule: a user-defined
+	// layer's stored owner or a tenant admin, an admin-defined layer a
+	// tenant admin alone.
+	if err := e.authorizeLayerWrite(r, cfg); err != nil {
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+		return
 	}
 	var patch LayerRegisterRequest
 	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
@@ -598,6 +664,41 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			"force_push_policy must be \"tolerant\" or \"strict\"")
 		return
 	}
+	// spec: §7.3.1 — the layer-write authorization rule, on the path that
+	// reads as a creation. PutLayerConfig below is an upsert keyed on
+	// (tenant_id, id) in every backend, so a registration under an existing
+	// layer's ID is a write against that layer and takes the arm its stored
+	// class selects. The lookup and the comparison both run ahead of the
+	// req.UserDefined short-circuit below, so a body asserting user_defined
+	// cannot skip this gate the way it skips authAdmin. A failed lookup is
+	// refused with registry.unavailable and writes nothing, because a store
+	// failure establishes neither that no layer holds the ID nor who owns the
+	// layer that does. An ID naming no stored layer is admitted to a caller
+	// the admin arm admits or to one resolving a verified subject; refusing
+	// the rest is what keeps an anonymous party from posting an unused ID
+	// with a body-supplied owner and injecting a layer into that subject's
+	// effective view.
+	// Two registrations racing under the same previously-unused ID resolve
+	// last-writer-wins, which is the shipped upsert's behavior accepted
+	// unchanged; the decision and its reason live in proposal 0013, "The
+	// layer-ownership defect".
+	stored, exists, err := e.lookupLayerForWrite(r.Context(), req.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
+	}
+	if exists {
+		if err := e.authorizeLayerWrite(r, stored); err != nil {
+			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+			return
+		}
+	} else if adminErr := e.authAdmin(r); adminErr != nil {
+		if who := e.identify(r); !who.IsAuthenticated || who.Sub == "" {
+			writeError(w, http.StatusForbidden, "auth.forbidden", adminErr.Error())
+			return
+		}
+	}
+
 	// spec: §7.3.1 / §4.6 — resolve the registration class. An admin-defined
 	// layer is declared by a tenant admin and requires admin authorization.
 	// An authenticated non-admin caller registers a personal (user-defined)
@@ -816,11 +917,11 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "registry.not_found", "no recoverable layer: "+id)
 		return
 	}
-	if !cfg.UserDefined {
-		if err := e.authAdmin(r); err != nil {
-			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
-			return
-		}
+	// spec: §7.3.1 — the layer-write authorization rule, evaluated against
+	// the tombstoned layer's stored class and owner.
+	if err := e.authorizeLayerWrite(r, cfg); err != nil {
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+		return
 	}
 	if err := e.store.RestoreLayerConfig(r.Context(), e.tenantID, id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
@@ -853,11 +954,10 @@ func (e *LayerEndpoint) unregister(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if !cfg.UserDefined {
-		if err := e.authAdmin(r); err != nil {
-			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
-			return
-		}
+	// spec: §7.3.1 — the layer-write authorization rule.
+	if err := e.authorizeLayerWrite(r, cfg); err != nil {
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+		return
 	}
 	if err := e.store.DeleteLayerConfig(r.Context(), e.tenantID, id); err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
@@ -902,11 +1002,11 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "registry.not_found", "no such layer: "+id)
 			return
 		}
-		if !l.UserDefined {
-			if err := e.authAdmin(r); err != nil {
-				writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
-				return
-			}
+		// spec: §7.3.1 — the layer-write authorization rule, evaluated for
+		// each affected layer.
+		if err := e.authorizeLayerWrite(r, l); err != nil {
+			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+			return
 		}
 	}
 	for i, id := range req.Order {
@@ -987,6 +1087,14 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	// spec: §7.3.1 — the layer-write authorization rule runs after the layer
+	// is loaded, which is what supplies the owner to compare against, and
+	// before the pipeline, so a refused caller triggers neither a Git fetch
+	// nor the break-glass freeze bypass (§4.7.2).
+	if err := e.authorizeLayerWrite(r, cfg); err != nil {
+		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+		return
+	}
 	e.runIngestAndRespond(w, r, cfg, bg)
 }
 
@@ -1011,10 +1119,17 @@ func (e *LayerEndpoint) runIngestAndRespond(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	// §0 quickstart: report the (artifact_id, version) pairs the snapshot
-	// produced so the CLI can print the per-artifact confirmation line.
+	// produced so the CLI can print the per-artifact confirmation line. The
+	// list covers both the newly accepted pairs and the unchanged ones, so
+	// each entry carries the status that says which count it belongs to and
+	// a reader can itemise either one.
 	arts := make([]map[string]string, 0, len(res.Ingested))
 	for _, a := range res.Ingested {
-		arts = append(arts, map[string]string{"id": a.ArtifactID, "version": a.Version})
+		status := "unchanged"
+		if a.Accepted {
+			status = "accepted"
+		}
+		arts = append(arts, map[string]string{"id": a.ArtifactID, "version": a.Version, "status": status})
 	}
 	// spec: §4.6 / §3.3 — surface the non-blocking ingest advisories (e.g. the
 	// cross-layer license change) so a publisher reingesting at
