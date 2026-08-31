@@ -4220,7 +4220,7 @@ misconfigured:
    scenario passes on nothing. This step is also what gives step 7 its meaning.
 
 6. Load the UI with no credential: no gateway in front, no header, no prior
-   `podium login`, and no session cookie. Open `http://127.0.0.1:8153/ui/` in a
+   `podium login`, and no session cookie. Open `http://127.0.0.1:8153/app/` in a
    private browser window to see what a person sees, and issue the reads the
    scenario turns on directly, which is the machine-checkable path. On load the
    React bundle issues the posture read and the catalog reads it draws the page
@@ -4684,12 +4684,12 @@ and record the skip.
    establishes nothing: an artifact that is visible to everyone would produce the
    same reading afterwards.
 
-3. Open `http://127.0.0.1:8153/ui/` in a private browser window and click the
+3. Open `http://127.0.0.1:8153/app/` in a private browser window and click the
    sign-in control. Keycloak's login page appears; sign in as `admin` with the
    password `admin`.
 
    **Expect.** The browser leaves the registry for the authorization endpoint,
-   returns to `http://127.0.0.1:8153/ui/` after the login, and the account
+   returns to `http://127.0.0.1:8153/app/` after the login, and the account
    cluster stands where the sign-in control was: the top bar carries the
    caller's own subject instead of a Sign in button, and the sign-out control
    sits inside the menu that cluster opens. A browser that lands on an
@@ -4932,7 +4932,7 @@ profile S47 signed in from cannot hold a second session.
    name and the two are distinguished by comparison rather than by reading a
    username out of them.
 
-2. Open `http://127.0.0.1:8153/ui/` in the second browser profile, sign in as
+2. Open `http://127.0.0.1:8153/app/` in the second browser profile, sign in as
    `bob` with the password `bob`, and open the layer panel. Do not use a private
    window of the profile S47 signed in from: every window of a profile shares
    one cookie jar, so bob's callback would replace the admin session rather than
@@ -5138,7 +5138,7 @@ will not match.
    each hold a single child, so §4.5.5 folds the passthrough chain and the
    response names the deepest node of each chain rather than its head.
 
-2. Open `http://127.0.0.1:8462/ui/` and read the root page and the sidebar.
+2. Open `http://127.0.0.1:8462/app/` and read the root page and the sidebar.
 
    **Expect.** The heading reads `All domains` with `30 ARTIFACTS` and
    `3 DOMAINS` beside it. Three subdomain cards stand under `SUBDOMAINS`, named
@@ -5236,7 +5236,7 @@ reader.
    control for the same filter: without it, a filter that silently matched
    everything would produce the same reading as one that works.
 
-2. Open `http://127.0.0.1:8462/ui/`, press the search control in the top bar,
+2. Open `http://127.0.0.1:8462/app/`, press the search control in the top bar,
    and search for `deploy`.
 
    **Expect.** The page reports `Showing 2 of 2 matches` and lists both
@@ -5294,7 +5294,7 @@ observes a script that failed to run.
 
 **Steps.**
 
-1. Open `http://127.0.0.1:8462/ui/#/artifact/eng%2Fplatform%2Fdeploy-runbook`.
+1. Open `http://127.0.0.1:8462/app/#/artifact/eng%2Fplatform%2Fdeploy-runbook`.
 
    **Expect.** The heading reads `deploy-runbook` with its type and version
    beside it. The body renders as markdown: the table appears as a table with
@@ -5432,7 +5432,7 @@ ingested.
    `404` for it, because writing to a `local` layer's directory changes nothing
    in the registry until an ingest runs.
 
-3. Open `http://127.0.0.1:8462/ui/#/layers` and press `Reingest` on the `reg`
+3. Open `http://127.0.0.1:8462/app/#/layers` and press `Reingest` on the `reg`
    row.
 
    **Expect.** The row reports the request running, and a report opens when it
