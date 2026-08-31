@@ -151,7 +151,7 @@ sites and testing sections after sign-off.
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §13.10's authentication paragraph, bind-guard
+- [x] **S1 · spec** — SPEC-1. §13.10's authentication paragraph, bind-guard
       rationale, web-UI configuration keys, and the browser-flow configuration
       guard, per "The edit sites". The §13.10 authentication paragraph is one of
       the sites the credential-location rule under "The browser session" moves,
