@@ -3657,7 +3657,11 @@ label:has(> input:disabled) {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 40px 16px;
+  /* The scrim's vertical padding is the modal's height budget: whatever it
+     takes is height the dialog's body cannot use, and the register form is
+     the tallest dialog here. 24px keeps the dialog clear of the viewport
+     edges and gives its body back the rest. */
+  padding: 24px 16px;
   background: var(--scrim);
 }
 
@@ -3868,10 +3872,22 @@ label:has(> input:disabled) {
   font-size: 12.5px;
 }
 
-.visibility-pair {
+/* The four grants are one set, and the whole set belongs above the dialog's
+   fold: stacked in a single column the last two axes and the line stating what
+   the selection admits sat a few hundred pixels below it at the design's own
+   1440x900, with nothing above the fold saying the set continued (§13.10). Two
+   columns halve the set's height. An axis that has been turned on carries a
+   member field and spans both columns, so the tokens keep the dialog's full
+   width. */
+.visibility-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  align-items: start;
   gap: 8px;
+}
+
+.vis-card-wide {
+  grid-column: 1 / -1;
 }
 
 /* Two short fields that qualify the field above them share a row, so the

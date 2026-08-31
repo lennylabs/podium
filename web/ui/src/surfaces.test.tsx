@@ -9405,6 +9405,75 @@ describe("the layer write flows", () => {
     expect(window.getComputedStyle(localNote).fontSize).toBe("12.5px");
   });
 
+  // §13.10: the visibility set is what the reader reviews before registering,
+  // and the whole set belongs above the dialog's fold at the design's own
+  // 1440x900. Stacked one field to a row, the form ran a couple of hundred
+  // pixels past the scrolling body, which left the Groups axis, the Specific
+  // users axis, and the line stating what the selection admits below it with
+  // nothing above the fold saying the set continued. The fields that name the
+  // same thing pair off and the four axes are one two-column block, which is
+  // the height that buys.
+  it("fits the register form's visibility set inside the dialog", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    // The ID and the class share a row, and so do the source choice and the
+    // location the chosen source reads from.
+    const identity = screen.getByTestId("register-identity-pair");
+    expect(identity.className).toContain("field-pair");
+    expect(identity.contains(screen.getByLabelText("Layer ID"))).toBe(true);
+    expect(identity.contains(screen.getByLabelText("Layer class"))).toBe(true);
+    const source = screen.getByTestId("register-source-pair");
+    expect(source.className).toContain("field-pair");
+    expect(
+      source.contains(screen.getByRole("radio", { name: "Git repository" })),
+    ).toBe(true);
+    expect(source.contains(screen.getByLabelText("Repository"))).toBe(true);
+    // The local arm pairs its own location field into the same row.
+    fireEvent.click(screen.getByRole("radio", { name: "Local folder" }));
+    expect(
+      screen
+        .getByTestId("register-source-pair")
+        .contains(screen.getByLabelText("Local path")),
+    ).toBe(true);
+    fireEvent.click(screen.getByRole("radio", { name: "Git repository" }));
+    // The four axes are one block rather than a pair followed by two rows of
+    // their own.
+    fireEvent.change(screen.getByLabelText("Layer class"), {
+      target: { value: "admin" },
+    });
+    const axes = screen.getByTestId("visibility-axes");
+    expect(axes.className).toContain("visibility-grid");
+    expect(axes.querySelectorAll(".vis-card").length).toBe(4);
+    for (const name of ["Public", "Organization", "Groups", "Specific users"]) {
+      expect(axes.contains(screen.getByLabelText(name))).toBe(true);
+    }
+    // The block is two columns wide, and the consequence line stands under it
+    // inside the same fieldset.
+    expect(window.getComputedStyle(axes).gridTemplateColumns).toBe("1fr 1fr");
+    expect(
+      axes.parentElement?.contains(screen.getByTestId("visibility-consequence")),
+    ).toBe(true);
+    // An axis the reader turns on carries a member field, which takes the row
+    // to itself.
+    expect(document.querySelectorAll(".vis-card-wide").length).toBe(0);
+    fireEvent.click(screen.getByLabelText("Groups"));
+    const groups = screen.getByLabelText("Groups").closest(".vis-card");
+    expect(groups?.className).toContain("vis-card-wide");
+    // An axis with no member field of its own never spans, selected or not.
+    fireEvent.click(screen.getByLabelText("Public"));
+    expect(
+      screen.getByLabelText("Public").closest(".vis-card")?.className,
+    ).not.toContain("vis-card-wide");
+  });
+
   // The sentence stating the hold sits in the footer, and a reader who tabs
   // into the field it names never reaches it. The field the hold stands on
   // therefore reports itself invalid and points at that same sentence, so the

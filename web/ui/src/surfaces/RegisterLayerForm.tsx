@@ -258,35 +258,45 @@ export function RegisterLayerForm({
               <RegistrationRefusal refusal={refusal} />
             </div>
           )}
-          <RequiredField
-            label="Layer ID"
-            value={id}
-            testID="register-id"
-            held={heldOn('id')}
-            onChange={(next) => {
-              setID(next);
-            }}
-          />
-          <label className="field">
-            <span className="label">Layer class</span>
-            <select
-              value={userDefined ? 'user' : 'admin'}
-              onChange={(event) => {
-                setUserDefined(event.target.value === 'user');
+          {/* The ID and the class both name what is being registered rather
+              than where it reads from, and each holds a short value, so they
+              share one row. Stacked they cost the body a whole field row, and
+              the body is the height the visibility set has to fit in. */}
+          <div className="field-pair" data-testid="register-identity-pair">
+            <RequiredField
+              label="Layer ID"
+              value={id}
+              testID="register-id"
+              held={heldOn('id')}
+              onChange={(next) => {
+                setID(next);
               }}
-            >
-              <option value="user">Your own layer</option>
-              <option value="admin">A layer for the whole tenant</option>
-            </select>
-          </label>
+            />
+            <label className="field">
+              <span className="label">Layer class</span>
+              <select
+                value={userDefined ? 'user' : 'admin'}
+                onChange={(event) => {
+                  setUserDefined(event.target.value === 'user');
+                }}
+              >
+                <option value="user">Your own layer</option>
+                <option value="admin">A layer for the whole tenant</option>
+              </select>
+            </label>
+          </div>
           {userDefined && (
             <p className="quiet field-note">
               A layer of your own is visible to you alone, and it counts against the layer limit an administrator sets.
             </p>
           )}
-          <SourceChoice value={sourceType} onChange={edited(setSourceType)} />
-          {sourceType === 'git' ? (
-            <>
+          {/* The source choice and the place it reads from are one setting,
+              so the segments and the arm's own location field share a row.
+              Each on its own row costs the body a field row that the
+              visibility set below needs to stay above the fold. */}
+          <div className="field-pair" data-testid="register-source-pair">
+            <SourceChoice value={sourceType} onChange={edited(setSourceType)} />
+            {sourceType === 'git' ? (
               <RequiredField
                 label="Repository"
                 value={repo}
@@ -296,6 +306,20 @@ export function RegisterLayerForm({
                   setRepo(next);
                 }}
               />
+            ) : (
+              <RequiredField
+                label="Local path"
+                value={localPath}
+                testID="register-local-path"
+                held={heldOn('local-path')}
+                onChange={(next) => {
+                  setLocalPath(next);
+                }}
+              />
+            )}
+          </div>
+          {sourceType === 'git' ? (
+            <>
               {/* The ref and the root both qualify the repository above them
                   and each holds a short value, so they share one row. */}
               <div className="field-pair">
@@ -320,33 +344,27 @@ export function RegisterLayerForm({
                 </label>
               </div>
               <p className="quiet field-note" data-testid="register-git-note">
-                Name the branch, tag, or commit to ingest as the ref; a git layer has no default and cannot ingest
-                without one. Leave the root empty to ingest the whole repository, or name the subdirectory the
-                artifacts live under.
+                The ref is a branch, tag, or commit. Leave the root empty for the whole repository.
               </p>
             </>
           ) : (
-            <>
-              <RequiredField
-                label="Local path"
-                value={localPath}
-                testID="register-local-path"
-                held={heldOn('local-path')}
-                onChange={(next) => {
-                  setLocalPath(next);
-                }}
-              />
-              <p className="quiet field-note" data-testid="register-local-note">
-                Name the directory the registry reads the artifacts from; a local layer has no default and cannot
-                ingest without one.
-              </p>
-            </>
+            <p className="quiet field-note" data-testid="register-local-note">
+              Name the directory the registry reads the artifacts from; a local layer has no default and cannot ingest
+              without one.
+            </p>
           )}
           {!userDefined && (
             <fieldset className="field visibility">
               <legend className="label">Visibility</legend>
               <p className="quiet visibility-lead">Grants combine, and anyone matching any of them sees the layer.</p>
-              <div className="visibility-pair">
+              {/* The axes are a set the reader chooses from, so all four are
+                  drawn as one two-column block: stacked, the last two and the
+                  consequence line stood below the dialog's fold at the
+                  design's own 1440x900, where the whole set is meant to be
+                  legible without scrolling (§13.10). An axis that has been
+                  turned on carries a member field, which needs the row to
+                  itself. */}
+              <div className="visibility-grid" data-testid="visibility-axes">
                 <VisibilityAxis
                   name="Public"
                   description="Anyone, signed in or not."
@@ -359,36 +377,36 @@ export function RegisterLayerForm({
                   checked={organization}
                   onChange={setOrganization}
                 />
+                <VisibilityAxis
+                  name="Groups"
+                  description="Members of the OIDC groups you name."
+                  checked={groupScoped}
+                  onChange={setGroupScoped}
+                >
+                  <TokenInput
+                    label="Group names, separated by commas"
+                    value={groups}
+                    onChange={edited(setGroups)}
+                    held={heldOn('groups')}
+                    tokens={groupMembers}
+                    known={knownGroups}
+                  />
+                </VisibilityAxis>
+                <VisibilityAxis
+                  name="Specific users"
+                  description="Named individuals, by email."
+                  checked={userScoped}
+                  onChange={setUserScoped}
+                >
+                  <TokenInput
+                    label="User identifiers, separated by commas"
+                    value={users}
+                    onChange={edited(setUsers)}
+                    held={heldOn('users')}
+                    tokens={userMembers}
+                  />
+                </VisibilityAxis>
               </div>
-              <VisibilityAxis
-                name="Groups"
-                description="Members of the OIDC groups you name."
-                checked={groupScoped}
-                onChange={setGroupScoped}
-              >
-                <TokenInput
-                  label="Group names, separated by commas"
-                  value={groups}
-                  onChange={edited(setGroups)}
-                  held={heldOn('groups')}
-                  tokens={groupMembers}
-                  known={knownGroups}
-                />
-              </VisibilityAxis>
-              <VisibilityAxis
-                name="Specific users"
-                description="Named individuals, by email."
-                checked={userScoped}
-                onChange={setUserScoped}
-              >
-                <TokenInput
-                  label="User identifiers, separated by commas"
-                  value={users}
-                  onChange={edited(setUsers)}
-                  held={heldOn('users')}
-                  tokens={userMembers}
-                />
-              </VisibilityAxis>
               {/* §4.6 combines the axes as a union, so the consequence is
                   stated once over the whole selection rather than per axis. */}
               <p className="consequence" data-testid="visibility-consequence">
@@ -678,8 +696,12 @@ function VisibilityAxis({
 }) {
   const boxID = useId();
   const descID = useId();
+  // A member field is a labelled input over a row of tokens, which is too
+  // wide for half the dialog, so an axis carrying one takes the whole row of
+  // the two-column set.
+  const wide = checked && children !== undefined;
   return (
-    <div className={checked ? 'vis-card vis-card-on' : 'vis-card'}>
+    <div className={['vis-card', checked ? 'vis-card-on' : '', wide ? 'vis-card-wide' : ''].filter(Boolean).join(' ')}>
       <input
         type="checkbox"
         id={boxID}
