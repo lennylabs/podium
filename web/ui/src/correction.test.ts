@@ -30,6 +30,19 @@ describe('correctQueryLine', () => {
     expect(correctQueryLine('span coverage', ids)).toBeNull();
   });
 
+  // A correction has to leave something of what the reader typed behind. A
+  // one-character word is within one edit of any single character the catalog
+  // spells, so correcting it offers a token that shares nothing with the
+  // query.
+  it('offers nothing for a word an edit would rewrite entirely', () => {
+    const long = ['deep/level4/an-extremely-long-identifier-that-keeps-going-past-6'];
+    expect(correctQueryLine('a', long)).toBeNull();
+    expect(correctQueryLine('a', ids)).toBeNull();
+    // Two characters still leave one standing, so the correction holds there.
+    expect(correctQueryLine('ap', ['finance/ap/pay-invoice'])).toBeNull();
+    expect(correctQueryLine('aq', ['finance/ap/pay-invoice'])).toBe('ap');
+  });
+
   // The inline filters are what the reader asked for rather than how they
   // spelled it, so the correction carries them through and rewrites the free
   // text alone.

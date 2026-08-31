@@ -11,9 +11,14 @@ import { useAsync } from '../useAsync';
 /** editCap is the largest edit distance a correction may cross, measured
  * against the length of the word the reader typed. A fixed cap of two rewrites
  * a four-letter word into an unrelated one, so a short word gets one edit and
- * a longer word gets two. */
+ * a longer word gets two. The cap is then held below the word's own length, so
+ * at least one character of what the reader typed survives the correction: at
+ * a cap equal to the length, a one-letter query is answered by whatever single
+ * character the catalog happens to spell, which shares nothing with the query.
+ * A word too short for any edit to leave something behind gets a cap of zero
+ * and is left alone. */
 function editCap(word: string): number {
-  return word.length <= 4 ? 1 : 2;
+  return Math.min(word.length <= 4 ? 1 : 2, word.length - 1);
 }
 
 /** vocabularyOf collects the words a set of artifact IDs spells. A path
@@ -63,6 +68,9 @@ function nearestTerm(word: string, vocabulary: string[]): string | null {
     return null;
   }
   const cap = editCap(word);
+  if (cap < 1) {
+    return null;
+  }
   let best: string | null = null;
   let bestAt = cap + 1;
   for (const term of vocabulary) {
