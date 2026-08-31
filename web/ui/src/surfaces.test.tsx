@@ -13366,7 +13366,7 @@ describe("the layer write flows", () => {
     // The source is on the same record, so the row names where the layer
     // came from rather than its identifier alone.
     expect(surface.textContent).toContain("/Users/alice/registry");
-    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore alice-personal" }));
     await waitFor(() => {
       expect(
         requests.some(
@@ -13374,6 +13374,35 @@ describe("the layer write flows", () => {
         ),
       ).toBe(true);
     });
+  });
+
+  // Every row carries the same visible word, so a reader who hears the
+  // buttons out of their rows gets a run of identical names. Each one is
+  // named after its layer the way the layer panel's per-row controls are.
+  it("names each restore button after the layer it recovers", async () => {
+    const deletedAt = new Date().toISOString();
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/layers?deleted=true": {
+        body: {
+          layers: [
+            { ...userLayer(), DeletedAt: deletedAt },
+            { ...adminLayer(), DeletedAt: deletedAt },
+          ],
+        },
+      },
+    });
+    goTo("#/layers/deleted");
+    render(<App />);
+    const surface = await screen.findByLabelText("Recently unregistered");
+    const names = [...surface.querySelectorAll("tbody button")].map((button) =>
+      button.getAttribute("aria-label"),
+    );
+    expect(names).toEqual(["Restore alice-personal", "Restore company"]);
+    // The visible word stays the column's, because the name is what a reader
+    // hears rather than what the cell draws.
+    expect(screen.getByRole("button", { name: "Restore company" }).textContent).toBe("Restore");
   });
 
   // The restore table's columns are fixed proportions floored at the width
@@ -13446,7 +13475,7 @@ describe("the layer write flows", () => {
     expect(region.getAttribute("role")).toBe("status");
     expect(region.textContent).toBe("");
 
-    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore alice-personal" }));
     await waitFor(() => {
       expect(screen.getByTestId("restore-announcement").textContent).toBe(
         "alice-personal is restored at order 1 of 2.",
@@ -13476,7 +13505,7 @@ describe("the layer write flows", () => {
     goTo("#/layers/deleted");
     render(<App />);
     await screen.findByLabelText("Recently unregistered");
-    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore alice-personal" }));
     // Focus is asserted once both reads the restore issues have answered,
     // because a surface that swaps itself out for its own loading state
     // takes the heading with it and drops focus again on the way through.
@@ -13534,7 +13563,7 @@ describe("the layer write flows", () => {
     goTo("#/layers/deleted");
     render(<App />);
     await screen.findByLabelText("Recently unregistered");
-    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore alice-personal" }));
     const refusal = await screen.findByRole("alert");
     expect(refusal.textContent).toContain("registry.conflict");
     expect(refusal.textContent).toContain(
@@ -13568,7 +13597,7 @@ describe("the layer write flows", () => {
     goTo("#/layers/deleted");
     render(<App />);
     await screen.findByLabelText("Recently unregistered");
-    fireEvent.click(await screen.findByRole("button", { name: "Restore" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Restore alice-personal" }));
     const refusal = await screen.findByRole("alert");
     expect(refusal.textContent).toContain("registry.conflict");
     expect(screen.getByTestId("restore-announcement").textContent).toBe("");

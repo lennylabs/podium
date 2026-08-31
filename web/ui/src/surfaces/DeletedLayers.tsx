@@ -308,8 +308,13 @@ function DeletedRow({
         )}
       </td>
       <td>
+        {/* The table repeats one control down its rows, so the visible word
+            is read out of its row by a screen reader and every button sounds
+            alike. The accessible name carries the layer the way the layer
+            panel's per-row controls do. */}
         <button
           type="button"
+          aria-label={`Restore ${layer.ID}`}
           disabled={readOnly}
           onClick={() => {
             onRestore(layer.ID);
