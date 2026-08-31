@@ -33,7 +33,7 @@ import {
 } from '../components/primitives';
 import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
-import { abbreviateHash } from '../hash';
+import { splitHash } from '../hash';
 import type { DependencyEdge, LargeResourceLink, LayerRecord, LoadArtifactResponse } from '../api';
 import { catalogArtifactIDs, dependentsOf, listLayers, loadArtifact } from '../api';
 import { artifactHref } from '../route';
@@ -653,9 +653,12 @@ function ArtifactRail({
             containers below it carry the sections the reader opens and
             closes. Drawing it as a table like the frontmatter beneath makes
             the two sections read as the same kind of object and flattens the
-            rail. The hash is abbreviated because it is 71 characters against
-            a rail that is far narrower, and the full value stays on the
-            row's title so it is still recoverable. */}
+            rail. The hash is 71 characters against a rail that is far
+            narrower, so the row clips it the way the layer table's source
+            column clips a path: the whole digest stays in the document and
+            the elision is the container's, so selecting the row, copying it,
+            or hearing it read out yields the digest a reader checks against
+            a build rather than the ends of it (§13.10). */}
         <dl className="rail-facts" data-testid="rail-provenance">
           <div className="rail-fact">
             <dt className="mono">layer</dt>
@@ -671,8 +674,14 @@ function ArtifactRail({
           </div>
           <div className="rail-fact">
             <dt className="mono">hash</dt>
-            <dd className="mono" title={artifact.content_hash}>
-              {abbreviateHash(artifact.content_hash)}
+            <dd className="mono rail-hash" title={artifact.content_hash}>
+              <ContentHash hash={artifact.content_hash} />
+              {/* The runs are laid out as separate boxes, so a selection
+                  across them carries a line break between each pair and a
+                  digest pasted into a comparison does not match. The control
+                  takes the value itself, on the terms every other value a
+                  reader has to take away with them is copied on. */}
+              <CopyButton value={artifact.content_hash} subject="Content hash" />
             </dd>
           </div>
         </dl>
@@ -722,6 +731,31 @@ function ArtifactRail({
         )}
       </section>
     </aside>
+  );
+}
+
+/** ContentHash draws a §6.4 content hash as the three runs the rail elides it
+ * through: the lead, which names the algorithm and opens the digest, the
+ * middle, which the rail clips, and the last digest characters, which stay
+ * drawn because they are the other end a reader compares against another copy.
+ * The runs together are the whole hash, so a reader who has to check the
+ * digest gets it out of the page by selecting or copying the row. The clipped
+ * run isolates its own text, so the right-to-left direction that moves its
+ * ellipsis against the lead does not reorder the characters within it. */
+function ContentHash({ hash }: { hash: string }) {
+  const runs = splitHash(hash);
+  return (
+    <>
+      <span className="rail-hash-lead">
+        <bdi>{runs.lead}</bdi>
+      </span>
+      <span className="rail-hash-middle">
+        <bdi>{runs.middle}</bdi>
+      </span>
+      <span className="rail-hash-tail">
+        <bdi>{runs.tail}</bdi>
+      </span>
+    </>
   );
 }
 

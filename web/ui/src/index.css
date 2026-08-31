@@ -3041,6 +3041,67 @@ label:has(> input:disabled) {
   word-break: break-word;
 }
 
+/* The content-hash row. A 71-character digest is several times the width of
+   the rail, so the row carries the whole value and clips it, the way the
+   layer table's source column carries a whole path. Elided into the text
+   itself, the digest was readable only by hovering the row, and a reader
+   checking it against a build or a signature could neither select it nor have
+   it read out. The row is three runs: the lead, which names the algorithm and
+   opens the digest, the middle, which takes the clip, and the last digest
+   characters, which stay drawn as the other end the reader compares. */
+.rail-hash {
+  display: flex;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.rail-hash-lead {
+  flex: none;
+}
+
+/* The clip falls at the middle run's start, so the ellipsis stands against
+   the lead and the row reads as one elided digest rather than as a value with
+   a gap in it. The run reverses direction to move the ellipsis there, and the
+   element inside restores left-to-right ordering so its characters keep their
+   own order. The middle gives up every pixel of the shrink before the trailing
+   characters give up one: the flex algorithm distributes the negative free
+   space in proportion to the scaled shrink factors, so a factor this much
+   larger drives the middle to zero and freezes it there. */
+.rail-hash-middle {
+  min-width: 0;
+  flex-shrink: 9999;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+}
+
+/* The trailing characters elide at their own start once the middle has
+   collapsed, so a rail narrower than the lead and the tail together still
+   states that the value is truncated instead of slicing it with no marker. */
+.rail-hash-tail {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+}
+
+.rail-hash-middle > bdi,
+.rail-hash-tail > bdi {
+  direction: ltr;
+}
+
+/* The row's copy control. A selection across the three runs carries a line
+   break between each pair, so the control is how the digest leaves the page
+   whole. It sits at the row's end and gives up none of its own width, so the
+   clip stays on the digest beside it. */
+.rail-hash button {
+  flex: none;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 10.5px;
+}
+
 .rail-list {
   list-style: none;
   padding: 0;

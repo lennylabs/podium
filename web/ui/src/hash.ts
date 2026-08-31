@@ -19,3 +19,24 @@ export function abbreviateHash(hash: string, lead = 4): string {
   }
   return `${algorithm}${digest.slice(0, lead)}…${digest.slice(-4)}`;
 }
+
+/** splitHash divides a content hash into the three runs the rail draws it as:
+ * the lead, which identifies the algorithm and opens the digest and is always
+ * drawn; the middle, which a container narrower than the digest clips; and the
+ * trailing digest characters, which stay out of the clip because they are the
+ * other end a reader compares against another copy. The runs together are the
+ * whole hash, so the container elides it visually while the document still
+ * carries the digest a reader selects, copies, or hears read out. `lead` is
+ * how many digest characters open the value and `tail` how many close it. */
+export function splitHash(hash: string, lead = 4, tail = 4): { lead: string; middle: string; tail: string } {
+  const separator = hash.indexOf(':');
+  const opening = (separator === -1 ? 0 : separator + 1) + lead;
+  if (hash.length <= opening + tail) {
+    return { lead: hash, middle: '', tail: '' };
+  }
+  return {
+    lead: hash.slice(0, opening),
+    middle: hash.slice(opening, hash.length - tail),
+    tail: hash.slice(-tail),
+  };
+}

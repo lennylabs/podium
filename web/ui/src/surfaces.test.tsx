@@ -182,11 +182,28 @@ function payInvoice(): Record<string, unknown> {
 
 /** railFacts reads the rail's provenance block as label and value pairs. */
 function railFacts(provenance: HTMLElement): (string | null | undefined)[][] {
-  const facts = within(provenance).getByTestId("rail-provenance");
+  return factRows(within(provenance).getByTestId("rail-provenance"));
+}
+
+/** factRows is the label and the value of every row in a rail fact list. The
+ * value is read without the row's own controls, so the copy control the
+ * content-hash row carries is not read as part of the digest beside it. */
+function factRows(facts: HTMLElement): (string | null | undefined)[][] {
   return [...facts.querySelectorAll(".rail-fact")].map((row) => [
     row.querySelector("dt")?.textContent,
-    row.querySelector("dd")?.textContent,
+    factValue(row),
   ]);
+}
+
+function factValue(row: Element): string {
+  const value = row.querySelector("dd")?.cloneNode(true) as HTMLElement | undefined;
+  if (value === undefined) {
+    return "";
+  }
+  for (const control of value.querySelectorAll('button, [role="status"]')) {
+    control.remove();
+  }
+  return value.textContent ?? "";
 }
 
 const emptyDomain = {
@@ -4463,10 +4480,11 @@ describe("the artifact viewer", () => {
   // values rather than prose: each one stands in a borderless list under its
   // own section label, so the bordered frontmatter and relations sections
   // beneath it stay the objects the rail is built around. The content hash is
-  // 71 characters against a rail far narrower than that, so the row
-  // abbreviates it and keeps the whole value on the row's title, where the
-  // reader can still recover it.
-  it("renders provenance as a borderless labelled list with the content hash abbreviated", async () => {
+  // 71 characters against a rail far narrower than that, so the row carries
+  // the whole digest and clips it, the way the layer table's source column
+  // carries a whole path: a reader checking the digest against a build
+  // selects or copies the row rather than hovering it. Spec: §13.10.
+  it("renders provenance as a borderless labelled list carrying the whole content hash", async () => {
     const contentHash =
       "sha256:ab7469fdce70f0beb8c3b4e696da5e0080f95f75a9d8b3c2e1f0a94d6c7b8e5f";
     stubRegistry({
@@ -4488,27 +4506,83 @@ describe("the artifact viewer", () => {
     render(<App />);
     const provenance = await screen.findByLabelText("Provenance");
     const facts = within(provenance).getByTestId("rail-provenance");
-    const rows = [...facts.querySelectorAll(".rail-fact")].map((row) => [
-      row.querySelector("dt")?.textContent,
-      row.querySelector("dd")?.textContent,
-    ]);
+    const rows = factRows(facts);
     // The layer list answered nothing here, so the two rows it feeds state
     // that rather than disappearing out of the block.
     expect(rows).toEqual([
       ["layer", "acme-platform"],
       ["visibility", "unreported"],
       ["ingested", "unreported"],
-      ["hash", "sha256:ab74…8e5f"],
+      ["hash", contentHash],
     ]);
     // The section carries no table and no bordered container of its own, so
     // it does not read as a second copy of the frontmatter table below it.
     expect(provenance.querySelector("table")).toBeNull();
     expect(provenance.querySelector(".data-table")).toBeNull();
-    // The abbreviation is a display, so the whole value is still on the row.
-    expect(within(provenance).queryByText(contentHash)).toBeNull();
-    expect(facts.querySelectorAll("dd")[3].getAttribute("title")).toBe(
-      contentHash,
+    // The elision is the container's, so the digest a reader selects, copies,
+    // or hears read out is the whole one. The row splits it into the run the
+    // rail clips and the last characters it holds out of the clip, and the
+    // two together are the value.
+    const hash = facts.querySelectorAll("dd")[3];
+    expect(hash.className).toContain("rail-hash");
+    expect(hash.querySelector(".rail-hash-lead")?.textContent).toBe(
+      "sha256:ab74",
     );
+    expect(hash.querySelector(".rail-hash-middle")?.textContent).toBe(
+      contentHash.slice("sha256:ab74".length, -4),
+    );
+    expect(hash.querySelector(".rail-hash-tail")?.textContent).toBe("8e5f");
+    expect(hash.getAttribute("title")).toBe(contentHash);
+  });
+
+  // The three runs the row draws the digest as are separate boxes, so a
+  // selection across them carries a line break between each pair and the
+  // pasted value does not match the digest it was compared against. The row
+  // therefore carries the same explicit copy control every other value a
+  // reader takes away with them carries, which is reachable from the keyboard
+  // and names what it took. Spec: §13.10.
+  it("copies the whole content hash from the provenance row", async () => {
+    const contentHash =
+      "sha256:ab7469fdce70f0beb8c3b4e696da5e0080f95f75a9d8b3c2e1f0a94d6c7b8e5f";
+    const written: string[] = [];
+    const original = Object.getOwnPropertyDescriptor(navigator, "clipboard");
+    Object.defineProperty(navigator, "clipboard", {
+      value: {
+        writeText: (text: string) => {
+          written.push(text);
+          return Promise.resolve();
+        },
+      },
+      configurable: true,
+    });
+    try {
+      stubRegistry({
+        "/v1/ui/session": { body: posture({ public_mode: true }) },
+        "/v1/load_artifact": {
+          body: { ...payInvoice(), content_hash: contentHash },
+        },
+        "/v1/dependents": { body: { edges: [] } },
+      });
+      goTo("#/artifact/finance%2Fap%2Fpay-invoice");
+      render(<App />);
+      const provenance = await screen.findByLabelText("Provenance");
+      const copy = within(provenance).getByRole("button", {
+        name: "Copy Content hash",
+      });
+      fireEvent.click(copy);
+      await waitFor(() => {
+        expect(written).toEqual([contentHash]);
+      });
+      expect(
+        within(provenance).getByTestId("copy-announcement").textContent,
+      ).toBe("Content hash copied to clipboard.");
+    } finally {
+      if (original !== undefined) {
+        Object.defineProperty(navigator, "clipboard", original);
+      } else {
+        delete (navigator as unknown as { clipboard?: unknown }).clipboard;
+      }
+    }
   });
 
   // The rail is where a reader learns who else can see the artifact and which
@@ -4554,10 +4628,7 @@ describe("the artifact viewer", () => {
     const provenance = await screen.findByLabelText("Provenance");
     await waitFor(() => {
       const facts = within(provenance).getByTestId("rail-provenance");
-      const rows = [...facts.querySelectorAll(".rail-fact")].map((row) => [
-        row.querySelector("dt")?.textContent,
-        row.querySelector("dd")?.textContent,
-      ]);
+      const rows = factRows(facts);
       expect(rows).toEqual([
         ["layer", "acme-platform"],
         // Every granted axis, in the union order §4.6 defines.

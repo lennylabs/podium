@@ -989,6 +989,41 @@ describe("layer name", () => {
   });
 });
 
+// The provenance rail's content-hash row holds a 71-character digest against
+// a rail several times narrower. The row carries the whole value, so a reader
+// checking it against a build or a signature can select it, copy it, or have
+// it read out, and the rail clips it visually on the same terms as the layer
+// table's source detail line.
+describe("provenance content hash", () => {
+  it("clips the digest in the container rather than in its text", () => {
+    const row = styled("rail-hash");
+    expect(row.display).toBe("flex");
+    expect(row.whiteSpace).toBe("nowrap");
+    expect(row.overflow).toBe("hidden");
+    // The algorithm prefix and the digest's opening characters are held out
+    // of the clip, so the row still names what was hashed.
+    expect(styled("rail-hash-lead").getPropertyValue("flex")).toBe("0 0 auto");
+    const middle = styled("rail-hash-middle");
+    expect(middle.overflow).toBe("hidden");
+    expect(middle.textOverflow).toBe("ellipsis");
+    expect(middle.minWidth).toBe("0");
+    // The middle absorbs the whole clip before the trailing digest characters
+    // give up a pixel, so the end the reader compares stays drawn.
+    expect(Number(middle.flexShrink)).toBeGreaterThan(1000);
+    const tail = styled("rail-hash-tail");
+    expect(tail.getPropertyValue("flex")).toBe("0 1 auto");
+    expect(tail.textOverflow).toBe("ellipsis");
+  });
+
+  // The clip falls at the middle run's start, so the ellipsis stands against
+  // the lead and the row reads as one elided digest. The element inside
+  // restores the reading order, so the run's characters keep their own.
+  it("elides the clipped run at its start", () => {
+    expect(styled("rail-hash-middle").direction).toBe("rtl");
+    expect(descendantStyle("rail-hash-middle", "bdi").direction).toBe("ltr");
+  });
+});
+
 // The layer table's source cell holds an absolute path or a repository URL,
 // either of which can be several times the column's width. Wrapping one broke
 // it between characters over three or four lines and left the rows of one
