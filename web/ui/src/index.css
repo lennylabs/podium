@@ -62,6 +62,12 @@
   --chip: #eae7d9;
   --acc: #ffa424;
   --acc-deep: #f2861a;
+  /* The pointer states of the two filled controls. They are tokens rather
+     than a filter on the fill, because a filled control has to darken by the
+     same step in both themes, and the dark theme's accent is the plain `acc`
+     value where `acc-deep` is not. */
+  --acc-hover: #f2861a;
+  --danger-hover: #8f2915;
   --on-acc: #14130f;
   --link: #a8480a;
   --wash: #fff3e2;
@@ -94,6 +100,8 @@
     --chip: #212739;
     --acc: #ffa424;
     --acc-deep: #ffa424;
+    --acc-hover: #f2861a;
+    --danger-hover: #e2543a;
     --link: #ffa424;
     --wash: rgba(255, 164, 36, 0.1);
     --cbd: #4a3a22;
@@ -120,6 +128,8 @@
   --b2: #232838;
   --chip: #212739;
   --acc-deep: #ffa424;
+  --acc-hover: #f2861a;
+  --danger-hover: #e2543a;
   --link: #ffa424;
   --wash: rgba(255, 164, 36, 0.1);
   --cbd: #4a3a22;
@@ -2414,6 +2424,47 @@ button.action-refused {
   border-color: var(--danger-bd);
   background: var(--danger-bg);
   color: var(--danger);
+}
+
+/* Pointer feedback. The design pass fixes one step of darkening under the
+   pointer and a 1px drop on press, and without either a control answers a
+   hover and a press with nothing at all.
+
+   The base rule is written so that its specificity matches the `.button` half
+   of the rule that paints the control, and `:where()` keeps the pseudo-classes
+   from raising it further. A variant that paints its own ground later in this
+   file (a tab, a segment, a row-menu item) therefore keeps its fill and states
+   its own hover, and only a control wearing the shared chrome takes the shared
+   step. The two filled variants darken their own fill, and the refused control
+   darkens its outline so the press that re-issues the write keeps the tone
+   that says it was refused. */
+:where(button, .button):hover:where(:not(:disabled)) {
+  background: var(--chip);
+}
+
+.button.primary:hover:where(:not(:disabled)) {
+  background: var(--acc-hover);
+  border-color: var(--acc-hover);
+}
+
+.button.danger:hover:where(:not(:disabled)) {
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
+}
+
+/* The quiet accent control carries no chrome to darken, so it answers the
+   pointer with the accent wash the accent surfaces elsewhere use. */
+.button.link-action:hover:where(:not(:disabled)) {
+  background: var(--wash);
+}
+
+button.action-refused:hover:where(:not(:disabled)) {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+}
+
+:where(button, .button):active:where(:not(:disabled)) {
+  transform: translateY(1px);
 }
 
 /* A checkbox carries its meaning in the text beside it, so the label mutes
