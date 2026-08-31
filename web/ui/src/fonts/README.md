@@ -5,7 +5,7 @@ identifiers, and Anton for the wordmark, and it records self-hosting as the
 remedy for a registry that reaches no font host. Each file here is the latin
 subset of the upstream release, in WOFF2, referenced by `../index.css` and
 emitted into the committed bundle, so the served UI resolves every family from
-the `/ui/` mount and loads nothing from another origin.
+the `/app/` mount and loads nothing from another origin.
 
 | File | Family | Upstream | Licence |
 |:--|:--|:--|:--|

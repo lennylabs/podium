@@ -1,5 +1,5 @@
 // Package web exposes the built §13.10 web-UI bundle to callers that
-// mount it at /ui/. The React source lives in web/ui and its build
+// mount it at /app/. The React source lives in web/ui and its build
 // output is committed under web/bundle, because go:embed resolves at
 // compile time and a clean clone must build with only a Go toolchain.
 // The embed directive names the bundle directory alone, so neither the
@@ -27,7 +27,7 @@ var bundle = mustSub(assets, "bundle")
 // Assets returns the built UI file system, rooted at the served bundle:
 // index.html is at its root and every asset the index references
 // resolves under it. Callers wrap this with http.FileServer to serve the
-// UI at /ui/.
+// UI at /app/.
 func Assets() fs.FS { return bundle }
 
 // mustSub roots the embedded file system at dir. The directory is

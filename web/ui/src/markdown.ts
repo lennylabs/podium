@@ -285,7 +285,7 @@ function replaceStrippedGraphics(root: DocumentFragment): void {
 // A §4.4 prose reference is written as an ordinary relative markdown link,
 // and `lint.prose_reference` admits one only when it resolves to a file the
 // artifact bundles or to another artifact's canonical ID. Left as authored,
-// the browser resolves either form against the `/ui/` mount, where the
+// the browser resolves either form against the `/app/` mount, where the
 // registry serves no such path: following it leaves the SPA for a plain-text
 // 404 and the shell disappears. So both forms are resolved here to something
 // the viewer answers itself. A reference that names another artifact is

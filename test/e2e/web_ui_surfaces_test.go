@@ -32,9 +32,9 @@ func TestWebUI_ServedBundleCallsResolve(t *testing.T) {
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_WEB_UI=true"},
 		"serve", "--standalone", "--web-ui", "--layer-path", reg)
 
-	st, index := getRaw(t, srv.BaseURL+"/ui/")
+	st, index := getRaw(t, srv.BaseURL+"/app/")
 	if st != 200 {
-		t.Fatalf("GET /ui/ status = %d, want 200\nlog:\n%s", st, srv.log())
+		t.Fatalf("GET /app/ status = %d, want 200\nlog:\n%s", st, srv.log())
 	}
 	called := bundleAPIPaths(t, srv, string(index))
 	if len(called) == 0 {
@@ -70,9 +70,9 @@ func TestWebUI_ServedBundleReadsTheReadOnlyMarker(t *testing.T) {
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_WEB_UI=true"},
 		"serve", "--standalone", "--web-ui", "--layer-path", reg)
 
-	st, index := getRaw(t, srv.BaseURL+"/ui/")
+	st, index := getRaw(t, srv.BaseURL+"/app/")
 	if st != 200 {
-		t.Fatalf("GET /ui/ status = %d, want 200\nlog:\n%s", st, srv.log())
+		t.Fatalf("GET /app/ status = %d, want 200\nlog:\n%s", st, srv.log())
 	}
 	found := false
 	for _, script := range bundleScripts(t, srv, string(index)) {
@@ -142,9 +142,9 @@ func TestWebUI_ServedBundleReadsTheLayerRecordFields(t *testing.T) {
 		}
 	}
 
-	st, index := getRaw(t, srv.BaseURL+"/ui/")
+	st, index := getRaw(t, srv.BaseURL+"/app/")
 	if st != 200 {
-		t.Fatalf("GET /ui/ status = %d, want 200\nlog:\n%s", st, srv.log())
+		t.Fatalf("GET /app/ status = %d, want 200\nlog:\n%s", st, srv.log())
 	}
 	scripts := strings.Join(bundleScripts(t, srv, string(index)), "\n")
 	for _, field := range panelLayerFields {
@@ -179,9 +179,9 @@ func TestWebUI_ServedBundleKeysOnTheIdentityRefusalCodes(t *testing.T) {
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_WEB_UI=true"},
 		"serve", "--standalone", "--web-ui", "--layer-path", reg)
 
-	st, index := getRaw(t, srv.BaseURL+"/ui/")
+	st, index := getRaw(t, srv.BaseURL+"/app/")
 	if st != 200 {
-		t.Fatalf("GET /ui/ status = %d, want 200\nlog:\n%s", st, srv.log())
+		t.Fatalf("GET /app/ status = %d, want 200\nlog:\n%s", st, srv.log())
 	}
 	scripts := strings.Join(bundleScripts(t, srv, string(index)), "\n")
 	for _, code := range identityRefusalCodes {
@@ -223,7 +223,7 @@ func bundleScripts(t *testing.T, srv *serverProc, index string) []string {
 		}
 		url, ok := bundleAssetURL(srv.BaseURL, ref[1])
 		if !ok {
-			t.Errorf("asset reference %q is rooted outside the /ui/ mount", ref[1])
+			t.Errorf("asset reference %q is rooted outside the /app/ mount", ref[1])
 			continue
 		}
 		st, body := getRaw(t, url)

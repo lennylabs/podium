@@ -17,7 +17,7 @@ import (
 	"time"
 )
 
-// `podium serve --web-ui` mounts the bundled SPA at /ui/.
+// `podium serve --web-ui` mounts the bundled SPA at /app/.
 func TestServerFlags_WebUIFlagMountsUI(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -26,24 +26,24 @@ func TestServerFlags_WebUIFlagMountsUI(t *testing.T) {
 	srv := startServerArgs(t, []string{"HOME=" + t.TempDir()},
 		"serve", "--standalone", "--web-ui", "--layer-path", reg)
 
-	st, body := getRaw(t, srv.BaseURL+"/ui/")
+	st, body := getRaw(t, srv.BaseURL+"/app/")
 	if st != 200 {
-		t.Fatalf("GET /ui/ status = %d, want 200\nlog:\n%s", st, srv.log())
+		t.Fatalf("GET /app/ status = %d, want 200\nlog:\n%s", st, srv.log())
 	}
 	if !strings.Contains(string(body), "<title>Podium</title>") {
 		t.Errorf("UI response missing index marker: %.200s", body)
 	}
 }
 
-// without --web-ui the UI is not mounted; /ui/ is not served.
+// without --web-ui the UI is not mounted; /app/ is not served.
 func TestServerFlags_NoWebUIByDefault(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"my-skill/ARTIFACT.md": smallteamLowArtifact("ui artifact"),
 	})
 	srv := startServer(t, reg)
-	if st := getStatus(t, srv.BaseURL+"/ui/"); st == 200 {
-		t.Errorf("GET /ui/ = 200 without --web-ui; the UI must be opt-in")
+	if st := getStatus(t, srv.BaseURL+"/app/"); st == 200 {
+		t.Errorf("GET /app/ = 200 without --web-ui; the UI must be opt-in")
 	}
 }
 
@@ -206,7 +206,7 @@ func transactionMaxAge(resp *http.Response) int {
 }
 
 // Spec: §7.3.4 / §13.10 — the browser authentication routes mount inside the
-// block that already serves /ui/, under the one enablement key. Each case
+// block that already serves /app/, under the one enablement key. Each case
 // starts one binary at one point of the enablement, key-carrier, and sign-in
 // window axes, and observes whether an authentication route answers and what
 // window the served pre-authorization cookie carries.

@@ -19,7 +19,7 @@ func TestSecurityHeaders_SetOnEveryResponse(t *testing.T) {
 		_, _ = w.Write([]byte("<!doctype html>"))
 	}))
 
-	for _, target := range []string{"/ui/", "/v1/search_artifacts"} {
+	for _, target := range []string{"/app/", "/v1/search_artifacts"} {
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, target, nil))
 		for header, want := range map[string]string{

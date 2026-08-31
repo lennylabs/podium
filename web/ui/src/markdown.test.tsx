@@ -208,9 +208,9 @@ describe('the sanitized artifact-body rendering path', () => {
   // A link is followed by the reader rather than by the browser, so it keeps
   // its host, and a relative link keeps its destination.
   it('keeps a link to a foreign host and a link on this origin', () => {
-    const container = renderBody('[Go](https://example.com/a)\n\n[Here](/ui/#/layers)\n');
+    const container = renderBody('[Go](https://example.com/a)\n\n[Here](/app/#/layers)\n');
     const hrefs = Array.from(container.querySelectorAll('a')).map((a) => a.getAttribute('href'));
-    expect(hrefs).toEqual(['https://example.com/a', '/ui/#/layers']);
+    expect(hrefs).toEqual(['https://example.com/a', '/app/#/layers']);
   });
 
   // An anchor whose destination the allowlist refused keeps its element and
@@ -322,7 +322,7 @@ describe('the sanitized artifact-body rendering path', () => {
 
 // A §4.4 prose reference names another artifact by its canonical ID, written
 // as a relative markdown link, and `lint.prose_reference` admits that form.
-// Left as authored the browser resolves it against the `/ui/` mount and the
+// Left as authored the browser resolves it against the `/app/` mount and the
 // reader leaves the SPA for the registry's plain-text 404, so the viewer
 // routes it to the artifact route the relations rail builds for the same
 // target (§13.10).
@@ -352,7 +352,7 @@ describe('a cross-artifact prose reference in the body', () => {
 // A §4.4 prose reference also names a file the artifact bundles, and
 // `lint.prose_reference` admits that form too. The registry serves no
 // per-artifact asset route, so left as authored the reference resolves
-// against the `/ui/` mount and following it drops the reader out of the SPA
+// against the `/app/` mount and following it drops the reader out of the SPA
 // onto a plain-text 404. The file's delivery is the viewer's Resources tab,
 // so the reference is rendered as a control naming the file rather than as a
 // link out of the application (§13.10).

@@ -13,7 +13,7 @@ import (
 )
 
 // Spec: §13.10 — when PODIUM_WEB_UI=true, the server mounts the
-// embedded SPA at /ui/. A GET /ui/ returns the index HTML.
+// embedded SPA at /app/. A GET /app/ returns the index HTML.
 func TestServe_WebUIServedWhenEnabled(t *testing.T) {
 	port := freePort(t)
 	tmp := t.TempDir()
@@ -27,7 +27,7 @@ func TestServe_WebUIServedWhenEnabled(t *testing.T) {
 
 	go func() { _ = serverboot.Run() }()
 
-	url := fmt.Sprintf("http://127.0.0.1:%d/ui/", port)
+	url := fmt.Sprintf("http://127.0.0.1:%d/app/", port)
 	deadline := time.Now().Add(5 * time.Second)
 	var body []byte
 	var err error
