@@ -1237,6 +1237,8 @@ function restoreTable(): {
   source: HTMLTableCellElement;
   id: HTMLTableCellElement;
   count: HTMLTableCellElement;
+  action: HTMLTableCellElement;
+  row: HTMLTableRowElement;
 } {
   const table = document.createElement("table");
   table.className = "data-table restore-table";
@@ -1266,14 +1268,17 @@ function restoreTable(): {
   source.className = "source-col";
   const count = document.createElement("td");
   count.className = "mono quiet";
+  const action = document.createElement("td");
+  action.appendChild(document.createElement("button"));
   row.appendChild(id);
   row.appendChild(source);
   row.appendChild(count);
+  row.appendChild(action);
   body.appendChild(row);
   table.appendChild(body);
   document.body.appendChild(table);
   mounted.push(table);
-  return { table, headers, source, id, count };
+  return { table, headers, source, id, count, action, row };
 }
 
 // The restore table's columns. The row is identified by its layer name, and
@@ -1337,6 +1342,25 @@ describe("restore table columns", () => {
       window.getComputedStyle(restoreTable().table).minWidth,
     );
     expect(floor).toBeGreaterThanOrEqual(960);
+  });
+
+  // That floor is wider than the column the surface is laid out in at a 1280px
+  // viewport, and the overflow falls on the action column, which carries the
+  // row's only control. Left in the scroll the button was cut through its own
+  // label, and scrolling far enough to read it took the layer identifier off
+  // the left edge. The column is pinned to the container's right edge, and it
+  // paints its own ground because the cells scrolling under it show through a
+  // sticky cell that declares none.
+  it("pins the action column to the container's right edge", () => {
+    const { action, headers } = restoreTable();
+    const cell = window.getComputedStyle(action);
+    expect(cell.position).toBe("sticky");
+    expect(cell.right).toBe("0px");
+    expect(cell.backgroundColor).toBe("var(--surf)");
+    const header = window.getComputedStyle(headers[headers.length - 1]);
+    expect(header.position).toBe("sticky");
+    expect(header.right).toBe("0px");
+    expect(header.backgroundColor).toBe("var(--surf2)");
   });
 });
 

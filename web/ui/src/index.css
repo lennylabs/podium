@@ -2260,6 +2260,34 @@ input[type="search"]::-webkit-search-cancel-button {
   width: 120px;
 }
 
+/* The restore control is the row's only action, and the table's floor is wider
+   than the column the surface is laid out in at a 1280px viewport, so the
+   overflow fell on the action: the button was cut through its own label, and
+   scrolling the container far enough to read it took the layer identifier off
+   the left edge, which left the reader able to see which layer a row is or the
+   control that restores it and never both. The action column is pinned to the
+   container's right edge, so it stays whole at every width the table scrolls
+   at (§13.10). It carries its own ground, because the cells scrolling under a
+   sticky cell show through one that declares none, and the header cell keeps
+   the inset tone the header row is drawn on. */
+.restore-table th:last-child,
+.restore-table td:last-child {
+  position: sticky;
+  right: 0;
+  background-color: var(--surf);
+}
+
+.restore-table thead th:last-child {
+  background-color: var(--surf2);
+}
+
+/* The hovered row lifts to the chip tone, and the pinned cell paints its own
+   ground over that, so it takes the row's tone as well. Left on the surface
+   fill the action column read as a hole punched in the lit row. */
+.restore-table tbody > tr:not(.row-detail):hover > td:last-child {
+  background-color: var(--chip);
+}
+
 .restore-table .source-col {
   width: auto;
   max-width: none;
