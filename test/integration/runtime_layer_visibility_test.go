@@ -105,7 +105,7 @@ func TestRuntimeLayerVisibility_SQLiteReadPath(t *testing.T) {
 
 	// alice registers a personal layer at runtime via POST /v1/layers.
 	regEndpoint := server.NewLayerEndpoint(st, "default", server.NewModeTracker()).
-		WithIdentityResolver(func(*http.Request) layer.Identity { return rlvAlice })
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return rlvAlice, nil })
 	regTS := httptest.NewServer(regEndpoint.Handler())
 	defer regTS.Close()
 	reqBody, _ := json.Marshal(map[string]any{

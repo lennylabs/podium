@@ -47,7 +47,7 @@ func (s *Server) withIdentityVerification(next http.Handler) http.Handler {
 		}
 		id, err := s.idVerifier(r)
 		if err != nil {
-			s.writeIdentityError(w, err)
+			writeIdentityError(w, err)
 			return
 		}
 		next.ServeHTTP(w, r.WithContext(withVerifiedIdentity(r.Context(), id)))
@@ -90,7 +90,7 @@ func pathRequiresIdentity(p string) bool {
 // browser flow is enabled, in the __Host-podium_session cookie, and it
 // verifies the two identically, so a message written about a forwarded token
 // is false on one of them.
-func (s *Server) writeIdentityError(w http.ResponseWriter, err error) {
+func writeIdentityError(w http.ResponseWriter, err error) {
 	if errors.Is(err, identity.ErrTokenExpired) {
 		// §6.10: the message is provider-neutral and location-neutral; the
 		// per-provider refresher is carried in the registry's

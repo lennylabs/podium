@@ -157,7 +157,7 @@ func TestConfigReadOnlyFlip_PostgresPrimaryOutage(t *testing.T) {
 		server.WithIdentityResolver(func(*http.Request) layer.Identity { return roflipAdmin }),
 	)
 	layerEP := server.NewLayerEndpoint(fault, roflipTenant, mode).
-		WithIdentityResolver(func(*http.Request) layer.Identity { return roflipAdmin }).
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return roflipAdmin, nil }).
 		WithAudit(sink)
 
 	mux := http.NewServeMux()

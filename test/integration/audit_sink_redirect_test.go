@@ -51,7 +51,7 @@ func TestErase_EndpointRedirectPurgesAndForwards(t *testing.T) {
 	ep := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
 		WithAudit(endpoint).
 		WithEraseSink(nil). // redirected to an endpoint: no local file to rewrite
-		WithIdentityResolver(func(*http.Request) layer.Identity { return admin }).
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return admin, nil }).
 		WithAdminAuth(func(*http.Request) error { return nil })
 	mux := http.NewServeMux()
 	mux.Handle("/v1/admin/erase", ep.EraseHandler())

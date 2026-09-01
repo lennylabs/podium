@@ -49,8 +49,12 @@ type LayerEndpoint struct {
 	authAdmin func(*http.Request) error
 	// identify resolves the caller identity. It backs the §4.6 rule
 	// that a user-defined layer's owner is the authenticated
-	// registrant. Defaults to an anonymous caller.
-	identify func(*http.Request) layer.Identity
+	// registrant, and the §7.3.1 layer read, which refuses a
+	// credential that failed verification. A verification failure is
+	// returned rather than swallowed; the paths that raise no
+	// authentication error of their own read it through caller.
+	// Defaults to an anonymous caller.
+	identify func(*http.Request) (layer.Identity, error)
 	// defaultLayerVisibility is the fallback applied at register
 	// time when an admin-defined layer arrives with no explicit
 	// visibility. One of "public" | "organization" | "private".
@@ -178,7 +182,7 @@ func NewLayerEndpoint(s store.Store, tenantID string, mode *ModeTracker) *LayerE
 	return &LayerEndpoint{
 		store: s, tenantID: tenantID, mode: mode,
 		authAdmin: func(*http.Request) error { return nil },
-		identify:  func(*http.Request) layer.Identity { return layer.Identity{IsPublic: true} },
+		identify:  func(*http.Request) (layer.Identity, error) { return layer.Identity{IsPublic: true}, nil },
 	}
 }
 
@@ -189,10 +193,27 @@ func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoi
 }
 
 // WithIdentityResolver installs the caller-identity resolver used to
-// derive a user-defined layer's owner from the authenticated registrant.
-func (e *LayerEndpoint) WithIdentityResolver(fn func(*http.Request) layer.Identity) *LayerEndpoint {
+// derive a user-defined layer's owner from the authenticated registrant and
+// to resolve the §7.3.1 layer read. A resolver that reports a verification
+// failure returns it, so the list read can refuse that credential with the
+// §6.10 envelope the failure already carries.
+func (e *LayerEndpoint) WithIdentityResolver(fn func(*http.Request) (layer.Identity, error)) *LayerEndpoint {
 	e.identify = fn
 	return e
+}
+
+// caller resolves the caller for a path that raises no authentication error
+// of its own: the write gates, the register handler, the erase handler, and
+// the audit emitters. A verification failure resolves the anonymous-public
+// caller, which is the disposition those paths take today and which every
+// write gate refuses, so this swallow alters no write outcome. It is the
+// swallow that lived in serverboot's layerIdentityResolver before the error
+// moved to the endpoint.
+func (e *LayerEndpoint) caller(r *http.Request) layer.Identity {
+	if id, err := e.identify(r); err == nil {
+		return id
+	}
+	return layer.Identity{IsPublic: true}
 }
 
 // authorizeLayerWrite implements the §7.3.1 layer-write authorization rule
@@ -211,7 +232,7 @@ func (e *LayerEndpoint) WithIdentityResolver(fn func(*http.Request) layer.Identi
 // Spec: §7.3.1
 func (e *LayerEndpoint) authorizeLayerWrite(r *http.Request, cfg store.LayerConfig) error {
 	if cfg.UserDefined {
-		if caller := e.identify(r); caller.IsAuthenticated && caller.Sub != "" && caller.Sub == cfg.Owner {
+		if caller := e.caller(r); caller.IsAuthenticated && caller.Sub != "" && caller.Sub == cfg.Owner {
 			return nil
 		}
 	}
@@ -306,7 +327,7 @@ func (e *LayerEndpoint) emitLayerEvent(r *http.Request, cfg store.LayerConfig, a
 	if cfg.Owner != "" {
 		fields["owner"] = cfg.Owner
 	}
-	emitAuditEvent(e.auditSink, r, e.identify(r), typ, cfg.ID, fields)
+	emitAuditEvent(e.auditSink, r, e.caller(r), typ, cfg.ID, fields)
 	// Spec: §7.6 — the watcher re-resolves its profile on
 	// layer.config_changed, so an admin layer change wakes it. A personal
 	// layer emits layer.user_registered instead and is not a §7.6 trigger:
@@ -501,7 +522,7 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 	// external endpoint (no local file) there is no on-disk chain to
 	// rewrite: the layers are still purged and the aggregator owns redaction
 	// of the shipped stream.
-	admin := callerIdentityString(e.identify(r))
+	admin := callerIdentityString(e.caller(r))
 	redacted := 0
 	if e.auditFile != nil {
 		redacted, err = audit.EraseUser(r.Context(), e.auditFile, body.UserID, body.Salt, admin)
@@ -693,7 +714,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if adminErr := e.authAdmin(r); adminErr != nil {
-		if who := e.identify(r); !who.IsAuthenticated || who.Sub == "" {
+		if who := e.caller(r); !who.IsAuthenticated || who.Sub == "" {
 			writeError(w, http.StatusForbidden, "auth.forbidden", adminErr.Error())
 			return
 		}
@@ -707,7 +728,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// invocation carries no --user-defined flag, so the class is resolved
 	// server-side from the caller's identity. An anonymous caller attempting
 	// an admin-defined registration is still rejected with auth.forbidden.
-	caller := e.identify(r)
+	caller := e.caller(r)
 	userDefined := req.UserDefined
 	if !userDefined {
 		if err := e.authAdmin(r); err != nil {
@@ -815,7 +836,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			// from the authenticated caller; with no authenticated identity
 			// (anonymous standalone) the layer stays private (no filters),
 			// which is the safe fallback for the `users` selection.
-			if id := e.identify(r); id.IsAuthenticated && id.Sub != "" {
+			if id := e.caller(r); id.IsAuthenticated && id.Sub != "" {
 				cfg.Users = []string{id.Sub}
 			}
 		}
@@ -1021,7 +1042,7 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(updated, func(i, j int) bool { return updated[i].Order < updated[j].Order })
 	// spec §8.1: reordering admin-defined layers emits layer.config_changed.
 	if len(req.Order) > 0 {
-		emitAuditEvent(e.auditSink, r, e.identify(r), audit.EventLayerConfigChanged,
+		emitAuditEvent(e.auditSink, r, e.caller(r), audit.EventLayerConfigChanged,
 			strings.Join(req.Order, ","), map[string]string{"action": "reorder"})
 		e.publishConfigChanged(r.Context(), strings.Join(req.Order, ","), "reorder")
 	}

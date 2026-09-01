@@ -61,7 +61,7 @@ func layerEventHarness(t *testing.T, rec *eventRecorder, id layer.Identity) stri
 	}
 	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
 		WithEventPublisher(rec.publish).
-		WithIdentityResolver(func(*http.Request) layer.Identity { return id })
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return id, nil })
 	ts := httptest.NewServer(endpoint.Handler())
 	t.Cleanup(ts.Close)
 	return ts.URL
@@ -163,8 +163,8 @@ func TestLayerEndpoint_NoPublisherIsANoOp(t *testing.T) {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
-		WithIdentityResolver(func(*http.Request) layer.Identity {
-			return layer.Identity{Sub: "admin", IsAuthenticated: true}
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) {
+			return layer.Identity{Sub: "admin", IsAuthenticated: true}, nil
 		})
 	ts := httptest.NewServer(endpoint.Handler())
 	t.Cleanup(ts.Close)

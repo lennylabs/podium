@@ -23,7 +23,7 @@ func newClassHarness(t *testing.T, id layer.Identity) (string, store.Store, func
 	}
 	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
 		WithAdminAuth(func(*http.Request) error { return server.ErrAdminRequired }).
-		WithIdentityResolver(func(*http.Request) layer.Identity { return id })
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return id, nil })
 	ts := httptest.NewServer(endpoint.Handler())
 	return ts.URL, st, ts.Close
 }

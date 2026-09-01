@@ -209,11 +209,65 @@ func TestInjectedTokenVerifier_RejectsMissingToken(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 / §7.3.1 — the layer endpoint resolves the
-// caller from the same request-time verifier wired on the meta-tool server. A
-// verified token yields the authenticated identity used to attribute a
-// user-defined layer and gate admin operations; a missing/invalid token or a
-// nil verifier resolves to the anonymous-public caller (fail-closed).
+// Spec: §6.3.2, §6.3.3, §7.3.1 — the resolver the layer endpoint reads
+// returns the verifier's error verbatim, so the endpoint refuses a credential
+// that failed verification and serves a caller the provider resolves as
+// anonymous. Whether an absent credential is a failure is the provider's own
+// rule: injected-session-token reports one, oidc-jwt does not.
+func TestLayerCallerResolver(t *testing.T) {
+	t.Parallel()
+	priv, reg := registeredRuntimeKey(t)
+	injected := layerCallerResolver(injectedTokenVerifier(reg, "https://podium.acme.com", nil))
+
+	// A valid runtime-signed token: the authenticated identity, no error.
+	raw := signRuntimeJWT(t, priv, jwt.MapClaims{
+		"iss": "rt", "aud": "https://podium.acme.com", "sub": "alice", "act": "rt",
+		"exp": time.Now().Add(5 * time.Minute).Unix(),
+	})
+	req, _ := http.NewRequest(http.MethodGet, "http://x/v1/layers", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	id, err := injected(req)
+	if err != nil {
+		t.Fatalf("valid token: got err %v, want nil", err)
+	}
+	if !id.IsAuthenticated || id.Sub != "alice" {
+		t.Errorf("valid token resolved to %+v, want authenticated alice", id)
+	}
+
+	// No Authorization header under injected-session-token: a verification
+	// failure, which the endpoint refuses.
+	anon, _ := http.NewRequest(http.MethodGet, "http://x/v1/layers", nil)
+	if _, err := injected(anon); !errors.Is(err, identity.ErrUntrustedRuntime) {
+		t.Errorf("missing token: got %v, want ErrUntrustedRuntime", err)
+	}
+
+	// No credential under oidc-jwt: the anonymous caller and no error, which
+	// keeps a signed-out browser out of the refusal.
+	oidc := layerCallerResolver(oidcJWTVerifier(identity.NewOIDCVerifier("https://issuer.example", "aud", 0), "", nil, false))
+	id, err = oidc(anon)
+	if err != nil {
+		t.Fatalf("oidc-jwt with no credential: got err %v, want nil", err)
+	}
+	if id.IsAuthenticated || id.IsPublic {
+		t.Errorf("oidc-jwt with no credential resolved to %+v, want the zero identity", id)
+	}
+
+	// A nil verifier: the anonymous-public caller and no error, which is the
+	// no-provider, public-mode, and free-form-label deployment.
+	id, err = layerCallerResolver(nil)(req)
+	if err != nil {
+		t.Fatalf("nil verifier: got err %v, want nil", err)
+	}
+	if id.IsAuthenticated || !id.IsPublic {
+		t.Errorf("nil verifier resolved to %+v, want anonymous-public", id)
+	}
+}
+
+// Spec: §4.6 — the swallowing resolver read by the §4.7.2 admin gate and the
+// §7.3.4 posture read, neither of which refuses a request for lack of a
+// credential. A verified token yields the authenticated identity used to
+// evaluate admin authorization; a missing or invalid token, or a nil
+// verifier, resolves to the anonymous-public caller (fail-closed).
 func TestLayerIdentityResolver(t *testing.T) {
 	t.Parallel()
 	priv, reg := registeredRuntimeKey(t)

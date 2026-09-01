@@ -210,12 +210,13 @@ func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
 	verifier := identity.NewOIDCVerifier(idp.issuer(), opts.audience, 0)
 	layerVerify := oidcJWTVerifier(verifier, "", mapping, opts.browserAuth)
 	layerIdentity := layerIdentityResolver(layerVerify)
+	layerCaller := layerCallerResolver(layerVerify)
 
 	reg := core.New(st, tenant, layers)
 	srv := server.New(reg, server.WithIdentityVerifier(layerVerify))
 	mode := server.NewModeTracker()
 	layerEndpoint := server.NewLayerEndpoint(st, tenant, mode).
-		WithIdentityResolver(layerIdentity)
+		WithIdentityResolver(layerCaller)
 
 	mux := http.NewServeMux()
 	mux.Handle("/v1/layers", layerEndpoint.Handler())

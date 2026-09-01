@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -80,7 +81,7 @@ func newLayerWriteServer(t *testing.T, st store.Store, admin bool, caller layer.
 			}
 			return server.ErrAdminRequired
 		}).
-		WithIdentityResolver(func(*http.Request) layer.Identity { return caller })
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return caller, nil })
 	if runner != nil {
 		e = e.WithReingestRunner(runner)
 	}
@@ -494,5 +495,31 @@ func TestLayerRegister_RecoveryWindowSequence(t *testing.T) {
 	}
 	if got.Owner != "alice" || got.LocalPath != "/tmp/alice" {
 		t.Errorf("restored layer = %+v, want alice's layer at /tmp/alice", got)
+	}
+}
+
+// Spec: §7.3.1 — the write paths raise no authentication error of their own.
+// They read the caller through the endpoint's swallowing helper, so a
+// credential the resolver reports as failing verification resolves the
+// anonymous-public caller and is refused with 403 auth.forbidden, which is the
+// disposition those paths took before the resolver carried an error.
+func TestLayerWriteAuth_UnverifiedCredentialStaysForbidden(t *testing.T) {
+	t.Parallel()
+	st := newLayerWriteStore(t)
+	seedLayer(t, st, store.LayerConfig{ID: "own", UserDefined: true, Owner: "alice", Users: []string{"alice"}})
+	e := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
+		WithAdminAuth(func(*http.Request) error { return server.ErrAdminRequired }).
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) {
+			return layer.Identity{}, identity.ErrTokenExpired
+		})
+	ts := httptest.NewServer(e.Handler())
+	t.Cleanup(ts.Close)
+
+	resp, body := putJSON(t, ts.URL, "/v1/layers/update?id=own", map[string]any{"ref": "release"})
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("update status = %d, want 403: %s", resp.StatusCode, body)
+	}
+	if code := errCode(t, body); code != "auth.forbidden" {
+		t.Errorf("update code = %q, want auth.forbidden", code)
 	}
 }

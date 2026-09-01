@@ -1243,7 +1243,7 @@ func run(ctx context.Context, stop func()) error {
 		WithDefaultVisibility(cfg.defaultLayerVisibility).
 		WithMaxUserLayers(cfg.maxUserLayers).
 		WithPublicBaseURL(cfg.publicURL).
-		WithIdentityResolver(layerIdentity).
+		WithIdentityResolver(layerCallerResolver(layerVerify)).
 		WithAdminAuth(func(r *http.Request) error {
 			// §13.10/§13.11: a standalone deployment configures no identity
 			// provider, so the local operator is the de facto admin; public

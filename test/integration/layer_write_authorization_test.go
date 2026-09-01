@@ -30,7 +30,7 @@ func newLayerWriteEndpoint(t *testing.T, st store.Store, caller layer.Identity) 
 	t.Helper()
 	reg := core.New(st, "t", nil)
 	e := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
-		WithIdentityResolver(func(*http.Request) layer.Identity { return caller }).
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return caller, nil }).
 		WithAdminAuth(func(r *http.Request) error {
 			return reg.AdminAuthorize(r.Context(), caller)
 		}).

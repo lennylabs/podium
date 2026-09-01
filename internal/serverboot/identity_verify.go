@@ -44,21 +44,38 @@ func injectedTokenVerifier(keys identity.RuntimeKeyVerifierStore, audience strin
 	}
 }
 
-// layerIdentityResolver adapts a §6.3.2 request-time verifier into the
-// resolver the §7.3.1 layer endpoint uses to attribute a user-defined layer
-// to its registrant (§4.6) and to evaluate admin authorization (§4.7.2). The
-// layer endpoint is mounted outside the meta-tool identity middleware, so it
-// resolves the caller itself. A verified token yields the authenticated
-// identity; a missing or invalid token resolves to the anonymous-public
-// caller, which the endpoint then denies for admin-gated operations and
-// rejects for user-defined registrations (fail-closed). A nil verifier (no
-// server-side verification wired) always resolves anonymous.
+// layerCallerResolver adapts a §6.3.2/§6.3.3 request-time verifier into the
+// resolver the §7.3.1 layer endpoint reads. It returns the verifier's error
+// verbatim, so the endpoint refuses a credential that failed verification
+// with the §6.10 envelope the server already maps that error to, and it
+// returns the anonymous-public caller with no error when no verifier is
+// wired, which is the no-provider, public-mode, and free-form-label
+// deployment. Whether an absent credential is a failure is the provider's
+// own rule and is not decided here: injectedTokenVerifier reports one,
+// oidcJWTVerifier and trustedHeadersVerifier do not.
+func layerCallerResolver(verify func(*http.Request) (layer.Identity, error)) func(*http.Request) (layer.Identity, error) {
+	return func(r *http.Request) (layer.Identity, error) {
+		if verify == nil {
+			return layer.Identity{IsPublic: true}, nil
+		}
+		return verify(r)
+	}
+}
+
+// layerIdentityResolver adapts a §6.3.2 request-time verifier into a resolver
+// that never fails. It is the swallowing form: a verified token yields the
+// authenticated identity, and a missing or invalid token, or a nil verifier
+// (no server-side verification wired), resolves to the anonymous-public
+// caller. It is read by the §4.7.2 admin gate and by the §7.3.4 posture read,
+// which refuse no request for lack of a credential
+// (pkg/registry/server/webui_session.go:12-14). The §7.3.1 layer endpoint
+// reads layerCallerResolver instead and refuses a verification failure
+// itself.
 func layerIdentityResolver(verify func(*http.Request) (layer.Identity, error)) func(*http.Request) layer.Identity {
+	resolve := layerCallerResolver(verify)
 	return func(r *http.Request) layer.Identity {
-		if verify != nil {
-			if id, err := verify(r); err == nil {
-				return id
-			}
+		if id, err := resolve(r); err == nil {
+			return id
 		}
 		return layer.Identity{IsPublic: true}
 	}
