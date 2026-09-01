@@ -4992,8 +4992,10 @@ profile S47 signed in from cannot hold a second session.
    **Expect.** The layer stays registered. The row reports that the registry
    refused that action and that nothing changed, and it names the code
    `auth.forbidden`. It reports neither who owns the layer nor the state of the
-   session, because the refusal carries neither. The Try again and Dismiss
-   controls are both offered, and every other control on the row stays live.
+   session, because the refusal carries neither. The band offers Dismiss alone
+   and reads `Retrying does not clear this condition.`, because the registry
+   marks `auth.forbidden` non-retryable. Every other control on the row stays
+   live.
 
 4. Confirm the refusal came from the authorization rule rather than from the
    panel.
