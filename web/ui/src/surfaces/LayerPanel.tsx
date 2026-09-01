@@ -1,8 +1,11 @@
 // The layer panel: the only surface with write operations. The list read
-// hands the panel every layer stored under the tenant and no response reports
-// that the caller holds the administrator role, so the panel predicts no
-// outcome. It renders its write operations on every row and presents whatever
-// refusal a write receives.
+// hands the panel the layers the caller may read under §7.3.1, which is the
+// tenant's whole layer list for a §4.7.2 tenant admin and for every caller on
+// a registry that authenticates none, the layers §4.6 admits for any other
+// caller who resolves a verified subject, and no layers for a caller who
+// resolves none. No response reports that the caller holds the administrator
+// role, so the panel predicts no outcome. It renders its write operations on
+// every row and presents whatever refusal a write receives.
 //
 // The panel is rendered for every caller on every deployment, including a
 // caller who resolves no subject. A standalone registry authenticates nobody
@@ -211,7 +214,7 @@ export function LayerPanel({
   // absolute order values from the request's own positions and two open
   // requests would race to stamp them. A press made while one is open is
   // held here and issued when it returns; a later press replaces the held
-  // one, because each request names the whole block's resulting order and
+  // one, because each request names the whole visible block's resulting order and
   // the newest press already carries every press before it.
   const sending = useRef(false);
   const held = useRef<{ from: string; order: string[] } | null>(null);
@@ -593,7 +596,7 @@ export function LayerPanel({
         </>
       )}
       {rows.length === 0 ? (
-        <EmptyState title="No layers">
+        <EmptyState title="No layers to show">
           Register a layer to bring its artifacts into the catalog.
         </EmptyState>
       ) : (
@@ -859,12 +862,13 @@ function blockOf(rows: LayerRecord[], id: string): LayerRecord[] {
  * stored values. A request naming the moved pair alone therefore stamps the
  * block's first order values onto that pair and leaves every other row of the
  * block holding the value it already had, which ties or inverts rows the move
- * was not meant to touch. The request names the whole block so the endpoint's
+ * was not meant to touch. The request names the whole visible block so the endpoint's
  * positional assignment reproduces the order the panel displayed.
  *
  * Every layer the request names is authorized on its own under the §7.3.1
- * layer-write rule, and the list read is unfiltered, so a block holding a
- * layer this caller may not write has its move refused whole. The panel
+ * layer-write rule, which is independent of the §7.3.1 read visibility the
+ * list is scoped by, so a block holding a layer this caller may not write has
+ * its move refused whole. The panel
  * presents that refusal on the row rather than predicting it. */
 function movedOrder(
   block: LayerRecord[],

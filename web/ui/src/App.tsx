@@ -245,10 +245,10 @@ export function App() {
   const shellReadFailed = !tree.loading && tree.error !== null && !isIdentityRefusal(tree.error);
   // surfaceReach counts the reads a layers surface reported as answered. The
   // layers surfaces report reachability rather than the catalog outcome the
-  // other surfaces report: a layer endpoint resolves an unverifiable session
-  // to the anonymous caller and answers, so clearing the refused state from
-  // its outcome would state that a session that ended is live. What a read
-  // that answered does say is that the registry is reachable.
+  // other surfaces report: a layer read that was refused carries an identity
+  // outcome of its own, which the surface reports through its error rather
+  // than through this count. What a read that answered does say is that the
+  // registry is reachable.
   const [surfaceReach, setSurfaceReach] = useState(0);
   const onReach = useCallback(() => {
     setSurfaceReach((n) => n + 1);
