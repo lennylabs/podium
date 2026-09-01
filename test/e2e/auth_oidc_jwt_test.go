@@ -300,3 +300,50 @@ func TestOIDCJWT_UnreachableIssuerRefusesBoot(t *testing.T) {
 		"SSL_CERT_FILE="+idp.caFile,
 	)
 }
+
+// Spec: §6.3.3, §6.10, §7.3.1 — the §7.3.1 layer read refuses a credential
+// the registry's request-time verifier could not verify, with the §6.10
+// envelope that failure already carries, and it does so in the spawned
+// binary. That path exists only when the boot sequence installs the
+// error-preserving identity resolver on the layer endpoint, which no package
+// test reaches: the browser-stack fixture builds its own endpoint, and the
+// unit tests inject their own resolver.
+//
+// A request carrying no credential is a different condition under oidc-jwt.
+// The verifier resolves it as an anonymous caller with no error, so it is not
+// refused and reads the layers §4.6 admits it, which is what keeps a
+// signed-out layer panel working.
+func TestOIDCJWT_LayerListRefusesUnverifiableCredential(t *testing.T) {
+	requireCustomTrustStore(t)
+	idp := startOIDCTestIdP(t, "")
+	srv := gwOIDCServer(t, idp)
+
+	foreign := idp.token(t, jwt.MapClaims{
+		"iss":    "https://evil.example/adfs",
+		"aud":    "https://podium.acme.example",
+		"sub":    "mallory@evil.example",
+		"groups": []string{"engineering"},
+		"exp":    time.Now().Add(time.Hour).Unix(),
+	})
+	st, body := gwHeaderGet(t, srv.BaseURL+"/v1/layers", bearer(foreign))
+	if st != 401 || !strings.Contains(string(body), "auth.untrusted_token") {
+		t.Errorf("layer read with a token from an unaccepted issuer = %d %s, want 401 auth.untrusted_token\nlog:\n%s",
+			st, body, srv.log())
+	}
+
+	expired := idp.token(t, jwt.MapClaims{
+		"iss":    idp.srv.URL,
+		"aud":    "https://podium.acme.example",
+		"sub":    "alice@acme.com",
+		"groups": []string{"engineering"},
+		"exp":    time.Now().Add(-time.Hour).Unix(),
+	})
+	st, body = gwHeaderGet(t, srv.BaseURL+"/v1/layers", bearer(expired))
+	if st != 401 || !strings.Contains(string(body), "auth.token_expired") {
+		t.Errorf("layer read with an expired token = %d %s, want 401 auth.token_expired", st, body)
+	}
+
+	if st, body := gwHeaderGet(t, srv.BaseURL+"/v1/layers", nil); st != 200 {
+		t.Errorf("layer read carrying no credential = %d %s, want 200", st, body)
+	}
+}

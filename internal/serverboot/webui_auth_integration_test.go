@@ -627,11 +627,15 @@ func TestBrowserFlow_CSRFCoversLayerWrites(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.4 — a request carrying a session cookie past the token's exp
-// reports differently on each surface, and the rule is what a panel built on
-// a single expiry signal fails against. The meta-tool route reports the
-// expiry, the layer read answers unfiltered, and the posture read answers 200
-// with no subject.
+// Spec: §6.10, §7.3.1, §7.3.4 — a request carrying a session cookie past the
+// token's exp is refused on every surface that verifies the credential, so
+// the meta-tool route and the layer read both report auth.token_expired,
+// while the §7.3.4 posture read answers 200 with no subject because it
+// refuses no request for lack of a credential.
+//
+// The layer read's refusal does not depend on this fixture's admin callback.
+// newBrowserStack installs none, so the endpoint's constructor default admits
+// every caller, and the refusal is what runs ahead of that admin arm.
 func TestBrowserFlow_ExpiredSessionAcrossSurfaces(t *testing.T) {
 	t.Parallel()
 	b := newBrowserStack(t, stackOpts{browserAuth: true})
@@ -650,8 +654,11 @@ func TestBrowserFlow_ExpiredSessionAcrossSurfaces(t *testing.T) {
 
 	layers := b.do(t, http.MethodGet, "/v1/layers", nil, expired)
 	defer layers.Body.Close()
-	if layers.StatusCode != http.StatusOK {
-		t.Errorf("layer read = %d, want 200; it reports nothing about the verification failure", layers.StatusCode)
+	if layers.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("layer read = %d, want 401 for a session past the token's exp", layers.StatusCode)
+	}
+	if e := envelope(t, layers); e.Code != "auth.token_expired" {
+		t.Errorf("layer read code = %q, want auth.token_expired", e.Code)
 	}
 
 	postureResp := b.do(t, http.MethodGet, server.PathWebUISession, nil, expired)
