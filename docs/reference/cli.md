@@ -430,7 +430,7 @@ Visibility flags set who can see the layer. They apply to an admin-defined layer
 
 ### `podium layer list`
 
-Lists configured layers and their current state.
+Lists the configured layers the caller's identity can see, and their current state. A caller holding the per-tenant `admin` role sees every layer in the tenant. Any other authenticated caller sees the layers that caller's identity admits, including that caller's own user-defined layers. A caller the registry resolves as anonymous sees none. A caller whose credential fails verification is refused rather than shown an empty list, and whether presenting no credential is itself a verification failure is the configured identity provider's rule. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so every layer in the tenant is listed there.
 
 ```
 podium layer list [--deleted]
@@ -440,7 +440,7 @@ podium layer list [--deleted]
 
 ### `podium layer reorder`
 
-Re-sequences the layer list. Reordering a user-defined layer requires no admin role: it is authorized to that layer's stored owner or to a caller holding the per-tenant `admin` role. Reordering an admin-defined layer requires the per-tenant `admin` role, and a caller without it is rejected with `auth.forbidden`, as is a caller authorized on neither arm. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits the request. An id that names no configured layer returns `registry.not_found`.
+Re-sequences the layer list. Reordering a user-defined layer requires no admin role: it is authorized to that layer's stored owner or to a caller holding the per-tenant `admin` role. Reordering an admin-defined layer requires the per-tenant `admin` role, and a caller without it is rejected with `auth.forbidden`, as is a caller authorized on neither arm. A caller whose credential fails verification under the configured identity provider's rule is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either arm is evaluated, so on this operation `auth.forbidden` names a caller the registry verified and did not authorize; the other layer write operations answer such a caller `auth.forbidden` as before. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits the request. An id that names no configured layer returns `registry.not_found`.
 
 ```
 podium layer reorder <id> [<id> ...]

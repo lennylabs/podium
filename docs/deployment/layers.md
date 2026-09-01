@@ -98,7 +98,7 @@ podium layer register --id alice-personal \
 
 An authenticated caller without the tenant `admin` role registers a user-defined layer whether or not `--user-defined` is passed. The registry resolves the class from the caller's identity.
 
-`podium layer list` prints the registered layers and their current state. The visibility flags are covered in [Access control](access-control), and the built-in source types are covered in [Server-side integrations](integrations#layer-sources).
+`podium layer list` prints the registered layers the caller can see, and their current state. A caller holding the tenant `admin` role, and every caller on a registry that authenticates none, sees every layer in the tenant. Any other authenticated caller sees the layers that caller's identity admits, including that caller's own user-defined layers. A caller the registry resolves as anonymous sees none, and a caller whose credential fails verification is refused on the terms the [HTTP API reference](../reference/http-api#list-layers) states. Whether presenting no credential is itself a verification failure is the configured identity provider's rule. The visibility flags are covered in [Access control](access-control), and the built-in source types are covered in [Server-side integrations](integrations#layer-sources).
 
 ---
 
@@ -110,7 +110,7 @@ An authenticated caller without the tenant `admin` role registers a user-defined
 podium layer reorder alice-scratch alice-personal
 ```
 
-A caller reorders their own user-defined layers without special rights. An argument list that names an admin-defined layer requires the tenant `admin` role, and the registry answers `auth.forbidden` otherwise. A deployment with no identity provider has no authenticated callers, so the local operator reorders any layer.
+A caller reorders their own user-defined layers without special rights. An argument list that names an admin-defined layer requires the tenant `admin` role, and the registry answers `auth.forbidden` otherwise. A caller whose credential fails verification under the configured identity provider's rule is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either arm is evaluated, so on this operation `auth.forbidden` names a caller the registry verified and did not authorize; the other layer write operations answer such a caller `auth.forbidden` as before. A deployment with no identity provider has no authenticated callers, so the local operator reorders any layer.
 
 A layer declared in the `registry:` `layers:` list is re-seeded from that file in list order at every restart. Change its position in `registry.yaml` to make a new order durable.
 
