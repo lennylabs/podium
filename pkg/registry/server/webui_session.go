@@ -27,9 +27,11 @@ type SessionPosture struct {
 	// on this deployment. The path fields are reported only when it is,
 	// because the flow's routes are registered only then.
 	BrowserAuthEnabled bool
-	// Identity resolves the requesting caller. It is the same resolver the
-	// §7.3.1 layer endpoint uses, so an unverifiable session resolves the
-	// anonymous caller and the response omits `subject`.
+	// Identity resolves the requesting caller with the error-swallowing
+	// resolver, so an unverifiable session resolves the anonymous caller and
+	// the response omits `subject`, which is what §7.3.4 requires of a read
+	// that refuses no request for lack of a credential. The §7.3.1 layer
+	// endpoint refuses the same credential.
 	Identity func(*http.Request) layer.Identity
 }
 

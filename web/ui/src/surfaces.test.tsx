@@ -1610,10 +1610,10 @@ describe("the application shell", () => {
   });
 
   // The layers route's surfaces report no catalog outcome, because a layer
-  // endpoint answers an unverifiable session anonymously and says nothing
-  // about it. A read of theirs that answered does say the registry is
-  // reachable, which is the condition the sidebar reported, so the shell
-  // re-issues its own read on it. Without that the sidebar states an outage
+  // read that was refused carries an identity outcome of its own that the
+  // surface reports through its error. A read of theirs that answered does
+  // say the registry is reachable, which is the condition the sidebar
+  // reported, so the shell re-issues its own read on it. Without that the sidebar states an outage
   // for the rest of the session while the panel beside it lists the layers.
   it("recovers the tree and the counts from the layer panel's retry", async () => {
     const stubs: Record<string, Stub> = {
@@ -8524,9 +8524,9 @@ describe("the session-expiry transition", () => {
     expect(screen.queryByLabelText("Catalog refused")).toBeNull();
   });
 
-  // The layers route issues no catalog read of its own, so the panel would
-  // receive the ended session on no path at all unless the shell takes one.
-  // The panel is kept underneath the treatment.
+  // The layers route issues no catalog read of its own, and the panel's own
+  // error band offers no recovery control, so the shell owns the control on
+  // this route. The panel is kept underneath the treatment.
   it("presents the ended session on the layer panel and keeps the panel underneath", async () => {
     stubRegistry({
       "/v1/ui/session": {
@@ -14264,9 +14264,10 @@ function openRowActions(layerID = "alice-personal"): void {
   );
 }
 
-/** bobLayer is a user-defined layer another subject owns. The list read is
- * unfiltered, so it reaches the panel alongside the caller's own, and a
- * reorder that named it would be refused whole. */
+/** bobLayer is a user-defined layer another subject owns. The suite's
+ * `/v1/layers` stub returns the row alongside the caller's own, and on a live
+ * registry it reaches a caller the §7.3.1 admin arm admits, and a reorder that
+ * named it would be refused whole. */
 function bobLayer(): Record<string, unknown> {
   return {
     ID: "bob-personal",
@@ -17579,6 +17580,11 @@ describe("a refused layer write", () => {
     goTo("#/layers");
     render(<App />);
     const panel = await screen.findByLabelText("Layer panel");
+    // The heading is scoped to the caller's view, so a caller who can see
+    // none of several registered layers is not told the tenant has none.
+    // Spec: §4.6, §7.3.1
+    const title = panel.querySelector(".empty-title") as HTMLElement;
+    expect(title.textContent).toBe("No layers to show");
     expect(panel.textContent).toContain(
       "Register a layer to bring its artifacts into the catalog.",
     );

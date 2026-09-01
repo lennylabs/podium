@@ -17,6 +17,7 @@ import (
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/layer/source"
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -49,8 +50,17 @@ type LayerEndpoint struct {
 	authAdmin func(*http.Request) error
 	// identify resolves the caller identity. It backs the §4.6 rule
 	// that a user-defined layer's owner is the authenticated
-	// registrant. Defaults to an anonymous caller.
-	identify func(*http.Request) layer.Identity
+	// registrant, and the §7.3.1 layer read, which refuses a
+	// credential that failed verification. A verification failure is
+	// returned rather than swallowed; the paths that raise no
+	// authentication error of their own read it through caller.
+	// Defaults to an anonymous caller.
+	identify func(*http.Request) (layer.Identity, error)
+	// resolveGroup expands a layer's `groups:` filter into member subjects
+	// for the §4.6 predicate the layer read evaluates. serverboot wires the
+	// SCIM group expander here, the same one the registry reads. Nil leaves
+	// group membership to the caller's own JWT claims.
+	resolveGroup layer.GroupResolver
 	// defaultLayerVisibility is the fallback applied at register
 	// time when an admin-defined layer arrives with no explicit
 	// visibility. One of "public" | "organization" | "private".
@@ -178,7 +188,7 @@ func NewLayerEndpoint(s store.Store, tenantID string, mode *ModeTracker) *LayerE
 	return &LayerEndpoint{
 		store: s, tenantID: tenantID, mode: mode,
 		authAdmin: func(*http.Request) error { return nil },
-		identify:  func(*http.Request) layer.Identity { return layer.Identity{IsPublic: true} },
+		identify:  func(*http.Request) (layer.Identity, error) { return layer.Identity{IsPublic: true}, nil },
 	}
 }
 
@@ -189,10 +199,109 @@ func (e *LayerEndpoint) WithAdminAuth(fn func(*http.Request) error) *LayerEndpoi
 }
 
 // WithIdentityResolver installs the caller-identity resolver used to
-// derive a user-defined layer's owner from the authenticated registrant.
-func (e *LayerEndpoint) WithIdentityResolver(fn func(*http.Request) layer.Identity) *LayerEndpoint {
+// derive a user-defined layer's owner from the authenticated registrant and
+// to resolve the §7.3.1 layer read. A resolver that reports a verification
+// failure returns it, so the list read can refuse that credential with the
+// §6.10 envelope the failure already carries.
+func (e *LayerEndpoint) WithIdentityResolver(fn func(*http.Request) (layer.Identity, error)) *LayerEndpoint {
 	e.identify = fn
 	return e
+}
+
+// WithGroupResolver installs the §4.6 group expander the layer read evaluates
+// its `groups:` filters through. serverboot passes the same SCIM expander it
+// gives the registry, so a group-scoped layer resolves identically on the
+// layer list and in the composed view. Without it, group membership is read
+// from the caller's own claims alone.
+func (e *LayerEndpoint) WithGroupResolver(fn layer.GroupResolver) *LayerEndpoint {
+	e.resolveGroup = fn
+	return e
+}
+
+// readableBy narrows a stored layer list to what the caller may read under
+// the §7.3.1 layer read rule. It is the read counterpart of
+// authorizeLayerWrite and takes its admin arm from the same authAdmin
+// callback, so one deployment condition decides both reads and writes.
+//
+// A caller the callback admits reads the tenant's whole list. That is the
+// §4.7.2 tenant admin, and it is also every caller on a registry started
+// with no identity provider configured or in public mode, because the
+// callback serverboot installs admits unconditionally there. That second
+// case is what keeps the standalone layer panel populated for a caller with
+// no subject.
+//
+// Any other caller must resolve a verified subject. The guard runs before
+// layer.VisibleWith and is load-bearing rather than defensive: a deployment
+// that installs no request-time verifier resolves layer.Identity{IsPublic:
+// true}, and VisibleWith short-circuits to visible for that identity, so
+// evaluating the predicate first would hand the whole tenant to a caller a
+// refusing admin callback just turned away. That is the deployment naming a
+// free-form PODIUM_IDENTITY_PROVIDER label. A credential that failed
+// verification never reaches here: the caller was refused before this helper
+// ran.
+//
+// An authAdmin error of any kind, including the store failure
+// core.AdminAuthorize reports as ErrUnavailable, takes the non-admin path.
+// The read narrows rather than failing, which discloses less rather than
+// more, and the kinds are not discriminated.
+//
+// The result is always non-nil so an empty read marshals as [] rather than
+// null.
+//
+// Spec: §4.6, §7.3.1
+func (e *LayerEndpoint) readableBy(r *http.Request, caller layer.Identity, configs []store.LayerConfig) []store.LayerConfig {
+	out := make([]store.LayerConfig, 0, len(configs))
+	if e.authAdmin(r) == nil {
+		return append(out, configs...)
+	}
+	if !caller.IsAuthenticated || caller.Sub == "" {
+		return out
+	}
+	for _, c := range configs {
+		// VisibleWith takes a layer.Layer and reads its Visibility field.
+		// Precedence is unused on this read, so it stays at its zero value.
+		l := layer.Layer{ID: c.ID, Visibility: core.VisibilityOf(c)}
+		if layer.VisibleWith(l, caller, e.resolveGroup) {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// verifiedCaller resolves the caller and refuses the request when the
+// configured request-time verifier reports a verification failure, writing
+// the §6.10 envelope that failure already maps to and reporting false. It is
+// the guard form the file already uses for rejectIfReadOnly, and it runs
+// ahead of the admin arm: the endpoint's constructor default admits every
+// caller, so an admin arm evaluated first would serve a caller whose
+// credential the registry just failed to verify.
+//
+// A provider that resolves an absent credential, or an unreachable issuer
+// key set, as an anonymous caller rather than as a failure returns no error
+// here, so such a request is not refused and reads what readableBy admits it.
+//
+// Spec: §6.3.2, §6.3.3, §6.10, §7.3.1
+func (e *LayerEndpoint) verifiedCaller(w http.ResponseWriter, r *http.Request) (layer.Identity, bool) {
+	id, err := e.identify(r)
+	if err != nil {
+		writeIdentityError(w, err)
+		return layer.Identity{}, false
+	}
+	return id, true
+}
+
+// caller resolves the caller for a path that raises no authentication error
+// of its own: the write gates, the register handler, the erase handler, and
+// the audit emitters. A verification failure resolves the anonymous-public
+// caller, which is the disposition those paths take today and which every
+// write gate refuses, so this swallow alters no write outcome. It is the
+// swallow that lived in serverboot's layerIdentityResolver before the error
+// moved to the endpoint.
+func (e *LayerEndpoint) caller(r *http.Request) layer.Identity {
+	if id, err := e.identify(r); err == nil {
+		return id
+	}
+	return layer.Identity{IsPublic: true}
 }
 
 // authorizeLayerWrite implements the §7.3.1 layer-write authorization rule
@@ -211,7 +320,7 @@ func (e *LayerEndpoint) WithIdentityResolver(fn func(*http.Request) layer.Identi
 // Spec: §7.3.1
 func (e *LayerEndpoint) authorizeLayerWrite(r *http.Request, cfg store.LayerConfig) error {
 	if cfg.UserDefined {
-		if caller := e.identify(r); caller.IsAuthenticated && caller.Sub != "" && caller.Sub == cfg.Owner {
+		if caller := e.caller(r); caller.IsAuthenticated && caller.Sub != "" && caller.Sub == cfg.Owner {
 			return nil
 		}
 	}
@@ -306,7 +415,7 @@ func (e *LayerEndpoint) emitLayerEvent(r *http.Request, cfg store.LayerConfig, a
 	if cfg.Owner != "" {
 		fields["owner"] = cfg.Owner
 	}
-	emitAuditEvent(e.auditSink, r, e.identify(r), typ, cfg.ID, fields)
+	emitAuditEvent(e.auditSink, r, e.caller(r), typ, cfg.ID, fields)
 	// Spec: §7.6 — the watcher re-resolves its profile on
 	// layer.config_changed, so an admin layer change wakes it. A personal
 	// layer emits layer.user_registered instead and is not a §7.6 trigger:
@@ -501,7 +610,7 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 	// external endpoint (no local file) there is no on-disk chain to
 	// rewrite: the layers are still purged and the aggregator owns redaction
 	// of the shipped stream.
-	admin := callerIdentityString(e.identify(r))
+	admin := callerIdentityString(e.caller(r))
 	redacted := 0
 	if e.auditFile != nil {
 		redacted, err = audit.EraseUser(r.Context(), e.auditFile, body.UserID, body.Salt, admin)
@@ -693,7 +802,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if adminErr := e.authAdmin(r); adminErr != nil {
-		if who := e.identify(r); !who.IsAuthenticated || who.Sub == "" {
+		if who := e.caller(r); !who.IsAuthenticated || who.Sub == "" {
 			writeError(w, http.StatusForbidden, "auth.forbidden", adminErr.Error())
 			return
 		}
@@ -707,7 +816,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// invocation carries no --user-defined flag, so the class is resolved
 	// server-side from the caller's identity. An anonymous caller attempting
 	// an admin-defined registration is still rejected with auth.forbidden.
-	caller := e.identify(r)
+	caller := e.caller(r)
 	userDefined := req.UserDefined
 	if !userDefined {
 		if err := e.authAdmin(r); err != nil {
@@ -815,7 +924,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			// from the authenticated caller; with no authenticated identity
 			// (anonymous standalone) the layer stays private (no filters),
 			// which is the safe fallback for the `users` selection.
-			if id := e.identify(r); id.IsAuthenticated && id.Sub != "" {
+			if id := e.caller(r); id.IsAuthenticated && id.Sub != "" {
 				cfg.Users = []string{id.Sub}
 			}
 		}
@@ -860,22 +969,27 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 // list handles GET /v1/layers. With ?deleted=true it returns the
 // soft-deleted layers still inside the §8.4 30-day recovery window so an
 // admin can see what RestoreLayerConfig can recover.
+//
+// Both arms refuse a credential the request-time verifier could not verify,
+// and both narrow what they return to the caller's §7.3.1 read scope, so the
+// soft-deleted arm discloses no more than the live one.
+//
+// Spec: §4.6, §6.10, §7.3.1
 func (e *LayerEndpoint) list(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("deleted") == "true" {
-		layers, err := e.store.ListDeletedLayerConfigs(r.Context(), e.tenantID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"layers": layers})
+	caller, ok := e.verifiedCaller(w, r)
+	if !ok {
 		return
 	}
-	layers, err := e.store.ListLayerConfigs(r.Context(), e.tenantID)
+	fetch := e.store.ListLayerConfigs
+	if r.URL.Query().Get("deleted") == "true" {
+		fetch = e.store.ListDeletedLayerConfigs
+	}
+	layers, err := fetch(r.Context(), e.tenantID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"layers": layers})
+	writeJSON(w, http.StatusOK, map[string]any{"layers": e.readableBy(r, caller, layers)})
 }
 
 // restore handles POST /v1/layers/restore?id=ID. It clears the §8.4
@@ -970,10 +1084,21 @@ func (e *LayerEndpoint) unregister(w http.ResponseWriter, r *http.Request) {
 }
 
 // reorder handles POST /v1/layers/reorder.
+//
+// A credential the request-time verifier could not verify is refused before
+// any layer is restamped, and the response body reports the same set the list
+// read would, so a caller who owns one personal layer does not read the
+// tenant's whole list back through a reorder.
+//
+// Spec: §4.6, §6.10, §7.3.1
 func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
 			"method not allowed: "+r.Method)
+		return
+	}
+	caller, ok := e.verifiedCaller(w, r)
+	if !ok {
 		return
 	}
 	if rejectIfReadOnly(w, e.mode) {
@@ -1021,11 +1146,11 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	sort.Slice(updated, func(i, j int) bool { return updated[i].Order < updated[j].Order })
 	// spec §8.1: reordering admin-defined layers emits layer.config_changed.
 	if len(req.Order) > 0 {
-		emitAuditEvent(e.auditSink, r, e.identify(r), audit.EventLayerConfigChanged,
+		emitAuditEvent(e.auditSink, r, e.caller(r), audit.EventLayerConfigChanged,
 			strings.Join(req.Order, ","), map[string]string{"action": "reorder"})
 		e.publishConfigChanged(r.Context(), strings.Join(req.Order, ","), "reorder")
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"layers": updated})
+	writeJSON(w, http.StatusOK, map[string]any{"layers": e.readableBy(r, caller, updated)})
 }
 
 // reingestRequest is the optional POST /v1/layers/reingest body. The §7.3.1

@@ -967,14 +967,19 @@ func run(ctx context.Context, stop func()) error {
 		}
 	}
 	scimHandler := buildSCIMHandler(scimStore)
+	// The expander is held here so the §7.3.1 layer read filters against the
+	// same IdP-pushed membership the composed catalog does. A nil value is the
+	// JWT-only path both consumers already contract for.
+	var resolveGroup layer.GroupResolver
 	if scimHandler != nil {
-		registry = registry.WithGroupResolver(func(g string) []string {
+		resolveGroup = func(g string) []string {
 			members, err := scimStore.MembersOf(context.Background(), g)
 			if err != nil {
 				return nil
 			}
 			return members
-		})
+		}
+		registry = registry.WithGroupResolver(resolveGroup)
 	}
 
 	mode := server.NewModeTracker()
@@ -1243,7 +1248,8 @@ func run(ctx context.Context, stop func()) error {
 		WithDefaultVisibility(cfg.defaultLayerVisibility).
 		WithMaxUserLayers(cfg.maxUserLayers).
 		WithPublicBaseURL(cfg.publicURL).
-		WithIdentityResolver(layerIdentity).
+		WithIdentityResolver(layerCallerResolver(layerVerify)).
+		WithGroupResolver(resolveGroup).
 		WithAdminAuth(func(r *http.Request) error {
 			// §13.10/§13.11: a standalone deployment configures no identity
 			// provider, so the local operator is the de facto admin; public

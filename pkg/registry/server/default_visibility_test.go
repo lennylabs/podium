@@ -94,8 +94,8 @@ func TestLayerRegister_DefaultVisibilityUsers(t *testing.T) {
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
 	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
 		WithDefaultVisibility("users").
-		WithIdentityResolver(func(*http.Request) layer.Identity {
-			return layer.Identity{IsAuthenticated: true, Sub: "alice@acme.com"}
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) {
+			return layer.Identity{IsAuthenticated: true, Sub: "alice@acme.com"}, nil
 		})
 	ts := httptest.NewServer(endpoint.Handler())
 	t.Cleanup(ts.Close)

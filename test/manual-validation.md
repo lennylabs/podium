@@ -4795,7 +4795,9 @@ to 3 completed and the browser still signed in.
    served again.
 
    ```bash
-   curl -sS "http://127.0.0.1:8153/v1/layers" | python3 -m json.tool | grep -i -e '"ID"' -e secret
+   curl -sS "http://127.0.0.1:8153/v1/layers" \
+     -H "Authorization: Bearer $TOKEN" \
+     -w '\nstatus=%{http_code}\n' | grep -i -e '"ID"' -e secret -e '"code"' -e status
    ```
 
    **Expect.** `own-release` is listed, and no line carries a secret value. The
@@ -4803,9 +4805,18 @@ to 3 completed and the browser still signed in.
    every other response, so once the reveal is dismissed it cannot be read back.
    In the panel the row carries the "yours" marker, which the panel draws by
    comparing the layer's stored owner against the subject the posture read
-   reports. The list read itself is unfiltered: it reports every layer in the
-   tenant to any caller who can reach it, and the marker is a rendering of
-   ownership rather than a filter.
+   reports. The list read answers the layers the caller may read, so the same
+   request without the header returns `{"layers": []}`: this stack configures
+   `oidc-jwt` and seeds no admin grant, so an unauthenticated caller is neither
+   an admin nor an authenticated subject and reads no layers at all. The marker
+   remains a rendering of ownership over the rows the caller can see. A `401`
+   carrying `auth.token_expired` here means `$TOKEN`, minted in the
+   prerequisite, has passed its Keycloak lifetime rather than that the read
+   narrowed. Re-mint it with the prerequisite's command and re-run the step. The
+   two outcomes are distinguishable from the terminal without inspecting the
+   token, because the command prints the status line beside the filtered body: a
+   refused read prints `status=401` and the envelope's `"code"` line, and a read
+   that answered prints `status=200` and the layer lines it carries.
 
 5. **Negative control.** Confirm the write needed the session. Issue the same
    registration from the terminal, which carries no cookie.
@@ -4874,12 +4885,18 @@ properties of a rendering.
 4. Confirm the registry agrees with the panel.
 
    ```bash
-   curl -sS "http://127.0.0.1:8153/v1/layers" | grep -c own-release || true
+   curl -sS "http://127.0.0.1:8153/v1/layers" \
+     -H "Authorization: Bearer $TOKEN" \
+     -w '\nstatus=%{http_code}\n' | grep -e own-release -e '"code"' -e status || true
    ```
 
-   **Expect.** The live list no longer carries `own-release`. The layer is
-   restorable from the panel's recovery control until the §8.4 window runs out,
-   which is what makes this an unregister rather than an erasure.
+   **Expect.** `status=200` with no `own-release` line, read under the owner's
+   own credential. The layer is restorable from the panel's recovery control
+   until the §8.4 window runs out, which is what makes this an unregister rather
+   than an erasure. As in S48, `status=401` beside a `"code"` line carrying
+   `auth.token_expired` means the token minted in the prerequisite has expired;
+   re-mint it and re-run the step, because a listing read from a refused request
+   states nothing about the tombstone.
 
 **Cleanup.** As S44, on the same terms: leave the stack running when S50 follows,
 and run S44's teardown only when this is the last scenario executed.
@@ -4889,16 +4906,20 @@ and run S44's teardown only when this is the last scenario executed.
 ## S50: A non-owner is refused on a destructive operation
 
 **Goal.** Validate that the registry refuses a layer write from a signed-in
-caller who neither owns the layer nor is a tenant admin, and that the panel
-reports the refusal on the row without claiming to know why.
+caller who neither owns the layer nor is a tenant admin, that the panel reports
+the refusal on the row without claiming to know why, and that a layer outside
+the caller's view is absent from that caller's list and still refused when named
+directly.
 
-**Covers.** The §7.3.1 layer-write authorization rule, `auth.forbidden`, and the
-§13.10 panel's treatment of a refused write.
+**Covers.** The §7.3.1 layer read visibility rule, the §7.3.1 layer-write
+authorization rule, `auth.forbidden`, and the §13.10 panel's treatment of a
+refused write.
 
 **Why by hand.** The assertion is that a second person, signed in through the
-same UI, sees the layer and is refused the operation. The refusal's rendering is
-the part no Go test reads, and the panel presenting per-owner scoping as
-server-enforced while the server failed open is the defect this closes.
+same UI, is refused a write on a row that person can see and reads a list that
+omits the layer that person cannot see. The refusal's rendering is the part no
+Go test reads, and the panel presenting per-owner scoping as server-enforced
+while the server failed open is the defect this closes.
 
 **Prerequisites.** The S44 stack, and a layer owned by the `admin` user. Run S48
 to register `own-release` and stop before S49, or re-register it. A second
@@ -4951,32 +4972,105 @@ profile S47 signed in from cannot hold a second session.
    from `$SUBJECT`. A body whose `subject` equals `$SUBJECT` means the sign-in
    reused the admin profile's SSO session, and every later step in this scenario
    would then exercise the owner arm of the rule rather than the non-owner arm
-   it exists to test. The panel
-   lists `own-release` along with the layers `registry.yaml` declares.
-   `GET /v1/layers` is unfiltered, so bob reads the whole tenant's layer list.
-   The `own-release` row carries no "yours" marker, because bob's subject is not
-   its stored owner.
+   it exists to test. The panel lists `public-handbook` alone. `private-comp`
+   and `comp-readers-policy` are absent because bob's subject is in neither the
+   `users:` list nor the `comp-readers` group, and `own-release` is absent
+   because a user-defined layer is visible to its registrant alone.
+   `public-handbook` is present because bob is authenticated and it is public. A
+   panel listing more than `public-handbook` means the list read is still
+   unfiltered, which is the failure this step now catches; an empty panel means
+   bob's sign-in did not resolve a subject, and step 1 is re-run before
+   continuing. A panel showing its refusal band with `auth.token_expired` or
+   `auth.untrusted_token` instead of a row list means bob's session cookie no
+   longer verifies, which is a refusal rather than a narrowing. Sign bob in
+   again and re-run the step.
 
-3. Press Unregister on the `own-release` row and complete the confirmation as
-   S49 step 3 does.
+3. Press Unregister on the `public-handbook` row, type `public-handbook` into
+   the confirmation field, and press Unregister layer, as S49 step 3 does for
+   its own layer.
 
    **Expect.** The layer stays registered. The row reports that the registry
    refused that action and that nothing changed, and it names the code
    `auth.forbidden`. It reports neither who owns the layer nor the state of the
-   session, because the refusal carries neither. The Try again and Dismiss
-   controls are both offered, and every other control on the row stays live.
+   session, because the refusal carries neither. The band offers Dismiss alone
+   and reads `Retrying does not clear this condition.`, because the registry
+   marks `auth.forbidden` non-retryable. Every other control on the row stays
+   live.
 
 4. Confirm the refusal came from the authorization rule rather than from the
    panel.
 
-   **Expect.** The `DELETE /v1/layers` request in the browser's network panel
-   answered `403` with `auth.forbidden`. A `200` means the server let a
-   non-owner delete another caller's layer, which is the failure this scenario
-   exists to catch.
+   **Expect.** The `DELETE /v1/layers?id=public-handbook` request in the
+   browser's network panel answered `403` with `auth.forbidden`. A `200` means
+   the server let a non-owner delete another caller's layer, which is the
+   failure this scenario exists to catch.
 
-5. Confirm the owner is still authorized. Return to the window S47 signed in
+5. Confirm the layer bob cannot see is refused when it is named directly. Mint
+   bob's own token the way prerequisite 5 mints `TOKEN`, then issue the delete
+   from the terminal.
+
+   ```bash
+   export BOB_TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
+     -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
+     -d username=bob -d password=bob \
+     | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
+   curl -sS -X DELETE "http://127.0.0.1:8153/v1/layers?id=own-release" \
+     -H "Authorization: Bearer $BOB_TOKEN" \
+     -w '\nstatus=%{http_code}\n'
+   ```
+
+   The layer ID travels in the `id` query parameter, which is where the handler
+   reads it. A request without it answers `400 registry.invalid_argument`
+   before any authorization runs, and the handler reads no request body.
+
+   **Expect.** `auth.forbidden` at HTTP 403. A `200` means the server let a
+   non-owner delete another caller's layer, which is the failure this scenario
+   exists to catch. The refusal names neither the owner nor the state of the
+   session, because it carries neither, and it is the same refusal a caller who
+   can see the layer receives, so the narrowed list discloses nothing further
+   about it.
+
+6. Read the list with a credential the registry cannot verify, then with none at
+   all.
+
+   ```bash
+   curl -sS "http://127.0.0.1:8153/v1/layers" \
+     -H "Authorization: Bearer not-a-token" \
+     -w '\nstatus=%{http_code}\n'
+   curl -sS "http://127.0.0.1:8153/v1/layers" -w '\nstatus=%{http_code}\n'
+   ```
+
+   Then, in bob's browser window, open DevTools, Application, Cookies, replace
+   the value of the `__Host-podium_session` cookie with `not-a-token`, and
+   reload the layers route.
+
+   **Expect.** The first request answers `status=401` with code
+   `auth.untrusted_token`. The second answers `status=200` with
+   `{"layers": []}`. Those two outcomes are the rule this scenario turns on: a
+   credential the registry fails to verify is refused, and a request the
+   provider resolves as anonymous is answered with an empty list, which is what
+   keeps the signed-out panel working on this `oidc-jwt` stack. A `200` on the
+   first request means the layer endpoint is still resolving an unverifiable
+   credential to the anonymous caller, which is the fail-open this scenario
+   exists to catch. A `401` on the second means the refusal is keying on the
+   resolved identity rather than on the verifier's error, which would sign every
+   visitor out of the public panel.
+
+   In the browser the panel renders its refusal band where it previously
+   rendered bob's row list. The band carries `auth.untrusted_token`, the
+   envelope's suggested action, and the line "Retrying does not clear this
+   condition." in place of a retry, because the registry marks that code
+   non-retryable and the band's retry is gated on that flag. Above it the shell
+   renders its own refused-read banner, "The registry served no catalog for this
+   request.", with a Try again control, because the shell's catalog read takes
+   the same refusal from the same cookie. That pairing is the part no Go test
+   reads. A panel showing an empty row list instead means the shell swallowed
+   the refusal and is telling bob the tenant holds no layers he can see. Restore
+   the session by signing bob in again before continuing.
+
+7. Confirm the owner is still authorized. Return to the window S47 signed in
    from, whose session step 2 left untouched because bob signed in from a
-   separate profile, and press Unregister on the same row.
+   separate profile, and press Unregister on the `own-release` row.
 
    **Expect.** The confirmation appears and the write succeeds. Without this
    step a registry refusing every caller would pass step 3 for the wrong reason.

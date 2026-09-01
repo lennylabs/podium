@@ -9,11 +9,14 @@ package serverboot
 // endpoint would pass whether or not the gate is installed there.
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -167,6 +170,20 @@ type stackOpts struct {
 	exchangeTimeout time.Duration
 	// transactionTTL is __Host-podium_auth's Max-Age.
 	transactionTTL time.Duration
+	// layerConfigs seeds GET /v1/layers. newBrowserStack writes each row with
+	// st.PutLayerConfig after CreateTenant, before the endpoint is built. The
+	// zero value is nil, which writes nothing, so a caller that does not set
+	// it reads the empty list the stack returns today. A caller leaves
+	// TenantID unset, because the fixture owns the tenant and stamps it on
+	// each row before the write. The layers field handed to core.New is the
+	// composed catalog's list and does not reach this read.
+	layerConfigs []store.LayerConfig
+	// adminAuth is installed with WithAdminAuth. The zero value is nil, which
+	// leaves the constructor default that admits every caller, matching what
+	// the fixture does today. A case that needs the non-admin arms passes the
+	// closure serverboot installs on an identity-provider-configured
+	// registry, which refuses a caller holding no §4.7.2 grant.
+	adminAuth func(*http.Request) error
 }
 
 func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
@@ -191,6 +208,15 @@ func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
 	if err := st.CreateTenant(t.Context(), store.Tenant{ID: tenant, Name: tenant}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
+	// store.Memory keys a row on (TenantID, ID) and ListLayerConfigs returns
+	// only rows whose TenantID matches, so an unstamped row is written under
+	// the empty tenant and the read for this tenant answers an empty list.
+	for _, cfg := range opts.layerConfigs {
+		cfg.TenantID = tenant
+		if err := st.PutLayerConfig(t.Context(), cfg); err != nil {
+			t.Fatalf("PutLayerConfig %s: %v", cfg.ID, err)
+		}
+	}
 	layers := []layer.Layer{
 		{ID: "pub", Precedence: 1, Visibility: layer.Visibility{Public: true}},
 		{ID: "eng", Precedence: 2, Visibility: layer.Visibility{Groups: []string{"engineering"}}},
@@ -210,12 +236,16 @@ func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
 	verifier := identity.NewOIDCVerifier(idp.issuer(), opts.audience, 0)
 	layerVerify := oidcJWTVerifier(verifier, "", mapping, opts.browserAuth)
 	layerIdentity := layerIdentityResolver(layerVerify)
+	layerCaller := layerCallerResolver(layerVerify)
 
 	reg := core.New(st, tenant, layers)
 	srv := server.New(reg, server.WithIdentityVerifier(layerVerify))
 	mode := server.NewModeTracker()
 	layerEndpoint := server.NewLayerEndpoint(st, tenant, mode).
-		WithIdentityResolver(layerIdentity)
+		WithIdentityResolver(layerCaller)
+	if opts.adminAuth != nil {
+		layerEndpoint = layerEndpoint.WithAdminAuth(opts.adminAuth)
+	}
 
 	mux := http.NewServeMux()
 	mux.Handle("/v1/layers", layerEndpoint.Handler())
@@ -626,11 +656,15 @@ func TestBrowserFlow_CSRFCoversLayerWrites(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.4 — a request carrying a session cookie past the token's exp
-// reports differently on each surface, and the rule is what a panel built on
-// a single expiry signal fails against. The meta-tool route reports the
-// expiry, the layer read answers unfiltered, and the posture read answers 200
-// with no subject.
+// Spec: §6.10, §7.3.1, §7.3.4 — a request carrying a session cookie past the
+// token's exp is refused on every surface that verifies the credential, so
+// the meta-tool route and the layer read both report auth.token_expired,
+// while the §7.3.4 posture read answers 200 with no subject because it
+// refuses no request for lack of a credential.
+//
+// The layer read's refusal does not depend on this fixture's admin callback.
+// newBrowserStack installs none, so the endpoint's constructor default admits
+// every caller, and the refusal is what runs ahead of that admin arm.
 func TestBrowserFlow_ExpiredSessionAcrossSurfaces(t *testing.T) {
 	t.Parallel()
 	b := newBrowserStack(t, stackOpts{browserAuth: true})
@@ -649,8 +683,11 @@ func TestBrowserFlow_ExpiredSessionAcrossSurfaces(t *testing.T) {
 
 	layers := b.do(t, http.MethodGet, "/v1/layers", nil, expired)
 	defer layers.Body.Close()
-	if layers.StatusCode != http.StatusOK {
-		t.Errorf("layer read = %d, want 200; it reports nothing about the verification failure", layers.StatusCode)
+	if layers.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("layer read = %d, want 401 for a session past the token's exp", layers.StatusCode)
+	}
+	if e := envelope(t, layers); e.Code != "auth.token_expired" {
+		t.Errorf("layer read code = %q, want auth.token_expired", e.Code)
 	}
 
 	postureResp := b.do(t, http.MethodGet, server.PathWebUISession, nil, expired)
@@ -786,5 +823,132 @@ func TestBrowserFlow_DisabledRegistersNoRoutes(t *testing.T) {
 	defer read.Body.Close()
 	if read.StatusCode != http.StatusNotFound {
 		t.Errorf("stale cookie read = %d, want 404; a disabled registry reads no cookie", read.StatusCode)
+	}
+}
+
+// bfLayerRows seeds the narrowing case: a public row, a row gated on the
+// engineering group, and a user-defined row owned by a third subject. Each row
+// carries a LocalPath the assertions search the response body for, because the
+// stored record is what GET /v1/layers serializes.
+func bfLayerRows() []store.LayerConfig {
+	return []store.LayerConfig{
+		{ID: "pub", SourceType: "local", LocalPath: "/srv/pub", Order: 10, Public: true},
+		{ID: "eng", SourceType: "local", LocalPath: "/srv/eng-secret", Order: 20,
+			Groups: []string{"engineering"}},
+		{ID: "carol-personal", SourceType: "local", LocalPath: "/srv/carol-personal", Order: 30,
+			UserDefined: true, Owner: "carol@acme.com", Users: []string{"carol@acme.com"}},
+	}
+}
+
+// layerList reads GET /v1/layers, requires 200, and reports the listed layer
+// IDs in sorted order together with the raw body, so a case can assert both
+// the set it received and the strings it must never receive.
+func (b *browserStack) layerList(t *testing.T, cookies ...*http.Cookie) ([]string, string) {
+	t.Helper()
+	resp := b.do(t, http.MethodGet, "/v1/layers", nil, cookies...)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read layer list: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("layer read = %d, want 200\nbody: %s", resp.StatusCode, body)
+	}
+	var got struct {
+		Layers []store.LayerConfig
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("decode layer list: %v\nbody: %s", err, body)
+	}
+	ids := make([]string, 0, len(got.Layers))
+	for _, l := range got.Layers {
+		ids = append(ids, l.ID)
+	}
+	sort.Strings(ids)
+	return ids, string(body)
+}
+
+// Spec: §4.6, §7.3.1 — the layer read narrows to the caller's effective view
+// through the wiring the boot path installs: the real verifier, the real
+// caller resolver, and the endpoint mounted on the boot mux behind the
+// browser-origin gate. The fixture installs the admin callback an
+// identity-provider-configured registry installs, which refuses a caller
+// holding no §4.7.2 grant, because the constructor default admits and every
+// arm below would otherwise read the whole list.
+func TestBrowserFlow_LayerListNarrowsToCaller(t *testing.T) {
+	t.Parallel()
+	refuseAdmin := func(*http.Request) error { return errors.New("not a tenant admin") }
+	b := newBrowserStack(t, stackOpts{
+		browserAuth:  true,
+		layerConfigs: bfLayerRows(),
+		adminAuth:    refuseAdmin,
+	})
+	cookie := func(idp *jwksIdP, sub string, groups []string) *http.Cookie {
+		return &http.Cookie{
+			Name:  server.CookieSession,
+			Value: idp.sign(t, gwClaims(idp.issuer(), sub, groups)),
+		}
+	}
+
+	// A member of engineering reads the public row and the group-gated row.
+	// The mapping the stack configures turns the token's idp-eng claim into
+	// the engineering group the row names.
+	member, body := b.layerList(t, cookie(b.idp, "alice@acme.com", []string{"idp-eng"}))
+	if strings.Join(member, ",") != "eng,pub" {
+		t.Errorf("member read = %v, want the public and the engineering row", member)
+	}
+	for _, withheld := range []string{"carol-personal", "carol@acme.com", "/srv/carol-personal"} {
+		if strings.Contains(body, withheld) {
+			t.Errorf("member body disclosed %q from a layer outside the caller's view\nbody: %s", withheld, body)
+		}
+	}
+
+	// A caller outside the group reads the public row alone, and learns
+	// neither that the group-gated row exists nor where its source lives.
+	outsider, body := b.layerList(t, cookie(b.idp, "bob@acme.com", nil))
+	if strings.Join(outsider, ",") != "pub" {
+		t.Errorf("non-member read = %v, want the public row alone", outsider)
+	}
+	for _, withheld := range []string{"eng", "/srv/eng-secret", "engineering", "carol-personal", "carol@acme.com", "/srv/carol-personal"} {
+		if strings.Contains(body, withheld) {
+			t.Errorf("non-member body disclosed %q\nbody: %s", withheld, body)
+		}
+	}
+
+	// A caller who never signed in is answered rather than refused: the
+	// verifier resolves an absent credential as anonymous with no error, which
+	// is what keeps the signed-out layer panel working. That caller reads no
+	// layers.
+	anonIDs, body := b.layerList(t)
+	if len(anonIDs) != 0 {
+		t.Errorf("cookie-less read = %v, want no layers", anonIDs)
+	}
+	compact := &bytes.Buffer{}
+	if err := json.Compact(compact, []byte(body)); err != nil {
+		t.Fatalf("compact cookie-less body: %v", err)
+	}
+	if compact.String() != `{"layers":[]}` {
+		t.Errorf("cookie-less body = %s, want an empty array rather than null", body)
+	}
+
+	// A stack whose admin callback admits is the registry that configures no
+	// identity provider, and it answers every caller the whole tenant list.
+	admin := newBrowserStack(t, stackOpts{browserAuth: true, layerConfigs: bfLayerRows()})
+	all, _ := admin.layerList(t)
+	if strings.Join(all, ",") != "carol-personal,eng,pub" {
+		t.Errorf("admin-arm read = %v, want the tenant's whole list", all)
+	}
+
+	// A credential the registry cannot verify is refused rather than narrowed,
+	// which is the condition the empty cookie-less body must never be confused
+	// with.
+	other := newJWKSIdP(t)
+	resp := b.do(t, http.MethodGet, "/v1/layers", nil, cookie(other, "mallory@acme.com", nil))
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("untrusted-issuer read = %d, want 401", resp.StatusCode)
+	}
+	if e := envelope(t, resp); e.Code != "auth.untrusted_token" {
+		t.Errorf("untrusted-issuer code = %q, want auth.untrusted_token", e.Code)
 	}
 }

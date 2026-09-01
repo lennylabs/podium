@@ -91,7 +91,7 @@ func layerAuditHarness(t *testing.T, sink *audit.FileSink, id layer.Identity) st
 	}
 	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
 		WithAudit(sink).
-		WithIdentityResolver(func(*http.Request) layer.Identity { return id })
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) { return id, nil })
 	ts := httptest.NewServer(endpoint.Handler())
 	t.Cleanup(ts.Close)
 	return ts.URL

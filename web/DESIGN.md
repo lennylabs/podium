@@ -41,8 +41,10 @@ as analysts, prompt authors, and reviewers who want to browse the catalog withou
 installing the SDK or learning the CLI. It is also where layers are managed. The
 layer-panel paragraph of §13.10 states who may do what there: an administrator
 manages the registered layer list, and an ordinary user manages the layers that
-user defined. The list read hands the panel every layer stored under the tenant,
-on the terms the unfiltered-list rule sets, and no response reports that the
+user defined. The list read hands the panel the layers the caller may read on the
+terms the §7.3.1 layer read visibility rule sets, which are the tenant's whole
+list for a tenant admin and for every caller on a registry that authenticates
+none, and the layers §4.6 admits otherwise, and no response reports that the
 caller holds the administrator role. The panel therefore does not predict that
 role. It renders its write operations on every row of a uniformly actionable
 list and presents whatever refusal a write receives. The one marker it carries is
@@ -285,9 +287,10 @@ structs in `pkg/registry/server/server.go` own both, and
 
 The catalog is assembled from layers, and spec §4.6 defines what a layer is: one
 source and one visibility declaration, composed in precedence order. This is the
-only surface with write operations. Its rows differ by layer class and by
-ownership rather than by the caller's role, because the list read is unscoped and
-no response reports that the caller holds the administrator role.
+only surface with write operations. Its rows are the rows the caller may read
+under §7.3.1, and its per-row rendering differs by layer class and by ownership
+rather than by the caller's role, because no response reports that the caller
+holds the administrator role.
 
 A layer record identifies its source, records when it was last ingested, carries
 an order value that sets its precedence, and declares who can see it. The registry
@@ -380,15 +383,26 @@ the caller's current count, so the panel renders that refusal where the user
 creates a layer rather than as a generic failure.
 
 Two properties of the shipped API decide how far the panel can lean on that role
-split. The first is the read. The layer list is not scoped to the caller: it
-returns every layer stored under the tenant, so the panel's role split is
-presentation over a list the server hands it whole. That statement is owned by
-the unfiltered-list rule under "The layer-ownership defect" in
-`proposals/0013-build-the-13-10-web-ui.md`, and the panel carries no condition
-that rule does not state.
+split. The first is the read. The layer list reports what the caller may read: a
+tenant admin and every caller on a registry that authenticates none receive the
+tenant's whole list, any other caller who resolves a verified subject receives
+the layers §4.6 admits, and a caller who resolves no subject receives none. The
+panel's role split is presentation over whichever list the server returns. That
+statement is owned by the §7.3.1 layer read visibility rule.
+
+A caller whose credential fails verification is refused rather than narrowed. The
+read answers the §6.10 envelope that credential already receives elsewhere, and
+the panel renders its refusal band in place of its table, naming the code and the
+envelope's `suggested_action`. The band offers no retry, because the registry
+marks none of those codes retryable. The way back belongs to the shell: the same
+credential refuses the shell's own catalog read, so the layers route renders the
+refused-read banner with its retry, or the ended-session banner with its recovery
+control where the posture read resolved a subject, above the panel it keeps
+mounted.
 
 The second is the write. Each write is authorized per layer, under the
-layer-write authorization rule stated in the same proposal section: an operation
+layer-write authorization rule stated under "The layer-ownership defect" in
+`proposals/0013-build-the-13-10-web-ui.md`: an operation
 on a user-defined layer is authorized to that layer's owner or to a tenant
 admin, an operation on an admin-defined layer is authorized to a tenant admin
 alone, and the rule covers register, unregister, update, restore, reorder, and
@@ -422,17 +436,26 @@ field, and the panel presents the stored owner as the field it is rather than as
 a statement about who may write it. Whether the panel's
 writes are admitted is decided on a different axis: the liveness condition above
 is a property of the deployment's configuration rather than of whether this
-caller resolved a subject, so on a registry where the rule is live a caller who
-resolves no subject carries no marker and still receives the refusal the
-paragraph above tells the panel to present.
+caller resolved a subject. Where the registry configures no identity provider or
+runs in public mode, the write rule is not live, the panel holds the tenant's
+whole list, no row carries an ownership marker because no subject resolves, and
+no write is refused. Where the registry configures an identity provider and does
+not run in public mode, the rule is live and the read has three arms under
+§7.3.1: a caller holding the tenant `admin` role reads the tenant's whole list,
+any other caller who resolves a verified subject reads the layers §4.6 admits,
+and a caller who resolves no subject reads no layers. A caller who resolves a
+subject receives on any row it can see whatever refusal the rule produces, which
+the panel presents, and a caller who resolves no subject stands on the panel's
+empty state with no row to mark and no write to attempt.
 
-Whether an anonymous caller sees the panel is a design decision rather than one
-the API makes. Listing layers carries no authorization check, and a standalone
-deployment with no identity provider treats the local operator as the
-administrator (§13.10, with the admin-authorization wiring in
-`internal/serverboot/serverboot.go`). Hiding the panel from an unauthenticated
-caller is therefore a UI choice, and it has to keep the panel available in the
-standalone deployment, where nobody authenticates and the panel is the point.
+Whether an anonymous caller sees the panel is a UI decision, while what the panel
+holds is decided by the read: the tenant's whole list for a tenant admin and on a
+registry that authenticates no caller, the layers §4.6 admits for any other
+caller who resolves a verified subject, and no rows for a caller who resolves
+none. A standalone deployment configures no identity provider, treats the local
+operator as the administrator (§13.10, with the admin-authorization wiring in
+`internal/serverboot/serverboot.go`), and keeps the panel available holding the
+tenant's whole list, where nobody authenticates and the panel is the point.
 
 ## The state matrix
 
@@ -464,10 +487,11 @@ operations, and the panel presents whatever refusal a write receives.
    admin-defined layers an ordinary user cannot modify or unregister. Destructive
    operations are not exclusive to this role, since a user can unregister a layer
    they own. No response reports that the caller holds this role, and the list
-   read hands the panel every layer stored under the tenant on the terms the
-   unfiltered-list rule sets, so the panel renders its write operations over the
-   whole list and presents whatever refusal a write receives rather than
-   predicting the outcome.
+   read hands the panel the layers the caller may read on the terms the §7.3.1
+   layer read visibility rule sets, which are the tenant's whole list for this
+   role and for every caller on a registry that authenticates none, so the panel
+   renders its write operations over the list it received and presents whatever
+   refusal a write receives rather than predicting the outcome.
 
 **The catalog-scope rule.** How much of the catalog an anonymous caller sees is a
 property of the deployment, and the page reads it from the posture read rather

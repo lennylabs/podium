@@ -4,12 +4,18 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/lennylabs/podium/pkg/identity"
+	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -362,4 +368,460 @@ func TestLayerEndpoint_RegisterGitLayer_WebhookURLEscapesLayerID(t *testing.T) {
 	if resp.StatusCode == http.StatusNotFound {
 		t.Errorf("POST %s = 404, advertised webhook URL does not reach the ingest endpoint", got.WebhookURL)
 	}
+}
+
+// layerArmOpts configures newLayerArmHarness. The admin callback, the
+// identity resolver, and the group resolver are the three seams the §7.3.1
+// layer read evaluates, and each field is the constant answer the harness
+// gives on every request. The identity seam carries an error because the read
+// refuses a credential the verifier could not verify, and every arm of
+// TestLayerEndpoint_ListRefusesUnverifiedCredential is defined by that error.
+type layerArmOpts struct {
+	adminErr     error
+	callerID     layer.Identity
+	callerErr    error
+	resolveGroup layer.GroupResolver
+	configs      []store.LayerConfig
+}
+
+// newLayerArmHarness serves the layer endpoint over a memory store seeded
+// with opts.configs, with the admin, identity, and group seams wired to the
+// constant answers opts carries. A config whose DeletedAt is non-nil is
+// written and then soft-deleted, so it appears on the ?deleted=true arm.
+func newLayerArmHarness(t *testing.T, opts layerArmOpts) (string, store.Store, func()) {
+	t.Helper()
+	ctx := context.Background()
+	st := store.NewMemory()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	for _, cfg := range opts.configs {
+		deleted := cfg.DeletedAt != nil
+		cfg.TenantID = "t"
+		cfg.DeletedAt = nil
+		if err := st.PutLayerConfig(ctx, cfg); err != nil {
+			t.Fatalf("PutLayerConfig %s: %v", cfg.ID, err)
+		}
+		if deleted {
+			if err := st.DeleteLayerConfig(ctx, "t", cfg.ID); err != nil {
+				t.Fatalf("DeleteLayerConfig %s: %v", cfg.ID, err)
+			}
+		}
+	}
+	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
+		WithAdminAuth(func(*http.Request) error { return opts.adminErr }).
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) {
+			return opts.callerID, opts.callerErr
+		}).
+		WithGroupResolver(opts.resolveGroup)
+	ts := httptest.NewServer(endpoint.Handler())
+	return ts.URL, st, ts.Close
+}
+
+// layerIDs returns the layer ids in a list or reorder response body.
+func layerIDs(t *testing.T, body []byte) []string {
+	t.Helper()
+	var resp struct {
+		Layers []store.LayerConfig `json:"layers"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("unmarshal %s: %v", body, err)
+	}
+	ids := make([]string, 0, len(resp.Layers))
+	for _, l := range resp.Layers {
+		ids = append(ids, l.ID)
+	}
+	return ids
+}
+
+func layerGet(t *testing.T, base, path string) (*http.Response, []byte) {
+	t.Helper()
+	resp, err := http.Get(base + path)
+	if err != nil {
+		t.Fatalf("GET %s: %v", path, err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp, out
+}
+
+// armLayers is the seeded tenant the read-scope cases share: one private
+// admin-defined layer, one public admin-defined layer, and one user-defined
+// layer owned by alice, which stores its registrant in Users the way the
+// register handler does.
+func armLayers() []store.LayerConfig {
+	return []store.LayerConfig{
+		{ID: "private", SourceType: "local", LocalPath: "/srv/private-source", Order: 10},
+		{ID: "public", SourceType: "local", LocalPath: "/srv/public", Order: 20, Public: true},
+		{ID: "alice-personal", SourceType: "local", LocalPath: "/srv/alice", Order: 30,
+			UserDefined: true, Owner: "alice", Users: []string{"alice"}},
+	}
+}
+
+// TestLayerEndpoint_ListArmsByCallerRole pins the §7.3.1 layer read: a caller
+// the admin callback admits reads the tenant's whole list, any other
+// authenticated caller reads the layers §4.6 admits for them, and a caller
+// resolving no verified subject reads none.
+//
+// Spec: §4.6, §7.3.1
+func TestLayerEndpoint_ListArmsByCallerRole(t *testing.T) {
+	t.Parallel()
+	alice := layer.Identity{Sub: "alice", IsAuthenticated: true}
+	bob := layer.Identity{Sub: "bob", IsAuthenticated: true}
+
+	cases := []struct {
+		name     string
+		opts     layerArmOpts
+		path     string
+		wantIDs  []string
+		wantBody string   // exact compacted body, when non-empty
+		absent   []string // substrings the body must not carry
+	}{
+		{
+			name:    "admin_reads_whole_tenant",
+			opts:    layerArmOpts{adminErr: nil, callerID: bob, configs: armLayers()},
+			path:    "/v1/layers",
+			wantIDs: []string{"private", "public", "alice-personal"},
+		},
+		{
+			name:    "user_reads_effective_view",
+			opts:    layerArmOpts{adminErr: server.ErrAdminRequired, callerID: bob, configs: armLayers()},
+			path:    "/v1/layers",
+			wantIDs: []string{"public"},
+			absent:  []string{"private", "/srv/private-source", "alice"},
+		},
+		{
+			name:    "owner_reads_own_user_defined_layer",
+			opts:    layerArmOpts{adminErr: server.ErrAdminRequired, callerID: alice, configs: armLayers()},
+			path:    "/v1/layers",
+			wantIDs: []string{"public", "alice-personal"},
+			absent:  []string{"/srv/private-source"},
+		},
+		{
+			name: "anonymous_reads_nothing",
+			opts: layerArmOpts{adminErr: server.ErrAdminRequired,
+				callerID: layer.Identity{}, configs: armLayers()},
+			path:     "/v1/layers",
+			wantIDs:  []string{},
+			wantBody: `{"layers":[]}`,
+		},
+		{
+			// A deployment naming a free-form PODIUM_IDENTITY_PROVIDER label
+			// installs no request-time verifier, so its caller resolves the
+			// anonymous-public identity that layer.VisibleWith admits
+			// everywhere, and its admin callback refuses. The authentication
+			// guard is what keeps that caller off the tenant's list.
+			name: "nil_verifier_reads_nothing",
+			opts: layerArmOpts{adminErr: server.ErrAdminRequired,
+				callerID: layer.Identity{IsPublic: true}, configs: armLayers()},
+			path:     "/v1/layers",
+			wantIDs:  []string{},
+			wantBody: `{"layers":[]}`,
+		},
+		{
+			name: "admin_check_error",
+			opts: layerArmOpts{adminErr: fmt.Errorf("admin check: %w", core.ErrUnavailable),
+				callerID: bob, configs: armLayers()},
+			path:    "/v1/layers",
+			wantIDs: []string{"public"},
+		},
+		{
+			name: "group_resolver_seam_member",
+			opts: layerArmOpts{
+				adminErr: server.ErrAdminRequired,
+				callerID: bob,
+				resolveGroup: func(g string) []string {
+					if g == "finance-readers" {
+						return []string{"bob"}
+					}
+					return nil
+				},
+				configs: []store.LayerConfig{
+					{ID: "finance", SourceType: "local", LocalPath: "/srv/fin", Groups: []string{"finance-readers"}},
+				},
+			},
+			path:    "/v1/layers",
+			wantIDs: []string{"finance"},
+		},
+		{
+			name: "group_resolver_seam_non_member",
+			opts: layerArmOpts{
+				adminErr:     server.ErrAdminRequired,
+				callerID:     bob,
+				resolveGroup: func(string) []string { return []string{"carol"} },
+				configs: []store.LayerConfig{
+					{ID: "finance", SourceType: "local", LocalPath: "/srv/fin", Groups: []string{"finance-readers"}},
+				},
+			},
+			path:    "/v1/layers",
+			wantIDs: []string{},
+		},
+		{
+			name: "deleted_arm_admin_reads_tombstone",
+			opts: layerArmOpts{callerID: bob, configs: []store.LayerConfig{
+				{ID: "gone", SourceType: "local", LocalPath: "/srv/gone", UserDefined: true,
+					Owner: "alice", Users: []string{"alice"}, DeletedAt: &deletedMarker},
+			}},
+			path:    "/v1/layers?deleted=true",
+			wantIDs: []string{"gone"},
+		},
+		{
+			name: "deleted_arm_owner_reads_tombstone",
+			opts: layerArmOpts{adminErr: server.ErrAdminRequired, callerID: alice,
+				configs: []store.LayerConfig{
+					{ID: "gone", SourceType: "local", LocalPath: "/srv/gone", UserDefined: true,
+						Owner: "alice", Users: []string{"alice"}, DeletedAt: &deletedMarker},
+				}},
+			path:    "/v1/layers?deleted=true",
+			wantIDs: []string{"gone"},
+		},
+		{
+			name: "deleted_arm_takes_the_same_rule",
+			opts: layerArmOpts{adminErr: server.ErrAdminRequired, callerID: bob,
+				configs: []store.LayerConfig{
+					{ID: "gone", SourceType: "local", LocalPath: "/srv/gone", UserDefined: true,
+						Owner: "alice", Users: []string{"alice"}, DeletedAt: &deletedMarker},
+				}},
+			path:    "/v1/layers?deleted=true",
+			wantIDs: []string{},
+			absent:  []string{"gone", "alice"},
+		},
+		{
+			name: "deleted_arm_anonymous_reads_nothing",
+			opts: layerArmOpts{adminErr: server.ErrAdminRequired, callerID: layer.Identity{},
+				configs: []store.LayerConfig{
+					{ID: "gone", SourceType: "local", LocalPath: "/srv/gone", UserDefined: true,
+						Owner: "alice", Users: []string{"alice"}, DeletedAt: &deletedMarker},
+				}},
+			path:     "/v1/layers?deleted=true",
+			wantIDs:  []string{},
+			wantBody: `{"layers":[]}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base, _, cleanup := newLayerArmHarness(t, tc.opts)
+			defer cleanup()
+
+			resp, body := layerGet(t, base, tc.path)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+			}
+			if got := layerIDs(t, body); !equalStringSets(got, tc.wantIDs) {
+				t.Errorf("layer ids = %v, want %v", got, tc.wantIDs)
+			}
+			if tc.wantBody != "" {
+				var compact bytes.Buffer
+				if err := json.Compact(&compact, body); err != nil {
+					t.Fatalf("compact %s: %v", body, err)
+				}
+				if compact.String() != tc.wantBody {
+					t.Errorf("body = %s, want %s", compact.String(), tc.wantBody)
+				}
+			}
+			for _, s := range tc.absent {
+				if strings.Contains(string(body), s) {
+					t.Errorf("body discloses %q: %s", s, body)
+				}
+			}
+		})
+	}
+}
+
+// deletedMarker flags a seeded config the harness soft-deletes. Its value is
+// never read; store.DeleteLayerConfig stamps the tombstone.
+var deletedMarker = time.Unix(0, 0)
+
+func equalStringSets(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	g := append([]string(nil), got...)
+	w := append([]string(nil), want...)
+	sort.Strings(g)
+	sort.Strings(w)
+	for i := range g {
+		if g[i] != w[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// TestLayerEndpoint_ReorderResponseTakesTheReadRule pins that the reorder
+// response body reports the same set the list read would, so a caller who
+// owns one personal layer does not read the tenant's whole list back through
+// a reorder.
+//
+// Spec: §4.6, §7.3.1
+func TestLayerEndpoint_ReorderResponseTakesTheReadRule(t *testing.T) {
+	t.Parallel()
+	alice := layer.Identity{Sub: "alice", IsAuthenticated: true}
+
+	t.Run("owner_reads_own_view", func(t *testing.T) {
+		t.Parallel()
+		base, _, cleanup := newLayerArmHarness(t, layerArmOpts{
+			adminErr: server.ErrAdminRequired, callerID: alice, configs: armLayers()})
+		defer cleanup()
+
+		resp, body := mustPost(t, base, "/v1/layers/reorder",
+			map[string]any{"order": []string{"alice-personal"}})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		if got := layerIDs(t, body); !equalStringSets(got, []string{"public", "alice-personal"}) {
+			t.Errorf("layer ids = %v, want [alice-personal public]", got)
+		}
+		for _, s := range []string{"private", "/srv/private-source"} {
+			if strings.Contains(string(body), s) {
+				t.Errorf("body discloses %q: %s", s, body)
+			}
+		}
+	})
+
+	t.Run("admin_reads_whole_tenant", func(t *testing.T) {
+		t.Parallel()
+		base, _, cleanup := newLayerArmHarness(t, layerArmOpts{callerID: alice, configs: armLayers()})
+		defer cleanup()
+
+		resp, body := mustPost(t, base, "/v1/layers/reorder",
+			map[string]any{"order": []string{"alice-personal"}})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		if got := layerIDs(t, body); !equalStringSets(got, []string{"private", "public", "alice-personal"}) {
+			t.Errorf("layer ids = %v, want all three", got)
+		}
+	})
+}
+
+// TestLayerEndpoint_ListRefusesUnverifiedCredential pins that a credential
+// the request-time verifier could not verify is refused on both list arms and
+// on reorder, with the §6.10 envelope that failure already carries, and that
+// the write paths keep their auth.forbidden disposition.
+//
+// Spec: §6.3.2, §6.3.3, §6.10, §7.3.1
+func TestLayerEndpoint_ListRefusesUnverifiedCredential(t *testing.T) {
+	t.Parallel()
+
+	refusals := []struct {
+		name     string
+		opts     layerArmOpts
+		wantCode string
+		wantISS  string
+	}{
+		{
+			name: "expired",
+			opts: layerArmOpts{adminErr: server.ErrAdminRequired,
+				callerErr: identity.ErrTokenExpired, configs: armLayers()},
+			wantCode: "auth.token_expired",
+		},
+		{
+			name: "untrusted_token",
+			opts: layerArmOpts{adminErr: server.ErrAdminRequired,
+				callerErr: &identity.UntrustedTokenError{Issuer: "https://idp.example"},
+				configs:   armLayers()},
+			wantCode: "auth.untrusted_token",
+			wantISS:  "https://idp.example",
+		},
+		{
+			name: "untrusted_runtime",
+			opts: layerArmOpts{adminErr: server.ErrAdminRequired,
+				callerErr: identity.ErrUntrustedRuntime, configs: armLayers()},
+			wantCode: "auth.untrusted_runtime",
+		},
+		{
+			// The constructor default admits every caller, so an admin arm
+			// evaluated before the guard would serve a credential the
+			// registry just failed to verify.
+			name:     "admitting_admin_callback_does_not_rescue",
+			opts:     layerArmOpts{callerErr: identity.ErrTokenExpired, configs: armLayers()},
+			wantCode: "auth.token_expired",
+		},
+	}
+
+	for _, tc := range refusals {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			base, _, cleanup := newLayerArmHarness(t, tc.opts)
+			defer cleanup()
+
+			for _, path := range []string{"/v1/layers", "/v1/layers?deleted=true"} {
+				resp, body := layerGet(t, base, path)
+				if resp.StatusCode != http.StatusUnauthorized {
+					t.Fatalf("GET %s status = %d, want 401: %s", path, resp.StatusCode, body)
+				}
+				if code := layerErrorCode(t, body); code != tc.wantCode {
+					t.Errorf("GET %s code = %q, want %q", path, code, tc.wantCode)
+				}
+				if tc.wantISS != "" && !strings.Contains(string(body), tc.wantISS) {
+					t.Errorf("GET %s body missing token_iss %q: %s", path, tc.wantISS, body)
+				}
+			}
+		})
+	}
+
+	t.Run("reorder", func(t *testing.T) {
+		t.Parallel()
+		base, st, cleanup := newLayerArmHarness(t, layerArmOpts{
+			callerErr: identity.ErrTokenExpired, configs: armLayers()})
+		defer cleanup()
+
+		resp, body := mustPost(t, base, "/v1/layers/reorder",
+			map[string]any{"order": []string{"alice-personal", "public", "private"}})
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401: %s", resp.StatusCode, body)
+		}
+		if code := layerErrorCode(t, body); code != "auth.token_expired" {
+			t.Errorf("code = %q, want auth.token_expired", code)
+		}
+		// The guard runs before the restamp, so the stored order is intact.
+		stored, err := st.ListLayerConfigs(context.Background(), "t")
+		if err != nil {
+			t.Fatalf("ListLayerConfigs: %v", err)
+		}
+		want := map[string]int{"private": 10, "public": 20, "alice-personal": 30}
+		for _, cfg := range stored {
+			if cfg.Order != want[cfg.ID] {
+				t.Errorf("layer %s order = %d, want %d", cfg.ID, cfg.Order, want[cfg.ID])
+			}
+		}
+	})
+
+	t.Run("writes_unchanged", func(t *testing.T) {
+		t.Parallel()
+		base, _, cleanup := newLayerArmHarness(t, layerArmOpts{
+			adminErr: server.ErrAdminRequired, callerErr: identity.ErrTokenExpired})
+		defer cleanup()
+
+		resp, body := mustPost(t, base, "/v1/layers", map[string]any{
+			"id": "mine", "source_type": "local", "local_path": "/tmp/mine", "user_defined": true,
+		})
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("register status = %d, want 403: %s", resp.StatusCode, body)
+		}
+		if code := layerErrorCode(t, body); code != "auth.forbidden" {
+			t.Errorf("register code = %q, want auth.forbidden", code)
+		}
+	})
+}
+
+// layerErrorCode reads the §6.10 error code out of a response body.
+func layerErrorCode(t *testing.T, body []byte) string {
+	t.Helper()
+	var env struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("unmarshal %s: %v", body, err)
+	}
+	if env.Error.Code != "" {
+		return env.Error.Code
+	}
+	return env.Code
 }

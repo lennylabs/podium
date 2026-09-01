@@ -67,8 +67,8 @@ func TestLayerEndpoint_UserDefinedOwnerFromIdentity(t *testing.T) {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	endpoint := server.NewLayerEndpoint(st, "t", server.NewModeTracker()).
-		WithIdentityResolver(func(*http.Request) layer.Identity {
-			return layer.Identity{Sub: "alice", IsAuthenticated: true}
+		WithIdentityResolver(func(*http.Request) (layer.Identity, error) {
+			return layer.Identity{Sub: "alice", IsAuthenticated: true}, nil
 		})
 	ts := httptest.NewServer(endpoint.Handler())
 	defer ts.Close()
