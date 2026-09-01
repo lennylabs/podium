@@ -86,6 +86,43 @@ func scimvisPushUser(t *testing.T, srv *serverProc, userName string) string {
 	return id
 }
 
+// scimvisLayerIDs reads GET /v1/layers with the given token and reports the
+// listed layer IDs. The read is narrowed to the caller's §4.6 view, and the
+// registry configures an identity provider, so the admin callback refuses this
+// caller and the group filter on the seeded layer is expanded through the SCIM
+// directory. That expansion reaches the endpoint only through the boot path's
+// group-resolver wiring, which no in-process fixture installs.
+//
+// Spec: §4.6, §6.3.1, §7.3.1
+func scimvisLayerIDs(t *testing.T, srv *serverProc, token string) []string {
+	t.Helper()
+	status, body := injGet(t, srv.BaseURL+"/v1/layers", token)
+	if status != http.StatusOK {
+		t.Fatalf("layer read = %d, want 200\nbody: %s", status, body)
+	}
+	var resp struct {
+		Layers []struct{ ID string }
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode layer list: %v (body=%s)", err, body)
+	}
+	ids := make([]string, 0, len(resp.Layers))
+	for _, l := range resp.Layers {
+		ids = append(ids, l.ID)
+	}
+	return ids
+}
+
+// scimvisListsLayer reports whether ids holds the named layer.
+func scimvisListsLayer(ids []string, id string) bool {
+	for _, got := range ids {
+		if got == id {
+			return true
+		}
+	}
+	return false
+}
+
 // Spec: §6.3.1 — group membership is resolved registry-side via SCIM 2.0 push;
 // the §4.6 visibility evaluator expands the layer `groups:` filter through that
 // directory. A verified caller whose token carries no group claim still sees a
@@ -134,6 +171,11 @@ func TestAuthSCIMVisibility_MembershipDrivesVisibility(t *testing.T) {
 	if status, b := injGet(t, srv.BaseURL+artifactURL, aliceToken); status != http.StatusOK {
 		t.Fatalf("SCIM-member alice load = %d, want 200 (SCIM membership should grant visibility)\nbody: %s\nlog:\n%s", status, b, srv.log())
 	}
+	// §7.3.1: the layer read reports the same view, so the groups-restricted
+	// layer is listed for the SCIM-resolved member.
+	if ids := scimvisLayerIDs(t, srv, aliceToken); !scimvisListsLayer(ids, "eng") {
+		t.Errorf("SCIM-member alice layer read = %v, want the groups-restricted layer listed", ids)
+	}
 
 	// bob is a provisioned user but not in the group; the layer is invisible.
 	bobToken := injSignJWT(t, priv, injClaims("bob@acme.com"))
@@ -151,6 +193,9 @@ func TestAuthSCIMVisibility_MembershipDrivesVisibility(t *testing.T) {
 	}
 	if status, b := injGet(t, srv.BaseURL+artifactURL, aliceToken); status != http.StatusNotFound {
 		t.Errorf("removed-member alice load = %d, want 404 (membership revoked)\nbody: %s", status, b)
+	}
+	if ids := scimvisLayerIDs(t, srv, aliceToken); scimvisListsLayer(ids, "eng") {
+		t.Errorf("removed-member alice layer read = %v, want the groups-restricted layer withheld", ids)
 	}
 }
 
