@@ -418,19 +418,25 @@ func (r *Registry) resolveLayers(ctx context.Context) []layer.Layer {
 	return out
 }
 
+// VisibilityOf projects a stored layer config onto the §4.6 visibility
+// record carried by the layer.Layer the evaluator consumes. It is the one
+// projection: layerFromConfig builds the composed view's layers on it, and
+// the §7.3.1 layer-list read builds the layer.Layer it filters with on it.
+//
+// Spec: §4.6
+func VisibilityOf(c store.LayerConfig) layer.Visibility {
+	return layer.Visibility{
+		Public:       c.Public,
+		Organization: c.Organization,
+		Groups:       c.Groups,
+		Users:        c.Users,
+	}
+}
+
 // layerFromConfig projects a stored layer config onto the visibility layer
 // the §4.6 evaluator consumes, at the given precedence.
 func layerFromConfig(c store.LayerConfig, precedence int) layer.Layer {
-	return layer.Layer{
-		ID:         c.ID,
-		Precedence: precedence,
-		Visibility: layer.Visibility{
-			Public:       c.Public,
-			Organization: c.Organization,
-			Groups:       c.Groups,
-			Users:        c.Users,
-		},
-	}
+	return layer.Layer{ID: c.ID, Precedence: precedence, Visibility: VisibilityOf(c)}
 }
 
 // ----- LoadDomain ----------------------------------------------------------
