@@ -1,9 +1,11 @@
 # Proposal 0015: Filter GET /v1/layers to the caller's effective view
 
 - Issue: (to be filed)
-- Status: Verified (2026-09-01). Converged after 3 adversarial review rounds
-  (2 findings fixed), recorded under "Resolved in adversarial review"; awaiting
-  sign-off.
+- Status: Approved (2026-09-01). Signed off by the maintainer for
+  implementation, whole, with every step in the checklist in scope. Converged
+  after 3 adversarial review rounds (2 findings fixed) following two redesigns
+  that settled the read rule and the failed-credential disposition; "Resolved in
+  adversarial review" records what each pass changed.
 - Date: 2026-08-31
 
 This document stages the proposed spec, code, test, and documentation changes.
