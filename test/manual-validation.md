@@ -4985,8 +4985,9 @@ profile S47 signed in from cannot hold a second session.
    longer verifies, which is a refusal rather than a narrowing. Sign bob in
    again and re-run the step.
 
-3. Press Unregister on the `public-handbook` row and complete the confirmation
-   as S49 step 3 does.
+3. Press Unregister on the `public-handbook` row, type `public-handbook` into
+   the confirmation field, and press Unregister layer, as S49 step 3 does for
+   its own layer.
 
    **Expect.** The layer stays registered. The row reports that the registry
    refused that action and that nothing changed, and it names the code
