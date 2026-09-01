@@ -1,8 +1,8 @@
 # Proposal 0015: Filter GET /v1/layers to the caller's effective view
 
 - Issue: (to be filed)
-- Status: Verified (2026-08-31). Converged after 4 adversarial review rounds
-  (6 findings fixed), recorded under "Resolved in adversarial review"; awaiting
+- Status: Verified (2026-09-01). Converged after 3 adversarial review rounds
+  (2 findings fixed), recorded under "Resolved in adversarial review"; awaiting
   sign-off.
 - Date: 2026-08-31
 
@@ -18,20 +18,34 @@ sections after sign-off.
   authorization paragraph, stating that a tenant admin reads the tenant's whole
   layer list on both the live and the soft-deleted arm, that any other
   authenticated caller reads the layers §4.6 admits for that caller, that a
-  caller the registry does not authenticate reads no layers, that a registry
-  which authenticates no caller returns the whole list to every caller, and that
-  a `reorder` response reports the same set the list read would.
+  caller whose credential fails verification is refused with the §6.10 envelope
+  that failure already carries, that a caller the provider resolves as anonymous
+  reads no layers, that a registry which authenticates no caller returns the
+  whole list to every caller, and that a `reorder` response reports the same set
+  the list read would. The write authorization paragraph gains one sentence
+  beside it, recording that on `reorder` a credential that fails verification is
+  refused with that failure's own envelope before either write arm is
+  evaluated, and that the other write operations raise no authentication error
+  of their own and refuse such a caller with `403 auth.forbidden` as before.
 - `pkg/registry/core` exports the one projection from a stored layer config onto
   the §4.6 visibility record, so the endpoint filter and the composed view read
   the same fields.
-- `pkg/registry/server` narrows both arms of `GET /v1/layers` and the reorder
+- `pkg/registry/server` refuses both arms of `GET /v1/layers` and
+  `POST /v1/layers/reorder` when the request-time verifier reports a
+  verification failure, and otherwise narrows both list arms and the reorder
   response body through one helper that reads the `authAdmin` callback the write
   gate already holds and, for a caller that callback refuses, the identity
-  resolver and a new group-resolver seam beside it.
+  resolver and a new group-resolver seam beside it. The other layer routes read
+  a swallowing helper and keep their present dispositions.
 - `internal/serverboot` passes the SCIM group expander to the layer endpoint as
-  well as to the registry. Nothing else in the boot wiring changes: the layer
-  endpoint already holds the admin callback and the identity resolver this rule
-  reads.
+  well as to the registry. The boot wiring changes in one further place, stated
+  in the bullet below.
+- `internal/serverboot` surfaces the verifier's error to the layer endpoint. The
+  resolver it installs there stops discarding the error, so the endpoint can
+  tell a credential that failed verification from a caller the provider resolves
+  as anonymous. The swallowing resolver stays for the §4.7.2 admin gate and the
+  §7.3.4 posture read, whose contracts refuse no request for lack of a
+  credential.
 - The layer panel's empty-state heading is scoped to the caller's view, the doc
   comments that assert an unfiltered whole-block list read are corrected, and the
   committed bundle is regenerated.
@@ -63,6 +77,10 @@ sections after sign-off.
   installs no request-time verifier, its admin callback refuses every caller, and
   its read returns no layers to anyone, which is the posture its write gate
   already takes.
+- An `authAdmin` failure of any kind, including the store error
+  `core.AdminAuthorize` reports as `ErrUnavailable`, takes the non-admin path.
+  The read narrows rather than answering `registry.unavailable`, which discloses
+  less, and the failure kinds are not discriminated.
 - A caller that resolves no verified subject and is not admitted by the admin arm
   reads no layers rather than the public subset. The layer-management surface is
   not an anonymous surface, and withholding a public layer's `repo`,
@@ -70,24 +88,40 @@ sections after sign-off.
   rule nothing.
 - The filter needs no separate owner test. A user-defined layer is stored with
   its registrant in `users:`, so `layer.VisibleWith` already admits the owner.
-- A credential that is presented and fails verification resolves to no verified
-  subject, so on a registry that configures an identity provider it takes the
-  unauthenticated arm and reads no layers. This needs no change to
-  `layerIdentityResolver`: `AdminAuthorize` refuses the public-mode identity that
-  resolver returns (`pkg/registry/core/admin.go:22`), and the helper's
-  authentication guard runs before `layer.VisibleWith`, whose `IsPublic`
-  short-circuit (`pkg/layer/composer.go:64-66`) is therefore never reached on
-  that arm.
-- The narrowed read answers an empty `200`, and no other spec section is
-  rescoped. §6.3.2, §6.3.3, §6.9, and §13.12 keep their unqualified
-  credential-rejection statements, so the applied spec carries both an
-  unqualified refusal and an empty `200` for the same credential on this route.
-  The overlap is accepted because the divergence is pre-existing in code and the
-  narrowed body discloses nothing, and open decision 2 carries the alternative of
-  restoring the scoping clause.
+- A credential that is presented and fails verification is refused rather than
+  narrowed. The read answers the §6.10 envelope the same credential already
+  receives on every middleware-protected route: `auth.token_expired`,
+  `auth.untrusted_token`, or `auth.untrusted_runtime`, written by the server's
+  existing `writeIdentityError`. No new error code and no new matrix cell.
+- The refusal is scoped to the list read and to `reorder`, which are the two
+  operations the guard covers. On `reorder` such a caller receives `401` with the
+  identity envelope where it previously received `403 auth.forbidden`.
+  `register`, `unregister`, `update`, `restore`, and `reingest` keep the
+  swallowing resolution and their `auth.forbidden` disposition, and extending the
+  guard to them is a separate change this proposal does not stage.
+- Presenting no credential is a different condition, and it differs by provider.
+  Under `injected-session-token` the verifier calls `verify(bearerToken(r))`
+  (`internal/serverboot/identity_verify.go:28`), so a request carrying no bearer
+  token fails verification and is refused, which is what §6.3.2 requires and
+  what the meta-tool routes already do. Under `oidc-jwt` a request carrying no
+  bearer credential, and one arriving while the issuer JWKS is unreachable,
+  resolve as anonymous with no error (`:223-225`, `:228-232`), so they are not
+  refused and read no layers, which is what `spec/13-deployment.md:170` and
+  `spec/06-mcp-server.md:100` and `:102` state. Under `trusted-headers` the
+  verifier raises no error at all. The endpoint therefore carries no
+  per-provider branch: it refuses exactly when the configured verifier returns
+  an error.
+- No other spec section is rescoped, and none needs to be. §6.3.2, §6.3.3, §6.9,
+  and §13.12 state their rejections for the registry process with no route
+  qualifier, and after this change `GET /v1/layers` takes those rejections, so
+  the two routes agree and the applied spec carries one disposition per
+  credential.
 - The change adds one predicate and one projection. The filter calls
   `layer.VisibleWith` on a `layer.Layer` built from the exported projection in
   `pkg/registry/core`, and copies neither.
+- The register form's layer-class control stays out of this proposal. Closing it
+  needs a new §7.3.4 field, a client change, and its own tests, and no
+  deliverable here depends on it.
 - Podium is pre-1.0, so no flag, configuration key, or query parameter restores
   the unfiltered listing, and no dual code path is added.
 
@@ -116,16 +150,21 @@ sections after sign-off.
   reporting alice, so `readableBy` returns that layer.
 - **The browser-stack fixture installs no admin callback.** `newBrowserStack`
   builds the endpoint with `WithIdentityResolver` alone
-  (`internal/serverboot/webui_auth_integration_test.go:216-218`), so on that
-  fixture every caller takes the admin arm and reads the whole list. A
-  per-identity case there installs a `WithAdminAuth` mirroring the boot closure
-  on an identity-provider-configured registry, or it asserts nothing.
-- **The authentication guard must precede the predicate.** `layer.VisibleWith`
-  returns true for `layer.Identity{IsPublic: true}`
-  (`pkg/layer/composer.go:64-66`), which is what `layerIdentityResolver` returns
-  for a credential that fails verification
-  (`internal/serverboot/identity_verify.go:56-65`). Evaluating the predicate
-  first would hand a forged credential the whole tenant.
+  (`internal/serverboot/webui_auth_integration_test.go:217-218`), so on that
+  fixture every verified caller takes the admin arm and reads the whole list. It
+  does not escape the refusal, which runs before the admin arm. A per-identity
+  narrowing case there installs a `WithAdminAuth` mirroring the boot closure on
+  an identity-provider-configured registry, or it asserts nothing.
+- **The refusal must precede the admin arm, and the authentication guard must
+  precede the predicate.** `newBrowserStack` installs no admin callback
+  (`internal/serverboot/webui_auth_integration_test.go:217-218`) and the
+  constructor default admits (`pkg/registry/server/layers.go:180-181`), so an
+  admin arm evaluated first would leave the expired-session read at `200` on the
+  fixture TEST-3 inverts. The `IsPublic` guard is still load-bearing after the
+  refusal lands, for a different reason: `layer.VisibleWith` returns true for
+  `layer.Identity{IsPublic: true}` (`pkg/layer/composer.go:64-66`), which is
+  what a `nil` verifier resolves, and the free-form-label deployment reaches
+  `readableBy` in exactly that state with a refusing admin callback.
 - **The panel lead is left verbatim, and the filter is why it is accurate for the
   caller it was wrong for.** `web/ui/src/surfaces/LayerPanel.tsx:145-150` says
   the panel lists the sources the catalog is composed from. For an authenticated
@@ -166,47 +205,67 @@ sections after sign-off.
 ## Implementation checklist
 
 - [ ] **S1 · spec** — SPEC-1. §7.3.1 gains the layer read visibility paragraph
-      beside the write authorization paragraph. The file is
-      `spec/07-external-integration.md`.
+      beside the write authorization paragraph, and that write authorization
+      paragraph gains the sentence scoping `reorder`'s refusal of a credential
+      that fails verification. The file is `spec/07-external-integration.md`.
       Levels: —. Depends on: —
 - [ ] **S2 · code** — CODE-1. `pkg/registry/core` exports the projection from a
       stored layer config onto the §4.6 visibility record.
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-2, TEST-1. The endpoint filters both list arms and the
-      reorder response body, with the per-identity endpoint cases that pin it.
-      Levels: unit. Depends on: S2
-- [ ] **S4 · test** — TEST-3. The browser-flow doc comment that asserts the layer
-      read answers unfiltered is corrected.
-      Levels: integration. Depends on: S3
+- [ ] **S3 · code** — CODE-3, TEST-0. `internal/serverboot` surfaces the
+      verifier's error through the resolver it installs on the layer endpoint,
+      the endpoint's identity seam carries the error, `e.caller` reproduces the
+      swallow for the write paths, and `writeIdentityError` becomes a package
+      function.
+      Levels: unit. The builder-chain line this step changes
+      (`internal/serverboot/serverboot.go:1246`) produces no observable outcome
+      until CODE-2 lands, so TEST-6 pins it in S4.
+      Depends on: S1
+- [ ] **S4 · code** — CODE-2, TEST-1, TEST-2, TEST-3, TEST-6. The endpoint
+      refuses an unverifiable credential and filters both list arms and the
+      reorder response body, with the per-identity and refusal cases that pin
+      them, the browser-flow expired-session case inverted from `200` to the
+      refusal, and the end-to-end case that pins the boot wiring through the
+      compiled binary.
+      Levels: unit, integration, e2e. TEST-3 lands in this step rather than
+      after it, because S3 switches `newBrowserStack` to `layerCallerResolver`
+      and this step lands the refusal, so its `200` assertion
+      (`internal/serverboot/webui_auth_integration_test.go:650-654`) fails from
+      the moment CODE-2 lands. TEST-6 lands here too, because it is the only
+      deliverable that reads `internal/serverboot/serverboot.go:1246` and the
+      status it asserts exists only once CODE-2 has landed.
+      Depends on: S2, S3
 - [ ] **S5 · code** — CODE-4. The SCIM group expander is passed to the layer
       endpoint as well as to the registry.
       Levels: e2e. The wiring lives in the builder chain and the browser stack
       installs no group resolver, so the level it reaches is the end-to-end arm
       TEST-4 stages in S6.
-      Depends on: S3, which stages the `WithGroupResolver` option this wiring
+      Depends on: S4, which stages the `WithGroupResolver` option this wiring
       calls.
-- [ ] **S6 · test** — TEST-4. The `layerConfigs` seam on the browser stack's
-      fixture, the per-identity narrowing through the wired browser stack, and
-      the SCIM-resolved membership read through the binary.
+- [ ] **S6 · test** — TEST-4. The `layerConfigs` and `adminAuth` seams on the
+      browser stack's fixture, the per-identity narrowing through the wired
+      browser stack, and the SCIM-resolved membership read through the binary.
       Levels: integration, e2e. Depends on: S5
 - [ ] **S7 · code** — CODE-5, TEST-5. The panel's empty-state heading, the stale
-      panel doc comments including the file header, the regenerated bundle, the
-      component assertion that pins the heading, and the `bobLayer` fixture
-      comment. The code lane resumes here after S6 because the heading it stages
-      describes the behavior S3 lands, and it precedes the documentation steps
-      that describe the same surface.
-      Levels: unit. Depends on: S3
+      panel doc comments including the file header and the three reach-report
+      comments, the regenerated bundle, the component assertion that pins the
+      heading, and the `bobLayer` and reach-report fixture comments. The code
+      lane resumes here after S6 because the heading it stages describes the
+      behavior S4 lands, and it precedes the documentation steps that describe
+      the same surface.
+      Levels: unit. Depends on: S4
 - [ ] **S8 · docs** — DOC-1. The read rule on the HTTP API reference, the CLI
       reference, and the layers deployment page.
-      Levels: —. Depends on: S3
+      Levels: —. Depends on: S4
 - [ ] **S9 · docs** — DOC-2. The three hand-run scenarios that read the list
-      anonymously or assert it is unfiltered.
-      Levels: —. Depends on: S3, S7
+      anonymously or assert it is unfiltered, and the S50 step that presents an
+      unverifiable credential and expects the refusal.
+      Levels: —. Depends on: S4, S7
 - [ ] **S10 · docs** — DOC-3. The `CHANGELOG.md` entry.
-      Levels: —. Depends on: S3
+      Levels: —. Depends on: S4
 - [ ] **S11 · docs** — DOC-4. The design documents' unfiltered-read statements,
       in `web/DESIGN.md` and `web/design/README.md`.
-      Levels: —. Depends on: S3
+      Levels: —. Depends on: S4
 
 ## Current state and the gap
 
@@ -248,7 +307,10 @@ bypass rather than an anonymous caller, and `layer.VisibleWith` short-circuits t
 visible for it (`pkg/layer/composer.go:64-66`). A filter that evaluated the §4.6
 predicate on that identity would still hand the whole list to a caller whose
 credential is expired or forged, which is why CODE-2 resolves the admin arm and
-the authentication guard before it evaluates the predicate. Under `oidc-jwt` and
+the authentication guard before it evaluates the predicate.
+CODE-3 removes the discard, so the endpoint sees the verification failure and
+refuses it before either arm runs; the ordering CODE-2 keeps is what covers the
+deployments whose verifier reports no error at all. Under `oidc-jwt` and
 `trusted-headers` an anonymous caller resolves to the zero identity instead
 (`internal/serverboot/identity_verify.go:223-233`, `:257-275`). Today every
 caller class receives the same list because the handler consults no identity at
@@ -330,26 +392,47 @@ anyone. Public mode and an identity provider are mutually exclusive at startup
 (`spec/13-deployment.md:506`; `pkg/registry/server/config_validate.go:17-18`), so
 the arms never overlap.
 
-**A failed verification reads no layers, and no resolver changes.** A credential
-that fails signature, `iss`, `aud`, configured-subject-claim, or expiry
-validation (`pkg/identity/oidc_jwt.go:251-253`), and a runtime-signed token
-carrying no registered signing key on a registry started under
-`injected-session-token` (`internal/serverboot/serverboot.go:1147`), resolves
-through `layerIdentityResolver` onto `layer.Identity{IsPublic: true}`.
-`AdminAuthorize` refuses that identity (`pkg/registry/core/admin.go:22`), so such
-a caller fails the admin arm, and the authentication guard stops it before
-`layer.VisibleWith` is reached. The read answers an empty `200`, which discloses
-nothing. §6.3.2's and §6.3.3's refusals are unqualified statements written for
-the registry process, and the layer-management endpoints diverge from them today:
-they are registered on the mux directly
-(`internal/serverboot/serverboot.go:1259-1260`), ahead of the meta-tool handler
-that verifies the credential (`:1327`), and a request carrying an expired session
-already answers `200` on this route
-(`internal/serverboot/webui_auth_integration_test.go:650-655`). This change
-narrows that body to empty. It leaves §6.3.2, §6.3.3, §6.9, and §13.12 unscoped,
-so the spec states an unqualified refusal for a credential §7.3.1 now answers
-with an empty `200`. That overlap is accepted rather than resolved, and open
-decision 2 carries the alternative of restoring the scoping clause.
+**A failed verification is refused, and the resolver changes to make that
+reachable.** A credential that fails signature, `iss`, `aud`,
+configured-subject-claim, or expiry validation (`pkg/identity/oidc_jwt.go:251-253`),
+and a runtime-signed token carrying no registered signing key under
+`injected-session-token` (`internal/serverboot/serverboot.go:1147`), reaches the
+endpoint as an error from the request-time verifier. The endpoint refuses the
+read with the §6.10 envelope that error already maps to, written by the server's
+existing `writeIdentityError` (`pkg/registry/server/identity_verify.go:83-124`).
+Today the endpoint cannot see the error: `layerIdentityResolver` discards it and
+returns `layer.Identity{IsPublic: true}`
+(`internal/serverboot/identity_verify.go:56-65`), which is why CODE-3 exists.
+
+Refusing rather than narrowing removes a spec-versus-spec overlap rather than
+creating one. §6.3.3 states its rejections for the registry process and carries
+no route qualifier (`spec/06-mcp-server.md:102`), §6.3.2 states
+`auth.untrusted_runtime` for an unregistered signing key (`:76`), §6.9 restates
+both as failure-mode rows (`:389`, `:391`), and §13.12's
+`PODIUM_OAUTH_SUBJECT_CLAIM` row restates the subject-claim refusal
+(`spec/13-deployment.md:498`). After this change the layer read takes those
+statements as written, so §6.3.2, §6.3.3, §6.9, and §13.12 are left untouched and
+every route answers one disposition for one credential.
+
+**Presenting no credential is a different condition, and the provider decides
+it.** The endpoint carries no per-provider branch. It refuses exactly when the
+configured verifier returns an error, and each verifier already encodes its own
+section's rule. `injectedTokenVerifier` calls `verify(bearerToken(r))`
+(`internal/serverboot/identity_verify.go:28`), so an absent bearer token is a
+verification failure under §6.3.2 and is refused, which is the posture the
+meta-tool routes already take on that provider
+(`internal/serverboot/identity_verify_test.go:202-210`). `oidcJWTVerifier`
+returns the anonymous identity with no error when the configured token header
+and, where the browser flow is enabled, the `__Host-podium_session` cookie carry
+no bearer credential (`internal/serverboot/identity_verify.go:223-225`), and
+again while the issuer JWKS is unreachable (`:228-232`); both are what
+`spec/13-deployment.md:170` and `spec/06-mcp-server.md:100` and `:102` state, and
+neither is refused here. `trustedHeadersVerifier` returns no error on any request
+(`:257-275`). A `nil` verifier, which is the no-provider, public-mode, and
+free-form-label deployment, resolves anonymous-public with no error. Refusing a
+signed-out browser on `oidc-jwt` would break the signed-out layer panel, and
+admitting an unverifiable token would be the fail-open this proposal closes; the
+verifier's own error return is the one signal that separates them.
 
 **The filter reuses the existing predicate and the existing group expander.** No
 second predicate is written, and the projection from the stored layer config onto
@@ -364,7 +447,9 @@ the unfiltered listing, and no dual code path is added.
 **SPEC-1.** Anchor: `spec/07-external-integration.md`, §7.3.1. The new paragraph
 lands immediately after the paragraph beginning `**Layer write authorization.**`
 (`spec/07-external-integration.md:97`) and immediately before the paragraph
-beginning `**Errors.**` (`:99`). Nothing in either neighbouring paragraph changes,
+beginning `**Errors.**` (`:99`). SPEC-1 stages two edits on §7.3.1: this
+inserted paragraph, and one sentence appended to the layer write authorization
+paragraph above it, given below. The `**Errors.**` paragraph is unchanged,
 and the command list, the user-defined-layer paragraph, and the ingestion-trigger
 material above are untouched.
 
@@ -377,10 +462,15 @@ The inserted paragraph:
 > authenticates no caller. To any other authenticated caller it returns the
 > layers that caller can see under §4.6, which includes that caller's own
 > user-defined layers through their implicit `users: [<registrant>]` visibility.
-> To a caller that resolves no verified subject it returns no layers, whether
-> that caller presented no credential or presented one that failed verification;
-> the layer read raises no authentication error of its own, so the response is an
-> empty `200` rather than a refusal. A `reorder` response reports the same set
+> A caller whose credential fails verification under the configured identity
+> provider's rule (§6.3.2, §6.3.3) is refused before any layer is read, with the
+> §6.10 envelope that verification failure carries on every other route that
+> verifies the same credential: `auth.token_expired`, `auth.untrusted_token`, or
+> `auth.untrusted_runtime`. A request the provider resolves as anonymous rather
+> than as a failure is not refused on this ground, which under `oidc-jwt`
+> includes a request carrying no credential and one arriving while the issuer
+> JWKS is unreachable; such a caller resolves no verified subject and the read
+> returns it no layers. A `reorder` response reports the same set
 > the list read would report for that caller. A layer the rule withholds is
 > absent from the response rather than refused, so the read discloses no layer
 > identifier, source location, owner subject, or visibility declaration for it,
@@ -392,36 +482,43 @@ The rule reads the same authorization the layer write authorization paragraph
 above reads, so one deployment condition decides both, and a caller who can write
 a layer can read it.
 
-Deliberately absent: a scoping clause on §6.3.2's, §6.3.3's, §6.9's, or
-§13.12's credential-rejection statements. Those statements carry no route
-qualifier today. §6.3.3 is titled "Server-Side Request Authentication"
-(`spec/06-mcp-server.md:90`) and states its rejections for the registry process
-rather than for one route, §6.3.2 states `auth.untrusted_runtime` for an
-unregistered signing key (`:76`), §6.9 restates both as failure-mode rows
-(`:389`, `:391`), and §13.12's `PODIUM_OAUTH_SUBJECT_CLAIM` row restates the
-subject-claim refusal (`spec/13-deployment.md:498`). The endpoint has diverged
-from them since it was built: the layer-management handlers are registered on the
-mux directly (`internal/serverboot/serverboot.go:1259-1260`) and take precedence
-over the meta-tool handler at `/` (`:1327`), which is the surface that verifies
-the request credential, and a request carrying an expired session already answers
-`200` on this route
-(`internal/serverboot/webui_auth_integration_test.go:650-655`). The paragraph
-above states the disposition that endpoint takes, so from here the spec carries
-both an unqualified refusal in §6.3.2 and §6.3.3 and an empty `200` in §7.3.1 for
-the same credential on the same request. This proposal accepts that as a known,
-narrow overlap rather than resolving it, on the ground that the divergence is
-pre-existing and that the narrowed body discloses nothing. Rescoping those
-statements is a separate editorial change, and open decision 2 carries it as an
-option. The implicit `users: [<registrant>]` visibility of a user-defined layer
-is stated two paragraphs above at `spec/07-external-integration.md:95`. The
+SPEC-1 stages a second edit on §7.3.1's layer write authorization paragraph. The
+paragraph today states that "A caller authorized by neither arm is refused with
+`403 auth.forbidden` (§6.10), whether that caller resolves a different subject or
+resolves none at all" (`spec/07-external-integration.md:97`). CODE-2's `reorder`
+guard runs ahead of the write gate, so on a registry whose request-time verifier
+reports an error the caller is refused with the identity envelope before the arm
+is evaluated at all, and the sentence as written names the wrong code for that
+caller. SPEC-1 stages one further sentence, inserted after it:
+
+> On `reorder`, a caller whose credential fails verification under the
+> configured identity provider's rule (§6.3.2, §6.3.3) is refused with that
+> failure's own §6.10 envelope before the arms are evaluated, so on that
+> operation `auth.forbidden` reports a caller the registry verified and did not
+> authorize. The remaining write operations raise no authentication error of
+> their own and refuse such a caller with `403 auth.forbidden` on the arms
+> above.
+
+The sentence is scoped to `reorder` because that is the only write operation
+CODE-2 guards. `register`, `unregister`, `update`, `restore`, and `reingest`
+keep `e.caller(r)`, which resolves a failed verification to the anonymous-public
+caller, so they answer `403 auth.forbidden` after this change exactly as they do
+today. No other sentence of the write paragraph changes, and no other spec
+section is edited: the sentence records the order the endpoint already takes on
+every other verified route. Extending the guard to those five handlers and
+dropping the scope would be a second, larger change to the write gate, and this
+proposal does not stage it.
+
+The paragraph needs no scoping clause on §6.3.2, §6.3.3, §6.9, or §13.12, and
+stages no edit to them. Those sections state their rejections for the registry
+process with no route qualifier (`spec/06-mcp-server.md:102`,
+`spec/13-deployment.md:498`), and CODE-3 makes `GET /v1/layers` take exactly
+those rejections, so the applied spec carries one disposition per credential and
+the endpoint's pre-existing divergence from them is closed rather than recorded.
+The implicit `users: [<registrant>]` visibility of a user-defined layer is
+stated two paragraphs above at `spec/07-external-integration.md:95`. The
 filesystem-registry bypass is not named, because a filesystem-source registry
 serves no HTTP endpoint (`spec/13-deployment.md:331-336`).
-
-A reviewer is most likely to reopen the §6.3.2 and §6.3.3 question here, and it
-is the one place where dropping SPEC-2 costs something rather than nothing:
-SPEC-1 states a disposition for a request those sections also state a disposition
-for. Passes 4 and 5 added SPEC-2's scoping clause for exactly that reason. Open
-decision 2 puts the choice to the maintainer rather than deleting it silently.
 
 ## Proposed solution
 
@@ -477,12 +574,14 @@ call:
 // keeps the standalone layer panel populated for a caller with no subject.
 //
 // Any other caller must resolve a verified subject. The guard runs before
-// layer.VisibleWith and is load-bearing rather than defensive: the boot
-// resolver maps a credential that fails verification onto
-// layer.Identity{IsPublic: true} (internal/serverboot/identity_verify.go:56-65)
-// and VisibleWith short-circuits to visible for that identity
+// layer.VisibleWith and is load-bearing rather than defensive: a deployment
+// that installs no request-time verifier resolves layer.Identity{IsPublic:
+// true}, and VisibleWith short-circuits to visible for that identity
 // (pkg/layer/composer.go:64-66), so evaluating the predicate first would
-// hand a forged credential the whole tenant.
+// hand the whole tenant to a caller a refusing admin callback just turned
+// away. That is the free-form-PODIUM_IDENTITY_PROVIDER deployment. A
+// credential that failed verification never reaches here: the caller was
+// refused before this helper ran.
 //
 // An authAdmin error of any kind, including the store failure
 // core.AdminAuthorize reports as ErrUnavailable, takes the non-admin path.
@@ -493,12 +592,11 @@ call:
 // null.
 //
 // Spec: §4.6, §7.3.1
-func (e *LayerEndpoint) readableBy(r *http.Request, configs []store.LayerConfig) []store.LayerConfig {
+func (e *LayerEndpoint) readableBy(r *http.Request, caller layer.Identity, configs []store.LayerConfig) []store.LayerConfig {
 	out := make([]store.LayerConfig, 0, len(configs))
 	if e.authAdmin(r) == nil {
 		return append(out, configs...)
 	}
-	caller := e.identify(r)
 	if !caller.IsAuthenticated || caller.Sub == "" {
 		return out
 	}
@@ -512,6 +610,28 @@ func (e *LayerEndpoint) readableBy(r *http.Request, configs []store.LayerConfig)
 	}
 	return out
 }
+
+// verifiedCaller resolves the caller and refuses the request when the
+// configured request-time verifier reports a verification failure, writing
+// the §6.10 envelope that failure already maps to and reporting false. It is
+// the guard form the file already uses for rejectIfReadOnly, and it runs
+// ahead of the admin arm: the endpoint's constructor default admits every
+// caller (:180-181), so an admin arm evaluated first would serve a caller
+// whose credential the registry just failed to verify.
+//
+// A provider that resolves an absent credential, or an unreachable issuer
+// key set, as an anonymous caller rather than as a failure returns no error
+// here, so such a request is not refused and reads what readableBy admits it.
+//
+// Spec: §6.3.2, §6.3.3, §6.10, §7.3.1
+func (e *LayerEndpoint) verifiedCaller(w http.ResponseWriter, r *http.Request) (layer.Identity, bool) {
+	id, err := e.identify(r)
+	if err != nil {
+		writeIdentityError(w, err)
+		return layer.Identity{}, false
+	}
+	return id, true
+}
 ```
 
 `layer.VisibleWith`'s first parameter is a `layer.Layer` and its body reads
@@ -522,34 +642,199 @@ and rejected: precedence is a property of the composed view rather than of a
 stored row, so such a builder would either take a precedence argument this read
 has no value for or hand `layerFromConfig` a `Precedence` it has to overwrite.
 
-`list` (`:860-879`) fetches once, on the arm the query parameter selects, and
-returns `e.readableBy(r, configs)`. Both arms pass through the same helper, so the
-`?deleted=true` path carries the same filter as the live path.
+`list` (`:860-879`) opens with `caller, ok := e.verifiedCaller(w, r); if !ok {
+return }`, so a credential that failed verification is refused before the store
+is read, then fetches once on the arm the query parameter selects and returns
+`e.readableBy(r, caller, configs)`. Both arms pass through the same guard and
+the same helper, so the `?deleted=true` path carries the same refusal and the
+same filter as the live path.
 
-`reorder` (`:1020-1028`) narrows its response body through the same helper,
-sorting before filtering so the order the caller reads is unchanged for the rows
-it can see. Its handler doc comment states that the response reports the same set
-the list read would report for that caller. Without this the fix
-is bypassable: the write gate admits a user-defined layer's owner, so any caller
-who owns one personal layer reorders that layer and reads the tenant's whole
-list back.
+`reorder` (`:973-1029`) takes the same guard after the method check
+(`:974-978`) and before `rejectIfReadOnly` (`:979-981`), so no layer is
+restamped for a caller the registry could not verify, and narrows its response
+body with `e.readableBy(r, caller, updated)`, sorting before filtering so the
+order the caller reads is unchanged for the rows it can see.
+
+The guard is reachable on every deployment that configures an identity provider,
+and it changes one response code there. It stands ahead of `rejectIfReadOnly`,
+the body decode, the store list, and the per-layer `authorizeLayerWrite` loop
+(`:1007-1010`), so it runs first rather than after the write gate. A caller
+presenting an expired or forged credential to `POST /v1/layers/reorder` today
+resolves anonymous-public through the swallowing resolver and receives `403
+auth.forbidden` from that loop; after this change the same caller receives `401`
+carrying `auth.token_expired`, `auth.untrusted_token`, or
+`auth.untrusted_runtime`. That is the disposition the same credential already
+receives on every middleware-protected route, it refuses before the restamp
+rather than after, and it is what SPEC-1 stages on §7.3.1's write authorization
+paragraph, DOC-1 stages on the documentation pages that mirror that paragraph,
+and DOC-3 records in the `CHANGELOG.md` entry. No caller who would have been
+authorized loses a write: a credential the verifier accepts raises no error
+here, and a credential it rejects was refused on the write gate before this
+change.
+
+Without the response filter the fix is bypassable: the write gate admits a
+user-defined layer's owner, so any caller who owns one personal layer reorders
+that layer and reads the tenant's whole list back.
+
+The register, update, restore, unregister, reingest, webhook, and erase paths
+read `e.caller(r)` and are unchanged. The inbound Git-provider webhook carries
+no caller credential and is served by a separate handler
+(`internal/serverboot/serverboot.go:1262`), so no refusal reaches it.
 
 No owner branch is added. A user-defined layer stores its registrant in `Users`
 at registration (`:758`), so the §4.6 predicate already admits the owner.
 
-### CODE-3 was dropped
+### CODE-3: surface the verifier's error to the layer endpoint
 
-An earlier revision changed `layerIdentityResolver` so a failed verification
-produced the zero identity rather than `layer.Identity{IsPublic: true}`. The
-three-armed read makes it unnecessary. On a registry that configures an identity
-provider, `AdminAuthorize` refuses the public-mode identity outright
-(`pkg/registry/core/admin.go:22`), including on the free-form-label deployment
-where `layerVerify` is nil (`internal/serverboot/identity_verify.go:157-159`), so
-such a caller falls to the non-admin path and is stopped by `readableBy`'s
-authentication guard before the predicate runs. `internal/serverboot` is
-unchanged apart from CODE-4, and `TestLayerIdentityResolver`
-(`internal/serverboot/identity_verify_test.go:212-244`) keeps its assertions
-verbatim.
+The endpoint cannot distinguish a failed verification from an absent credential
+today. `layerIdentityResolver` (`internal/serverboot/identity_verify.go:56-65`)
+discards the verifier's error and returns `layer.Identity{IsPublic: true}`, and
+its doc comment says so: "a missing or invalid token resolves to the
+anonymous-public caller". CODE-3 splits the error-preserving resolver out of it
+and leaves the swallowing one for the consumers that must not refuse.
+
+`internal/serverboot/identity_verify.go`:
+
+```go
+// layerCallerResolver adapts a §6.3.2/§6.3.3 request-time verifier into the
+// resolver the §7.3.1 layer endpoint reads. It returns the verifier's error
+// verbatim, so the endpoint refuses a credential that failed verification
+// with the §6.10 envelope the server already maps that error to, and it
+// returns the anonymous-public caller with no error when no verifier is
+// wired, which is the no-provider, public-mode, and free-form-label
+// deployment. Whether an absent credential is a failure is the provider's
+// own rule and is not decided here: injectedTokenVerifier reports one,
+// oidcJWTVerifier and trustedHeadersVerifier do not.
+func layerCallerResolver(verify func(*http.Request) (layer.Identity, error)) func(*http.Request) (layer.Identity, error) {
+	return func(r *http.Request) (layer.Identity, error) {
+		if verify == nil {
+			return layer.Identity{IsPublic: true}, nil
+		}
+		return verify(r)
+	}
+}
+```
+
+`layerIdentityResolver` keeps its name, its signature, and its behavior, and is
+rewritten over the new function so the anonymous fallback is written once:
+
+```go
+func layerIdentityResolver(verify func(*http.Request) (layer.Identity, error)) func(*http.Request) layer.Identity {
+	resolve := layerCallerResolver(verify)
+	return func(r *http.Request) layer.Identity {
+		if id, err := resolve(r); err == nil {
+			return id
+		}
+		return layer.Identity{IsPublic: true}
+	}
+}
+```
+
+Its doc comment loses the clause "a missing or invalid token resolves to the
+anonymous-public caller, which the endpoint then denies for admin-gated
+operations and rejects for user-defined registrations (fail-closed)" and gains:
+it is the swallowing form, read by the §4.7.2 admin gate and by the §7.3.4
+posture read, which refuses no request for lack of a credential
+(`pkg/registry/server/webui_session.go:12-14`); the layer endpoint reads
+`layerCallerResolver` instead and refuses a verification failure itself.
+
+The boot wiring (`internal/serverboot/serverboot.go:1237-1256`) keeps
+`layerIdentity := layerIdentityResolver(layerVerify)` for the `WithAdminAuth`
+closure at `:1247-1256` and the `SessionPosture.Identity` field at `:1318`, and
+passes `WithIdentityResolver(layerCallerResolver(layerVerify))` to the endpoint
+at `:1246`, which today reads `WithIdentityResolver(layerIdentity)`. That single
+line is what makes the refusal real in a shipped binary, and TEST-6 is the
+deliverable that pins it.
+
+Two comments state the old seam as a fact about the layer endpoint and are
+falsified by the split. Both take a string edit in this step:
+
+- `SessionPosture.Identity`'s field comment
+  (`pkg/registry/server/webui_session.go:30-32`) reads "It is the same resolver
+  the §7.3.1 layer endpoint uses, so an unverifiable session resolves the
+  anonymous caller and the response omits `subject`." After the split the layer
+  endpoint reads a different resolver and refuses that session, so the comment
+  states the posture read's own contract instead: the posture read resolves the
+  caller with the error-swallowing resolver, so an unverifiable session resolves
+  the anonymous caller and the response omits `subject`, which is what §7.3.4
+  requires of a read that refuses no request for lack of a credential. The
+  sentence names the layer endpoint only to say that the endpoint refuses the
+  same credential.
+- `TestLayerIdentityResolver`'s doc comment
+  (`internal/serverboot/identity_verify_test.go:212-216`) carries `// Spec: §4.6
+  / §7.3.1` and reads "the layer endpoint resolves the caller from the same
+  request-time verifier wired on the meta-tool server … a missing/invalid token
+  or a nil verifier resolves to the anonymous-public caller (fail-closed)".
+  After the split that describes the §4.7.2 admin gate and the §7.3.4 posture
+  read rather than the §7.3.1 layer read. The comment is rewritten to name those
+  two consumers, and its `§7.3.1` citation is dropped, because TEST-0 now
+  carries §7.3.1 for this file. The test's assertions are unchanged, because
+  `layerIdentityResolver` keeps its behavior.
+
+`pkg/registry/server`. The endpoint's identity seam carries the error:
+
+- The `identify` field (`layers.go:50-53`) becomes
+  `func(*http.Request) (layer.Identity, error)`, and its comment records that a
+  verification failure is returned rather than swallowed.
+- `NewLayerEndpoint`'s default (`:181`) becomes
+  `func(*http.Request) (layer.Identity, error) { return layer.Identity{IsPublic: true}, nil }`.
+- `WithIdentityResolver` (`:191-196`) takes the new signature. This is the
+  endpoint's option; the identically named `server.WithIdentityResolver`
+  (`pkg/registry/server/server.go:191`) is a different option on `*Server` and
+  does not change, so every `server.WithIdentityResolver(...)` call site is
+  untouched.
+- Podium is pre-1.0, so no compatibility overload is kept. Thirteen test
+  literals that call the endpoint option take `, nil` on their return:
+  `pkg/registry/server/{erase_test.go:39, default_visibility_test.go:97,
+  layer_visibility_test.go:70, layer_register_class_test.go:26,
+  layer_event_publish_test.go:64, layer_event_publish_test.go:166,
+  layer_write_auth_test.go:83, audit_emission_test.go:94}` and
+  `test/integration/{erase_test.go:49, layer_write_authorization_test.go:33,
+  runtime_layer_visibility_test.go:108, audit_sink_redirect_test.go:54,
+  readonly_postgres_flip_test.go:160}`. Each keeps its meaning: that caller,
+  verified.
+- The fourteenth call site passes a variable rather than a literal.
+  `newBrowserStack` builds `layerIdentity := layerIdentityResolver(layerVerify)`
+  (`internal/serverboot/webui_auth_integration_test.go:212`) and passes it both
+  to the endpoint (`:217-218`) and to `SessionPosture.Identity`, whose literal
+  is built at `:241-246` with `Identity: layerIdentity` at `:244`. It
+  gains `layerCaller := layerCallerResolver(layerVerify)` beside it, passes
+  `layerCaller` to the endpoint, and keeps `layerIdentity` for the posture read,
+  which mirrors the boot wiring.
+- The seven internal reads of `e.identify(r)` (`:214`, `:309`, `:504`, `:696`,
+  `:710`, `:818`, `:1024`) become `e.caller(r)`, a helper that lands with this
+  step so the package compiles at S3:
+
+```go
+// caller resolves the caller for a path that raises no authentication error
+// of its own: the write gates, the register handler, the erase handler, and
+// the audit emitters. A verification failure resolves the anonymous-public
+// caller, which is the disposition those paths take today and which every
+// write gate refuses, so this change alters no write outcome. It is the
+// swallow that lived in serverboot's layerIdentityResolver before this
+// change moved the error to the endpoint.
+func (e *LayerEndpoint) caller(r *http.Request) layer.Identity {
+	if id, err := e.identify(r); err == nil {
+		return id
+	}
+	return layer.Identity{IsPublic: true}
+}
+```
+
+- `writeIdentityError` (`pkg/registry/server/identity_verify.go:93`) drops its
+  `*Server` receiver and becomes a package-level function. Its body reads no
+  receiver state, and its one caller (`:50`) drops the `s.`. The endpoint calls
+  it directly, so the §6.10 mapping stays in one place and the layer read cannot
+  drift from the middleware-protected routes.
+
+An alternative that added a second seam beside `identify` was rejected: it
+verifies the same credential twice on every list read and lets the two seams
+report different callers. A `serverboot`-side middleware over the mounted route
+was also rejected: it needs a new exported envelope writer, no
+`pkg/registry/server` test can reach it, and every other mount of the endpoint
+(`internal/serverboot/webui_auth_integration_test.go:220-222`,
+`test/integration/runtime_layer_visibility_test.go:107-109`) would silently fail
+open.
 
 ### CODE-4: wire the SCIM group expander into the layer endpoint
 
@@ -571,12 +856,17 @@ if scimHandler != nil {
 }
 ```
 
-and in the layer endpoint's builder chain (`:1238-1256`):
+and in the layer endpoint's builder chain (`:1238-1256`), whose identity
+resolver CODE-3 has already replaced:
 
 ```go
-	WithIdentityResolver(layerIdentity).
+	WithIdentityResolver(layerCallerResolver(layerVerify)).
 	WithGroupResolver(resolveGroup).
 ```
+
+CODE-4 adds the `WithGroupResolver(resolveGroup)` line alone. The
+`WithIdentityResolver` line is shown for position and is CODE-3's, not a second
+edit to the same line.
 
 A nil `resolveGroup` is the JWT-only path, which is what the nil contract in
 `pkg/layer` already means (`pkg/layer/composer.go:45-49`). Without this a caller
@@ -653,6 +943,34 @@ from the whole list the panel holds. The lead is left alone on every arm: on the
 admin arm it is the deliberate posture of the admin panel, and no response
 reports the role, so the panel predicts nothing either way.
 
+Three comments outside the panel state the pre-change endpoint behavior as the
+reason for a live shell rule, and each takes a string edit in this step:
+
+- `useReachReport`'s exported doc (`web/ui/src/useAsync.ts:64-70`) says the
+  layer surfaces report through it "because a layer endpoint resolves an
+  unverifiable session to the anonymous caller and answers, so its outcome
+  carries nothing about the session". After CODE-2 that endpoint refuses such a
+  session. The reason becomes the one that survives: a read that answered says
+  the registry was reachable, which is all this hook reports, and a layer read
+  that was refused carries an identity outcome of its own that the surface
+  reports through its error rather than through this hook.
+- `surfaceReach`'s comment (`web/ui/src/App.tsx:246-251`) states the same
+  falsified reason and takes the same replacement, keeping its conclusion, "What
+  a read that answered does say is that the registry is reachable", verbatim.
+- The reach-recovery case's comment (`web/ui/src/surfaces.test.tsx:1612-1614`)
+  repeats it and takes the same replacement. Its assertions are unchanged, so it
+  is a comment edit beside TEST-5's `bobLayer` edit rather than a new case.
+
+The shell's refused state is left keyed on the catalog read alone, which is
+where it is keyed today (`web/ui/src/App.tsx:243-245`). A refused layer read
+renders the panel's own refusal band (`LayerPanel.tsx:298-307`) and reports no
+reach, so the sidebar holds whatever the catalog read last reported. Staging a
+second refusal source is a §13.10 shell change this proposal does not make, and
+the comments say so rather than leaving the question unstated.
+
+`web/bundle` is regenerated for these edits in the same commit as the panel's,
+which is already this step's requirement.
+
 No further panel edit is staged. `listOrdered` (`:794-806`) partitions
 and sorts whatever the read returns, and the "yours" marker and the personal
 layer count are computed per row against the subject the posture read reports
@@ -668,10 +986,14 @@ changed and `.github/workflows/test.yml` runs `npm run build` followed by
 |:--|:--|:--|
 | A tenant admin reads either arm | `200` carrying the tenant's whole layer list, including every other caller's user-defined layers. Unchanged from today | §7.3.1's staged paragraph; `docs/reference/http-api.md` `### List layers` |
 | An authenticated non-admin reads either arm | `200` carrying the layers §4.6 admits for that caller, including that caller's own user-defined layers, with no field of a withheld layer present and no indication that rows were withheld | §7.3.1's staged paragraph; `docs/reference/http-api.md` `### List layers` |
-| A caller resolving no verified subject on a registry that configures an identity provider, whether the caller presented no credential or one that failed signature, `iss`, `aud`, subject-claim, expiry, or runtime-key validation | `200` carrying `"layers": []`, and the panel's "No layers to show" empty state. No §6.10 code reports it | §7.3.1's staged paragraph; `docs/reference/http-api.md` `### List layers`; `CHANGELOG.md` |
+| A caller whose credential fails signature, `iss`, `aud`, subject-claim, or expiry validation, or a runtime-signed token carrying no registered key | `401` carrying the §6.10 envelope that failure already maps to: `auth.token_expired`, `auth.untrusted_token` with `details.token_iss`, or `auth.untrusted_runtime` with `details.runtime_iss`. No layer is read. The panel renders its refusal band with the code | §7.3.1's staged paragraph; `readableBy`'s guard and `verifiedCaller`; TEST-2's arms; `docs/reference/http-api.md` `### List layers` |
+| A caller presenting no credential under `oidc-jwt` or `trusted-headers`, or one arriving while the issuer JWKS is unreachable | `200` carrying `"layers": []`, and the panel's "No layers to show" empty state. Not a refusal: the provider resolves the request as anonymous (`internal/serverboot/identity_verify.go:223-225`, `:228-232`; `spec/06-mcp-server.md:100`, `:102`; `spec/13-deployment.md:170`), which is what keeps the signed-out layer panel working | §7.3.1's staged paragraph; TEST-1's `anonymous_reads_nothing`; TEST-4's cookie-less arm |
+| A caller presenting no bearer token under `injected-session-token` | `401 auth.untrusted_runtime`. The verifier reports the absent token as a verification failure (`internal/serverboot/identity_verify.go:28`, `internal/serverboot/identity_verify_test.go:202-210`), which is the §6.3.2 rule and the posture the meta-tool routes already take | §7.3.1's staged paragraph; TEST-0's provider arms |
 | A caller's view admits no layer at all | `200` carrying an empty array rather than `null`, and the panel's "No layers to show" empty state | §7.3.1's staged paragraph; `docs/reference/http-api.md` `### List layers` |
 | `GET /v1/layers?deleted=true` | The same rule as the live arm, on every caller class | §7.3.1's staged paragraph, "on both its live and its soft-deleted arm"; `docs/reference/http-api.md` `### List soft-deleted layers and restore` |
 | `POST /v1/layers/reorder` issued by a layer owner | `200` whose body reports the same set the list read would report for that caller, which is the tenant's whole list where that caller also holds the §4.7.2 admin role | §7.3.1's staged paragraph, "A `reorder` response reports the same set the list read would report for that caller" |
+| A reorder whose credential fails verification, on a registry that configures an identity provider | `401` carrying the §6.10 identity envelope, before any layer is restamped. This is a status change on a write route: the guard stands ahead of `rejectIfReadOnly` (`pkg/registry/server/layers.go:979`) and ahead of the per-layer `authorizeLayerWrite` loop (`:1007-1010`), which today answers that caller `403 auth.forbidden`. A caller the verifier accepts raises no error here and takes the write gate unchanged | CODE-2's reorder guard; SPEC-1's staged sentence on the write authorization paragraph; TEST-2's `reorder` arm; DOC-3's `CHANGELOG.md` entry |
+| Every other layer route: register, update, restore, unregister, reingest, the inbound webhook, and erase | Unchanged. They read `e.caller(r)`, which resolves a failed verification to the anonymous-public caller exactly as today, and the webhook carries no caller credential at all | CODE-3; Non-goals, "Changing the §7.3.1 layer write authorization rule" |
 | The admin check itself fails, because `IsAdmin` returns a store error | The caller takes the non-admin path and reads their §4.6 view, or no layers if they resolve no subject. The read narrows rather than answering `registry.unavailable` | `readableBy`'s doc comment; TEST-1's `admin_check_error` arm |
 | A registry started with no identity provider, which includes public mode | Unchanged: the whole tenant layer list | §7.3.1's staged paragraph, "authenticates no caller"; the `authAdmin` closure at `internal/serverboot/serverboot.go:1247-1255`; `docs/reference/http-api.md` `### List layers` |
 | A registry naming a free-form `PODIUM_IDENTITY_PROVIDER` label, which installs no request-time verifier and is not public mode | Every caller is refused by the admin callback and authenticates as no one, so every caller reads no layers, which is the posture its write gate already takes | `readableBy`'s admin arm; the `authAdmin` closure at `internal/serverboot/serverboot.go:1247-1255`; TEST-1's arms |
@@ -683,6 +1005,59 @@ changed and `.github/workflows/test.yml` runs `npm run build` followed by
 
 ## Testing
 
+**TEST-0: pin the provider distinction at the resolver (unit).**
+`internal/serverboot/identity_verify_test.go`, beside `TestLayerIdentityResolver`
+(`:212-245`), which keeps its assertions verbatim because
+`layerIdentityResolver` keeps its behavior; its doc comment is rewritten by
+CODE-3, which is where the falsified §7.3.1 claim in it is corrected. Add
+`TestLayerCallerResolver`,
+carrying `// Spec: §6.3.2, §6.3.3, §7.3.1`, with four arms, because the
+endpoint's whole rule is "refuse when this returns an error" and the arms are
+what make that rule mean different things per provider:
+
+- A valid runtime-signed token through `injectedTokenVerifier`: the
+  authenticated identity and a nil error.
+- No `Authorization` header through `injectedTokenVerifier`: an error satisfying
+  `errors.Is(err, identity.ErrUntrustedRuntime)`. This is the arm that says an
+  absent credential is a failure under §6.3.2, and it restates at the resolver
+  what `TestInjectedTokenVerifier_RejectsMissingToken` (`:202-210`) pins at the
+  verifier.
+- No credential through `oidcJWTVerifier`, built over the package's existing
+  JWKS fixture: the anonymous identity and a nil error. This is the arm that
+  keeps a signed-out browser out of the refusal, and it fails if the endpoint
+  rule is ever rewritten to key on the identity rather than on the error.
+- A nil verifier: `layer.Identity{IsPublic: true}` and a nil error.
+
+**TEST-2: pin the refusal at the endpoint (unit).** New
+`TestLayerEndpoint_ListRefusesUnverifiedCredential` in
+`pkg/registry/server/layers_test.go`, table-driven, each case carrying
+`// Spec: §6.3.2, §6.3.3, §6.10, §7.3.1`, over the same seeded layers TEST-1
+uses and the same harness variant:
+
+- **`expired`.** A resolver returning `identity.ErrTokenExpired`: `401`, code
+  `auth.token_expired`.
+- **`untrusted_token`.** A resolver returning
+  `&identity.UntrustedTokenError{Issuer: "https://idp.example"}`: `401`, code
+  `auth.untrusted_token`, and `details.token_iss` naming the issuer. This is the
+  arm that pins reuse of `writeIdentityError` rather than a second mapping.
+- **`untrusted_runtime`.** A resolver returning `identity.ErrUntrustedRuntime`:
+  `401`, code `auth.untrusted_runtime`.
+- **`admitting_admin_callback_does_not_rescue`.** The same erroring resolver
+  with `authAdmin` left at the constructor default that admits: still `401`.
+  This pins the order, and it is the unit-level twin of TEST-3's inversion.
+- **`deleted_arm`** and **`reorder`.** The same erroring resolver against
+  `?deleted=true` and against `POST /v1/layers/reorder`: `401` on both, and on
+  the reorder arm the stored order is unchanged afterwards, which pins that the
+  guard runs before the restamp.
+- **`writes_unchanged`.** The same erroring resolver against `POST /v1/layers`
+  with a user-defined body under a refusing `authAdmin`: the status and code the
+  handler answers today, not `401`. This pins that `e.caller`'s swallow left the
+  write paths where they were.
+
+No matrix cell is added. `auth.token_expired`, `auth.untrusted_token`, and
+`auth.untrusted_runtime` are existing §6.10 codes with their own annotated
+tests; this route returns them and defines none.
+
 **TEST-1: pin the filter at the endpoint (unit).** New cases in
 `pkg/registry/server/layers_test.go`, beside
 `TestLayerEndpoint_ListReturnsRegisteredLayers` (`:196-224`) and
@@ -691,8 +1066,13 @@ existing harness (`:17-25`) installs no admin
 callback, so it runs on the constructor default that admits
 (`pkg/registry/server/layers.go:180`) and reads the whole list; its assertions
 stay green and still mean what they meant. The new cases need a harness variant
-taking a per-request `error` for `WithAdminAuth`, a per-request `layer.Identity`,
-and an optional `layer.GroupResolver`. Name the function
+taking a per-request `error` for `WithAdminAuth`, a per-request
+`(layer.Identity, error)` for `WithIdentityResolver`, and an optional
+`layer.GroupResolver`. The identity seam carries an error after CODE-3, and
+TEST-2 is built on this same variant: every one of its arms is defined by the
+error the resolver returns, so a variant carrying a `layer.Identity` alone can
+express none of them. TEST-1's own arms pass a nil error, which is what leaves
+their meaning unchanged. Name the function
 `TestLayerEndpoint_ListArmsByCallerRole`, table-driven, each case carrying
 `// Spec: §4.6, §7.3.1`. Seed one private admin-defined layer with a `LocalPath`
 the assertions search for, one public admin-defined layer, and one user-defined
@@ -706,12 +1086,12 @@ layer owned by alice.
   ID, nor its local path, nor alice's subject. Alice's arm additionally carries
   her own layer.
 - **`anonymous_reads_nothing`.** A refusing callback with a resolver returning
-  `layer.Identity{}`: `200` whose body is exactly `{"layers":[]}`, marshalled as
-  `[]` rather than `null`.
-- **`forged_credential_reads_nothing`.** A refusing callback with a resolver
-  returning `layer.Identity{IsPublic: true}`, which is what the boot resolver
-  produces for a credential that fails verification: `{"layers":[]}`. A helper
-  that evaluates `layer.VisibleWith` before the authentication guard returns all
+  `layer.Identity{}, nil`: `200` whose body is exactly `{"layers":[]}`,
+  marshalled as `[]` rather than `null`.
+- **`nil_verifier_reads_nothing`.** A refusing callback with a resolver
+  returning `layer.Identity{IsPublic: true}, nil`, which is what a deployment
+  wiring no request-time verifier resolves: `{"layers":[]}`. A helper that
+  evaluates `layer.VisibleWith` before the authentication guard returns all
   three layers and fails here.
 - **`admin_check_error`.** A callback returning a wrapped `core.ErrUnavailable`
   with an authenticated non-admin resolver: the caller's §4.6 view, and status
@@ -733,33 +1113,41 @@ layer owned by alice.
   layer's ID nor its local path. The same reorder under an admitting callback
   returns the whole list.
 
-**TEST-3: correct the browser-flow doc comment (integration).**
+**TEST-3: invert the browser-flow expired-session case (integration).**
 `internal/serverboot/webui_auth_integration_test.go`,
-`TestBrowserFlow_ExpiredSessionAcrossSurfaces` (`:629-668`). The comment at
-`:632` states that the layer read answers unfiltered, which CODE-2 falsifies,
-while the `200` assertion at `:652-653` survives unchanged and would silently
-stop describing the behavior. Rewrite the comment to describe each surface after
-the fix: the meta-tool route refuses with `auth.token_expired`, the layer read
-answers `200` and reports the verification failure through no error code, and the
-posture read answers `200` with no subject. State what the layer read's `200` now
-holds on this fixture: `newBrowserStack` installs no admin callback
-(`internal/serverboot/webui_auth_integration_test.go:216-218`), so the
-constructor default admits (`pkg/registry/server/layers.go:180`), the request
-takes `readableBy`'s admin arm rather than its no-subject arm, and the body
-carries the stack's whole layer list, which this stack seeds as empty. Keep all
-three assertions verbatim.
+`TestBrowserFlow_ExpiredSessionAcrossSurfaces` (`:629-668`). It is the only test
+in the tree that pins today's `200` for a credential that failed verification on
+this route; every other `/v1/layers` read either runs on a stack with no
+identity provider or carries a valid token
+(`test/e2e/auth_admin_cli_rbac_test.go:148`).
 
-The comment must not describe the no-subject arm, because this fixture cannot
-take it. TEST-4's new `adminAuth` field is what a case needing that arm installs,
-and TEST-3 does not need it: the surface it documents is the divergence between
-the three routes on one expired credential.
+The assertion at `:650-654` inverts:
 
-This case seeds no layer rows of its own. `newBrowserStack` writes no layer
-configs today (its only store writes are `CreateTenant` at `:191` and
-`PutManifest` at `:198`), and this case passes no rows through the seam TEST-4
-adds, so its layer read returns an empty list and asserts only the status of each
-surface. TEST-4 carries the disclosure assertion, in a case that seeds its own
-rows through that seam.
+```go
+layers := b.do(t, http.MethodGet, "/v1/layers", nil, expired)
+defer layers.Body.Close()
+if layers.StatusCode != http.StatusUnauthorized {
+    t.Fatalf("layer read = %d, want 401 for a session past the token's exp", layers.StatusCode)
+}
+if e := envelope(t, layers); e.Code != "auth.token_expired" {
+    t.Errorf("layer read code = %q, want auth.token_expired", e.Code)
+}
+```
+
+The function's doc comment at `:629-633` currently reads that the layer read
+"answers unfiltered" and that the three surfaces report differently. It is
+replaced by the new rule: a request carrying a session cookie past the token's
+`exp` is refused on every surface that verifies the credential, so the meta-tool
+route and the layer read both report `auth.token_expired`, while the §7.3.4
+posture read answers `200` with no `subject`, because it refuses no request for
+lack of a credential. The comment states that the layer read's refusal does not
+depend on the fixture's admin callback: `newBrowserStack` installs none
+(`:217-218`), so the constructor default admits, and the refusal runs ahead of
+the admin arm.
+
+This case seeds no layer rows of its own and needs none: the refusal precedes
+the store read. TEST-4 carries the disclosure assertions, in a case that seeds
+its own rows through the seam it adds.
 
 **TEST-4: prove the narrowing through the wired stack (integration and e2e).**
 
@@ -847,7 +1235,17 @@ rows through that seam.
   (`internal/serverboot/identity_verify.go:215`, `:218-222`), which
   `newBrowserStack` passes from `opts.browserAuth` (`:211`), so on a default
   stack all three arms would resolve anonymous and the case would assert
-  nothing. The expired credential arm needs no
+  nothing.
+
+  The cookie-less arm is load-bearing beyond the empty body: it pins that a
+  caller who never signed in is answered `200` rather than refused.
+  `oidcJWTVerifier` resolves an absent credential as anonymous with no error
+  (`internal/serverboot/identity_verify.go:223-225`), which is what
+  `spec/13-deployment.md:170` requires, and refusing there would break the
+  signed-out layer panel. A fifth arm presents a cookie signed by an issuer the
+  stack does not trust and asserts `401 auth.untrusted_token`, so the two
+  conditions the endpoint must never confuse are pinned side by side on one
+  fixture. The expired credential arm needs no
   case here; TEST-3's function already covers that surface.
 - **CODE-4's wiring.** `browserStack` installs no group resolver (`:217-218`) and
   the wiring lives in `serverboot.go`'s builder chain, so only a test that runs
@@ -871,15 +1269,80 @@ collision sentence CODE-5 preserves; `:17780` asserts the lead literal, which
 CODE-5 leaves verbatim; and `:13743-13759` pins `DeletedLayers.tsx:132`, a
 different component outside this change.
 
-One fixture comment in the same file is falsified and takes a string edit beside
-CODE-5's panel comments. `bobLayer`
-(`web/ui/src/surfaces.test.tsx:14267-14269`) reads "The list read is unfiltered,
+Three comments in the same file are falsified and take string edits beside
+CODE-5's panel comments. The first is `bobLayer`
+(`web/ui/src/surfaces.test.tsx:14267-14269`), which reads "The list read is unfiltered,
 so it reaches the panel alongside the caller's own", which after CODE-2 is no
 longer why another subject's user-defined layer appears in a panel row. The
 reason becomes the stub: the suite's `/v1/layers` stub returns the row, and on a
 live registry that row reaches a caller the §7.3.1 admin arm admits. The rest of
 the comment, including "a reorder that named it would be refused whole", is
 unchanged, and the fixture's own assertions are unchanged.
+
+The second is the reach-recovery case's comment (`:1612-1614`), which states
+that the layers route's surfaces report no catalog outcome "because a layer
+endpoint answers an unverifiable session anonymously and says nothing about it".
+After CODE-2 the endpoint refuses that session, so the comment takes the same
+replacement CODE-5 stages on `useReachReport` and on `surfaceReach`: a read that
+answered reports that the registry is reachable, which is the condition the
+sidebar recovery keys on. The case's assertions are unchanged.
+
+The third is the ended-session case's premise comment (`:8527-8529`), which
+reads "The layers route issues no catalog read of its own, so the panel would
+receive the ended session on no path at all unless the shell takes one." Its
+first clause stays true and its second does not: after CODE-2 the panel's own
+`/v1/layers` read carries the same refusal from the same credential, which is
+the pairing DOC-4 states, so the ended session reaches the panel on a path of
+its own. The reason becomes the one that survives the change: the shell owns
+the recovery control on the layers route because the panel's own error band
+offers none.
+
+The case's assertions are unchanged, including the row assertion at `:8555`.
+The case stubs `/v1/layers` as a `200` and pins what the shell renders given
+that answer, which is a question about the shell rather than about the
+endpoint, so the change falsifies the comment's stated reason rather than the
+case. The stub does now encode a pairing a live registry will not produce, and
+rewriting it would replace the row assertion with the panel's error band, which
+`:17745-17780` already covers. That is recorded here so a later reader does not
+read the corrected comment as contradicting the stub beneath it, and it is not
+staged.
+
+The sibling case at `:8605-8617` carries no falsified prose and needs no edit.
+
+**TEST-6: pin the boot wiring through the binary (e2e).** New
+`TestOIDCJWT_LayerListRefusesUnverifiableCredential` in
+`test/e2e/auth_oidc_jwt_test.go`, carrying `// Spec: §6.3.3, §6.10, §7.3.1`. It
+is the only deliverable that reads `internal/serverboot/serverboot.go:1246`, the
+one line that makes CODE-3's error-preserving resolver reach a shipped registry.
+TEST-0 exercises the resolver alone, TEST-2 injects a resolver into the
+endpoint, and TEST-3 runs on `newBrowserStack`, which builds its own endpoint
+(`internal/serverboot/webui_auth_integration_test.go:217-218`), so all three
+stay green if the builder chain is left passing `layerIdentity`. This is
+boot-path code that runs only in the spawned binary, which
+`.claude/rules/test-coverage.md` requires be covered by an end-to-end test
+asserting the observable result.
+
+The existing `gwOIDCServer` harness (`test/e2e/auth_oidc_jwt_test.go:125-159`)
+boots the binary with `PODIUM_IDENTITY_PROVIDER=oidc-jwt` against the file's
+`oidcTestIdP`, so the case needs no new fixture. It reads `/v1/layers` with
+`gwHeaderGet` (`test/e2e/auth_gateway_test.go:28-44`) on three arms:
+
+- A token from an issuer the registry does not accept, minted the way
+  `TestOIDCJWT_ADFSProfileVisibility` mints its `foreign` token (`:249-259`):
+  `401` and a body containing `auth.untrusted_token`. This is the arm that fails
+  if `:1246` keeps the swallowing resolver, because the read answers `200` there.
+- No `Authorization` header at all: `200`, because `oidcJWTVerifier` resolves an
+  absent credential as anonymous with no error
+  (`internal/serverboot/identity_verify.go:223-225`). This is the arm that keeps
+  the signed-out layer panel working, and it pins that the refusal keys on the
+  verifier's error rather than on the identity.
+- A token past its `exp` under an accepted issuer: `401` and
+  `auth.token_expired`, which pins the mapping the same binary answers on the
+  meta-tool routes.
+
+Both refusal arms assert the `code` field rather than the status alone, because
+a `401` written by any other path would satisfy a status-only assertion. The
+case runs under `requireCustomTrustStore(t)`, as every case in that file does.
 
 ## Manual validation
 
@@ -892,12 +1355,23 @@ before it is committed.
 read and expects the user-defined layer to appear. The surface a human reads is
 the terminal output of the curl beside the panel row; the wrong output it catches
 is a personal layer appearing to a caller who does not own it. The command gains
-the owner's credential:
+the owner's credential, the status line, and the envelope's `code` among the
+patterns it filters on:
 
 ```bash
 curl -sS "http://127.0.0.1:8153/v1/layers" \
-  -H "Authorization: Bearer $TOKEN" | python3 -m json.tool | grep -i -e '"ID"' -e secret
+  -H "Authorization: Bearer $TOKEN" \
+  -w '\nstatus=%{http_code}\n' | grep -i -e '"ID"' -e secret -e '"code"' -e status
 ```
+
+The `-w` form is the one this file already uses where a step reads a status
+(`test/manual-validation.md:4250`, `:4680`, `:4817`). Without it the step is
+unreadable after the change: a refusal and a read that narrowed to no layers
+both print no layer line, and the §6.10 envelope carries no status inside it
+(`pkg/registry/server/server.go:1446-1458`). The `python3 -m json.tool` stage is
+dropped because the server already indents every response body
+(`pkg/registry/server/server.go:1438-1444`), so the filter reads the body
+directly and the appended status line does not have to parse as JSON.
 
 The whole Expect block at `:4801-4808` is replaced by the following, which keeps
 the secret-redaction rule and the "yours" marker sentence verbatim and drops the
@@ -912,21 +1386,36 @@ answers the layers the caller may read, so the same request without the header
 returns `{"layers": []}`: this stack configures `oidc-jwt` and seeds no admin
 grant, so an unauthenticated caller is neither an admin nor an authenticated
 subject and reads no layers at all. The marker remains a rendering of ownership
-over the rows the caller can see.
+over the rows the caller can see. A `401` carrying `auth.token_expired` here
+means `$TOKEN`, minted in the prerequisite, has passed its Keycloak lifetime
+rather than that the read narrowed. Re-mint it with the prerequisite's command
+and re-run the step. The two outcomes are distinguishable from the terminal
+without inspecting the token, because the command prints the status line beside
+the filtered body: a refused read prints `status=401` and the envelope's `"code"`
+line, and a read that answered prints `status=200` and the layer lines it
+carries.
 
 **S49 step 4** (`:4874-4882`) issues the same anonymous read and counts the
-tombstoned layer. It gains the same header, so the count is zero because the
-layer is tombstoned rather than because the caller is anonymous:
+tombstoned layer. It gains the same header, so the layer is absent because it is
+tombstoned rather than because the caller is anonymous, and it gains the status
+line for the reason S48's command does: a `grep -c` prints `0` for a refused
+request and `0` for the tombstoned success the step is checking, so the count
+alone no longer distinguishes them. The count is replaced by the same filtered
+listing:
 
 ```bash
 curl -sS "http://127.0.0.1:8153/v1/layers" \
-  -H "Authorization: Bearer $TOKEN" | grep -c own-release || true
+  -H "Authorization: Bearer $TOKEN" \
+  -w '\nstatus=%{http_code}\n' | grep -e own-release -e '"code"' -e status || true
 ```
 
-**Expect.** The live list no longer carries `own-release`, read under the owner's
-own credential. The layer is restorable from the panel's recovery control until
+**Expect.** `status=200` with no `own-release` line, read under the owner's own
+credential. The layer is restorable from the panel's recovery control until
 the §8.4 window runs out, which is what makes this an unregister rather than an
-erasure.
+erasure. As in S48, `status=401` beside a `"code"` line carrying
+`auth.token_expired` means the token minted in the prerequisite has expired;
+re-mint it and re-run the step, because a listing read from a refused request
+states nothing about the tombstone.
 
 **S50** (`:4889-4986`) states outright that the list read is unfiltered (`:4956`)
 and drives the non-owner refusal from the `own-release` panel row. That row no longer
@@ -964,7 +1453,10 @@ user-defined layer is visible to its registrant alone. `public-handbook` is
 present because bob is authenticated and it is public. A panel listing more than
 `public-handbook` means the list read is still unfiltered, which is the failure
 this step now catches; an empty panel means bob's sign-in did not resolve a
-subject, and step 1 is re-run before continuing.
+subject, and step 1 is re-run before continuing. A panel showing its refusal
+band with `auth.token_expired` or `auth.untrusted_token` instead of a row list
+means bob's session cookie no longer verifies, which is a refusal rather than a
+narrowing. Sign bob in again and re-run the step.
 
 Steps 3 and 4 keep their panel interaction and their expectations, retargeted
 from the `own-release` row to the `public-handbook` row. That layer is
@@ -994,8 +1486,50 @@ exists to catch. The refusal names neither the owner nor the state of the
 session, because it carries neither, and it is the same refusal a caller who can
 see the layer receives, so the narrowed list discloses nothing further about it.
 
+A new step 6 covers the credential the registry cannot verify, from the terminal
+and from the browser, on the stack this scenario already runs.
+
+**Step 6.** Read the list with a credential the registry cannot verify, then
+with none at all:
+
+```bash
+curl -sS "http://127.0.0.1:8153/v1/layers" \
+  -H "Authorization: Bearer not-a-token" \
+  -w '\nstatus=%{http_code}\n'
+curl -sS "http://127.0.0.1:8153/v1/layers" -w '\nstatus=%{http_code}\n'
+```
+
+Then, in bob's browser window, open DevTools, Application, Cookies, replace the
+value of the `__Host-podium_session` cookie with `not-a-token`, and reload the
+layers route.
+
+**Expect.** The first request answers `status=401` with code
+`auth.untrusted_token`. The second answers `status=200` with `{"layers": []}`.
+Those two outcomes are the rule this change turns on: a credential the registry
+fails to verify is refused, and a request the provider resolves as anonymous is
+answered with an empty list, which is what keeps the signed-out panel working on
+this `oidc-jwt` stack. A `200` on the first request means the layer endpoint is
+still resolving an unverifiable credential to the anonymous caller, which is the
+fail-open this scenario exists to catch. A `401` on the second means the refusal
+is keying on the resolved identity rather than on the verifier's error, which
+would sign every visitor out of the public panel.
+
+In the browser the panel renders its refusal band where it previously rendered
+bob's row list. The band carries `auth.untrusted_token`, the envelope's
+suggested action, and the line "Retrying does not clear this condition." in place
+of a retry, because the registry marks that code non-retryable
+(`pkg/registry/server/error_envelope.go:81-86`) and the band's retry is gated on
+the flag (`web/ui/src/components/primitives.tsx:724-728`). Above it the shell
+renders its own refused-read banner, "The registry served no catalog for this
+request.", with a Try again control, because the shell's catalog read takes the
+same refusal from the same cookie (`web/ui/src/App.tsx:182-188`, `:505`,
+`:1072-1082`). That pairing is the part no Go test reads. A panel showing an
+empty row list instead means the shell swallowed the refusal and is telling bob
+the tenant holds no layers he can see. Restore the session by signing bob in
+again before continuing.
+
 The existing step 5, the owner arm reached from the admin window's panel row,
-becomes step 6 and names its target explicitly. Its instruction reads "press
+becomes step 7 and names its target explicitly. Its instruction reads "press
 Unregister on the `own-release` row" rather than "press Unregister on the same
 row" (`test/manual-validation.md:4979`), because "the same row" takes its
 referent from step 3, and step 3 now acts on `public-handbook`. Left as a
@@ -1022,10 +1556,13 @@ behaviour for a non-admin user, so that page needs no edit and becomes accurate.
 `docs/reference/http-api.md`, `### List layers` (`:346-350`), which is a bare code
 block today, gains one paragraph stating that a caller holding the tenant `admin`
 role receives the tenant's whole layer list, that any other authenticated caller
-receives the layers that caller can see under the visibility rules, that a caller
-the registry does not authenticate, including one whose credential fails
-verification since these endpoints raise no authentication error of their own,
-receives an empty list, that a withheld layer is absent from the `200` rather
+receives the layers that caller can see under the visibility rules, that a
+caller whose credential fails verification is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime`,
+the same refusal the registry answers on any other route that verifies the same
+credential, that a caller the registry resolves as anonymous receives an empty
+list rather than a refusal, and that whether presenting no credential is itself
+a verification failure is the configured provider's rule, that a withheld layer
+is absent from the `200` rather
 than refused with an error code, and closing with the page's established bypass
 sentence: "A registry started with no identity provider configured, or one
 started in public mode, authenticates no caller, so the read returns the tenant's
@@ -1039,17 +1576,46 @@ serves no HTTP read.
 `docs/reference/cli.md`, `### podium layer list` (`:431-437`): "Lists configured
 layers and their current state." becomes a sentence naming the layers visible to
 the caller's identity, carrying the same bypass sentence, and stating that a
-caller holding the tenant `admin` role sees every layer in the tenant while
-another caller sees the layers that caller's identity admits and an
-unauthenticated caller sees none.
+caller holding the tenant `admin` role sees every layer in the tenant, another
+caller sees the layers that caller's identity admits, a caller the registry
+resolves as anonymous sees none, and a caller whose credential fails
+verification is refused rather than shown an empty list. Whether presenting no
+credential is itself a verification failure is the configured identity
+provider's rule.
 
 `docs/deployment/layers.md:101`: the clause describing what `podium layer list`
 prints takes the same three arms as the CLI reference: a caller holding the
 tenant `admin` role, and every caller on a registry that authenticates none, sees
 every layer in the tenant; any other authenticated caller sees the layers that
-caller's identity admits; and an unauthenticated caller sees none. Line `:131`
+caller's identity admits; a caller the registry resolves as anonymous sees none;
+and a caller whose credential fails verification is refused, on the same terms
+the HTTP API reference states. Whether presenting no credential is itself a
+verification failure is the configured identity provider's rule. Line `:131`
 needs no edit, because the `--deleted` arm is filtered on the terms stated at
 `:101`.
+
+DOC-1 also stages the `reorder` refusal on the pages that mirror the layer write
+authorization rule, on the same terms as SPEC-1's staged sentence. Each takes a
+clause saying that on `POST /v1/layers/reorder` a caller whose credential fails
+verification under the configured identity provider's rule is refused with
+`auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before
+either authorization arm is evaluated, so on that operation `auth.forbidden`
+names a caller the registry verified and did not authorize, and that the other
+layer write operations answer such a caller `auth.forbidden` as before:
+
+- `docs/reference/http-api.md:315`, the **Layer write authorization** paragraph,
+  after "A caller authorized by neither arm is refused with `403
+  auth.forbidden`, whether that caller resolves a different subject or resolves
+  none at all."
+- `docs/reference/http-api.md:370`, the **Reorder layers** paragraph, after "a
+  caller authorized by neither arm is rejected with `auth.forbidden`."
+- `docs/reference/cli.md:443`, `### podium layer reorder`, after "as is a caller
+  authorized on neither arm."
+- `docs/deployment/layers.md:113`, after "the registry answers `auth.forbidden`
+  otherwise."
+
+No other write route's page changes, because no other write handler takes the
+guard.
 
 `docs/deployment/access-control.md:121` needs no edit. The step directs an
 operator through `podium admin show-effective`, and an operator holding the
@@ -1135,6 +1701,30 @@ edit with it.
   receives on any row it can see whatever refusal the rule produces, which the
   panel presents, and a caller who resolves no subject stands on the panel's
   empty state with no row to mark and no write to attempt.
+- Both documents gain the refused arm beside the three read arms. A caller whose
+  session cookie no longer verifies is refused rather than narrowed, so the panel
+  renders its existing refusal band in place of its table
+  (`web/ui/src/surfaces/LayerPanel.tsx:298-307`). The band states the §6.10 code
+  (`web/ui/src/api.ts:49-56`) and the envelope's `suggested_action`, and it
+  offers no retry of its own: the registry marks none of `auth.token_expired`,
+  `auth.untrusted_token`, and `auth.untrusted_runtime` retryable
+  (`pkg/registry/server/error_envelope.go:81-86`, `:112-119`), the flag is
+  serialized on every envelope (`pkg/registry/server/server.go:650`) and read
+  through as `false` (`web/ui/src/api.ts:212-218`), and `ErrorState` renders
+  "Retrying does not clear this condition." in place of the button where the flag
+  is false (`web/ui/src/components/primitives.tsx:704`, `:724-728`). The recovery
+  control on that route belongs to the shell rather than to the panel. The
+  shell's own catalog read takes the same refusal from the same credential and
+  sets `catalogError` (`web/ui/src/App.tsx:182-188`), so the layers route renders
+  `RefusedRead` with its retry above the panel it keeps mounted, and
+  `SessionEnded` with `AuthRecovery` where the posture read resolved a subject
+  (`web/ui/src/App.tsx:504-505`, `:1066-1082`, `:1121-1143`). The design
+  documents therefore describe the pair: the shell's banner carries the way back,
+  and the panel under it names the code. No rendering code changes, because the
+  band, the code label, and the shell's recovery arm are already built. What does
+  change in `web/ui/src` is comment text, staged in CODE-5: the
+  shell's reach-report rule gives the endpoint's old behavior as its reason, and
+  that reason is replaced.
 - The board 14i sentences beside that clause take the same split.
   `web/design/README.md:154` describes board 14i as drawing the panel for a
   caller who resolves no subject on a deployment running no browser sign-in, with
@@ -1176,31 +1766,39 @@ that alters what a caller sees on upgrade (`CHANGELOG.md:79`):
 >   may read, on both the live and the `?deleted=true` arm, and the reorder
 >   response reports the same set. A caller holding the tenant `admin` role still
 >   receives the tenant's whole layer list. Any other authenticated caller
->   receives the layers visible to that identity, and a caller the registry does
->   not authenticate receives an empty list. A layer outside that set is absent
+>   receives the layers visible to that identity. A caller the registry resolves as
+>   anonymous receives an empty list, and a caller whose credential fails
+>   verification is refused with the same `auth.token_expired`,
+>   `auth.untrusted_token`, or `auth.untrusted_runtime` envelope the registry's
+>   other routes already answer for that credential. A layer outside that set is absent
 >   from the response rather than refused, and no error code reports the
 >   narrowing. A registry started with no identity provider configured, which
 >   includes public mode, returns the whole layer list to every caller as before.
 >   On upgrade, a signed-in non-admin sees fewer rows in `podium layer list` and
 >   in the web UI layer panel, and an unauthenticated caller against a registry
->   that configures an identity provider sees none.
+>   that configures an identity provider sees none. A caller presenting a stale
+>   or forged token to `GET /v1/layers` now receives that refusal where it
+>   previously received the full list, and the same caller receives it from
+>   `POST /v1/layers/reorder` in place of the `403 auth.forbidden` the write
+>   gate answered before, because the registry now reports that it could not
+>   verify the credential before it evaluates whether that caller may write.
 
 ## Open questions
 
-None. The failed-credential question is closed by the rule itself: such a caller
-resolves no verified subject and reads no layers, which is the strictest
-available answer and discloses nothing, so no divergence with §6.3.2 or §6.3.3
-needs resolving. The reorder question is closed by the write gate: a tenant admin
+No question remains open. The failed-credential question is closed by the
+refusal: such a caller receives the §6.10 envelope its credential already
+receives everywhere else, so §6.3.2, §6.3.3, §6.9, and §13.12 keep their
+unqualified statements and no divergence is left to resolve. The reorder question is closed by the write gate: a tenant admin
 reads the whole run, and a non-admin can name only their own user-defined layers,
 so no accepted reorder from the panel restamps a run the caller cannot see whole,
 and a subset reorder from the CLI is pre-existing endpoint behaviour this
 proposal does not change.
 
-## Open decisions
+## Settled decisions
 
-Two of the three decisions this section carried are settled. They are recorded
-here with the reasoning that produced them, because the alternatives were
-weighed and the record of why is worth keeping.
+Every decision this section carried is settled. They are recorded here with the
+reasoning that produced them, because the alternatives were weighed and the
+record of why is worth keeping.
 
 **Settled: the layer read carries an admin arm.** A tenant admin reads the
 tenant's whole list, including another caller's user-defined layers. The staged
@@ -1219,45 +1817,21 @@ stages.
 
 - Taking the admin arm: a tenant admin reads every layer in the tenant, including
   another caller's user-defined layers with their owner subject and local path.
-  CODE-3, TEST-2, the gateway documentation edits, and both former open questions
-  disappear. The scoping of §6.3.2 and §6.3.3 does not follow from this arm
-  either way; that is open decision 2. `internal/serverboot` changes only for
-  CODE-4. Every list read by a non-admin costs one `store.IsAdmin` call, which is
-  what a layer write already costs.
+  The gateway documentation edits and both former open questions disappear.
+  CODE-3 and TEST-2 return in a different form: the resolver change now exists
+  to refuse an unverifiable credential rather than to narrow it.
+  `internal/serverboot` changes for CODE-3 and CODE-4. Every list read by a
+  non-admin costs one `store.IsAdmin` call, which is what a layer write already
+  costs.
 - Refusing the admin arm: §4.6 decides for every caller, an admin holding no
   group and owning no personal layer sees fewer rows than the tenant holds, and
   the failed-credential caller reads the public layers rather than nothing.
-  CODE-3 and SPEC-2 come back, and with them the question of what a failed
-  credential reads.
+  SPEC-2 comes back, and with it the question of what a failed credential reads.
 
 SPEC-1's staged paragraph is written for the admin arm, which is the settled
 answer above.
 
-**2. Is an empty `200` for a failed credential acceptable on this route, and does
-the spec say so twice?** Default: an empty `200`, with no rescoping of §6.3.2,
-§6.3.3, §6.9, or §13.12. The route already answers `200` to an expired session
-(`internal/serverboot/webui_auth_integration_test.go:650-655`), and after the
-change the body discloses nothing. Three arms:
-
-- **Empty `200`, nothing rescoped**, which is what this proposal stages. Its cost
-  is stated rather than argued away: §6.3.3 states its rejections for the
-  registry process and carries no route qualifier (`spec/06-mcp-server.md:90`,
-  `:102`), so after SPEC-1 lands the spec holds both "rejected with
-  `auth.untrusted_token`" and an empty `200` for the same credential on
-  `GET /v1/layers`. Today the spec assigns that read no disposition at all, so
-  this arm converts a code-versus-spec divergence into a spec-versus-spec
-  overlap.
-- **Empty `200`, with the §6.3.x scoping retained.** SPEC-2 comes back as earlier
-  revisions staged it: a scoping clause and a §7.3.1 cross-reference on
-  `spec/06-mcp-server.md:76`, `:102`, `:106`, §6.9's rows (`:389`, `:390`,
-  `:391`), and `spec/13-deployment.md:498`. It is the only arm under which the
-  applied spec carries one disposition per route. Its cost is a three-file spec
-  edit and S1 widening back to those files.
-- **A `401` on this route.** The two routes agree with no rescoping, at the cost
-  of a refusal on a read that is otherwise never refused, and it needs its own
-  SPEC-1 sentence and a change to the endpoint's mounting or its handler.
-
-**3. Does the register form's layer-class control belong in this proposal?**
+**2. Does the register form's layer-class control belong in this proposal?**
 Settled: no. The defect is real and verified: `register` resolves the class
 server-side and answers `201` carrying the class it chose
 (`pkg/registry/server/layers.go:711-721`, `:736-762`), while the form sends a
@@ -1292,15 +1866,26 @@ its own defect and is not deferred by deferring the form.
   in the style of the `as_admin=1` arms at `docs/reference/http-api.md:166` and
   `:198`. A tenant admin already reads the whole list, so no override is needed
   for the case those arms exist for.
-- Adding a §6.10 error code. The remedy narrows a `200` collection rather than
-  denying a named resource, the handler's existing `registry.unavailable` arms
-  are unchanged, and `matrix-audit` gains no cell.
-- Changing the §7.3.1 layer write authorization rule, any write handler's
-  authorization behaviour, or `layerIdentityResolver`. The read reuses the
-  `authAdmin` callback the write gate already installs and adds no branch to it,
-  and the resolver's public-mode fallback for a credential that fails
-  verification is left as it is, because `readableBy`'s authentication guard
-  makes it unreachable on the read.
+- Adding a §6.10 error code or a matrix cell. The refusal returns the existing
+  `auth.token_expired`, `auth.untrusted_token`, and `auth.untrusted_runtime`
+  codes through the server's existing `writeIdentityError`, and a narrowed
+  listing is still reported through no code at all.
+- Changing the §7.3.1 layer write authorization rule or any write handler's
+  authorization outcome. The read reuses the `authAdmin` callback the write gate
+  already installs and adds no branch to it, and `e.caller` reproduces the
+  resolver's anonymous-public fallback for every write, register, erase, and
+  audit path, so their dispositions are unchanged. One write route does change
+  its refusal code, and it is stated rather than claimed away: `reorder` refuses
+  an unverifiable credential ahead of `rejectIfReadOnly` and ahead of the
+  per-layer `authorizeLayerWrite` loop
+  (`pkg/registry/server/layers.go:979`, `:1007-1010`), so on a registry that
+  configures an identity provider that caller receives `401` with the identity
+  envelope where it previously received `403 auth.forbidden`. SPEC-1 stages the
+  §7.3.1 sentence recording it, DOC-1 stages the same qualification on the four
+  documentation sentences that mirror that paragraph, and DOC-3 records it in
+  the `CHANGELOG.md` entry. The other five write operations keep `e.caller(r)`
+  and their `auth.forbidden` disposition, and no caller the verifier accepts
+  sees any change.
 - Changing how `POST /v1/layers/reorder` assigns absolute order values. Only its
   response body is narrowed.
 - Tenant routing on the layer endpoint. It reads a single tenant ID fixed at
@@ -1698,3 +2283,122 @@ defect needing its own §7.3.4 field, client change, and tests.
   describing different read sets for the same caller. The live-rule arm now
   states all three arms, and the refusal clause stays scoped to rows the caller
   can see.
+
+### Redesign 1 (2026-09-01, automated)
+
+One redesign specification was reconciled against the working tree and applied as
+an ordered edit list. The area redesigned is the disposition of a credential that
+fails verification on the §7.3.1 layer read, and with it the spec amendment, the
+boot wiring, the endpoint's identity seam, the checklist, the edge cases, the
+tests, the hand-run scenarios, and the documentation that follow from it.
+
+- **The layer read answered an empty `200` to a credential the registry failed to
+  verify, and the proposal recorded that as an accepted spec-versus-spec
+  overlap.** The read now refuses such a credential with the §6.10 envelope the
+  same credential receives on every middleware-protected route, written by the
+  server's existing `writeIdentityError`, so §6.3.2, §6.3.3, §6.9, and §13.12
+  keep their unqualified statements and stage no edit.
+- **CODE-3 returns in a new form.** It surfaces the verifier's error to the
+  endpoint through a new `layerCallerResolver` rather than mapping a failure onto
+  the zero identity, and it leaves `layerIdentityResolver`'s behavior intact for
+  the §4.7.2 admin gate and the §7.3.4 posture read, whose contracts refuse no
+  request for lack of a credential. The endpoint's `identify` seam carries an
+  error, `e.caller` reproduces the swallow for the write, register, erase, and
+  audit paths, and `writeIdentityError` becomes a package-level function.
+- **`POST /v1/layers/reorder` changes one response code.** The guard stands ahead
+  of `rejectIfReadOnly` and ahead of the per-layer `authorizeLayerWrite` loop, so
+  on a registry that configures an identity provider an unverifiable credential
+  receives `401` where it received `403 auth.forbidden`. SPEC-1 stages a sentence
+  on §7.3.1's write authorization paragraph recording it, scoped to `reorder`
+  because the other five write operations keep `e.caller(r)` and their existing
+  disposition, DOC-1 stages the same qualification on the four documentation
+  sentences that mirror that paragraph, and DOC-3 records it on upgrade.
+- **The provider distinction is stated where it belongs.** The endpoint carries
+  no per-provider branch and refuses exactly when the configured verifier returns
+  an error. An absent credential is a verification failure under
+  `injected-session-token` and is not one under `oidc-jwt` or `trusted-headers`,
+  and an unreachable issuer JWKS resolves as anonymous, which is what keeps the
+  signed-out layer panel working.
+- **The test set was rebuilt around the refusal.** TEST-0 pins the provider
+  distinction at the resolver, TEST-2 returns as the endpoint refusal case,
+  TEST-3 inverts from asserting `200` to asserting `401 auth.token_expired`, and
+  TEST-6 is added to pin `internal/serverboot/serverboot.go:1246` through the
+  compiled binary, which is the only line a shipped registry depends on and the
+  only one the other three leave unread. TEST-1's harness variant carries
+  `(layer.Identity, error)` so TEST-2's arms can be expressed on it.
+- **Three `web/ui/src` comments and one hand-run step were falsified or missing.**
+  `useReachReport`, `surfaceReach`, and the reach-recovery case give the removed
+  endpoint behavior as the reason for a live shell rule, and CODE-5 and TEST-5
+  take them. DOC-2 gains an S50 step that presents an unverifiable credential and
+  expects the refusal from the terminal and the panel's refusal band in the
+  browser, which is the change's central new observable and was asserted by no
+  hand-run step.
+
+**What the redesign deleted.** The empty-`200` disposition for a failed
+credential, in the Summary's fixed decision, in the Decisions paragraph, in
+SPEC-1's staged sentence, and in the edge-case table. The spec-versus-spec
+overlap argument in every place it stood, including SPEC-1's two rescoping
+paragraphs and the Summary's overlap bullet. Open decision 2, because the arm it
+offered is the one taken, and the cross-reference to it in decision 1's first
+bullet. The claim that `internal/serverboot` changes only for CODE-4, in the
+Summary bullet, in the CODE-3 section, in decision 1's first bullet, and in the
+Non-goals bullet. The `forged_credential_reads_nothing` TEST-1 arm, replaced by
+`nil_verifier_reads_nothing`. TEST-3's instruction to keep its `200` assertions
+verbatim. The Open questions paragraph's failed-credential sentences. The
+Non-goals bullet listing `layerIdentityResolver` as unchanged. This supersedes
+the Pass 7 entries recording CODE-3, TEST-2, and open decision 2 as dropped. No
+spec file, code file, or test outside this proposal is deleted, and no existing
+§6.10 code, matrix cell, or test assertion is removed beyond the single `200`
+assertion TEST-3 inverts.
+
+**Open decisions recorded.** Two, both with a default staged in the text above
+and neither changing any other deliverable. First, whether the `reorder` guard
+runs before or after `rejectIfReadOnly`: the staged text puts it before, which is
+fail-closed and matches the list arm, at the cost of answering `401` rather than
+`registry.read_only` to an unverifiable credential on a read-only registry.
+Second, whether SPEC-1 names the `injected-session-token` absent-credential
+refusal explicitly: the staged paragraph leaves it to "the configured identity
+provider's rule (§6.3.2, §6.3.3)", which avoids a third place to keep in step, at
+the cost that a reader of §7.3.1 alone does not learn that the same absent
+credential is refused under one provider and resolved as anonymous under another.
+Both arms of both decisions leave the code identical apart from that one response
+code.
+
+### Pass 10 (2026-09-01, automated)
+
+- **DOC-4 and S50's new step 6 described the panel's refusal band as carrying a
+  retry control, which it does not render for an identity refusal.** The registry
+  marks none of `auth.token_expired`, `auth.untrusted_token`, and
+  `auth.untrusted_runtime` retryable (`pkg/registry/server/error_envelope.go:81-86`,
+  `:112-119`), `ErrorResponse.Retryable` carries no `omitempty`
+  (`pkg/registry/server/server.go:650`), the client reads the flag through as
+  `false` for any envelope carrying a code (`web/ui/src/api.ts:212-218`), and
+  `ErrorState` then renders "Retrying does not clear this condition." in place of
+  the button (`web/ui/src/components/primitives.tsx:704`, `:724-728`). The panel
+  passes no `children`, so it adds no control of its own
+  (`web/ui/src/surfaces/LayerPanel.tsx:304`). Equating that band with the shell's
+  catalog treatment was also wrong: the shell renders `AuthRecovery` there. Both
+  sites now state the rendering that occurs. The band carries the code, the
+  envelope's suggested action, and the non-retryable line, and the way back on the
+  layers route is the shell's, because the shell's own catalog read takes the same
+  refusal from the same credential and sets `catalogError`
+  (`web/ui/src/App.tsx:182-188`), which renders `RefusedRead` with its retry above
+  the kept panel, or `SessionEnded` with `AuthRecovery` where the posture read
+  resolved a subject (`:504-505`, `:1066-1082`, `:1121-1143`). No rendering code
+  change is staged, which matches CODE-5's existing record that the shell's
+  refused state stays keyed on the catalog read alone.
+- **S48 step 4 and S49 step 4's staged commands could not surface the `401` their
+  Expect blocks told the operator to act on.** `curl -sS` without `-w` prints the
+  body alone, the §6.10 envelope carries no status inside it
+  (`pkg/registry/server/server.go:1446-1458`), and a refusal matched neither
+  step's filter, so a refused read and a read that narrowed to no layers printed
+  the same nothing. Both commands now append `-w '\nstatus=%{http_code}\n'` and
+  filter on the envelope's `"code"` line beside their existing patterns, which is
+  the form this file already uses where a step reads a status
+  (`test/manual-validation.md:4250`, `:4680`, `:4817`) and the form the staged S50
+  steps 5 and 6 use. S48's `python3 -m json.tool` stage is dropped, because the
+  server already indents every response body
+  (`pkg/registry/server/server.go:1438-1444`) and the appended status line does
+  not parse as JSON. S49's `grep -c`, which printed `0` for both outcomes, is
+  replaced by the same filtered listing, and its Expect states `status=200` with
+  no `own-release` line as the passing result.
