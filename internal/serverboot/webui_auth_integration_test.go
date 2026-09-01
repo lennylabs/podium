@@ -909,7 +909,7 @@ func TestBrowserFlow_LayerListNarrowsToCaller(t *testing.T) {
 	if strings.Join(outsider, ",") != "pub" {
 		t.Errorf("non-member read = %v, want the public row alone", outsider)
 	}
-	for _, withheld := range []string{"eng", "/srv/eng-secret", "engineering", "carol@acme.com"} {
+	for _, withheld := range []string{"eng", "/srv/eng-secret", "engineering", "carol-personal", "carol@acme.com", "/srv/carol-personal"} {
 		if strings.Contains(body, withheld) {
 			t.Errorf("non-member body disclosed %q\nbody: %s", withheld, body)
 		}
