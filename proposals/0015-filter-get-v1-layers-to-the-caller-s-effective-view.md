@@ -1,7 +1,7 @@
 # Proposal 0015: Filter GET /v1/layers to the caller's effective view
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-09-01). Signed off by the maintainer for
+- Status: Implemented (2026-09-01). Signed off by the maintainer for
   implementation, whole, with every step in the checklist in scope. Converged
   after 3 adversarial review rounds (2 findings fixed) following two redesigns
   that settled the read rule and the failed-credential disposition; "Resolved in
@@ -206,15 +206,15 @@ sections after sign-off.
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.3.1 gains the layer read visibility paragraph
+- [x] **S1 · spec** — SPEC-1. §7.3.1 gains the layer read visibility paragraph
       beside the write authorization paragraph, and that write authorization
       paragraph gains the sentence scoping `reorder`'s refusal of a credential
       that fails verification. The file is `spec/07-external-integration.md`.
       Levels: —. Depends on: —
-- [ ] **S2 · code** — CODE-1. `pkg/registry/core` exports the projection from a
+- [x] **S2 · code** — CODE-1. `pkg/registry/core` exports the projection from a
       stored layer config onto the §4.6 visibility record.
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-3, TEST-0. `internal/serverboot` surfaces the
+- [x] **S3 · code** — CODE-3, TEST-0. `internal/serverboot` surfaces the
       verifier's error through the resolver it installs on the layer endpoint,
       the endpoint's identity seam carries the error, `e.caller` reproduces the
       swallow for the write paths, and `writeIdentityError` becomes a package
@@ -223,7 +223,7 @@ sections after sign-off.
       (`internal/serverboot/serverboot.go:1246`) produces no observable outcome
       until CODE-2 lands, so TEST-6 pins it in S4.
       Depends on: S1
-- [ ] **S4 · code** — CODE-2, TEST-1, TEST-2, TEST-3, TEST-6. The endpoint
+- [x] **S4 · code** — CODE-2, TEST-1, TEST-2, TEST-3, TEST-6. The endpoint
       refuses an unverifiable credential and filters both list arms and the
       reorder response body, with the per-identity and refusal cases that pin
       them, the browser-flow expired-session case inverted from `200` to the
@@ -237,18 +237,18 @@ sections after sign-off.
       deliverable that reads `internal/serverboot/serverboot.go:1246` and the
       status it asserts exists only once CODE-2 has landed.
       Depends on: S2, S3
-- [ ] **S5 · code** — CODE-4. The SCIM group expander is passed to the layer
+- [x] **S5 · code** — CODE-4. The SCIM group expander is passed to the layer
       endpoint as well as to the registry.
       Levels: e2e. The wiring lives in the builder chain and the browser stack
       installs no group resolver, so the level it reaches is the end-to-end arm
       TEST-4 stages in S6.
       Depends on: S4, which stages the `WithGroupResolver` option this wiring
       calls.
-- [ ] **S6 · test** — TEST-4. The `layerConfigs` and `adminAuth` seams on the
+- [x] **S6 · test** — TEST-4. The `layerConfigs` and `adminAuth` seams on the
       browser stack's fixture, the per-identity narrowing through the wired
       browser stack, and the SCIM-resolved membership read through the binary.
       Levels: integration, e2e. Depends on: S5
-- [ ] **S7 · code** — CODE-5, TEST-5. The panel's empty-state heading, the stale
+- [x] **S7 · code** — CODE-5, TEST-5. The panel's empty-state heading, the stale
       panel doc comments including the file header and the three reach-report
       comments, the regenerated bundle, the component assertion that pins the
       heading, and the `bobLayer` and reach-report fixture comments. The code
@@ -256,16 +256,16 @@ sections after sign-off.
       behavior S4 lands, and it precedes the documentation steps that describe
       the same surface.
       Levels: unit. Depends on: S4
-- [ ] **S8 · docs** — DOC-1. The read rule on the HTTP API reference, the CLI
+- [x] **S8 · docs** — DOC-1. The read rule on the HTTP API reference, the CLI
       reference, and the layers deployment page.
       Levels: —. Depends on: S4
-- [ ] **S9 · docs** — DOC-2. The three hand-run scenarios that read the list
+- [x] **S9 · docs** — DOC-2. The three hand-run scenarios that read the list
       anonymously or assert it is unfiltered, and the S50 step that presents an
       unverifiable credential and expects the refusal.
       Levels: —. Depends on: S4, S7
-- [ ] **S10 · docs** — DOC-3. The `CHANGELOG.md` entry.
+- [x] **S10 · docs** — DOC-3. The `CHANGELOG.md` entry.
       Levels: —. Depends on: S4
-- [ ] **S11 · docs** — DOC-4. The design documents' unfiltered-read statements,
+- [x] **S11 · docs** — DOC-4. The design documents' unfiltered-read statements,
       in `web/DESIGN.md` and `web/design/README.md`.
       Levels: —. Depends on: S4
 
