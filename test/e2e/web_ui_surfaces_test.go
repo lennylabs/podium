@@ -57,11 +57,15 @@ func TestWebUI_ServedBundleCallsResolve(t *testing.T) {
 	}
 }
 
-// Spec: §13.10, §13.2.1 — the served bundle reads the read-only marker off
-// the registry's responses under the name the registry sets, so the layer
-// panel presents the state before a write is attempted. The header name is
-// the whole contract between the two sides, and a rename on either side
-// silently returns the panel to one refusal per button press.
+// Spec: §13.10, §13.2.1, §7.3.4 — the served bundle reads the read-only
+// marker off the registry's responses under the name the registry sets, and
+// reads the §7.3.4 capability object under the name the posture read
+// serializes, so the layer panel presents both states before a write is
+// attempted. Each name is the whole contract between the two sides, and a
+// rename on either side is silent: the marker returns the panel to one
+// refusal per button press, and the capability reads undefined, which the
+// client's predicate resolves closed and which withholds every control the
+// rule governs from every caller.
 func TestWebUI_ServedBundleReadsTheReadOnlyMarker(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -75,13 +79,20 @@ func TestWebUI_ServedBundleReadsTheReadOnlyMarker(t *testing.T) {
 		t.Fatalf("GET /app/ status = %d, want 200\nlog:\n%s", st, srv.log())
 	}
 	found := false
+	capability := false
 	for _, script := range bundleScripts(t, srv, string(index)) {
 		if strings.Contains(script, readOnlyHeaderName) {
 			found = true
 		}
+		if strings.Contains(script, "layer_capabilities") && strings.Contains(script, "manage_any_layer") {
+			capability = true
+		}
 	}
 	if !found {
 		t.Errorf("the served bundle reads no %s header; the panel would learn the read-only state one refused write at a time", readOnlyHeaderName)
+	}
+	if !capability {
+		t.Error("the served bundle reads no layer_capabilities.manage_any_layer; the panel would withhold every §7.3.1 control from every caller")
 	}
 }
 

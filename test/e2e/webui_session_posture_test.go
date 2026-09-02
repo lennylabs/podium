@@ -36,7 +36,10 @@ func TestServerFlags_WebUISessionPostureRead(t *testing.T) {
 			SignInPath  string `json:"sign_in_path"`
 			SignOutPath string `json:"sign_out_path"`
 		} `json:"browser_auth"`
-		Subject string `json:"subject"`
+		Subject           string `json:"subject"`
+		LayerCapabilities struct {
+			ManageAnyLayer bool `json:"manage_any_layer"`
+		} `json:"layer_capabilities"`
 	}
 	if err := json.Unmarshal(body, &posture); err != nil {
 		t.Fatalf("decode posture: %v\nbody: %s", err, body)
@@ -52,6 +55,12 @@ func TestServerFlags_WebUISessionPostureRead(t *testing.T) {
 	}
 	if posture.Subject != "" {
 		t.Errorf("subject = %q, want none for an uncredentialed request", posture.Subject)
+	}
+	// §7.3.1: a deployment that configures no identity provider treats the
+	// local operator as the de facto admin, so the layer endpoints admit
+	// every caller and the read reports that rather than a closed default.
+	if !posture.LayerCapabilities.ManageAnyLayer {
+		t.Error("manage_any_layer is false on a registry that configures no identity provider and admits every layer write")
 	}
 
 	// The authentication routes are unregistered on this deployment, so the
@@ -128,5 +137,76 @@ func TestServerFlags_BrowserOriginGateCoversLayerWrites(t *testing.T) {
 		if e.Code == "auth.csrf_invalid" {
 			t.Error("a write carrying no browser-origin evidence was refused by the gate")
 		}
+	}
+}
+
+// Spec: §7.3.4 — the posture read reports the caller's §7.3.1 layer
+// capabilities, and it reports them from the layer endpoint's own admin arm.
+// The value is a prediction a client renders on, so a token the read reports
+// manage_any_layer true for is a token the layer endpoint admits on a
+// registration naming a filesystem path on the registry host. The stack is
+// the injected-session-token harness rather than the oidc-jwt one, which
+// skips on darwin.
+func TestWebUISession_ReportsLayerCapabilities(t *testing.T) {
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		ServeArgs:       []string{"--web-ui"},
+		Layers: []authLayer{{
+			ID:         "seed",
+			Files:      map[string]string{"seed/note/ARTIFACT.md": authContext("seed note")},
+			Visibility: authVisibility{Public: true},
+		}},
+	})
+	adminToken := srv.adminToken("alice@acme.com")
+	bobToken := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+
+	for _, tc := range []struct {
+		what    string
+		token   string
+		subject string
+		want    bool
+	}{
+		{"bootstrap admin", adminToken, "alice@acme.com", true},
+		{"verified non-admin", bobToken, "bob@acme.com", false},
+	} {
+		st, body := srv.get("/v1/ui/session", tc.token)
+		if st != http.StatusOK {
+			t.Fatalf("%s: GET /v1/ui/session = %d\nbody: %s\nlog:\n%s", tc.what, st, body, srv.log())
+		}
+		var posture struct {
+			IdentityProviderConfigured bool   `json:"identity_provider_configured"`
+			Subject                    string `json:"subject"`
+			LayerCapabilities          struct {
+				ManageAnyLayer bool `json:"manage_any_layer"`
+			} `json:"layer_capabilities"`
+		}
+		if err := json.Unmarshal(body, &posture); err != nil {
+			t.Fatalf("%s: decode posture: %v\nbody: %s", tc.what, err, body)
+		}
+		if !posture.IdentityProviderConfigured {
+			t.Errorf("%s: identity_provider_configured is false on the authenticated stack", tc.what)
+		}
+		if posture.Subject != tc.subject {
+			t.Errorf("%s: subject = %q, want %q", tc.what, posture.Subject, tc.subject)
+		}
+		if posture.LayerCapabilities.ManageAnyLayer != tc.want {
+			t.Errorf("%s: manage_any_layer = %v, want %v", tc.what, posture.LayerCapabilities.ManageAnyLayer, tc.want)
+		}
+	}
+
+	// The read predicts what the layer endpoint does. The admin arm the read
+	// reported open admits a registration naming a host path.
+	root := writeRegistry(t, map[string]string{
+		"ops/runbook/ARTIFACT.md": authContext("an operations runbook"),
+	})
+	reg, err := json.Marshal(map[string]any{
+		"id": "ops", "source_type": "local", "local_path": root, "organization": true,
+	})
+	if err != nil {
+		t.Fatalf("marshal registration: %v", err)
+	}
+	if st, body := srv.do(http.MethodPost, "/v1/layers", adminToken, reg); st != http.StatusOK && st != http.StatusCreated {
+		t.Fatalf("admin local registration = %d, want the write the read predicted to be admitted\nbody: %s\nlog:\n%s", st, body, srv.log())
 	}
 }
