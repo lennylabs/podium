@@ -1103,13 +1103,20 @@ function LayerRow({
     mayEdit ? "Edit" : "",
     mayUnregister ? "Unregister" : "",
   ].filter((label) => label !== "");
-  // The Reingest button is the row's stable control, and it is where focus
-  // returns from every row state that takes away the control focus was on:
-  // the button disables itself while its request is open, which blurs it,
-  // and a refusal banner's Dismiss goes away with the banner it closes. The
-  // browser leaves focus on the document body in both cases, which puts the
-  // reader back at the top of the page.
+  // Focus returns to the Reingest button from every row state that takes away
+  // the control focus was on: the button disables itself while its request is
+  // open, which blurs it, and a refusal banner's Dismiss goes away with the
+  // banner it closes. The browser leaves focus on the document body in both
+  // cases, which puts the reader back at the top of the page. The rule
+  // withholds that button on a row whose reingest it refuses (§13.10) while
+  // leaving Edit and Unregister live, so the debt falls back to the overflow
+  // trigger, which is the row's remaining stable control there: it is present
+  // wherever a menu item could take focus from it, and those items are the
+  // only presses left that can owe focus on such a row.
   const trigger = useRef<HTMLButtonElement>(null);
+  // Picking an item unmounts the menu, so the trigger takes focus back before
+  // the dialog the item opens reads what to return focus to.
+  const overflow = useRef<HTMLButtonElement>(null);
   // Focus is owed only from a press on this row's own controls. The panel's
   // fan-out drives every row at once, and a row claiming focus for a request
   // the reader started from the panel's control moves them into the table.
@@ -1131,11 +1138,8 @@ function LayerRow({
       return;
     }
     owed.current = false;
-    trigger.current?.focus();
+    (trigger.current ?? overflow.current)?.focus();
   }, [reingest.kind, refused]);
-  // Picking an item unmounts the menu, so the trigger takes focus back before
-  // the dialog the item opens reads what to return focus to.
-  const overflow = useRef<HTMLButtonElement>(null);
   // The menu is a transient popup, so it dismisses on Escape and on a press
   // or a focus move outside itself, which is also what keeps one row's
   // actions from staying open behind another row's.

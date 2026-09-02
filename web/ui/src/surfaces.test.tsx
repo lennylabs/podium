@@ -13445,6 +13445,52 @@ describe("the layer write flows", () => {
     });
   });
 
+  // The local-source rule withholds the row's Reingest button from a caller
+  // who owns a local layer without holding the admin arm, and it leaves Edit
+  // and Unregister on the same row live. The focus the refusal's Dismiss
+  // gives up therefore has no Reingest control to return to, so the row hands
+  // it to the overflow trigger instead of leaving it on the document body,
+  // which would put the reader back at the top of the page.
+  it("returns focus to the row’s overflow control where the rule withholds its Reingest button", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "DELETE /v1/layers": {
+        status: 403,
+        body: { code: "auth.forbidden", message: "not permitted" },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    expect(
+      screen.queryByRole("button", { name: /^Reingest (?!all$)/ }),
+    ).toBeNull();
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Unregister" }));
+    fireEvent.change(screen.getByLabelText("Type the layer ID to confirm"), {
+      target: { value: "alice-personal" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Unregister layer" }));
+    const refused = await screen.findByText(/nothing changed/);
+    const dismiss = within(refused.closest("div") as HTMLElement).getByRole(
+      "button",
+      { name: "Dismiss" },
+    );
+    dismiss.focus();
+    fireEvent.click(dismiss);
+    await waitFor(() => {
+      expect(screen.queryByText(/nothing changed/)).toBeNull();
+    });
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", {
+          name: "More actions for alice-personal",
+        }),
+      );
+    });
+  });
+
   // The cap refusal carries the limit and the caller's current count, and
   // this is where the user created the layer, so the count is rendered here
   // rather than arriving as the generic failure every other refusal gets.
