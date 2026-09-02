@@ -101,14 +101,17 @@ func newLayerWriteStore(t *testing.T) store.Store {
 }
 
 // seedLayer writes cfg directly through the store so the seeding is not itself
-// subject to the gate under test.
+// subject to the gate under test. The LocalPath default is conditioned on a
+// local source: a cell that names SourceType "git" must reach the endpoint with
+// an empty LocalPath, so that the §7.3.1 local-source rule classifies it on its
+// repository string alone and a cell that wants a stray stored path names one.
 func seedLayer(t *testing.T, st store.Store, cfg store.LayerConfig) {
 	t.Helper()
 	cfg.TenantID = "t"
 	if cfg.SourceType == "" {
 		cfg.SourceType = "local"
 	}
-	if cfg.LocalPath == "" {
+	if cfg.SourceType == "local" && cfg.LocalPath == "" {
 		cfg.LocalPath = "/tmp/seed"
 	}
 	if err := st.PutLayerConfig(context.Background(), cfg); err != nil {
@@ -122,7 +125,24 @@ type layerWriteOp struct {
 	name string
 	// tombstoned seeds the layer soft-deleted rather than live (restore).
 	tombstoned bool
-	do         func(t *testing.T, base string) (*http.Response, []byte)
+	// source overrides the seeded layer's source fields. restore and
+	// reingest re-read the stored source, so the §7.3.1 local-source rule
+	// reaches them and a local seed would refuse the non-admin owner this
+	// table asserts at 200. They are seeded as a git layer whose repository
+	// names a network endpoint, which that rule does not reach, so the cell
+	// keeps asserting the layer-write rule it exists for. update classifies
+	// the patch, which carries "ref" alone, and unregister and reorder are
+	// outside the rule, so those cells keep the local seed.
+	source func(*store.LayerConfig)
+	do     func(t *testing.T, base string) (*http.Response, []byte)
+}
+
+// gitSource seeds a git layer whose repository string names a network endpoint
+// and which carries no filesystem path, so the §7.3.1 local-source rule does
+// not reach it.
+func gitSource(cfg *store.LayerConfig) {
+	cfg.SourceType = "git"
+	cfg.Repo = "https://github.com/acme/x.git"
 }
 
 func layerWriteOps() []layerWriteOp {
@@ -133,13 +153,13 @@ func layerWriteOps() []layerWriteOp {
 		{name: "update", do: func(t *testing.T, base string) (*http.Response, []byte) {
 			return putJSON(t, base, "/v1/layers/update?id=own", map[string]any{"ref": "release"})
 		}},
-		{name: "restore", tombstoned: true, do: func(t *testing.T, base string) (*http.Response, []byte) {
+		{name: "restore", tombstoned: true, source: gitSource, do: func(t *testing.T, base string) (*http.Response, []byte) {
 			return mustPost(t, base, "/v1/layers/restore?id=own", nil)
 		}},
 		{name: "reorder", do: func(t *testing.T, base string) (*http.Response, []byte) {
 			return mustPost(t, base, "/v1/layers/reorder", map[string]any{"order": []string{"own"}})
 		}},
-		{name: "reingest", do: func(t *testing.T, base string) (*http.Response, []byte) {
+		{name: "reingest", source: gitSource, do: func(t *testing.T, base string) (*http.Response, []byte) {
 			return mustPost(t, base, "/v1/layers/reingest?id=own", nil)
 		}},
 	}
@@ -169,7 +189,11 @@ func TestLayerWriteAuth_UserDefinedOwnerOrAdmin(t *testing.T) {
 			t.Run(op.name+"/"+c.name, func(t *testing.T) {
 				t.Parallel()
 				st := newLayerWriteStore(t)
-				seedLayer(t, st, store.LayerConfig{ID: "own", UserDefined: true, Owner: "alice", Users: []string{"alice"}})
+				cfg := store.LayerConfig{ID: "own", UserDefined: true, Owner: "alice", Users: []string{"alice"}}
+				if op.source != nil {
+					op.source(&cfg)
+				}
+				seedLayer(t, st, cfg)
 				if op.tombstoned {
 					if err := st.DeleteLayerConfig(context.Background(), "t", "own"); err != nil {
 						t.Fatalf("DeleteLayerConfig: %v", err)
@@ -337,7 +361,11 @@ func TestLayerRegister_TakeoverProduct(t *testing.T) {
 						st := &layerFaultStore{Store: mem, failGet: lk.failGet, failDeleted: lk.failDeleted}
 						base := newLayerWriteServer(t, st, c.admin, c.id, nil)
 
-						req := map[string]any{"id": "own", "source_type": "local", "local_path": "/tmp/posted"}
+						// A git source naming a network repository, because
+						// the §7.3.1 local-source rule refuses a non-admin
+						// registration that names a filesystem path and this
+						// table asserts the layer-write rule alone.
+						req := map[string]any{"id": "own", "source_type": "git", "repo": "https://github.com/acme/x.git"}
 						for k, v := range b.extra {
 							req[k] = v
 						}
@@ -463,8 +491,12 @@ func TestLayerRegister_RecoveryWindowSequence(t *testing.T) {
 	st := newLayerWriteStore(t)
 	aliceBase := newLayerWriteServer(t, st, false, aliceID, nil)
 
+	// A git source naming a network repository, because the §7.3.1
+	// local-source rule refuses a non-admin registration and a non-admin
+	// restore that name a filesystem path, and this sequence asserts the
+	// recovery window rather than that rule.
 	resp, body := mustPost(t, aliceBase, "/v1/layers", map[string]any{
-		"id": "shared-id", "source_type": "local", "local_path": "/tmp/alice", "user_defined": true,
+		"id": "shared-id", "source_type": "git", "repo": "https://github.com/alice/x.git", "user_defined": true,
 	})
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("alice register status = %d: %s", resp.StatusCode, body)
@@ -476,7 +508,7 @@ func TestLayerRegister_RecoveryWindowSequence(t *testing.T) {
 
 	bobBase := newLayerWriteServer(t, st, false, bobID, nil)
 	resp, body = mustPost(t, bobBase, "/v1/layers", map[string]any{
-		"id": "shared-id", "source_type": "local", "local_path": "/tmp/bob", "user_defined": true,
+		"id": "shared-id", "source_type": "git", "repo": "https://github.com/bob/x.git", "user_defined": true,
 	})
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("bob re-registration status = %d, want 403: %s", resp.StatusCode, body)
@@ -493,8 +525,8 @@ func TestLayerRegister_RecoveryWindowSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetLayerConfig after restore: %v", err)
 	}
-	if got.Owner != "alice" || got.LocalPath != "/tmp/alice" {
-		t.Errorf("restored layer = %+v, want alice's layer at /tmp/alice", got)
+	if got.Owner != "alice" || got.Repo != "https://github.com/alice/x.git" {
+		t.Errorf("restored layer = %+v, want alice's layer at her own repository", got)
 	}
 }
 

@@ -11,9 +11,23 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
+// webhookEndpointOpt wires one collaborator onto the endpoint the fixture
+// returns. The §7.3.1 local-source rule reads the admin arm, and
+// NewLayerEndpoint installs one that admits every caller, so a case that
+// exercises the refusal installs a denying arm through denyAdminArm.
+type webhookEndpointOpt func(*LayerEndpoint) *LayerEndpoint
+
+// denyAdminArm installs the admin arm a deployment with an identity provider
+// configured wires for a caller who holds no §4.7.2 admin role. A webhook
+// delivery carries the per-layer secret rather than a session, so it resolves
+// no admin there.
+func denyAdminArm(e *LayerEndpoint) *LayerEndpoint {
+	return e.WithAdminAuth(func(*http.Request) error { return ErrAdminRequired })
+}
+
 // newWebhookEndpoint seeds a git layer with a known webhook secret so the
 // §7.3.1 inbound-webhook handler has a verifiable target.
-func newWebhookEndpoint(t *testing.T, lc store.LayerConfig) (*LayerEndpoint, string) {
+func newWebhookEndpoint(t *testing.T, lc store.LayerConfig, opts ...webhookEndpointOpt) (*LayerEndpoint, string) {
 	t.Helper()
 	st := store.NewMemory()
 	const tenantID = "default"
@@ -24,7 +38,11 @@ func newWebhookEndpoint(t *testing.T, lc store.LayerConfig) (*LayerEndpoint, str
 	if err := st.PutLayerConfig(context.Background(), lc); err != nil {
 		t.Fatalf("PutLayerConfig: %v", err)
 	}
-	return NewLayerEndpoint(st, tenantID, NewModeTracker()), tenantID
+	e := NewLayerEndpoint(st, tenantID, NewModeTracker())
+	for _, opt := range opts {
+		e = opt(e)
+	}
+	return e, tenantID
 }
 
 // spec: §7.3.1 / §9.1 GitProvider — a delivery with a valid GitHub

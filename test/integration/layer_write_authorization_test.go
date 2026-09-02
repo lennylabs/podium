@@ -66,6 +66,21 @@ func layerWriteErrCode(t *testing.T, body []byte) string {
 	return env.Code
 }
 
+// layerWriteConstraint returns the §6.10 envelope's details.constraint, which
+// the §7.3.1 local-source refusal carries and the layer-write refusal does not.
+func layerWriteConstraint(t *testing.T, body []byte) string {
+	t.Helper()
+	var env struct {
+		Details struct {
+			Constraint string `json:"constraint"`
+		} `json:"details"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		t.Fatalf("decode error envelope %q: %v", body, err)
+	}
+	return env.Details.Constraint
+}
+
 // Spec: §7.3.1 — the layer-write authorization rule with the layer endpoint
 // wired to its real collaborators: a file-backed SQLite store, the §4.7.2
 // admin grant table behind pkg/registry/core.AdminAuthorize, and the ingest
@@ -93,13 +108,32 @@ func TestLayerWriteAuthorization_OverAdminGrantTable(t *testing.T) {
 	// carries alice as its caller-supplied owner field.
 	userDir := t.TempDir()
 	writeArtifact(t, filepath.Join(userDir, "personal"), "alice personal artifact")
+	localDir := t.TempDir()
+	writeArtifact(t, filepath.Join(localDir, "personal"), "alice local artifact")
 	orgDir := t.TempDir()
 	writeArtifact(t, filepath.Join(orgDir, "org"), "org artifact")
+	// alice-personal names a git source with a network repository, because
+	// the §7.3.1 local-source rule refuses a non-admin on a layer that names a
+	// filesystem path and this cell asserts the layer-write rule. The rule
+	// classifies a git source on its repository string alone, so the stored
+	// path is not classified, and the fixture's runner drives source.Local
+	// over that path whatever the source type names, which is what keeps the
+	// ingest reachable.
 	if err := st.PutLayerConfig(ctx, store.LayerConfig{
-		TenantID: "t", ID: "alice-personal", SourceType: "local", LocalPath: userDir,
+		TenantID: "t", ID: "alice-personal", SourceType: "git",
+		Repo: "https://github.com/alice/personal.git", LocalPath: userDir,
 		UserDefined: true, Owner: "alice@acme.com", Users: []string{"alice@acme.com"},
 	}); err != nil {
 		t.Fatalf("PutLayerConfig(alice-personal): %v", err)
+	}
+	// alice-local is the same layer on a local source, which is the cell the
+	// local-source rule reaches: alice owns it and the layer-write rule admits
+	// her, so its refusal is that rule's alone.
+	if err := st.PutLayerConfig(ctx, store.LayerConfig{
+		TenantID: "t", ID: "alice-local", SourceType: "local", LocalPath: localDir,
+		UserDefined: true, Owner: "alice@acme.com", Users: []string{"alice@acme.com"},
+	}); err != nil {
+		t.Fatalf("PutLayerConfig(alice-local): %v", err)
 	}
 	if err := st.PutLayerConfig(ctx, store.LayerConfig{
 		TenantID: "t", ID: "org", SourceType: "local", LocalPath: orgDir, Owner: "alice@acme.com",
@@ -116,12 +150,21 @@ func TestLayerWriteAuthorization_OverAdminGrantTable(t *testing.T) {
 		caller  layerWriteCaller
 		layerID string
 		want    int
+		// constraint is the details.constraint the §7.3.1 local-source rule
+		// carries on the cells it refuses, and is empty where the refusal is
+		// the layer-write rule's.
+		constraint string
 	}{
 		{caller: bob, layerID: "alice-personal", want: http.StatusForbidden},
 		{caller: anon, layerID: "alice-personal", want: http.StatusForbidden},
 		{caller: alice, layerID: "alice-personal", want: http.StatusOK},
+		// alice owns alice-local, so the layer-write rule admits her and the
+		// local-source rule is what refuses her re-read of a host path.
+		{caller: alice, layerID: "alice-local", want: http.StatusForbidden, constraint: "local_source"},
 		{caller: bob, layerID: "org", want: http.StatusForbidden},
 		{caller: alice, layerID: "org", want: http.StatusForbidden},
+		// ops holds the §4.7.2 admin grant, so both rules admit it on a local
+		// source and the pipeline runs over the seeded tree.
 		{caller: ops, layerID: "org", want: http.StatusOK},
 	}
 	for _, c := range cases {
@@ -148,6 +191,9 @@ func TestLayerWriteAuthorization_OverAdminGrantTable(t *testing.T) {
 			if code := layerWriteErrCode(t, body); code != "auth.forbidden" {
 				t.Errorf("code = %q, want auth.forbidden", code)
 			}
+			if got := layerWriteConstraint(t, body); got != c.constraint {
+				t.Errorf("details.constraint = %q, want %q", got, c.constraint)
+			}
 			if before.LastIngestedAt == nil && after.LastIngestedAt != nil {
 				t.Errorf("refused reingest ran the pipeline: last_ingested_at was stamped")
 			}
@@ -155,10 +201,13 @@ func TestLayerWriteAuthorization_OverAdminGrantTable(t *testing.T) {
 	}
 
 	// A registration under alice's layer ID by another verified subject is
-	// refused, and the stored layer keeps its owner and its source.
+	// refused, and the stored layer keeps its owner and its source. The
+	// registration names a git source with a network repository, because the
+	// local-source rule would otherwise refuse bob before the layer-write rule
+	// this cell asserts is reached.
 	base := newLayerWriteEndpoint(t, st, bob.id)
 	status, body := layerWritePost(t, base, "/v1/layers", map[string]any{
-		"id": "alice-personal", "source_type": "local", "local_path": t.TempDir(),
+		"id": "alice-personal", "source_type": "git", "repo": "https://github.com/bob/x.git",
 		"user_defined": true, "owner": "bob@acme.com",
 	})
 	if status != http.StatusForbidden {
@@ -167,11 +216,49 @@ func TestLayerWriteAuthorization_OverAdminGrantTable(t *testing.T) {
 	if code := layerWriteErrCode(t, body); code != "auth.forbidden" {
 		t.Errorf("bob re-registration code = %q, want auth.forbidden", code)
 	}
+	if got := layerWriteConstraint(t, body); got != "" {
+		t.Errorf("bob re-registration details.constraint = %q, want the layer-write refusal", got)
+	}
 	got, err := st.GetLayerConfig(ctx, "t", "alice-personal")
 	if err != nil {
 		t.Fatalf("GetLayerConfig(alice-personal): %v", err)
 	}
 	if got.Owner != "alice@acme.com" || got.LocalPath != userDir {
 		t.Errorf("refused registration rewrote the stored layer: %+v", got)
+	}
+
+	// Spec: §7.3.1 — the local-source rule on register. bob resolves a
+	// verified subject, so the coarse gate admits his registration of an
+	// unused ID and this refusal is the local-source rule's alone. Nothing is
+	// stored, and the refusal names no filesystem path.
+	fresh := t.TempDir()
+	status, body = layerWritePost(t, base, "/v1/layers", map[string]any{
+		"id": "bob-personal", "source_type": "local", "local_path": fresh,
+		"user_defined": true, "owner": "bob@acme.com",
+	})
+	if status != http.StatusForbidden {
+		t.Fatalf("bob local registration status = %d, want 403: %s", status, body)
+	}
+	if code := layerWriteErrCode(t, body); code != "auth.forbidden" {
+		t.Errorf("bob local registration code = %q, want auth.forbidden", code)
+	}
+	if c := layerWriteConstraint(t, body); c != "local_source" {
+		t.Errorf("bob local registration details.constraint = %q, want local_source", c)
+	}
+	if bytes.Contains(body, []byte(fresh)) {
+		t.Errorf("refusal body discloses the filesystem path: %s", body)
+	}
+	if _, err := st.GetLayerConfig(ctx, "t", "bob-personal"); err == nil {
+		t.Error("refused registration stored the layer")
+	}
+
+	// Spec: §7.3.1 — the same registration by the tenant admin is admitted,
+	// which is the arm the rule keeps open.
+	opsBase := newLayerWriteEndpoint(t, st, ops.id)
+	status, body = layerWritePost(t, opsBase, "/v1/layers", map[string]any{
+		"id": "ops-local", "source_type": "local", "local_path": fresh,
+	})
+	if status != http.StatusCreated {
+		t.Fatalf("ops local registration status = %d, want 201: %s", status, body)
 	}
 }
