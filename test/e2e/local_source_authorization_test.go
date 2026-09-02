@@ -101,8 +101,16 @@ const bootEscapedBytes = "OUTSIDE-SECRET-PAYLOAD"
 
 // serveExpectBootFailure runs `podium serve <args> --bind 127.0.0.1:<free>`
 // under a hard deadline, expecting the boot to abort before the listener
-// binds, and returns the combined output. It asserts the non-zero exit and the
-// unbound port itself, so a caller states only what the output must name.
+// binds, and returns the combined output. It asserts the non-zero exit and that
+// no listener was bound itself, so a caller states only what the output must
+// name.
+//
+// The unbound listener is asserted from the boot's own banner rather than by
+// probing the port after the run. The process has exited by then, so the port
+// is free whatever the boot did, and a probe would pass even against a boot
+// that bound the listener, served requests, and then exited non-zero. The
+// banner at internal/serverboot/serverboot.go is printed once the listener
+// binds, so its absence is evidence that survives the process.
 func serveExpectBootFailure(t *testing.T, env []string, args ...string) string {
 	t.Helper()
 	bind := localBind(freePort(t))
@@ -112,17 +120,22 @@ func serveExpectBootFailure(t *testing.T, env []string, args ...string) string {
 	if res.Exit == 0 {
 		t.Fatalf("serve exited 0; want a non-zero abort before the listener binds\noutput:\n%s", out)
 	}
-	if st := getStatusNoFatal("http://" + bind + "/healthz"); st == 200 {
-		t.Fatalf("serve bound %s instead of aborting the boot\noutput:\n%s", bind, out)
+	if strings.Contains(out, "listening on") {
+		t.Fatalf("serve bound %s instead of aborting the boot before the listener binds\noutput:\n%s", bind, out)
 	}
 	return out
 }
 
 // assertNoEscapedBytes reads the artifact the layer holds in its own directory
 // and the discovery surface, and fails if either carries what the removed link
-// pointed at.
+// pointed at. It first confirms the banner a bound listener prints, which is
+// what serveExpectBootFailure asserts the absence of; a renamed banner would
+// otherwise turn that assertion vacuous.
 func assertNoEscapedBytes(t *testing.T, srv *serverProc) {
 	t.Helper()
+	if log := srv.log(); !strings.Contains(log, "listening on") {
+		t.Fatalf("a booted server does not print the listening banner\nlog:\n%s", log)
+	}
 	st, body := srv.getMaybeAuth(t, srv.BaseURL+"/v1/load_artifact?id=ops/runbook")
 	if st != 200 {
 		t.Fatalf("load_artifact = %d, want the in-root artifact served\nbody: %s\nlog:\n%s", st, body, srv.log())
