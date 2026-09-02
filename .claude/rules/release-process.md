@@ -28,7 +28,7 @@ Podium follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`MAJO
    - Match the `## [X.Y.Z] - YYYY-MM-DD` header format exactly. The release workflow extracts this section verbatim as the GitHub Release body, so a malformed header drops the release notes.
 4. Confirm `go build ./...` and `go test ./internal/buildinfo/` pass.
 5. Commit as `chore(release): prep vX.Y.Z` with a DCO sign-off (`git commit -s`). The prep commit touches only `CHANGELOG.md` and `internal/buildinfo/buildinfo.go`.
-6. Open a PR with base `main`. Let CI pass before merging.
+6. Open a PR with base `main`. Let CI pass before merging, including `codecov/patch`, which reports separately from the test lanes and lands after them. See the Codecov section of [`test-coverage.md`](test-coverage.md) for how to read it.
 
 ## Tagging the release
 
