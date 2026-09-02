@@ -1,7 +1,7 @@
 # Proposal 0016: Authorize local-source layer registration, confine what a local layer's ingest may read, and report the caller's layer capabilities so the panel offers only what that caller can take
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-09-02). Signed off by the maintainer for
+- Status: Implemented (2026-09-02). Signed off by the maintainer for
   implementation, whole, with every step in the checklist in scope. OQ-1 is
   settled with it: the local-source rule ships with its single admin arm and no
   configuration key, which is a narrowing of the original requirement that asked
@@ -245,24 +245,24 @@ sections after sign-off.
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-2. §7.3.1 gains the local-source authorization
+- [x] **S1 · spec** — SPEC-2. §7.3.1 gains the local-source authorization
       paragraph and the ingest-confinement paragraph, and its `**Errors.**`
       paragraph gains the new arm. The file is
       `spec/07-external-integration.md`.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-3. §4.6's `local` source bullet and §4.7.2's
+- [x] **S2 · spec** — SPEC-3. §4.6's `local` source bullet and §4.7.2's
       authoring-rights paragraph each gain one pointer clause to the §7.3.1
       rule. The file is `spec/04-artifact-model.md`.
       Levels: —. Depends on: S1
-- [ ] **S3 · spec** — SPEC-5. §7.3.4's posture read gains the
+- [x] **S3 · spec** — SPEC-5. §7.3.4's posture read gains the
       `layer_capabilities` bullet, its opening sentence pair names it and states
       what a carried credential is verified for, and its closing sentence is
       amended. The file is `spec/07-external-integration.md`.
       Levels: —. Depends on: —
-- [ ] **S4 · spec** — SPEC-7. §13.10's layer-panel bullet records the rendering
+- [x] **S4 · spec** — SPEC-7. §13.10's layer-panel bullet records the rendering
       commitment. The file is `spec/13-deployment.md`.
       Levels: —. Depends on: S3
-- [ ] **S5 · code** — CODE-1, TEST-1, TEST-2. The confined tree constructor in
+- [x] **S5 · code** — CODE-1, TEST-1, TEST-2. The confined tree constructor in
       `pkg/layer/source`, the three bootstrap call sites routed through it, the
       `SKILL.md` read's classification branch and the `Request.Files` comment in
       `pkg/registry/ingest`, and
@@ -272,22 +272,22 @@ sections after sign-off.
       pins on the two `internal/serverboot` sites land in S10, which is the level
       that reaches them.
       Levels: unit. Depends on: S1
-- [ ] **S6 · code** — CODE-4, TEST-4. The local-source authorization rule, the
+- [x] **S6 · code** — CODE-4, TEST-4. The local-source authorization rule, the
       host-path classifier, and the capability evaluator in one new file, the
       five call sites, the cases that pin all five, and the amendments to
       `pkg/registry/server/layer_write_auth_test.go` and
       `test/integration/layer_write_authorization_test.go`, whose seeded local
       paths the rule would otherwise refuse.
       Levels: unit, integration. Depends on: S1
-- [ ] **S7 · code** — CODE-5, TEST-5, TEST-6. The posture read's capability
+- [x] **S7 · code** — CODE-5, TEST-5, TEST-6. The posture read's capability
       seam, its default-closed disposition, the boot wiring that passes the
       endpoint's own evaluator into it, the body cases, and the case pinning
       that the reported capability and the enforced gate are one expression.
       Levels: unit, integration. Depends on: S3, S6
-- [ ] **S8 · code** — CLI-1. The `--local` usage strings on `podium layer
+- [x] **S8 · code** — CLI-1. The `--local` usage strings on `podium layer
       register` and `podium layer update` name the new constraint.
       Levels: —. Depends on: S6
-- [ ] **S9 · code** — UI-1, UI-2, TEST-8. The posture type, the capability
+- [x] **S9 · code** — UI-1, UI-2, TEST-8. The posture type, the capability
       accessor, the `mayTake` predicate module, the register target constructor, the shell
       that derives the capability object and the `postureAnswered` flag once,
       threads them, and applies the register call to its own `catalogBare` line
@@ -295,24 +295,24 @@ sections after sign-off.
       and its empty-state arm, the deleted-layers surface, the register form,
       the update form, the regenerated bundle, and the client-side cases.
       Levels: unit. Depends on: S4, S7
-- [ ] **S10 · test** — TEST-10. The boot wiring, the CLI refusal, the posture
+- [x] **S10 · test** — TEST-10. The boot wiring, the CLI refusal, the posture
       body, and the bootstrap ingest's confinement through the compiled binary on
       both the `--layer-path` arm and the declared-layer arm, plus the bundle
       assertion.
       Levels: e2e. Depends on: S5, S9
-- [ ] **S11 · docs** — DOC-1. The local-source rule and the posture field on the
+- [x] **S11 · docs** — DOC-1. The local-source rule and the posture field on the
       HTTP API, error-codes, CLI, layers, and access-control pages, and the
       §4.7.2 disclaimer restatements on the concepts, clustered, and local
       pages.
       Levels: —. Depends on: S6, S7
-- [ ] **S12 · docs** — DOC-2. The hand-run scenarios: S44's bootstrap-admin
+- [x] **S12 · docs** — DOC-2. The hand-run scenarios: S44's bootstrap-admin
       note, S47 steps 1 and 3 and its Covers line, S48, and S50's steps amended,
       S50's Goal paragraph, Covers line, and "Why by hand" paragraph rewritten,
       S55 to S57 added, and the scenario index rows.
       Levels: —. Depends on: S9
-- [ ] **S13 · docs** — DOC-3. The `CHANGELOG.md` entry.
+- [x] **S13 · docs** — DOC-3. The `CHANGELOG.md` entry.
       Levels: —. Depends on: S9
-- [ ] **S14 · docs** — DOC-4. Every site the claim, board, and prescription
+- [x] **S14 · docs** — DOC-4. Every site the claim, board, and prescription
       sweeps return takes its R1 to R5 rewrite or falls in a named exclusion
       class, across the brief, the inventory, the boards, and the client's
       comments, and the brief's domain browser section gains the one statement
