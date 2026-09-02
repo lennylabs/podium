@@ -139,11 +139,23 @@ function catalogOf(count: number): { ids: string[] } {
   };
 }
 
+/** posture is a §7.3.4 posture read body. layer_capabilities is derived from
+ * the two identity fields with the predicate the registry itself applies: a
+ * deployment running in public mode or configuring no identity provider
+ * authenticates no caller, so its layer endpoints admit every request on the
+ * admin arm, and every other deployment reports the arm closed unless the
+ * call site says otherwise. A fixture therefore cannot state a body the
+ * registry could not emit, and an authenticated caller that renders a write
+ * control states the capability that makes it render. */
 function posture(overrides: Partial<SessionPosture> = {}): SessionPosture {
+  const open =
+    overrides.public_mode === true ||
+    overrides.identity_provider_configured === false;
   return {
     identity_provider_configured: true,
     public_mode: false,
     browser_auth: { enabled: false },
+    layer_capabilities: { manage_any_layer: open },
     ...overrides,
   };
 }
@@ -1899,25 +1911,37 @@ describe("the sign-in control", () => {
   });
 
   // A read that does not answer leaves the page holding no value for either
-  // key, so it renders the anonymous presentation: neither control, and the
-  // layer panel with its write operations.
-  it("renders the anonymous presentation where the posture read fails", async () => {
+  // key, so it renders neither control, and it settles nothing about what the
+  // registry would admit: the capability object is closed and the subject is
+  // empty, so every control that would take a §7.3.1 layer write is withheld.
+  // The two empty states are the exception, and they key on the read having
+  // answered rather than on the control's absence: an unanswered read is no
+  // statement that the registry resolved no caller, so both keep the
+  // instruction to register.
+  // Spec: §7.3.4, §13.10
+  it("withholds the layer writes and keeps the register instruction where the posture read fails", async () => {
     stubRegistry({
       "/v1/ui/session": {
         status: 503,
         body: { code: "registry.unavailable", message: "down" },
       },
-      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/layers": { body: { layers: [] } },
     });
     goTo("#/layers");
     render(<App />);
-    await screen.findByLabelText("Layer panel");
+    const panel = await screen.findByLabelText("Layer panel");
     expect(screen.queryByTestId("sign-in")).toBeNull();
     expect(screen.queryByTestId("sign-out")).toBeNull();
-    expect(
-      screen.getAllByRole("button", { name: "Reingest alice-personal" }).length,
-    ).toBe(1);
-    expect(screen.queryByText("yours")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Register layer" })).toBeNull();
+    expect(panel.textContent).toContain(
+      "Register a layer to bring its artifacts into the catalog.",
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-empty").textContent).toContain(
+        "Register a layer to fill it.",
+      );
+    });
   });
 });
 
@@ -7416,6 +7440,11 @@ describe("the layer panel", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
+    // Such a registry admits every request on the §7.3.1 admin arm, which the
+    // posture read reports, so every control the local-source rule governs is
+    // rendered for a caller it resolves no subject for.
+    expect(screen.getByRole("button", { name: "Register layer" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reingest all" })).toBeTruthy();
     expect(
       screen.getAllByRole("button", { name: /^Reingest (company|alice-personal)$/ })
         .length,
@@ -7480,7 +7509,7 @@ describe("the layer panel", () => {
   // tripled the height of every row.
   it("keeps the row to one action and an overflow control", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
     });
     goTo("#/layers");
@@ -7508,7 +7537,7 @@ describe("the layer panel", () => {
   // press would reingest.
   it("names each row's Reingest trigger after the layer it acts on", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
     });
     goTo("#/layers");
@@ -7605,7 +7634,7 @@ describe("the layer panel", () => {
   it("states the last ingest as an age over the short ingest ref", async () => {
     const at = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -7694,7 +7723,7 @@ describe("the layer panel", () => {
   // control live.
   it("presents a refused write on the row without reporting ownership or session state", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer("bob@acme.com")] } },
       "DELETE /v1/layers": {
         status: 403,
@@ -7725,7 +7754,7 @@ describe("the layer panel", () => {
   // cell over that height, and pushed the row's controls apart.
   it("draws a refusal under the row rather than inside the actions cell", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         status: 403,
@@ -7766,7 +7795,7 @@ describe("the layer panel", () => {
   // the banner sits.
   it("tints the Reingest button a refusal was attempted from and no other", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
       "/v1/layers/reingest?id=company": {
         status: 503,
@@ -8666,7 +8695,7 @@ describe("read-only mode", () => {
   // wraps the meta-tool mux and the layer endpoints are mounted beside it.
   it("presents the state once and makes every write control unavailable", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/load_domain": {
         body: emptyDomain,
         headers: { "X-Podium-Read-Only": "true" },
@@ -8775,7 +8804,7 @@ describe("read-only mode", () => {
 
   it("keeps every write control live where the registry serves writes", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/load_domain": { body: emptyDomain },
       "/v1/layers": { body: { layers: [userLayer()] } },
     });
@@ -8822,14 +8851,12 @@ describe("read-only mode", () => {
   it("keeps the banner where a catalog read is refused", async () => {
     stubRegistry({
       "/v1/ui/session": {
-        body: posture({
-          subject: "alice@acme.com",
+        body: posture({ subject: "alice@acme.com",
           browser_auth: {
             enabled: true,
             sign_in_path: "/v1/ui/auth/sign-in",
             sign_out_path: "/v1/ui/auth/sign-out",
-          },
-        }),
+          }, layer_capabilities: { manage_any_layer: true } }),
       },
       "/v1/load_domain": {
         body: emptyDomain,
@@ -9109,7 +9136,7 @@ describe("the layer write flows", () => {
   // domain the write had just added appeared only after a page reload.
   it("re-reads the sidebar tree after a layer write", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/load_domain": {
         body: {
           path: "",
@@ -9169,7 +9196,7 @@ describe("the layer write flows", () => {
   // Spec: §13.10
   it("holds the reingest wait open with a clock and a way off it", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": { hangs: true },
     });
@@ -9466,7 +9493,7 @@ describe("the layer write flows", () => {
   // from.
   it("dismisses the row actions on Escape, on an outside press, and when another row's actions open", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
     });
     goTo("#/layers");
@@ -9744,7 +9771,7 @@ describe("the layer write flows", () => {
   // the checkbox takes its tick from the accent token.
   it("draws the register form’s select and checkboxes off the token set rather than as native widgets", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layer: { ID: "company", SourceType: "local", Order: 1 } },
       },
@@ -9786,7 +9813,7 @@ describe("the layer write flows", () => {
   // offers them on.
   it("registers an admin-defined layer on every visibility axis", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layer: { ID: "company", SourceType: "local", Order: 1 } },
       },
@@ -9927,7 +9954,7 @@ describe("the layer write flows", () => {
   // such field and sends none.
   it("offers no root on a local source", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layer: { ID: "alice-personal", SourceType: "local", Order: 1 },
@@ -10050,7 +10077,7 @@ describe("the layer write flows", () => {
   // field itself as required.
   it("names the field holding the register submit", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
       },
@@ -10155,7 +10182,7 @@ describe("the layer write flows", () => {
   // are set at.
   it("sets the register form's field guidance at the dense size", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
       },
@@ -10185,7 +10212,7 @@ describe("the layer write flows", () => {
   // the height that buys.
   it("fits the register form's visibility set inside the dialog", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
       },
@@ -10250,7 +10277,7 @@ describe("the layer write flows", () => {
   // refusal arrives on the control it applies to.
   it("marks the field holding the register submit invalid", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
       },
@@ -10350,7 +10377,7 @@ describe("the layer write flows", () => {
   // status region and keeps its identity across the change (§13.10).
   it("announces the register hold as it appears and clears", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
       },
@@ -10387,7 +10414,7 @@ describe("the layer write flows", () => {
   // same hold the ref and the local path carry, on every source type.
   it("holds a registration until the layer ID is named", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
       },
@@ -10443,7 +10470,7 @@ describe("the layer write flows", () => {
   // until the ref is named, and a local source is unaffected by the hold.
   it("holds a git registration until the ref is named", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
       },
@@ -10494,7 +10521,7 @@ describe("the layer write flows", () => {
   // named, on the same terms as the git arm's ref.
   it("holds a local registration until the path is named", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layer: { ID: "ops", SourceType: "local", Order: 1 } },
       },
@@ -11252,7 +11279,7 @@ describe("the layer write flows", () => {
   // own outcome beside it.
   it("states the update outcome beside a rotated secret", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer()] } },
       "PUT /v1/layers/update": {
         body: {
@@ -11280,7 +11307,7 @@ describe("the layer write flows", () => {
   // own write is open, the way the row's Reingest control does.
   it("sends one registration however many times the submit is activated", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [] } },
       "POST /v1/layers": {
         deferred: true,
@@ -11332,7 +11359,7 @@ describe("the layer write flows", () => {
   it("keeps a granted user on the layer the Edit dialog patches", async () => {
     const granted = { ...adminLayer(), Users: ["alice@acme.com"] };
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [granted] } },
       "PUT /v1/layers/update": { body: { layer: granted } },
     });
@@ -11372,7 +11399,7 @@ describe("the layer write flows", () => {
   // Spec: §4.6
   it("states a granted visibility axis in the Edit dialog rather than drawing an inert checkbox", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer()] } },
       "PUT /v1/layers/update": { body: { layer: adminLayer() } },
     });
@@ -11410,7 +11437,7 @@ describe("the layer write flows", () => {
   // Spec: §4.6
   it("tells the register dialog's reader that Edit widens visibility and withdraws nothing", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [] } },
     });
     goTo("#/layers");
@@ -11436,7 +11463,7 @@ describe("the layer write flows", () => {
   // own container and the way out is a corner icon or a guess at Escape.
   it("closes the update outcome through a Done control", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer()] } },
       "PUT /v1/layers/update": { body: { layer: adminLayer() } },
     });
@@ -11465,7 +11492,7 @@ describe("the layer write flows", () => {
   // reveal is presenting as shown once.
   it("sends one rotation however many times Save changes is activated", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer()] } },
       "PUT /v1/layers/update": {
         deferred: true,
@@ -11944,7 +11971,7 @@ describe("the layer write flows", () => {
   // every other dialog does.
   it("leaves a secretless registration outcome dismissible", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [] } },
       "POST /v1/layers": {
         body: {
@@ -11985,7 +12012,7 @@ describe("the layer write flows", () => {
   // left as a layer the reader believes carries its artifacts.
   it("promises the registration alone and names the ingest as the next step", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [] } },
       "POST /v1/layers": {
         body: {
@@ -12036,7 +12063,7 @@ describe("the layer write flows", () => {
   // that a dialog covers the page.
   it("moves focus into the registration outcome dialog", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [] } },
       "POST /v1/layers": {
         body: {
@@ -12084,7 +12111,7 @@ describe("the layer write flows", () => {
   // same reveal rather than through a second treatment.
   it("patches a git layer and reveals the rotated secret once", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer()] }, deferred: true },
       "PUT /v1/layers/update": {
         body: {
@@ -12146,7 +12173,7 @@ describe("the layer write flows", () => {
   // local-path layer and says why.
   it("offers no rotation on a local-path layer and patches its source details", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "PUT /v1/layers/update": { body: { layer: userLayer() } },
     });
@@ -12233,7 +12260,7 @@ describe("the layer write flows", () => {
   // against them.
   it("sends the resulting order of the moving layer class block", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
@@ -12294,7 +12321,7 @@ describe("the layer write flows", () => {
   // path, and it took that text out of the selection model.
   it("makes only the handle draggable, and leaves the rest of the row alone", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layers: [adminLayer(), userLayer(), scratchLayer()] },
       },
@@ -12318,7 +12345,7 @@ describe("the layer write flows", () => {
   // downward drag and the row arrives one place further down than that.
   it("marks the edge the dragged row will land on", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
@@ -12347,7 +12374,7 @@ describe("the layer write flows", () => {
   // names a move no composition would make and the panel sends nothing.
   it("sends no reorder where the drop crosses the layer-class boundary", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: { layers: [adminLayer(), userLayer(), scratchLayer()] },
       },
@@ -12369,7 +12396,7 @@ describe("the layer write flows", () => {
   // block, sending the request a drop sends.
   it("reorders from the keyboard when the handle takes an arrow key", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
@@ -12409,7 +12436,7 @@ describe("the layer write flows", () => {
   // same single step from the order the first press already left behind.
   it("steps each arrow press off the move the press before it made", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
@@ -12454,7 +12481,7 @@ describe("the layer write flows", () => {
   // than reporting itself by the swap alone.
   it("announces where a committed move left the layer", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
@@ -12487,7 +12514,7 @@ describe("the layer write flows", () => {
   // Spec: §13.10
   it("retracts the move announcement where the registry refuses the reorder", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
@@ -12535,7 +12562,7 @@ describe("the layer write flows", () => {
   // Spec: §13.10
   it("announces the move where the retry of a refused reorder lands", async () => {
     const stubs: Record<string, Stub> = {
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layers: [adminLayer(), userLayer(), scratchLayer(), bobLayer()],
@@ -12690,7 +12717,7 @@ describe("the layer write flows", () => {
   // per layer, and no dialog naming a single layer.
   it("reingests every layer in sequence and reports the run once", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
       "/v1/layers/reingest?id=company": {
         body: { accepted: 3, idempotent: 1 },
@@ -12736,7 +12763,7 @@ describe("the layer write flows", () => {
   // is marked running, and the rest are marked queued.
   it("names every layer in the run as it runs", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layers: [
@@ -12790,7 +12817,7 @@ describe("the layer write flows", () => {
   // the registry, so the run keeps going and still resolves into its report.
   it("stops waiting on the run without abandoning it", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
       "/v1/layers/reingest?id=company": {
         body: { accepted: 3, idempotent: 1 },
@@ -12821,7 +12848,7 @@ describe("the layer write flows", () => {
   // for rather than having it overwritten by a run that started after it.
   it("holds Reingest all while a row's own reingest is open", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
       "/v1/layers/reingest?id=company": {
         body: { accepted: 3, idempotent: 1 },
@@ -12861,7 +12888,7 @@ describe("the layer write flows", () => {
   // the row triggers are held for as long as it runs.
   it("holds the row triggers while the fan-out is running", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
       "/v1/layers/reingest?id=company": {
         body: { accepted: 3, idempotent: 1 },
@@ -12891,7 +12918,7 @@ describe("the layer write flows", () => {
   // names it with the code and the message its envelope carried.
   it("names a refused layer in the run report", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
       "/v1/layers/reingest?id=company": {
         body: { accepted: 3, idempotent: 1 },
@@ -12931,7 +12958,7 @@ describe("the layer write flows", () => {
   // Spec: §13.10
   it("returns focus to Reingest all when the run's report closes", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
       "/v1/layers/reingest?id=company": {
         body: { accepted: 3, idempotent: 1 },
@@ -12967,7 +12994,7 @@ describe("the layer write flows", () => {
   // being dropped by the panel's error state.
   it("reports the run when the reload that ends it is refused", async () => {
     const stubs: Record<string, Stub> = {
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
       "/v1/layers/reingest?id=company": {
         body: { accepted: 3, idempotent: 1 },
@@ -13007,7 +13034,7 @@ describe("the layer write flows", () => {
   // rejections and conflicts rather than returning the row to rest.
   it("presents what the reingest snapshot accepted, rejected, and conflicted on", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         body: {
@@ -13096,7 +13123,7 @@ describe("the layer write flows", () => {
   // the right edge. It resolves over the page instead.
   it("resolves the finished reingest over the page rather than into the layer row", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         body: {
@@ -13145,7 +13172,7 @@ describe("the layer write flows", () => {
   // presenting a summary of zeroes.
   it("reports a recorded reingest where the registry runs no pipeline in the request", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         body: { queued: "alice-personal", queued_at: "2026-08-25T00:00:00Z" },
@@ -13165,7 +13192,7 @@ describe("the layer write flows", () => {
   // retry.
   it("names the colliding versions where the whole snapshot was refused", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         status: 409,
@@ -13205,7 +13232,7 @@ describe("the layer write flows", () => {
   // approvers, so the override carries all three.
   it("offers the break-glass override where a freeze window refused the reingest", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         status: 409,
@@ -13257,7 +13284,7 @@ describe("the layer write flows", () => {
   // edge on the statement's own line.
   it("draws a refused reingest as a row annotation with its marker leading and its controls at the right edge", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         status: 503,
@@ -13297,7 +13324,7 @@ describe("the layer write flows", () => {
   // rather than one line that fits none of them.
   it("presents a refused reingest with the envelope’s own message and remediation", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         status: 422,
@@ -13331,7 +13358,7 @@ describe("the layer write flows", () => {
   // its status rather than given a code the registry never sent.
   it("reports a refusal that carried no error envelope by its status alone", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         status: 403,
@@ -13354,7 +13381,7 @@ describe("the layer write flows", () => {
   // permanent withholds the retry that clears it.
   it("offers the retry on a codeless refusal whose status is server-side", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         status: 503,
@@ -13379,7 +13406,7 @@ describe("the layer write flows", () => {
   // control the reingest was started from.
   it("returns focus to the row’s Reingest control when the request settles and when the refusal is dismissed", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers/reingest": {
         status: 502,
@@ -13529,7 +13556,7 @@ describe("the layer write flows", () => {
   // over fields the reader has since corrected.
   it("drops a refused registration when the reader edits the form", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "POST /v1/layers": {
         status: 400,
@@ -13566,7 +13593,7 @@ describe("the layer write flows", () => {
   it("lists what is still recoverable with its erase date and restores it", async () => {
     const unregisteredAt = new Date(Date.now() - 28 * 24 * 60 * 60 * 1000);
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
           layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }],
@@ -13604,7 +13631,7 @@ describe("the layer write flows", () => {
   it("names each restore button after the layer it recovers", async () => {
     const deletedAt = new Date().toISOString();
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [] } },
       "/v1/layers?deleted=true": {
         body: {
@@ -13677,7 +13704,7 @@ describe("the layer write flows", () => {
   // that names the layer and the precedence it came back at.
   it("reports a committed restore with the precedence it returned to", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       // The list read answers with the restored layer back in it, which is
       // where the announced precedence is read from.
       "/v1/layers": { body: { layers: [userLayer(), adminLayer()] } },
@@ -13715,7 +13742,7 @@ describe("the layer write flows", () => {
   // on the heading, beside the live region the restore reports itself in.
   it("hands focus to the heading when a restore takes the row away", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer(), adminLayer()] } },
       "/v1/layers?deleted=true": {
         body: {
@@ -13765,7 +13792,7 @@ describe("the layer write flows", () => {
   // reingest.
   it("states the registry's message and remediation on a refused restore", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers?deleted=true": {
         body: {
@@ -13801,7 +13828,7 @@ describe("the layer write flows", () => {
   // refusal of the next one.
   it("drops the restore outcome when a later restore is refused", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers?deleted=true": {
         body: {
@@ -17361,7 +17388,15 @@ describe("a refused layer write", () => {
     body: Record<string, unknown>;
   }): void {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      // The caller holds the admin arm, so the row's controls are rendered
+      // and the refusal below is the registry answering a write the panel
+      // predicted it would take.
+      "/v1/ui/session": {
+        body: posture({
+          subject: "alice@acme.com",
+          layer_capabilities: { manage_any_layer: true },
+        }),
+      },
       "/v1/layers": { body: { layers: [userLayer("bob@acme.com")] } },
       "/v1/layers?deleted=true": { body: { layers: [] } },
       "DELETE /v1/layers": refusal ?? {
@@ -17524,7 +17559,7 @@ describe("a refused layer write", () => {
   // its way to being erased.
   it("states the recoverable count on the panel’s first action", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers?deleted=true": {
         body: {
@@ -17573,7 +17608,7 @@ describe("a refused layer write", () => {
   // state is not read as a tree that failed to render under them.
   it("drops the reorder copy and the zero count where no layer is registered", async () => {
     stubRegistry({
-      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/load_domain": { body: emptyDomain },
       "/v1/layers": { body: { layers: [] } },
     });
@@ -17598,11 +17633,10 @@ describe("a refused layer write", () => {
       expect(link.textContent).toBe("↺ Recently unregistered");
       expect(link.querySelector(".badge")).toBe(null);
     });
-    expect(
-      screen
-        .getByRole("button", { name: "Reingest all" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
+    // The fan-out acts on the rows the rule admits, so a panel holding none
+    // offers no control rather than a control with nothing to run over.
+    // Spec: §13.10
+    expect(screen.queryByRole("button", { name: "Reingest all" })).toBeNull();
   });
 
   // The panel's retry is the recovery from an outage that refused every read
@@ -18434,5 +18468,405 @@ describe("keyboard semantics", () => {
       );
     });
     expect(document.activeElement).toBe(link);
+  });
+});
+
+// The §13.10 rendering rule for a §7.3.1 layer write: a control the client
+// predicts the registry would refuse is absent, a control it admits is drawn
+// and then disabled by the §13.2.1 read-only marker as before, and a refusal
+// the target's own fields do not settle is drawn where it comes back. Each
+// case drives the panel at one of the rule's condition points and reads every
+// control the rule covers, so a control added without a rule fails here.
+// Spec: §7.3.1, §13.10
+describe("the layer panel under the local-source rule", () => {
+  /** aliceGit is a user-defined layer alice owns whose source reads no
+   * filesystem path on the registry host, so every operation on it is hers. */
+  function aliceGit(): Record<string, unknown> {
+    return {
+      ID: "alice-notes",
+      SourceType: "git",
+      Repo: "git@github.com:alice/notes.git",
+      Ref: "main",
+      Order: 3,
+      UserDefined: true,
+      Owner: "alice@acme.com",
+    };
+  }
+
+  /** nonAdmin is the caller the rule is about: a verified subject on a
+   * deployment that authenticates, holding no §4.7.2 admin role. */
+  function nonAdmin(): SessionPosture {
+    return posture({ subject: "alice@acme.com" });
+  }
+
+  function tenantAdmin(): SessionPosture {
+    return posture({
+      subject: "ops@acme.com",
+      layer_capabilities: { manage_any_layer: true },
+    });
+  }
+
+  it("renders every row control on the caller's own git row and none on a row they do not own", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: nonAdmin() },
+      "/v1/layers": { body: { layers: [adminLayer(), aliceGit()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    // The panel-level controls: a registration under an unused ID is the
+    // caller's own layer, and one visible row admits the fan-out.
+    expect(
+      screen.getByRole("button", { name: "Register layer" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reingest all" })).toBeTruthy();
+    // The caller's own row carries every control.
+    expect(
+      screen.getByRole("button", { name: "Reingest alice-notes" }),
+    ).toBeTruthy();
+    openRowActions("alice-notes");
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Unregister" })).toBeTruthy();
+    fireEvent.keyDown(document.activeElement ?? document.body, {
+      key: "Escape",
+    });
+    expect(
+      screen
+        .getByLabelText(moveHandleLabel("alice-notes"))
+        .hasAttribute("disabled"),
+    ).toBe(false);
+    // The row the caller does not own carries none of them, and its handle
+    // stays drawn and names why it refuses the move.
+    expect(screen.queryByRole("button", { name: "Reingest company" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "More actions for company" }),
+    ).toBeNull();
+    const handle = screen.getByLabelText(
+      "Move company: reordering this block requires the administrator role",
+    );
+    expect(handle.hasAttribute("disabled")).toBe(true);
+    expect(handle.getAttribute("draggable")).toBe("false");
+  });
+
+  // The two controls that take the same operation on two different targets:
+  // Edit names the row's class and owner with the patch's own fields, which
+  // name no filesystem path, and the row's reingest names the stored record,
+  // which does.
+  it("withholds the reingest control on a local layer the caller owns and keeps Edit and Unregister", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: nonAdmin() },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    expect(
+      screen.queryByRole("button", { name: "Reingest alice-personal" }),
+    ).toBeNull();
+    // No visible row admits the fan-out, so the panel offers no control for
+    // a run with nothing to run over.
+    expect(screen.queryByRole("button", { name: "Reingest all" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Register layer" })).toBeTruthy();
+    openRowActions();
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Unregister" })).toBeTruthy();
+  });
+
+  // The block a move would name is the moved row's own class block, so the
+  // handle is live on the caller's own user-defined rows while an
+  // admin-defined row sits in the same list. An implementation that settles
+  // the prediction over the whole visible set fails here.
+  it("keeps the handle live on the caller's own block beside an admin-defined row", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: nonAdmin() },
+      "/v1/layers": {
+        body: { layers: [adminLayer(), userLayer(), aliceGit()] },
+      },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    for (const id of ["alice-personal", "alice-notes"]) {
+      const handle = screen.getByLabelText(moveHandleLabel(id));
+      expect(handle.hasAttribute("disabled")).toBe(false);
+      expect(handle.getAttribute("draggable")).toBe("true");
+    }
+    const refused = screen.getByLabelText(
+      "Move company: reordering this block requires the administrator role",
+    );
+    expect(refused.hasAttribute("disabled")).toBe(true);
+    expect(refused.getAttribute("draggable")).toBe("false");
+    // The panel's own precedence line still instructs the reader, because a
+    // move is available from a row in the list.
+    expect(
+      screen.getByLabelText("Layer panel").textContent,
+    ).toContain("drag or press the arrow keys on a handle to reorder");
+  });
+
+  // The fan-out narrows to the rows the rule admits, so the run report names
+  // no row it did not attempt and the caller collects no refusal for a row
+  // the panel already knew about.
+  it("runs Reingest all over the admitted rows alone", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: nonAdmin() },
+      "/v1/layers": {
+        body: { layers: [adminLayer(), userLayer(), aliceGit()] },
+      },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+      "/v1/layers/reingest?id=alice-notes": { body: { accepted: 2 } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Reingest all" }));
+    await screen.findByLabelText("Reingest all result");
+    const reingests = requests.filter((r) =>
+      r.url.startsWith("/v1/layers/reingest"),
+    );
+    expect(reingests.length).toBe(1);
+    expect(reingests[0].url).toContain("id=alice-notes");
+    const report = screen.getByRole("dialog", {
+      name: /Reingest all finished/,
+    });
+    expect(report.textContent).not.toContain("company");
+    expect(report.textContent).not.toContain("alice-personal");
+  });
+
+  // Restore is a §7.3.1 write and the rule reads the tombstoned record's own
+  // source, so the caller reads a row they cannot restore and is offered no
+  // control on it.
+  it("withholds Restore on a tombstone the caller cannot write and on their own local layer", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: nonAdmin() },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/layers?deleted=true": {
+        body: {
+          layers: [
+            { ...adminLayer(), DeletedAt: new Date().toISOString() },
+            { ...userLayer(), DeletedAt: new Date().toISOString() },
+            { ...aliceGit(), DeletedAt: new Date().toISOString() },
+          ],
+        },
+      },
+    });
+    goTo(deletedLayersHref);
+    render(<App />);
+    await screen.findByText("Recently unregistered", { selector: "h1" });
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Restore alice-notes" }),
+      ).toBeTruthy();
+    });
+    expect(screen.queryByRole("button", { name: "Restore company" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Restore alice-personal" }),
+    ).toBeNull();
+  });
+
+  // The update form is open to the owner of a local layer, and the field that
+  // would patch the filesystem path is not. The patch it sends names no
+  // local_path, which is what the registry admits from that caller.
+  it("withholds the Local path field from a non-admin owner and omits local_path from the patch", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: nonAdmin() },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+      "PUT /v1/layers/update": { body: { layer: "alice-personal" } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    await screen.findByRole("dialog", { name: /Edit alice-personal/ });
+    expect(screen.queryByLabelText("Local path")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => {
+      expect(
+        requests.some((r) => r.url.startsWith("/v1/layers/update")),
+      ).toBe(true);
+    });
+    const sent = JSON.parse(bodies[bodies.length - 1]) as Record<
+      string,
+      unknown
+    >;
+    expect("local_path" in sent).toBe(false);
+    expect(sent.root).toBe("");
+  });
+
+  it("renders the Local path field for a caller holding the admin arm", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: tenantAdmin() },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    await screen.findByRole("dialog", { name: /Edit alice-personal/ });
+    expect(screen.getByLabelText("Local path")).toBeTruthy();
+  });
+
+  // The register dialog withholds the two controls that name a registration
+  // the rule refuses or the registry resolves away, and keeps everything
+  // else: the source control still renders, with the git option every caller
+  // holds, because a repository string that resolves to the file transport is
+  // answered by the registry rather than predicted here.
+  it("withholds the class control and the Local folder option and keeps the Git option", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: nonAdmin() },
+      "/v1/layers": { body: { layers: [aliceGit()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = await screen.findByRole("dialog", { name: /Register/ });
+    expect(within(dialog).queryByText("Layer class")).toBeNull();
+    expect(
+      within(dialog).getByRole("radio", { name: "Git repository" }),
+    ).toBeTruthy();
+    expect(
+      within(dialog).queryByRole("radio", { name: "Local folder" }),
+    ).toBeNull();
+    // The note describing the class the caller is about to get stays.
+    expect(dialog.textContent).toContain("A layer of your own is visible to you alone");
+  });
+
+  it("offers the class control and the Local folder option to a caller holding the admin arm", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: tenantAdmin() },
+      "/v1/layers": { body: { layers: [aliceGit()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(screen.getByRole("button", { name: "Register layer" }));
+    const dialog = await screen.findByRole("dialog", { name: /Register/ });
+    expect(within(dialog).getByText("Layer class")).toBeTruthy();
+    expect(
+      within(dialog).getByRole("radio", { name: "Local folder" }),
+    ).toBeTruthy();
+  });
+
+  // A caller the registry resolved none of on a deployment that authenticates
+  // reads no row and may register none, and both empty states say so rather
+  // than instructing the reader to press a control that is not there.
+  it("states that no caller was resolved where the registration is refused", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture() },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    expect(screen.queryByRole("button", { name: "Register layer" })).toBeNull();
+    expect(panel.textContent).toContain(
+      "The registry resolved no caller for this page, so no layer can be registered from it.",
+    );
+    expect(panel.textContent).not.toContain(
+      "Register a layer to bring its artifacts into the catalog.",
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-empty").textContent).toContain(
+        "The catalog holds no domains.",
+      );
+    });
+    expect(screen.getByTestId("catalog-empty").textContent).not.toContain(
+      "Register a layer to fill it.",
+    );
+  });
+
+  // A registry that authenticates nobody reports no subject and admits every
+  // request, so the control is drawn and both instructions stand. The arm is
+  // decided by the register call rather than by the subject, and an
+  // implementation that keys either state on the subject fails here.
+  it("keeps the register control and both instructions where the registry admits every request", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ layer_capabilities: { manage_any_layer: true } }),
+      },
+      "/v1/load_domain": { body: emptyDomain },
+      "/v1/layers": { body: { layers: [] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    const panel = await screen.findByLabelText("Layer panel");
+    expect(screen.getByRole("button", { name: "Register layer" })).toBeTruthy();
+    expect(panel.textContent).toContain(
+      "Register a layer to bring its artifacts into the catalog.",
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId("catalog-empty").textContent).toContain(
+        "Register a layer to fill it.",
+      );
+    });
+  });
+
+  // Two controls turn on the layer record alone and are outside the rule, so
+  // a caller holding the admin arm reads them exactly as every other caller
+  // does: the rotation checkbox is drawn and disabled on a layer that carries
+  // no webhook secret, and a user-defined layer's visibility is displayed
+  // rather than edited.
+  it("leaves the rotation checkbox and the visibility display where they are for an admin", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: tenantAdmin() },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: /Edit alice-personal/,
+    });
+    const rotate = within(dialog).getByLabelText("Rotate the webhook secret");
+    expect(rotate.hasAttribute("disabled")).toBe(true);
+    expect(within(dialog).queryByLabelText("Public")).toBeNull();
+    expect(dialog.textContent).toContain(
+      "A layer of your own is fixed to you at registration and cannot be widened.",
+    );
+  });
+
+  // The client predicts and the registry authorizes, and the prediction can
+  // go stale between the posture read and the press. The refused write is
+  // drawn on the row it was attempted from, on the envelope's own terms.
+  it("draws the refusal on the row where the grant changed after the posture read", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: tenantAdmin() },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "/v1/layers?deleted=true": { body: { layers: [] } },
+      "/v1/layers/reingest": {
+        status: 403,
+        body: {
+          code: "auth.forbidden",
+          message: "the caller is not authorized for a local source",
+          details: { constraint: "local_source" },
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Reingest alice-personal" }),
+    );
+    const refused = await screen.findByLabelText("Reingest refused");
+    expect(refused.textContent).toContain("auth.forbidden");
+    expect(refused.textContent).toContain(
+      "the caller is not authorized for a local source",
+    );
   });
 });

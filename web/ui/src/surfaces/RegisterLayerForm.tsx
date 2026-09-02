@@ -18,12 +18,15 @@ import { useEffect, useId, useRef, useState } from 'react';
 
 import { SecretReveal, useSecretAcknowledgement } from './SecretReveal';
 import { fragment, matchGroups, members, replaceFragment, without } from './members';
+import { mayTake } from './layerrights';
+import type { LayerCapabilities } from '../session';
 import { ErrorState, Modal } from '../components/primitives';
 import type { LayerRegistration, LayerSecretResult } from '../api';
 import { ApiError, registerLayer } from '../api';
 
 export function RegisterLayerForm({
   subject,
+  caps,
   knownGroups,
   knownIDs,
   onRegistered,
@@ -31,6 +34,11 @@ export function RegisterLayerForm({
   readOnly,
 }: {
   subject: string;
+  /** caps is what this deployment's layer endpoints admit this caller on.
+   * The dialog's class control and its Local folder option each predict a
+   * registration of their own, and each is present only where mayTake admits
+   * that registration. */
+  caps: LayerCapabilities;
   /** knownGroups are the group names already granted on the layers the caller
    * can see. They back the group axis's typeahead, which is the only check the
    * form can offer on a name before it is sent. */
@@ -78,6 +86,29 @@ export function RegisterLayerForm({
   // standing note until the reader has begun to fill the form in, on the same
   // terms as the per-field invalid mark below.
   const [engaged, setEngaged] = useState(false);
+  // The class control names a registration of the admin-defined class, which
+  // carries no owner the caller matches, so the call reduces to the admin
+  // arm. Its absence predicts no refusal: the registry resolves such a
+  // registration from any other caller down to a user-defined layer owned by
+  // them, and a control naming a value the registry resolves away is withheld
+  // (§13.10). Where it is absent the form submits the class the caller holds.
+  const mayChooseClass = mayTake(
+    'register',
+    { UserDefined: false, Owner: subject },
+    caps,
+    subject,
+  );
+  // The Local folder option names a registration that reads a filesystem path
+  // on the registry host, which §7.3.1 authorizes to a tenant admin alone.
+  // The Git option stays offered to every caller: a repository string that
+  // resolves to the file transport names such a path too, and the client does
+  // not classify a repository string, so the registry answers that one.
+  const mayNameLocal = mayTake(
+    'register',
+    { UserDefined: true, Owner: subject, SourceType: 'local' },
+    caps,
+    subject,
+  );
   // §4.6 keys a layer on its ID and the registration is an upsert on that
   // key, so a second registration sent while the first is still open rewrites
   // the layer the first one created: it reassigns the layer's place in the
@@ -272,18 +303,20 @@ export function RegisterLayerForm({
                 setID(next);
               }}
             />
-            <label className="field">
-              <span className="label">Layer class</span>
-              <select
-                value={userDefined ? 'user' : 'admin'}
-                onChange={(event) => {
-                  setUserDefined(event.target.value === 'user');
-                }}
-              >
-                <option value="user">Your own layer</option>
-                <option value="admin">A layer for the whole tenant</option>
-              </select>
-            </label>
+            {mayChooseClass && (
+              <label className="field">
+                <span className="label">Layer class</span>
+                <select
+                  value={userDefined ? 'user' : 'admin'}
+                  onChange={(event) => {
+                    setUserDefined(event.target.value === 'user');
+                  }}
+                >
+                  <option value="user">Your own layer</option>
+                  <option value="admin">A layer for the whole tenant</option>
+                </select>
+              </label>
+            )}
           </div>
           {userDefined && (
             <p className="quiet field-note">
@@ -295,7 +328,7 @@ export function RegisterLayerForm({
               Each on its own row costs the body a field row that the
               visibility set below needs to stay above the fold. */}
           <div className="field-pair" data-testid="register-source-pair">
-            <SourceChoice value={sourceType} onChange={edited(setSourceType)} />
+            <SourceChoice value={sourceType} local={mayNameLocal} onChange={edited(setSourceType)} />
             {sourceType === 'git' ? (
               <RequiredField
                 label="Repository"
@@ -624,10 +657,22 @@ function RequiredField({
 /** SourceChoice is the source selector. The source types are two exclusive
  * choices that fit on one row, so they are drawn as a segmented control the
  * reader reads both options from rather than as a list they have to open. */
-function SourceChoice({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+function SourceChoice({
+  value,
+  local,
+  onChange,
+}: {
+  value: string;
+  /** local is whether this caller may register a layer that reads a
+   * filesystem path on the registry host. The option is absent where they
+   * may not, and the group opens on the option they hold because the form's
+   * source state defaults to git. */
+  local: boolean;
+  onChange: (next: string) => void;
+}) {
   const options = [
     { id: 'git', label: 'Git repository' },
-    { id: 'local', label: 'Local folder' },
+    ...(local ? [{ id: 'local', label: 'Local folder' }] : []),
   ];
   // A radio group is one Tab stop and the arrows move the selection inside
   // it, the same treatment the artifact viewer's tab strip carries. A reader

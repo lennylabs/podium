@@ -17,6 +17,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
 import { grantedGroups } from "./members";
+import { mayTake, newLayerTarget, ownedByCaller } from "./layerrights";
 import { erasesOn, recoveryDays } from "./recovery";
 import { RegisterLayerForm } from "./RegisterLayerForm";
 import type { ReingestOutcome, ReingestState } from "./ReingestControl";
@@ -39,6 +40,7 @@ import {
 } from "../components/primitives";
 import { SourceCell } from "../components/SourceCell";
 import { takeFocus, usePopupDismiss } from "../components/focus";
+import type { LayerCapabilities } from "../session";
 import type { BreakGlass, LayerRecord } from "../api";
 import {
   ingestRef,
@@ -159,11 +161,23 @@ function PanelHead({
 
 export function LayerPanel({
   subject,
+  caps,
+  postureAnswered,
   readOnly,
   onCatalogChange,
   onReach,
 }: {
   subject: string;
+  /** caps is what this deployment's layer endpoints admit this caller on.
+   * Every control the panel renders for a §7.3.1 layer write is present only
+   * where mayTake admits its operation on its target, and the present
+   * controls are then disabled by readOnly. */
+  caps: LayerCapabilities;
+  /** postureAnswered reports whether the posture read settled anything. The
+   * empty state below the header is its only reader: a caller the registry
+   * resolved none of and a caller whose read did not answer both hold no
+   * subject and no capability, and the two are instructed differently. */
+  postureAnswered: boolean;
   readOnly: boolean;
   /** onCatalogChange tells the shell that a write moved what the catalog
    * holds, so the counts the sidebar footer states are re-read. The panel
@@ -309,6 +323,27 @@ export function LayerPanel({
     );
   }
   const rows = inMovedOrder(layers.value ?? [], moved);
+  // The register prediction, evaluated once. The control that takes the
+  // operation and the empty state that instructs a reader to press it read
+  // this one value.
+  const mayRegister = mayTake("register", newLayerTarget(subject), caps, subject);
+  // The rows the fan-out may reingest. The control is present where the rule
+  // admits the caller on at least one visible row, and its run acts on that
+  // subset alone, so the report names no row it did not attempt.
+  const reingestable = rows.filter((row) =>
+    mayTake("reingest", row, caps, subject),
+  );
+  /** movableBlock reports whether a move started from this row would be
+   * admitted. The request names the moved row's own class block and the
+   * handler refuses the whole call on the first row it cannot write, so the
+   * prediction is settled over every row of that block. It carries no
+   * condition on the block's length: a block holding one row is a block with
+   * nothing to move, which blockEdgeNote already reports. */
+  const movableBlock = (layer: LayerRecord): boolean =>
+    blockOf(rows, layer.ID).every((row) =>
+      mayTake("reorder", row, caps, subject),
+    );
+  const anyMovable = rows.some((layer) => movableBlock(layer));
 
   // One in-flight guard covers the whole surface. The registry runs the §7.3.1
   // ingest pipeline inside the request, so two open requests for one layer run
@@ -374,7 +409,7 @@ export function LayerPanel({
    * layer over the page, each naming a single layer and none stating the
    * run, and a refused layer sat behind that stack. */
   const reingestAll = async (): Promise<void> => {
-    const targets = rows.map((row) => row.ID);
+    const targets = reingestable.map((row) => row.ID);
     setRun({
       startedAt: Date.now(),
       targets,
@@ -525,26 +560,30 @@ export function LayerPanel({
             ↺ Recently unregistered
             <RecoverableCount read={recoverable} />
           </a>
-          <button
-            type="button"
-            className="button primary"
-            disabled={readOnly}
-            onClick={() => {
-              setRegistering((open) => !open);
-            }}
-          >
-            Register layer
-          </button>
-          <button
-            type="button"
-            ref={reingestAllControl}
-            disabled={readOnly || rows.length === 0 || reingesting}
-            onClick={() => {
-              void reingestAll();
-            }}
-          >
-            Reingest all
-          </button>
+          {mayRegister && (
+            <button
+              type="button"
+              className="button primary"
+              disabled={readOnly}
+              onClick={() => {
+                setRegistering((open) => !open);
+              }}
+            >
+              Register layer
+            </button>
+          )}
+          {reingestable.length > 0 && (
+            <button
+              type="button"
+              ref={reingestAllControl}
+              disabled={readOnly || reingesting}
+              onClick={() => {
+                void reingestAll();
+              }}
+            >
+              Reingest all
+            </button>
+          )}
       </PanelHead>
       {runProgress}
       {runReport}
@@ -562,6 +601,7 @@ export function LayerPanel({
       {registering && (
         <RegisterLayerForm
           subject={subject}
+          caps={caps}
           knownGroups={grantedGroups(rows)}
           knownIDs={rows.map((row) => row.ID)}
           onRegistered={afterWrite}
@@ -585,7 +625,9 @@ export function LayerPanel({
             <span className="label">
               {readOnly
                 ? "Precedence — reordering is unavailable while the registry is read-only"
-                : "Precedence — drag or press the arrow keys on a handle to reorder"}
+                : anyMovable
+                  ? "Precedence — drag or press the arrow keys on a handle to reorder"
+                  : "Precedence — reordering these layers requires the administrator role"}
             </span>
             <span className="quiet">lower row wins</span>
           </p>
@@ -597,7 +639,9 @@ export function LayerPanel({
       )}
       {rows.length === 0 ? (
         <EmptyState title="No layers to show">
-          Register a layer to bring its artifacts into the catalog.
+          {postureAnswered && !mayRegister
+            ? "The registry resolved no caller for this page, so no layer can be registered from it."
+            : "Register a layer to bring its artifacts into the catalog."}
         </EmptyState>
       ) : (
         // The table keeps its designed column widths down to a floor and
@@ -636,6 +680,8 @@ export function LayerPanel({
                   layer={layer}
                   position={index + 1}
                   subject={subject}
+                  caps={caps}
+                  movable={movableBlock(layer)}
                   readOnly={readOnly}
                   refusal={refusals[layer.ID] ?? null}
                   reingest={reingest[layer.ID] ?? idleReingest}
@@ -718,7 +764,12 @@ export function LayerPanel({
       >
         {outcome.text}
       </p>
-      <PanelFoot rows={rows} subject={subject} readOnly={readOnly} />
+      <PanelFoot
+        rows={rows}
+        subject={subject}
+        readOnly={readOnly}
+        movable={anyMovable}
+      />
     </section>
   );
 }
@@ -746,16 +797,20 @@ function PanelFoot({
   rows,
   subject,
   readOnly,
+  movable,
 }: {
   rows: LayerRecord[];
   subject: string;
   readOnly: boolean;
+  /** movable is whether a reorder is admitted from at least one row, which
+   * is the same call the handles are rendered on. */
+  movable: boolean;
 }) {
   const quota = useAsync(() => readQuota(), []);
   const cap = quota.value?.limits?.MaxUserLayers;
   const mine = rows.filter((row) => ownedByCaller(row, subject)).length;
   const holding = subject !== "";
-  const reorderable = rows.length > 0 && !readOnly;
+  const reorderable = rows.length > 0 && !readOnly && movable;
   if (!holding && !reorderable) {
     return null;
   }
@@ -969,6 +1024,8 @@ function LayerRow({
   layer,
   position,
   subject,
+  caps,
+  movable,
   readOnly,
   refusal,
   reingest,
@@ -991,6 +1048,12 @@ function LayerRow({
   layer: LayerRecord;
   position: number;
   subject: string;
+  caps: LayerCapabilities;
+  /** movable is whether a reorder started from this row is admitted over
+   * every row of the class block the move would name. The row holds one
+   * layer and no list, so the panel settles the block and threads the
+   * result in. */
+  movable: boolean;
   readOnly: boolean;
   refusal: Refusal | null;
   reingest: ReingestState;
@@ -1023,6 +1086,23 @@ function LayerRow({
   const [confirming, setConfirming] = useState(false);
   const [editing, setEditing] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
+  // Each control is present only where the registry would admit the
+  // operation it takes on the target it names. Edit names the row's class and
+  // owner with the patch's own fields for the rest, so it stays present on a
+  // local layer the caller owns while the form withholds the Local path
+  // field inside it.
+  const mayReingest = mayTake("reingest", layer, caps, subject);
+  const mayEdit = mayTake(
+    "update",
+    { UserDefined: layer.UserDefined, Owner: layer.Owner },
+    caps,
+    subject,
+  );
+  const mayUnregister = mayTake("unregister", layer, caps, subject);
+  const menuItems = [
+    mayEdit ? "Edit" : "",
+    mayUnregister ? "Unregister" : "",
+  ].filter((label) => label !== "");
   // The Reingest button is the row's stable control, and it is where focus
   // returns from every row state that takes away the control focus was on:
   // the button disables itself while its request is open, which blurs it,
@@ -1153,10 +1233,12 @@ function LayerRow({
           aria-label={
             readOnly
               ? `Move ${layer.ID}: reordering is unavailable while the registry is read-only`
-              : `Move ${layer.ID}: press the up or down arrow key`
+              : movable
+                ? `Move ${layer.ID}: press the up or down arrow key`
+                : `Move ${layer.ID}: reordering this block requires the administrator role`
           }
-          disabled={readOnly}
-          draggable={!readOnly}
+          disabled={readOnly || !movable}
+          draggable={!readOnly && movable}
           onKeyDown={(event) => {
             if (event.key !== "ArrowUp" && event.key !== "ArrowDown") {
               return;
@@ -1203,6 +1285,7 @@ function LayerRow({
           <ReingestButton
             layerID={layer.ID}
             state={reingest}
+            admitted={mayReingest}
             readOnly={readOnly}
             held={reingestHeld}
             buttonRef={trigger}
@@ -1211,6 +1294,7 @@ function LayerRow({
               onReingest(breakGlass);
             }}
           />
+          {menuItems.length > 0 && (
           <button
             ref={overflow}
             type="button"
@@ -1224,6 +1308,7 @@ function LayerRow({
           >
             ⋯
           </button>
+          )}
         </div>
         {overflowOpen && (
           <RowMenu
@@ -1233,31 +1318,34 @@ function LayerRow({
             onDismiss={() => {
               setOverflowOpen(false);
             }}
-            items={[
-              {
-                label: "Edit",
-                disabled: readOnly,
-                onSelect: () => {
-                  overflow.current?.focus();
-                  setOverflowOpen(false);
-                  setEditing((open) => !open);
-                },
-              },
-              {
-                label: "Unregister",
-                disabled: readOnly,
-                onSelect: () => {
-                  overflow.current?.focus();
-                  setOverflowOpen(false);
-                  setConfirming(true);
-                },
-              },
-            ]}
+            items={menuItems.map((label) =>
+              label === "Edit"
+                ? {
+                    label,
+                    disabled: readOnly,
+                    onSelect: () => {
+                      overflow.current?.focus();
+                      setOverflowOpen(false);
+                      setEditing((open) => !open);
+                    },
+                  }
+                : {
+                    label,
+                    disabled: readOnly,
+                    onSelect: () => {
+                      overflow.current?.focus();
+                      setOverflowOpen(false);
+                      setConfirming(true);
+                    },
+                  },
+            )}
           />
         )}
         {editing && (
           <UpdateLayerForm
             layer={layer}
+            caps={caps}
+            subject={subject}
             readOnly={readOnly}
             onUpdated={onWrite}
             onClose={() => {
@@ -1658,19 +1746,6 @@ function orderNote(position: number, layer: LayerRecord): string {
     return note;
   }
   return `${note} · owner ${layer.Owner}`;
-}
-
-/** ownedByCaller is the panel's ownership marker. It is a property of a
- * user-defined row alone: on such a row it compares the row's stored owner
- * against the caller's own subject, and the posture read reports a subject
- * only where one resolves, so a caller with no subject carries no marker on
- * any row. An admin-defined row carries no marker on any value of its stored
- * owner, because the write rule authorizes a tenant admin alone there and
- * that owner names no authorized subject. */
-function ownedByCaller(layer: LayerRecord, subject: string): boolean {
-  return (
-    layer.UserDefined === true && subject !== "" && layer.Owner === subject
-  );
 }
 
 /** LastIngestCell states when the layer was last ingested as an age, the way
