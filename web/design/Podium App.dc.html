@@ -1740,17 +1740,18 @@ a{color:#2a78d6}a:hover{color:#1a5aa8}
   <div style="display:flex;align-items:center;gap:12px"><h2 style="margin:0;font-size:19px;font-weight:600;letter-spacing:-.02em">Register a layer</h2><span style="margin-left:auto;color:#7a8399;font-size:16px">✕</span></div>
   <p style="margin:7px 0 0;font-size:13.5px;line-height:1.55;color:#c4cbdb;max-width:580px;text-wrap:pretty">A layer points at a source Podium ingests. Its precedence decides who wins when two layers carry the same artifact ID.</p></div>
 <div style="padding:22px 24px;display:flex;flex-direction:column;gap:18px">
+  <div style="display:flex;flex-direction:column;gap:6px">
+  <label style="font:600 11px 'JetBrains Mono',monospace;letter-spacing:.07em;color:#7a8399">LAYER CLASS</label>
+  <div style="display:flex;align-items:center;gap:9px;height:38px;padding:0 12px;border:1px solid #2b3145;border-radius:8px;background:#141824;">
+    <span style="font-size:13.5px;color:#eaeef7;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">A layer for the whole tenant</span>
+    <span style="margin-left:auto;font-size:9px;color:#7a8399;flex:none">&#9662;</span>
+    </div>
+  </div>
   <div style="display:flex;flex-direction:column;gap:7px">
     <span style="font:600 11px 'JetBrains Mono',monospace;letter-spacing:.07em;color:#7a8399">SOURCE</span>
     <div style="display:flex;gap:2px;padding:3px;border-radius:9px;background:#212739;width:fit-content">
       <span style="padding:7px 16px;border-radius:7px;background:#171b28;font-weight:600;color:#eaeef7;font-size:13px">Git repository</span>
       <span style="padding:7px 16px;border-radius:7px;color:#9aa3ba;font-size:13px">Local folder</span>
-    </div></div>
-  <div style="display:flex;flex-direction:column;gap:7px">
-    <span style="font:600 11px 'JetBrains Mono',monospace;letter-spacing:.07em;color:#7a8399">LAYER CLASS</span>
-    <div style="display:flex;gap:2px;padding:3px;border-radius:9px;background:#212739;width:fit-content">
-      <span style="padding:7px 16px;border-radius:7px;background:#171b28;font-weight:600;color:#eaeef7;font-size:13px">Admin-defined</span>
-      <span style="padding:7px 16px;border-radius:7px;color:#9aa3ba;font-size:13px">User-defined</span>
     </div></div>
   <div style="display:flex;flex-direction:column;gap:6px">
   <label style="font:600 11px 'JetBrains Mono',monospace;letter-spacing:.07em;color:#7a8399">REPOSITORY</label>
@@ -1797,7 +1798,7 @@ a{color:#2a78d6}a:hover{color:#1a5aa8}
 <div style="display:flex;align-items:center;gap:10px;padding:16px 24px;border-top:1px solid #232838;background:#141824"><span style="font-size:12.5px;color:#7a8399">Precedence: 5 (lowest).</span><div style="flex:1"></div><div style="display:flex;gap:9px"><span style="padding:9px 14px;border-radius:8px;color:#9aa3ba;font-size:13.5px;font-weight:500">Cancel</span><span style="padding:9px 16px;border-radius:8px;background:#ffa424;color:#14130f;font-size:13.5px;font-weight:600">Register and ingest</span></div></div></div></div></div>
     </div>
     <div class="dv-opt" id="17b">
-      <div class="dv-olabel"><a class="dv-oid" href="#17b">17b</a>No grants is valid — plus the fixed-at-registration rule for a user-defined layer. Drawn for a caller this deployment's layer endpoints admit on the §4.7.2 admin arm, which is a tenant admin or any caller on a registry that authenticates none</div>
+      <div class="dv-olabel"><a class="dv-oid" href="#17b">17b</a>No grants is valid — plus the fixed-at-registration rule for a user-defined layer. Drawn for a caller this deployment's layer endpoints admit on the §4.7.2 admin arm, which is a tenant admin or any caller on a registry that authenticates none, so the dialog carries the layer-class control with the user-defined arm selected</div>
       <div class="dv-card" style="position:relative;overflow:hidden;width:1440px;background:#0c0f16;font-family:'Space Grotesk',system-ui,sans-serif;color:#eaeef7">
   <div style="display:flex;align-items:center;gap:16px;padding:0 16px;height:52px;background:#171b28;border-bottom:1px solid #2b3145">
     <div style="display:flex;align-items:center;gap:9px;font-family:Anton,sans-serif;font-size:17px;text-transform:uppercase;letter-spacing:.03em"><svg width="22" height="16" viewBox="4 13 64 46" aria-hidden="true"><circle cx="36" cy="28" r="15" fill="#ffa424"></circle><rect x="4" y="54" width="64" height="5" fill="#eaeef7"></rect></svg>Podium</div>
@@ -1915,6 +1916,13 @@ a{color:#2a78d6}a:hover{color:#1a5aa8}
   <div style="display:flex;align-items:center;gap:12px"><h2 style="margin:0;font-size:19px;font-weight:600;letter-spacing:-.02em">Register a layer</h2><span style="margin-left:auto;color:#7a8399;font-size:16px">✕</span></div>
   </div>
 <div style="padding:22px 24px;display:flex;flex-direction:column;gap:18px">
+  <div style="display:flex;flex-direction:column;gap:6px">
+  <label style="font:600 11px 'JetBrains Mono',monospace;letter-spacing:.07em;color:#7a8399">LAYER CLASS</label>
+  <div style="display:flex;align-items:center;gap:9px;height:38px;padding:0 12px;border:1px solid #2b3145;border-radius:8px;background:#141824;">
+    <span style="font-size:13.5px;color:#eaeef7;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Your own layer</span>
+    <span style="margin-left:auto;font-size:9px;color:#7a8399;flex:none">&#9662;</span>
+    </div>
+  </div>
   <div style="display:flex;flex-direction:column;gap:7px">
     <span style="font:600 11px 'JetBrains Mono',monospace;letter-spacing:.07em;color:#7a8399">SOURCE</span>
     <div style="display:flex;gap:2px;padding:3px;border-radius:9px;background:#212739;width:fit-content">
