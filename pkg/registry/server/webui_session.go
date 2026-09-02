@@ -16,9 +16,10 @@ import (
 // verified so the response can report `subject` and evaluate
 // `layer_capabilities`, and for no other purpose.
 //
-// The browser can observe neither of the two things it reports: the session
-// cookie is HttpOnly, and no other shipped response separates the postures.
-// The UI's sign-in control and its rendering rules key on this read.
+// The browser can observe none of what this read reports: the session cookie
+// is HttpOnly, no other shipped response separates the postures, and the
+// admin arm the capabilities evaluate is server-side configuration. The UI's
+// sign-in control and its rendering rules key on this read.
 type SessionPosture struct {
 	// IdentityProviderConfigured reports whether an identity provider is
 	// configured. The body never names which one.
@@ -41,6 +42,8 @@ type SessionPosture struct {
 	// seam reports every member false: the layer endpoint's constructor
 	// installs an admitting admin arm by default, and a reporting surface
 	// defaults the other way.
+	//
+	// Spec: §7.3.4
 	Capabilities func(*http.Request) LayerCapabilities
 }
 
