@@ -344,7 +344,7 @@ Body:
 
 `id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. A request whose `id` names a layer that already exists in the tenant is a write against that layer and is authorized against it under the rule above, so a caller neither arm authorizes is refused with `403 auth.forbidden` rather than overwriting it.
 
-A registration also falls under the local-source rule above when its `source_type` is `local`, when it carries a `local_path` and its `source_type` is not `git`, or when its `source_type` is `git` and its `repo` resolves to the Git file transport. A `git` registration is placed by its `repo` string alone, so a `local_path` sent beside a `git` `repo` naming a network endpoint does not place it on the arm. A registration the rule places on the arm and whose caller does not hold the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
+A registration also falls under the local-source rule above when its `source_type` is `local`, when it carries a `local_path` and its `source_type` is not `git`, or when its `repo` resolves to the Git file transport. A `git` registration is placed by its `repo` string alone, so a `local_path` sent beside a `git` `repo` naming a network endpoint does not place it on the arm. A registration the rule places on the arm and whose caller does not hold the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
 
 The response is `201 Created` with the stored layer and, for a `git` source, the webhook URL and HMAC secret to register on the source repo:
 
