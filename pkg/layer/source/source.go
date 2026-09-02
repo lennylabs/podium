@@ -86,8 +86,13 @@ type Visibility struct {
 // §6.10 code so the LayerSourceProvider SPI conforms to the §9.3 "Structured
 // errors" constraint.
 var (
-	// ErrSourceUnreachable wraps a transient fetch failure. The condition is
-	// transient, so the structured envelope marks it retryable.
+	// ErrSourceUnreachable wraps a fetch failure. Most such failures are
+	// transient, so the structured envelope marks it retryable. One arm is
+	// permanent: ConfinedFS reports a read that resolves outside the layer's
+	// directory here, and restructuring the layer is the only remedy. The
+	// flag stays true because the HTTP envelope carries no
+	// errorCodeRegistry entry for ingest.source_unreachable and reports
+	// retryable: false regardless.
 	ErrSourceUnreachable = &spi.Error{Code: "ingest.source_unreachable", Message: "source: unreachable", Retryable: true}
 	// ErrInvalidConfig signals an invalid layer config (e.g., git source
 	// missing repo:).

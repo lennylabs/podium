@@ -32,7 +32,7 @@ func (Local) Snapshot(_ context.Context, cfg LayerConfig) (*Snapshot, error) {
 	}
 	return &Snapshot{
 		Reference: cfg.Path,
-		Files:     os.DirFS(cfg.Path),
+		Files:     ConfinedFS(cfg.Path),
 		CreatedAt: time.Now().UTC(),
 	}, nil
 }

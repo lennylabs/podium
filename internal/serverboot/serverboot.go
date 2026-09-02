@@ -30,6 +30,7 @@ import (
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/metrics"
@@ -452,7 +453,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		res, err := ingest.Ingest(ctx, st, ingest.Request{
 			TenantID: tenantID,
 			LayerID:  l.ID,
-			Files:    os.DirFS(l.Path),
+			Files:    source.ConfinedFS(l.Path),
 			// §13.10/§13.2.2 public-mode sensitivity ceiling: reject medium and
 			// high artifacts at ingest with ingest.public_mode_rejects_sensitive.
 			// Empty (non-public deployments) imposes no floor.
@@ -613,7 +614,7 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 			res, err := ingest.Ingest(ctx, st, ingest.Request{
 				TenantID: tenantID,
 				LayerID:  lc.ID,
-				Files:    os.DirFS(lc.LocalPath),
+				Files:    source.ConfinedFS(lc.LocalPath),
 				// §13.10/§13.2.2 public-mode sensitivity ceiling.
 				RejectAtOrAbove: publicSensitivityFloor(cfg),
 				// §13.10 sandbox-profile ingest gate (off unless enforced).

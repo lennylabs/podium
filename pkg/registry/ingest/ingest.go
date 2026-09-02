@@ -196,7 +196,7 @@ type Request struct {
 	// queries the store for this.
 	CurrentArtifactCount int
 	// Files is the source's snapshot exposed as fs.FS. The Local
-	// LayerSourceProvider produces this from os.DirFS; the Git
+	// LayerSourceProvider produces this from source.ConfinedFS; the Git
 	// provider exposes the checked-out tree the same way.
 	Files fs.FS
 	// Linter applies §4.3 lint rules. Lint errors are reported in
@@ -1138,6 +1138,14 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		skillPath := joinPath(dir, "SKILL.md")
 		skillBytes, err := fs.ReadFile(fsys, skillPath)
 		if err != nil {
+			// spec: §7.3.1/§6.10 — a SKILL.md the confinement refuses is a
+			// source-unreachable condition, and substituting the bare
+			// missing-file message would lose the sentinel and report the
+			// permanent refusal as a retryable registry.unavailable. An
+			// absent SKILL.md keeps the existing message.
+			if errors.Is(err, source.ErrSourceUnreachable) {
+				return filesystem.ArtifactRecord{}, fmt.Errorf("%s/SKILL.md: %w", id, err)
+			}
 			return filesystem.ArtifactRecord{}, fmt.Errorf("%s: type: skill missing SKILL.md", id)
 		}
 		s, err := manifest.ParseSkill(skillBytes)

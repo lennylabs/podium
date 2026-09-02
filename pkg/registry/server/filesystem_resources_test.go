@@ -6,9 +6,11 @@ import (
 	"testing"
 )
 
-// dirFS wraps os.DirFS-like semantics; the tests exercise each method
-// the server depends on. The functions are simple wrappers but
-// nothing else in the package calls them.
+// newDirFS returns the confined tree the filesystem bootstrap hands to the
+// ingest pipeline. The case exercises each method the ingest walks call, so
+// the wrapper keeps satisfying fs.StatFS and fs.ReadDirFS.
+//
+// Spec: §7.3.1
 func TestDirFS_OpenReadDirStat(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
