@@ -593,7 +593,7 @@ Higher-precedence layers override lower on collisions. Resolution of layers 1 an
 Source types are pluggable via the `LayerSourceProvider` SPI (§9.1). The built-in options:
 
 - **`git`**: a remote Git repository at a tracked ref, optionally rooted at a subpath. The registry ingests on webhook when one is configured, and supports manual reingest and polling via `podium layer watch <id>` for refs without a webhook (§7.3.1). Provider-level details (signature verification, fetch semantics) flow through the `GitProvider` SPI (§9.1), with built-in support for GitHub, GitLab, Bitbucket.
-- **`local`**: a filesystem path readable by the registry process. Re-scanned on demand via `podium layer reingest <id>` or polled by `podium layer watch <id>` (§7.3.1). Intended for standalone and small-team installations where the registry runs alongside the author.
+- **`local`**: a filesystem path readable by the registry process. Re-scanned on demand via `podium layer reingest <id>` or polled by `podium layer watch <id>` (§7.3.1). Intended for standalone and small-team installations where the registry runs alongside the author. Which caller may declare a layer that names such a path is governed by the §7.3.1 local-source authorization rule.
 
 Custom source types register through `LayerSourceProvider`. Common targets include S3 (versioned bucket), OCI registries (content-addressed), and HTTP-served archives. Each implementation is responsible for fetch semantics, integrity verification (signature, checksum, etag), snapshotting at a stable reference, and declaring its trigger model: webhook, polling, or push notification (§7.3.1 *Ingestion triggers*).
 
@@ -793,7 +793,7 @@ A deployment is single-region. Multi-region deployments run separate registries 
 
 Read access is governed by per-layer visibility (§4.6), enforced at the registry on every API call. There are no per-artifact roles. A caller sees a layer if its visibility declaration matches their identity (`public`, `organization`, an OIDC group claim, or an explicit user listing); the caller's effective view is the composition of every visible layer.
 
-**Authoring rights are out of Podium's scope.** Whoever can merge to a layer's tracked Git ref publishes; whoever can write to a `local` source's filesystem path publishes there. Branch protection, required reviewers, signing requirements, and code ownership are configured by the team in their Git provider as they see fit. Podium reads no in-repo permission files.
+**Authoring rights are out of Podium's scope.** Whoever can merge to a layer's tracked Git ref publishes; whoever can write to a `local` source's filesystem path publishes there. Branch protection, required reviewers, signing requirements, and code ownership are configured by the team in their Git provider as they see fit. Podium reads no in-repo permission files. That scope statement is about writing content into a source the registry already reads. Which caller may declare a layer that makes the registry read a given filesystem path is governed by the §7.3.1 local-source authorization rule, because the registry process reads that path with its own rights rather than with the registrant's.
 
 **The `admin` role.** A single Podium-side role exists per tenant. Admins can:
 
