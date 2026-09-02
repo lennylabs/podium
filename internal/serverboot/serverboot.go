@@ -1323,6 +1323,12 @@ func run(ctx context.Context, stop func()) error {
 			PublicMode:                 cfg.publicMode,
 			BrowserAuthEnabled:         cfg.webUIAuth,
 			Identity:                   layerIdentity,
+			// §7.3.4: the method value binds the endpoint's own authAdmin,
+			// the closure WithAdminAuth installed above, so the reported
+			// capability and the enforced gate are one expression. Hoisting
+			// that closure into a variable and evaluating it here would let
+			// the two drift apart.
+			Capabilities: layers.Capabilities,
 		}.Handler())
 	}
 	if mreg != nil {
