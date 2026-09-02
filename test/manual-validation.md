@@ -4226,7 +4226,7 @@ misconfigured:
    sign-in mounted at /v1/ui/auth/sign-in (§6.3.4)`, and `config show` prints
    `oidc-jwt`. A registry in public mode shows every artifact to everyone and
    would make step 6 pass for the wrong reason. A missing sign-in line means the
-   browser flow is off, and S47 through S50 cannot run.
+   browser flow is off, and S47 through S50 and S55 through S57 cannot run.
 
    `config show` takes its path from `PODIUM_CONFIG_FILE` and defines no
    `--config` flag, which `serve` does; passing `--config` exits 1 with `flag
