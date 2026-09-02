@@ -208,10 +208,20 @@ func TestLocal_BootstrapTreeIsConfined(t *testing.T) {
 	if _, err := fsys.Open("pkg/leak.txt"); !errors.Is(err, ErrSourceUnreachable) {
 		t.Errorf("bootstrap tree open escaping link: want ErrSourceUnreachable, got %v", err)
 	}
-	// fs.FS requires an unrooted, cleaned name. A caller that passes
-	// anything else gets fs.ErrInvalid rather than a resolution attempt.
-	if _, err := fsys.Open("../outside.txt"); !errors.Is(err, fs.ErrInvalid) {
-		t.Errorf("bootstrap tree open invalid name: want fs.ErrInvalid, got %v", err)
+	// fs.FS requires an unrooted, cleaned name. A caller that passes anything
+	// else is refused without a resolution attempt, and the refusal carries
+	// ErrSourceUnreachable like every other non-ENOENT failure, so the
+	// reingest endpoint classifies it as a source refusal.
+	if _, err := fsys.Open("../outside.txt"); !errors.Is(err, ErrSourceUnreachable) {
+		t.Errorf("bootstrap tree open invalid name: want ErrSourceUnreachable, got %v", err)
+	}
+	if _, err := fsys.Open("/etc/passwd"); !errors.Is(err, ErrSourceUnreachable) {
+		t.Errorf("bootstrap tree open rooted name: want ErrSourceUnreachable, got %v", err)
+	}
+	// An absent path keeps fs.ErrNotExist, which is the other arm of the
+	// classification and what the ingest's SKILL.md read distinguishes.
+	if _, err := fsys.Open("pkg/absent.md"); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("bootstrap tree open absent path: want fs.ErrNotExist, got %v", err)
 	}
 	if _, err := fs.Stat(fsys, "pkg"); err != nil {
 		t.Errorf("bootstrap tree stat: %v", err)

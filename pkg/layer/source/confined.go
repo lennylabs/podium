@@ -51,10 +51,15 @@ func classify(op, name string, err error) error {
 }
 
 // open resolves one name inside the root. The name is an fs path, so it is
-// converted to the host separator before os.OpenInRoot sees it.
+// converted to the host separator before os.OpenInRoot sees it. A name fs.FS
+// rejects is classified like every other failure rather than returned raw: the
+// rooted and dot-dot names it covers are the population os.OpenInRoot would
+// itself refuse as an escape, and an unclassified error reaches the reingest
+// endpoint's default arm as registry.unavailable rather than
+// ingest.source_unreachable.
 func (f rootFS) open(op, name string) (*os.File, error) {
 	if !fs.ValidPath(name) {
-		return nil, &fs.PathError{Op: op, Path: name, Err: fs.ErrInvalid}
+		return nil, classify(op, name, &fs.PathError{Op: op, Path: name, Err: fs.ErrInvalid})
 	}
 	file, err := os.OpenInRoot(f.root, filepath.FromSlash(name))
 	if err != nil {
