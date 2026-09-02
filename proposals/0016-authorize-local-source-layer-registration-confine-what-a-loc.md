@@ -1,8 +1,13 @@
 # Proposal 0016: Authorize local-source layer registration, confine what a local layer's ingest may read, and report the caller's layer capabilities so the panel offers only what that caller can take
 
 - Issue: (to be filed)
-- Status: Verified (2026-09-01). Converged after 12 adversarial review rounds (67
-  findings fixed); awaiting sign-off.
+- Status: Approved (2026-09-02). Signed off by the maintainer for
+  implementation, whole, with every step in the checklist in scope. OQ-1 is
+  settled with it: the local-source rule ships with its single admin arm and no
+  configuration key, which is a narrowing of the original requirement that asked
+  for an operator setting, and the narrowing is accepted. Converged after 12
+  adversarial review rounds (67 findings fixed) over 2 full lens sweeps;
+  "Resolved in adversarial review" records what each pass changed.
 - Date: 2026-09-01
 
 This document stages the proposed spec, code, test, and documentation changes.
