@@ -13,6 +13,15 @@ New and changed code carries tests. The new code reaches at least 85% line cover
 - Inspect per-function coverage with `go tool cover -func=cover.out` and add tests for the functions below the threshold.
 - A function below 85% needs a test for the uncovered branch, or a comment that names why the branch cannot run.
 
+## Codecov on a pull request
+
+Codecov reports the coverage of the changed lines, and it is a separate signal from the test lanes. A pull request is not green until it has reported.
+
+- Wait for `codecov/patch` before merging. The test lanes finishing says the tests passed; it says nothing about whether the changed lines are covered, and the two land at different times.
+- Read it as a **check-run**, not a commit status. `gh api repos/<owner>/<repo>/commits/<sha>/check-runs` lists it. The commit-status endpoint carries no codecov context on this repository, so polling `commits/<sha>/status` reports an empty list forever and reads as "codecov has not answered" when it has.
+- Treat codecov's absence and its refusal differently. A run whose upload step succeeded and whose check has not appeared is still in flight; the upload logs `Upload queued for processing complete` when the data reached Codecov. A check that reported a failure is a coverage result to act on.
+- The local figure and the reported one are computed differently, so a local measurement above the bar predicts the check rather than replacing it.
+
 ## Test level
 
 - Unit tests cover pure functions, branch logic, and error mapping.
