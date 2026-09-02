@@ -369,6 +369,16 @@ export function App() {
   // the page states that no subject resolved for it and claims nothing about
   // content beyond what was returned. The authentication controls stay keyed
   // on the read, so that arm renders neither of them.
+  //
+  // The banner's own sentence therefore branches on the control rather than on
+  // the arm. Where the shell renders a sign-in control the banner names it,
+  // and where it renders none the banner says only what the page holds,
+  // because the arm is reached on a deployment that offers the reader no way
+  // to sign in. Neither sentence says the catalog was filtered: the read
+  // reports a configured provider rather than an installed verifier, so a
+  // registry naming a provider the process does not recognise lands here
+  // while serving its whole catalog to everyone, and a claim that this page
+  // holds the public subset would be false there.
   const anonymous = scope === 'public-subset' && subject === '';
 
   // The sidebar states where the page sits in the §4.2 hierarchy, and an
@@ -429,7 +439,9 @@ export function App() {
       />
       {anonymous && (
         <PageBanner testID="anonymous-banner">
-          You are not signed in. This page shows what the registry served.
+          {authControl(posture).kind === 'sign-in'
+            ? 'You are not signed in. Sign in for a personalized view of the catalog.'
+            : 'You are not signed in. This page shows what the registry served.'}
         </PageBanner>
       )}
       <div className="app-body">

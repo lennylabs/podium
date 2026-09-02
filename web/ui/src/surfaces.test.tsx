@@ -1988,6 +1988,45 @@ describe("the catalog-scope rule", () => {
     expect(banner.textContent).toContain("not signed in");
     expect(banner.querySelector("button")).toBeNull();
     expect(banner.querySelector("a")).toBeNull();
+    // This deployment runs no browser flow, so the shell renders no sign-in
+    // control and the banner does not name one. A reader here has no way to
+    // sign in, and a sentence telling them to would name a control the page
+    // does not carry.
+    expect(banner.textContent).not.toMatch(/sign in for/i);
+  });
+
+  // The same arm on a deployment that does run the browser flow. The shell
+  // renders a sign-in control there, so the banner names it. The two arms are
+  // pinned together because the banner and the control key on different
+  // conditions: the banner on the catalog scope, the control on the posture
+  // read's browser_auth.enabled, so one can render without the other.
+  //
+  // Spec: §13.10
+  it("names signing in only where the deployment offers a sign-in control", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({
+          browser_auth: {
+            enabled: true,
+            sign_in_path: "/v1/ui/auth/sign-in",
+            sign_out_path: "/v1/ui/auth/sign-out",
+          },
+        }),
+      },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const banner = await screen.findByTestId("anonymous-banner");
+    expect(banner.textContent).toContain("not signed in");
+    expect(banner.textContent).toMatch(/sign in for a personalized view/i);
+    // Neither arm claims the catalog was filtered. A registry naming a
+    // provider the process does not recognise reaches this arm while serving
+    // its whole catalog to every caller, so a claim about the returned set
+    // would be false there.
+    expect(banner.textContent).not.toMatch(/public content|hidden|withheld/i);
+    // The sentence names the control; it does not become one.
+    expect(banner.querySelector("button")).toBeNull();
+    expect(banner.querySelector("a")).toBeNull();
   });
 
   // The refused arm, ordered ahead of the other two. A registry whose
