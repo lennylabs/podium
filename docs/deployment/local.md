@@ -165,7 +165,7 @@ The shared library does the same parsing, composition, and adapter work in both 
 
 ## Limits worth knowing
 
-- Authoring rights for the catalog belong to whoever can write to the directory. Branch protection on a Git repo is the typical control.
+- Authoring rights for the catalog belong to whoever can write to the directory. Branch protection on a Git repo is the typical control. That statement is about writing content into a catalog directory the CLI already reads. Which caller may declare a layer naming a host path is a question only a server-backed tier answers, and [Layers](layers#who-may-register-a-local-source-layer) covers it.
 - Visibility declarations in layer config are recorded and not enforced. Artifacts remain portable to server-backed tiers.
 - Audit is the git history (when committed to git) or whatever the sharing mechanism preserves. There is no Podium-side audit stream.
 - Freeze windows and signing enforcement require a server.

@@ -59,7 +59,7 @@ POST /v1/ui/auth/sign-out    clear both cookies
 GET /v1/ui/session
 ```
 
-Reports the deployment's identity posture and the caller's own resolved subject. The registry registers it wherever it serves the web UI, whether or not the browser flow is enabled. It requires no credential and refuses no request for lack of one; a request that carries one has it verified only so the response can report `subject`, and a request that resolves no subject is answered `200` with `subject` absent.
+Reports the deployment's identity posture, the caller's own resolved subject, and what that caller may do on the layer operations in [Layer management](#layer-management). The registry registers it wherever it serves the web UI, whether or not the browser flow is enabled. It requires no credential and refuses no request for lack of one; a request that carries one has it verified so the response can report `subject` and evaluate `layer_capabilities`, and for no other purpose, and a request that resolves no subject is answered `200` with `subject` absent.
 
 ```json
 {
@@ -70,11 +70,18 @@ Reports the deployment's identity posture and the caller's own resolved subject.
     "sign_in_path": "/v1/ui/auth/sign-in",
     "sign_out_path": "/v1/ui/auth/sign-out"
   },
-  "subject": "alice@acme.com"
+  "subject": "alice@acme.com",
+  "layer_capabilities": {
+    "manage_any_layer": false
+  }
 }
 ```
 
-`identity_provider_configured` reports whether an identity provider is configured and never names which one. `public_mode` reports whether public mode is engaged. `browser_auth.enabled` reports whether the browser flow is enabled on this deployment, and `sign_in_path` and `sign_out_path` are present only when it is, because the flow's routes are registered only then. `subject` is the verified subject of the request that asked, present only when one resolves. The response carries no other field, and in particular no issuer, client identifier, endpoint, or other configuration value. A registry started without the web UI never registers this path and answers a request for it as it answers any path it does not register.
+`identity_provider_configured` reports whether an identity provider is configured and never names which one. `public_mode` reports whether public mode is engaged. `browser_auth.enabled` reports whether the browser flow is enabled on this deployment, and `sign_in_path` and `sign_out_path` are present only when it is, because the flow's routes are registered only then. `subject` is the verified subject of the request that asked, present only when one resolves.
+
+`layer_capabilities` reports what the requesting caller may do on the layer operations. It carries `manage_any_layer`, a boolean reporting whether this deployment's layer endpoints admit this caller on the `admin` arm, which is the arm that decides a write on a layer the caller does not own and every operation the [local-source authorization rule](#layer-management) governs. On a registry started with no identity provider configured, or one started in public mode, those endpoints admit every caller on that arm, so the member is true there, including on a request that resolves no subject. The object and its member are always present, and where the deployment determines no capability for the request the member is false. The object predicts a server decision rather than reporting a grant: it is a snapshot taken when the read was answered, an operation a client offers on the strength of it can still be refused, and the envelope the operation's own endpoint returns remains the authority.
+
+The response carries no other field, and in particular no issuer, client identifier, endpoint, filesystem path, or other configuration value, and no subject or authorization belonging to any caller other than the one that asked. A registry started without the web UI never registers this path and answers a request for it as it answers any path it does not register.
 
 ---
 
@@ -314,6 +321,8 @@ Returns the per-subtree domain analysis report for the path (the same report `po
 
 **Layer write authorization.** The write operations in this section, meaning `POST /v1/layers`, `DELETE /v1/layers`, `/v1/layers/update`, `/v1/layers/restore`, `/v1/layers/reorder`, and `/v1/layers/reingest`, are gated. On a stored layer that is user-defined, the operation is authorized to that layer's stored `owner` or to a caller holding the per-tenant `admin` role. On a stored layer that is admin-defined, it is authorized to a tenant admin alone, whatever that layer's stored `owner` field names, because on an admin-defined layer that field is supplied by the requesting caller and names no authorized subject. On `POST /v1/layers` the gate applies when the request's `id` names a layer that already exists in the tenant, and the arm taken is decided by the stored layer's class and stored owner rather than by anything in the request body; a layer that is soft-deleted and still inside its recovery window is a layer that exists for this rule. A registration whose `id` names no stored layer is authorized to a caller the admin arm admits or to a caller who resolves a verified subject, and where that registration resolves to a user-defined layer and a subject resolves, the stored `owner` is that subject. A caller authorized by neither arm is refused with `403 auth.forbidden`, whether that caller resolves a different subject or resolves none at all. On `POST /v1/layers/reorder` a caller whose credential fails verification under the configured identity provider's rule is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime` before either authorization arm is evaluated, so on that operation `auth.forbidden` names a caller the registry verified and did not authorize; the other layer write operations answer such a caller `auth.forbidden` as before. A registration whose existence lookup fails is refused with `500 registry.unavailable` and writes nothing. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so no caller can hold the admin role or resolve as an owner and these endpoints admit the request there.
 
+**Local-source authorization.** Registering a layer whose source type is `local` or whose registration names a filesystem path on the registry host, patching a stored layer's filesystem path, restoring a stored layer that names one, and reingesting one are authorized to a caller holding the per-tenant `admin` role. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so no caller can hold the admin role and these operations are admitted there, on the same reading the layer write authorization rule above states for its own arms. Any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`, and the refusal names no filesystem path. The rule applies to a user-defined and to an admin-defined layer alike, and it is evaluated on each of those operations rather than against the stored layer list, so a layer stored before this rule was in force is refused at its next such operation rather than at startup. An inbound webhook delivery triggers a reingest and is governed by this rule on the same arm: the delivery carries the per-layer secret rather than a caller the registry can place on the admin arm, so on a registry that authenticates its callers a webhook-triggered reingest of a layer that names a filesystem path is refused. `DELETE /v1/layers` and `POST /v1/layers/reorder` name no filesystem path and re-read none, so the rule does not reach them. A `git` source whose `repo` names a network endpoint is fetched through a network transport and yields tree objects rather than host files, so the rule does not reach it; a `git` source is placed on this rule's arm by its `repo` string alone, so a `local_path` stored beside a `git` source never places a restore, a reingest, or a webhook-triggered reingest on the arm. A `git` source whose `repo` resolves to the Git file transport names a repository path on the registry host and takes the same arm, and a `repo` string the registry cannot place as a network endpoint is treated as naming a host path.
+
 ### Register a layer
 
 ```
@@ -333,7 +342,11 @@ Body:
 }
 ```
 
-`id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. A request whose `id` names a layer that already exists in the tenant is a write against that layer and is authorized against it under the rule above, so a caller neither arm authorizes is refused with `403 auth.forbidden` rather than overwriting it. The response is `201 Created` with the stored layer and, for a `git` source, the webhook URL and HMAC secret to register on the source repo:
+`id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. A request whose `id` names a layer that already exists in the tenant is a write against that layer and is authorized against it under the rule above, so a caller neither arm authorizes is refused with `403 auth.forbidden` rather than overwriting it.
+
+A registration also falls under the local-source rule above when its `source_type` is `local`, when it carries a `local_path` and its `source_type` is not `git`, or when its `repo` resolves to the Git file transport. A `git` registration is placed by its `repo` string alone, so a `local_path` sent beside a `git` `repo` naming a network endpoint does not place it on the arm. A registration the rule places on the arm and whose caller does not hold the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
+
+The response is `201 Created` with the stored layer and, for a `git` source, the webhook URL and HMAC secret to register on the source repo:
 
 ```json
 {
@@ -357,7 +370,7 @@ GET /v1/layers
 POST /v1/layers/reingest?id={id}
 ```
 
-Forces a fresh snapshot of the layer regardless of the trigger model. Reingesting an admin-defined layer is authorized to a tenant admin, and reingesting a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden` before any Git fetch runs. The body is optional and carries a break-glass override during a freeze window:
+Forces a fresh snapshot of the layer regardless of the trigger model. Reingesting an admin-defined layer is authorized to a tenant admin, and reingesting a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden` before any Git fetch runs. On a layer that names a filesystem path on the registry host, the local-source rule above additionally requires the `admin` role, and any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`. The body is optional and carries a break-glass override during a freeze window:
 
 ```json
 { "break_glass": true, "justification": "...", "approvers": ["...", "..."] }
@@ -380,6 +393,8 @@ PUT  /v1/layers/update?id={id}
 
 Patches the layer. A non-zero body field replaces the corresponding value; a zero field leaves it unchanged. The patchable fields are visibility (`public`, `organization`, `groups`, `users`), `ref`, `root`, `local_path`, `owner`, `force_push_policy`, and a webhook-secret rotation (`rotate_webhook_secret`). On a user-defined layer the registry ignores the `owner` and visibility fields and still answers `200 OK` to a caller the rule above authorizes, because that layer's owner and its implicit `users: [<owner>]` visibility are fixed at registration; the remaining fields apply as described. The identifying fields (`id`, `source_type`) are immutable.
 
+A patch is classified by the fields it carries. A patch carrying `local_path` names a filesystem path on the registry host and falls under the local-source rule above, whatever the stored layer's source type, so a caller without the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`. The refusal rejects the whole request rather than one field of it, so the stored configuration is unchanged and no other field the same patch carries is applied. A patch carrying no `local_path` is not reached by that rule, because the handler applies neither `source_type` nor a repository string here: `source_type` is immutable and there is no patchable `repo` field.
+
 ### Unregister
 
 ```
@@ -395,7 +410,7 @@ GET  /v1/layers?deleted=true
 POST /v1/layers/restore?id={id}
 ```
 
-`GET /v1/layers?deleted=true` lists the soft-deleted layers still inside the recovery window, filtered on the terms the layer read visibility rule under [List layers](#list-layers) states. `POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and its artifacts. Restoring an admin-defined layer is authorized to a tenant admin, and restoring a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden`.
+`GET /v1/layers?deleted=true` lists the soft-deleted layers still inside the recovery window, filtered on the terms the layer read visibility rule under [List layers](#list-layers) states. `POST /v1/layers/restore?id={id}` clears the tombstone and recovers the layer and its artifacts. Restoring an admin-defined layer is authorized to a tenant admin, and restoring a user-defined layer to its owner or a tenant admin, under the rule above; a caller authorized by neither arm is rejected with `auth.forbidden`. On a layer that names a filesystem path on the registry host, the local-source rule above additionally requires the `admin` role, and any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
 
 ---
 

@@ -11,17 +11,28 @@ import { useState } from "react";
 
 import { SecretReveal, useSecretAcknowledgement } from "./SecretReveal";
 import { members, merge } from "./members";
+import { mayTake } from "./layerrights";
+import type { LayerCapabilities } from "../session";
 import { Badge, ErrorState, Modal } from "../components/primitives";
 import type { LayerRecord, LayerSecretResult, LayerUpdate } from "../api";
 import { updateLayer } from "../api";
 
 export function UpdateLayerForm({
   layer,
+  caps,
+  subject,
   readOnly,
   onUpdated,
   onClose,
 }: {
   layer: LayerRecord;
+  /** caps is what this deployment's layer endpoints admit this caller on.
+   * The Local path field patches a filesystem path on the registry host,
+   * which §7.3.1 authorizes to a tenant admin alone, so the field is present
+   * only where the call admits it while the form itself stays open to the
+   * owner for the rest of the patch. */
+  caps: LayerCapabilities;
+  subject: string;
   readOnly: boolean;
   onUpdated: () => void;
   onClose: () => void;
@@ -62,6 +73,20 @@ export function UpdateLayerForm({
   // retired. The form holds the write while one is open, on the same terms as
   // the row's Reingest control.
   const [pending, setPending] = useState(false);
+  // The field would patch local_path, so the target it predicts names a
+  // filesystem path whatever the reader has typed so far. The rest of the
+  // patch names none, which is what keeps the form itself open to the
+  // non-admin owner of a local layer.
+  const mayNamePath = mayTake(
+    "update",
+    {
+      UserDefined: layer.UserDefined,
+      Owner: layer.Owner,
+      LocalPath: layer.LocalPath === undefined || layer.LocalPath === "" ? "a path" : layer.LocalPath,
+    },
+    caps,
+    subject,
+  );
 
   // send is held apart from the form's submit handler so a refused patch can
   // be re-issued from the refusal itself, which is the treatment every other
@@ -72,7 +97,9 @@ export function UpdateLayerForm({
     }
     const patch: LayerUpdate = git
       ? { ref, root, force_push_policy: policy, rotate_webhook_secret: rotate }
-      : { local_path: localPath, root };
+      : mayNamePath
+        ? { local_path: localPath, root }
+        : { root };
     if (editableVisibility) {
       // Each axis the patch carries grants, and an axis it omits keeps its
       // stored value, so the form sends an axis the reader turned on and the
@@ -175,16 +202,18 @@ export function UpdateLayerForm({
               </label>
             </>
           ) : (
-            <label className="field">
-              <span className="label">Local path</span>
-              <input
-                type="text"
-                value={localPath}
-                onChange={(event) => {
-                  setLocalPath(event.target.value);
-                }}
-              />
-            </label>
+            mayNamePath && (
+              <label className="field">
+                <span className="label">Local path</span>
+                <input
+                  type="text"
+                  value={localPath}
+                  onChange={(event) => {
+                    setLocalPath(event.target.value);
+                  }}
+                />
+              </label>
+            )
           )}
           <label className="field">
             <span className="label">Root</span>

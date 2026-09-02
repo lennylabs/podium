@@ -5,9 +5,21 @@
 
 import { paths } from './api';
 
+/** LayerCapabilities is what this deployment's layer endpoints admit this
+ * caller on. It carries one member per gate the client predicts, and its Go
+ * mirror is the wire type in pkg/registry/server/webui_session.go. */
+export interface LayerCapabilities {
+  /** manage_any_layer reports whether the layer endpoints admit this caller
+   * on the §4.7.2 admin arm, which is the arm that authorizes a write to a
+   * layer the caller does not own and an operation naming a filesystem path
+   * on the registry host. */
+  manage_any_layer: boolean;
+}
+
 /** SessionPosture is the posture read's body. The read reports the
- * deployment's identity posture and the caller's own resolved subject, and
- * nothing else. */
+ * deployment's identity posture, the caller's own resolved subject, and what
+ * this deployment's layer endpoints admit that caller on, and nothing
+ * else. */
 export interface SessionPosture {
   identity_provider_configured: boolean;
   public_mode: boolean;
@@ -21,6 +33,10 @@ export interface SessionPosture {
   };
   /** Present only where a subject resolves. */
   subject?: string;
+  /** The field is optional on the type because a response from an older
+   * registry carries none. capabilitiesOf is what turns that into a closed
+   * default, and every reader goes through it. */
+  layer_capabilities?: LayerCapabilities;
 }
 
 /** readSession takes the posture read. A registry serving no web UI never
@@ -113,9 +129,25 @@ export function catalogScope(posture: SessionPosture | null, identityRefused: bo
   return 'whole';
 }
 
+/**
+ * capabilitiesOf reads the caller's layer capabilities off the posture,
+ * returning every member false where the read did not answer or carried no
+ * object. It takes the nullable posture every other rule in this file takes,
+ * so no call site has to remember the closed default.
+ *
+ * The two states it collapses onto one value are a read that did not answer
+ * and an answered read that resolved no caller: both callers are refused the
+ * same operations. The two empty states are where the two read differently,
+ * and the shell derives a separate postureAnswered boolean for them.
+ */
+export function capabilitiesOf(posture: SessionPosture | null): LayerCapabilities {
+  return { manage_any_layer: posture?.layer_capabilities?.manage_any_layer === true };
+}
+
 /** isSignedIn reports whether the read resolved a subject for this caller.
- * The administrator role is reported by nothing, so no rule here predicts
- * it. */
+ * The read also reports whether this deployment's layer endpoints admit this
+ * caller on the §4.7.2 admin arm, which capabilitiesOf carries. It reports no
+ * role name and no grant table, so no rule here predicts either. */
 export function isSignedIn(posture: SessionPosture | null): boolean {
   return posture !== null && posture.subject !== undefined && posture.subject !== '';
 }

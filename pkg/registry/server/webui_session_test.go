@@ -43,6 +43,7 @@ func TestSessionPosture_Body(t *testing.T) {
 				"identity_provider_configured": false,
 				"public_mode":                  false,
 				"browser_auth":                 map[string]any{"enabled": false},
+				"layer_capabilities":           map[string]any{"manage_any_layer": false},
 			},
 		},
 		{
@@ -52,6 +53,7 @@ func TestSessionPosture_Body(t *testing.T) {
 				"identity_provider_configured": false,
 				"public_mode":                  true,
 				"browser_auth":                 map[string]any{"enabled": false},
+				"layer_capabilities":           map[string]any{"manage_any_layer": false},
 			},
 		},
 		{
@@ -70,6 +72,7 @@ func TestSessionPosture_Body(t *testing.T) {
 					"sign_in_path":  server.PathWebUISignIn,
 					"sign_out_path": server.PathWebUISignOut,
 				},
+				"layer_capabilities": map[string]any{"manage_any_layer": false},
 			},
 		},
 	}
@@ -101,6 +104,47 @@ func TestSessionPosture_Body(t *testing.T) {
 				t.Error("a request that resolves no subject carries no subject field")
 			}
 		})
+	}
+}
+
+// Spec: §7.3.4 — layer_capabilities and its member are always present, and a
+// read whose capability seam is not wired reports the member false.
+//
+// D11: the closed default lives here rather than at the callers because
+// NewLayerEndpoint installs an admitting authAdmin by default
+// (pkg/registry/server/layers.go), so a reporting surface that inherited that
+// default would over-report on every deployment that wires no admin arm.
+func TestSessionPosture_LayerCapabilitiesDefaultClosed(t *testing.T) {
+	t.Parallel()
+	caps, ok := posture(t, server.SessionPosture{})["layer_capabilities"].(map[string]any)
+	if !ok {
+		t.Fatal("layer_capabilities absent from a posture read with no capability seam")
+	}
+	if len(caps) != 1 || caps["manage_any_layer"] != false {
+		t.Errorf("layer_capabilities = %v, want exactly manage_any_layer false", caps)
+	}
+}
+
+// Spec: §7.3.4 — the handler serializes what the seam reports rather than
+// recomputing it, so a seam that admits the caller is reported as admitting.
+func TestSessionPosture_LayerCapabilitiesFromSeam(t *testing.T) {
+	t.Parallel()
+	body := posture(t, server.SessionPosture{
+		Capabilities: func(*http.Request) server.LayerCapabilities {
+			return server.LayerCapabilities{ManageAnyLayer: true}
+		},
+	})
+	caps, ok := body["layer_capabilities"].(map[string]any)
+	if !ok {
+		t.Fatalf("layer_capabilities = %v, want an object", body["layer_capabilities"])
+	}
+	if caps["manage_any_layer"] != true {
+		t.Errorf("manage_any_layer = %v, want the value the seam reported", caps["manage_any_layer"])
+	}
+	// The read still resolves no subject, so the capability is reported
+	// independently of whether one resolves.
+	if _, ok := body["subject"]; ok {
+		t.Error("a request that resolves no subject carries no subject field")
 	}
 }
 

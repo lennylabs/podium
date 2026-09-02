@@ -14,7 +14,8 @@ package e2e
 // auth_scim_visibility_test.go each hand-roll a registry.yaml with per-layer
 // visibility. This file packages those into one reusable primitive.
 //
-// startAuthServer boots `serve --standalone` in injected-session-token mode
+// startAuthServer boots `serve --standalone`, plus any serve arguments the
+// spec names, in injected-session-token mode
 // from a declarative layer set with explicit visibility (public, org,
 // groups:<g>, users:<u>, or private), seeds the runtime signing key, and
 // optionally seeds SCIM users and groups so the §4.6 groups: filter resolves
@@ -100,6 +101,11 @@ type authServerSpec struct {
 	// ExtraEnv is appended to the server environment (last write wins), for
 	// tests that need an additional knob without a bespoke boot.
 	ExtraEnv []string
+	// ServeArgs are appended to the `serve --standalone` argument list, for a
+	// test that needs a serve flag the harness does not set itself. The
+	// §7.3.4 posture read is mounted on --web-ui alone, so a case that reads
+	// it against an authenticated stack passes that flag here.
+	ServeArgs []string
 }
 
 // authServer is a running authenticated harness. It exposes the base URL, the
@@ -159,7 +165,7 @@ func startAuthServer(t *testing.T, spec authServerSpec) *authServer {
 	}
 	env = append(env, spec.ExtraEnv...)
 
-	proc := startServerArgs(t, env, "serve", "--standalone")
+	proc := startServerArgs(t, env, append([]string{"serve", "--standalone"}, spec.ServeArgs...)...)
 
 	as := &authServer{
 		t:       t,

@@ -272,6 +272,9 @@ func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
 		IdentityProviderConfigured: true,
 		BrowserAuthEnabled:         opts.browserAuth,
 		Identity:                   layerIdentity,
+		// §7.3.4: the endpoint's own evaluator, so the reported capability
+		// and the gate the endpoint enforces are one expression.
+		Capabilities: layerEndpoint.Capabilities,
 	}.Handler())
 	mux.Handle("/", srv.Handler())
 
@@ -702,6 +705,16 @@ func TestBrowserFlow_ExpiredSessionAcrossSurfaces(t *testing.T) {
 	if _, ok := body["subject"]; ok {
 		t.Error("the posture read reported a subject for an unverifiable session")
 	}
+	// Spec: §7.3.4 — the capability object and its member are present on a
+	// read that resolves no subject. This fixture wires no admin arm, so the
+	// endpoint's constructor default admits and the member is true.
+	caps, ok := body["layer_capabilities"].(map[string]any)
+	if !ok || len(caps) != 1 {
+		t.Fatalf("layer_capabilities = %v, want an object carrying manage_any_layer", body["layer_capabilities"])
+	}
+	if caps["manage_any_layer"] != true {
+		t.Errorf("manage_any_layer = %v, want the arm the endpoint enforces", caps["manage_any_layer"])
+	}
 }
 
 // Spec: §7.3.4 — the posture read reports the paths the mux registers and the
@@ -725,6 +738,13 @@ func TestBrowserFlow_PostureRead(t *testing.T) {
 	}
 
 	off := read(disabled)
+	// Spec: §7.3.4 — the capability object and its member are always present.
+	// Neither stack wires an admin arm, so the endpoint's constructor default
+	// admits and the read reports what that gate would decide.
+	caps, ok := off["layer_capabilities"].(map[string]any)
+	if !ok || len(caps) != 1 || caps["manage_any_layer"] != true {
+		t.Errorf("layer_capabilities = %v, want exactly manage_any_layer true", off["layer_capabilities"])
+	}
 	auth, _ := off["browser_auth"].(map[string]any)
 	if auth["enabled"] != false || len(auth) != 1 {
 		t.Errorf("browser_auth = %v, want enabled false and no path fields", auth)
@@ -748,8 +768,14 @@ func TestBrowserFlow_PostureRead(t *testing.T) {
 	cb := enabled.do(t, http.MethodGet, server.PathWebUICallback+"?state="+state+"&code="+code, nil, tx)
 	cb.Body.Close()
 	session := responseCookie(cb, server.CookieSession)
-	if got := read(enabled, session)["subject"]; got != "alice@acme.com" {
+	signedIn := read(enabled, session)
+	if got := signedIn["subject"]; got != "alice@acme.com" {
 		t.Errorf("subject = %v, want the session's verified subject", got)
+	}
+	// Spec: §7.3.4 — the same read reports the capability beside the subject.
+	caps, ok = signedIn["layer_capabilities"].(map[string]any)
+	if !ok || caps["manage_any_layer"] != true {
+		t.Errorf("layer_capabilities = %v, want manage_any_layer true", signedIn["layer_capabilities"])
 	}
 }
 

@@ -28,8 +28,9 @@ import {
   signOut,
   subscribeReadOnly,
 } from './api';
-import type { SessionPosture } from './session';
-import { authControl, catalogScope, expiryControl, isSignedIn, readSession } from './session';
+import type { LayerCapabilities, SessionPosture } from './session';
+import { authControl, capabilitiesOf, catalogScope, expiryControl, isSignedIn, readSession } from './session';
+import { mayTake, newLayerTarget } from './surfaces/layerrights';
 import { catalogDepth, domainLabel, marksCurrentDomain } from './domain';
 import { useModalOpen, usePopupDismiss } from './components/focus';
 import {
@@ -212,9 +213,10 @@ export function App() {
       },
       () => {
         // A read that does not answer leaves the page holding no value for
-        // either key, and the anonymous presentation is what it renders:
-        // neither authentication control, and the layer panel with its write
-        // operations.
+        // either key. It holds capabilitiesOf(null), every member false, so
+        // the page renders neither authentication control and no layer write
+        // control, and a reader recovers the controls by reloading the
+        // document.
         if (live) {
           setPosture(null);
           setPostureLoaded(true);
@@ -320,6 +322,21 @@ export function App() {
   const expired = refused && isSignedIn(posture);
   const scope = catalogScope(posture, refused);
   const subject = posture?.subject ?? '';
+  // The capability object is derived once, here, so the closed default the
+  // accessor applies is applied once rather than at each surface. It is
+  // threaded beside the subject the surfaces already take.
+  const caps = capabilitiesOf(posture);
+  // Whether the posture read settled anything. It reports nothing about
+  // authorization, which the register call below owns, and it is read by the
+  // two empty states alone: a read that answered and resolved no caller and a
+  // read that did not answer give the same capabilities and the same empty
+  // subject, and those two states instruct the reader differently.
+  const postureAnswered = posture !== null;
+  // The register prediction the panel's control and both empty-state
+  // instructions read. It is one call rather than a hand-written condition,
+  // so a registry that authenticates nobody keeps the instruction and a
+  // caller the registry resolved none of loses it.
+  const mayRegister = mayTake('register', newLayerTarget(subject), caps, subject);
   const recovery = <AuthRecovery posture={posture} onRetry={retryCatalog} />;
   const catalogNodes = refused ? [] : (tree.value?.subdomains ?? []);
   // A catalog read that came back holding no domain is a state of its own,
@@ -428,8 +445,10 @@ export function App() {
             Search
           </SectionLink>
           {/* The layer panel is reachable for every caller on every
-              deployment. The nav reads no posture field and predicts no
-              outcome the server decides. */}
+              deployment. The nav reads no posture field and states nothing
+              about the caller: the panel decides which of its own write
+              controls it renders, from the posture read's per-operation
+              prediction and each target's own fields. */}
           <SectionLink href={layersHref} current={route.name === 'layers' ? 'page' : false}>
             Layers
           </SectionLink>
@@ -462,10 +481,17 @@ export function App() {
           />
           {catalogEmpty && (
             <p className="quiet catalog-empty" data-testid="catalog-empty">
-              The catalog holds no domains.{' '}
+              The catalog holds no domains.
+              {/* The instruction to register is dropped where the read
+                  answered and the register call refuses, because the caller
+                  it names cannot take the remedy it names. An unanswered read
+                  settles nothing about whether the registry resolved a caller,
+                  so the instruction stands there. */}
               {catalogBare
-                ? 'Register a layer to fill it.'
-                : 'Its artifacts sit at the top of the hierarchy.'}
+                ? postureAnswered && !mayRegister
+                  ? ''
+                  : ' Register a layer to fill it.'
+                : ' Its artifacts sit at the top of the hierarchy.'}
             </p>
           )}
           {/* The failed read is the shell's own, and the surface beside it
@@ -510,6 +536,8 @@ export function App() {
               <Surface
                 route={route}
                 subject={subject}
+                caps={caps}
+                postureAnswered={postureAnswered}
                 readOnly={readOnly}
                 onCatalogOutcome={onCatalogOutcome}
                 onCatalogChange={reloadCatalog}
@@ -526,6 +554,8 @@ export function App() {
 function Surface({
   route,
   subject,
+  caps,
+  postureAnswered,
   readOnly,
   onCatalogOutcome,
   onCatalogChange,
@@ -533,6 +563,13 @@ function Surface({
 }: {
   route: ReturnType<typeof useRoute>;
   subject: string;
+  /** caps is what the layer endpoints admit this caller on. Surface holds no
+   * posture of its own, so the props are the only route to the surfaces that
+   * predict a write. */
+  caps: LayerCapabilities;
+  /** postureAnswered reports whether the posture read settled anything. The
+   * layer panel's empty state is its only reader below this point. */
+  postureAnswered: boolean;
   readOnly: boolean;
   onCatalogOutcome: (err: unknown) => void;
   onCatalogChange: () => void;
@@ -550,9 +587,22 @@ function Surface({
       // A restore moves the same figures the sidebar footer states, so the
       // recovery surface reports it the way every other layer write does.
       return route.deleted ? (
-        <DeletedLayers onRestored={onCatalogChange} readOnly={readOnly} onReach={onReach} />
+        <DeletedLayers
+          subject={subject}
+          caps={caps}
+          onRestored={onCatalogChange}
+          readOnly={readOnly}
+          onReach={onReach}
+        />
       ) : (
-        <LayerPanel subject={subject} readOnly={readOnly} onCatalogChange={onCatalogChange} onReach={onReach} />
+        <LayerPanel
+          subject={subject}
+          caps={caps}
+          postureAnswered={postureAnswered}
+          readOnly={readOnly}
+          onCatalogChange={onCatalogChange}
+          onReach={onReach}
+        />
       );
     case 'domain':
       return <DomainBrowser path={route.path} onError={onCatalogOutcome} />;
@@ -1269,9 +1319,9 @@ function useTopbarMenu() {
 /** AccountMenu is the identity cluster and the menu behind it. It carries the
  * caller's own subject, the appearance preference, the layer quota, and the
  * sign-out entry point where the deployment runs one. It carries no role
- * badge and no group membership: no response reports that the caller holds
- * the administrator role, and no response enumerates the caller's groups, so
- * the menu states neither. */
+ * badge, no capability report, and no group membership: no response reports
+ * the caller's role, the posture read's per-operation prediction is read by
+ * the layer panel alone, and no response enumerates the caller's groups. */
 function AccountMenu({
   subject,
   theme,

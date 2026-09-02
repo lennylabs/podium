@@ -97,6 +97,7 @@ export function reingestRefusal(err: unknown): ReingestState {
 export function ReingestButton({
   layerID,
   state,
+  admitted,
   readOnly,
   held,
   onStart,
@@ -108,6 +109,10 @@ export function ReingestButton({
    * cannot tell which layer a press would reingest. */
   layerID: string;
   state: ReingestState;
+  /** admitted is whether the registry would take this layer's reingest from
+   * this caller. A control the rule refuses is absent rather than drawn and
+   * refused when it is pressed (§13.10). */
+  admitted: boolean;
   readOnly: boolean;
   /** held is the panel's own in-flight guard: a fan-out across every layer is
    * open, and this row is one of the layers it reingests. Without it the row
@@ -122,6 +127,9 @@ export function ReingestButton({
    * controls with them when they close. */
   buttonRef?: RefObject<HTMLButtonElement | null>;
 }) {
+  if (!admitted) {
+    return null;
+  }
   return (
     <button
       ref={buttonRef}

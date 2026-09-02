@@ -73,6 +73,16 @@ func (e *LayerEndpoint) handleWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "ingest.webhook_invalid", err.Error())
 		return
 	}
+	// spec: §7.3.1 — the local-source authorization rule. A verified
+	// delivery drives the same ingest the guarded reingest drives, so a
+	// stored git layer whose repository string resolves to go-git's file
+	// transport is refused here rather than re-read with the registry's own
+	// rights by the holder of the per-layer secret. A repository naming a
+	// network endpoint is not classified, so every existing webhook for such
+	// a layer keeps working, its stored local_path included.
+	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.Repo) {
+		return
+	}
 	// §7.3.1: a verified delivery "fetches the new commit, ingests". Drive
 	// the ingest pipeline (no break-glass on the webhook path) and return its
 	// result summary. Without a runner wired the handler records the intent.

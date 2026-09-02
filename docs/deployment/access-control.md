@@ -79,6 +79,29 @@ Enforcement is bypassed in these cases:
 
 ---
 
+## Who can change a layer
+
+Visibility decides who reads a layer. A separate rule decides who writes one. The layer write operations `register`, `unregister`, `update`, `restore`, `reorder`, and `reingest` are authorized against the stored layer: an admin-defined layer to a caller holding the tenant `admin` role alone, and a user-defined layer to that layer's stored owner or to a tenant admin. A caller authorized on neither arm is refused with `auth.forbidden`. Those arms govern a write against a layer that already exists, `register` included, where the request's `id` names a stored layer. A registration whose `id` names no stored layer is authorized to a caller the admin arm admits or to a caller who resolves a verified subject, and in the second case the registry stores it as a user-defined layer owned by that subject.
+
+Beside that rule sits the local-source rule. Registering a layer whose source names a filesystem path on the registry host, patching that path, restoring such a layer, and reingesting one are authorized to a tenant admin alone, whether the layer is admin-defined or user-defined. Any other caller is refused with `auth.forbidden` carrying `details.constraint: "local_source"`, and the refusal names no path. A `git` source whose repository string resolves to the Git file transport names a host path and takes the same arm; one naming a network endpoint does not. The rule exists because the registry process reads that path with its own rights rather than with the registrant's, so the path is an admin decision even where the layer is the registrant's own.
+
+What a caller without the `admin` role may do with layers:
+
+| Operation | Without the `admin` role |
+|:--|:--|
+| Register a `git` layer on a network repository | Permitted for a caller who resolves a verified subject. The registry resolves it to a user-defined layer owned by that subject. A caller who resolves no subject is refused with `auth.forbidden`. |
+| Register a layer naming a host path, by `--local` or by a repository string on the Git file transport | Refused with `auth.forbidden`, `details.constraint: "local_source"`. |
+| List layers | Permitted, narrowed to the layers that caller's identity admits. |
+| Update, unregister, restore, reorder, or reingest a layer the caller owns | Permitted, except as the next row states. |
+| Patch a layer's filesystem path, or restore or reingest a layer that names one | Refused with `auth.forbidden`, `details.constraint: "local_source"`, including on the caller's own layer. |
+| Any write on an admin-defined layer, or on another caller's user-defined layer | Refused with `auth.forbidden`. |
+
+A registry started with no identity provider configured, and one in public mode, authenticates no caller, so no caller can hold the `admin` role and both rules admit every request there.
+
+The web UI reads the caller's own capabilities from the session posture read, `GET /v1/ui/session`, which reports `layer_capabilities.manage_any_layer` for the requesting caller alone. The web UI renders a layer write control only where that value together with the target layer's own class, stored owner, source type, and stored filesystem path settle that the layer rules admit this caller on that operation. `manage_any_layer` is the arm that covers a write on a layer the caller does not own and every operation the local-source rule governs. The value predicts a server decision rather than granting anything, and the layer endpoint's own refusal remains the authority. The [HTTP API reference](../reference/http-api#session-posture) documents the body.
+
+---
+
 ## Deployment defaults
 
 `PODIUM_DEFAULT_LAYER_VISIBILITY` sets the visibility an admin-defined layer takes when it registers without a `visibility:` block. It accepts `public`, `organization`, or `private`. Without an explicit setting, the value follows whether identity is configured:

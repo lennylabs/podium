@@ -87,16 +87,25 @@ podium layer register --id org-defaults \
   --organization
 
 # A local-source layer, read from a path the registry process can see.
+# Registering one requires the tenant admin role.
 podium layer register --id team-artifacts \
   --local /var/podium/team-artifacts/ --group acme-engineering
 
 # A personal layer. The registry derives the owner from the authenticated
 # caller and gives the layer implicit users:[<owner>] visibility.
 podium layer register --id alice-personal \
-  --local /home/alice/podium-personal/ --user-defined
+  --repo git@github.com:alice/podium-personal.git --ref main --user-defined
 ```
 
 An authenticated caller without the tenant `admin` role registers a user-defined layer whether or not `--user-defined` is passed. The registry resolves the class from the caller's identity.
+
+### Who may register a local-source layer
+
+Registering a layer whose source names a filesystem path on the registry host, patching that path, restoring such a layer, and reingesting one are authorized to a caller holding the tenant `admin` role. Any other caller is refused with `auth.forbidden` carrying `details.constraint: "local_source"`. A `--repo` value that resolves to the Git file transport names a host path as well and takes the same arm. A deployment with no identity provider configured, and one in public mode, authenticates no caller, so no caller can hold the `admin` role and each of these operations is admitted there for every caller. The registry process reads the named path with its own rights rather than with the registrant's, which is why the path is admin-only while a Git ref is not.
+
+The rule is evaluated on each of those operations rather than against the stored layer list, so a `local`-source layer a non-admin registered before the rule was in force keeps serving its ingested artifacts and is refused at its next reingest, restore, or path patch. Re-register it under an admin identity, or grant the owner the `admin` role, to bring it back under a caller the rule admits. `podium layer watch` reingests on every tick, so a watch loop over such a layer is refused once per tick for a caller the rule does not admit.
+
+An ingest of a local-source layer reads only within the directory the layer's configured path resolves to. A path that leaves that directory, including one reached through a symbolic link stored inside it, is not read, and a read the ingest requires and cannot satisfy fails that layer's ingest with `ingest.source_unreachable` while the artifacts served before the refusal stay in place. A symbolic link inside the layer whose target is written as an absolute path is refused whatever that target names, including a target inside the same layer, so rewrite such a link with a target relative to its own directory. A layer that relied on a link leaving its root is restructured to hold the content inside the layer directory.
 
 `podium layer list` prints the registered layers the caller can see, and their current state. A caller holding the tenant `admin` role, and every caller on a registry that authenticates none, sees every layer in the tenant. Any other authenticated caller sees the layers that caller's identity admits, including that caller's own user-defined layers. A caller the registry resolves as anonymous sees none, and a caller whose credential fails verification is refused on the terms the [HTTP API reference](../reference/http-api#list-layers) states. Whether presenting no credential is itself a verification failure is the configured identity provider's rule. The visibility flags are covered in [Access control](access-control), and the built-in source types are covered in [Server-side integrations](integrations#layer-sources).
 
@@ -124,7 +133,7 @@ Each layer refreshes from its source independently.
 |:--|:--|
 | Git webhook | A `git`-source layer whose host can reach the registry. The registry ingests on each merge to the tracked ref. Register the webhook URL that `podium layer register` returned. |
 | `podium layer reingest <id>` | A manual or scheduled pull. Covers offline mirrors, internal Git that cannot reach the registry, and any host without a public ingress. |
-| `podium layer watch --id <id>` | A polling loop against the layer's source at an interval set with `--interval` (default 1m). Works for `local` sources and for `git` sources with no webhook. |
+| `podium layer watch --id <id>` | A polling loop against the layer's source at an interval set with `--interval` (default 1m). Works for `local` sources and for `git` sources with no webhook. Each tick reingests, so a loop over a source naming a host path is authorized as [the local-source rule](#who-may-register-a-local-source-layer) states. |
 
 `podium layer update --id <id>` patches a registered layer's mutable fields, including the tracked ref, the source path, and the visibility. Only the flags supplied are applied.
 
@@ -147,4 +156,4 @@ On a server-backed deployment, `podium admin show-effective [--group <g>]... <us
 - **Same-ID collisions across layers are rejected rather than shadowed.** A server rejects the second contribution at ingest with `ingest.collision` unless the higher-precedence artifact declares `extends:` against that ID. `podium lint` reports the same collision on a local catalog, and `podium sync` materializing one keeps the highest-precedence copy. The same layer list and the same identity always produce the same view.
 - **A hidden parent still merges.** When a visible artifact declares `extends:` against an artifact in a layer the caller cannot see, the registry resolves the parent server-side and returns the merged result. The caller never sees the parent directly.
 - **Layer order is declared, never inferred.** There is no fixed `org / team / user` hierarchy. The ordering is whatever the layer list says.
-- **Authoring rights are separate.** Whoever can merge to a layer's tracked Git ref publishes there, and whoever can write to a `local`-source layer's path publishes there. Branch protection and required reviewers stay in the Git host.
+- **Authoring rights are separate.** Whoever can merge to a layer's tracked Git ref publishes there, and whoever can write to a `local`-source layer's path publishes there. Branch protection and required reviewers stay in the Git host. That scope statement is about writing content into a source the registry already reads. Which caller may declare a layer that makes the registry read a given filesystem path is governed by the local-source rule under [Who may register a local-source layer](#who-may-register-a-local-source-layer).

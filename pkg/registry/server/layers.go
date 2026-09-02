@@ -682,6 +682,15 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 			"force_push_policy must be \"tolerant\" or \"strict\"")
 		return
 	}
+	// spec: §7.3.1 — the local-source authorization rule, evaluated against
+	// the patch rather than against the stored layer. The handler applies
+	// neither patch.SourceType nor patch.Repo, so a patch carrying no
+	// local_path patches no filesystem path and is admitted for whatever
+	// caller the write gate admitted; a patch that names one is a tenant
+	// admin's operation.
+	if !e.authorizeLocalSource(w, r, "", patch.LocalPath, "") {
+		return
+	}
 	// spec: §7.3.1 — a non-empty force_push_policy replaces the prior
 	// value; the empty string leaves it unchanged (consistent with the
 	// other patch fields).
@@ -827,6 +836,16 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+	}
+
+	// spec: §7.3.1 — the local-source authorization rule. A registration
+	// that names a filesystem path on the registry host, including a git
+	// repository string go-git resolves to its file transport, is a tenant
+	// admin's operation; the coarse gate above refuses only a caller who
+	// resolves no verified subject, so this is the arm that closes the
+	// arbitrary read.
+	if !e.authorizeLocalSource(w, r, req.SourceType, req.LocalPath, req.Repo) {
+		return
 	}
 
 	cfg := store.LayerConfig{
@@ -1037,6 +1056,12 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return
 	}
+	// spec: §7.3.1 — the local-source authorization rule, evaluated against
+	// the tombstoned layer's stored source. A restore returns a layer whose
+	// next ingest re-reads that path, so it takes the same arm.
+	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.Repo) {
+		return
+	}
 	if err := e.store.RestoreLayerConfig(r.Context(), e.tenantID, id); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "registry.not_found", "no recoverable layer: "+id)
@@ -1218,6 +1243,12 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 	// nor the break-glass freeze bypass (§4.7.2).
 	if err := e.authorizeLayerWrite(r, cfg); err != nil {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+		return
+	}
+	// spec: §7.3.1 — the local-source authorization rule. A reingest
+	// re-reads the stored layer's filesystem path with the registry
+	// process's own rights, so it is a tenant admin's operation.
+	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.Repo) {
 		return
 	}
 	e.runIngestAndRespond(w, r, cfg, bg)

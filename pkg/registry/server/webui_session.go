@@ -7,16 +7,19 @@ import (
 )
 
 // SessionPosture serves the §7.3.4 posture read, GET /v1/ui/session. It
-// reports the deployment's identity posture and the caller's own resolved
-// subject, and nothing else: no issuer, client identifier, endpoint, or other
-// configuration value, and no artifact, layer, tenant, or other caller's
-// data. The read requires no credential and refuses no request for lack of
-// one; a request that carries one has it verified only so the response can
-// report `subject`.
+// reports the deployment's identity posture, the caller's own resolved
+// subject, and what that caller may do on the §7.3.1 layer operations, and
+// nothing else: no issuer, client identifier, endpoint, filesystem path, or
+// other configuration value, and no artifact, layer, tenant, or other
+// caller's subject or authorization. The read requires no credential and
+// refuses no request for lack of one; a request that carries one has it
+// verified so the response can report `subject` and evaluate
+// `layer_capabilities`, and for no other purpose.
 //
-// The browser can observe neither of the two things it reports: the session
-// cookie is HttpOnly, and no other shipped response separates the postures.
-// The UI's sign-in control and its rendering rules key on this read.
+// The browser can observe none of what this read reports: the session cookie
+// is HttpOnly, no other shipped response separates the postures, and the
+// admin arm the capabilities evaluate is server-side configuration. The UI's
+// sign-in control and its rendering rules key on this read.
 type SessionPosture struct {
 	// IdentityProviderConfigured reports whether an identity provider is
 	// configured. The body never names which one.
@@ -33,6 +36,15 @@ type SessionPosture struct {
 	// that refuses no request for lack of a credential. The §7.3.1 layer
 	// endpoint refuses the same credential.
 	Identity func(*http.Request) layer.Identity
+	// Capabilities evaluates the caller's §7.3.1 layer capabilities. Boot
+	// passes the layer endpoint's own evaluator, so the value a client
+	// renders on and the gate the registry applies are one expression. A nil
+	// seam reports every member false: the layer endpoint's constructor
+	// installs an admitting admin arm by default, and a reporting surface
+	// defaults the other way.
+	//
+	// Spec: §7.3.4
+	Capabilities func(*http.Request) LayerCapabilities
 }
 
 // Handler serves the posture read.
@@ -51,6 +63,13 @@ func (p SessionPosture) Handler() http.Handler {
 			"public_mode":                  p.PublicMode,
 			"browser_auth":                 browserAuth,
 		}
+		// §7.3.4: the object and its member are always present, so the
+		// closed default is written here once rather than at each caller.
+		var caps LayerCapabilities
+		if p.Capabilities != nil {
+			caps = p.Capabilities(r)
+		}
+		body["layer_capabilities"] = caps
 		if p.Identity != nil {
 			if id := p.Identity(r); id.IsAuthenticated && id.Sub != "" {
 				body["subject"] = id.Sub

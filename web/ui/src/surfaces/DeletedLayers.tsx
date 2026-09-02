@@ -19,6 +19,8 @@ import { EmptyState, ErrorState, Loading } from '../components/primitives';
 import { layersHref } from '../route';
 import { takeFocus } from '../components/focus';
 import { SourceCell } from '../components/SourceCell';
+import type { LayerCapabilities } from '../session';
+import { mayTake } from './layerrights';
 import type { LayerRecord } from '../api';
 import { ApiError, listDeletedLayers, listLayers, restoreLayer } from '../api';
 import { useAsync, useReachReport } from '../useAsync';
@@ -46,10 +48,18 @@ function RecoveryHead({ heading }: { heading: RefObject<HTMLHeadingElement | nul
 }
 
 export function DeletedLayers({
+  subject,
+  caps,
   onRestored,
   readOnly,
   onReach,
 }: {
+  subject: string;
+  /** caps is what this deployment's layer endpoints admit this caller on.
+   * Restore is a §7.3.1 write, and the rule guards it on the tombstoned
+   * record's own source and path, so a caller who owns a tombstoned local
+   * layer reads the row and is offered no control on it. */
+  caps: LayerCapabilities;
   onRestored: () => void;
   readOnly: boolean;
   /** onReach tells the shell that this read answered, so a shell read that
@@ -177,7 +187,14 @@ export function DeletedLayers({
             </thead>
             <tbody>
               {rows.map((layer) => (
-                <DeletedRow key={layer.ID} layer={layer} readOnly={readOnly} onRestore={restore} />
+                <DeletedRow
+                  key={layer.ID}
+                  layer={layer}
+                  subject={subject}
+                  caps={caps}
+                  readOnly={readOnly}
+                  onRestore={restore}
+                />
               ))}
             </tbody>
           </table>
@@ -248,14 +265,19 @@ function restoredNote(id: string, layers: LayerRecord[] | null): string {
 
 function DeletedRow({
   layer,
+  subject,
+  caps,
   readOnly,
   onRestore,
 }: {
   layer: LayerRecord;
+  subject: string;
+  caps: LayerCapabilities;
   readOnly: boolean;
   onRestore: (id: string) => void;
 }) {
   const window = recoveryWindow(layer);
+  const mayRestore = mayTake('restore', layer, caps, subject);
   return (
     <tr>
       <td className="mono layer-name">{layer.ID}</td>
@@ -312,16 +334,18 @@ function DeletedRow({
             is read out of its row by a screen reader and every button sounds
             alike. The accessible name carries the layer the way the layer
             panel's per-row controls do. */}
-        <button
-          type="button"
-          aria-label={`Restore ${layer.ID}`}
-          disabled={readOnly}
-          onClick={() => {
-            onRestore(layer.ID);
-          }}
-        >
-          Restore
-        </button>
+        {mayRestore && (
+          <button
+            type="button"
+            aria-label={`Restore ${layer.ID}`}
+            disabled={readOnly}
+            onClick={() => {
+              onRestore(layer.ID);
+            }}
+          >
+            Restore
+          </button>
+        )}
       </td>
     </tr>
   );
