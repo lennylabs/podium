@@ -149,6 +149,9 @@ rm -rf "$WORK"
 | S52 | Search through the web UI with the type, scope, and tag filters | standalone | none | none | none |
 | S53 | Read an artifact through the viewer | standalone | none | none | none |
 | S54 | Author on disk, reingest from the panel, and materialize | standalone | none | none | none |
+| S55 | The register dialog offers only what the caller can take | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S56 | The panel presents per-row only what the caller may take | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S57 | A stale prediction still refuses, and the panel says so | standalone | none | none | Keycloak (Docker) + mkcert CA |
 
 ---
 
@@ -3921,9 +3924,34 @@ the page's authentication control. No Go test reads a browser rendering, which i
 why the previous §13.10 text could claim the UI ran a device-code flow with an
 in-browser verification handoff and no test contradicted it.
 
-**This is the stack the browser-flow scenarios run on.** S47 through S50 take
-their prerequisites and steps 1 to 4 from here and then sign in, so a change to
-the Keycloak registration or the serve invocation below reaches each of them.
+**This is the stack the browser-flow scenarios run on.** S47 through S50 and S55
+through S57 take their prerequisites and steps 1 to 4 from here and then sign
+in, so a change to the Keycloak registration or the serve invocation below
+reaches each of them.
+
+**Bootstrap admin, for S56 and S57 alone.** This stack seeds no tenant-admin
+grant and sets no `PODIUM_BOOTSTRAP_ADMINS`, and `POST /v1/admin/grants` is
+itself admin-gated, so no caller on the stack as written below can issue the
+first grant. S56 and S57 need one, so a run that reaches them amends step 3 with
+two additions. Before step 3's `podium serve`, create a second realm user
+`carol` the way S50 step 1 creates `bob`, read her `sub` and her access token,
+and name that `sub` as the bootstrap admin:
+
+```bash
+$KC create users -r master -s username=carol -s enabled=true
+$KC set-password -r master --username carol --new-password carol
+export CAROL_TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
+  -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
+  -d username=carol -d password=carol \
+  | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
+export CAROL_SUBJECT="$(python3 -c "import base64,json,os; p=os.environ['CAROL_TOKEN'].split('.')[1]; p+='='*(-len(p)%4); print(json.loads(base64.urlsafe_b64decode(p))['sub'])")"
+export PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"
+```
+
+Carol is the bootstrap operator and never signs in to the UI. She exists so the
+first grant has an issuer, and `PODIUM_BOOTSTRAP_ADMINS` is the only route to
+one on a registry whose grant table starts empty. A run of S44 through S50 alone
+skips this block, and the stack behaves as it does today.
 
 **Prerequisites.** A local Keycloak serving an `https` issuer the host trusts, a
 confidential client registered for the authorization-code flow, and one access
@@ -4649,7 +4677,7 @@ the same browser could not read a moment earlier.
 
 **Covers.** §6.3.4 browser acquisition, the §7.3.4 sign-in, callback, sign-out,
 and posture routes, the §6.3.3 second accepted credential location, §6.3.1 group
-mapping, and §4.6 group-scoped visibility.
+mapping, §4.6 group-scoped visibility, and the §13.10 layer panel.
 
 **Why by hand.** The assertion is a redirect chain a person completes at the
 IdP's own login page and the view the page renders afterwards. No Go test drives
@@ -4672,7 +4700,14 @@ and record the skip.
    `sign_in_path: /v1/ui/auth/sign-in` and
    `sign_out_path: /v1/ui/auth/sign-out`. There is no `subject` key, because
    this request carries no credential. The read needs no credential and refuses
-   no request for lack of one.
+   no request for lack of one. `layer_capabilities` is present and reports
+   `manage_any_layer: false`, because this stack configures an identity provider
+   and seeds no admin grant, so the caller the read reports on holds no
+   tenant-admin role. The object is present on every answer, including this one,
+   which carries no `subject`. A missing `layer_capabilities` key means the
+   registry is serving a build from before the posture read reported
+   capabilities, and the panel on that build renders every write control on
+   every row.
 
 2. Take the anonymous baseline for the group-scoped artifact.
 
@@ -4684,11 +4719,27 @@ and record the skip.
    establishes nothing: an artifact that is visible to everyone would produce the
    same reading afterwards.
 
-3. Open `http://127.0.0.1:8153/app/` in a private browser window and click the
-   sign-in control. Keycloak's login page appears; sign in as `admin` with the
-   password `admin`.
+3. Open `http://127.0.0.1:8153/app/#/layers` in a private browser window, read
+   the layer panel, and click the sign-in control. Keycloak's login page
+   appears; sign in as `admin` with the password `admin`. The address names the
+   layers route because an empty hash resolves to the catalog route, and a
+   reader who opens `/app/` alone is looking at the domain browser rather than
+   at the panel.
 
-   **Expect.** The browser leaves the registry for the authorization endpoint,
+   **Expect.** Before the click, the panel header draws no `Register layer`
+   control and the empty state reads that the registry resolved no caller for
+   this page rather than instructing the reader to register a layer. A
+   `Register layer` control drawn here offers a registration the registry
+   refuses, and an empty state that instructs the reader to register a layer
+   points at a control this page does not carry. The list is empty rather than
+   refused,
+   because the visibility filter narrows to nothing for a caller with no
+   subject. The sidebar's own catalog line reads "The catalog holds no domains.
+   Its artifacts sit at the top of the hierarchy." here, because S44's public
+   layer puts its one artifact at the layer root, so the root catalog read
+   returns no subdomain and one notable entry.
+
+   Then the browser leaves the registry for the authorization endpoint,
    returns to `http://127.0.0.1:8153/app/` after the login, and the account
    cluster stands where the sign-in control was: the top bar carries the
    caller's own subject instead of a Sign in button, and the sign-out control
@@ -4770,16 +4821,29 @@ to 3 completed and the browser still signed in.
    git add -A && git -c user.email=alice@acme.com -c user.name=alice commit -qm "add release skill"
    ```
 
+   This repository stands for the repository the reader would push to the remote
+   URL step 2 registers. No step in S48, S49, or S50 reingests the layer, so the
+   registration never fetches it.
+
 2. Open the layer panel in the signed-in page, press Register layer, and fill
-   the form. Choose "Your own layer" as the class and "Git repository" as the
-   source, give `$WORK/own-repo` as the repository, `main` as the ref, and
-   `own-release` as the layer ID.
+   the form. Choose "Git repository" as the source, give
+   `https://git.acme.internal/alice/own-release.git` as the repository, `main`
+   as the ref, and `own-release` as the layer ID.
 
    **Expect.** The form states that a layer of your own is visible to you alone
    and counts against the layer limit an administrator sets. The registration is
    stored user-defined with the signed-in caller as its owner and its visibility
    fixed to that subject, whatever visibility the request carried, which is why
    the form offers no visibility axes on this class.
+
+   The form offers no layer-class control and no `Local folder` source option,
+   because this caller holds no tenant-admin role and the registry would refuse
+   both. A class control present here means the panel is predicting from
+   something other than the posture read, and a `Local folder` option present
+   here offers a registration the registry answers with `auth.forbidden`. A
+   filesystem path given as the repository is refused for the same reason,
+   because a repository string that resolves to the Git file transport names a
+   path on the registry host.
 
 3. Read what the panel returns.
 
@@ -4824,7 +4888,7 @@ to 3 completed and the browser still signed in.
    ```bash
    curl -sS -X POST "http://127.0.0.1:8153/v1/layers" \
      -H 'Content-Type: application/json' \
-     -d '{"id":"own-release-2","source_type":"git","repo":"'"$WORK/own-repo"'","ref":"main","user_defined":true}' \
+     -d '{"id":"own-release-2","source_type":"git","repo":"https://git.acme.internal/alice/own-release.git","ref":"main","user_defined":true}' \
      -w '\nstatus=%{http_code}\n'
    ```
 
@@ -4906,20 +4970,25 @@ and run S44's teardown only when this is the last scenario executed.
 ## S50: A non-owner is refused on a destructive operation
 
 **Goal.** Validate that the registry refuses a layer write from a signed-in
-caller who neither owns the layer nor is a tenant admin, that the panel reports
-the refusal on the row without claiming to know why, and that a layer outside
-the caller's view is absent from that caller's list and still refused when named
+caller who neither owns the layer nor is a tenant admin, that the panel offers
+no write control on a row that caller cannot write, and that a layer outside the
+caller's view is absent from that caller's list and still refused when named
 directly.
 
+The refusal band on a row it was attempted from is validated by S57, which
+presses a control the caller was offered and then lost.
+
 **Covers.** The §7.3.1 layer read visibility rule, the §7.3.1 layer-write
-authorization rule, `auth.forbidden`, and the §13.10 panel's treatment of a
-refused write.
+authorization rule, `auth.forbidden`, and the §13.10 rule that the panel offers
+a layer operation only where the caller may take it.
 
 **Why by hand.** The assertion is that a second person, signed in through the
-same UI, is refused a write on a row that person can see and reads a list that
-omits the layer that person cannot see. The refusal's rendering is the part no
+same UI, is offered no write control on a row that person can see, is refused
+that same write when it is named directly from the terminal, and reads a list
+that omits the layer that person cannot see. The absent control is the part no
 Go test reads, and the panel presenting per-owner scoping as server-enforced
-while the server failed open is the defect this closes.
+while the server failed open is the defect this closes. The rendering of a
+refusal the panel does receive is read by S57.
 
 **Prerequisites.** The S44 stack, and a layer owned by the `admin` user. Run S48
 to register `own-release` and stop before S49, or re-register it. A second
@@ -4937,14 +5006,16 @@ profile S47 signed in from cannot hold a second session.
    $KC set-password -r master --username bob --new-password bob
    ```
 
-   Read bob's `sub` the way prerequisite 5 read admin's, so step 2 has a value
-   to compare the posture body against.
+   Mint bob's own token the way prerequisite 5 mints `TOKEN`, and read bob's
+   `sub` out of it, so step 2 has a value to compare the posture body against
+   and step 4 has a credential to issue its request with.
 
    ```bash
-   export BOB_SUBJECT="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
+   export BOB_TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
      -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
      -d username=bob -d password=bob \
-     | python3 -c "import base64,json,sys; p=json.load(sys.stdin)['access_token'].split('.')[1]; p+='='*(-len(p)%4); print(json.loads(base64.urlsafe_b64decode(p))['sub'])")"
+     | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
+   export BOB_SUBJECT="$(python3 -c "import base64,json,os; p=os.environ['BOB_TOKEN'].split('.')[1]; p+='='*(-len(p)%4); print(json.loads(base64.urlsafe_b64decode(p))['sub'])")"
    echo "$BOB_SUBJECT"
    ```
 
@@ -4985,35 +5056,34 @@ profile S47 signed in from cannot hold a second session.
    longer verifies, which is a refusal rather than a narrowing. Sign bob in
    again and re-run the step.
 
-3. Press Unregister on the `public-handbook` row, type `public-handbook` into
-   the confirmation field, and press Unregister layer, as S49 step 3 does for
-   its own layer.
+3. Read the `public-handbook` row in bob's panel.
 
-   **Expect.** The layer stays registered. The row reports that the registry
-   refused that action and that nothing changed, and it names the code
-   `auth.forbidden`. It reports neither who owns the layer nor the state of the
-   session, because the refusal carries neither. The band offers Dismiss alone
-   and reads `Retrying does not clear this condition.`, because the registry
-   marks `auth.forbidden` non-retryable. Every other control on the row stays
-   live.
+   **Expect.** The row is listed, because bob's §4.6 view admits it, and it
+   carries no write control at all: no Edit, no Unregister, no reingest control,
+   and no overflow trigger. The actions cell is empty and holds the same width
+   as a row that carries controls, so the list does not reflow. An Unregister
+   control present here means the panel is still offering every write on every
+   row, which is what this scenario now exists to catch.
 
-4. Confirm the refusal came from the authorization rule rather than from the
-   panel.
-
-   **Expect.** The `DELETE /v1/layers?id=public-handbook` request in the
-   browser's network panel answered `403` with `auth.forbidden`. A `200` means
-   the server let a non-owner delete another caller's layer, which is the
-   failure this scenario exists to catch.
-
-5. Confirm the layer bob cannot see is refused when it is named directly. Mint
-   bob's own token the way prerequisite 5 mints `TOKEN`, then issue the delete
-   from the terminal.
+4. Confirm the registry refuses the same operation when it is named directly, so
+   the absent control is a prediction of the server rule rather than a
+   substitute for it.
 
    ```bash
-   export BOB_TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
-     -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
-     -d username=bob -d password=bob \
-     | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
+   curl -sS -X DELETE "http://127.0.0.1:8153/v1/layers?id=public-handbook" \
+     -H "Authorization: Bearer $BOB_TOKEN" \
+     -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** `auth.forbidden` at HTTP 403. A `200` means the server let a
+   non-owner delete another caller's layer, which is the failure this scenario
+   exists to catch. The panel hiding the control and the registry refusing the
+   request are two independent statements, and this step is the second one.
+
+5. Confirm the layer bob cannot see is refused when it is named directly, using
+   the token step 1 exported.
+
+   ```bash
    curl -sS -X DELETE "http://127.0.0.1:8153/v1/layers?id=own-release" \
      -H "Authorization: Bearer $BOB_TOKEN" \
      -w '\nstatus=%{http_code}\n'
@@ -5585,3 +5655,189 @@ ingested.
 kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
 rm -rf "$WORK"
 ```
+
+---
+
+## S55: The register dialog offers only what the caller can take
+
+**Goal.** Validate that the register dialog offers no layer class and no source
+the registry will refuse for this caller, and that the registry refuses the same
+registration when it is named directly.
+
+**Covers.** §7.3.1 local-source authorization, §7.3.4 `layer_capabilities`, and
+the §13.10 layer panel.
+
+**Why by hand.** The wrong output is a dialog offering a class and a source the
+registry then refuses, which reads to the operator as a product that lost their
+input, and only a human reading the dialog sees that.
+
+**Prerequisites.** The S44 stack, re-stood by running S44's Prerequisites and
+steps 1 to 6, with a signed-in session per S47 steps 1 to 3. `TOKEN` and
+`SUBJECT` are the values S44's Prerequisites and step 1 export, and they belong
+to the signed-in caller, who holds no tenant-admin grant on this stack. When
+Keycloak or the `mkcert` CA is unavailable, skip and record the skip.
+
+**Steps.**
+
+1. Open the layer panel as the signed-in caller and press `Register layer`. Read
+   the class control and the source control.
+
+   **Expect.** The dialog carries no layer-class control and its source control
+   offers no `Local folder` option. A class control present here means the form
+   is predicting from something other than the posture read. A `Local folder`
+   option present here offers a registration step 2 shows the registry refusing.
+
+2. Register a `local`-source layer from the terminal with the same caller's
+   token.
+
+   ```bash
+   curl -sS -X POST "http://127.0.0.1:8153/v1/layers" \
+     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"id":"s55-local","source_type":"local","local_path":"/etc","user_defined":true}' \
+     -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** `auth.forbidden` at HTTP 403, with `"constraint": "local_source"`
+   in the envelope's `details` and no filesystem path anywhere in the body. A
+   `201` means the local-source rule is not wired on `register`, which is the
+   defect this change closes.
+
+**Cleanup.** Leave the stack running when S56 or S57 follows, and run S44's
+teardown only when this is the last scenario executed.
+
+---
+
+## S56: The panel presents per-row only what the caller may take
+
+**Goal.** Validate that the panel renders a layer operation only where the
+caller may take it, and that a caller who holds the tenant-admin role gets every
+control back, so a registry that hid every control from everyone does not pass.
+
+**Covers.** §7.3.1 layer write authorization and local-source authorization,
+§7.3.4 `layer_capabilities`, and the §13.10 layer panel.
+
+**Why by hand.** The row actions are a rendering, and the failure this catches
+is a control drawn for a caller who can never take it or withheld from a caller
+who can.
+
+**Prerequisites.** S55's prerequisite, with S44's bootstrap-admin note applied:
+`carol` exists, `CAROL_TOKEN` and `CAROL_SUBJECT` are exported, and the registry
+was started with `PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"`. Carol never signs
+in to the UI; she exists so the first grant has an issuer.
+
+**Steps.**
+
+1. Grant the tenant-admin role to the signed-in caller, using carol's bootstrap
+   token, and register a user-defined local layer as that caller while the grant
+   is in force.
+
+   ```bash
+   curl -sS -X POST "http://127.0.0.1:8153/v1/admin/grants" \
+     -H "Authorization: Bearer $CAROL_TOKEN" -H 'Content-Type: application/json' \
+     -d "{\"user_id\":\"$SUBJECT\"}" -w '\nstatus=%{http_code}\n'
+   mkdir -p "$WORK/notes" && printf -- '---\nid: note\ntype: context\n---\nnote\n' \
+     > "$WORK/notes/ARTIFACT.md"
+   PODIUM_SESSION_TOKEN="$TOKEN" podium layer register \
+     --registry http://127.0.0.1:8153 \
+     --id s56-notes --local "$WORK/notes" --user-defined
+   ```
+
+   **Expect.** The grant answers `201` with `{"user_id": "<the subject>"}`, and
+   the registration exits `0` with the stored record printed, carrying
+   `"UserDefined": true` and this caller's subject as `Owner`. A `403` on the
+   grant means `PODIUM_BOOTSTRAP_ADMINS` did not name carol's `sub`, and the
+   prerequisite is re-run before continuing. A `403` on the registration means
+   the grant did not take effect, because a non-admin may not name a filesystem
+   path.
+
+   The grant body carries `user_id` alone, and the grant lands in the caller's
+   own tenant. `register` derives its source type from `--local` and declares no
+   `--source` flag, and its flag set parses with `flag.ContinueOnError`, so an
+   unknown flag exits non-zero before any request. `PODIUM_SESSION_TOKEN` is the
+   credential the CLI attaches, so it acts as the same caller the browser
+   session holds; S44's Prerequisites unset that variable, so exporting it on
+   the command line is what makes the invocation authenticated at all.
+
+2. Revoke the grant, reload the panel, and read the `s56-notes` row and the
+   `public-handbook` row.
+
+   ```bash
+   curl -sS -X DELETE "http://127.0.0.1:8153/v1/admin/grants?user_id=$SUBJECT" \
+     -H "Authorization: Bearer $CAROL_TOKEN" -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** The revoke answers `204`. `s56-notes` carries `Edit` and
+   `Unregister` behind its overflow control, because the caller owns it, and
+   carries no reingest control, because it names a filesystem path and this
+   caller is no longer a tenant admin. `public-handbook` is admin-defined, so it
+   carries no write control at all and an empty actions cell of the same width.
+   The drag handle on `public-handbook` is present, disabled, not draggable, and
+   its accessible name states that the caller cannot reorder that set rather
+   than instructing the reader to press an arrow key, while the handle on
+   `s56-notes` stays live, because a move from it names the user-defined block,
+   which holds this caller's own layers alone. A disabled handle on `s56-notes`
+   means the client is reading the reorder predicate over the whole visible list
+   rather than over the block the request names. A reingest control on
+   `s56-notes` means the client is predicting at `unregister` or `reorder`
+   rather than at `reingest`, so it is predicting the write arm alone where the
+   server also applies the local-source rule.
+
+3. Re-grant the role with the same command as step 1's first block, reload, and
+   read the same two rows.
+
+   **Expect.** Both rows carry every write control, the reingest control is back
+   on `s56-notes`, and the drag handle is live on both rows, including
+   `public-handbook`, which the admin arm now lets this caller write. Without
+   this step a registry that hid every control from everyone would pass step 2
+   for the wrong reason.
+
+**Cleanup.** Leave the stack running when S57 follows, and otherwise run this
+scenario group's teardown, which S57 records.
+
+---
+
+## S57: A stale prediction still refuses, and the panel says so
+
+**Goal.** Validate that the panel treats its prediction as a prediction: an
+operation it offered and the registry then refuses draws the refusal on the row
+rather than reading as a failure of the page.
+
+**Covers.** §7.3.4 `layer_capabilities` snapshot semantics, the §13.10 layer
+panel, and §6.10 `auth.forbidden`.
+
+**Why by hand.** Only a human sees whether the page keeps working around the
+refused row.
+
+**Prerequisites.** S56, run through step 3, so the tenant-admin grant is in
+place and the panel is loaded under it.
+
+**Steps.**
+
+1. With the tenant-admin grant in place from S56 step 3, open the layer panel
+   and leave it loaded without reloading it.
+
+   **Expect.** `public-handbook` carries its full set of write controls.
+
+2. Revoke the grant out of band, leaving the page loaded.
+
+   ```bash
+   curl -sS -X DELETE "http://127.0.0.1:8153/v1/admin/grants?user_id=$SUBJECT" \
+     -H "Authorization: Bearer $CAROL_TOKEN" -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** `204`. The loaded page does not change, because it holds the
+   posture read it took before the revocation.
+
+3. Press `Unregister` on the `public-handbook` row from the still-loaded page
+   and confirm the dialog.
+
+   **Expect.** The write is refused, the row draws the refusal band naming
+   `auth.forbidden`, the band offers Dismiss alone and reads
+   `Retrying does not clear this condition.`, and the rest of the page keeps
+   working. A page that blanks, signs the caller out, or reports a transport
+   failure means the client is reading a refusal as a failure of the page rather
+   than as the registry's answer.
+
+**Teardown.** Revoke any remaining grant, delete `s56-notes`, and run S44's
+teardown: stop the server by its recorded PID, run `rm -rf "$WORK"`, and remove
+the IdP with `docker rm -f kc-podium` and `rm -rf "$KCERT"`.
