@@ -67,8 +67,10 @@ export function RegisterLayerForm({
   // layer's owner is derived from the caller's own subject and the registry
   // refuses the registration where none resolves, so a caller who holds a
   // subject opens on their own layer and a caller who holds none opens on the
-  // tenant's. Either way the class stays a control, because the posture read
-  // reports no role and the panel predicts no outcome.
+  // tenant's. Whether the class stays a control is decided by mayTake below:
+  // no response reports the caller's role, and the §7.3.4 posture read reports
+  // per §7.3.1 operation whether this deployment's layer endpoints would admit
+  // this caller, which is what the class control is withheld on.
   const [userDefined, setUserDefined] = useState(subject !== '');
   const [isPublic, setPublic] = useState(false);
   const [organization, setOrganization] = useState(false);

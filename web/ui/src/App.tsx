@@ -213,9 +213,10 @@ export function App() {
       },
       () => {
         // A read that does not answer leaves the page holding no value for
-        // either key, and the anonymous presentation is what it renders:
-        // neither authentication control, and the layer panel with its write
-        // operations.
+        // either key. It holds capabilitiesOf(null), every member false, so
+        // the page renders neither authentication control and no layer write
+        // control, and a reader recovers the controls by reloading the
+        // document.
         if (live) {
           setPosture(null);
           setPostureLoaded(true);
@@ -444,8 +445,10 @@ export function App() {
             Search
           </SectionLink>
           {/* The layer panel is reachable for every caller on every
-              deployment. The nav reads no posture field and predicts no
-              outcome the server decides. */}
+              deployment. The nav reads no posture field and states nothing
+              about the caller: the panel decides which of its own write
+              controls it renders, from the posture read's per-operation
+              prediction and each target's own fields. */}
           <SectionLink href={layersHref} current={route.name === 'layers' ? 'page' : false}>
             Layers
           </SectionLink>
@@ -1316,9 +1319,9 @@ function useTopbarMenu() {
 /** AccountMenu is the identity cluster and the menu behind it. It carries the
  * caller's own subject, the appearance preference, the layer quota, and the
  * sign-out entry point where the deployment runs one. It carries no role
- * badge and no group membership: no response reports that the caller holds
- * the administrator role, and no response enumerates the caller's groups, so
- * the menu states neither. */
+ * badge, no capability report, and no group membership: no response reports
+ * the caller's role, the posture read's per-operation prediction is read by
+ * the layer panel alone, and no response enumerates the caller's groups. */
 function AccountMenu({
   subject,
   theme,

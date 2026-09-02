@@ -3,9 +3,14 @@
 // tenant's whole layer list for a §4.7.2 tenant admin and for every caller on
 // a registry that authenticates none, the layers §4.6 admits for any other
 // caller who resolves a verified subject, and no layers for a caller who
-// resolves none. No response reports that the caller holds the administrator
-// role, so the panel predicts no outcome. It renders its write operations on
-// every row and presents whatever refusal a write receives.
+// resolves none. No response reports the caller's role. The §7.3.4 posture read
+// reports per §7.3.1 operation whether this deployment's layer endpoints would
+// admit this caller, which predicts a server decision rather than reporting a
+// grant, so the panel renders a §7.3.1 layer write control only where that read
+// and the target's own class, stored owner, source type, and stored filesystem
+// path admit this caller. The §13.2.1 read-only marker then mutes whatever
+// remains present, and a refusal an offered write receives is still drawn on
+// the row it was attempted from, because the posture read reports a snapshot.
 //
 // The panel is rendered for every caller on every deployment, including a
 // caller who resolves no subject. A standalone registry authenticates nobody

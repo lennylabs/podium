@@ -44,10 +44,15 @@ manages the registered layer list, and an ordinary user manages the layers that
 user defined. The list read hands the panel the layers the caller may read on the
 terms the §7.3.1 layer read visibility rule sets, which are the tenant's whole
 list for a tenant admin and for every caller on a registry that authenticates
-none, and the layers §4.6 admits otherwise, and no response reports that the
-caller holds the administrator role. The panel therefore does not predict that
-role. It renders its write operations on every row of a uniformly actionable
-list and presents whatever refusal a write receives. The one marker it carries is
+none, and the layers §4.6 admits otherwise. No response reports the caller's
+role. The §7.3.4 posture read reports, per §7.3.1 operation, whether this
+deployment's layer endpoints would admit this caller, which predicts a server
+decision rather than reporting a grant. The panel therefore renders a §7.3.1
+layer write control only where that read and the target's own class, stored
+owner, source type, and stored filesystem path admit this caller, the §13.2.1
+read-only marker then mutes whatever remains present, and a refusal an offered
+write receives is still drawn on the row it was attempted from, because the
+posture read reports a snapshot. The one marker it carries is
 the ownership marker the layer-panel section below defines, which is a property
 of a user-defined row rather than a rendering of the caller's role.
 
@@ -150,7 +155,13 @@ them. What each part of the response gives the design:
 The registry root is addressed by the empty path, and §4.5.5 records that the
 root carries no description and no author-curated entries. The browser therefore
 needs a root state whose header cannot lean on a domain description, and it has
-to read as the top of the hierarchy rather than as an empty domain.
+to read as the top of the hierarchy rather than as an empty domain. A root whose
+read returns no subdomain and no artifact is the one state in which this surface
+instructs the reader to register a layer, and that instruction is a claim about
+the caller reading it. The browser states it only where the same §7.3.1
+prediction the layer panel reads admits this caller on a registration, and it
+states it unchanged where the identity posture read settled nothing, because an
+unanswered read settles nothing about whether the registry resolved a caller.
 
 Each child entry is a `DomainDescriptor` (`pkg/registry/server/server.go`), which
 is the same structure the search surface ranks, so a subdomain row and a domain
@@ -289,8 +300,11 @@ The catalog is assembled from layers, and spec §4.6 defines what a layer is: on
 source and one visibility declaration, composed in precedence order. This is the
 only surface with write operations. Its rows are the rows the caller may read
 under §7.3.1, and its per-row rendering differs by layer class and by ownership
-rather than by the caller's role, because no response reports that the caller
-holds the administrator role.
+rather than by the caller's role, because no response reports the caller's role.
+The §7.3.4 posture read reports instead, per §7.3.1 operation, whether this
+deployment's layer endpoints would admit this caller, which predicts a server
+decision rather than reporting a grant, and every write control on a row is
+rendered from that prediction together with the row's own fields.
 
 A layer record identifies its source, records when it was last ingested, carries
 an order value that sets its precedence, and declares who can see it. The registry
@@ -444,9 +458,15 @@ not run in public mode, the rule is live and the read has three arms under
 §7.3.1: a caller holding the tenant `admin` role reads the tenant's whole list,
 any other caller who resolves a verified subject reads the layers §4.6 admits,
 and a caller who resolves no subject reads no layers. A caller who resolves a
-subject receives on any row it can see whatever refusal the rule produces, which
-the panel presents, and a caller who resolves no subject stands on the panel's
-empty state with no row to mark and no write to attempt.
+subject is offered a write control on a row it can see only where the §7.3.4
+posture read and that row's own class, stored owner, source type, and stored
+filesystem path admit it, and an offered write that comes back refused is drawn
+on the row it was attempted from, because the posture read reports a snapshot. A
+caller who resolves no subject stands on the panel's empty state with no row to
+mark and no write to attempt. On a deployment configuring an identity provider
+that empty state reports that the registry resolved no caller for this page,
+while a deployment that authenticates none keeps "Register a layer to bring its
+artifacts into the catalog."
 
 Whether an anonymous caller sees the panel is a UI decision, while what the panel
 holds is decided by the read: the tenant's whole list for a tenant admin and on a
@@ -463,12 +483,13 @@ Most of the design work is here rather than in the happy path.
 
 **Identity states.** The UI has these. The anonymous state and the authenticated
 state are told apart by whether the posture read resolves a subject for the
-caller. The administrator state is not reported at all, so the page does not
-predict it. Where the posture read does not answer, the page renders the
-anonymous presentation "The posture read" in
-`proposals/0013-build-the-13-10-web-ui.md` states for that arm: neither
-authentication control is rendered, the layer panel renders its write
-operations, and the panel presents whatever refusal a write receives.
+caller. No response reports the caller's role. The §7.3.4 posture read reports
+per §7.3.1 operation whether this deployment's layer endpoints would admit this
+caller, which predicts a server decision rather than reporting a grant, and the
+page renders its layer write controls from that prediction. A read that does not
+answer holds every member of that prediction false, so the page renders neither
+authentication control and no layer write control, and a reader recovers the
+controls by reloading the document.
 
 1. **Anonymous.** The posture read resolves no subject, so the caller browses
    without an identity (§13.10 on web-UI authentication, with the visibility
@@ -486,12 +507,17 @@ operations, and the panel presents whatever refusal a write receives.
 3. **Administrator.** Manages every layer in the tenant, including the
    admin-defined layers an ordinary user cannot modify or unregister. Destructive
    operations are not exclusive to this role, since a user can unregister a layer
-   they own. No response reports that the caller holds this role, and the list
-   read hands the panel the layers the caller may read on the terms the §7.3.1
-   layer read visibility rule sets, which are the tenant's whole list for this
-   role and for every caller on a registry that authenticates none, so the panel
-   renders its write operations over the list it received and presents whatever
-   refusal a write receives rather than predicting the outcome.
+   they own. No response reports that the caller holds this role. The §7.3.4
+   posture read reports whether this deployment's layer endpoints would admit
+   this caller on the §4.7.2 admin arm, which is a prediction of a server
+   decision rather than a report of a grant, and the list read hands the panel
+   the layers the caller may read on the terms the §7.3.1 layer read visibility
+   rule sets, which are the tenant's whole list for this role and for every
+   caller on a registry that authenticates none. The panel renders a write
+   control over the list it received only where that prediction and the row's
+   own class, stored owner, source type, and stored filesystem path admit this
+   caller, and it draws a refusal an offered write receives on the row the write
+   was attempted from.
 
 **The catalog-scope rule.** How much of the catalog an anonymous caller sees is a
 property of the deployment, and the page reads it from the posture read rather
