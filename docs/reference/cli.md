@@ -503,6 +503,8 @@ podium layer watch --id <id> [--interval <duration>]
 
 `--interval` takes a Go duration string (`30s`, `1h`) and defaults to `1m`. A non-positive value is rejected.
 
+On a registry that authenticates its callers, a watch loop over a `local`-source layer, or over a `git` layer whose repository string resolves to the Git file transport, drives a reingest that the local-source rule described under [`podium layer register`](#podium-layer-register) authorizes to a caller holding the per-tenant `admin` role. Any other caller is refused on each tick with `auth.forbidden` carrying `details.constraint: "local_source"`. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits each tick. See [Who may register a local-source layer](../deployment/layers#who-may-register-a-local-source-layer).
+
 ---
 
 ## Admin

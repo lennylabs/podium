@@ -89,7 +89,7 @@ What a caller without the `admin` role may do with layers:
 
 | Operation | Without the `admin` role |
 |:--|:--|
-| Register a `git` layer on a network repository | Permitted. The registry resolves it to a user-defined layer owned by the caller. |
+| Register a `git` layer on a network repository | Permitted for a caller who resolves a verified subject. The registry resolves it to a user-defined layer owned by that subject. A caller who resolves no subject is refused with `auth.forbidden`. |
 | Register a layer naming a host path, by `--local` or by a repository string on the Git file transport | Refused with `auth.forbidden`, `details.constraint: "local_source"`. |
 | List layers | Permitted, narrowed to the layers that caller's identity admits. |
 | Update, unregister, restore, reorder, or reingest a layer the caller owns | Permitted, except as the next row states. |
@@ -98,7 +98,7 @@ What a caller without the `admin` role may do with layers:
 
 A registry started with no identity provider configured, and one in public mode, authenticates no caller, so no caller can hold the `admin` role and both rules admit every request there.
 
-The web UI reads the caller's own capabilities from the session posture read, `GET /v1/ui/session`, which reports `layer_capabilities.manage_any_layer` for the requesting caller alone. The web UI renders a layer write control on the strength of it. The value predicts a server decision rather than granting anything, and the layer endpoint's own refusal remains the authority. The [HTTP API reference](../reference/http-api#session-posture) documents the body.
+The web UI reads the caller's own capabilities from the session posture read, `GET /v1/ui/session`, which reports `layer_capabilities.manage_any_layer` for the requesting caller alone. The web UI renders a layer write control only where that value together with the target layer's own class, stored owner, source type, and stored filesystem path settle that the layer rules admit this caller on that operation. `manage_any_layer` is the arm that covers a write on a layer the caller does not own and every operation the local-source rule governs. The value predicts a server decision rather than granting anything, and the layer endpoint's own refusal remains the authority. The [HTTP API reference](../reference/http-api#session-posture) documents the body.
 
 ---
 
