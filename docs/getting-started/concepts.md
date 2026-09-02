@@ -214,6 +214,14 @@ layer's tracked Git ref publishes there; whoever can write to a
 protection, required reviewers, and signing requirements live in
 the Git host. Podium does not duplicate them.
 
+That scope statement is about writing content into a source
+the registry already reads. Which caller may declare a layer
+that makes the registry read a given filesystem path is a
+separate rule: on a server-backed tier it is authorized to a
+tenant admin, because the registry process reads that path
+with its own rights rather than with the registrant's. See
+[Layers](../deployment/layers#who-may-register-a-local-source-layer).
+
 ---
 
 ## Harness

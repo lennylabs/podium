@@ -419,6 +419,8 @@ podium layer register --id <id> --local <path>
 
 For Git sources, the registry returns the webhook URL and HMAC secret to configure on the source repo. Without webhook configuration, the layer stays at its initial commit until the first manual reingest.
 
+`--local` names a filesystem path on the registry host and requires the per-tenant `admin` role. A caller without it is rejected with `auth.forbidden` carrying `details.constraint: "local_source"`. A `--repo` value that resolves to the Git file transport also names a host path and takes the same arm. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits the registration.
+
 `--force-push-policy` sets the per-layer force-push handling for a Git source. The default (`tolerant`) preserves previously-ingested commits and emits a `layer.history_rewritten` event; `strict` rejects an ingest whose history was rewritten. The policy is also settable with `podium layer update --force-push-policy` and through the registry.yaml `source.git.force_push_policy` key.
 
 Visibility flags set who can see the layer. They apply to an admin-defined layer; a user-defined layer takes the fixed visibility `users: [<owner>]` instead.
@@ -488,6 +490,8 @@ podium layer update --id <id>
 ```
 
 `--rotate-webhook-secret` regenerates the Git layer's HMAC webhook secret and prints the new value.
+
+`--local` patches the layer's filesystem path on the registry host and requires the per-tenant `admin` role. A patch carrying it is rejected with `auth.forbidden` carrying `details.constraint: "local_source"` for a caller without that role, whatever the layer's stored source type. A patch that does not carry `--local` is not reached by that rule. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits the patch.
 
 ### `podium layer watch`
 
