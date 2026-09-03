@@ -1,7 +1,7 @@
 # Proposal 0018: A configured audience set for the registry's JWT verifiers
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-09-03). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 7 adversarial review rounds (17 findings fixed). OQ-1 is resolved in favor of D4 as staged, so both verifiers read the whole set. OQ-2 is resolved in favor of D12 as staged, so `Settings()` reports one joined row.
+- Status: Implemented (2026-09-03). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 7 adversarial review rounds (17 findings fixed). OQ-1 is resolved in favor of D4 as staged, so both verifiers read the whole set. OQ-2 is resolved in favor of D12 as staged, so `Settings()` reports one joined row.
 - Date: 2026-09-02
 
 This document stages the proposed spec amendments and the code changes that implement them. It does not modify any spec, code, or doc file. Apply the changes in the sections below after sign-off; `implement-proposal` lands the staged spec edits first, verifies them, and then implements the code against the committed spec.
@@ -43,26 +43,30 @@ This document stages the proposed spec amendments and the code changes that impl
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §6.3.3 gains the accepted-audiences paragraphs, its verification paragraph names the configured audiences, and its requirement paragraph names a set that resolves to at least one entry. The file is `spec/06-mcp-server.md`.
+- [x] **S1 · spec** — SPEC-1. §6.3.3 gains the accepted-audiences paragraphs, its verification paragraph names the configured audiences, and its requirement paragraph names a set that resolves to at least one entry. The file is `spec/06-mcp-server.md`.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §6.3 gains the sentence distinguishing the registry-process and client-process readings of `PODIUM_OAUTH_AUDIENCE`, and §6.3.2's `aud` bullet names the configured set and gains the startup-guard sentence. The file is `spec/06-mcp-server.md`.
+- [x] **S2 · spec** — SPEC-2. §6.3 gains the sentence distinguishing the registry-process and client-process readings of `PODIUM_OAUTH_AUDIENCE`, and §6.3.2's `aud` bullet names the configured set and gains the startup-guard sentence. The file is `spec/06-mcp-server.md`.
       Levels: —. Depends on: S1
-- [ ] **S3 · spec** — SPEC-3. §6.3.4's cookie paragraph, options paragraph, and authorization-request table row name the canonical audience, the cookie paragraph's closing limitation clause names an audience the registry accepts, and the §6.9 untrusted-token row names the configured audiences. The file is `spec/06-mcp-server.md`.
+- [x] **S3 · spec** — SPEC-3. §6.3.4's cookie paragraph, options paragraph, and authorization-request table row name the canonical audience, the cookie paragraph's closing limitation clause names an audience the registry accepts, and the §6.9 untrusted-token row names the configured audiences. The file is `spec/06-mcp-server.md`.
       Levels: —. Depends on: S1
-- [ ] **S4 · spec** — SPEC-4. §13.12 gains the `PODIUM_OAUTH_AUDIENCE` row it has never carried, its identity-variable preamble names both providers that verify against the whole set, its `identity_provider:` key-list sentence names the two written forms, and the §13.10 restatement names the canonical entry. The file is `spec/13-deployment.md`.
+- [x] **S4 · spec** — SPEC-4. §13.12 gains the `PODIUM_OAUTH_AUDIENCE` row it has never carried, its identity-variable preamble names both providers that verify against the whole set, its `identity_provider:` key-list sentence names the two written forms, and the §13.10 restatement names the canonical entry. The file is `spec/13-deployment.md`.
       Levels: —. Depends on: S1
-- [ ] **S5 · code** — CODE-1. `OIDCVerifier` holds the audience set, `NewOIDCVerifier` takes it and normalizes it through the shared normalization helper, `Verify` fails closed on an empty set and passes the set to `jwt.WithAudience`, `AcceptedAudiences` and `CanonicalAudience` report it, and the existing `NewOIDCVerifier` call sites pass a slice.
+- [x] **S5 · code** — CODE-1. `OIDCVerifier` holds the audience set, `NewOIDCVerifier` takes it and normalizes it through the shared normalization helper, `Verify` fails closed on an empty set and passes the set to `jwt.WithAudience`, `AcceptedAudiences` and `CanonicalAudience` report it, and the existing `NewOIDCVerifier` call sites pass a slice.
       Levels: unit, integration. Depends on: S1
-- [ ] **S6 · code** — CODE-2. `RuntimeKeyVerifierStore.JWTVerifier` and `RuntimeKeyRegistry.JWTVerifier` take the audience set and fail closed on an empty one, the existing `JWTVerifier` call sites pass a slice, and the §9.1 SPI field `identity.Config.Audience` becomes `Audiences []string` with the rewritten comment.
+- [x] **S6 · code** — CODE-2. `RuntimeKeyVerifierStore.JWTVerifier` and `RuntimeKeyRegistry.JWTVerifier` take the audience set and fail closed on an empty one, the existing `JWTVerifier` call sites pass a slice, and the §9.1 SPI field `identity.Config.Audience` becomes `Audiences []string` with the rewritten comment.
       Levels: unit, integration. Depends on: S2
-- [ ] **S7 · code** — CODE-3. The configuration plumbing: the `oauthAudiences` field, the `PODIUM_OAUTH_AUDIENCE` split, the `audienceList` YAML decoder, the `applyYAML` overlay, the `Settings()` row and its source, and the config tests that read the renamed field.
+- [x] **S7 · code** — CODE-3. The configuration plumbing: the `oauthAudiences` field, the `PODIUM_OAUTH_AUDIENCE` split, the `audienceList` YAML decoder, the `applyYAML` overlay, the `Settings()` row and its source, and the config tests that read the renamed field.
       Levels: unit, e2e. Depends on: S4, S5
 - [ ] **S8 · code** — CODE-4. The boot wiring: the canonical accessor beside the guards, both startup guards, both verifier constructions, the canonical entry at the §6.3.4 send site, the whole set into `identity.Config.Audiences` in `selectIdentityProvider`, the `oidc-jwt` boot line, and the guard tests whose table columns become `[]string`.
       Levels: unit, integration, e2e. Depends on: S6, S7
-- [ ] **S9 · test** — TEST-1. The unit, integration, config-round-trip, and end-to-end tests named under Testing, including the empty-set and blank-entry regressions.
+- [x] **S9 · test** — TEST-1. The unit, integration, config-round-trip, and end-to-end tests named under Testing, including the empty-set and blank-entry regressions.
       Levels: unit, integration, e2e. Depends on: S8
-- [ ] **S10 · docs** — DOCS-1. The `docs/` edits, the `test/manual-validation.md` amendments to S33, S36, S43, and S44, and the CHANGELOG entry.
+- [x] **S10 · docs** — DOCS-1. The `docs/` edits, the `test/manual-validation.md` amendments to S33, S36, S43, and S44, and the CHANGELOG entry.
       Levels: —. Depends on: S9
+
+## Deviations from the checklist
+
+- **S11** landed the boot wiring the checklist carries as S8, which stayed unticked. It moved the canonical-audience accessor beside the startup guards, took both guards and both verifier constructions to the audience set, sent the canonical entry from the browser sign-in request, wrote the whole set into `identity.Config.Audiences` in `selectIdentityProvider`, added the accepted-audiences clause to the `oidc-jwt` boot line, and retyped the guard tests' table columns as `[]string`.
 
 ## Current state and the gap
 
