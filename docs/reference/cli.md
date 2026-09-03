@@ -421,14 +421,16 @@ For Git sources, the registry returns the webhook URL and HMAC secret to configu
 
 `--local` names a filesystem path on the registry host and requires the per-tenant `admin` role. A caller without it is rejected with `auth.forbidden` carrying `details.constraint: "local_source"`. A `--repo` value that resolves to the Git file transport also names a host path and takes the same arm. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits the registration.
 
+`--owner`, `--public`, `--organization`, `--group`, and `--user` set fields the registry reads on a tenant admin's registration alone. On a registry that authenticates callers, a caller without the `admin` role that sends `--public`, `--organization`, `--group`, `--user`, or an `--owner` naming another subject is rejected with `auth.forbidden` carrying `details.constraint: "admin_only_fields"`, and the refusal names the asserted fields. A flag carrying no value asserts nothing, and an `--owner` naming the caller's own verified subject asserts nothing. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits every caller on the admin arm, so the rule refuses nothing there, and `--owner` is the mechanism that names a layer's owner on such a registry.
+
 `--force-push-policy` sets the per-layer force-push handling for a Git source. The default (`tolerant`) preserves previously-ingested commits and emits a `layer.history_rewritten` event; `strict` rejects an ingest whose history was rewritten. The policy is also settable with `podium layer update --force-push-policy` and through the registry.yaml `source.git.force_push_policy` key.
 
 Visibility flags set who can see the layer. They apply to an admin-defined layer; a user-defined layer takes the fixed visibility `users: [<owner>]` instead.
 
-- `--user-defined` registers a personal layer. The registry derives its owner from the authenticated caller and sets its visibility to that owner alone, so `--public`, `--organization`, `--group`, and `--user` are ignored on this form and `--owner` is honored only when no authenticated identity resolves. `podium layer update` also ignores owner and visibility patches on a user-defined layer.
-- `--public` sets public visibility; `--organization` sets organization-wide visibility.
-- `--group` grants visibility to an OIDC group (repeatable).
-- `--user` grants visibility to an OIDC subject or email (repeatable).
+- `--user-defined` registers a personal layer. The registry derives its owner from the authenticated caller and sets its visibility to that owner alone. On a registry that authenticates callers, a caller without the `admin` role that sends `--public`, `--organization`, `--group`, `--user`, or an `--owner` naming another subject is rejected with `auth.forbidden` carrying `details.constraint: "admin_only_fields"`; the paragraph above states the deployments where no flag is refused and `--owner` is the mechanism. `podium layer update` also ignores owner and visibility patches on a user-defined layer.
+- `--public` sets public visibility; `--organization` sets organization-wide visibility. Both require the per-tenant `admin` role on a registry that authenticates callers.
+- `--group` grants visibility to an OIDC group (repeatable), and requires the per-tenant `admin` role on a registry that authenticates callers.
+- `--user` grants visibility to an OIDC subject or email (repeatable), and requires the per-tenant `admin` role on a registry that authenticates callers.
 
 ### `podium layer list`
 

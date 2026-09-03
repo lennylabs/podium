@@ -59,7 +59,7 @@ POST /v1/ui/auth/sign-out    clear both cookies
 GET /v1/ui/session
 ```
 
-Reports the deployment's identity posture, the caller's own resolved subject, and what that caller may do on the layer operations in [Layer management](#layer-management). The registry registers it wherever it serves the web UI, whether or not the browser flow is enabled. It requires no credential and refuses no request for lack of one; a request that carries one has it verified so the response can report `subject` and evaluate `layer_capabilities`, and for no other purpose, and a request that resolves no subject is answered `200` with `subject` absent.
+Reports the deployment's identity posture, the caller's own resolved subject, and what that caller may do on the layer operations in [Layer management](#layer-management). The registry registers it wherever it serves the web UI, whether or not the browser flow is enabled. It requires no credential and refuses no request for lack of one; a request that carries one has it verified so the response can report `subject` and `email` and evaluate `layer_capabilities`, and for no other purpose, and a request that resolves no subject is answered `200` with `subject` absent.
 
 ```json
 {
@@ -71,17 +71,18 @@ Reports the deployment's identity posture, the caller's own resolved subject, an
     "sign_out_path": "/v1/ui/auth/sign-out"
   },
   "subject": "alice@acme.com",
+  "email": "alice@acme.com",
   "layer_capabilities": {
     "manage_any_layer": false
   }
 }
 ```
 
-`identity_provider_configured` reports whether an identity provider is configured and never names which one. `public_mode` reports whether public mode is engaged. `browser_auth.enabled` reports whether the browser flow is enabled on this deployment, and `sign_in_path` and `sign_out_path` are present only when it is, because the flow's routes are registered only then. `subject` is the verified subject of the request that asked, present only when one resolves.
+`identity_provider_configured` reports whether an identity provider is configured and never names which one. `public_mode` reports whether public mode is engaged. `browser_auth.enabled` reports whether the browser flow is enabled on this deployment, and `sign_in_path` and `sign_out_path` are present only when it is, because the flow's routes are registered only then. `subject` is the verified subject of the request that asked, present only when one resolves. `email` is the requesting caller's own email as the configured identity provider recorded it, present only where one resolves and is non-empty, and absent otherwise. It belongs to the caller that asked and to no other caller.
 
 `layer_capabilities` reports what the requesting caller may do on the layer operations. It carries `manage_any_layer`, a boolean reporting whether this deployment's layer endpoints admit this caller on the `admin` arm, which is the arm that decides a write on a layer the caller does not own and every operation the [local-source authorization rule](#layer-management) governs. On a registry started with no identity provider configured, or one started in public mode, those endpoints admit every caller on that arm, so the member is true there, including on a request that resolves no subject. The object and its member are always present, and where the deployment determines no capability for the request the member is false. The object predicts a server decision rather than reporting a grant: it is a snapshot taken when the read was answered, an operation a client offers on the strength of it can still be refused, and the envelope the operation's own endpoint returns remains the authority.
 
-The response carries no other field, and in particular no issuer, client identifier, endpoint, filesystem path, or other configuration value, and no subject or authorization belonging to any caller other than the one that asked. A registry started without the web UI never registers this path and answers a request for it as it answers any path it does not register.
+The response carries no other field, and in particular no issuer, client identifier, endpoint, filesystem path, or other configuration value, and no subject, email, or authorization belonging to any caller other than the one that asked. A registry started without the web UI never registers this path and answers a request for it as it answers any path it does not register.
 
 ---
 
@@ -345,6 +346,8 @@ Body:
 `id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. A request whose `id` names a layer that already exists in the tenant is a write against that layer and is authorized against it under the rule above, so a caller neither arm authorizes is refused with `403 auth.forbidden` rather than overwriting it.
 
 A registration also falls under the local-source rule above when its `source_type` is `local`, when it carries a `local_path` and its `source_type` is not `git`, or when its `repo` resolves to the Git file transport. A `git` registration is placed by its `repo` string alone, so a `local_path` sent beside a `git` `repo` naming a network endpoint does not place it on the arm. A registration the rule places on the arm and whose caller does not hold the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
+
+`owner`, `public`, `organization`, `groups`, and `users` are read on a tenant admin's registration alone. A caller without the `admin` role that asserts any of them is refused with `403 auth.forbidden` carrying `details.constraint: "admin_only_fields"`, and the refusal names the asserted fields in its message. A field is asserted by its value rather than by its presence: `public` or `organization` carrying false, an empty `groups` or `users`, an empty `owner`, and an `owner` naming the caller's own verified subject assert nothing. A registration that asserts none of them is resolved to a user-defined layer owned by the caller, as before. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits every caller on the admin arm, so the rule refuses nothing there.
 
 The response is `201 Created` with the stored layer and, for a `git` source, the webhook URL and HMAC secret to register on the source repo:
 
