@@ -1,7 +1,7 @@
 # Proposal 0018: A configured audience set for the registry's JWT verifiers
 
 - Issue: (to be filed)
-- Status: Approved (2026-09-03). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 7 adversarial review rounds (17 findings fixed). OQ-1 is resolved in favor of D4 as staged, so both verifiers read the whole set. OQ-2 is resolved in favor of D12 as staged, so `Settings()` reports one joined row.
+- Status: Applied to spec (2026-09-03). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 7 adversarial review rounds (17 findings fixed). OQ-1 is resolved in favor of D4 as staged, so both verifiers read the whole set. OQ-2 is resolved in favor of D12 as staged, so `Settings()` reports one joined row.
 - Date: 2026-09-02
 
 This document stages the proposed spec amendments and the code changes that implement them. It does not modify any spec, code, or doc file. Apply the changes in the sections below after sign-off; `implement-proposal` lands the staged spec edits first, verifies them, and then implements the code against the committed spec.
