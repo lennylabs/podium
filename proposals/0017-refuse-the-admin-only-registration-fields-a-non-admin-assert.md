@@ -1,7 +1,7 @@
 # Proposal 0017: Refuse the admin-only registration fields a non-admin asserts, and report the caller's own email in the posture read
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-09-02). Signed off by the maintainer for
+- Status: Implemented (2026-09-02). Signed off by the maintainer for
   implementation, whole, with every step in the checklist in scope. Converged
   after 9 adversarial review rounds (21 findings fixed); "Resolved in
   adversarial review" records what each pass changed.
@@ -125,15 +125,15 @@ sections after sign-off.
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.3.1 gains the admin-only registration fields
+- [x] **S1 · spec** — SPEC-1. §7.3.1 gains the admin-only registration fields
       paragraph, and its `**Errors.**` paragraph gains the new arm. The file is
       `spec/07-external-integration.md`.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §7.3.4's posture read gains the `email` bullet,
+- [x] **S2 · spec** — SPEC-2. §7.3.4's posture read gains the `email` bullet,
       its opening sentence names it, and its closing sentence is amended. The
       file is `spec/07-external-integration.md`.
       Levels: —. Depends on: —
-- [ ] **S3 · code** — CODE-1, TEST-1. The hoisted admin arm, the value-keyed
+- [x] **S3 · code** — CODE-1, TEST-1. The hoisted admin arm, the value-keyed
       asserted-fields helper, and the refusal after the local-source call in
       `pkg/registry/server/layers.go`; the server cases in
       `pkg/registry/server/layer_register_class_test.go`; the amended
@@ -142,29 +142,29 @@ sections after sign-off.
       `test/integration/layer_write_authorization_test.go`; and the end-to-end
       CLI case in `test/e2e/local_source_authorization_test.go`.
       Levels: unit, integration, e2e. Depends on: S1
-- [ ] **S4 · code** — CODE-3, TEST-2. The posture read serializes the
+- [x] **S4 · code** — CODE-3, TEST-2. The posture read serializes the
       requesting caller's own email under its existing subject guard, its
       declaration comment states what the body is closed against, and the
       handler cases pin the present and the absent arm.
       Levels: unit. Depends on: S2
-- [ ] **S5 · code** — UI-1, TEST-3. The `email` field on `SessionPosture`, the
+- [x] **S5 · code** — UI-1, TEST-3. The `email` field on `SessionPosture`, the
       display derivation in `TopBar`, the `display` prop on `AccountMenu` and
       its three render sites, the client cases, and the regenerated
       `web/bundle` (`web/bundle/index.html` and the content-hashed files under
       `web/bundle/assets/`), produced by `npm ci && npm run build` in `web/ui`.
       Levels: unit. Depends on: S4
-- [ ] **S6 · code** — CLI-1. The `--public`, `--organization`, `--group`, and
+- [x] **S6 · code** — CLI-1. The `--public`, `--organization`, `--group`, and
       `--user` usage strings on `podium layer register` name the administrator
       role.
       Levels: —. Depends on: S1
-- [ ] **S7 · docs** — DOCS-1. The refusal and the posture field on the HTTP API,
+- [x] **S7 · docs** — DOCS-1. The refusal and the posture field on the HTTP API,
       error-codes, CLI, access-control, and layers pages.
       Levels: —. Depends on: S3, S4, S6
-- [ ] **S8 · docs** — DOCS-2. The hand-run scenarios: S44's realm-user email,
+- [x] **S8 · docs** — DOCS-2. The hand-run scenarios: S44's realm-user email,
       S47 step 1, step 3, and step 6, and S55's new
       terminal step with its `**Covers.**` line.
       Levels: —. Depends on: S3, S5
-- [ ] **S9 · docs** — DOCS-3. The `CHANGELOG.md` entry, which records both the
+- [x] **S9 · docs** — DOCS-3. The `CHANGELOG.md` entry, which records both the
       refusal and the posture field.
       Levels: —. Depends on: S3, S5
 
