@@ -57,7 +57,7 @@ This document stages the proposed spec amendments and the code changes that impl
       Levels: unit, integration. Depends on: S2
 - [x] **S7 · code** — CODE-3. The configuration plumbing: the `oauthAudiences` field, the `PODIUM_OAUTH_AUDIENCE` split, the `audienceList` YAML decoder, the `applyYAML` overlay, the `Settings()` row and its source, and the config tests that read the renamed field.
       Levels: unit, e2e. Depends on: S4, S5
-- [ ] **S8 · code** — CODE-4. The boot wiring: the canonical accessor beside the guards, both startup guards, both verifier constructions, the canonical entry at the §6.3.4 send site, the whole set into `identity.Config.Audiences` in `selectIdentityProvider`, the `oidc-jwt` boot line, and the guard tests whose table columns become `[]string`.
+- [x] **S8 · code** — CODE-4. The boot wiring: the canonical accessor beside the guards, both startup guards, both verifier constructions, the canonical entry at the §6.3.4 send site, the whole set into `identity.Config.Audiences` in `selectIdentityProvider`, the `oidc-jwt` boot line, and the guard tests whose table columns become `[]string`.
       Levels: unit, integration, e2e. Depends on: S6, S7
 - [x] **S9 · test** — TEST-1. The unit, integration, config-round-trip, and end-to-end tests named under Testing, including the empty-set and blank-entry regressions.
       Levels: unit, integration, e2e. Depends on: S8
