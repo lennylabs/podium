@@ -33,10 +33,11 @@ type Factory func(Config) (Provider, error)
 // settings a provider needs; an out-of-process provider (§9.3) would
 // receive the same values.
 type Config struct {
-	// Audiences is the accepted-audience set the registry answers to
-	// (§6.3.3). A verifying provider accepts a token whose `aud` claim
-	// carries at least one member, and the first member is the canonical
-	// audience a flow the registry initiates itself asks for (§6.3.4). An
+	// Audiences is the §6.3.2 / §6.3.3 accepted audience set. A verifying
+	// provider accepts a token whose `aud` claim carries at least one
+	// member and rejects one that carries none, including a token with no
+	// `aud`. The first member is the canonical audience a flow the registry
+	// initiates itself asks for (§6.3.4). An
 	// empty set means no audience is configured. The startup guards that
 	// refuse an empty set are scoped to the injected-session-token and
 	// oidc-jwt providers alone, so a provider registered under any other id
