@@ -4771,8 +4771,10 @@ and record the skip.
    cluster stands where the sign-in control was: the top bar carries
    `alice@acme.com` beside an avatar reading `A`, and the sign-out control sits
    inside the menu that cluster opens. A top bar carrying the UUID step 1 read
-   as `subject` means the posture read returned no `email`, which is the
-   fallback rather than the reading this step asserts. A browser that lands on
+   as `subject` means the posture read returned no `email`, or that the shell is
+   a build from before the account cluster read it, and the reader is looking at
+   a provider-chosen identifier where the design draws their own address. A
+   browser that lands on
    an `invalid_scope` or `invalid_redirect_uri` error page at Keycloak means
    prerequisite 4's client scope or redirect URI did not take.
 
