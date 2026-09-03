@@ -4346,9 +4346,9 @@ misconfigured:
 
    **Expect.** `/healthz` reports `{"mode":"ready"}` rather than `mode: public`,
    the log line reads `identity provider: oidc-jwt (verifying caller tokens
-   against accepted issuers $ISSUER and accepted audiences
-   $PODIUM_OAUTH_AUDIENCE)`, a second line reads `web UI browser sign-in
-   mounted at /v1/ui/auth/sign-in (§6.3.4)`, and `config show` prints
+   against accepted issuers $ISSUER and accepted audiences $AUD)`, a second
+   line reads `web UI browser sign-in mounted at /v1/ui/auth/sign-in
+   (§6.3.4)`, and `config show` prints
    `oidc-jwt`. A registry in public mode shows every artifact to everyone and
    would make step 6 pass for the wrong reason. A missing sign-in line means the
    browser flow is off, and S47 through S50 and S55 through S57 cannot run.
