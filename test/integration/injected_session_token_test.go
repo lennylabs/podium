@@ -28,7 +28,7 @@ const istAudience = "https://podium.acme.com"
 // and maps the verified claims (groups and OAuth scopes) onto a
 // layer.Identity. spec: §6.3.1, §6.3.2.
 func istVerifier(reg *identity.RuntimeKeyRegistry) func(*http.Request) (layer.Identity, error) {
-	verify := reg.JWTVerifier(istAudience, nil)
+	verify := reg.JWTVerifier([]string{istAudience}, nil)
 	return func(r *http.Request) (layer.Identity, error) {
 		h := r.Header.Get("Authorization")
 		var raw string

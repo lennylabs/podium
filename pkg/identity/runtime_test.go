@@ -44,7 +44,7 @@ func TestJWTVerifier_AcceptsRegisteredKey(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss":    "managed-runtime-1",
 		"aud":    "https://podium.acme.com",
@@ -78,7 +78,7 @@ func TestJWTVerifier_RejectsUnregisteredIssuer(t *testing.T) {
 	t.Parallel()
 	priv, _ := newRSAKeyPair(t)
 	reg := identity.NewRuntimeKeyRegistry()
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "unknown-runtime",
 		"aud": "https://podium.acme.com",
@@ -104,7 +104,7 @@ func TestJWTVerifier_RejectsWrongSignature(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, otherPriv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com",
 		"sub": "joan", "act": "rt",
@@ -127,7 +127,7 @@ func TestJWTVerifier_RejectsExpired(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com",
 		"sub": "joan", "act": "rt",
@@ -149,7 +149,7 @@ func TestJWTVerifier_RejectsWrongAudience(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", "aud": "https://something-else",
 		"sub": "joan", "act": "rt",
@@ -173,7 +173,7 @@ func TestJWTVerifier_RejectsMissingAud(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", // no aud claim
 		"sub": "joan", "act": "rt",
@@ -198,7 +198,7 @@ func TestJWTVerifier_FailsClosedWhenAudienceUnconfigured(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("", nil) // audience unconfigured
+	verify := reg.JWTVerifier(nil, nil) // audience unconfigured
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com",
 		"sub": "joan", "act": "rt",
@@ -223,7 +223,7 @@ func TestJWTVerifier_RejectsMissingSub(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com",
 		"act": "rt",
@@ -250,7 +250,7 @@ func TestJWTVerifier_AcceptsSingleStringGroupsClaim(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com",
 		"sub": "alice", "act": "rt",
@@ -278,7 +278,7 @@ func TestJWTVerifier_RejectsMissingAct(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com",
 		"sub": "joan",
@@ -300,7 +300,7 @@ func TestJWTVerifier_RejectsMissingExp(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com",
 		"sub": "joan", "act": "rt",
@@ -320,7 +320,7 @@ func TestJWTVerifier_RejectsActMismatch(t *testing.T) {
 	if err := reg.Register(identity.RuntimeKey{Issuer: "rt", Algorithm: "RS256", Key: pub}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com",
 		"sub": "alice", "act": "some-other-runtime",
@@ -341,7 +341,7 @@ func TestJWTVerifier_AcceptsActObjectForm(t *testing.T) {
 	if err := reg.Register(identity.RuntimeKey{Issuer: "rt", Algorithm: "RS256", Key: pub}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com",
 		"sub": "alice", "act": map[string]any{"sub": "rt"},
@@ -372,7 +372,7 @@ func TestJWTVerifier_UntrustedErrorCarriesIssuer(t *testing.T) {
 	t.Parallel()
 	priv, _ := newRSAKeyPair(t)
 	reg := identity.NewRuntimeKeyRegistry()
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	signed := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": "managed-runtime-x", "aud": "https://podium.acme.com",
 		"sub": "alice", "act": "managed-runtime-x",
@@ -401,7 +401,7 @@ func TestJWTVerifier_ParsesScopeClaims(t *testing.T) {
 	if err := reg.Register(identity.RuntimeKey{Issuer: "rt", Algorithm: "RS256", Key: pub}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 
 	// "scope": space-delimited string.
 	s1 := signJWT(t, priv, jwt.SigningMethodRS256, jwt.MapClaims{
@@ -458,7 +458,7 @@ func TestRuntimeKeyRegistry_AcceptsEd25519(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	verify := reg.JWTVerifier("https://podium.acme.com", nil)
+	verify := reg.JWTVerifier([]string{"https://podium.acme.com"}, nil)
 	token := jwt.NewWithClaims(jwt.SigningMethodEdDSA, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com",
 		"sub": "joan", "act": "rt",

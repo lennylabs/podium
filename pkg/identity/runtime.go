@@ -71,7 +71,7 @@ func NewRuntimeKeyRegistry() *RuntimeKeyRegistry {
 // file-persisted variant satisfy it.
 type RuntimeKeyVerifierStore interface {
 	All() []RuntimeKey
-	JWTVerifier(audience string, clock func() jwt.NumericDate) func(string) (Identity, error)
+	JWTVerifier(audiences []string, clock func() jwt.NumericDate) func(string) (Identity, error)
 }
 
 // Register adds or replaces a runtime's key.
@@ -130,9 +130,12 @@ func (r *RuntimeKeyRegistry) Lookup(issuer string) (RuntimeKey, bool) {
 
 // JWTVerifier returns the verifier closure for InjectedSessionToken.
 //
-// audience is the registry endpoint the runtime is calling. clock is
-// optional; when nil the verifier uses the system clock.
-func (r *RuntimeKeyRegistry) JWTVerifier(audience string, clock func() jwt.NumericDate) func(string) (Identity, error) {
+// audiences is the accepted-audience set the registry answers to, formed by
+// NormalizeAudiences, and a token verifies when its aud claim carries at
+// least one member (§6.3.3). clock is optional; when nil the verifier uses
+// the system clock.
+func (r *RuntimeKeyRegistry) JWTVerifier(audiences []string, clock func() jwt.NumericDate) func(string) (Identity, error) {
+	accepted := NormalizeAudiences(audiences)
 	return func(raw string) (Identity, error) {
 		if raw == "" {
 			return Identity{}, untrusted("", "empty token")
@@ -159,20 +162,27 @@ func (r *RuntimeKeyRegistry) JWTVerifier(audience string, clock func() jwt.Numer
 
 		// §6.3.2 lists aud ("registry endpoint") among the claims the registry
 		// verifies on every call. The audience is the registry's own endpoint,
-		// so without it configured the verifier cannot validate aud and must
+		// so without one configured the verifier cannot validate aud and must
 		// fail closed: a runtime signing key is a shared trust anchor, so an
-		// unvalidated aud is a cross-registry token-confusion surface. With the
-		// audience set, jwt.WithAudience requires the aud claim to be present
-		// and to match (a missing aud is rejected as a required-claim error).
-		// (spec: §6.3.2)
-		if audience == "" {
+		// unvalidated aud is a cross-registry token-confusion surface. This
+		// rejection is load-bearing rather than defense in depth:
+		// jwt.WithAudience over an empty slice leaves the validator's expected
+		// set empty, and the validator then skips the aud check entirely, so a
+		// verifier with no configured audience would accept a token carrying no
+		// aud at all. The §13.12 config.injected_token_audience_unset startup
+		// guard should already have refused boot; this rejection is what keeps
+		// the claim verified if one ever gets past it. With the set non-empty,
+		// jwt.WithAudience requires the aud claim to be present and to carry at
+		// least one accepted value (a missing aud is rejected as a
+		// required-claim error). (spec: §6.3.2, §6.3.3)
+		if len(accepted) == 0 {
 			return Identity{}, untrusted(issuer, "registry audience is not configured; the required aud claim cannot be verified")
 		}
 		opts := []jwt.ParserOption{
 			jwt.WithIssuer(issuer),
 			jwt.WithValidMethods([]string{runtime.Algorithm}),
 			jwt.WithExpirationRequired(),
-			jwt.WithAudience(audience),
+			jwt.WithAudience(accepted...),
 		}
 		if clock != nil {
 			opts = append(opts, jwt.WithTimeFunc(func() (out jwtTime) {

@@ -23,7 +23,7 @@ import (
 // typed *identity.UntrustedRuntimeError carrying the issuer) to the §6.10
 // envelope.
 func injectedTokenVerifier(keys identity.RuntimeKeyVerifierStore, audience string, groups *identity.IdpGroupMapping) func(*http.Request) (layer.Identity, error) {
-	verify := keys.JWTVerifier(audience, nil)
+	verify := keys.JWTVerifier([]string{audience}, nil)
 	return func(r *http.Request) (layer.Identity, error) {
 		id, err := verify(bearerToken(r))
 		if err != nil {
@@ -176,7 +176,7 @@ func selectIdentityProvider(cfg *Config) (identity.Provider, error) {
 		return nil, nil
 	}
 	return identity.Default.New(cfg.identityProvider, identity.Config{
-		Audience:              cfg.oauthAudience,
+		Audiences:             identity.NormalizeAudiences([]string{cfg.oauthAudience}),
 		AuthorizationEndpoint: cfg.oauthAuthorizationEndpoint,
 	})
 }
