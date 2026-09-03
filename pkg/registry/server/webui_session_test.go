@@ -174,6 +174,76 @@ func TestSessionPosture_Subject(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.4 — email is the requesting caller's own email, present only
+// where the configured identity provider recorded one, and resolved from the
+// same identity read as subject.
+func TestSessionPosture_Email(t *testing.T) {
+	t.Parallel()
+	// An opaque provider subject, so the two fields cannot be confused for
+	// one another.
+	withEmail := server.SessionPosture{
+		IdentityProviderConfigured: true,
+		BrowserAuthEnabled:         true,
+		Identity: func(*http.Request) layer.Identity {
+			return layer.Identity{
+				Sub:             "7f1c6f4e-2b1a-4a0b-9a53-0f6f1f1c3a11",
+				Email:           "alice@acme.com",
+				IsAuthenticated: true,
+			}
+		},
+	}
+	body := posture(t, withEmail)
+	if got := body["subject"]; got != "7f1c6f4e-2b1a-4a0b-9a53-0f6f1f1c3a11" {
+		t.Errorf("subject = %v, want the resolved subject", got)
+	}
+	if got := body["email"]; got != "alice@acme.com" {
+		t.Errorf("email = %v, want the resolved email", got)
+	}
+
+	noEmail := server.SessionPosture{
+		IdentityProviderConfigured: true,
+		Identity: func(*http.Request) layer.Identity {
+			return layer.Identity{Sub: "auth0|abc123", IsAuthenticated: true}
+		},
+	}
+	got := posture(t, noEmail)
+	if got["subject"] != "auth0|abc123" {
+		t.Errorf("subject = %v, want the resolved subject", got["subject"])
+	}
+	if _, ok := got["email"]; ok {
+		t.Error("a caller whose provider recorded no email resolved an email field")
+	}
+
+	anonymous := server.SessionPosture{
+		IdentityProviderConfigured: true,
+		Identity: func(*http.Request) layer.Identity {
+			return layer.Identity{IsPublic: true}
+		},
+	}
+	anon := posture(t, anonymous)
+	if _, ok := anon["subject"]; ok {
+		t.Error("an anonymous caller resolved a subject field")
+	}
+	if _, ok := anon["email"]; ok {
+		t.Error("an anonymous caller resolved an email field")
+	}
+
+	// The body stays closed: it carries the §7.3.4 names and nothing else.
+	named := map[string]bool{
+		"identity_provider_configured": true,
+		"public_mode":                  true,
+		"browser_auth":                 true,
+		"layer_capabilities":           true,
+		"subject":                      true,
+		"email":                        true,
+	}
+	for k := range body {
+		if !named[k] {
+			t.Errorf("body carries %q, which §7.3.4 does not name", k)
+		}
+	}
+}
+
 // Spec: §7.3.4 — the read answers on GET.
 func TestSessionPosture_MethodRefusal(t *testing.T) {
 	t.Parallel()

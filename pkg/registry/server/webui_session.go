@@ -8,13 +8,13 @@ import (
 
 // SessionPosture serves the §7.3.4 posture read, GET /v1/ui/session. It
 // reports the deployment's identity posture, the caller's own resolved
-// subject, and what that caller may do on the §7.3.1 layer operations, and
-// nothing else: no issuer, client identifier, endpoint, filesystem path, or
-// other configuration value, and no artifact, layer, tenant, or other
-// caller's subject or authorization. The read requires no credential and
-// refuses no request for lack of one; a request that carries one has it
-// verified so the response can report `subject` and evaluate
-// `layer_capabilities`, and for no other purpose.
+// subject and email, and what that caller may do on the §7.3.1 layer
+// operations, and nothing else: no issuer, client identifier, endpoint,
+// filesystem path, or other configuration value, and no artifact, layer,
+// tenant, or other caller's subject, email, or authorization. The read
+// requires no credential and refuses no request for lack of one; a request
+// that carries one has it verified so the response can report `subject` and
+// `email` and evaluate `layer_capabilities`, and for no other purpose.
 //
 // The browser can observe none of what this read reports: the session cookie
 // is HttpOnly, no other shipped response separates the postures, and the
@@ -73,6 +73,13 @@ func (p SessionPosture) Handler() http.Handler {
 		if p.Identity != nil {
 			if id := p.Identity(r); id.IsAuthenticated && id.Sub != "" {
 				body["subject"] = id.Sub
+				// §7.3.4: both fields resolve from one identity read, so
+				// neither can report another caller's value. The email is
+				// omitted when the configured identity provider recorded
+				// none.
+				if id.Email != "" {
+					body["email"] = id.Email
+				}
 			}
 		}
 		writeJSON(w, http.StatusOK, body)
