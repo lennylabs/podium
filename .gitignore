@@ -34,6 +34,3 @@ site/test/.tmp/
 # Local archives. One was committed by accident; the release ships built
 # artifacts from the workflow rather than anything checked in here.
 *.zip
-
-# IDE project files.
-.idea/

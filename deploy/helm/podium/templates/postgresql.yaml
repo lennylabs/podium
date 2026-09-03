@@ -20,10 +20,18 @@ spec:
       labels:
         {{- include "podium.pgSelectorLabels" . | nindent 8 }}
     spec:
+      {{- with .Values.postgresql.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: postgres
           image: {{ .Values.postgresql.image }}
           imagePullPolicy: {{ .Values.postgresql.imagePullPolicy }}
+          {{- with .Values.postgresql.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: POSTGRES_DB
               value: {{ .Values.postgresql.database | quote }}

@@ -1,3 +1,6 @@
+{{- if and (eq .Values.config.objectStore.type "filesystem") (not .Values.objects.enabled) }}
+{{- fail "config.objectStore.type=filesystem requires objects.enabled=true: the object root would otherwise land on the read-only container root filesystem, where the registry logs one warning, disables the object store, and still reports ready" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -42,6 +45,37 @@ spec:
                 name: {{ .Values.existingSecret }}
           {{- end }}
           env:
+            {{- if .Values.postgresql.enabled }}
+            # A chart cannot read a secret's value, so the bundled database's
+            # password reaches the DSN through the kubelet's $(VAR) expansion,
+            # which resolves only variables defined earlier in this same env
+            # list. Keep these two in this order, and keep both out of envFrom,
+            # which that expansion does not read.
+            #
+            # The DSN takes lib/pq's keyword form rather than the postgres://
+            # URL the driver also accepts, because the expansion substitutes
+            # the password literally and a URL would have to carry it
+            # percent-encoded. A password holding / ? # % or a space breaks
+            # URL parsing, and `openssl rand -base64` emits / routinely, so the
+            # URL form fails at connect time on an ordinary generated password
+            # and reports it as an invalid port. Quoting the value here keeps a
+            # password with a space intact. A single quote or a trailing
+            # backslash is rejected when the DSN is parsed, so the pod fails
+            # with a connection-string error. An embedded backslash is instead
+            # stripped from the value the driver sends, so the database rejects
+            # the credential and the pod reports a password-authentication
+            # failure that names nothing about escaping. Avoid both.
+            #
+            # TLS is off because both ends are in-cluster and this database is
+            # for evaluation.
+            - name: PODIUM_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.postgresql.existingSecret }}
+                  key: {{ .Values.postgresql.passwordKey }}
+            - name: PODIUM_POSTGRES_DSN
+              value: "host={{ include "podium.pgFullname" . }} port=5432 user={{ .Values.postgresql.username }} password='$(PODIUM_PG_PASSWORD)' dbname={{ .Values.postgresql.database }} sslmode=disable"
+            {{- end }}
             # The kubelet probes the pod over the cluster network, so the
             # registry must listen on all interfaces rather than on its
             # 127.0.0.1 default. values.yaml declared config.bind and no
@@ -105,8 +139,12 @@ spec:
               value: {{ . | quote }}
             {{- end }}
             {{- if .Values.runtimeKeys.enabled }}
+            # The variable names the JSON key file, and the volume mounts the
+            # secret at the directory above it. Pointing it at mountPath makes
+            # the registry read a directory, which it treats as a fatal boot
+            # error rather than as an absent file.
             - name: PODIUM_RUNTIME_KEYS_PATH
-              value: {{ .Values.runtimeKeys.mountPath | quote }}
+              value: {{ printf "%s/%s" (trimSuffix "/" .Values.runtimeKeys.mountPath) .Values.runtimeKeys.key | quote }}
             {{- end }}
             # Public mode and its bind override travel together. The bind above
             # is 0.0.0.0 so the kubelet can reach the probes, and public mode
