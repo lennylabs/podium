@@ -110,14 +110,26 @@ type audienceList []string
 // PODIUM_OAUTH_AUDIENCE alone. A sequence contributes one entry per element.
 // Both arms normalize through identity.NormalizeAudiences, so entries are
 // trimmed, blanks are dropped, and duplicates collapse keeping the first
-// occurrence. The scalar arm reads the node value, so a YAML null resolves to
-// the empty string and is dropped, which leaves the set empty for the startup
-// guard to refuse rather than failing the decode and discarding the config
-// file.
+// occurrence. The scalar arm decodes into a string, so the key stays typed and
+// a scalar that is not a string is refused rather than installing an audience
+// the operator did not intend. A YAML null decodes to the empty string and is
+// dropped, which leaves the set empty for the startup guard to refuse rather
+// than failing the decode and discarding the config file.
 func (a *audienceList) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.ScalarNode:
-		*a = identity.NormalizeAudiences([]string{node.Value})
+		// yaml.v3 renders a non-string scalar into a string field verbatim,
+		// so an unquoted number, boolean, or timestamp would otherwise
+		// install an audience the operator did not intend. The tag check
+		// keeps the key typed and reports the value instead.
+		if node.Tag != "" && node.Tag != "!!str" && node.Tag != "!!null" {
+			return fmt.Errorf("identity_provider.audience must be a string or a list of strings, got %s %q", node.Tag, node.Value)
+		}
+		var s string
+		if err := node.Decode(&s); err != nil {
+			return fmt.Errorf("identity_provider.audience: %w", err)
+		}
+		*a = identity.NormalizeAudiences([]string{s})
 		return nil
 	case yaml.SequenceNode:
 		var many []string

@@ -71,7 +71,10 @@ func TestAudienceList_UnmarshalYAML(t *testing.T) {
 		{"empty sequence yields none", "audience: []", nil, false},
 		{"null yields none", "audience:", nil, false},
 		{"mapping is refused", "audience:\n  value: https://a", nil, true},
-		{"non-string scalar is one entry verbatim", "audience: 5", []string{"5"}, false},
+		{"non-string scalar is refused", "audience: 5", nil, true},
+		{"boolean scalar is refused", "audience: true", nil, true},
+		{"quoted numeric scalar is one entry", "audience: \"5\"", []string{"5"}, false},
+		{"explicit null yields none", "audience: null", nil, false},
 		{"sequence of mappings is refused", "audience:\n  - value: https://a", nil, true},
 	}
 	for _, tc := range cases {
