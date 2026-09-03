@@ -70,7 +70,7 @@ Fine-grained narrowing via OAuth scope claims (e.g., `podium:read:finance/*`, `p
 The injected token is a JWT signed by a runtime-specific signing key that the deployment configures the registry to trust at runtime onboarding. The registry verifies the signature on every call. Required claims:
 
 - `iss`: runtime identifier (must match a registered runtime).
-- `aud`: registry endpoint.
+- `aud`: a registry endpoint. The registry verifies it against the audience set configured for the deployment (§6.3.3), and a token whose `aud` carries no member of that set is rejected with `auth.untrusted_runtime`. A deployment that configures no audience fails startup with `config.injected_token_audience_unset`, so the claim is always verified.
 - `sub`: user id the runtime is acting on behalf of.
 - `act`: actor (the runtime itself).
 - `exp`: expiry.
