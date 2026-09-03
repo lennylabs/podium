@@ -39,6 +39,8 @@ Provider-specific options are passed as additional env vars (e.g., `PODIUM_OAUTH
 
 Identity providers attach the caller's OAuth-attested identity to every registry call. `oauth-device-code` is the client-side acquisition provider: the consumer obtains and caches the token through the device-code flow. `injected-session-token` is the provider the registry verifies server-side, by checking the runtime's signature on each call (§6.3.2). §6.3.4 specifies the browser acquisition flow, in which a registry serving the web UI (§13.10) obtains the `oidc-jwt` credential for a browser through a server-side authorization-code exchange.
 
+`PODIUM_OAUTH_AUDIENCE` is read differently by the two process kinds. A registry process reads it as the set of audience values that name this registry and verifies an inbound token's `aud` claim against that set (§6.3.2, §6.3.3). A client process reads it as the single audience it asks the IdP to stamp on the token it acquires, because one acquisition produces one audience, and the client-side providers send it verbatim.
+
 - **`oauth-device-code`** _(default)_. Interactive device-code flow on first use; tokens cached in the OS keychain (macOS Keychain, Windows Credential Manager, libsecret on Linux). Refreshes transparently. Defaults: access-token TTL 15 min, refresh-token TTL 7 days, revocation propagation ≤60s. Options: `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_TOKEN_KEYCHAIN_NAME`.
 
   How the verification URL surfaces depends on the consumer:
