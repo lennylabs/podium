@@ -1224,6 +1224,12 @@ function TopBar({
 }) {
   const control = authControl(posture);
   const subject = posture?.subject ?? '';
+  // The cluster names the reader by their email where the read carries one,
+  // because a provider-chosen subject is often an opaque identifier. The
+  // fallback covers both arms that carry none: a provider that recorded no
+  // email for this caller, and an older registry whose posture read reports
+  // no such key.
+  const display = posture?.email || subject;
   return (
     <header className="topbar">
       <Wordmark />
@@ -1264,7 +1270,7 @@ function TopBar({
           reader on that deployment to prefers-color-scheme. */}
       {subject !== '' ? (
         <AccountMenu
-          subject={subject}
+          display={display}
           theme={theme}
           onTheme={onTheme}
           signOutPath={control.kind === 'sign-out' ? control.path : null}
@@ -1317,18 +1323,18 @@ function useTopbarMenu() {
 }
 
 /** AccountMenu is the identity cluster and the menu behind it. It carries the
- * caller's own subject, the appearance preference, the layer quota, and the
+ * caller's own identity, the appearance preference, the layer quota, and the
  * sign-out entry point where the deployment runs one. It carries no role
  * badge, no capability report, and no group membership: no response reports
  * the caller's role, the posture read's per-operation prediction is read by
  * the layer panel alone, and no response enumerates the caller's groups. */
 function AccountMenu({
-  subject,
+  display,
   theme,
   onTheme,
   signOutPath,
 }: {
-  subject: string;
+  display: string;
   theme: ThemePreference;
   onTheme: (next: ThemePreference) => void;
   signOutPath: string | null;
@@ -1347,9 +1353,9 @@ function AccountMenu({
         onClick={toggle}
       >
         <span className="mono avatar" aria-hidden="true">
-          {initialsOf(subject)}
+          {initialsOf(display)}
         </span>
-        <span className="mono subject">{subject}</span>
+        <span className="mono subject">{display}</span>
       </button>
       {open && (
         <div
@@ -1360,7 +1366,7 @@ function AccountMenu({
           data-testid="account-menu"
           ref={menu}
         >
-          <p className="mono quiet">{subject}</p>
+          <p className="mono quiet">{display}</p>
           <AppearanceSwitch theme={theme} onTheme={onTheme} />
           <LayerQuota />
           {signOutPath !== null && <SignOutButton path={signOutPath} />}
@@ -1507,7 +1513,9 @@ function LayerQuota() {
 
 /** initialsOf is the avatar's mono label. A subject is an identifier rather
  * than a person's name, so the initials come off the identifier's own parts
- * and a subject that carries none falls back to its first character. */
+ * and a subject that carries none falls back to its first character. The
+ * label comes off whichever of the caller's email and subject the identity
+ * cluster selected, and the rule holds for both. */
 export function initialsOf(subject: string): string {
   const local = subject.split('@')[0];
   const parts = local.split(/[.\-_]/).filter((part) => part !== '');

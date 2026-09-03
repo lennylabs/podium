@@ -15554,6 +15554,48 @@ describe("the shell’s identity cluster", () => {
     expect(screen.getByTestId("account-menu").id).toBe(controls);
   });
 
+  // A provider-chosen subject is often an opaque identifier, so the cluster
+  // names the reader by the email the posture read carries and draws the
+  // avatar label off that same value. A UUID rendered as the reader's own
+  // identity is the defect this pins, and its "-"-separated parts would
+  // otherwise become the avatar's initials.
+  //
+  // Spec: §7.3.4
+  it("names the reader by the email the posture read carries", async () => {
+    const uuid = "8f14e45f-ceea-467a-9d1a-1c1f1f1d1e1e";
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ subject: uuid, email: "alice@acme.com" }),
+      },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const trigger = await screen.findByTestId("account-trigger");
+    expect(trigger.textContent).toContain("alice@acme.com");
+    expect(trigger.textContent).not.toContain(uuid);
+    expect(trigger.querySelector(".avatar")?.textContent).toBe("A");
+    fireEvent.click(trigger);
+    const menu = screen.getByTestId("account-menu");
+    expect(menu.textContent).toContain("alice@acme.com");
+    expect(menu.textContent).not.toContain(uuid);
+  });
+
+  // Where the identity provider recorded no email, and on an older registry
+  // whose posture read reports no such key, the cluster falls back to the
+  // subject rather than standing empty.
+  //
+  // Spec: §7.3.4
+  it("falls back to the subject where the read carries no email", async () => {
+    const uuid = "8f14e45f-ceea-467a-9d1a-1c1f1f1d1e1e";
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: uuid }) },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const trigger = await screen.findByTestId("account-trigger");
+    expect(trigger.textContent).toContain(uuid);
+  });
+
   // Every label the shell writes for a reader is sentence case, and the
   // appearance options are labels rather than identifiers. The stored
   // preference stays lowercase because it is the value stamped on the root

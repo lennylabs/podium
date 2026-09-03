@@ -17,9 +17,9 @@ export interface LayerCapabilities {
 }
 
 /** SessionPosture is the posture read's body. The read reports the
- * deployment's identity posture, the caller's own resolved subject, and what
- * this deployment's layer endpoints admit that caller on, and nothing
- * else. */
+ * deployment's identity posture, the caller's own resolved subject and email,
+ * and what this deployment's layer endpoints admit that caller on, and
+ * nothing else. */
 export interface SessionPosture {
   identity_provider_configured: boolean;
   public_mode: boolean;
@@ -33,6 +33,11 @@ export interface SessionPosture {
   };
   /** Present only where a subject resolves. */
   subject?: string;
+  /** Present only where the configured identity provider recorded one for
+   * this caller. The identity cluster renders it in place of the
+   * provider-chosen subject, which on many deployments is an opaque
+   * identifier a reader cannot recognize as their own. */
+  email?: string;
   /** The field is optional on the type because a response from an older
    * registry carries none. capabilitiesOf is what turns that into a closed
    * default, and every reader goes through it. */
