@@ -15,15 +15,15 @@ import (
 // injectedTokenVerifier builds the §6.3.2 request-time verifier for the
 // injected-session-token provider. It extracts the bearer token from the
 // Authorization header, verifies its signature against the registered
-// runtime keys for the configured audience, applies the §6.3.1
+// runtime keys for the accepted-audience set, applies the §6.3.1
 // IdpGroupMapping, and returns the caller layer.Identity carrying the
 // verified claims (including any "podium:*" scopes for the §6.3.1 scope
 // narrowing). A verification failure is returned verbatim so the server
 // maps identity.ErrUntrustedRuntime / identity.ErrTokenExpired (and the
 // typed *identity.UntrustedRuntimeError carrying the issuer) to the §6.10
 // envelope.
-func injectedTokenVerifier(keys identity.RuntimeKeyVerifierStore, audience string, groups *identity.IdpGroupMapping) func(*http.Request) (layer.Identity, error) {
-	verify := keys.JWTVerifier(audience, nil)
+func injectedTokenVerifier(keys identity.RuntimeKeyVerifierStore, audiences []string, groups *identity.IdpGroupMapping) func(*http.Request) (layer.Identity, error) {
+	verify := keys.JWTVerifier(audiences, nil)
 	return func(r *http.Request) (layer.Identity, error) {
 		id, err := verify(bearerToken(r))
 		if err != nil {
@@ -121,8 +121,19 @@ func identityVisibilityGuard(identityProvider string, providerSelected, publicMo
 	return fmt.Errorf("config.identity_provider_unverified: PODIUM_IDENTITY_PROVIDER=%q has no request-time token verifier wired, so the registry would resolve every caller as anonymous-public and never apply per-layer visibility (§2.2, §6.3.1); the registry verifies %s server-side. Set PODIUM_PUBLIC_MODE=true to run an open registry, or select one of those", identityProvider, strings.Join(verifiedProviders, ", "))
 }
 
+// canonicalAudience returns the canonical entry of the accepted-audience set
+// (§6.3.4): the first entry, which is the audience the registry asks for when
+// it initiates a flow itself. A set that resolves to no entry yields "".
+func canonicalAudience(audiences []string) string {
+	if len(audiences) == 0 {
+		return ""
+	}
+	return audiences[0]
+}
+
 // injectedTokenAudienceGuard refuses startup when the injected-session-token
-// provider is selected without a configured audience.
+// provider is selected over an accepted-audience set that resolves to no
+// entry.
 //
 // spec: §6.3.2 — aud ("registry endpoint") is one of the claims the registry
 // verifies on every injected-session-token call. The audience is the
@@ -133,9 +144,9 @@ func identityVisibilityGuard(identityProvider string, providerSelected, publicMo
 // token-confusion surface. Fail closed at boot with an actionable error
 // rather than reject every token at request time. Other providers (the
 // audience is optional for oauth-device-code) are exempt.
-func injectedTokenAudienceGuard(identityProvider, audience string) error {
-	if identityProvider == "injected-session-token" && strings.TrimSpace(audience) == "" {
-		return fmt.Errorf("config.injected_token_audience_unset: PODIUM_IDENTITY_PROVIDER=injected-session-token requires PODIUM_OAUTH_AUDIENCE set to this registry's endpoint so the required aud claim is verified on every token (§6.3.2)")
+func injectedTokenAudienceGuard(identityProvider string, audiences []string) error {
+	if identityProvider == "injected-session-token" && len(identity.NormalizeAudiences(audiences)) == 0 {
+		return fmt.Errorf("config.injected_token_audience_unset: PODIUM_IDENTITY_PROVIDER=injected-session-token requires PODIUM_OAUTH_AUDIENCE to name at least one audience this registry answers to, so the required aud claim is verified on every token (§6.3.2)")
 	}
 	return nil
 }
@@ -176,7 +187,7 @@ func selectIdentityProvider(cfg *Config) (identity.Provider, error) {
 		return nil, nil
 	}
 	return identity.Default.New(cfg.identityProvider, identity.Config{
-		Audience:              cfg.oauthAudience,
+		Audiences:             identity.NormalizeAudiences(cfg.oauthAudiences),
 		AuthorizationEndpoint: cfg.oauthAuthorizationEndpoint,
 	})
 }
@@ -301,7 +312,7 @@ func trustedHeadersVerifier(proxySecret string) func(*http.Request) (layer.Ident
 // cannot substitute a signing key over an http endpoint). A loopback issuer
 // (https://127.0.0.1, https://localhost) is permitted for local IdP testing and
 // still requires https. Other providers are exempt.
-func oidcJWTConfigGuard(identityProvider, issuer, audience string) error {
+func oidcJWTConfigGuard(identityProvider, issuer string, audiences []string) error {
 	if identityProvider != "oidc-jwt" {
 		return nil
 	}
@@ -309,7 +320,7 @@ func oidcJWTConfigGuard(identityProvider, issuer, audience string) error {
 	if err != nil || u.Scheme != "https" || u.Host == "" {
 		return fmt.Errorf("config.invalid_issuer_scheme: PODIUM_IDENTITY_PROVIDER=oidc-jwt requires PODIUM_OAUTH_ISSUER to be an https URL (got %q); the registry fetches the OIDC discovery document and JWKS over this URL and an http endpoint lets a man-in-the-middle substitute a signing key (§6.3.3, §13.12)", issuer)
 	}
-	if strings.TrimSpace(audience) == "" {
+	if len(identity.NormalizeAudiences(audiences)) == 0 {
 		return fmt.Errorf("config.oidc_jwt_audience_unset: PODIUM_IDENTITY_PROVIDER=oidc-jwt requires PODIUM_OAUTH_AUDIENCE set to this registry's endpoint so the required aud claim is verified on every forwarded token (§6.3.3, §13.12)")
 	}
 	return nil

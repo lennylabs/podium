@@ -32,6 +32,14 @@ import (
 
 const gwAudience = "https://podium.gateway.test"
 
+// gwSecondAudience is a second value the same registry answers to, the client
+// identifier a device-code token carries (§6.3.3).
+const gwSecondAudience = "podium-gateway-client"
+
+// gwAudiences is the accepted-audience set the gateway-path verifiers are built
+// with (§6.3.3), with gwAudience canonical.
+var gwAudiences = []string{gwAudience}
+
 // jwksIdP is a single-key OIDC issuer stub (discovery + JWKS).
 type jwksIdP struct {
 	srv  *httptest.Server
@@ -183,7 +191,7 @@ func bearer(token string) map[string]string {
 func TestGatewayIntegration_OIDCJWTVisibility(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0)
 	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil, false))
 
 	alice := idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"}))
@@ -207,10 +215,51 @@ func TestGatewayIntegration_OIDCJWTVisibility(t *testing.T) {
 	}
 }
 
+// TestGatewayIntegration_OIDCJWTAudienceSet drives the §6.3.3 multi-audience
+// deployment through the meta-tool server: one verifier over two audiences,
+// one issuer, and one caller whose tokens differ only in aud. Both are admitted
+// and resolve the same §4.6 group-scoped view, which is the privilege-equality
+// claim: admission under any configured entry carries the same effective view.
+// A token audienced to an unconfigured value is refused with the §6.10
+// auth.untrusted_token envelope.
+// Spec: §6.3.3, §4.6
+func TestGatewayIntegration_OIDCJWTAudienceSet(t *testing.T) {
+	t.Parallel()
+	idp := newJWKSIdP(t)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), []string{gwAudience, gwSecondAudience}, 0)
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil, false))
+
+	// gwClaims stamps the canonical audience, so the per-token value is set
+	// here rather than in the helper every other case shares.
+	tokenFor := func(aud string) string {
+		c := gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"})
+		c["aud"] = aud
+		return idp.sign(t, c)
+	}
+
+	for _, aud := range []string{gwAudience, gwSecondAudience} {
+		if st, body := loadArtifact(t, ts.URL, "eng/secret", bearer(tokenFor(aud))); st != 200 {
+			t.Errorf("alice under aud %q load eng/secret = %d, want 200\nbody: %s", aud, st, body)
+		}
+	}
+
+	st, body := loadArtifact(t, ts.URL, "pub/welcome", bearer(tokenFor("https://unconfigured.example")))
+	if st != 401 {
+		t.Fatalf("token under an unconfigured audience = %d, want 401\nbody: %s", st, body)
+	}
+	var env struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(body, &env)
+	if env.Code != "auth.untrusted_token" {
+		t.Errorf("code = %q, want auth.untrusted_token", env.Code)
+	}
+}
+
 func TestGatewayIntegration_OIDCJWTVerificationErrors(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0)
 	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil, false))
 
 	// Wrong audience -> 401 auth.untrusted_token, with details.token_iss.
@@ -263,7 +312,7 @@ func TestGatewayIntegration_OIDCJWTVerificationErrors(t *testing.T) {
 func TestGatewayIntegration_OIDCJWTGroupMapping(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0)
 	mapping := identity.NewIdpGroupMapping(map[string]string{"00g1engOID": "engineering"})
 	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", mapping, false))
 
@@ -282,7 +331,7 @@ func TestGatewayIntegration_OIDCJWTGroupMapping(t *testing.T) {
 	// The adapter maps group values and names no claim (§6.3.1), so it composes
 	// with a named group claim: the same raw value arriving as a single string
 	// under the configured claim name maps to engineering too.
-	named := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0, identity.WithGroupsClaim(adfsGroupsClaimURI))
+	named := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0, identity.WithGroupsClaim(adfsGroupsClaimURI))
 	namedTS := gatewayServer(t, oidcJWTVerifier(named, "", mapping, false))
 	claims := gwClaims(idp.issuer(), "carol@acme.com", nil)
 	claims[adfsGroupsClaimURI] = "00g1engOID"
@@ -294,7 +343,7 @@ func TestGatewayIntegration_OIDCJWTGroupMapping(t *testing.T) {
 func TestGatewayIntegration_OIDCJWTCustomTokenHeader(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0)
 	ts := gatewayServer(t, oidcJWTVerifier(verifier, "X-Forwarded-Access-Token", nil, false))
 
 	alice := idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"}))
@@ -324,7 +373,7 @@ func TestGatewayIntegration_OIDCJWTSplitIssuerAndClaimNames(t *testing.T) {
 	const fedIssuer = "http://adfs.acme.test/adfs/services/trust"
 	const subjectClaim = "idsub"
 	idp := newJWKSIdP(t, withAccessTokenIssuer(fedIssuer))
-	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0,
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0,
 		identity.WithSubjectClaim(subjectClaim),
 		identity.WithGroupsClaim(adfsGroupsClaimURI))
 	if err := verifier.Prime(); err != nil {
@@ -389,7 +438,7 @@ func TestGatewayIntegration_OIDCJWTSplitIssuerAndClaimNames(t *testing.T) {
 func TestGatewayIntegration_OIDCJWTEmptyClaimNamesKeepDefaults(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0,
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0,
 		identity.WithSubjectClaim(""),
 		identity.WithGroupsClaim(""))
 	if err := verifier.Prime(); err != nil {
@@ -417,7 +466,7 @@ func TestGatewayIntegration_OIDCJWTEmptyClaimNamesKeepDefaults(t *testing.T) {
 func TestGatewayIntegration_OIDCJWTAccessTokenIssuerEqualsIssuer(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t, withAccessTokenIssuerEqualToIssuer())
-	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0)
 	if err := verifier.Prime(); err != nil {
 		t.Fatalf("Prime: %v", err)
 	}

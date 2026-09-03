@@ -88,6 +88,49 @@ func TestRegistryConfig_SpecExampleNestedInterpolation(t *testing.T) {
 	}
 }
 
+// §13.12 / §6.3.3: identity_provider.audience accepts a YAML sequence, and
+// every entry reaches the §6.3.3 accepted-audience set. `config show --server`
+// reports the joined set under oauth_audience and attributes it to
+// registry.yaml, so an operator can read back the audiences the registry
+// answers to.
+func TestRegistryConfig_IdentityAudienceSequence(t *testing.T) {
+	t.Parallel()
+	cfgFile := filepath.Join(t.TempDir(), "registry.yaml")
+	body := "" +
+		"registry:\n" +
+		"  identity_provider:\n" +
+		"    type: oidc-jwt\n" +
+		"    issuer: https://acme.okta.com/oauth2/default\n" +
+		"    audience:\n" +
+		"      - https://podium.acme.com\n" +
+		"      - https://podium.acme.com/mcp\n"
+	if err := os.WriteFile(cfgFile, []byte(body), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+	table := configShowSettings(t, []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_CONFIG_FILE=" + cfgFile,
+		"PODIUM_IDENTITY_PROVIDER=", "PODIUM_OAUTH_AUDIENCE=", "PODIUM_OAUTH_ISSUER=",
+	})
+	if v, src := settingRow(t, table, "oauth_audience"); v != "https://podium.acme.com,https://podium.acme.com/mcp" || src != "registry.yaml" {
+		t.Errorf("oauth_audience = (%q, %q), want the joined sequence sourced from registry.yaml\n%s", v, src, table)
+	}
+}
+
+// §13.12: PODIUM_OAUTH_AUDIENCE carries a comma-separated list, and with no
+// config-file audience the whole list resolves from the environment.
+func TestRegistryConfig_OAuthAudienceListFromEnv(t *testing.T) {
+	t.Parallel()
+	table := configShowSettings(t, []string{
+		"HOME=" + t.TempDir(),
+		"PODIUM_CONFIG_FILE=" + filepath.Join(t.TempDir(), "absent.yaml"),
+		"PODIUM_OAUTH_AUDIENCE=https://a,https://b",
+	})
+	if v, src := settingRow(t, table, "oauth_audience"); v != "https://a,https://b" || src != "PODIUM_OAUTH_AUDIENCE" {
+		t.Errorf("oauth_audience = (%q, %q), want the environment list\n%s", v, src, table)
+	}
+}
+
 // §13.12 line 347: selecting the s3 object store without its
 // required bucket refuses startup, naming the missing key.
 func TestRegistryConfig_S3MissingBucketRefusesStart(t *testing.T) {

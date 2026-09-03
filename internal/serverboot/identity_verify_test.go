@@ -46,7 +46,7 @@ func TestInjectedTokenVerifier_MapsClaims(t *testing.T) {
 	t.Parallel()
 	priv, reg := registeredRuntimeKey(t)
 	mapping := identity.NewIdpGroupMapping(map[string]string{"00gFinanceOID": "finance"})
-	verify := injectedTokenVerifier(reg, "https://podium.acme.com", mapping)
+	verify := injectedTokenVerifier(reg, []string{"https://podium.acme.com"}, mapping)
 
 	raw := signRuntimeJWT(t, priv, jwt.MapClaims{
 		"iss": "rt", "aud": "https://podium.acme.com", "sub": "alice", "act": "rt",
@@ -120,7 +120,7 @@ func TestInjectedTokenVerifier_GroupClaimEncodings(t *testing.T) {
 			req, _ := http.NewRequest(http.MethodGet, "http://x/v1/search_artifacts", nil)
 			req.Header.Set("Authorization", "Bearer "+signRuntimeJWT(t, priv, claims))
 
-			id, err := injectedTokenVerifier(reg, "https://podium.acme.com", tc.mapping)(req)
+			id, err := injectedTokenVerifier(reg, []string{"https://podium.acme.com"}, tc.mapping)(req)
 			if err != nil {
 				t.Fatalf("verify: %v", err)
 			}
@@ -143,7 +143,7 @@ func TestGatewayIntegration_InjectedTokenSingleStringGroupClaim(t *testing.T) {
 	t.Parallel()
 	priv, reg := registeredRuntimeKey(t)
 	mapping := identity.NewIdpGroupMapping(map[string]string{"00g1engOID": "engineering"})
-	ts := gatewayServer(t, injectedTokenVerifier(reg, gwAudience, mapping))
+	ts := gatewayServer(t, injectedTokenVerifier(reg, []string{gwAudience}, mapping))
 
 	token := func(sub string, groups any) string {
 		return signRuntimeJWT(t, priv, jwt.MapClaims{
@@ -183,7 +183,7 @@ func TestInjectedTokenVerifier_RejectsUnregistered(t *testing.T) {
 	t.Parallel()
 	priv, _ := rsa.GenerateKey(rand.Reader, 2048)
 	reg := identity.NewRuntimeKeyRegistry() // no keys registered
-	verify := injectedTokenVerifier(reg, "https://podium.acme.com", nil)
+	verify := injectedTokenVerifier(reg, []string{"https://podium.acme.com"}, nil)
 	raw := signRuntimeJWT(t, priv, jwt.MapClaims{
 		"iss": "ghost-runtime", "aud": "https://podium.acme.com", "sub": "alice", "act": "ghost-runtime",
 		"exp": time.Now().Add(5 * time.Minute).Unix(),
@@ -202,7 +202,7 @@ func TestInjectedTokenVerifier_RejectsUnregistered(t *testing.T) {
 func TestInjectedTokenVerifier_RejectsMissingToken(t *testing.T) {
 	t.Parallel()
 	reg := identity.NewRuntimeKeyRegistry()
-	verify := injectedTokenVerifier(reg, "https://podium.acme.com", nil)
+	verify := injectedTokenVerifier(reg, []string{"https://podium.acme.com"}, nil)
 	req, _ := http.NewRequest(http.MethodGet, "http://x/v1/search_artifacts", nil)
 	if _, err := verify(req); !errors.Is(err, identity.ErrUntrustedRuntime) {
 		t.Fatalf("missing token: got %v, want ErrUntrustedRuntime", err)
@@ -217,7 +217,7 @@ func TestInjectedTokenVerifier_RejectsMissingToken(t *testing.T) {
 func TestLayerCallerResolver(t *testing.T) {
 	t.Parallel()
 	priv, reg := registeredRuntimeKey(t)
-	injected := layerCallerResolver(injectedTokenVerifier(reg, "https://podium.acme.com", nil))
+	injected := layerCallerResolver(injectedTokenVerifier(reg, []string{"https://podium.acme.com"}, nil))
 
 	// A valid runtime-signed token: the authenticated identity, no error.
 	raw := signRuntimeJWT(t, priv, jwt.MapClaims{
@@ -243,7 +243,7 @@ func TestLayerCallerResolver(t *testing.T) {
 
 	// No credential under oidc-jwt: the anonymous caller and no error, which
 	// keeps a signed-out browser out of the refusal.
-	oidc := layerCallerResolver(oidcJWTVerifier(identity.NewOIDCVerifier("https://issuer.example", "aud", 0), "", nil, false))
+	oidc := layerCallerResolver(oidcJWTVerifier(identity.NewOIDCVerifier("https://issuer.example", []string{"aud"}, 0), "", nil, false))
 	id, err = oidc(anon)
 	if err != nil {
 		t.Fatalf("oidc-jwt with no credential: got err %v, want nil", err)
@@ -271,7 +271,7 @@ func TestLayerCallerResolver(t *testing.T) {
 func TestLayerIdentityResolver(t *testing.T) {
 	t.Parallel()
 	priv, reg := registeredRuntimeKey(t)
-	verify := injectedTokenVerifier(reg, "https://podium.acme.com", nil)
+	verify := injectedTokenVerifier(reg, []string{"https://podium.acme.com"}, nil)
 	resolve := layerIdentityResolver(verify)
 
 	// Valid token => authenticated identity.
@@ -304,25 +304,26 @@ func TestLayerIdentityResolver(t *testing.T) {
 func TestInjectedTokenAudienceGuard(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name     string
-		provider string
-		audience string
-		wantErr  bool
+		name      string
+		provider  string
+		audiences []string
+		wantErr   bool
 	}{
-		{"injected no audience refuses", "injected-session-token", "", true},
-		{"injected blank audience refuses", "injected-session-token", "   ", true},
-		{"injected with audience starts", "injected-session-token", "https://podium.acme.com", false},
-		{"oauth-device-code exempt", "oauth-device-code", "", false},
-		{"empty provider exempt", "", "", false},
+		{"injected no audience refuses", "injected-session-token", nil, true},
+		{"injected blank audience refuses", "injected-session-token", []string{"   "}, true},
+		{"injected with audience starts", "injected-session-token", []string{"https://podium.acme.com"}, false},
+		{"injected with several audiences starts", "injected-session-token", []string{"https://podium.acme.com", "https://podium.acme.com/mcp"}, false},
+		{"oauth-device-code exempt", "oauth-device-code", nil, false},
+		{"empty provider exempt", "", nil, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := injectedTokenAudienceGuard(tc.provider, tc.audience)
+			err := injectedTokenAudienceGuard(tc.provider, tc.audiences)
 			if tc.wantErr && err == nil {
-				t.Fatalf("provider=%q audience=%q: want refusal, got nil", tc.provider, tc.audience)
+				t.Fatalf("provider=%q audiences=%q: want refusal, got nil", tc.provider, tc.audiences)
 			}
 			if !tc.wantErr && err != nil {
-				t.Fatalf("provider=%q audience=%q: want nil, got %v", tc.provider, tc.audience, err)
+				t.Fatalf("provider=%q audiences=%q: want nil, got %v", tc.provider, tc.audiences, err)
 			}
 			if tc.wantErr && !strings.Contains(err.Error(), "config.injected_token_audience_unset") {
 				t.Errorf("error should carry the namespaced code, got %v", err)

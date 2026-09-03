@@ -178,7 +178,11 @@ func boolPtr(b bool) *bool { return &b }
 type identityKeyGuard struct {
 	key   string
 	value string
-	got   func(*Config) string
+	// literal, when non-empty, is written under the key in place of value,
+	// so a key that accepts several YAML forms is exercised in each one
+	// while value stays the resolved result the reader must report.
+	literal string
+	got     func(*Config) string
 }
 
 // Spec: §13.12 — every key the `identity_provider:` object holds
@@ -187,23 +191,51 @@ type identityKeyGuard struct {
 // without an error; the per-key assertion below is what reports that drift.
 func TestReadYAMLConfig_IdentityProviderKeysRoundTrip(t *testing.T) {
 	guards := []identityKeyGuard{
-		{"type", "oidc-jwt", func(c *Config) string { return c.identityProvider }},
-		{"audience", "https://podium.acme.com", func(c *Config) string { return c.oauthAudience }},
-		{"authorization_endpoint", "https://acme.okta.com/oauth2/default", func(c *Config) string {
+		{key: "type", value: "oidc-jwt", got: func(c *Config) string { return c.identityProvider }},
+		{key: "audience", value: "https://podium.acme.com", got: func(c *Config) string {
+			return strings.Join(c.oauthAudiences, ",")
+		}},
+		{key: "authorization_endpoint", value: "https://acme.okta.com/oauth2/default", got: func(c *Config) string {
 			return c.oauthAuthorizationEndpoint
 		}},
-		{"issuer", "https://idp.acme.com/adfs", func(c *Config) string { return c.oauthIssuer }},
-		{"token_header", "X-Podium-Token", func(c *Config) string { return c.oauthTokenHeader }},
-		{"subject_claim", "upn", func(c *Config) string { return c.oauthSubjectClaim }},
-		{"groups_claim", "roles", func(c *Config) string { return c.oauthGroupsClaim }},
-		{"jwks_cache_ttl_seconds", "900", func(c *Config) string {
+		{key: "issuer", value: "https://idp.acme.com/adfs", got: func(c *Config) string { return c.oauthIssuer }},
+		{key: "token_header", value: "X-Podium-Token", got: func(c *Config) string { return c.oauthTokenHeader }},
+		{key: "subject_claim", value: "upn", got: func(c *Config) string { return c.oauthSubjectClaim }},
+		{key: "groups_claim", value: "roles", got: func(c *Config) string { return c.oauthGroupsClaim }},
+		{key: "jwks_cache_ttl_seconds", value: "900", got: func(c *Config) string {
 			return strconv.Itoa(c.oauthJWKSCacheTTLSeconds)
 		}},
 	}
+	t.Run("scalar audience", func(t *testing.T) { roundTripIdentityGuards(t, guards) })
+	// §6.3.3: the same document with the audience written as a sequence
+	// resolves to the whole accepted set, and every other key still lands.
+	t.Run("sequence audience", func(t *testing.T) {
+		seq := make([]identityKeyGuard, len(guards))
+		copy(seq, guards)
+		for i := range seq {
+			if seq[i].key != "audience" {
+				continue
+			}
+			seq[i].literal = `["https://podium.acme.com", "https://podium.acme.com/mcp"]`
+			seq[i].value = "https://podium.acme.com,https://podium.acme.com/mcp"
+		}
+		roundTripIdentityGuards(t, seq)
+	})
+}
+
+// roundTripIdentityGuards writes the guards as one `identity_provider:` object,
+// reads it back through readYAMLConfig and applyYAML, and asserts each key
+// resolved to its expected value.
+func roundTripIdentityGuards(t *testing.T, guards []identityKeyGuard) {
+	t.Helper()
 	var body strings.Builder
 	body.WriteString("registry:\n  identity_provider:\n")
 	for _, g := range guards {
-		fmt.Fprintf(&body, "    %s: %s\n", g.key, g.value)
+		written := g.value
+		if g.literal != "" {
+			written = g.literal
+		}
+		fmt.Fprintf(&body, "    %s: %s\n", g.key, written)
 	}
 	path := filepath.Join(t.TempDir(), "registry.yaml")
 	if err := os.WriteFile(path, []byte(body.String()), 0o644); err != nil {

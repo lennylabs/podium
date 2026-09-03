@@ -177,14 +177,20 @@ func TestGateway_OIDCJWTHttpIssuerRefused(t *testing.T) {
 	)
 }
 
-// Spec: §6.3.3 / §13.12 — oidc-jwt requires PODIUM_OAUTH_AUDIENCE; an unset
-// audience fails startup with config.oidc_jwt_audience_unset.
+// Spec: §6.3.3 / §13.12 — oidc-jwt requires PODIUM_OAUTH_AUDIENCE to name at
+// least one audience. An unset variable, and a comma-separated list whose
+// every entry is blank, both resolve to no entry and fail startup with
+// config.oidc_jwt_audience_unset. The blank-list arm is the one a resolution
+// that dropped the trim would boot, leaving the verifier holding an empty
+// entry that matches a token carrying aud: ["", "x"].
 func TestGateway_OIDCJWTMissingAudienceRefused(t *testing.T) {
-	gwExpectStartupFailure(t, "config.oidc_jwt_audience_unset",
-		"PODIUM_IDENTITY_PROVIDER=oidc-jwt",
-		"PODIUM_OAUTH_ISSUER=https://acme.okta.example/oauth2/default",
-		"PODIUM_OAUTH_AUDIENCE=",
-	)
+	for _, audience := range []string{"", " , "} {
+		gwExpectStartupFailure(t, "config.oidc_jwt_audience_unset",
+			"PODIUM_IDENTITY_PROVIDER=oidc-jwt",
+			"PODIUM_OAUTH_ISSUER=https://acme.okta.example/oauth2/default",
+			"PODIUM_OAUTH_AUDIENCE="+audience,
+		)
+	}
 }
 
 // Spec: §6.3.3 — trusted-headers on a multi-tenant registry requires a proxy

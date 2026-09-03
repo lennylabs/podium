@@ -1136,7 +1136,7 @@ func run(ctx context.Context, stop func()) error {
 			// §6.3.2: the verifier validates aud against this registry's
 			// endpoint on every call; refuse to start without it rather than
 			// accept tokens whose audience goes unchecked.
-			if err := injectedTokenAudienceGuard(cfg.identityProvider, cfg.oauthAudience); err != nil {
+			if err := injectedTokenAudienceGuard(cfg.identityProvider, cfg.oauthAudiences); err != nil {
 				return err
 			}
 			// §6.3.2: a verifying registry over an empty key set rejects every
@@ -1150,7 +1150,7 @@ func run(ctx context.Context, stop func()) error {
 			}
 			sort.Strings(issuers)
 			log.Printf("identity provider: injected-session-token trusts runtime issuers %s (from %s)", strings.Join(issuers, ", "), runtimeKeysPath)
-			layerVerify = injectedTokenVerifier(runtimeKeys, cfg.oauthAudience, cfg.idpGroupMapping)
+			layerVerify = injectedTokenVerifier(runtimeKeys, cfg.oauthAudiences, cfg.idpGroupMapping)
 			bootOpts = append(bootOpts, server.WithIdentityVerifier(layerVerify))
 			verifierInstalled = true
 			log.Printf("identity provider: injected-session-token (verifying runtime-signed JWTs)")
@@ -1159,7 +1159,7 @@ func run(ctx context.Context, stop func()) error {
 			// §6.3.3: verify the caller's token against the issuer JWKS, in
 			// either accepted credential location.
 			// Refuse to start without an https issuer and a configured audience.
-			if err := oidcJWTConfigGuard(cfg.identityProvider, cfg.oauthIssuer, cfg.oauthAudience); err != nil {
+			if err := oidcJWTConfigGuard(cfg.identityProvider, cfg.oauthIssuer, cfg.oauthAudiences); err != nil {
 				return err
 			}
 			// §6.3.3: an empty claim name leaves the default in place, so the
@@ -1167,7 +1167,7 @@ func run(ctx context.Context, stop func()) error {
 			// other claims.
 			verifier := identity.NewOIDCVerifier(
 				cfg.oauthIssuer,
-				cfg.oauthAudience,
+				cfg.oauthAudiences,
 				time.Duration(cfg.oauthJWKSCacheTTLSeconds)*time.Second,
 				identity.WithSubjectClaim(cfg.oauthSubjectClaim),
 				identity.WithGroupsClaim(cfg.oauthGroupsClaim),
@@ -1180,11 +1180,16 @@ func run(ctx context.Context, stop func()) error {
 			layerVerify = oidcJWTVerifier(verifier, cfg.oauthTokenHeader, cfg.idpGroupMapping, cfg.webUIAuth)
 			bootOpts = append(bootOpts, server.WithIdentityVerifier(layerVerify))
 			verifierInstalled = true
-			// §6.3.3: the accepted set is the configured issuer plus the
-			// access_token_issuer the discovery document published, which is
-			// known only after Prime and never reaches Settings(). This line is
-			// the operator-visible record of the widened set.
-			log.Printf("identity provider: oidc-jwt (verifying caller tokens against accepted issuers %s)", strings.Join(verifier.AcceptedIssuers(), ", "))
+			// Spec: §6.3.3 — the accepted issuer set is the configured issuer
+			// plus the access_token_issuer the discovery document published,
+			// which is known only after Prime and never reaches Settings(), so
+			// this line is the operator-visible record of the widened set. The
+			// accepted audiences are read from the verifier for the same
+			// reason, and are reported whatever the set's size, because a
+			// size-conditional form would print no audience on every
+			// single-audience registry.
+			log.Printf("identity provider: oidc-jwt (verifying caller tokens against accepted issuers %s and accepted audiences %s)",
+				strings.Join(verifier.AcceptedIssuers(), ", "), strings.Join(verifier.AcceptedAudiences(), ", "))
 			if cfg.oauthSubjectClaim != "" {
 				log.Printf("identity provider: oidc-jwt reads the caller subject from claim %q", cfg.oauthSubjectClaim)
 			}
@@ -1298,13 +1303,13 @@ func run(ctx context.Context, stop func()) error {
 					ClientSecret:          cfg.webUIOAuthClientSecret,
 					RedirectURI:           cfg.webUIRedirectURI,
 					Scopes:                cfg.webUIOAuthScopes,
-					// §6.3.4: the redirect asks the IdP for the registry's
-					// resolved audience, which is the configuration field
-					// LoadConfig filled from PODIUM_OAUTH_AUDIENCE or from
-					// the identity_provider.audience config-file key. Reading
-					// the environment variable here would send an empty
-					// audience on a registry configured through registry.yaml.
-					Audience: cfg.oauthAudience,
+					// §6.3.4: the redirect asks the IdP for the canonical
+					// audience, which is the first entry of the set LoadConfig
+					// resolved from PODIUM_OAUTH_AUDIENCE or from the
+					// identity_provider.audience config-file key. Reading the
+					// environment variable here would send an empty audience
+					// on a registry configured through registry.yaml.
+					Audience: canonicalAudience(cfg.oauthAudiences),
 					Client:   &http.Client{Timeout: cfg.webUIOAuthExchangeTimeout},
 				},
 				TransactionTTL: cfg.webUIAuthTransactionTTL,
@@ -1629,10 +1634,19 @@ type Config struct {
 	// with a registry-managed Ed25519 key (§4.7.9).
 	signMode         string
 	identityProvider string
-	// oauthAudience is the §6.3.2 `aud` claim the injected-session-token
-	// verifier requires (the registry endpoint). Empty disables audience
-	// checking. Sourced from PODIUM_OAUTH_AUDIENCE.
-	oauthAudience string
+	// oauthAudiences is the §6.3.3 accepted-audience set. A token satisfies
+	// the required `aud` check when its claim carries at least one member,
+	// and admission under any entry carries the same effective view, grants,
+	// and audit identity. Both registry-process JWT verifiers read the whole
+	// set: the oidc-jwt verifier over the caller's forwarded token, and the
+	// injected-session-token verifier over the runtime-signed token. The
+	// first entry is canonical and is the audience the registry asks for
+	// when it initiates a flow itself (§6.3.4). A set that resolves to no
+	// entry refuses startup under both providers rather than leaving `aud`
+	// unchecked. Sourced from the comma-separated PODIUM_OAUTH_AUDIENCE or
+	// from the identity_provider.audience config-file key, which accepts a
+	// scalar and a sequence.
+	oauthAudiences []string
 	// oauthAuthorizationEndpoint is the §6.3 / §13.12 identity-provider
 	// authorization endpoint (PODIUM_OAUTH_AUTHORIZATION_ENDPOINT or the
 	// registry.yaml identity_provider.authorization_endpoint). Surfaced via
@@ -1899,7 +1913,7 @@ func (c *Config) Settings() []Setting {
 		{"public_mode", boolStr(c.publicMode), envOrSrc("PODIUM_PUBLIC_MODE", defaultSrc)},
 		{"allow_public_bind", boolStr(c.allowPublicBind), envOrSrc("PODIUM_ALLOW_PUBLIC_BIND", defaultSrc)},
 		{"identity_provider", c.identityProvider, envOrSrc("PODIUM_IDENTITY_PROVIDER", yamlSrc)},
-		{"oauth_audience", c.oauthAudience, envOrSrc("PODIUM_OAUTH_AUDIENCE", defaultSrc)},
+		{"oauth_audience", strings.Join(c.oauthAudiences, ","), envOrSrc("PODIUM_OAUTH_AUDIENCE", yamlSrc)},
 		{"identity_provider.authorization_endpoint", c.oauthAuthorizationEndpoint, envOrSrc("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", yamlSrc)},
 		{"identity_provider.issuer", c.oauthIssuer, envOrSrc("PODIUM_OAUTH_ISSUER", yamlSrc)},
 		{"identity_provider.token_header", c.oauthTokenHeader, envOrSrc("PODIUM_OAUTH_TOKEN_HEADER", yamlSrc)},
@@ -1982,7 +1996,7 @@ func LoadConfig() *Config {
 		webUIOAuthExchangeTimeout:       envPositiveDuration("PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT", defaultWebUIOAuthExchangeTimeout),
 		signMode:                        os.Getenv("PODIUM_SIGN"),
 		identityProvider:                os.Getenv("PODIUM_IDENTITY_PROVIDER"),
-		oauthAudience:                   os.Getenv("PODIUM_OAUTH_AUDIENCE"),
+		oauthAudiences:                  identity.NormalizeAudiences(splitCSVTrim(os.Getenv("PODIUM_OAUTH_AUDIENCE"))),
 		oauthAuthorizationEndpoint:      os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
 		oauthIssuer:                     os.Getenv("PODIUM_OAUTH_ISSUER"),
 		oauthTokenHeader:                os.Getenv("PODIUM_OAUTH_TOKEN_HEADER"),

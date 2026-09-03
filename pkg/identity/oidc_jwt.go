@@ -95,8 +95,14 @@ var oidcAllowedAlgs = []string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES5
 // issuer's jwks_uri under either accepted value.
 type OIDCVerifier struct {
 	issuer   string
-	audience string
 	cacheTTL time.Duration
+
+	// audiences is the accepted-audience set (§6.3.3). A token satisfies the
+	// aud check when its claim carries at least one member, and the first
+	// member is the canonical audience (§6.3.4). It is normalized and copied
+	// at construction, and is read without holding v.mu like subjectClaim and
+	// groupsClaim, because nothing writes it after construction.
+	audiences []string
 
 	// subjectClaim and groupsClaim name the claims the caller's subject and
 	// group membership are read from (§6.3.3). An empty value selects the
@@ -140,8 +146,40 @@ func WithGroupsClaim(name string) OIDCOption {
 	return func(v *OIDCVerifier) { v.groupsClaim = name }
 }
 
+// NormalizeAudiences returns the accepted-audience set formed from in
+// (§6.3.3): each entry is trimmed of surrounding whitespace, blank entries are
+// dropped, duplicates are collapsed keeping the first occurrence, and the
+// remaining order is preserved so the first entry stays canonical (§6.3.4).
+// The result is a fresh slice, so it does not alias the caller's.
+//
+// Dropping blank entries is a security predicate rather than tidiness. The JWT
+// validator rejects a token whose aud is absent, empty, or [""], but for an aud
+// such as ["", "x"] it falls through to a membership test that a blank
+// configured entry would satisfy.
+//
+// The helper is exported because internal/serverboot resolves the same set from
+// the environment and the config file and must apply this rule, and pkg/
+// cannot import internal/.
+func NormalizeAudiences(in []string) []string {
+	out := make([]string, 0, len(in))
+	seen := make(map[string]struct{}, len(in))
+	for _, a := range in {
+		a = strings.TrimSpace(a)
+		if a == "" {
+			continue
+		}
+		if _, dup := seen[a]; dup {
+			continue
+		}
+		seen[a] = struct{}{}
+		out = append(out, a)
+	}
+	return out
+}
+
 // NewOIDCVerifier returns a verifier for issuer that validates the aud claim
-// against audience and caches the issuer JWKS for cacheTTL. A non-positive
+// against the accepted-audience set formed from audiences by
+// NormalizeAudiences, and caches the issuer JWKS for cacheTTL. A non-positive
 // cacheTTL falls back to the §13.12 default of 300 seconds. WithSubjectClaim
 // and WithGroupsClaim name the claims the caller's subject and group
 // membership are read from; without them the verifier reads "sub" and
@@ -149,17 +187,17 @@ func WithGroupsClaim(name string) OIDCOption {
 // token that carries "sub" and not the named claim is rejected. The caller is
 // responsible for the §13.12 config.invalid_issuer_scheme (https) and
 // config.oidc_jwt_audience_unset startup checks; the verifier itself fails
-// closed on an empty audience at request time as a defense in depth.
-func NewOIDCVerifier(issuer, audience string, cacheTTL time.Duration, opts ...OIDCOption) *OIDCVerifier {
+// closed at request time on a set that resolves to no entry.
+func NewOIDCVerifier(issuer string, audiences []string, cacheTTL time.Duration, opts ...OIDCOption) *OIDCVerifier {
 	if cacheTTL <= 0 {
 		cacheTTL = 300 * time.Second
 	}
 	v := &OIDCVerifier{
-		issuer:   strings.TrimRight(issuer, "/"),
-		audience: audience,
-		cacheTTL: cacheTTL,
-		httpc:    &http.Client{Timeout: 10 * time.Second},
-		clock:    time.Now,
+		issuer:    strings.TrimRight(issuer, "/"),
+		audiences: NormalizeAudiences(audiences),
+		cacheTTL:  cacheTTL,
+		httpc:     &http.Client{Timeout: 10 * time.Second},
+		clock:     time.Now,
 	}
 	for _, opt := range opts {
 		opt(v)
@@ -206,10 +244,14 @@ func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 	if !v.issuerAccepted(issuer) {
 		return Identity{}, untrustedToken(issuer, fmt.Sprintf("iss %q does not match the accepted issuers %q", issuer, v.AcceptedIssuers()))
 	}
-	if v.audience == "" {
-		// Defense in depth: the §13.12 config.oidc_jwt_audience_unset startup
-		// guard should already have refused boot. An unverifiable aud would
-		// accept a token issued for any relying party that shares the issuer.
+	if len(v.audiences) == 0 {
+		// Load-bearing rather than defense in depth: jwt.WithAudience over an
+		// empty slice leaves the validator's expected set empty, and the
+		// validator then skips the aud check entirely, so a verifier with no
+		// configured audience would accept a token carrying no aud at all. The
+		// §13.12 config.oidc_jwt_audience_unset startup guard should already
+		// have refused boot; this rejection is what keeps the claim verified if
+		// one ever gets past it.
 		return Identity{}, untrustedToken(issuer, "registry audience is not configured; the required aud claim cannot be verified")
 	}
 
@@ -231,8 +273,12 @@ func (v *OIDCVerifier) Verify(raw string) (Identity, error) {
 	// carry that rule. jwt.Parser.Parse re-decodes and then verifies the same
 	// payload segment ParseUnverified read above, so the claim map the identity
 	// is derived from is the signature-verified payload once Parse returns.
+	// jwt.WithAudience is the disjunctive option: the token is accepted when
+	// its aud claim carries at least one configured audience (§6.3.3). The
+	// conjunctive jwt.WithAllAudiences, which requires every configured value,
+	// is deliberately not used.
 	opts := []jwt.ParserOption{
-		jwt.WithAudience(v.audience),
+		jwt.WithAudience(v.audiences...),
 		jwt.WithExpirationRequired(),
 		jwt.WithValidMethods(oidcAllowedAlgs),
 	}
@@ -285,6 +331,23 @@ func (v *OIDCVerifier) AcceptedIssuers() []string {
 		return []string{v.issuer}
 	}
 	return []string{v.issuer, v.accessTokenIssuer}
+}
+
+// AcceptedAudiences returns a copy of the accepted-audience set (§6.3.3), the
+// canonical audience first. A token is accepted when its aud claim carries at
+// least one of these values.
+func (v *OIDCVerifier) AcceptedAudiences() []string {
+	return append([]string(nil), v.audiences...)
+}
+
+// CanonicalAudience returns the first configured audience (§6.3.4), the value
+// the registry sends when it initiates a flow itself. It is "" when no audience
+// is configured, which the startup guard refuses and Verify rejects.
+func (v *OIDCVerifier) CanonicalAudience() string {
+	if len(v.audiences) == 0 {
+		return ""
+	}
+	return v.audiences[0]
 }
 
 // keyForKID returns the verification key for kid, refreshing the JWKS once on a

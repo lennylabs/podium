@@ -146,10 +146,14 @@ func validClaims(iss, aud string) jwt.MapClaims {
 
 const testAudience = "https://podium.acme.example"
 
+// testAudiences is the single-entry accepted-audience set most cases configure
+// (§6.3.3), with testAudience canonical.
+var testAudiences = []string{testAudience}
+
 func TestOIDCVerifier_ValidTokenMapsClaims(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
-	v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 
 	id, err := v.Verify(idp.sign(t, "key-1", validClaims(idp.issuer(), testAudience)))
 	if err != nil {
@@ -178,7 +182,7 @@ func TestOIDCVerifier_ValidTokenMapsClaims(t *testing.T) {
 func TestOIDCVerifier_Rejections(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
-	v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 
 	expired := validClaims(idp.issuer(), testAudience)
 	expired["exp"] = time.Now().Add(-time.Hour).Unix()
@@ -216,7 +220,7 @@ func TestOIDCVerifier_Rejections(t *testing.T) {
 func TestOIDCVerifier_BadSignatureRejected(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
-	v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 
 	// Sign with a key whose public half is not in the JWKS.
 	other, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -237,7 +241,7 @@ func TestOIDCVerifier_BadSignatureRejected(t *testing.T) {
 func TestOIDCVerifier_RejectsHS256(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
-	v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 
 	// An HS256 token signed with the RSA public modulus as the HMAC secret is
 	// the classic algorithm-confusion attack; the verifier must reject HS*.
@@ -258,7 +262,7 @@ func TestOIDCVerifier_RejectsHS256(t *testing.T) {
 func TestOIDCVerifier_UntrustedTokenCarriesIssuer(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
-	v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 
 	wrongAud := validClaims(idp.issuer(), "https://other.example")
 	_, err := v.Verify(idp.sign(t, "key-1", wrongAud))
@@ -275,7 +279,7 @@ func TestOIDCVerifier_KeyRotationRefreshesJWKS(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
 	// Long TTL: the refresh must be driven by the kid cache-miss, not expiry.
-	v := NewOIDCVerifier(idp.issuer(), testAudience, time.Hour)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, time.Hour)
 
 	// Prime the cache with key-1.
 	if _, err := v.Verify(idp.sign(t, "key-1", validClaims(idp.issuer(), testAudience))); err != nil {
@@ -293,7 +297,7 @@ func TestOIDCVerifier_KeyRotationRefreshesJWKS(t *testing.T) {
 func TestOIDCVerifier_CacheTTLRefetch(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
-	v := NewOIDCVerifier(idp.issuer(), testAudience, time.Minute)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, time.Minute)
 	now := time.Now()
 	v.clock = func() time.Time { return now }
 
@@ -319,7 +323,7 @@ func TestOIDCVerifier_CacheTTLRefetch(t *testing.T) {
 func TestOIDCVerifier_UnreachableIssuerFailsPrime(t *testing.T) {
 	t.Parallel()
 	// Port 1 on loopback is effectively always refused.
-	v := NewOIDCVerifier("http://127.0.0.1:1", testAudience, 300*time.Second)
+	v := NewOIDCVerifier("http://127.0.0.1:1", testAudiences, 300*time.Second)
 	if err := v.Prime(); err == nil {
 		t.Fatal("Prime() = nil, want error for unreachable issuer")
 	}
@@ -333,7 +337,7 @@ func TestOIDCVerifier_KeySetUnavailableIsDistinctSignal(t *testing.T) {
 	// per §6.3.3 "while the key set is unavailable at runtime, verification fails
 	// closed and the request is anonymous".
 	const iss = "http://127.0.0.1:1"
-	v := NewOIDCVerifier(iss, testAudience, 300*time.Second)
+	v := NewOIDCVerifier(iss, testAudiences, 300*time.Second)
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -356,7 +360,7 @@ func TestOIDCVerifier_KeySetUnavailableIsDistinctSignal(t *testing.T) {
 func TestOIDCVerifier_NoKidSingleKey(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
-	v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 
 	// A token with no kid header still verifies when the JWKS has a single key.
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, validClaims(idp.issuer(), testAudience))

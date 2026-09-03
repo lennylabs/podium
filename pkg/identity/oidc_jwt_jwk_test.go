@@ -24,7 +24,7 @@ import (
 func TestOIDCVerifier_UnknownKidRejected(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
-	v := NewOIDCVerifier(idp.issuer(), testAudience, time.Hour)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, time.Hour)
 	// Prime the cache with key-1.
 	if _, err := v.Verify(idp.sign(t, "key-1", validClaims(idp.issuer(), testAudience))); err != nil {
 		t.Fatalf("prime: %v", err)
@@ -154,10 +154,10 @@ func TestECCurve(t *testing.T) {
 func TestNewOIDCVerifier_DefaultCacheTTL(t *testing.T) {
 	t.Parallel()
 	// A non-positive TTL falls back to the §13.12 default of 300 seconds.
-	if v := NewOIDCVerifier("https://issuer.example", "aud", 0); v.cacheTTL != 300*time.Second {
+	if v := NewOIDCVerifier("https://issuer.example", []string{"aud"}, 0); v.cacheTTL != 300*time.Second {
 		t.Errorf("cacheTTL = %v, want 300s", v.cacheTTL)
 	}
-	if v := NewOIDCVerifier("https://issuer.example", "aud", -5); v.cacheTTL != 300*time.Second {
+	if v := NewOIDCVerifier("https://issuer.example", []string{"aud"}, -5); v.cacheTTL != 300*time.Second {
 		t.Errorf("negative TTL: cacheTTL = %v, want 300s", v.cacheTTL)
 	}
 }
@@ -174,15 +174,32 @@ func TestUntrustedTokenError_Message(t *testing.T) {
 	}
 }
 
+// TestOIDCVerifier_AudienceUnsetFailsClosed pins the rejection that keeps the
+// aud claim verified when the configured set resolves to no entry, over both an
+// empty slice and a slice whose entries are all blank. Splatting an empty set
+// into jwt.WithAudience would leave the validator's expected set empty and skip
+// the aud check, so this branch is load-bearing.
+// Spec: §6.3.3
 func TestOIDCVerifier_AudienceUnsetFailsClosed(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
-	// Audience unset: even a well-formed token is rejected, because the required
-	// aud claim cannot be verified.
-	v := NewOIDCVerifier(idp.issuer(), "", 300*time.Second)
-	_, err := v.Verify(idp.sign(t, "key-1", validClaims(idp.issuer(), "anything")))
-	if err == nil || !strings.Contains(err.Error(), "audience is not configured") {
-		t.Fatalf("err = %v, want an audience-not-configured rejection", err)
+	for _, tc := range []struct {
+		name      string
+		audiences []string
+	}{
+		{"nil", nil},
+		{"empty slice", []string{}},
+		{"all blank", []string{"", "   ", "\t"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Even a well-formed token is rejected, because the required aud
+			// claim cannot be verified.
+			v := NewOIDCVerifier(idp.issuer(), tc.audiences, 300*time.Second)
+			_, err := v.Verify(idp.sign(t, "key-1", validClaims(idp.issuer(), "anything")))
+			if err == nil || !strings.Contains(err.Error(), "registry audience is not configured; the required aud claim cannot be verified") {
+				t.Fatalf("err = %v, want an audience-not-configured rejection", err)
+			}
+		})
 	}
 }
 
@@ -221,7 +238,7 @@ func TestOIDCVerifier_PrimeFetchErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(tc.handler)
 			defer srv.Close()
-			v := NewOIDCVerifier(srv.URL, "aud", 300*time.Second)
+			v := NewOIDCVerifier(srv.URL, []string{"aud"}, 300*time.Second)
 			if err := v.Prime(); err == nil {
 				t.Errorf("Prime() = nil error, want an error for %s", tc.name)
 			}

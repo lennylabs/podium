@@ -40,7 +40,7 @@ func sessionCookie(value string) *http.Cookie {
 func TestOIDCJWTVerifier_CookieResolvesLikeTheHeader(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0)
 	mapping, err := identity.ParseIdpGroupMapping("idp-eng=engineering")
 	if err != nil {
 		t.Fatalf("ParseIdpGroupMapping: %v", err)
@@ -78,7 +78,7 @@ func TestOIDCJWTVerifier_CookieResolvesLikeTheHeader(t *testing.T) {
 func TestOIDCJWTVerifier_HeaderWinsOverCookie(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verify := oidcJWTVerifier(identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0), "", nil, true)
+	verify := oidcJWTVerifier(identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0), "", nil, true)
 
 	r := cookieRequest(sessionCookie(idp.sign(t, gwClaims(idp.issuer(), "bob@acme.com", nil))))
 	r.Header.Set("Authorization", "Bearer "+idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", nil)))
@@ -97,7 +97,7 @@ func TestOIDCJWTVerifier_HeaderWinsOverCookie(t *testing.T) {
 func TestOIDCJWTVerifier_ExpiredCookieReportsExpiry(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verify := oidcJWTVerifier(identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0), "", nil, true)
+	verify := oidcJWTVerifier(identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0), "", nil, true)
 
 	claims := gwClaims(idp.issuer(), "alice@acme.com", nil)
 	claims["exp"] = time.Now().Add(-time.Hour).Unix()
@@ -116,7 +116,7 @@ func TestOIDCJWTVerifier_ExpiredCookieReportsExpiry(t *testing.T) {
 func TestOIDCJWTVerifier_CookieIgnoredWhenFlowDisabled(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verify := oidcJWTVerifier(identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0), "", nil, false)
+	verify := oidcJWTVerifier(identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0), "", nil, false)
 
 	id, err := verify(cookieRequest(sessionCookie(idp.sign(t, gwClaims(idp.issuer(), "alice@acme.com", nil)))))
 	if err != nil {
@@ -133,7 +133,7 @@ func TestOIDCJWTVerifier_CookieIgnoredWhenFlowDisabled(t *testing.T) {
 func TestOIDCJWTVerifier_CookieAnonymousWhileJWKSUnavailable(t *testing.T) {
 	t.Parallel()
 	const iss = "http://127.0.0.1:1"
-	verify := oidcJWTVerifier(identity.NewOIDCVerifier(iss, "aud", 0), "", nil, true)
+	verify := oidcJWTVerifier(identity.NewOIDCVerifier(iss, []string{"aud"}, 0), "", nil, true)
 
 	tok := jwt.NewWithClaims(jwt.SigningMethodRS256, jwt.MapClaims{
 		"iss": iss, "aud": "aud", "sub": "alice@acme.com",
@@ -162,7 +162,7 @@ func TestOIDCJWTVerifier_CookieAnonymousWhileJWKSUnavailable(t *testing.T) {
 func TestOIDCJWTVerifier_NoCredentialIsAnonymousWithFlowEnabled(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verify := oidcJWTVerifier(identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0), "", nil, true)
+	verify := oidcJWTVerifier(identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0), "", nil, true)
 	id, err := verify(cookieRequest())
 	if err != nil {
 		t.Fatalf("no credential must be anonymous, got err %v", err)

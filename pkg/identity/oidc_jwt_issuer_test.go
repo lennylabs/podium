@@ -19,7 +19,7 @@ func TestOIDCVerifier_AcceptsDiscoveredAccessTokenIssuer(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
 	idp.setAccessTokenIssuer(adfsTokenIssuer)
-	v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 	if err := v.Prime(); err != nil {
 		t.Fatalf("Prime: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestOIDCVerifier_RejectsUnacceptedIssuer(t *testing.T) {
 			t.Parallel()
 			idp := newTestIdP(t)
 			idp.setAccessTokenIssuer(tc.accessTokenIssuer)
-			v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+			v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 			if err := v.Prime(); err != nil {
 				t.Fatalf("Prime: %v", err)
 			}
@@ -108,7 +108,7 @@ func TestOIDCVerifier_AccessTokenIssuerTrailingSlash(t *testing.T) {
 			t.Parallel()
 			idp := newTestIdP(t)
 			idp.setAccessTokenIssuer(tc.accessTokenIssuer)
-			v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+			v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 			if err := v.Prime(); err != nil {
 				t.Fatalf("Prime: %v", err)
 			}
@@ -125,7 +125,7 @@ func TestOIDCVerifier_AccessTokenIssuerStillRequiresAudience(t *testing.T) {
 	t.Parallel()
 	idp := newTestIdP(t)
 	idp.setAccessTokenIssuer(adfsTokenIssuer)
-	v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 	if err := v.Prime(); err != nil {
 		t.Fatalf("Prime: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestOIDCVerifier_AcceptedIssuers(t *testing.T) {
 		t.Parallel()
 		idp := newTestIdP(t)
 		idp.setAccessTokenIssuer(adfsTokenIssuer)
-		v := NewOIDCVerifier(idp.issuer()+"/", testAudience, 300*time.Second)
+		v := NewOIDCVerifier(idp.issuer()+"/", testAudiences, 300*time.Second)
 		if got, want := v.AcceptedIssuers(), []string{idp.issuer()}; !slices.Equal(got, want) {
 			t.Errorf("AcceptedIssuers() = %v, want %v", got, want)
 		}
@@ -155,7 +155,7 @@ func TestOIDCVerifier_AcceptedIssuers(t *testing.T) {
 		t.Parallel()
 		idp := newTestIdP(t)
 		idp.setAccessTokenIssuer(adfsTokenIssuer + "/")
-		v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+		v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 		if err := v.Prime(); err != nil {
 			t.Fatalf("Prime: %v", err)
 		}
@@ -168,7 +168,7 @@ func TestOIDCVerifier_AcceptedIssuers(t *testing.T) {
 	t.Run("document publishes no access_token_issuer", func(t *testing.T) {
 		t.Parallel()
 		idp := newTestIdP(t)
-		v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second)
+		v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second)
 		if err := v.Prime(); err != nil {
 			t.Fatalf("Prime: %v", err)
 		}
@@ -215,7 +215,7 @@ func TestOIDCVerifier_AccessTokenIssuerEqualsConfiguredIssuer(t *testing.T) {
 			t.Parallel()
 			idp := newTestIdP(t)
 			idp.setAccessTokenIssuer(tc.published(idp.issuer()))
-			v := NewOIDCVerifier(tc.configured(idp.issuer()), testAudience, 300*time.Second)
+			v := NewOIDCVerifier(tc.configured(idp.issuer()), testAudiences, 300*time.Second)
 			if err := v.Prime(); err != nil {
 				t.Fatalf("Prime: %v", err)
 			}
@@ -248,7 +248,7 @@ func TestOIDCVerifier_JWKSRefreshKeepsAccessTokenIssuer(t *testing.T) {
 	idp := newTestIdP(t)
 	idp.setAccessTokenIssuer(adfsTokenIssuer)
 	// Long TTL: the refresh below is driven by the kid cache miss.
-	v := NewOIDCVerifier(idp.issuer(), testAudience, time.Hour)
+	v := NewOIDCVerifier(idp.issuer(), testAudiences, time.Hour)
 	if err := v.Prime(); err != nil {
 		t.Fatalf("Prime: %v", err)
 	}

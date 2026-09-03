@@ -391,11 +391,19 @@ func TestSmallTeam_IdentityProviderUnverifiedFailsStartup(t *testing.T) {
 // audience would go unchecked (a cross-registry token-confusion surface).
 func TestInjectedToken_AudienceUnsetFailsStartup(t *testing.T) {
 	t.Parallel()
-	out := smallteamRawExecFail(t,
-		[]string{"HOME=" + t.TempDir(), "PODIUM_IDENTITY_PROVIDER=injected-session-token"},
-		"serve", "--standalone")
-	if !strings.Contains(out, "config.injected_token_audience_unset") {
-		t.Errorf("expected config.injected_token_audience_unset in output; got:\n%s", out)
+	// The blank-list arm names a set whose every entry is blank. It resolves
+	// to no entry, so it fails the same guard the unset variable fails.
+	for _, audience := range []string{"", " , "} {
+		out := smallteamRawExecFail(t,
+			[]string{
+				"HOME=" + t.TempDir(),
+				"PODIUM_IDENTITY_PROVIDER=injected-session-token",
+				"PODIUM_OAUTH_AUDIENCE=" + audience,
+			},
+			"serve", "--standalone")
+		if !strings.Contains(out, "config.injected_token_audience_unset") {
+			t.Errorf("audience %q: expected config.injected_token_audience_unset in output; got:\n%s", audience, out)
+		}
 	}
 }
 

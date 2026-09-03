@@ -96,7 +96,7 @@ registry:
 
 Every server-side key nests under the top-level `registry:` mapping. A document that starts at `identity_provider:` parses to an empty config and the registry ignores it without reporting an error.
 
-`oidc-jwt` is the registry's side of the flow: it verifies each presented token against the issuer's JWKS and validates the `aud` claim against `audience:`. A CLI, an SDK, or another API client obtains that token by completing the device-code flow the next step configures, and on a registry that enables the browser flow a browser obtains it through the registry's own authorization-code exchange, which the registry returns in the `__Host-podium_session` cookie. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
+`oidc-jwt` is the registry's side of the flow: it verifies each presented token against the issuer's JWKS and requires the token's `aud` claim to carry one of the values configured under `audience:`. A CLI, an SDK, or another API client obtains that token by completing the device-code flow the next step configures, and on a registry that enables the browser flow a browser obtains it through the registry's own authorization-code exchange, which the registry returns in the `__Host-podium_session` cookie. Setting `oauth-device-code` as the registry's own provider stops startup with `config.identity_provider_unverified`.
 
 Entra carries the user principal name in the `preferred_username` claim, which the registry does not read. The registry takes the caller's email from the `email` claim alone, so add `email` under **Token configuration → Add optional claim → Access token** when layer visibility lists callers by email address. The `IdpGroupMapping` adapter resolves the group claim to group names (Option A above). Restart the registry.
 
@@ -112,7 +112,7 @@ podium login --scopes "openid profile email api://podium/Podium.Use"
 
 Set `PODIUM_OAUTH_TOKEN_URL` explicitly. With it unset, `podium login` derives the token endpoint by appending `/token` to the device-authorization URL, which produces `https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/devicecode/token` and the token exchange fails.
 
-Request the API scope from step 3 in `--scopes`. The v2.0 endpoint sets the access token's `aud` from the resource named by the requested scope and ignores the `audience` form parameter that `PODIUM_OAUTH_AUDIENCE` sets, so that variable has no effect against Entra. With the default scope set (`openid profile email groups`) the issued access token is not audienced to `api://podium`, and the registry rejects it on the `aud` check.
+Request the API scope from step 3 in `--scopes`. The v2.0 endpoint sets the access token's `aud` from the resource named by the requested scope and ignores the `audience` form parameter that `PODIUM_OAUTH_AUDIENCE` sets, so that variable has no effect against Entra. With the default scope set (`openid profile email groups`) the issued access token is not audienced to `api://podium`, and the registry rejects it on the `aud` check. Because the requested scope's resource governs `aud`, the registry's `audience:` lists the resource identifiers Entra mints for the scopes the deployment's clients request, and a client that must present a differently-audienced token needs that value listed as well.
 
 The browser device-flow page is hosted at `https://microsoft.com/devicelogin`. After completion, `podium login` prints the `sub`, `email`, and groups.
 

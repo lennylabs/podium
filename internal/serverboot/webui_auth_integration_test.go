@@ -157,10 +157,12 @@ type browserStack struct {
 }
 
 type stackOpts struct {
-	// audience is the registry's resolved audience, which the sign-in
-	// redirect sends. Empty leaves the redirect's audience parameter empty,
-	// which the stub then mints a token for the client identifier instead.
-	audience string
+	// audiences is the registry's resolved accepted-audience set. The whole
+	// set is installed on the verifier, while the redirect sends the
+	// canonical entry alone. Empty leaves the redirect's audience parameter
+	// empty, which the stub then mints a token for the client identifier
+	// instead.
+	audiences []string
 	// browserAuth enables the §6.3.4 flow. When false the authentication
 	// routes are unmounted and the verifier reads no cookie.
 	browserAuth bool
@@ -188,8 +190,8 @@ type stackOpts struct {
 
 func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
 	t.Helper()
-	if opts.audience == "" {
-		opts.audience = gwAudience
+	if len(opts.audiences) == 0 {
+		opts.audiences = []string{gwAudience}
 	}
 	if len(opts.scopes) == 0 {
 		opts.scopes = []string{"openid", bfGroupScope}
@@ -233,7 +235,7 @@ func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
 	if err != nil {
 		t.Fatalf("ParseIdpGroupMapping: %v", err)
 	}
-	verifier := identity.NewOIDCVerifier(idp.issuer(), opts.audience, 0)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), opts.audiences, 0)
 	layerVerify := oidcJWTVerifier(verifier, "", mapping, opts.browserAuth)
 	layerIdentity := layerIdentityResolver(layerVerify)
 	layerCaller := layerCallerResolver(layerVerify)
@@ -259,7 +261,7 @@ func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
 				ClientSecret:          bfClientSecret,
 				RedirectURI:           bfRedirectURI,
 				Scopes:                opts.scopes,
-				Audience:              opts.audience,
+				Audience:              canonicalAudience(opts.audiences),
 				Client:                &http.Client{Timeout: opts.exchangeTimeout},
 			},
 			TransactionTTL: opts.transactionTTL,
@@ -442,6 +444,57 @@ func TestBrowserFlow_AudienceDrivesTheSessionToken(t *testing.T) {
 	}
 	if claims["sub"] == "id-token-subject" {
 		t.Error("the session cookie carries the ID token; it carries the access token")
+	}
+}
+
+// Spec: §6.3.3, §6.3.4 — over an accepted-audience set with more than one
+// entry the registry verifies every entry, while the sign-in redirect asks
+// the IdP for the canonical entry alone. The case pins both directions: the
+// authorization request carries the first entry rather than the joined set or
+// a later entry, and a token minted for the second entry resolves through the
+// same verifier the session token resolves through.
+func TestBrowserFlow_CanonicalAudienceIsSentAndTheSetIsVerified(t *testing.T) {
+	t.Parallel()
+	const second = "https://podium.acme.test"
+	b := newBrowserStack(t, stackOpts{browserAuth: true, audiences: []string{gwAudience, second}})
+
+	tx, code := b.signInLeg(t)
+	if got := b.stub.lastAuthorize.Get("audience"); got != gwAudience {
+		t.Errorf("audience = %q, want the canonical entry %q", got, gwAudience)
+	}
+
+	state, _, _ := strings.Cut(tx.Value, ".")
+	resp := b.do(t, http.MethodGet, server.PathWebUICallback+"?state="+state+"&code="+code, nil, tx)
+	defer resp.Body.Close()
+	session := responseCookie(resp, server.CookieSession)
+	if session == nil {
+		t.Fatal("the callback set no session cookie")
+	}
+	claims := jwt.MapClaims{}
+	if _, _, err := jwt.NewParser().ParseUnverified(session.Value, claims); err != nil {
+		t.Fatalf("parse session token: %v", err)
+	}
+	if claims["aud"] != gwAudience {
+		t.Errorf("session token aud = %v, want the canonical entry", claims["aud"])
+	}
+	read := b.do(t, http.MethodGet, "/v1/load_artifact?id=eng/secret", nil, session)
+	defer read.Body.Close()
+	if read.StatusCode != http.StatusOK {
+		t.Errorf("canonical-audience session read = %d, want 200 (the group-scoped layer)", read.StatusCode)
+	}
+
+	// A token whose aud is the second entry is admitted by the same verifier.
+	// This is what separates the canonical send from a narrowed verifier: a
+	// verifier built over the canonical entry alone rejects it.
+	other := &http.Cookie{Name: server.CookieSession, Value: b.idp.sign(t, jwt.MapClaims{
+		"iss": b.idp.issuer(), "aud": second, "sub": "alice@acme.com",
+		"groups": []any{"idp-eng"},
+		"exp":    time.Now().Add(10 * time.Minute).Unix(),
+	})}
+	secondRead := b.do(t, http.MethodGet, "/v1/load_artifact?id=eng/secret", nil, other)
+	defer secondRead.Body.Close()
+	if secondRead.StatusCode != http.StatusOK {
+		t.Errorf("second-audience read = %d, want 200; the verifier holds the whole set", secondRead.StatusCode)
 	}
 }
 

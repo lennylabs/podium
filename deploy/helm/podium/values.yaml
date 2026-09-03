@@ -58,6 +58,9 @@ config:
   # this file would silently replace a correct secret-supplied endpoint.
   identityProvider:
     type: oidc-jwt
+    # audience reaches the pod as PODIUM_OAUTH_AUDIENCE and accepts a
+    # comma-separated list of audience values the registry answers to. A token
+    # is accepted when its aud claim carries one of them (§6.3.3).
     audience: ""
     issuer: ""
 

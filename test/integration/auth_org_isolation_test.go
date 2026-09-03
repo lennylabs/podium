@@ -50,7 +50,7 @@ const (
 // verifies the bearer against the runtime key registry and carries the
 // verified claims, including org_id, onto layer.Identity. spec: §6.3.1, §6.3.2.
 func orgisoVerifier(reg *identity.RuntimeKeyRegistry) func(*http.Request) (layer.Identity, error) {
-	verify := reg.JWTVerifier(orgisoAudience, nil)
+	verify := reg.JWTVerifier([]string{orgisoAudience}, nil)
 	return func(r *http.Request) (layer.Identity, error) {
 		h := r.Header.Get("Authorization")
 		var raw string

@@ -36,24 +36,25 @@ func TestDefaultBootstrapVisibility_GatewayProvidersArePrivate(t *testing.T) {
 func TestOIDCJWTConfigGuard(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name     string
-		provider string
-		issuer   string
-		audience string
-		wantCode string // "" means no error
+		name      string
+		provider  string
+		issuer    string
+		audiences []string
+		wantCode  string // "" means no error
 	}{
-		{"not oidc-jwt is exempt", "injected-session-token", "", "", ""},
-		{"valid https issuer and audience", "oidc-jwt", "https://acme.okta.com/oauth2/default", "https://podium.acme", ""},
-		{"loopback https permitted", "oidc-jwt", "https://localhost:8443", "https://podium.acme", ""},
-		{"http issuer refused", "oidc-jwt", "http://acme.okta.com", "https://podium.acme", "config.invalid_issuer_scheme"},
-		{"empty issuer refused", "oidc-jwt", "", "https://podium.acme", "config.invalid_issuer_scheme"},
-		{"issuer without host refused", "oidc-jwt", "https://", "https://podium.acme", "config.invalid_issuer_scheme"},
-		{"missing audience refused", "oidc-jwt", "https://acme.okta.com", "", "config.oidc_jwt_audience_unset"},
-		{"blank audience refused", "oidc-jwt", "https://acme.okta.com", "   ", "config.oidc_jwt_audience_unset"},
+		{"not oidc-jwt is exempt", "injected-session-token", "", nil, ""},
+		{"valid https issuer and audience", "oidc-jwt", "https://acme.okta.com/oauth2/default", []string{"https://podium.acme"}, ""},
+		{"several audiences accepted", "oidc-jwt", "https://acme.okta.com/oauth2/default", []string{"https://podium.acme", "https://podium.acme/mcp"}, ""},
+		{"loopback https permitted", "oidc-jwt", "https://localhost:8443", []string{"https://podium.acme"}, ""},
+		{"http issuer refused", "oidc-jwt", "http://acme.okta.com", []string{"https://podium.acme"}, "config.invalid_issuer_scheme"},
+		{"empty issuer refused", "oidc-jwt", "", []string{"https://podium.acme"}, "config.invalid_issuer_scheme"},
+		{"issuer without host refused", "oidc-jwt", "https://", []string{"https://podium.acme"}, "config.invalid_issuer_scheme"},
+		{"missing audience refused", "oidc-jwt", "https://acme.okta.com", nil, "config.oidc_jwt_audience_unset"},
+		{"blank audience refused", "oidc-jwt", "https://acme.okta.com", []string{"   "}, "config.oidc_jwt_audience_unset"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := oidcJWTConfigGuard(tc.provider, tc.issuer, tc.audience)
+			err := oidcJWTConfigGuard(tc.provider, tc.issuer, tc.audiences)
 			if tc.wantCode == "" {
 				if err != nil {
 					t.Fatalf("err = %v, want nil", err)
@@ -123,7 +124,7 @@ func TestTrustedHeadersVerifier(t *testing.T) {
 
 func TestOIDCJWTVerifier_NoTokenIsAnonymous(t *testing.T) {
 	t.Parallel()
-	v := identity.NewOIDCVerifier("https://issuer.example", "aud", 0)
+	v := identity.NewOIDCVerifier("https://issuer.example", []string{"aud"}, 0)
 	verify := oidcJWTVerifier(v, "", nil, false)
 
 	// No Authorization header: anonymous, not a rejection, and no network call.
@@ -142,7 +143,7 @@ func TestOIDCJWTVerifier_KeySetUnavailableIsAnonymous(t *testing.T) {
 	// Unreachable issuer, no cache: a present, parseable token cannot be
 	// verified, and §6.3.3 makes that anonymous rather than a 401.
 	const iss = "http://127.0.0.1:1"
-	v := identity.NewOIDCVerifier(iss, "aud", 0)
+	v := identity.NewOIDCVerifier(iss, []string{"aud"}, 0)
 	verify := oidcJWTVerifier(v, "X-Forwarded-Access-Token", nil, false)
 
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
