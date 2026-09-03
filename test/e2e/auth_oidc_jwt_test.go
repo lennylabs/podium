@@ -134,6 +134,25 @@ func (i *oidcTestIdP) token(t *testing.T, claims jwt.MapClaims) string {
 func gwOIDCServer(t *testing.T, idp *oidcTestIdP, audiences []string, extraEnv ...string) *serverProc {
 	t.Helper()
 	home := t.TempDir()
+	env := append([]string{
+		"HOME=" + home,
+		"PODIUM_CONFIG_FILE=" + gwOIDCConfigFile(t, home, ""),
+		"PODIUM_INGEST_OFFLINE=true",
+		"PODIUM_IDENTITY_PROVIDER=oidc-jwt",
+		"PODIUM_OAUTH_ISSUER=" + idp.srv.URL,
+		"PODIUM_OAUTH_AUDIENCE=" + strings.Join(audiences, ","),
+		"SSL_CERT_FILE=" + idp.caFile,
+	}, extraEnv...)
+	return startServerArgs(t, env, "serve", "--standalone")
+}
+
+// gwOIDCConfigFile writes the registry.yaml the oidc-jwt e2e registries boot
+// on, carrying a public layer and an engineering-group layer, and returns its
+// path. extraBlocks is appended under `registry:` so a caller can add the
+// identity_provider block when the configuration under test is the config-file
+// form rather than the environment form.
+func gwOIDCConfigFile(t *testing.T, home, extraBlocks string) string {
+	t.Helper()
 	pubRoot := writeRegistry(t, map[string]string{"welcome/ARTIFACT.md": contextArtifact("public welcome")})
 	engRoot := writeRegistry(t, map[string]string{"secret/ARTIFACT.md": contextArtifact("engineering secret")})
 	cfg := "" +
@@ -150,21 +169,13 @@ func gwOIDCServer(t *testing.T, idp *oidcTestIdP, audiences []string, extraEnv .
 		"        local:\n" +
 		"          path: " + engRoot + "\n" +
 		"      visibility:\n" +
-		"        groups: [engineering]\n"
+		"        groups: [engineering]\n" +
+		extraBlocks
 	cfgPath := filepath.Join(home, "registry.yaml")
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
-	env := append([]string{
-		"HOME=" + home,
-		"PODIUM_CONFIG_FILE=" + cfgPath,
-		"PODIUM_INGEST_OFFLINE=true",
-		"PODIUM_IDENTITY_PROVIDER=oidc-jwt",
-		"PODIUM_OAUTH_ISSUER=" + idp.srv.URL,
-		"PODIUM_OAUTH_AUDIENCE=" + strings.Join(audiences, ","),
-		"SSL_CERT_FILE=" + idp.caFile,
-	}, extraEnv...)
-	return startServerArgs(t, env, "serve", "--standalone")
+	return cfgPath
 }
 
 // bearer returns the Authorization header map for tok.
@@ -402,5 +413,56 @@ func TestOIDCJWT_AudienceSetVisibility(t *testing.T) {
 	want := "accepted issuers " + idp.srv.URL + " and accepted audiences " + oidcAudience + ", " + oidcSecondAudience
 	if got := srv.log(); !strings.Contains(got, want) {
 		t.Errorf("boot log does not name %q:\n%s", want, got)
+	}
+}
+
+// Spec: §13.12, §6.3.3 — identity_provider.audience written as a YAML sequence
+// boots a registry, and every entry reaches the accepted-audience set the
+// verifier holds. Reading the resolved row back through `config show`
+// establishes that the sequence decodes; only a boot establishes that the
+// registry starts on it, which is the failure the scalar key already had.
+func TestOIDCJWT_AudienceSequenceFromConfigFileBoots(t *testing.T) {
+	requireCustomTrustStore(t)
+	idp := startOIDCTestIdP(t, "")
+	home := t.TempDir()
+	cfgPath := gwOIDCConfigFile(t, home, ""+
+		"  identity_provider:\n"+
+		"    type: oidc-jwt\n"+
+		"    issuer: "+idp.srv.URL+"\n"+
+		"    audience:\n"+
+		"      - "+oidcAudience+"\n"+
+		"      - "+oidcSecondAudience+"\n")
+	// The environment carries no identity settings, so the config file is the
+	// only source of the provider, the issuer, and the audience set.
+	srv := startServerArgs(t, []string{
+		"HOME=" + home,
+		"PODIUM_CONFIG_FILE=" + cfgPath,
+		"PODIUM_INGEST_OFFLINE=true",
+		"PODIUM_IDENTITY_PROVIDER=",
+		"PODIUM_OAUTH_ISSUER=",
+		"PODIUM_OAUTH_AUDIENCE=",
+		"SSL_CERT_FILE=" + idp.caFile,
+	}, "serve", "--standalone")
+
+	member := idp.token(t, jwt.MapClaims{
+		"iss":    idp.srv.URL,
+		"aud":    oidcSecondAudience,
+		"sub":    "alice@acme.com",
+		"groups": []string{"engineering"},
+		"exp":    time.Now().Add(time.Hour).Unix(),
+	})
+	if st, body := gwHeaderGet(t, srv.BaseURL+"/v1/load_artifact?id=secret", bearer(member)); st != 200 {
+		t.Errorf("later-audience member load engineering secret = %d, want 200\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+
+	got := srv.log()
+	want := "accepted issuers " + idp.srv.URL + " and accepted audiences " + oidcAudience + ", " + oidcSecondAudience
+	if !strings.Contains(got, want) {
+		t.Errorf("boot log does not name %q:\n%s", want, got)
+	}
+	// A sequence that reached the guard as no entry would refuse startup, and a
+	// config file dropped on a decode error would boot with no layers at all.
+	if strings.Contains(got, "config.oidc_jwt_audience_unset") || strings.Contains(got, "ignored registry.yaml") {
+		t.Errorf("boot log reports a refused or discarded config file:\n%s", got)
 	}
 }

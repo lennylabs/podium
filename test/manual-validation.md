@@ -2491,8 +2491,12 @@ through verification to resolved visibility.
 - An `aud` value the issued access token carries, for `PODIUM_OAUTH_AUDIENCE`.
 - A second `aud` value the same IdP stamps on a token for the same user, for the
   two-audience steps. A second client or a second API resource on the same
-  tenant supplies one. A tenant that cannot mint a second audience skips steps 9
-  and 10 and records the skip and the reason against this prerequisite.
+  tenant supplies one. The second token is a JWT for the same test user, and it
+  carries the same group claim under the same claim name as the first token, so
+  that step 9 compares two admissions that differ in `aud` alone. A tenant that
+  cannot mint a second audience, and a second client that cannot be configured
+  to emit that group claim under that name, both skip steps 9 and 10 and record
+  the skip and the reason against this prerequisite.
 - An access token that is a JWT the registry can verify, carrying that `aud` and
   a group claim for the test user. Okta issues a JWT from a custom authorization
   server such as `/oauth2/default` and an opaque token from the org server.
@@ -2666,11 +2670,18 @@ with `curl`.
    carrying either one authenticates and resolves the same visibility. Obtain
    the second token by repeating steps 2 to 4 against the second client or
    resource and exporting it as `TOKEN2`, and export the audience it carries as
-   `AUD2`. A tenant that cannot mint a second audience skips this step and step
-   10 and records the skip.
+   `AUD2`. Decode `TOKEN2` with the `claims` helper from step 5 first, and read
+   its `aud`, its subject claim, and its group claim off the printed payload.
+   The two admissions this step compares differ in `aud` alone, so a `TOKEN2`
+   that names a different subject, or that carries no group claim under the name
+   step 7 exported, would make the `deploy` line report the second client's
+   claim configuration rather than the registry's audience handling. A tenant
+   that cannot mint a second audience, and a second token that fails this
+   decode, both skip this step and step 10 and record the skip.
 
    ```bash
    [ -n "$TOKEN2" ] || echo "no second-audience token; skip step 9 and step 10 and record the skip"
+   claims "$TOKEN2"
    kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
    export AUD2=<second audience the IdP stamps on the access token>
    export PODIUM_OAUTH_AUDIENCE="$AUD,$AUD2"
@@ -2720,6 +2731,12 @@ with `curl`.
   header is the only location it accepts a credential in.
 - The tampered request returns `401` with `auth.untrusted_token` and
   `details.token_iss` naming the token's issuer.
+- Step 9's decode of `TOKEN2` prints a payload whose `aud` carries `$AUD2`,
+  whose subject claim matches the one recorded at step 5, and whose group claim
+  carries the test user's membership under the name step 7 exported. A payload
+  that misses any of the three fails the prerequisite for the second token, and
+  the run skips step 9 and step 10 and records the skip rather than reading the
+  loads below as a registry result.
 - Step 9 returns `200` for `handbook` and `200` for `deploy` under both tokens.
   The two tokens carry different `aud` values, and a caller admitted under
   either audience resolves the same visibility. A run that skipped the group
@@ -3933,6 +3950,25 @@ names, which is what the defect was about; the placeholder hostname is not.
    in the configured order, and its provenance column reads `registry.yaml`. A
    scalar `audience:` is one audience verbatim and is never split on a
    separator, so only the sequence form produces two values here.
+
+   Then start a registry on that config, the way step 3 starts one on the
+   scalar block. Reading the resolved row establishes that the sequence parses,
+   and it establishes nothing about whether a registry boots on it, which is the
+   gap this scenario exists to close.
+
+   ```bash
+   podium serve --standalone --no-embeddings --config "$WORK/registry-list.yaml" \
+     --bind 127.0.0.1:8152 > "$WORK/srv-list.log" 2>&1 &
+   SRV_LIST=$!
+   sleep 3
+   curl -fsS http://127.0.0.1:8152/healthz && echo && cat "$WORK/srv-list.log"
+   kill "$SRV_LIST" 2>/dev/null; wait "$SRV_LIST" 2>/dev/null
+   ```
+
+   **Expect.** `/healthz` answers and the log carries no
+   `config.oidc_jwt_audience_unset`, `config.identity_provider_unverified`, or
+   `config.invalid_issuer_scheme`. A registry that exited leaves `curl` failing
+   and the reason on the last line of `$WORK/srv-list.log`.
 
 6. **Negative control, the configuration §13.12 used to carry.** Stop the
    server, then start one on the pre-correction block.
