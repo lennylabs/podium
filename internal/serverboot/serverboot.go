@@ -151,16 +151,6 @@ func smtpNotifierFromEnv() (notification.SMTP, bool) {
 	}, true
 }
 
-// canonicalAudience returns the canonical entry of the accepted-audience set
-// (§6.3.4): the first entry, which is the audience the registry asks for when
-// it initiates a flow itself. A set that resolves to no entry yields "".
-func canonicalAudience(audiences []string) string {
-	if len(audiences) == 0 {
-		return ""
-	}
-	return audiences[0]
-}
-
 // splitCSVTrim splits a comma-separated list, trimming whitespace and
 // dropping empty entries. Returns nil for an empty input.
 func splitCSVTrim(raw string) []string {

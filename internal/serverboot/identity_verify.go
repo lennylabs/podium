@@ -121,6 +121,16 @@ func identityVisibilityGuard(identityProvider string, providerSelected, publicMo
 	return fmt.Errorf("config.identity_provider_unverified: PODIUM_IDENTITY_PROVIDER=%q has no request-time token verifier wired, so the registry would resolve every caller as anonymous-public and never apply per-layer visibility (§2.2, §6.3.1); the registry verifies %s server-side. Set PODIUM_PUBLIC_MODE=true to run an open registry, or select one of those", identityProvider, strings.Join(verifiedProviders, ", "))
 }
 
+// canonicalAudience returns the canonical entry of the accepted-audience set
+// (§6.3.4): the first entry, which is the audience the registry asks for when
+// it initiates a flow itself. A set that resolves to no entry yields "".
+func canonicalAudience(audiences []string) string {
+	if len(audiences) == 0 {
+		return ""
+	}
+	return audiences[0]
+}
+
 // injectedTokenAudienceGuard refuses startup when the injected-session-token
 // provider is selected over an accepted-audience set that resolves to no
 // entry.
