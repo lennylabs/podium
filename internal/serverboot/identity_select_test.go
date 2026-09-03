@@ -78,3 +78,31 @@ func TestIdentityRegistry_UnknownIsError(t *testing.T) {
 		t.Errorf("err = %v, want ErrUnknownProvider", err)
 	}
 }
+
+// Spec: §9.1 — identity.Config.Audiences carries the whole accepted-audience
+// set to the selected provider, in order, so a provider that verifies a
+// §6.3.2 token out of process verifies the audiences the in-process
+// verifiers verify rather than a narrower set.
+func TestSelectIdentityProvider_CarriesTheAudienceSet(t *testing.T) {
+	const id = "acme-audience-capture"
+	var got identity.Config
+	if err := identity.Default.Register(id, func(c identity.Config) (identity.Provider, error) {
+		got = c
+		return acmeIdentity{}, nil
+	}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	audiences := []string{"https://podium.acme.com", " ", "https://registry.acme.com"}
+	if _, err := selectIdentityProvider(&Config{identityProvider: id, oauthAudiences: audiences}); err != nil {
+		t.Fatalf("select: %v", err)
+	}
+	want := []string{"https://podium.acme.com", "https://registry.acme.com"}
+	if len(got.Audiences) != len(want) {
+		t.Fatalf("Audiences = %v, want %v", got.Audiences, want)
+	}
+	for i, a := range want {
+		if got.Audiences[i] != a {
+			t.Errorf("Audiences[%d] = %q, want %q", i, got.Audiences[i], a)
+		}
+	}
+}

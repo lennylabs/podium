@@ -2656,7 +2656,8 @@ with `curl`.
   carries a name other than `groups`, the name is the value step 7 exports in
   `PODIUM_OAUTH_GROUPS_CLAIM`.
 - The startup log carries `identity provider: oidc-jwt (verifying caller
-  tokens against accepted issuers ...)` naming the configured issuer. An IdP
+  tokens against accepted issuers ... and accepted audiences ...)` naming the
+  configured issuer and every configured audience. An IdP
   whose discovery document publishes no `access_token_issuer`, or publishes one
   equal to the configured issuer, leaves the configured issuer as the sole
   accepted value, so the line names one value.
@@ -4234,8 +4235,9 @@ misconfigured:
 
    **Expect.** `/healthz` reports `{"mode":"ready"}` rather than `mode: public`,
    the log line reads `identity provider: oidc-jwt (verifying caller tokens
-   against accepted issuers $ISSUER)`, a second line reads `web UI browser
-   sign-in mounted at /v1/ui/auth/sign-in (§6.3.4)`, and `config show` prints
+   against accepted issuers $ISSUER and accepted audiences
+   $PODIUM_OAUTH_AUDIENCE)`, a second line reads `web UI browser sign-in
+   mounted at /v1/ui/auth/sign-in (§6.3.4)`, and `config show` prints
    `oidc-jwt`. A registry in public mode shows every artifact to everyone and
    would make step 6 pass for the wrong reason. A missing sign-in line means the
    browser flow is off, and S47 through S50 and S55 through S57 cannot run.

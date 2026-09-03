@@ -1180,11 +1180,16 @@ func run(ctx context.Context, stop func()) error {
 			layerVerify = oidcJWTVerifier(verifier, cfg.oauthTokenHeader, cfg.idpGroupMapping, cfg.webUIAuth)
 			bootOpts = append(bootOpts, server.WithIdentityVerifier(layerVerify))
 			verifierInstalled = true
-			// §6.3.3: the accepted set is the configured issuer plus the
-			// access_token_issuer the discovery document published, which is
-			// known only after Prime and never reaches Settings(). This line is
-			// the operator-visible record of the widened set.
-			log.Printf("identity provider: oidc-jwt (verifying caller tokens against accepted issuers %s)", strings.Join(verifier.AcceptedIssuers(), ", "))
+			// Spec: §6.3.3 — the accepted issuer set is the configured issuer
+			// plus the access_token_issuer the discovery document published,
+			// which is known only after Prime and never reaches Settings(), so
+			// this line is the operator-visible record of the widened set. The
+			// accepted audiences are read from the verifier for the same
+			// reason, and are reported whatever the set's size, because a
+			// size-conditional form would print no audience on every
+			// single-audience registry.
+			log.Printf("identity provider: oidc-jwt (verifying caller tokens against accepted issuers %s and accepted audiences %s)",
+				strings.Join(verifier.AcceptedIssuers(), ", "), strings.Join(verifier.AcceptedAudiences(), ", "))
 			if cfg.oauthSubjectClaim != "" {
 				log.Printf("identity provider: oidc-jwt reads the caller subject from claim %q", cfg.oauthSubjectClaim)
 			}

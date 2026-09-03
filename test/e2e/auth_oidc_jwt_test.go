@@ -202,6 +202,11 @@ func TestOIDCJWT_DefaultClaimsVisibility(t *testing.T) {
 	if got := srv.log(); !strings.Contains(got, "accepted issuers "+idp.srv.URL) {
 		t.Errorf("boot log does not name the accepted issuer:\n%s", got)
 	}
+	// Spec: §6.3.3 — the registry names the accepted audiences in its startup
+	// log, on the same provider line and whatever the set's size.
+	if got := srv.log(); !strings.Contains(got, "accepted audiences https://podium.acme.example") {
+		t.Errorf("boot log does not name the accepted audiences:\n%s", got)
+	}
 }
 
 // Spec: §6.3.3 — the AD FS profile end to end: the token's iss is the

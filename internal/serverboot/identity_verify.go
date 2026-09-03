@@ -146,7 +146,7 @@ func canonicalAudience(audiences []string) string {
 // audience is optional for oauth-device-code) are exempt.
 func injectedTokenAudienceGuard(identityProvider string, audiences []string) error {
 	if identityProvider == "injected-session-token" && len(identity.NormalizeAudiences(audiences)) == 0 {
-		return fmt.Errorf("config.injected_token_audience_unset: PODIUM_IDENTITY_PROVIDER=injected-session-token requires PODIUM_OAUTH_AUDIENCE set to this registry's endpoint so the required aud claim is verified on every token (§6.3.2)")
+		return fmt.Errorf("config.injected_token_audience_unset: PODIUM_IDENTITY_PROVIDER=injected-session-token requires PODIUM_OAUTH_AUDIENCE to name at least one audience this registry answers to, so the required aud claim is verified on every token (§6.3.2)")
 	}
 	return nil
 }
