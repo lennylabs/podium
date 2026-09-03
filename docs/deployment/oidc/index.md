@@ -61,7 +61,7 @@ Two mechanisms resolve group membership registry-side, and each guide names the 
 
 ## Common pitfalls (across IdPs)
 
-- **Audience mismatch.** The IdP must issue tokens with `aud` matching the `audience:` configured for the registry. A token whose `aud` does not match is rejected.
+- **Audience mismatch.** The IdP must issue tokens whose `aud` carries one of the values configured under `audience:` for the registry. A token whose `aud` carries none of them is rejected.
 - **Groups claim format.** Some IdPs emit groups as a JSON array of names; others emit IDs. The `IdpGroupMapping` adapter maps raw group values to the group names used in layer visibility.
 - **Browser-mediated flows blocked.** Some corporate networks block the device-code verification URL. Test with a developer on the corporate network before declaring success.
 - **Missing `org_id` on a multi-tenant registry.** A registry started with `PODIUM_MULTI_TENANT=true` selects each request's tenant from the token's verified `org_id` claim. A token without that claim leaves the request on the registry's reserved no-data tenant, so the caller sees an empty catalog and no error. A token whose `org_id` names no provisioned tenant is rejected with `auth.tenant_unknown`. Configure the IdP to emit `org_id` when the registry runs multi-tenant.

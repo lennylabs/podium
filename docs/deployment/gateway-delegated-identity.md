@@ -30,6 +30,9 @@ registry:
     type: oidc-jwt
     issuer: https://acme.okta.com/oauth2/default   # must be https
     audience: https://podium.acme.com
+    # audience:                                # or a list, when one registry answers to several values
+    #   - https://podium.acme.com
+    #   - 8e1f0c3a-podium-cli
     token_header: Authorization   # default; value parsed as "Bearer <token>" for any header name
     jwks_cache_ttl_seconds: 300   # default
     # subject_claim: idsub                       # AD FS; default: sub
@@ -41,11 +44,13 @@ Every server-side key nests under the top-level `registry:` mapping. A document 
 | Setting | Environment override | Default | Notes |
 | --- | --- | --- | --- |
 | `identity_provider.issuer` | `PODIUM_OAUTH_ISSUER` | required | Must use `https`. The registry derives the JWKS from `<issuer>/.well-known/openid-configuration`. |
-| `identity_provider.audience` | `PODIUM_OAUTH_AUDIENCE` | required | The registry validates the token's `aud` against this value. |
+| `identity_provider.audience` | `PODIUM_OAUTH_AUDIENCE` | required | Audience values this registry answers to. A token is accepted when its `aud` claim carries at least one configured value. The config-file key takes a string or a list of strings, and the environment variable takes a comma-separated list. |
 | `identity_provider.token_header` | `PODIUM_OAUTH_TOKEN_HEADER` | `Authorization` | Header carrying the forwarded JWT, parsed as `Bearer <token>` for any header name. |
 | `identity_provider.jwks_cache_ttl_seconds` | `PODIUM_OAUTH_JWKS_CACHE_TTL_SECONDS` | `300` | A `kid` absent from the cached set forces an earlier refresh. |
 | `identity_provider.subject_claim` | `PODIUM_OAUTH_SUBJECT_CLAIM` | `(unset; sub)` | Claim read as the caller's subject. When it is set the registry reads that claim alone and rejects a token that does not carry it with `auth.untrusted_token`. AD FS access tokens carry `idsub` and no `sub`. |
 | `identity_provider.groups_claim` | `PODIUM_OAUTH_GROUPS_CLAIM` | `(unset; groups)` | Claim read for group membership. AD FS issuance rules emit the full claim-type URI (`http://schemas.microsoft.com/ws/2008/06/identity/claims/groups`) unless authored with a short name. Single-value and multi-value forms are both accepted. |
+
+A deployment lists more than one value when the same registry is addressed by more than one audience from one trusted issuer. The OAuth device authorization grant is the case this covers: that request carries `client_id` and `scope` and cannot name a target resource, so an IdP that stamps the client identifier on the resulting access token issues a different `aud` than the same IdP issues for a token exchange that names the registry's API URI. Each listed value is a trust decision the operator makes at startup, and the set never grows at runtime. The audience decides whether a token is verified at all and does not narrow what a caller may do: a caller admitted under any listed value has the same effective view, the same grants, and the same audit identity. A deployment that needs two entrances to one catalog to differ in privilege runs two registries. A listed value that another resource server also accepts, or a client identifier shared across applications, admits every token that issuer mints for it, so list a client identifier only where it is assigned to a single application. A comma is legal in a URI and cannot be written in the environment form, which splits on commas; write such a value in the config file, where a string is one audience verbatim. A client process that shares the registry's environment reads `PODIUM_OAUTH_AUDIENCE` as the one value it asks for and sends the comma-separated list verbatim, so give a co-located client its own `--audience` or its own environment.
 
 The gateway's job: forward the caller's IdP-signed JWT in the configured header as `Bearer <token>`, whether the header is the default `Authorization` or a custom one such as `X-Forwarded-Access-Token`. Stripping client-supplied tokens is unnecessary, because a forged token fails verification.
 

@@ -2146,7 +2146,9 @@ misconfigurations the startup guards cover, naming the config error code rather
 than serving an unverifiable or forgeable registry.
 
 **Covers.** The `config.invalid_issuer_scheme`, `config.oidc_jwt_audience_unset`,
-and `config.trusted_headers_public_bind` startup guards (§6.3.3, §13.10, §13.12).
+and `config.trusted_headers_public_bind` startup guards, including the audience
+guard against a comma-separated list whose every entry is blank (§6.3.3, §13.10,
+§13.12).
 
 **Steps.**
 
@@ -2169,11 +2171,18 @@ and `config.trusted_headers_public_bind` startup guards (§6.3.3, §13.10, §13.
    echo "exit=$?"
    ```
 
-3. `oidc-jwt` without `PODIUM_OAUTH_AUDIENCE` is refused.
+3. `oidc-jwt` without `PODIUM_OAUTH_AUDIENCE` is refused, and so is a list
+   whose every entry is blank. Both runs exit immediately.
 
    ```bash
    PODIUM_IDENTITY_PROVIDER=oidc-jwt \
      PODIUM_OAUTH_ISSUER=https://acme.okta.example/oauth2/default \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8133
+   echo "exit=$?"
+
+   PODIUM_IDENTITY_PROVIDER=oidc-jwt \
+     PODIUM_OAUTH_ISSUER=https://acme.okta.example/oauth2/default \
+     PODIUM_OAUTH_AUDIENCE=" , " \
      podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8133
    echo "exit=$?"
    ```
@@ -2190,7 +2199,11 @@ and `config.trusted_headers_public_bind` startup guards (§6.3.3, §13.10, §13.
 **Expected.**
 
 - Step 2 exits non-zero and prints `config.invalid_issuer_scheme`.
-- Step 3 exits non-zero and prints `config.oidc_jwt_audience_unset`.
+- Step 3 exits non-zero and prints `config.oidc_jwt_audience_unset` on the run
+  with the variable unset.
+- Step 3 exits non-zero and prints `config.oidc_jwt_audience_unset` again on the
+  run with `PODIUM_OAUTH_AUDIENCE=" , "`, because every entry is blank after
+  trimming and the set resolves to no audience.
 - Step 4 exits non-zero and prints `config.trusted_headers_public_bind`, naming
   the non-loopback bind address.
 - Each server refuses to start, so no background process is left to stop.
@@ -2476,6 +2489,10 @@ through verification to resolved visibility.
   resulting access token as `TOKEN` before step 5. When neither grant is
   available, skip the scenario and record the skip and the reason.
 - An `aud` value the issued access token carries, for `PODIUM_OAUTH_AUDIENCE`.
+- A second `aud` value the same IdP stamps on a token for the same user, for the
+  two-audience steps. A second client or a second API resource on the same
+  tenant supplies one. A tenant that cannot mint a second audience skips steps 9
+  and 10 and records the skip and the reason against this prerequisite.
 - An access token that is a JWT the registry can verify, carrying that `aud` and
   a group claim for the test user. Okta issues a JWT from a custom authorization
   server such as `/oauth2/default` and an opaque token from the org server.
@@ -2645,6 +2662,32 @@ with `curl`.
    curl -s -H "Authorization: Bearer ${TOKEN}AA" "$URL/v1/load_artifact?id=handbook"
    ```
 
+9. Restart the registry with both audiences configured and confirm that a token
+   carrying either one authenticates and resolves the same visibility. Obtain
+   the second token by repeating steps 2 to 4 against the second client or
+   resource and exporting it as `TOKEN2`, and export the audience it carries as
+   `AUD2`. A tenant that cannot mint a second audience skips this step and step
+   10 and records the skip.
+
+   ```bash
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   export AUD2=<second audience the IdP stamps on the access token>
+   export PODIUM_OAUTH_AUDIENCE="$AUD,$AUD2"
+   podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8136 > "$WORK/srv2.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8136/healthz
+   for T in "$TOKEN" "$TOKEN2"; do
+     echo "handbook: $(code -H "Authorization: Bearer $T" "$URL/v1/load_artifact?id=handbook")"
+     echo "deploy:   $(code -H "Authorization: Bearer $T" "$URL/v1/load_artifact?id=deploy")"
+   done
+   ```
+
+10. Read the provider line from the two-audience run's startup log.
+
+    ```bash
+    grep "identity provider:" "$WORK/srv2.log"
+    ```
+
 **Expected (baseline part).**
 
 - Step 4 prints a token response carrying `access_token`, and `TOKEN` is
@@ -2676,6 +2719,13 @@ with `curl`.
   header is the only location it accepts a credential in.
 - The tampered request returns `401` with `auth.untrusted_token` and
   `details.token_iss` naming the token's issuer.
+- Step 9 returns `200` for `handbook` and `200` for `deploy` under both tokens.
+  The two tokens carry different `aud` values, and a caller admitted under
+  either audience resolves the same visibility.
+- Step 10 prints a provider line naming both `$AUD` and `$AUD2` among the
+  accepted audiences.
+- A run that could not mint a second audience records the skip in place of the
+  two preceding lines.
 
 **Steps (AD FS profile part).** Skip these steps and record the skip when no AD
 FS farm is available.
@@ -3859,7 +3909,28 @@ names, which is what the defect was about; the placeholder hostname is not.
    `identity_provider.audience` names a sequence, the value column joins the
    accepted audiences with commas.
 
-5. **Negative control, the configuration §13.12 used to carry.** Stop the
+5. **Sequence form.** Rewrite the block with `audience:` as a two-element
+   sequence and read the row again.
+
+   ```bash
+   cat > "$WORK/registry-list.yaml" <<YAML
+   registry:
+     identity_provider:
+       type: oidc-jwt
+       issuer: $ISSUER
+       audience:
+         - $AUD
+         - api://podium
+   YAML
+   PODIUM_CONFIG_FILE="$WORK/registry-list.yaml" podium config show --server | grep -E "oauth_audience"
+   ```
+
+   **Expect.** `oauth_audience` reads `$AUD,api://podium`, joined with a comma
+   in the configured order, and its provenance column reads `registry.yaml`. A
+   scalar `audience:` is one audience verbatim and is never split on a
+   separator, so only the sequence form produces two values here.
+
+6. **Negative control, the configuration §13.12 used to carry.** Stop the
    server, then start one on the pre-correction block.
 
    ```bash
@@ -3880,7 +3951,7 @@ names, which is what the defect was about; the placeholder hostname is not.
    where this configuration also starts has the guard switched off, and step 3's
    success then establishes nothing; record the failure rather than the success.
 
-6. **Negative control, the edit a reader makes when changing the type alone.**
+7. **Negative control, the edit a reader makes when changing the type alone.**
 
    ```bash
    cat > "$WORK/half.yaml" <<YAML
