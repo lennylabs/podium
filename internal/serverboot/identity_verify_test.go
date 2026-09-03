@@ -243,7 +243,7 @@ func TestLayerCallerResolver(t *testing.T) {
 
 	// No credential under oidc-jwt: the anonymous caller and no error, which
 	// keeps a signed-out browser out of the refusal.
-	oidc := layerCallerResolver(oidcJWTVerifier(identity.NewOIDCVerifier("https://issuer.example", "aud", 0), "", nil, false))
+	oidc := layerCallerResolver(oidcJWTVerifier(identity.NewOIDCVerifier("https://issuer.example", []string{"aud"}, 0), "", nil, false))
 	id, err = oidc(anon)
 	if err != nil {
 		t.Fatalf("oidc-jwt with no credential: got err %v, want nil", err)

@@ -85,7 +85,7 @@ func TestOIDCVerifier_ConfiguredClaimNames(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			idp := newTestIdP(t)
-			v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second, tc.opts...)
+			v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second, tc.opts...)
 
 			claims := validClaims(idp.issuer(), testAudience)
 			if tc.mutate != nil {
@@ -132,7 +132,7 @@ func TestOIDCVerifier_ConfiguredSubjectClaimHasNoFallback(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			idp := newTestIdP(t)
-			v := NewOIDCVerifier(idp.issuer(), testAudience, 300*time.Second, WithSubjectClaim(adfsSubjectClaim))
+			v := NewOIDCVerifier(idp.issuer(), testAudiences, 300*time.Second, WithSubjectClaim(adfsSubjectClaim))
 
 			claims := validClaims(idp.issuer(), testAudience)
 			tc.mutate(claims)

@@ -233,7 +233,7 @@ func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
 	if err != nil {
 		t.Fatalf("ParseIdpGroupMapping: %v", err)
 	}
-	verifier := identity.NewOIDCVerifier(idp.issuer(), opts.audience, 0)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), []string{opts.audience}, 0)
 	layerVerify := oidcJWTVerifier(verifier, "", mapping, opts.browserAuth)
 	layerIdentity := layerIdentityResolver(layerVerify)
 	layerCaller := layerCallerResolver(layerVerify)

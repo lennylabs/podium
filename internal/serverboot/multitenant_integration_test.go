@@ -84,7 +84,7 @@ func orgToken(t *testing.T, idp *jwksIdP, sub, org string) string {
 func TestMultiTenant_OIDCJWTRoutesByOrg(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0)
 	ts := multiTenantServer(t, oidcJWTVerifier(verifier, "", nil, false), true)
 
 	acme := bearer(orgToken(t, idp, "alice@acme.com", "acme"))
@@ -116,7 +116,7 @@ func TestMultiTenant_OIDCJWTRoutesByOrg(t *testing.T) {
 func TestMultiTenant_OIDCJWTUnknownOrgRejected(t *testing.T) {
 	t.Parallel()
 	idp := newJWKSIdP(t)
-	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudience, 0)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), gwAudiences, 0)
 	ts := multiTenantServer(t, oidcJWTVerifier(verifier, "", nil, false), true)
 
 	// A verified token whose org_id names no provisioned tenant is rejected with

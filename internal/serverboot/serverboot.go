@@ -1167,7 +1167,7 @@ func run(ctx context.Context, stop func()) error {
 			// other claims.
 			verifier := identity.NewOIDCVerifier(
 				cfg.oauthIssuer,
-				cfg.oauthAudience,
+				[]string{cfg.oauthAudience},
 				time.Duration(cfg.oauthJWKSCacheTTLSeconds)*time.Second,
 				identity.WithSubjectClaim(cfg.oauthSubjectClaim),
 				identity.WithGroupsClaim(cfg.oauthGroupsClaim),

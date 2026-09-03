@@ -123,7 +123,7 @@ func TestTrustedHeadersVerifier(t *testing.T) {
 
 func TestOIDCJWTVerifier_NoTokenIsAnonymous(t *testing.T) {
 	t.Parallel()
-	v := identity.NewOIDCVerifier("https://issuer.example", "aud", 0)
+	v := identity.NewOIDCVerifier("https://issuer.example", []string{"aud"}, 0)
 	verify := oidcJWTVerifier(v, "", nil, false)
 
 	// No Authorization header: anonymous, not a rejection, and no network call.
@@ -142,7 +142,7 @@ func TestOIDCJWTVerifier_KeySetUnavailableIsAnonymous(t *testing.T) {
 	// Unreachable issuer, no cache: a present, parseable token cannot be
 	// verified, and §6.3.3 makes that anonymous rather than a 401.
 	const iss = "http://127.0.0.1:1"
-	v := identity.NewOIDCVerifier(iss, "aud", 0)
+	v := identity.NewOIDCVerifier(iss, []string{"aud"}, 0)
 	verify := oidcJWTVerifier(v, "X-Forwarded-Access-Token", nil, false)
 
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
