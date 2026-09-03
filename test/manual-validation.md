@@ -3938,7 +3938,7 @@ two additions. Before step 3's `podium serve`, create a second realm user
 and name that `sub` as the bootstrap admin:
 
 ```bash
-$KC create users -r master -s username=carol -s enabled=true
+$KC create users -r master -s username=carol -s enabled=true -s email=carol@acme.com
 $KC set-password -r master --username carol --new-password carol
 export CAROL_TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
   -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
@@ -4076,6 +4076,18 @@ misconfigured:
    authorization endpoint on the scope set the browser flow sends by default.
    `full.path=false` makes the claim value `podium-comp` rather than a group
    path, which is the value step 3's group mapping reads.
+
+   Give the realm `admin` user an email address.
+
+   ```bash
+   $KC update users/$ADMIN_UID -r master -s email=alice@acme.com -s emailVerified=true
+   ```
+
+   **Expect.** The command reports no error. The account cluster in the web
+   shell renders the caller's own email where the posture read carries one, and
+   the browser flow already requests the `profile email` scopes, so a realm user
+   with no address exercises only the subject fallback and leaves the email
+   reading unvalidated. S47 step 1 and step 3 read this address.
 
    `kcadm` targets `http://localhost:8080` from inside the container on purpose.
    `--server https://localhost:8443` fails with "Console is not active, but
@@ -4699,8 +4711,9 @@ and record the skip.
    `public_mode: false`, and `browser_auth` reporting `enabled: true` with
    `sign_in_path: /v1/ui/auth/sign-in` and
    `sign_out_path: /v1/ui/auth/sign-out`. There is no `subject` key, because
-   this request carries no credential. The read needs no credential and refuses
-   no request for lack of one. `layer_capabilities` is present and reports
+   this request carries no credential. There is no `email` key for the same
+   reason. The read needs no credential and refuses no request for lack of one.
+   `layer_capabilities` is present and reports
    `manage_any_layer: false`, because this stack configures an identity provider
    and seeds no admin grant, so the caller the read reports on holds no
    tenant-admin role. The object is present on every answer, including this one,
@@ -4708,6 +4721,20 @@ and record the skip.
    registry is serving a build from before the posture read reported
    capabilities, and the panel on that build renders every write control on
    every row.
+
+   Read the same route again with the credential S44's prerequisite 5 minted.
+
+   ```bash
+   curl -sS -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8153/v1/ui/session"; echo
+   ```
+
+   **Expect.** HTTP 200 with `subject` carrying a UUID and `email` carrying
+   `alice@acme.com`. The two carry different values, which is the reading this
+   command exists for: Keycloak issues an opaque UUID as the subject, and the
+   email is the address S44's prerequisite 4 set on the realm `admin` user. An
+   answer carrying `subject` and no `email` means that `$KC update` did not
+   take, or that the token carries no `email` claim because the `email` scope
+   was not granted.
 
 2. Take the anonymous baseline for the group-scoped artifact.
 
@@ -4741,10 +4768,12 @@ and record the skip.
 
    Then the browser leaves the registry for the authorization endpoint,
    returns to `http://127.0.0.1:8153/app/` after the login, and the account
-   cluster stands where the sign-in control was: the top bar carries the
-   caller's own subject instead of a Sign in button, and the sign-out control
-   sits inside the menu that cluster opens. A browser that lands on an
-   `invalid_scope` or `invalid_redirect_uri` error page at Keycloak means
+   cluster stands where the sign-in control was: the top bar carries
+   `alice@acme.com` beside an avatar reading `A`, and the sign-out control sits
+   inside the menu that cluster opens. A top bar carrying the UUID step 1 read
+   as `subject` means the posture read returned no `email`, which is the
+   fallback rather than the reading this step asserts. A browser that lands on
+   an `invalid_scope` or `invalid_redirect_uri` error page at Keycloak means
    prerequisite 4's client scope or redirect URI did not take.
 
 4. Read the group-scoped artifact in the signed-in page. Open the compensation
@@ -4779,7 +4808,7 @@ and record the skip.
    registry-mediated flow exists for, and the page rendering author-controlled
    markdown on the same origin is why.
 
-6. Open the account cluster from the subject in the top bar, press Sign out
+6. Open the account cluster from the email in the top bar, press Sign out
    inside the menu, then reload.
 
    **Expect.** The page returns to the anonymous view: the compensation policy
@@ -5664,8 +5693,8 @@ rm -rf "$WORK"
 the registry will refuse for this caller, and that the registry refuses the same
 registration when it is named directly.
 
-**Covers.** §7.3.1 local-source authorization, §7.3.4 `layer_capabilities`, and
-the §13.10 layer panel.
+**Covers.** §7.3.1 local-source authorization, §7.3.1 admin-only registration
+fields, §7.3.4 `layer_capabilities`, and the §13.10 layer panel.
 
 **Why by hand.** The wrong output is a dialog offering a class and a source the
 registry then refuses, which reads to the operator as a product that lost their
@@ -5701,6 +5730,24 @@ Keycloak or the `mkcert` CA is unavailable, skip and record the skip.
    in the envelope's `details` and no filesystem path anywhere in the body. A
    `201` means the local-source rule is not wired on `register`, which is the
    defect this change closes.
+
+3. Register a public layer from the terminal with the same caller's token.
+
+   ```bash
+   curl -sS -X POST "http://127.0.0.1:8153/v1/layers" \
+     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"id":"s55-public","source_type":"git","repo":"https://git.acme.internal/alice/handbook.git","ref":"main","user_defined":true,"public":true}' \
+     -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** `auth.forbidden` at HTTP 403, with
+   `"constraint": "admin_only_fields"` in the envelope's `details` and a message
+   naming `public`. A `201` means the registry discarded the assertion and
+   registered a layer the caller asked to be public as one visible to the
+   registrant alone, which reports success on a registration that applied none
+   of what was asked. Re-sending the same body without the `public` field
+   answers `201`, which is what keeps the refusal scoped to the asserted field
+   rather than to the registration.
 
 **Cleanup.** Leave the stack running when S56 or S57 follows, and run S44's
 teardown only when this is the last scenario executed.
