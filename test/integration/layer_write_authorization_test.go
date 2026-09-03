@@ -252,6 +252,52 @@ func TestLayerWriteAuthorization_OverAdminGrantTable(t *testing.T) {
 		t.Error("refused registration stored the layer")
 	}
 
+	// Spec: §7.3.1 — the layer-write rule precedes the admin-only
+	// registration fields rule. bob asserts public on a git-source
+	// registration under alice's stored ID, and the refusal is the
+	// layer-write rule's, which carries no details.constraint. alice's layer
+	// keeps its owner and its source.
+	status, body = layerWritePost(t, base, "/v1/layers", map[string]any{
+		"id": "alice-personal", "source_type": "git", "repo": "https://github.com/bob/x.git",
+		"public": true,
+	})
+	if status != http.StatusForbidden {
+		t.Fatalf("bob public re-registration status = %d, want 403: %s", status, body)
+	}
+	if code := layerWriteErrCode(t, body); code != "auth.forbidden" {
+		t.Errorf("bob public re-registration code = %q, want auth.forbidden", code)
+	}
+	if c := layerWriteConstraint(t, body); c != "" {
+		t.Errorf("bob public re-registration details.constraint = %q, want the layer-write refusal", c)
+	}
+	got, err = st.GetLayerConfig(ctx, "t", "alice-personal")
+	if err != nil {
+		t.Fatalf("GetLayerConfig(alice-personal): %v", err)
+	}
+	if got.Owner != "alice@acme.com" || got.LocalPath != userDir {
+		t.Errorf("refused registration rewrote the stored layer: %+v", got)
+	}
+
+	// Spec: §7.3.1 — the local-source rule precedes the admin-only
+	// registration fields rule. The same caller asserts public on a local
+	// registration under an unused ID, and the refusal names local_source.
+	status, body = layerWritePost(t, base, "/v1/layers", map[string]any{
+		"id": "bob-public-local", "source_type": "local", "local_path": fresh,
+		"public": true,
+	})
+	if status != http.StatusForbidden {
+		t.Fatalf("bob public local registration status = %d, want 403: %s", status, body)
+	}
+	if code := layerWriteErrCode(t, body); code != "auth.forbidden" {
+		t.Errorf("bob public local registration code = %q, want auth.forbidden", code)
+	}
+	if c := layerWriteConstraint(t, body); c != "local_source" {
+		t.Errorf("bob public local registration details.constraint = %q, want local_source", c)
+	}
+	if _, err := st.GetLayerConfig(ctx, "t", "bob-public-local"); err == nil {
+		t.Error("refused registration stored the layer")
+	}
+
 	// Spec: §7.3.1 — the same registration by the tenant admin is admitted,
 	// which is the arm the rule keeps open.
 	opsBase := newLayerWriteEndpoint(t, st, ops.id)

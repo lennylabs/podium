@@ -488,6 +488,35 @@ type LayerRegisterRequest struct {
 	RotateWebhookSecret bool `json:"rotate_webhook_secret,omitempty"`
 }
 
+// adminOnlyRegistrationFields reports the §7.3.1 admin-only registration
+// fields the request asserts, in sorted order. A field is asserted by its
+// value rather than by its presence: LayerRegisterRequest decodes into plain
+// string, bool, and []string fields, so an absent key and a zero value are one
+// thing, and the shipped CLI writes body["owner"] unconditionally inside its
+// --user-defined block. An owner naming the caller's own subject asserts
+// nothing, because it names what the class resolution already stores.
+//
+// Spec: §7.3.1
+func adminOnlyRegistrationFields(req LayerRegisterRequest, sub string) []string {
+	var asserted []string
+	if len(req.Groups) > 0 {
+		asserted = append(asserted, "groups")
+	}
+	if req.Organization {
+		asserted = append(asserted, "organization")
+	}
+	if owner := strings.TrimSpace(req.Owner); owner != "" && owner != sub {
+		asserted = append(asserted, "owner")
+	}
+	if req.Public {
+		asserted = append(asserted, "public")
+	}
+	if len(req.Users) > 0 {
+		asserted = append(asserted, "users")
+	}
+	return asserted
+}
+
 // validForcePushPolicy reports whether p is one of the §7.3.1 accepted
 // force-push policy values ("" and "tolerant" both mean tolerant; "strict"
 // rejects a rewritten history).
@@ -805,12 +834,18 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
+	// spec: §7.3.1 — the admin arm decides three things on this path: whether
+	// a registration under an unused ID from a caller with no verified subject
+	// is refused, whether the registration resolves to the admin-defined
+	// class, and whether an asserted admin-only field is refused below.
+	// Evaluate it once so the three read one answer.
+	adminErr := e.authAdmin(r)
 	if exists {
 		if err := e.authorizeLayerWrite(r, stored); err != nil {
 			writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 			return
 		}
-	} else if adminErr := e.authAdmin(r); adminErr != nil {
+	} else if adminErr != nil {
 		if who := e.caller(r); !who.IsAuthenticated || who.Sub == "" {
 			writeError(w, http.StatusForbidden, "auth.forbidden", adminErr.Error())
 			return
@@ -828,11 +863,11 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	caller := e.caller(r)
 	userDefined := req.UserDefined
 	if !userDefined {
-		if err := e.authAdmin(r); err != nil {
+		if adminErr != nil {
 			if caller.IsAuthenticated && caller.Sub != "" {
 				userDefined = true
 			} else {
-				writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
+				writeError(w, http.StatusForbidden, "auth.forbidden", adminErr.Error())
 				return
 			}
 		}
@@ -846,6 +881,20 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// arbitrary read.
 	if !e.authorizeLocalSource(w, r, req.SourceType, req.LocalPath, req.Repo) {
 		return
+	}
+
+	// spec: §7.3.1 — the admin-only registration fields rule. A caller the
+	// admin arm admits has these fields read on the admin-defined arm below;
+	// every other caller has them resolved away, so an assertion is refused
+	// here rather than discarded and answered 201.
+	if adminErr != nil {
+		if asserted := adminOnlyRegistrationFields(req, caller.Sub); len(asserted) > 0 {
+			writeErrorDetails(w, http.StatusForbidden, "auth.forbidden",
+				fmt.Sprintf("the registration fields %s are read on a tenant admin's registration alone; this registration resolves to a layer owned by the caller with visibility users:[<registrant>], so re-send it without them or ask an administrator to run it",
+					strings.Join(asserted, ", ")),
+				map[string]any{"constraint": "admin_only_fields"})
+			return
+		}
 	}
 
 	cfg := store.LayerConfig{

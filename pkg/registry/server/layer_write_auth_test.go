@@ -337,10 +337,12 @@ func TestLayerRegister_TakeoverProduct(t *testing.T) {
 	}
 	bodies := []struct {
 		name  string
-		extra map[string]any
+		extra func(registerCaller) map[string]any
 	}{
 		{name: "id-only"},
-		{name: "asserts-user-defined", extra: map[string]any{"user_defined": true, "owner": "bob"}},
+		{name: "asserts-user-defined", extra: func(c registerCaller) map[string]any {
+			return map[string]any{"user_defined": true, "owner": c.id.Sub}
+		}},
 	}
 
 	for _, c := range callers {
@@ -364,10 +366,16 @@ func TestLayerRegister_TakeoverProduct(t *testing.T) {
 						// A git source naming a network repository, because
 						// the §7.3.1 local-source rule refuses a non-admin
 						// registration that names a filesystem path and this
-						// table asserts the layer-write rule alone.
+						// table asserts the layer-write rule alone. The
+						// asserting body's owner is the posting caller's own
+						// subject, because the §7.3.1 admin-only registration
+						// fields rule refuses an owner naming another subject
+						// and this table asserts the layer-write rule alone.
 						req := map[string]any{"id": "own", "source_type": "git", "repo": "https://github.com/acme/x.git"}
-						for k, v := range b.extra {
-							req[k] = v
+						if b.extra != nil {
+							for k, v := range b.extra(c) {
+								req[k] = v
+							}
 						}
 						resp, body := mustPost(t, base, "/v1/layers", req)
 
@@ -468,7 +476,7 @@ func assertRegisteredOwner(t *testing.T, st store.Store, c registerCaller, idSta
 	if got.UserDefined != userDefined {
 		t.Fatalf("stored UserDefined = %v, want %v", got.UserDefined, userDefined)
 	}
-	want := "bob" // the body-supplied owner on the asserting body
+	want := c.id.Sub // the body-supplied owner on the asserting body is the caller's own subject
 	if !bodyAssertsUserDefined {
 		want = ""
 	}

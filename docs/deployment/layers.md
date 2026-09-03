@@ -81,7 +81,8 @@ Or register them at runtime:
 
 ```bash
 # A git-source layer. The registry returns a webhook URL and HMAC secret
-# to configure on the source repo.
+# to configure on the source repo. Setting a visibility flag requires the
+# tenant admin role.
 podium layer register --id org-defaults \
   --repo git@github.com:acme/podium-org-defaults.git --ref main \
   --organization
@@ -97,7 +98,11 @@ podium layer register --id alice-personal \
   --repo git@github.com:alice/podium-personal.git --ref main --user-defined
 ```
 
-An authenticated caller without the tenant `admin` role registers a user-defined layer whether or not `--user-defined` is passed. The registry resolves the class from the caller's identity.
+An authenticated caller without the tenant `admin` role registers a user-defined layer whether or not `--user-defined` is passed, where the registration asserts none of `owner`, `public`, `organization`, `groups`, and `users`. The registry resolves the class from the caller's identity. A registration that asserts one of those fields is refused with `auth.forbidden` carrying `details.constraint: "admin_only_fields"`, as the section below states.
+
+### Who may set a layer's owner and visibility
+
+`owner`, `public`, `organization`, `groups`, and `users`, which `podium layer register` sets with `--public`, `--organization`, `--group`, and `--user`, and with `--owner` on its `--user-defined` form, are read on a registration by a caller holding the tenant `admin` role alone. Any other caller that asserts one of them is refused with `auth.forbidden` carrying `details.constraint: "admin_only_fields"`, and the refusal names the asserted fields. A field is asserted by its value rather than by its presence, so a false `public` or `organization`, an empty `groups` or `users`, an empty `owner`, and an `owner` naming the caller's own verified subject assert nothing. A deployment with no identity provider configured, and one in public mode, authenticates no caller and admits every caller on the admin arm, so the rule refuses nothing there, and `podium layer register --user-defined --owner` is the mechanism that names a layer's owner on such a deployment. This rule is evaluated after the layer write authorization rule and after the local-source rule below, so a registration the layer write rule refuses keeps its bare `auth.forbidden` with no `details.constraint`, a registration also on the local-source arm keeps `details.constraint: "local_source"`, and the `admin_only_fields` refusal is returned only where neither earlier rule refuses.
 
 ### Who may register a local-source layer
 

@@ -1988,6 +1988,45 @@ describe("the catalog-scope rule", () => {
     expect(banner.textContent).toContain("not signed in");
     expect(banner.querySelector("button")).toBeNull();
     expect(banner.querySelector("a")).toBeNull();
+    // This deployment runs no browser flow, so the shell renders no sign-in
+    // control and the banner does not name one. A reader here has no way to
+    // sign in, and a sentence telling them to would name a control the page
+    // does not carry.
+    expect(banner.textContent).not.toMatch(/sign in for/i);
+  });
+
+  // The same arm on a deployment that does run the browser flow. The shell
+  // renders a sign-in control there, so the banner names it. The two arms are
+  // pinned together because the banner and the control key on different
+  // conditions: the banner on the catalog scope, the control on the posture
+  // read's browser_auth.enabled, so one can render without the other.
+  //
+  // Spec: §13.10
+  it("names signing in only where the deployment offers a sign-in control", async () => {
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({
+          browser_auth: {
+            enabled: true,
+            sign_in_path: "/v1/ui/auth/sign-in",
+            sign_out_path: "/v1/ui/auth/sign-out",
+          },
+        }),
+      },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const banner = await screen.findByTestId("anonymous-banner");
+    expect(banner.textContent).toContain("not signed in");
+    expect(banner.textContent).toMatch(/sign in for a personalized view/i);
+    // Neither arm claims the catalog was filtered. A registry naming a
+    // provider the process does not recognise reaches this arm while serving
+    // its whole catalog to every caller, so a claim about the returned set
+    // would be false there.
+    expect(banner.textContent).not.toMatch(/public content|hidden|withheld/i);
+    // The sentence names the control; it does not become one.
+    expect(banner.querySelector("button")).toBeNull();
+    expect(banner.querySelector("a")).toBeNull();
   });
 
   // The refused arm, ordered ahead of the other two. A registry whose
@@ -15552,6 +15591,48 @@ describe("the shell’s identity cluster", () => {
     expect(controls).toBeTruthy();
     fireEvent.click(trigger);
     expect(screen.getByTestId("account-menu").id).toBe(controls);
+  });
+
+  // A provider-chosen subject is often an opaque identifier, so the cluster
+  // names the reader by the email the posture read carries and draws the
+  // avatar label off that same value. A UUID rendered as the reader's own
+  // identity is the defect this pins, and its "-"-separated parts would
+  // otherwise become the avatar's initials.
+  //
+  // Spec: §7.3.4
+  it("names the reader by the email the posture read carries", async () => {
+    const uuid = "8f14e45f-ceea-467a-9d1a-1c1f1f1d1e1e";
+    stubRegistry({
+      "/v1/ui/session": {
+        body: posture({ subject: uuid, email: "alice@acme.com" }),
+      },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const trigger = await screen.findByTestId("account-trigger");
+    expect(trigger.textContent).toContain("alice@acme.com");
+    expect(trigger.textContent).not.toContain(uuid);
+    expect(trigger.querySelector(".avatar")?.textContent).toBe("A");
+    fireEvent.click(trigger);
+    const menu = screen.getByTestId("account-menu");
+    expect(menu.textContent).toContain("alice@acme.com");
+    expect(menu.textContent).not.toContain(uuid);
+  });
+
+  // Where the identity provider recorded no email, and on an older registry
+  // whose posture read reports no such key, the cluster falls back to the
+  // subject rather than standing empty.
+  //
+  // Spec: §7.3.4
+  it("falls back to the subject where the read carries no email", async () => {
+    const uuid = "8f14e45f-ceea-467a-9d1a-1c1f1f1d1e1e";
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: uuid }) },
+      "/v1/load_domain": { body: emptyDomain },
+    });
+    render(<App />);
+    const trigger = await screen.findByTestId("account-trigger");
+    expect(trigger.textContent).toContain(uuid);
   });
 
   // Every label the shell writes for a reader is sentence case, and the
