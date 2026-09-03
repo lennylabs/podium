@@ -2670,6 +2670,7 @@ with `curl`.
    10 and records the skip.
 
    ```bash
+   [ -n "$TOKEN2" ] || echo "no second-audience token; skip step 9 and step 10 and record the skip"
    kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
    export AUD2=<second audience the IdP stamps on the access token>
    export PODIUM_OAUTH_AUDIENCE="$AUD,$AUD2"
@@ -2721,7 +2722,10 @@ with `curl`.
   `details.token_iss` naming the token's issuer.
 - Step 9 returns `200` for `handbook` and `200` for `deploy` under both tokens.
   The two tokens carry different `aud` values, and a caller admitted under
-  either audience resolves the same visibility.
+  either audience resolves the same visibility. A run that skipped the group
+  claim per the Prerequisites has no `eng-internal` layer, so it asserts that
+  `handbook` returns `200` under both tokens and records the skip in place of
+  the `deploy` line.
 - Step 10 prints a provider line naming both `$AUD` and `$AUD2` among the
   accepted audiences.
 - A run that could not mint a second audience records the skip in place of the
