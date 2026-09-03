@@ -1,7 +1,7 @@
 # Proposal 0017: Refuse the admin-only registration fields a non-admin asserts, and report the caller's own email in the posture read
 
 - Issue: (to be filed)
-- Status: Approved (2026-09-02). Signed off by the maintainer for
+- Status: Applied to spec (2026-09-02). Signed off by the maintainer for
   implementation, whole, with every step in the checklist in scope. Converged
   after 9 adversarial review rounds (21 findings fixed); "Resolved in
   adversarial review" records what each pass changed.
