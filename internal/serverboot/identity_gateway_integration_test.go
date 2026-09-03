@@ -32,6 +32,10 @@ import (
 
 const gwAudience = "https://podium.gateway.test"
 
+// gwSecondAudience is a second value the same registry answers to, the client
+// identifier a device-code token carries (§6.3.3).
+const gwSecondAudience = "podium-gateway-client"
+
 // gwAudiences is the accepted-audience set the gateway-path verifiers are built
 // with (§6.3.3), with gwAudience canonical.
 var gwAudiences = []string{gwAudience}
@@ -208,6 +212,47 @@ func TestGatewayIntegration_OIDCJWTVisibility(t *testing.T) {
 	// Non-member does not.
 	if st, _ := loadArtifact(t, ts.URL, "eng/secret", bearer(bob)); st != 404 {
 		t.Errorf("bob (no group) load eng/secret = %d, want 404", st)
+	}
+}
+
+// TestGatewayIntegration_OIDCJWTAudienceSet drives the §6.3.3 multi-audience
+// deployment through the meta-tool server: one verifier over two audiences,
+// one issuer, and one caller whose tokens differ only in aud. Both are admitted
+// and resolve the same §4.6 group-scoped view, which is the privilege-equality
+// claim: admission under any configured entry carries the same effective view.
+// A token audienced to an unconfigured value is refused with the §6.10
+// auth.untrusted_token envelope.
+// Spec: §6.3.3, §4.6
+func TestGatewayIntegration_OIDCJWTAudienceSet(t *testing.T) {
+	t.Parallel()
+	idp := newJWKSIdP(t)
+	verifier := identity.NewOIDCVerifier(idp.issuer(), []string{gwAudience, gwSecondAudience}, 0)
+	ts := gatewayServer(t, oidcJWTVerifier(verifier, "", nil, false))
+
+	// gwClaims stamps the canonical audience, so the per-token value is set
+	// here rather than in the helper every other case shares.
+	tokenFor := func(aud string) string {
+		c := gwClaims(idp.issuer(), "alice@acme.com", []string{"engineering"})
+		c["aud"] = aud
+		return idp.sign(t, c)
+	}
+
+	for _, aud := range []string{gwAudience, gwSecondAudience} {
+		if st, body := loadArtifact(t, ts.URL, "eng/secret", bearer(tokenFor(aud))); st != 200 {
+			t.Errorf("alice under aud %q load eng/secret = %d, want 200\nbody: %s", aud, st, body)
+		}
+	}
+
+	st, body := loadArtifact(t, ts.URL, "pub/welcome", bearer(tokenFor("https://unconfigured.example")))
+	if st != 401 {
+		t.Fatalf("token under an unconfigured audience = %d, want 401\nbody: %s", st, body)
+	}
+	var env struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(body, &env)
+	if env.Code != "auth.untrusted_token" {
+		t.Errorf("code = %q, want auth.untrusted_token", env.Code)
 	}
 }
 

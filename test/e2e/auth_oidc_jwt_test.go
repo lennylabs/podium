@@ -39,6 +39,13 @@ const adfsGroupClaim = "http://schemas.microsoft.com/ws/2008/06/identity/claims/
 // from. It is compared as a string and never dereferenced.
 const adfsTokenIssuer = "http://adfs.acme.example/adfs/services/trust"
 
+// oidcAudience is the canonical accepted audience the e2e registries boot
+// with, and oidcSecondAudience is a later entry in the §6.3.3 set.
+const (
+	oidcAudience       = "https://podium.acme.example"
+	oidcSecondAudience = "podium-cli-client"
+)
+
 // oidcTestIdP is an https OIDC endpoint serving a discovery document and a
 // JWKS, plus the signing key so a test can mint tokens it accepts.
 type oidcTestIdP struct {
@@ -121,8 +128,10 @@ func (i *oidcTestIdP) token(t *testing.T, claims jwt.MapClaims) string {
 
 // gwOIDCServer starts a standalone registry under oidc-jwt against idp, with a
 // public layer and an engineering-group layer so the test can assert §4.6
-// visibility from the verified token. extraEnv carries the claim-name settings.
-func gwOIDCServer(t *testing.T, idp *oidcTestIdP, extraEnv ...string) *serverProc {
+// visibility from the verified token. audiences is the §6.3.3 accepted set the
+// registry boots with, passed as the comma-separated environment form.
+// extraEnv carries the claim-name settings.
+func gwOIDCServer(t *testing.T, idp *oidcTestIdP, audiences []string, extraEnv ...string) *serverProc {
 	t.Helper()
 	home := t.TempDir()
 	pubRoot := writeRegistry(t, map[string]string{"welcome/ARTIFACT.md": contextArtifact("public welcome")})
@@ -152,7 +161,7 @@ func gwOIDCServer(t *testing.T, idp *oidcTestIdP, extraEnv ...string) *serverPro
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=oidc-jwt",
 		"PODIUM_OAUTH_ISSUER=" + idp.srv.URL,
-		"PODIUM_OAUTH_AUDIENCE=https://podium.acme.example",
+		"PODIUM_OAUTH_AUDIENCE=" + strings.Join(audiences, ","),
 		"SSL_CERT_FILE=" + idp.caFile,
 	}, extraEnv...)
 	return startServerArgs(t, env, "serve", "--standalone")
@@ -171,18 +180,18 @@ func bearer(tok string) map[string]string {
 func TestOIDCJWT_DefaultClaimsVisibility(t *testing.T) {
 	requireCustomTrustStore(t)
 	idp := startOIDCTestIdP(t, "")
-	srv := gwOIDCServer(t, idp)
+	srv := gwOIDCServer(t, idp, []string{oidcAudience})
 
 	member := idp.token(t, jwt.MapClaims{
 		"iss":    idp.srv.URL,
-		"aud":    "https://podium.acme.example",
+		"aud":    oidcAudience,
 		"sub":    "alice@acme.com",
 		"groups": []string{"engineering"},
 		"exp":    time.Now().Add(time.Hour).Unix(),
 	})
 	outsider := idp.token(t, jwt.MapClaims{
 		"iss": idp.srv.URL,
-		"aud": "https://podium.acme.example",
+		"aud": oidcAudience,
 		"sub": "bob@acme.com",
 		"exp": time.Now().Add(time.Hour).Unix(),
 	})
@@ -204,7 +213,7 @@ func TestOIDCJWT_DefaultClaimsVisibility(t *testing.T) {
 	}
 	// Spec: §6.3.3 — the registry names the accepted audiences in its startup
 	// log, on the same provider line and whatever the set's size.
-	if got := srv.log(); !strings.Contains(got, "accepted audiences https://podium.acme.example") {
+	if got := srv.log(); !strings.Contains(got, "accepted audiences "+oidcAudience) {
 		t.Errorf("boot log does not name the accepted audiences:\n%s", got)
 	}
 }
@@ -217,14 +226,14 @@ func TestOIDCJWT_DefaultClaimsVisibility(t *testing.T) {
 func TestOIDCJWT_ADFSProfileVisibility(t *testing.T) {
 	requireCustomTrustStore(t)
 	idp := startOIDCTestIdP(t, adfsTokenIssuer)
-	srv := gwOIDCServer(t, idp,
+	srv := gwOIDCServer(t, idp, []string{oidcAudience},
 		"PODIUM_OAUTH_SUBJECT_CLAIM=idsub",
 		"PODIUM_OAUTH_GROUPS_CLAIM="+adfsGroupClaim,
 	)
 
 	member := idp.token(t, jwt.MapClaims{
 		"iss":          adfsTokenIssuer,
-		"aud":          "https://podium.acme.example",
+		"aud":          oidcAudience,
 		"idsub":        "S-1-5-21-alice",
 		adfsGroupClaim: "engineering", // single group: a string, not an array
 		"exp":          time.Now().Add(time.Hour).Unix(),
@@ -237,7 +246,7 @@ func TestOIDCJWT_ADFSProfileVisibility(t *testing.T) {
 	// The configured issuer stays accepted alongside the second value.
 	viaConfigured := idp.token(t, jwt.MapClaims{
 		"iss":          idp.srv.URL,
-		"aud":          "https://podium.acme.example",
+		"aud":          oidcAudience,
 		"idsub":        "S-1-5-21-alice",
 		adfsGroupClaim: []string{"engineering"},
 		"exp":          time.Now().Add(time.Hour).Unix(),
@@ -253,7 +262,7 @@ func TestOIDCJWT_ADFSProfileVisibility(t *testing.T) {
 	// token gets.
 	foreign := idp.token(t, jwt.MapClaims{
 		"iss":          "https://evil.example/adfs",
-		"aud":          "https://podium.acme.example",
+		"aud":          oidcAudience,
 		"idsub":        "S-1-5-21-mallory",
 		adfsGroupClaim: "engineering",
 		"exp":          time.Now().Add(time.Hour).Unix(),
@@ -267,7 +276,7 @@ func TestOIDCJWT_ADFSProfileVisibility(t *testing.T) {
 	// configured, because the configured claim has no fallback.
 	subOnly := idp.token(t, jwt.MapClaims{
 		"iss":          adfsTokenIssuer,
-		"aud":          "https://podium.acme.example",
+		"aud":          oidcAudience,
 		"sub":          "alice@acme.com",
 		adfsGroupClaim: "engineering",
 		"exp":          time.Now().Add(time.Hour).Unix(),
@@ -301,7 +310,7 @@ func TestOIDCJWT_UnreachableIssuerRefusesBoot(t *testing.T) {
 	gwExpectStartupFailure(t, "refusing to start",
 		"PODIUM_IDENTITY_PROVIDER=oidc-jwt",
 		"PODIUM_OAUTH_ISSUER="+unreachable,
-		"PODIUM_OAUTH_AUDIENCE=https://podium.acme.example",
+		"PODIUM_OAUTH_AUDIENCE="+oidcAudience,
 		"SSL_CERT_FILE="+idp.caFile,
 	)
 }
@@ -321,11 +330,11 @@ func TestOIDCJWT_UnreachableIssuerRefusesBoot(t *testing.T) {
 func TestOIDCJWT_LayerListRefusesUnverifiableCredential(t *testing.T) {
 	requireCustomTrustStore(t)
 	idp := startOIDCTestIdP(t, "")
-	srv := gwOIDCServer(t, idp)
+	srv := gwOIDCServer(t, idp, []string{oidcAudience})
 
 	foreign := idp.token(t, jwt.MapClaims{
 		"iss":    "https://evil.example/adfs",
-		"aud":    "https://podium.acme.example",
+		"aud":    oidcAudience,
 		"sub":    "mallory@evil.example",
 		"groups": []string{"engineering"},
 		"exp":    time.Now().Add(time.Hour).Unix(),
@@ -338,7 +347,7 @@ func TestOIDCJWT_LayerListRefusesUnverifiableCredential(t *testing.T) {
 
 	expired := idp.token(t, jwt.MapClaims{
 		"iss":    idp.srv.URL,
-		"aud":    "https://podium.acme.example",
+		"aud":    oidcAudience,
 		"sub":    "alice@acme.com",
 		"groups": []string{"engineering"},
 		"exp":    time.Now().Add(-time.Hour).Unix(),
@@ -350,5 +359,48 @@ func TestOIDCJWT_LayerListRefusesUnverifiableCredential(t *testing.T) {
 
 	if st, body := gwHeaderGet(t, srv.BaseURL+"/v1/layers", nil); st != 200 {
 		t.Errorf("layer read carrying no credential = %d %s, want 200", st, body)
+	}
+}
+
+// Spec: §6.3.3, §4.6 — the registry boots over an accepted-audience set given
+// as the comma-separated environment form, admits a token stamped with the
+// later entry, and resolves the same group-scoped view the canonical audience
+// resolves. The startup log names both configured audiences beside the
+// accepted issuer, which is the operator-visible record of the set.
+func TestOIDCJWT_AudienceSetVisibility(t *testing.T) {
+	requireCustomTrustStore(t)
+	idp := startOIDCTestIdP(t, "")
+	srv := gwOIDCServer(t, idp, []string{oidcAudience, oidcSecondAudience})
+
+	member := idp.token(t, jwt.MapClaims{
+		"iss":    idp.srv.URL,
+		"aud":    oidcSecondAudience,
+		"sub":    "alice@acme.com",
+		"groups": []string{"engineering"},
+		"exp":    time.Now().Add(time.Hour).Unix(),
+	})
+	if st, body := gwHeaderGet(t, srv.BaseURL+"/v1/load_artifact?id=welcome", bearer(member)); st != 200 {
+		t.Errorf("later-audience member load public welcome = %d, want 200\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+	if st, body := gwHeaderGet(t, srv.BaseURL+"/v1/load_artifact?id=secret", bearer(member)); st != 200 {
+		t.Errorf("later-audience member load engineering secret = %d, want 200\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+
+	// The set is two values rather than any value.
+	foreign := idp.token(t, jwt.MapClaims{
+		"iss":    idp.srv.URL,
+		"aud":    "https://unconfigured.example",
+		"sub":    "alice@acme.com",
+		"groups": []string{"engineering"},
+		"exp":    time.Now().Add(time.Hour).Unix(),
+	})
+	st, body := gwHeaderGet(t, srv.BaseURL+"/v1/layers", bearer(foreign))
+	if st != 401 || !strings.Contains(string(body), "auth.untrusted_token") {
+		t.Errorf("token under an unconfigured audience = %d %s, want 401 auth.untrusted_token", st, body)
+	}
+
+	want := "accepted issuers " + idp.srv.URL + " and accepted audiences " + oidcAudience + ", " + oidcSecondAudience
+	if got := srv.log(); !strings.Contains(got, want) {
+		t.Errorf("boot log does not name %q:\n%s", want, got)
 	}
 }

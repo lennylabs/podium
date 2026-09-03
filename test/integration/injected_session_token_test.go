@@ -23,12 +23,16 @@ import (
 
 const istAudience = "https://podium.acme.com"
 
+// istSecondAudience is a later entry in the §6.3.3 accepted-audience set, the
+// value a second front end stamps on the session tokens it injects.
+const istSecondAudience = "podium-console"
+
 // istVerifier mirrors the serverboot injected-session-token wiring: it
 // extracts the bearer token, verifies it against the runtime key registry,
 // and maps the verified claims (groups and OAuth scopes) onto a
 // layer.Identity. spec: §6.3.1, §6.3.2.
-func istVerifier(reg *identity.RuntimeKeyRegistry) func(*http.Request) (layer.Identity, error) {
-	verify := reg.JWTVerifier([]string{istAudience}, nil)
+func istVerifier(reg *identity.RuntimeKeyRegistry, audiences []string) func(*http.Request) (layer.Identity, error) {
+	verify := reg.JWTVerifier(audiences, nil)
 	return func(r *http.Request) (layer.Identity, error) {
 		h := r.Header.Get("Authorization")
 		var raw string
@@ -84,8 +88,13 @@ func istGet(t *testing.T, url, token string) (int, []byte) {
 
 // istServer boots a SQLite-backed registry behind the §6.3.2 verifier with a
 // public layer holding finance (two versions) and hr artifacts.
-func istServer(t *testing.T) (*httptest.Server, *rsa.PrivateKey) {
+// The audiences the verifier accepts default to the canonical value alone; a
+// caller passes more to exercise the §6.3.3 set.
+func istServer(t *testing.T, audiences ...string) (*httptest.Server, *rsa.PrivateKey) {
 	t.Helper()
+	if len(audiences) == 0 {
+		audiences = []string{istAudience}
+	}
 	ctx := context.Background()
 	st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "registry.db"))
 	if err != nil {
@@ -116,7 +125,7 @@ func istServer(t *testing.T) (*httptest.Server, *rsa.PrivateKey) {
 	if err := keys.Register(identity.RuntimeKey{Issuer: "rt", Algorithm: "RS256", Key: &priv.PublicKey}); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	srv := server.New(reg, server.WithIdentityVerifier(istVerifier(keys)))
+	srv := server.New(reg, server.WithIdentityVerifier(istVerifier(keys, audiences)))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts, priv
@@ -203,5 +212,38 @@ func TestInjectedSessionToken_UntrustedRejectedOverHTTP(t *testing.T) {
 	}
 	if env.Details["runtime_iss"] != "ghost" {
 		t.Errorf("details.runtime_iss = %v, want ghost", env.Details["runtime_iss"])
+	}
+}
+
+// Spec: §6.3.2, §6.3.3 — the injected-session-token verifier reads the whole
+// accepted-audience set rather than the canonical entry alone. A token stamped
+// with a later entry verifies over HTTP and resolves the identity the
+// canonical-audience token resolves, so the two carry the same effective view.
+func TestInjectedSessionToken_AudienceSetOverHTTP(t *testing.T) {
+	t.Parallel()
+	ts, priv := istServer(t, istAudience, istSecondAudience)
+
+	const scopes = "openid podium:read:finance/*"
+	canonical := istSign(t, priv, istClaims(scopes))
+	later := istClaims(scopes)
+	later["aud"] = istSecondAudience
+
+	status, want := istGet(t, ts.URL+"/v1/search_artifacts?query=", canonical)
+	if status != http.StatusOK {
+		t.Fatalf("canonical-audience status = %d, want 200\nbody: %s", status, want)
+	}
+	status, got := istGet(t, ts.URL+"/v1/search_artifacts?query=", istSign(t, priv, later))
+	if status != http.StatusOK {
+		t.Fatalf("later-audience status = %d, want 200\nbody: %s", status, got)
+	}
+	if string(got) != string(want) {
+		t.Errorf("later-audience view differs from the canonical one:\n got: %s\nwant: %s", got, want)
+	}
+
+	// A token stamped with an unconfigured audience is still refused.
+	foreign := istClaims(scopes)
+	foreign["aud"] = "https://unconfigured.example"
+	if status, body := istGet(t, ts.URL+"/v1/search_artifacts?query=", istSign(t, priv, foreign)); status != http.StatusUnauthorized {
+		t.Errorf("unconfigured-audience status = %d, want 401\nbody: %s", status, body)
 	}
 }

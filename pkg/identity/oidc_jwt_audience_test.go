@@ -138,3 +138,38 @@ func TestNormalizeAudiences(t *testing.T) {
 		t.Errorf("NormalizeAudiences = %v, want [b a]", got)
 	}
 }
+
+// TestOIDCVerifier_BlankAudienceEntryIsDropped pins that dropping blank entries
+// during resolution is a security predicate. The JWT library rejects an aud
+// claim that is absent, an empty string, an empty list, or a list holding one
+// empty string, but a claim such as ["", "https://other.example"] falls through
+// to a membership test that matches the token's empty entry against a
+// configured empty one (golang-jwt/jwt/v5 Validator.verifyAudience). A verifier
+// carrying a blank entry therefore admits a token no configured audience names,
+// which is why the case builds one past the constructor and asserts the
+// acceptance. Do not delete it as contrived: it is the reason the constructor's
+// drop exists.
+// Spec: §6.3.3
+func TestOIDCVerifier_BlankAudienceEntryIsDropped(t *testing.T) {
+	t.Parallel()
+	idp := newTestIdP(t)
+	claims := validClaims(idp.issuer(), "")
+	claims["aud"] = []any{"", "https://other.example"}
+	token := idp.sign(t, "key-1", claims)
+
+	admitting := NewOIDCVerifier(idp.issuer(), []string{testAudience}, 300*time.Second)
+	admitting.audiences = []string{""} // past the constructor, as no operator input can produce
+	if _, err := admitting.Verify(token); err != nil {
+		t.Fatalf("a blank configured audience did not admit aud [\"\", ...]: %v; the constructor's drop is what forecloses this", err)
+	}
+
+	v := NewOIDCVerifier(idp.issuer(), []string{"", testAudience}, 300*time.Second)
+	got := v.AcceptedAudiences()
+	if len(got) != 1 || got[0] != testAudience {
+		t.Fatalf("AcceptedAudiences() = %v, want [%s]", got, testAudience)
+	}
+	var ute *UntrustedTokenError
+	if _, err := v.Verify(token); !errors.As(err, &ute) {
+		t.Fatalf("err = %v (%T), want *UntrustedTokenError", err, err)
+	}
+}
