@@ -73,6 +73,43 @@ func TestLayerCLI_LocalRefusedForNonAdmin(t *testing.T) {
 	cliWantExit(t, anon, 0, "uncredentialed local registration against a registry with no identity provider")
 }
 
+// Spec: §7.3.1 — the admin-only registration fields rule through the compiled
+// binary. `podium layer register --public` as a verified non-admin used to
+// exit 0 on a registration that stored none of it, so the operator-facing
+// assertion is the non-zero exit carrying the coded envelope and the
+// constraint that names the rule.
+func TestLayerCLI_AdminOnlyFieldsRefusedForNonAdmin(t *testing.T) {
+	t.Parallel()
+	srv := startAuthServer(t, authServerSpec{
+		BootstrapAdmins: []string{"alice@acme.com"},
+		Layers: []authLayer{{
+			ID:         "seed",
+			Files:      map[string]string{"seed/note/ARTIFACT.md": authContext("seed note")},
+			Visibility: authVisibility{Public: true},
+		}},
+	})
+	// A git source naming a network repository, so the local-source rule,
+	// which precedes this one, refuses neither arm.
+	const repo = "https://github.com/acme/public-layer.git"
+
+	// ---- A verified non-admin is refused, with the rule named ---------------
+	bobToken := srv.token(authIdentity{Sub: "bob@acme.com", Email: "bob@acme.com"})
+	refused := runPodium(t, "", acliEnv(t, srv, bobToken),
+		"layer", "register", "--id", "bob-public", "--repo", repo, "--ref", "main", "--public")
+	cliWantNonZero(t, refused, "non-admin registration asserting --public")
+	for _, want := range []string{"403", "auth.forbidden", "admin_only_fields"} {
+		if !strings.Contains(refused.Stderr, want) {
+			t.Errorf("non-admin registration asserting --public: stderr does not carry %q\nstderr: %s", want, refused.Stderr)
+		}
+	}
+
+	// ---- The bootstrap admin's identical invocation succeeds ----------------
+	adminToken := srv.adminToken("alice@acme.com")
+	admitted := runPodium(t, "", acliEnv(t, srv, adminToken),
+		"layer", "register", "--id", "ops-public", "--repo", repo, "--ref", "main", "--public")
+	cliWantExit(t, admitted, 0, "admin registration asserting --public")
+}
+
 // bootLayerTree writes a local layer directory holding one artifact and one
 // bundled resource symbolically linked to a file outside the root, and returns
 // the layer root and the path of the link. The root's base name is the layer
