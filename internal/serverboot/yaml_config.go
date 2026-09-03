@@ -112,8 +112,9 @@ type audienceList []string
 // trimmed, blanks are dropped, and duplicates collapse keeping the first
 // occurrence. A YAML null decodes to the empty string and is dropped, which
 // leaves the set empty for the startup guard to refuse rather than failing the
-// decode and discarding the config file. Any other node kind is a decode
-// error naming the key.
+// decode and discarding the config file. Any other node is a decode error
+// naming the key and the YAML tag the operator wrote, because that error is
+// reported through the single warning line that discards the config file.
 func (a *audienceList) UnmarshalYAML(node *yaml.Node) error {
 	switch node.Kind {
 	case yaml.ScalarNode:
@@ -131,7 +132,7 @@ func (a *audienceList) UnmarshalYAML(node *yaml.Node) error {
 		*a = identity.NormalizeAudiences(many)
 		return nil
 	default:
-		return fmt.Errorf("identity_provider.audience must be a string or a list of strings, got YAML kind %d", node.Kind)
+		return fmt.Errorf("identity_provider.audience: want a string or a list of strings, got %s", node.Tag)
 	}
 }
 

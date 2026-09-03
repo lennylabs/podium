@@ -59,23 +59,24 @@ func TestLoadConfig_OAuthAudiencesBlankResolvesToNone(t *testing.T) {
 func TestAudienceList_UnmarshalYAML(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name    string
-		doc     string
-		want    []string
-		wantErr bool
+		name     string
+		doc      string
+		want     []string
+		wantErr  bool
+		wantText string
 	}{
-		{"scalar yields one entry", "audience: https://podium.acme.com", []string{"https://podium.acme.com"}, false},
-		{"scalar carrying a comma is one entry", "audience: https://a,https://b", []string{"https://a,https://b"}, false},
-		{"sequence yields one entry per element in order", "audience: [https://b, https://a]", []string{"https://b", "https://a"}, false},
-		{"sequence drops blanks and duplicates", "audience: [\" https://a \", \"\", https://b, https://a]", []string{"https://a", "https://b"}, false},
-		{"empty sequence yields none", "audience: []", nil, false},
-		{"null yields none", "audience:", nil, false},
-		{"mapping is refused", "audience:\n  value: https://a", nil, true},
-		{"unquoted numeric scalar is one entry verbatim", "audience: 5", []string{"5"}, false},
-		{"boolean scalar is one entry verbatim", "audience: true", []string{"true"}, false},
-		{"quoted numeric scalar is one entry", "audience: \"5\"", []string{"5"}, false},
-		{"explicit null yields none", "audience: null", nil, false},
-		{"sequence of mappings is refused", "audience:\n  - value: https://a", nil, true},
+		{"scalar yields one entry", "audience: https://podium.acme.com", []string{"https://podium.acme.com"}, false, ""},
+		{"scalar carrying a comma is one entry", "audience: https://a,https://b", []string{"https://a,https://b"}, false, ""},
+		{"sequence yields one entry per element in order", "audience: [https://b, https://a]", []string{"https://b", "https://a"}, false, ""},
+		{"sequence drops blanks and duplicates", "audience: [\" https://a \", \"\", https://b, https://a]", []string{"https://a", "https://b"}, false, ""},
+		{"empty sequence yields none", "audience: []", nil, false, ""},
+		{"null yields none", "audience:", nil, false, ""},
+		{"mapping is refused", "audience:\n  value: https://a", nil, true, "got !!map"},
+		{"unquoted numeric scalar is one entry verbatim", "audience: 5", []string{"5"}, false, ""},
+		{"boolean scalar is one entry verbatim", "audience: true", []string{"true"}, false, ""},
+		{"quoted numeric scalar is one entry", "audience: \"5\"", []string{"5"}, false, ""},
+		{"explicit null yields none", "audience: null", nil, false, ""},
+		{"sequence of mappings is refused", "audience:\n  - value: https://a", nil, true, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,6 +90,9 @@ func TestAudienceList_UnmarshalYAML(t *testing.T) {
 				}
 				if !strings.Contains(err.Error(), "identity_provider.audience") {
 					t.Errorf("error should name the key, got %v", err)
+				}
+				if tc.wantText != "" && !strings.Contains(err.Error(), tc.wantText) {
+					t.Errorf("error should name the written form %q, got %v", tc.wantText, err)
 				}
 				return
 			}
