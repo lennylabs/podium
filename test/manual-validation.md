@@ -3853,10 +3853,10 @@ names, which is what the defect was about; the placeholder hostname is not.
    prints as `identity_provider` rather than `identity_provider.type`, so a
    literal grep for the latter finds nothing.
 
-   The provenance column reads `default` for `oauth_audience` even when the
-   value comes from the config file, while `identity_provider` and
-   `identity_provider.issuer` on the same run read `registry.yaml`. The value
-   itself does track the file. Read the value rather than the provenance.
+   The provenance column reads `registry.yaml` for `oauth_audience` on this
+   run, matching `identity_provider` and `identity_provider.issuer`. When
+   `identity_provider.audience` names a sequence, the value column joins the
+   accepted audiences with commas.
 
 5. **Negative control, the configuration §13.12 used to carry.** Stop the
    server, then start one on the pre-correction block.

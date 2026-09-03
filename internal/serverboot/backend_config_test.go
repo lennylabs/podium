@@ -110,8 +110,8 @@ func TestReadYAMLConfig_SpecExampleNestedBlock(t *testing.T) {
 		t.Errorf("vectorInferenceModel = %q, want multilingual-e5-large", c.vectorInferenceModel)
 	}
 	if c.identityProvider != "oidc-jwt" || c.oauthIssuer != "https://acme.okta.com/oauth2/default" ||
-		c.oauthAudience != "https://podium.acme.com" {
-		t.Errorf("identity = {%q issuer=%q aud=%q}", c.identityProvider, c.oauthIssuer, c.oauthAudience)
+		strings.Join(c.oauthAudiences, ",") != "https://podium.acme.com" {
+		t.Errorf("identity = {%q issuer=%q aud=%q}", c.identityProvider, c.oauthIssuer, strings.Join(c.oauthAudiences, ","))
 	}
 	// the discovery block under registry: still reaches the defaults.
 	if c.discoveryDefaults().NotableCount != 9 {

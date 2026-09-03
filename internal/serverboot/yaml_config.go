@@ -9,6 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/lennylabs/podium/pkg/audit"
+	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 )
 
@@ -80,15 +81,54 @@ type yamlTenant struct {
 // an object keyed by `type` plus the provider-specific keys below, so a scalar
 // does not unmarshal here.
 type yamlIdentityCfg struct {
-	Type                  string `yaml:"type,omitempty"`
-	Audience              string `yaml:"audience,omitempty"`
-	AuthorizationEndpoint string `yaml:"authorization_endpoint,omitempty"`
+	Type                  string       `yaml:"type,omitempty"`
+	Audience              audienceList `yaml:"audience,omitempty"`
+	AuthorizationEndpoint string       `yaml:"authorization_endpoint,omitempty"`
 	// §6.3.3 / §13.12 oidc-jwt keys.
 	Issuer              string `yaml:"issuer,omitempty"`
 	TokenHeader         string `yaml:"token_header,omitempty"`
 	SubjectClaim        string `yaml:"subject_claim,omitempty"`
 	GroupsClaim         string `yaml:"groups_claim,omitempty"`
 	JWKSCacheTTLSeconds int    `yaml:"jwks_cache_ttl_seconds,omitempty"`
+}
+
+// audienceList is the §13.12 identity_provider.audience value, resolved into
+// the §6.3.3 accepted-audience set. The key accepts a scalar naming one
+// audience and a sequence naming several.
+//
+// The custom decoder is required rather than stylistic. A plain []string field
+// rejects the scalar form with a type error, readYAMLConfig wraps it, and
+// LoadConfig responds to that error by logging one warning line and skipping
+// the whole overlay, so every registry whose registry.yaml writes
+// `audience: https://podium.acme.com` would boot with its entire config file
+// discarded.
+type audienceList []string
+
+// UnmarshalYAML decodes identity_provider.audience from a scalar or a
+// sequence. A scalar is one audience verbatim and is never split on a
+// separator, because the comma-separated form belongs to
+// PODIUM_OAUTH_AUDIENCE alone. A sequence contributes one entry per element.
+// Both arms normalize through identity.NormalizeAudiences, so entries are
+// trimmed, blanks are dropped, and duplicates collapse keeping the first
+// occurrence. The scalar arm reads the node value, so a YAML null resolves to
+// the empty string and is dropped, which leaves the set empty for the startup
+// guard to refuse rather than failing the decode and discarding the config
+// file.
+func (a *audienceList) UnmarshalYAML(node *yaml.Node) error {
+	switch node.Kind {
+	case yaml.ScalarNode:
+		*a = identity.NormalizeAudiences([]string{node.Value})
+		return nil
+	case yaml.SequenceNode:
+		var many []string
+		if err := node.Decode(&many); err != nil {
+			return fmt.Errorf("identity_provider.audience: %w", err)
+		}
+		*a = identity.NormalizeAudiences(many)
+		return nil
+	default:
+		return fmt.Errorf("identity_provider.audience must be a string or a list of strings, got YAML kind %d", node.Kind)
+	}
 }
 
 // yamlStoreCfg mirrors the §13.12 `store:` block. The DSN key is `dsn`
@@ -285,8 +325,8 @@ func applyYAML(c *Config, y *yamlConfig) {
 	if c.identityProvider == "" && y.Identity.Type != "" {
 		c.identityProvider = y.Identity.Type
 	}
-	if c.oauthAudience == "" && y.Identity.Audience != "" {
-		c.oauthAudience = y.Identity.Audience
+	if len(c.oauthAudiences) == 0 && len(y.Identity.Audience) > 0 {
+		c.oauthAudiences = y.Identity.Audience
 	}
 	if c.oauthAuthorizationEndpoint == "" && y.Identity.AuthorizationEndpoint != "" {
 		c.oauthAuthorizationEndpoint = y.Identity.AuthorizationEndpoint
