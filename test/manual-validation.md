@@ -4317,14 +4317,17 @@ probe configuration, and `config.identity_provider_unverified` (§6.3.3) reached
 through a `helm install` rather than through a local process.
 
 **Why by hand.** `test/chart/chart_test.go` reads `values.yaml` and the template
-files with `os.ReadFile` and `yaml.Unmarshal`. It never invokes `helm`, so
-nothing renders the chart and nothing installs it. It pins that the values are
+files with `os.ReadFile` and `yaml.Unmarshal`, and pins that the values are
 internally consistent, which is what the three simultaneous defects that
-prompted it needed. It cannot see a chart that renders valid YAML and still
-produces a pod that never becomes ready: a probe path that does not answer, a
-manifest the API server rejects, a container that cannot write where its
-configuration points, or an image reference that does not resolve. Each of those
-appears only when a cluster runs the chart.
+prompted it needed. `test/chart/render_test.go` runs `helm template` and asserts
+what the manifests contain, which covers the object-store volume pairing, the
+runtime-keys path, the name derivation for the bundled database, and the keys a
+default install must leave to the secret. Neither installs the chart. They
+cannot see a chart that renders valid YAML and still produces a pod that never
+becomes ready: a probe path that does not answer, a manifest the API server
+rejects, a container that cannot write where its configuration points, or an
+image reference that does not resolve. Each of those appears only when a cluster
+runs the chart.
 
 **Prerequisites.** `helm`, `kubectl`, `kind`, and a working Docker daemon. When
 any is absent, skip and record the skip.

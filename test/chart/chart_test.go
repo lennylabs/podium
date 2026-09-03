@@ -116,9 +116,6 @@ func TestChart_EveryConfigValueIsRenderedOrDeclaredSecretSupplied(t *testing.T) 
 	secretSupplied := map[string]bool{
 		"endpoint":                true,
 		"store.dsn":               true,
-		"objectStore.bucket":      true,
-		"objectStore.region":      true,
-		"objectStore.endpoint":    true,
 		"embeddingProvider.model": true,
 	}
 
@@ -269,5 +266,138 @@ func TestChart_IdentityBlockNamesTheKeysItsProviderReads(t *testing.T) {
 		if v, _ := idp[k].(string); v != "" {
 			t.Errorf("config.identityProvider.%s defaults to %q; a non-empty default overrides a secret-supplied value through envFrom precedence and would replace a correct endpoint with a placeholder", k, v)
 		}
+	}
+}
+
+// deploymentSource is the deployment template read as text. The wiring below
+// is asserted on the source rather than on rendered output because the
+// properties that matter are orderings and guards, which survive into every
+// render and which `helm template` would only exercise for the value set the
+// test happened to pick.
+func deploymentSource(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(chartDir, "templates", "deployment.yaml"))
+	if err != nil {
+		t.Fatalf("read deployment.yaml: %v", err)
+	}
+	return string(raw)
+}
+
+// The bundled Postgres renders a StatefulSet and a Service, and the registry
+// reaches it only if the deployment also carries a DSN naming that service.
+// Rendering the database without the connection produced a chart where
+// `postgresql.enabled=true` started a database nothing connected to, and the
+// operator still had to hand-write a DSN embedding the password they had
+// already given the StatefulSet.
+//
+// The orphan checks above cannot see this: they ask whether a values key is
+// referenced by some template, and `postgresql` is referenced by its own.
+//
+// Spec: §13.12
+func TestChart_BundledPostgresIsWiredToTheRegistry(t *testing.T) {
+	t.Parallel()
+	src := deploymentSource(t)
+
+	dsn := strings.Index(src, "- name: PODIUM_POSTGRES_DSN")
+	if dsn < 0 {
+		t.Fatal("deployment.yaml sets no PODIUM_POSTGRES_DSN; enabling the bundled Postgres starts a database the registry never connects to")
+	}
+	// The DSN names the bundled service through the chart's own helper rather
+	// than a literal, so renaming the release cannot leave it pointing at a
+	// service that no longer exists.
+	if !strings.Contains(valueLineAfter(t, src, "- name: PODIUM_POSTGRES_DSN"), "podium.pgFullname") {
+		t.Error("the DSN does not name the bundled service through podium.pgFullname")
+	}
+
+	// A chart cannot read a secret's value, so the password reaches the DSN
+	// through the kubelet's $(VAR) expansion. That expansion resolves only
+	// variables defined earlier in the same container's env list, so the
+	// binding must precede the DSN. Reversing them yields a DSN carrying the
+	// literal string rather than the password, which renders and deploys and
+	// fails at connect time.
+	pw := strings.Index(src, "- name: PODIUM_PG_PASSWORD")
+	if pw < 0 {
+		t.Fatal("deployment.yaml binds no PODIUM_PG_PASSWORD for the DSN to expand")
+	}
+	if pw > dsn {
+		t.Error("PODIUM_PG_PASSWORD is defined after PODIUM_POSTGRES_DSN; $(VAR) expands only from an earlier entry, so the DSN would carry the literal variable name")
+	}
+	// Every assertion below reads the DSN's own value line rather than the
+	// file, because the prose above the entry names the same identifiers it
+	// does and would otherwise decide the result.
+	dsnValue := valueLineAfter(t, src, "- name: PODIUM_POSTGRES_DSN")
+	if !strings.Contains(dsnValue, "$(PODIUM_PG_PASSWORD)") {
+		t.Error("the DSN does not expand PODIUM_PG_PASSWORD, so it carries no password")
+	}
+
+	// The expansion substitutes the password literally, so the DSN takes
+	// lib/pq's keyword form rather than the postgres:// URL the driver also
+	// accepts. A URL carries the password in userinfo, where / ? # % and a
+	// space have to be percent-encoded; `openssl rand -base64` emits / often
+	// enough that the URL form fails on an ordinary generated password, and
+	// lib/pq reports it as an invalid port rather than as a password problem.
+	if strings.Contains(dsnValue, "postgres://") {
+		t.Error("the DSN is built as a postgres:// URL; the expanded password is not percent-encoded, so a password holding / ? # % or a space breaks it at connect time")
+	}
+	if !strings.Contains(dsnValue, "password='$(PODIUM_PG_PASSWORD)'") {
+		t.Error("the expanded password is not single-quoted in the keyword DSN, so a password holding a space is truncated")
+	}
+}
+
+// valueLineAfter returns the `value:` line belonging to the env entry that
+// marker names, so an assertion reads what the template emits rather than any
+// comment that happens to mention the same identifier.
+func valueLineAfter(t *testing.T, src, marker string) string {
+	t.Helper()
+	at := strings.Index(src, marker)
+	if at < 0 {
+		t.Fatalf("deployment.yaml has no %q entry", marker)
+	}
+	for _, line := range strings.Split(src[at:], "\n")[1:] {
+		if strings.Contains(line, "value:") {
+			return line
+		}
+		if strings.Contains(line, "- name:") {
+			break
+		}
+	}
+	t.Fatalf("the %q entry carries no value: line", marker)
+	return ""
+}
+
+// The wiring is guarded, so a deployment that runs against an external
+// database is unaffected by it. Without the guard every install would carry a
+// DSN naming a service the release does not create, and because env wins over
+// envFrom on the same key it would silently override the DSN an operator
+// supplied through existingSecret.
+//
+// Spec: §13.12
+func TestChart_BundledPostgresWiringIsGuarded(t *testing.T) {
+	t.Parallel()
+	src := deploymentSource(t)
+
+	guard := strings.Index(src, "if .Values.postgresql.enabled")
+	if guard < 0 {
+		t.Fatal("the bundled-Postgres env block carries no postgresql.enabled guard")
+	}
+	dsn := strings.Index(src, "- name: PODIUM_POSTGRES_DSN")
+	if dsn < guard {
+		t.Error("PODIUM_POSTGRES_DSN is set before the postgresql.enabled guard opens, so an external-database deployment would carry it too")
+	}
+	// The guard has to close before the entries that follow it. An unbounded
+	// search for an end marker proves nothing, because a valid template always
+	// has one somewhere later; the guard must close ahead of the next
+	// unconditional variable, or it swallows the rest of the env block.
+	rest := src[dsn:]
+	end := strings.Index(rest, "{{- end }}")
+	if end < 0 {
+		t.Fatal("the guard opened around the DSN never closes")
+	}
+	next := strings.Index(rest, "- name: PODIUM_BIND")
+	if next < 0 {
+		t.Fatal("PODIUM_BIND is not set after the bundled-Postgres block")
+	}
+	if end > next {
+		t.Error("the postgresql.enabled guard closes after PODIUM_BIND, so an external-database install renders those entries conditionally and loses them")
 	}
 }
