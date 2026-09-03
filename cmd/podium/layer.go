@@ -186,12 +186,12 @@ func layerRegister(args []string) int {
 	local := fs.String("local", "", "filesystem path (for local source; requires the administrator role)")
 	userDefined := fs.Bool("user-defined", false, "register a personal layer")
 	owner := fs.String("owner", "", "OIDC sub of the user-defined layer's owner")
-	public := fs.Bool("public", false, "visibility: public")
-	organization := fs.Bool("organization", false, "visibility: organization-wide")
+	public := fs.Bool("public", false, "visibility: public (requires the administrator role)")
+	organization := fs.Bool("organization", false, "visibility: organization-wide (requires the administrator role)")
 	forcePush := fs.String("force-push-policy", "", "git force-push handling: tolerant (default) or strict")
 	var groups, users stringSliceFlag
-	fs.Var(&groups, "group", "OIDC group with visibility (repeatable)")
-	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable)")
+	fs.Var(&groups, "group", "OIDC group with visibility (repeatable; requires the administrator role)")
+	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable; requires the administrator role)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)

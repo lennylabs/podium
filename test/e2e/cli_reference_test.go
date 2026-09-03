@@ -1442,6 +1442,22 @@ func TestCLI_LayerRegisterGit(t *testing.T) {
 	cliContains(t, res.Stdout, "webhook_secret", "webhook secret")
 }
 
+// spec: §7.3.1 — the register help names the administrator role on the
+// ownership and visibility flags the registry refuses from a non-admin.
+func TestCLI_LayerRegisterHelpNamesAdminOnlyFlags(t *testing.T) {
+	res := runPodium(t, "", nil, "layer", "register", "--help")
+	cliWantExit(t, res, 0, "layer register --help")
+	out := res.Stdout + res.Stderr
+	for _, want := range []string{
+		"visibility: public (requires the administrator role)",
+		"visibility: organization-wide (requires the administrator role)",
+		"OIDC group with visibility (repeatable; requires the administrator role)",
+		"OIDC subject or email with visibility (repeatable; requires the administrator role)",
+	} {
+		cliContains(t, out, want, "register flag usage")
+	}
+}
+
 // spec: doc "Layer management — podium layer list".
 func TestCLI_LayerList(t *testing.T) {
 	srv := startServer(t, "")
