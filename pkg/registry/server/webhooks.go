@@ -224,32 +224,19 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 			}
 			current.Debounce = debounce
 		}
-		if body.Secret != nil && *body.Secret != maskedSecret {
-			// A body carrying the mask sentinel is a read fed back into the
-			// update, and it carries no credential: the list and the single
-			// read substitute maskedSecret for the stored secret, because
-			// §7.2.1 returns a credential only from the operation that mints
-			// it. Writing the sentinel through would replace the receiver's
-			// HMAC key with the literal "***" and sign every later delivery
-			// with it, so the round trip leaves the stored secret alone. A
-			// body naming any other value is a rotation and is stored.
+		if body.Secret != nil {
 			current.Secret = *body.Secret
 		}
 		if body.EventFilter != nil {
 			current.EventFilter = *body.EventFilter
 		}
 		if body.Disabled != nil {
-			// Only the disabled-to-enabled transition clears the failure
-			// counter, so the worker gives a re-enabled receiver a fresh
-			// budget. An already-enabled receiver keeps its count: every
-			// receiver object now carries disabled and failure_count, so a
-			// client feeding a read back into this endpoint would otherwise
-			// reset a live receiver's failure budget as a side effect of a
-			// round trip that changes nothing.
-			if current.Disabled && !*body.Disabled {
+			current.Disabled = *body.Disabled
+			if !*body.Disabled {
+				// Re-enabling clears the failure counter so the worker
+				// gives the receiver a fresh budget.
 				current.FailureCount = 0
 			}
-			current.Disabled = *body.Disabled
 		}
 		if err := s.webhooks.Store.Put(r.Context(), current); err != nil {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())

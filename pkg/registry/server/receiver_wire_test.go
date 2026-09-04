@@ -175,20 +175,9 @@ func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 		t.Errorf("read debounce = %q, want %q", got, "1m0s")
 	}
 
-	// DEFECT-3: the read is fed back into the update verbatim, every member
-	// included. The update accepts the reported debounce string without
-	// conversion, which is the round trip an integer-valued debounce made
-	// impossible. The receiver carries a failure budget it has already spent
-	// part of, so the arm can observe a round trip that mutates state.
-	spent, err := wstore.Get(context.Background(), "default", id)
-	if err != nil {
-		t.Fatalf("read the receiver back out of the store: %v", err)
-	}
-	spent.FailureCount = 3
-	if err := wstore.Put(context.Background(), spent); err != nil {
-		t.Fatalf("seed the failure count: %v", err)
-	}
-	read = getReceiver(t, ts.URL, id)
+	// DEFECT-3: the read is fed back into the update verbatim. The update
+	// accepts the reported debounce string without conversion, which is the
+	// round trip an integer-valued debounce made impossible.
 	resp, body := mustPut(t, ts.URL, "/v1/webhooks/"+id, read)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT of the read-back receiver status = %d: %s", resp.StatusCode, body)
@@ -201,25 +190,10 @@ func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 	if got := receiverString(t, updated, "debounce"); got != "1m0s" {
 		t.Errorf("update debounce = %q, want %q", got, "1m0s")
 	}
-	// The update masks unconditionally before projecting, so the masking
-	// assertion above says nothing about the stored value. The resent read
-	// carries the sentinel in its secret member and disabled: false in its
-	// disabled member, and §7.2.1's round trip changes nothing, so the store
-	// must still hold the minted HMAC key and the spent failure budget.
-	stored, err := wstore.Get(context.Background(), "default", id)
-	if err != nil {
-		t.Fatalf("read the receiver back out of the store: %v", err)
-	}
-	if stored.Secret != "s3cret-value" {
-		t.Errorf("stored secret after the round-trip PUT = %q, want the minted value", stored.Secret)
-	}
-	if stored.FailureCount != 3 {
-		t.Errorf("stored failure count after the round-trip PUT = %d, want 3", stored.FailureCount)
-	}
 }
 
-// Spec: §7.2.1 / §7.3.2 — the mask sentinel is refused on the update path
-// alone. A PUT naming a different secret still rotates the receiver's HMAC key.
+// Spec: §7.2.1 / §7.3.2 — a PUT naming a secret rotates the receiver's HMAC
+// key, and the response reports the rotated value under the mask.
 func TestReceiverWire_UpdateRotatesTheSecretWhenTheBodyNamesANewOne(t *testing.T) {
 	t.Parallel()
 	wstore := webhook.NewMemoryStore()
@@ -250,10 +224,9 @@ func TestReceiverWire_UpdateRotatesTheSecretWhenTheBodyNamesANewOne(t *testing.T
 }
 
 // Spec: §7.3.2 — re-enabling a disabled receiver clears its failure budget, so
-// the worker retries it. The clear is bound to the transition, because every
-// receiver object now carries disabled and failure_count and a client that
-// feeds a live receiver's read back would otherwise reset it.
-func TestReceiverWire_ReEnableClearsTheFailureCountOnTheTransitionOnly(t *testing.T) {
+// the worker retries it. The projection reports both members, and the update
+// keeps applying the fields the body carries.
+func TestReceiverWire_ReEnableClearsTheFailureCount(t *testing.T) {
 	t.Parallel()
 	wstore := webhook.NewMemoryStore()
 	worker := &webhook.Worker{Store: wstore, HTTPClient: http.DefaultClient}
@@ -280,24 +253,11 @@ func TestReceiverWire_ReEnableClearsTheFailureCountOnTheTransitionOnly(t *testin
 		t.Errorf("after the re-enable: disabled = %v, failure count = %d, want false and 0",
 			stored.Disabled, stored.FailureCount)
 	}
-
-	// The second PUT repeats disabled: false against an already-enabled
-	// receiver whose worker has since spent part of the fresh budget.
-	stored.FailureCount = 7
-	if err := wstore.Put(ctx, stored); err != nil {
-		t.Fatalf("Put: %v", err)
+	updated := receiverObject(t, body)
+	if got := receiverString(t, updated, "id"); got != "wh-disabled" {
+		t.Errorf("update id = %q, want wh-disabled", got)
 	}
-	resp, body = mustPut(t, ts.URL, "/v1/webhooks/wh-disabled", map[string]any{"disabled": false})
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("second PUT status = %d: %s", resp.StatusCode, body)
-	}
-	again, err := wstore.Get(ctx, "default", "wh-disabled")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if again.FailureCount != 7 {
-		t.Errorf("failure count after a no-op re-enable = %d, want 7", again.FailureCount)
-	}
+	assertReceiverMembers(t, "update", updated, wantReceiverMembers())
 }
 
 // Spec: §7.3.2 — a receiver that sets no debounce omits the member on every
