@@ -146,6 +146,8 @@ Schema:
 
 Receivers are configured per org (URL + HMAC secret).
 
+**The receiver object.** The receiver CRUD endpoints return a receiver as the object `{id, url, secret, event_filter, disabled, failure_count, last_delivery, last_failure, created_at, debounce}`, under §7.2.1. `debounce` is the trailing window written in the same duration string the request body accepts, so a client returns a receiver it read without converting the value, and it is omitted on a receiver that sets none. `secret` carries the receiver's HMAC secret on the creating response alone, so the operator records it once; the list, the single read, and the update return it masked. The object carries no tenant identifier, under §7.2.1.
+
 `layer.ingested` fires once per completed layer ingest cycle. A CI marketplace-publish job subscribes a receiver to `layer.ingested` (§7.8), so one source commit triggers one publish across the artifacts it changed. `artifact.published` is not used for this purpose, because it fires once per ingested `(artifact_id, version)` and would trigger one publish per changed artifact rather than one per source commit.
 
 **Receiver authorization.** The receiver CRUD endpoints (`GET`, `POST`, `PUT`, and `DELETE /v1/webhooks`) require the per-tenant admin role and return `auth.forbidden` (§6.10) for a non-admin caller, alongside the existing read-only rejection for the mutating methods. Receivers are an org-level configuration, so receiver management follows the same authorization posture as the other admin endpoints, including the standalone and no-auth deployments.
