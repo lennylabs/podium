@@ -5047,12 +5047,16 @@ describe("the artifact viewer", () => {
         name: "Copy Content hash",
       });
       fireEvent.click(copy);
+      // The clipboard write resolves before React flushes the announcement,
+      // so waiting on `written` returns while the region is still empty.
+      // Wait on the announcement, which is the later of the two, and read
+      // the clipboard afterwards.
       await waitFor(() => {
-        expect(written).toEqual([contentHash]);
+        expect(
+          within(provenance).getByTestId("copy-announcement").textContent,
+        ).toBe("Content hash copied to clipboard.");
       });
-      expect(
-        within(provenance).getByTestId("copy-announcement").textContent,
-      ).toBe("Content hash copied to clipboard.");
+      expect(written).toEqual([contentHash]);
     } finally {
       if (original !== undefined) {
         Object.defineProperty(navigator, "clipboard", original);
