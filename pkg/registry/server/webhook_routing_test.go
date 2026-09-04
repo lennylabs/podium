@@ -264,5 +264,5 @@ func (failingWebhookStore) List(context.Context, string) ([]webhook.Receiver, er
 func (failingWebhookStore) Get(context.Context, string, string) (webhook.Receiver, error) {
 	return webhook.Receiver{}, context.DeadlineExceeded
 }
-func (failingWebhookStore) Put(context.Context, webhook.Receiver) error { return nil }
+func (failingWebhookStore) Put(context.Context, webhook.Receiver) error  { return nil }
 func (failingWebhookStore) Delete(context.Context, string, string) error { return nil }
