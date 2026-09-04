@@ -89,22 +89,22 @@ func TestServe_LayerPathBootstrap_E2E(t *testing.T) {
 	waitForServer(t, port)
 
 	// /v1/layers must surface the bootstrap layer so /v1/layers/reingest
-	// and the admin UI can address it. store.LayerConfig has no JSON
-	// tags so the marshaller emits the Go field names verbatim.
+	// and the admin UI can address it. The list answers the §7.3.1 layer
+	// object, whose members are lower snake_case.
 	layers := getJSON(t, port, "/v1/layers")
 	list, _ := layers["layers"].([]any)
 	if len(list) != 1 {
 		t.Fatalf("/v1/layers returned %d layers, want 1: %v", len(list), layers)
 	}
 	first, _ := list[0].(map[string]any)
-	if first["ID"] != "alice-personal" {
-		t.Errorf("layer ID = %v, want alice-personal (full: %v)", first["ID"], first)
+	if first["id"] != "alice-personal" {
+		t.Errorf("layer id = %v, want alice-personal (full: %v)", first["id"], first)
 	}
-	if first["SourceType"] != "local" {
-		t.Errorf("SourceType = %v, want local", first["SourceType"])
+	if first["source_type"] != "local" {
+		t.Errorf("source_type = %v, want local", first["source_type"])
 	}
-	if first["LocalPath"] != layerDir+"/alice-personal" {
-		t.Errorf("LocalPath = %v, want %s/alice-personal", first["LocalPath"], layerDir)
+	if first["local_path"] != layerDir+"/alice-personal" {
+		t.Errorf("local_path = %v, want %s/alice-personal", first["local_path"], layerDir)
 	}
 
 	// /v1/search_artifacts must return the ingested manifest so the

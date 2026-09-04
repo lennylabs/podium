@@ -17,7 +17,7 @@ import { Badge } from './primitives';
 import type { LayerRecord } from '../api';
 
 export function SourceCell({ layer }: { layer: LayerRecord }) {
-  if (layer.SourceType === 'git') {
+  if (layer.source_type === 'git') {
     return (
       <div className="source-cell">
         <div className="source-ref">
@@ -29,8 +29,8 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
               the reader is left to work out from the refusal why a layer that
               registered cleanly serves nothing. The row names the missing ref
               instead. */}
-          {present(layer.Ref) ? (
-            <span className="mono">{layer.Ref}</span>
+          {present(layer.ref) ? (
+            <span className="mono">{layer.ref}</span>
           ) : (
             <Badge tone="danger">no ref</Badge>
           )}
@@ -42,18 +42,18 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
             git@github.com:alice/podium-personal-artifacts.git and the same
             repository under bob as one identical string. The repository line
             takes the opposite elision and keeps its start (§13.10). */}
-        <Detail value={layer.Repo ?? ''} clip="trailing" />
-        {present(layer.Root) && <Detail value={rootLine(layer.Root)} />}
+        <Detail value={layer.repo ?? ''} clip="trailing" />
+        {present(layer.root) && <Detail value={rootLine(layer.root)} />}
       </div>
     );
   }
-  if (layer.SourceType === 'local') {
+  if (layer.source_type === 'local') {
     return (
       <div className="source-cell">
         <div className="source-ref">
           <Badge tone="soft">local</Badge>
         </div>
-        <Detail value={layer.LocalPath ?? ''} />
+        <Detail value={layer.local_path ?? ''} />
       </div>
     );
   }
@@ -61,7 +61,7 @@ export function SourceCell({ layer }: { layer: LayerRecord }) {
   return (
     <div className="source-cell">
       <div className="source-ref">
-        <Badge tone="soft">{layer.SourceType}</Badge>
+        <Badge tone="soft">{layer.source_type}</Badge>
       </div>
       {fields.length > 0 && (
         <details className="source-fields">
@@ -172,10 +172,10 @@ export function splitDetail(value: string): { head: string; tail: string } {
  * those. */
 function sourceFields(layer: LayerRecord): [string, string][] {
   const candidates: [string, string | undefined][] = [
-    ['repo', layer.Repo],
-    ['ref', layer.Ref],
-    ['root', layer.Root],
-    ['local_path', layer.LocalPath],
+    ['repo', layer.repo],
+    ['ref', layer.ref],
+    ['root', layer.root],
+    ['local_path', layer.local_path],
   ];
   return candidates.filter((entry): entry is [string, string] => present(entry[1]));
 }

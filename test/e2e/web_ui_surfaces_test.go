@@ -104,10 +104,11 @@ const readOnlyHeaderName = "X-Podium-Read-Only"
 // identifier it keys a row on, the class and the order that place the row in
 // the composition, the owner the ownership marker compares against, and the
 // staleness stamp the row renders, plus the force-push policy the update
-// form edits. The registry marshals store.LayerConfig directly, so the casing
-// is not uniform: a tagged member carries its tag and every other member
-// carries its Go field name.
-var panelLayerFields = []string{"ID", "Order", "UserDefined", "Owner", "last_ingested_at", "force_push_policy"}
+// form edits. The registry answers the §7.3.1 layer object, so every member
+// is lower snake_case. The bundle half of the assertion below is weak for
+// "id" and "order", because both strings occur in unrelated bundle code; the
+// wire half still pins their presence.
+var panelLayerFields = []string{"id", "order", "user_defined", "owner", "last_ingested_at", "force_push_policy"}
 
 // panelLayerOmitted are the panel's members whose json tag carries omitempty
 // and which a layer served from a local path leaves unset, so the wire object
@@ -115,13 +116,12 @@ var panelLayerFields = []string{"ID", "Order", "UserDefined", "Owner", "last_ing
 // bundle alone.
 var panelLayerOmitted = map[string]bool{"last_ingested_at": true, "force_push_policy": true}
 
-// Spec: §13.10, §7.3.1 — the served bundle reads a layer record under the
-// member names the registry marshals it with. The registry marshals the store
-// struct directly, so a member's name on the wire is either its json tag or
-// its Go field name, and the two are mixed in one object. Reading a tagged
-// member under its Go field name yields undefined on every response, which
-// renders as a permanently absent value rather than as a failure, so the
-// correspondence is pinned against a layer the running binary returns.
+// Spec: §7.2.1, §7.3.1, §13.10 — the served bundle reads a layer record under
+// the member names the registry answers, which §7.3.1 fixes as lower
+// snake_case. Reading a member under any other name yields undefined on every
+// response, which renders as a permanently absent value rather than as a
+// failure, so the correspondence is pinned against a layer the running binary
+// returns.
 func TestWebUI_ServedBundleReadsTheLayerRecordFields(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{

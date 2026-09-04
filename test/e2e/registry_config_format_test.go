@@ -166,11 +166,12 @@ func TestRegistryConfig_StandalonePublicDefault(t *testing.T) {
 		t.Fatalf("POST /v1/layers = %d, want 201\nbody: %s", st, body)
 	}
 
-	// store.LayerConfig has no JSON tags, so fields serialize under Go names.
+	// The list answers the §7.3.1 layer object, whose members are lower
+	// snake_case.
 	var resp struct {
 		Layers []struct {
-			ID     string `json:"ID"`
-			Public bool   `json:"Public"`
+			ID     string `json:"id"`
+			Public bool   `json:"public"`
 		} `json:"layers"`
 	}
 	getJSON(t, srv.BaseURL+"/v1/layers", &resp)

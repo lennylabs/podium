@@ -168,14 +168,14 @@ const manifestDoc = "---\nname: review\ntags:\n  - security\n---\n";
  * artifact viewer's provenance rail states. */
 function ingestedLayer(): Record<string, unknown> {
   return {
-    ID: "acme-platform",
-    SourceType: "git",
-    Repo: "git@github.com:acme/platform.git",
-    Ref: "main",
-    Order: 1,
-    Organization: true,
+    id: "acme-platform",
+    source_type: "git",
+    repo: "git@github.com:acme/platform.git",
+    ref: "main",
+    order: 1,
+    organization: true,
     last_ingested_at: new Date(Date.now() - 7200000).toISOString(),
-    LastIngestedRef: "4f2a1c9de4471b1e8f0c2a5d6e7b8c9a0d1e2f34",
+    last_ingested_ref: "4f2a1c9de4471b1e8f0c2a5d6e7b8c9a0d1e2f34",
   };
 }
 
@@ -5074,15 +5074,15 @@ describe("the artifact viewer", () => {
         body: {
           layers: [
             {
-              ID: "acme-platform",
-              SourceType: "git",
-              Repo: "git@github.com:acme/platform.git",
-              Ref: "main",
-              Order: 1,
-              Organization: true,
-              Groups: ["platform"],
+              id: "acme-platform",
+              source_type: "git",
+              repo: "git@github.com:acme/platform.git",
+              ref: "main",
+              order: 1,
+              organization: true,
+              groups: ["platform"],
               last_ingested_at: new Date(Date.now() - 7200000).toISOString(),
-              LastIngestedRef: "4f2a1c9de4471b1e8f0c2a5d6e7b8c9a0d1e2f34",
+              last_ingested_ref: "4f2a1c9de4471b1e8f0c2a5d6e7b8c9a0d1e2f34",
             },
           ],
         },
@@ -7497,6 +7497,39 @@ describe("the layer panel", () => {
     expect(screen.queryByText("yours")).toBeNull();
   });
 
+  // A registry answering the pre-§7.3.1 Go-cased member names is the
+  // correspondence failure the served-bundle pin exists to catch. The panel
+  // reads every member as absent there and renders the empty row rather than
+  // throwing, so a reader sees a blank layer name instead of a broken page.
+  it("renders the absent state over a layer list served under the old Go-cased names", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              ID: "company",
+              SourceType: "git",
+              Repo: "git@github.com:acme/company.git",
+              Ref: "main",
+              Order: 1,
+              Organization: true,
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    expect(document.querySelectorAll("table.layer-table tbody tr").length).toBe(1);
+    expect(
+      (document.querySelector(".layer-name")?.textContent ?? "x").trim(),
+    ).toBe("");
+    expect(screen.queryByText("company")).toBeNull();
+    expect(screen.queryByText("organization")).toBeNull();
+  });
+
   // The header row is drawn entirely in the section-label style, so the
   // column names read as one row rather than as mono handles beside
   // sentence-case sans text. The actions column names no data and carries
@@ -7629,8 +7662,8 @@ describe("the layer panel", () => {
       "/v1/layers": {
         body: {
           layers: [
-            { ...adminLayer("platform-eng"), Order: 11 },
-            { ...userLayer("alice@acme.com"), Order: 21 },
+            { ...adminLayer("platform-eng"), order: 11 },
+            { ...userLayer("alice@acme.com"), order: 21 },
           ],
         },
       },
@@ -7680,7 +7713,7 @@ describe("the layer panel", () => {
             {
               ...adminLayer(),
               last_ingested_at: at,
-              LastIngestedRef: "4f2a1c9d8e7b6a5c4d3e2f1a0b9c8d7e6f5a4b3c",
+              last_ingested_ref: "4f2a1c9d8e7b6a5c4d3e2f1a0b9c8d7e6f5a4b3c",
             },
             userLayer(),
           ],
@@ -7713,7 +7746,7 @@ describe("the layer panel", () => {
             {
               ...userLayer(),
               last_ingested_at: at,
-              LastIngestedRef: "/Users/alice/registry",
+              last_ingested_ref: "/Users/alice/registry",
             },
           ],
         },
@@ -7868,15 +7901,15 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "shared",
-              SourceType: "git",
-              Repo: "git@github.com:acme/shared.git",
-              Ref: "main",
-              Order: 1,
-              Public: true,
-              Organization: true,
-              Groups: ["secops", "appsec", "platform", "data"],
-              Users: ["carol@acme.com"],
+              id: "shared",
+              source_type: "git",
+              repo: "git@github.com:acme/shared.git",
+              ref: "main",
+              order: 1,
+              public: true,
+              organization: true,
+              groups: ["secops", "appsec", "platform", "data"],
+              users: ["carol@acme.com"],
             },
           ],
         },
@@ -7930,19 +7963,19 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "shared",
-              SourceType: "git",
-              Repo: "git@github.com:acme/shared.git",
-              Ref: "main",
-              Order: 1,
-              Groups: [
+              id: "shared",
+              source_type: "git",
+              repo: "git@github.com:acme/shared.git",
+              ref: "main",
+              order: 1,
+              groups: [
                 "secops",
                 "appsec",
                 "platform-eng",
                 "data-platform",
                 "design-ops",
               ],
-              Users: ["alice@acme.com", "bob@acme.com", "carol@acme.com"],
+              users: ["alice@acme.com", "bob@acme.com", "carol@acme.com"],
             },
           ],
         },
@@ -7975,17 +8008,17 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "alice-personal",
-              SourceType: "local",
+              id: "alice-personal",
+              source_type: "local",
               Path: "/Users/alice/registry",
-              Order: 1,
+              order: 1,
             },
             {
-              ID: "shared",
-              SourceType: "local",
+              id: "shared",
+              source_type: "local",
               Path: "/srv/registry",
-              Order: 2,
-              Organization: true,
+              order: 2,
+              organization: true,
             },
           ],
         },
@@ -8026,12 +8059,12 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "acme-git-main",
-              SourceType: "git",
-              Repo: "git@github.com:acme/registry.git",
-              Ref: "main",
-              Root: "catalog",
-              Order: 1,
+              id: "acme-git-main",
+              source_type: "git",
+              repo: "git@github.com:acme/registry.git",
+              ref: "main",
+              root: "catalog",
+              order: 1,
             },
             userLayer(),
           ],
@@ -8078,10 +8111,10 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "scratch",
-              SourceType: "local",
-              LocalPath: longPath,
-              Order: 1,
+              id: "scratch",
+              source_type: "local",
+              local_path: longPath,
+              order: 1,
             },
           ],
         },
@@ -8115,16 +8148,16 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "finance",
-              SourceType: "local",
-              LocalPath: `${parent}/finance-shared`,
-              Order: 1,
+              id: "finance",
+              source_type: "local",
+              local_path: `${parent}/finance-shared`,
+              order: 1,
             },
             {
-              ID: "eng",
-              SourceType: "local",
-              LocalPath: `${parent}/eng-shared`,
-              Order: 2,
+              id: "eng",
+              source_type: "local",
+              local_path: `${parent}/eng-shared`,
+              order: 2,
             },
           ],
         },
@@ -8167,10 +8200,10 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "wide",
-              SourceType: "local",
-              LocalPath: `/srv/${longSegment}`,
-              Order: 1,
+              id: "wide",
+              source_type: "local",
+              local_path: `/srv/${longSegment}`,
+              order: 1,
             },
           ],
         },
@@ -8217,12 +8250,12 @@ describe("the layer panel", () => {
       "/v1/layers": {
         body: {
           layers: [
-            { ID: "one", SourceType: "local", LocalPath: "/tmp", Order: 1 },
+            { id: "one", source_type: "local", local_path: "/tmp", order: 1 },
             {
-              ID: "two",
-              SourceType: "local",
-              LocalPath: "/usr/local",
-              Order: 2,
+              id: "two",
+              source_type: "local",
+              local_path: "/usr/local",
+              order: 2,
             },
           ],
         },
@@ -8252,20 +8285,20 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "acme-platform-artifacts",
-              SourceType: "git",
-              Repo: "git@github.com:acme/platform-artifacts.git",
-              Ref: "main",
-              Root: "artifacts/",
-              Order: 1,
+              id: "acme-platform-artifacts",
+              source_type: "git",
+              repo: "git@github.com:acme/platform-artifacts.git",
+              ref: "main",
+              root: "artifacts/",
+              order: 1,
             },
             {
-              ID: "acme-rules",
-              SourceType: "git",
-              Repo: "git@github.com:acme/rules.git",
-              Ref: "main",
-              Root: "rules",
-              Order: 2,
+              id: "acme-rules",
+              source_type: "git",
+              repo: "git@github.com:acme/rules.git",
+              ref: "main",
+              root: "rules",
+              order: 2,
             },
           ],
         },
@@ -8296,12 +8329,12 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "acme",
-              SourceType: "git",
-              Repo: "git@github.com:acme/artifacts.git",
-              Ref: "main",
-              Root: "artifacts",
-              Order: 1,
+              id: "acme",
+              source_type: "git",
+              repo: "git@github.com:acme/artifacts.git",
+              ref: "main",
+              root: "artifacts",
+              order: 1,
             },
           ],
         },
@@ -8341,20 +8374,20 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "alice-personal",
-              SourceType: "git",
-              Repo: "git@github.com:alice/podium-personal-artifacts.git",
-              Ref: "main",
-              Root: "registry/artifacts",
-              Order: 1,
+              id: "alice-personal",
+              source_type: "git",
+              repo: "git@github.com:alice/podium-personal-artifacts.git",
+              ref: "main",
+              root: "registry/artifacts",
+              order: 1,
             },
             {
-              ID: "bob-personal",
-              SourceType: "git",
-              Repo: "git@github.com:bob/podium-personal-artifacts.git",
-              Ref: "main",
-              Root: "registry/artifacts",
-              Order: 2,
+              id: "bob-personal",
+              source_type: "git",
+              repo: "git@github.com:bob/podium-personal-artifacts.git",
+              ref: "main",
+              root: "registry/artifacts",
+              order: 2,
             },
           ],
         },
@@ -8405,11 +8438,11 @@ describe("the layer panel", () => {
         body: {
           layers: [
             {
-              ID: "acme-vault",
-              SourceType: "vault-kv",
-              Repo: "acme/vault-artifacts",
-              Root: "artifacts",
-              Order: 1,
+              id: "acme-vault",
+              source_type: "vault-kv",
+              repo: "acme/vault-artifacts",
+              root: "artifacts",
+              order: 1,
             },
           ],
         },
@@ -9740,10 +9773,10 @@ describe("the layer write flows", () => {
       "/v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "local",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "local",
+            order: 1,
+            user_defined: true,
           },
         },
       },
@@ -9781,7 +9814,7 @@ describe("the layer write flows", () => {
         body: posture({ identity_provider_configured: false }),
       },
       "/v1/layers": {
-        body: { layer: { ID: "company", SourceType: "local", Order: 1 } },
+        body: { layer: { id: "company", source_type: "local", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -9812,7 +9845,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
-        body: { layer: { ID: "company", SourceType: "local", Order: 1 } },
+        body: { layer: { id: "company", source_type: "local", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -9854,7 +9887,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
-        body: { layer: { ID: "company", SourceType: "local", Order: 1 } },
+        body: { layer: { id: "company", source_type: "local", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -9910,7 +9943,7 @@ describe("the layer write flows", () => {
         body: posture({ identity_provider_configured: false }),
       },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "local", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "local", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -9958,7 +9991,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": {
-        body: { layer: { ID: "catalog", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "catalog", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -9996,7 +10029,7 @@ describe("the layer write flows", () => {
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
-          layer: { ID: "alice-personal", SourceType: "local", Order: 1 },
+          layer: { id: "alice-personal", source_type: "local", order: 1 },
         },
       },
     });
@@ -10031,7 +10064,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10083,7 +10116,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10118,7 +10151,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10223,7 +10256,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10253,7 +10286,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10318,7 +10351,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10378,7 +10411,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10418,7 +10451,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10455,7 +10488,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10511,7 +10544,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "git", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "git", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10562,7 +10595,7 @@ describe("the layer write flows", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
-        body: { layer: { ID: "ops", SourceType: "local", Order: 1 } },
+        body: { layer: { id: "ops", source_type: "local", order: 1 } },
       },
     });
     goTo("#/layers");
@@ -10605,12 +10638,12 @@ describe("the layer write flows", () => {
         body: {
           layers: [
             {
-              ID: "ops",
-              SourceType: "git",
-              Repo: "git@github.com:acme/ops.git",
-              Ref: "",
-              Order: 1,
-              Public: true,
+              id: "ops",
+              source_type: "git",
+              repo: "git@github.com:acme/ops.git",
+              ref: "",
+              order: 1,
+              public: true,
             },
           ],
         },
@@ -10840,13 +10873,13 @@ describe("the layer write flows", () => {
               // the names come from several layers' grants, so the list is
               // deduplicated and an empty entry is dropped rather than
               // offered as a name.
-              Groups: ["platform-oncall", "secops", " "],
+              groups: ["platform-oncall", "secops", " "],
             },
             {
               ...adminLayer(),
-              ID: "compliance",
-              Order: 2,
-              Groups: ["secops", "appsec", "platform-eng"],
+              id: "compliance",
+              order: 2,
+              groups: ["secops", "appsec", "platform-eng"],
             },
           ],
         },
@@ -10930,7 +10963,7 @@ describe("the layer write flows", () => {
           layers: [
             {
               ...adminLayer(),
-              Groups: ["appsec", "platform-eng", "platform-oncall", "secops"],
+              groups: ["appsec", "platform-eng", "platform-oncall", "secops"],
             },
           ],
         },
@@ -10992,7 +11025,7 @@ describe("the layer write flows", () => {
           layers: [
             {
               ...adminLayer(),
-              Groups: [
+              groups: [
                 "appsec",
                 "data",
                 "infra",
@@ -11046,10 +11079,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-local",
-            SourceType: "local",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-local",
+            source_type: "local",
+            order: 1,
+            user_defined: true,
           },
         },
       },
@@ -11075,10 +11108,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "git",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "git",
+            order: 1,
+            user_defined: true,
           },
           webhook_url:
             "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11139,10 +11172,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "git",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "git",
+            order: 1,
+            user_defined: true,
           },
           webhook_url:
             "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11195,10 +11228,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "git",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "git",
+            order: 1,
+            user_defined: true,
           },
           webhook_url:
             "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11238,10 +11271,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "git",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "git",
+            order: 1,
+            user_defined: true,
           },
           webhook_url:
             "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11289,10 +11322,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "git",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "git",
+            order: 1,
+            user_defined: true,
           },
           webhook_url:
             "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11352,10 +11385,10 @@ describe("the layer write flows", () => {
         deferred: true,
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "local",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "local",
+            order: 1,
+            user_defined: true,
           },
         },
       },
@@ -11396,7 +11429,7 @@ describe("the layer write flows", () => {
   //
   // Spec: §4.6
   it("keeps a granted user on the layer the Edit dialog patches", async () => {
-    const granted = { ...adminLayer(), Users: ["alice@acme.com"] };
+    const granted = { ...adminLayer(), users: ["alice@acme.com"] };
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [granted] } },
@@ -11583,10 +11616,10 @@ describe("the layer write flows", () => {
         "POST /v1/layers": {
           body: {
             layer: {
-              ID: "alice-personal",
-              SourceType: "git",
-              Order: 1,
-              UserDefined: true,
+              id: "alice-personal",
+              source_type: "git",
+              order: 1,
+              user_defined: true,
             },
             webhook_url:
               "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11662,10 +11695,10 @@ describe("the layer write flows", () => {
         "POST /v1/layers": {
           body: {
             layer: {
-              ID: "alice-personal",
-              SourceType: "git",
-              Order: 1,
-              UserDefined: true,
+              id: "alice-personal",
+              source_type: "git",
+              order: 1,
+              user_defined: true,
             },
             webhook_url:
               "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11744,10 +11777,10 @@ describe("the layer write flows", () => {
         "POST /v1/layers": {
           body: {
             layer: {
-              ID: "alice-personal",
-              SourceType: "git",
-              Order: 1,
-              UserDefined: true,
+              id: "alice-personal",
+              source_type: "git",
+              order: 1,
+              user_defined: true,
             },
             webhook_url:
               "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11803,10 +11836,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "git",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "git",
+            order: 1,
+            user_defined: true,
           },
           webhook_url:
             "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11848,10 +11881,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "git",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "git",
+            order: 1,
+            user_defined: true,
           },
           webhook_url:
             "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11889,10 +11922,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "git",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "git",
+            order: 1,
+            user_defined: true,
           },
           webhook_url:
             "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -11940,10 +11973,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "git",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "git",
+            order: 1,
+            user_defined: true,
           },
           webhook_url:
             "https://registry.acme.com/v1/ingest/webhook/alice-personal",
@@ -12015,10 +12048,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "local",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "local",
+            order: 1,
+            user_defined: true,
           },
         },
       },
@@ -12056,10 +12089,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "local",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "local",
+            order: 1,
+            user_defined: true,
           },
         },
       },
@@ -12107,10 +12140,10 @@ describe("the layer write flows", () => {
       "POST /v1/layers": {
         body: {
           layer: {
-            ID: "alice-personal",
-            SourceType: "local",
-            Order: 1,
-            UserDefined: true,
+            id: "alice-personal",
+            source_type: "local",
+            order: 1,
+            user_defined: true,
           },
         },
       },
@@ -12154,7 +12187,7 @@ describe("the layer write flows", () => {
       "/v1/layers": { body: { layers: [adminLayer()] }, deferred: true },
       "PUT /v1/layers/update": {
         body: {
-          layer: { ID: "company", SourceType: "git", Order: 1 },
+          layer: { id: "company", source_type: "git", order: 1 },
           webhook_url: "https://registry.acme.com/v1/ingest/webhook/company",
           webhook_secret: "whsec-rotated",
         },
@@ -12807,7 +12840,7 @@ describe("the layer write flows", () => {
         body: {
           layers: [
             adminLayer(),
-            { ...adminLayer(), ID: "security-baseline", Order: 2 },
+            { ...adminLayer(), id: "security-baseline", order: 2 },
             userLayer(),
           ],
         },
@@ -13681,7 +13714,7 @@ describe("the layer write flows", () => {
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": {
         body: {
-          layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }],
+          layers: [{ ...userLayer(), deleted_at: unregisteredAt.toISOString() }],
         },
       },
       "/v1/layers/restore": { body: {} },
@@ -13721,8 +13754,8 @@ describe("the layer write flows", () => {
       "/v1/layers?deleted=true": {
         body: {
           layers: [
-            { ...userLayer(), DeletedAt: deletedAt },
-            { ...adminLayer(), DeletedAt: deletedAt },
+            { ...userLayer(), deleted_at: deletedAt },
+            { ...adminLayer(), deleted_at: deletedAt },
           ],
         },
       },
@@ -13749,7 +13782,7 @@ describe("the layer write flows", () => {
       "/v1/layers": { body: { layers: [] } },
       "/v1/layers?deleted=true": {
         body: {
-          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+          layers: [{ ...userLayer(), deleted_at: new Date().toISOString() }],
         },
       },
     });
@@ -13771,7 +13804,7 @@ describe("the layer write flows", () => {
       "/v1/layers": { body: { layers: [] } },
       "/v1/layers?deleted=true": {
         body: {
-          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+          layers: [{ ...userLayer(), deleted_at: new Date().toISOString() }],
         },
       },
     });
@@ -13795,7 +13828,7 @@ describe("the layer write flows", () => {
       "/v1/layers": { body: { layers: [userLayer(), adminLayer()] } },
       "/v1/layers?deleted=true": {
         body: {
-          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+          layers: [{ ...userLayer(), deleted_at: new Date().toISOString() }],
         },
       },
       "/v1/layers/restore": { body: { restored: "alice-personal" } },
@@ -13831,7 +13864,7 @@ describe("the layer write flows", () => {
       "/v1/layers": { body: { layers: [userLayer(), adminLayer()] } },
       "/v1/layers?deleted=true": {
         body: {
-          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+          layers: [{ ...userLayer(), deleted_at: new Date().toISOString() }],
         },
       },
       "/v1/layers/restore": { body: { restored: "alice-personal" } },
@@ -13881,7 +13914,7 @@ describe("the layer write flows", () => {
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers?deleted=true": {
         body: {
-          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+          layers: [{ ...userLayer(), deleted_at: new Date().toISOString() }],
         },
       },
       "/v1/layers/restore": {
@@ -13917,7 +13950,7 @@ describe("the layer write flows", () => {
       "/v1/layers": { body: { layers: [userLayer()] } },
       "/v1/layers?deleted=true": {
         body: {
-          layers: [{ ...userLayer(), DeletedAt: new Date().toISOString() }],
+          layers: [{ ...userLayer(), deleted_at: new Date().toISOString() }],
         },
       },
       "/v1/layers/restore": {
@@ -13950,13 +13983,13 @@ describe("the layer write flows", () => {
           layers: [
             {
               ...userLayer(),
-              ID: "alice-roomy",
-              DeletedAt: new Date(Date.now() - day / 2).toISOString(),
+              id: "alice-roomy",
+              deleted_at: new Date(Date.now() - day / 2).toISOString(),
             },
             {
               ...userLayer(),
-              ID: "alice-expiring",
-              DeletedAt: new Date(Date.now() - 28 * day).toISOString(),
+              id: "alice-expiring",
+              deleted_at: new Date(Date.now() - 28 * day).toISOString(),
             },
           ],
         },
@@ -14002,7 +14035,7 @@ describe("the layer write flows", () => {
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": {
         body: {
-          layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }],
+          layers: [{ ...userLayer(), deleted_at: unregisteredAt.toISOString() }],
         },
       },
     });
@@ -14040,7 +14073,7 @@ describe("the layer write flows", () => {
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": {
         body: {
-          layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }],
+          layers: [{ ...userLayer(), deleted_at: unregisteredAt.toISOString() }],
         },
       },
     });
@@ -14063,7 +14096,7 @@ describe("the layer write flows", () => {
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": {
         body: {
-          layers: [{ ...userLayer(), DeletedAt: unregisteredAt.toISOString() }],
+          layers: [{ ...userLayer(), deleted_at: unregisteredAt.toISOString() }],
         },
       },
     });
@@ -14105,7 +14138,7 @@ describe("the layer write flows", () => {
         "/v1/layers": {
           body: {
             layers: [
-              { ...userLayer(), DeletedAt: unregisteredAt.toISOString() },
+              { ...userLayer(), deleted_at: unregisteredAt.toISOString() },
             ],
           },
         },
@@ -14141,8 +14174,8 @@ describe("the layer write flows", () => {
           layers: [
             {
               ...userLayer(),
-              ID: "alice-old",
-              DeletedAt: new Date().toISOString(),
+              id: "alice-old",
+              deleted_at: new Date().toISOString(),
             },
           ],
         },
@@ -14244,7 +14277,7 @@ describe("the layer write flows", () => {
   it("states no erase date where the record carries no unregistered time", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
-      "/v1/layers": { body: { layers: [{ ...userLayer(), DeletedAt: null }] } },
+      "/v1/layers": { body: { layers: [{ ...userLayer(), deleted_at: null }] } },
     });
     goTo("#/layers/deleted");
     render(<App />);
@@ -14346,25 +14379,25 @@ function lastIngestCell(id: string): HTMLElement {
 
 function adminLayer(owner = ""): Record<string, unknown> {
   return {
-    ID: "company",
-    SourceType: "git",
-    Repo: "git@github.com:acme/company.git",
-    Ref: "main",
-    Order: 1,
-    UserDefined: false,
-    Owner: owner,
-    Organization: true,
+    id: "company",
+    source_type: "git",
+    repo: "git@github.com:acme/company.git",
+    ref: "main",
+    order: 1,
+    user_defined: false,
+    owner: owner,
+    organization: true,
   };
 }
 
 function userLayer(owner = "alice@acme.com"): Record<string, unknown> {
   return {
-    ID: "alice-personal",
-    SourceType: "local",
-    LocalPath: "/Users/alice/registry",
-    Order: 2,
-    UserDefined: true,
-    Owner: owner,
+    id: "alice-personal",
+    source_type: "local",
+    local_path: "/Users/alice/registry",
+    order: 2,
+    user_defined: true,
+    owner: owner,
   };
 }
 
@@ -14382,12 +14415,12 @@ function openRowActions(layerID = "alice-personal"): void {
  * named it would be refused whole. */
 function bobLayer(): Record<string, unknown> {
   return {
-    ID: "bob-personal",
-    SourceType: "local",
-    LocalPath: "/Users/bob/registry",
-    Order: 4,
-    UserDefined: true,
-    Owner: "bob@acme.com",
+    id: "bob-personal",
+    source_type: "local",
+    local_path: "/Users/bob/registry",
+    order: 4,
+    user_defined: true,
+    owner: "bob@acme.com",
   };
 }
 
@@ -14395,12 +14428,12 @@ function bobLayer(): Record<string, unknown> {
  * the moving layer has a sibling inside its own class. */
 function scratchLayer(owner = "alice@acme.com"): Record<string, unknown> {
   return {
-    ID: "alice-scratch",
-    SourceType: "local",
-    LocalPath: "/Users/alice/scratch",
-    Order: 3,
-    UserDefined: true,
-    Owner: owner,
+    id: "alice-scratch",
+    source_type: "local",
+    local_path: "/Users/alice/scratch",
+    order: 3,
+    user_defined: true,
+    owner: owner,
   };
 }
 
@@ -17693,8 +17726,8 @@ describe("a refused layer write", () => {
           layers: [
             {
               ...userLayer(),
-              ID: "alice-old",
-              DeletedAt: new Date().toISOString(),
+              id: "alice-old",
+              deleted_at: new Date().toISOString(),
             },
           ],
         },
@@ -17776,8 +17809,8 @@ describe("a refused layer write", () => {
       layers: [
         {
           ...userLayer(),
-          ID: "alice-old",
-          DeletedAt: new Date().toISOString(),
+          id: "alice-old",
+          deleted_at: new Date().toISOString(),
         },
       ],
     };
@@ -18610,13 +18643,13 @@ describe("the layer panel under the local-source rule", () => {
    * filesystem path on the registry host, so every operation on it is hers. */
   function aliceGit(): Record<string, unknown> {
     return {
-      ID: "alice-notes",
-      SourceType: "git",
-      Repo: "git@github.com:alice/notes.git",
-      Ref: "main",
-      Order: 3,
-      UserDefined: true,
-      Owner: "alice@acme.com",
+      id: "alice-notes",
+      source_type: "git",
+      repo: "git@github.com:alice/notes.git",
+      ref: "main",
+      order: 3,
+      user_defined: true,
+      owner: "alice@acme.com",
     };
   }
 
@@ -18772,9 +18805,9 @@ describe("the layer panel under the local-source rule", () => {
       "/v1/layers?deleted=true": {
         body: {
           layers: [
-            { ...adminLayer(), DeletedAt: new Date().toISOString() },
-            { ...userLayer(), DeletedAt: new Date().toISOString() },
-            { ...aliceGit(), DeletedAt: new Date().toISOString() },
+            { ...adminLayer(), deleted_at: new Date().toISOString() },
+            { ...userLayer(), deleted_at: new Date().toISOString() },
+            { ...aliceGit(), deleted_at: new Date().toISOString() },
           ],
         },
       },

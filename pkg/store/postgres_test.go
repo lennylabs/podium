@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"net/url"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -298,4 +300,109 @@ func TestPostgres_DropOrg_RemovesExactlyOneOrg(t *testing.T) {
 	if got.ContentHash != "sha256:b" {
 		t.Errorf("org B manifest = %q, want sha256:b (org B data must survive org A drop)", got.ContentHash)
 	}
+}
+
+// nonUTCPostgresDSN returns dsn carrying a session time zone that is not
+// UTC, so lib/pq scans a timestamptz back in that zone. It accepts both DSN
+// forms the backend takes: a URL and a keyword string.
+func nonUTCPostgresDSN(dsn string) string {
+	const zone = "Asia/Tokyo"
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		u, err := url.Parse(dsn)
+		if err != nil {
+			return dsn + " timezone=" + zone
+		}
+		q := u.Query()
+		q.Set("timezone", zone)
+		u.RawQuery = q.Encode()
+		return u.String()
+	}
+	return dsn + " timezone=" + zone
+}
+
+// Spec: §7.2.1 — the §7.3.1 layer object's timestamps are RFC 3339 in UTC.
+// lib/pq hands a timestamptz back in the connection's session time zone and
+// nothing pins that zone, so the Postgres read normalizes created_at the way
+// it already normalizes the nullable stamps beside it. Without the
+// conversion a registry over a non-UTC Postgres session emits created_at
+// with an offset while the standalone SQLite deployment emits Z, which §2.2
+// does not permit. The arm lives at the store level because a server-level
+// arm over a UTC session passes either way.
+func TestPostgres_LayerConfigTimestampsAreUTC(t *testing.T) {
+	dsn := os.Getenv("PODIUM_POSTGRES_DSN")
+	if dsn == "" {
+		t.Skip("PODIUM_POSTGRES_DSN unset; skipping the Postgres layer-timestamp check")
+	}
+	s, err := store.OpenPostgres(nonUTCPostgresDSN(dsn))
+	if err != nil {
+		t.Skipf("OpenPostgres %q: %v (database unreachable)", dsn, err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	ctx := context.Background()
+	if err := s.ResetForTest(ctx); err != nil {
+		t.Fatalf("ResetForTest: %v", err)
+	}
+	if err := s.CreateTenant(ctx, store.Tenant{ID: "tzorg", Name: "tzorg"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+
+	created := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	ingested := time.Date(2026, 6, 2, 9, 30, 0, 0, time.UTC)
+	deleted := time.Date(2026, 6, 3, 8, 15, 0, 0, time.UTC)
+	live := store.LayerConfig{
+		TenantID: "tzorg", ID: "live", SourceType: "local", LocalPath: "/srv/live",
+		CreatedAt: created, LastIngestedAt: &ingested,
+	}
+	if err := s.PutLayerConfig(ctx, live); err != nil {
+		t.Fatalf("PutLayerConfig(live): %v", err)
+	}
+	tombstoned := store.LayerConfig{
+		TenantID: "tzorg", ID: "tombstoned", SourceType: "local", LocalPath: "/srv/gone",
+		CreatedAt: created, DeletedAt: &deleted,
+	}
+	if err := s.PutLayerConfig(ctx, tombstoned); err != nil {
+		t.Fatalf("PutLayerConfig(tombstoned): %v", err)
+	}
+
+	assertUTC := func(where string, got time.Time, want time.Time) {
+		t.Helper()
+		if got.Location() != time.UTC {
+			t.Errorf("%s location = %v, want UTC", where, got.Location())
+		}
+		if !got.Equal(want) {
+			t.Errorf("%s = %v, want the instant %v", where, got, want)
+		}
+	}
+
+	one, err := s.GetLayerConfig(ctx, "tzorg", "live")
+	if err != nil {
+		t.Fatalf("GetLayerConfig: %v", err)
+	}
+	assertUTC("GetLayerConfig created_at", one.CreatedAt, created)
+	if one.LastIngestedAt == nil {
+		t.Fatalf("GetLayerConfig dropped last_ingested_at")
+	}
+	assertUTC("GetLayerConfig last_ingested_at", *one.LastIngestedAt, ingested)
+
+	listed, err := s.ListLayerConfigs(ctx, "tzorg")
+	if err != nil {
+		t.Fatalf("ListLayerConfigs: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("ListLayerConfigs returned %d layers, want 1", len(listed))
+	}
+	assertUTC("ListLayerConfigs created_at", listed[0].CreatedAt, created)
+
+	gone, err := s.ListDeletedLayerConfigs(ctx, "tzorg")
+	if err != nil {
+		t.Fatalf("ListDeletedLayerConfigs: %v", err)
+	}
+	if len(gone) != 1 {
+		t.Fatalf("ListDeletedLayerConfigs returned %d layers, want 1", len(gone))
+	}
+	assertUTC("ListDeletedLayerConfigs created_at", gone[0].CreatedAt, created)
+	if gone[0].DeletedAt == nil {
+		t.Fatalf("ListDeletedLayerConfigs dropped deleted_at")
+	}
+	assertUTC("ListDeletedLayerConfigs deleted_at", *gone[0].DeletedAt, deleted)
 }

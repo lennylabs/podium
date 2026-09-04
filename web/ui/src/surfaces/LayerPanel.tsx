@@ -345,7 +345,7 @@ export function LayerPanel({
    * condition on the block's length: a block holding one row is a block with
    * nothing to move, which blockEdgeNote already reports. */
   const movableBlock = (layer: LayerRecord): boolean =>
-    blockOf(rows, layer.ID).every((row) =>
+    blockOf(rows, layer.id).every((row) =>
       mayTake("reorder", row, caps, subject),
     );
   const anyMovable = rows.some((layer) => movableBlock(layer));
@@ -414,7 +414,7 @@ export function LayerPanel({
    * layer over the page, each naming a single layer and none stating the
    * run, and a refused layer sat behind that stack. */
   const reingestAll = async (): Promise<void> => {
-    const targets = reingestable.map((row) => row.ID);
+    const targets = reingestable.map((row) => row.id);
     setRun({
       startedAt: Date.now(),
       targets,
@@ -507,7 +507,7 @@ export function LayerPanel({
    * Every path that sends a reorder goes through it, so no path leaves the
    * live region holding the outcome of an earlier press. */
   const takeMove = (from: string, order: string[]) => {
-    setMoved(reordered(rows, order).map((row) => row.ID));
+    setMoved(reordered(rows, order).map((row) => row.id));
     setOutcome(announced(movedNote(rows, order, from)));
     issueReorder(from, order);
   };
@@ -528,7 +528,7 @@ export function LayerPanel({
    * request the drop sends. */
   const moveBy = (id: string, delta: number) => {
     const block = blockOf(rows, id);
-    const at = block.findIndex((row) => row.ID === id);
+    const at = block.findIndex((row) => row.id === id);
     if (at < 0) {
       return;
     }
@@ -537,7 +537,7 @@ export function LayerPanel({
       setOutcome(drawn(blockEdgeNote(block, id, delta)));
       return;
     }
-    commitMove(id, onto.ID);
+    commitMove(id, onto.id);
   };
 
   return (
@@ -608,7 +608,7 @@ export function LayerPanel({
           subject={subject}
           caps={caps}
           knownGroups={grantedGroups(rows)}
-          knownIDs={rows.map((row) => row.ID)}
+          knownIDs={rows.map((row) => row.id)}
           onRegistered={afterWrite}
           onClose={() => {
             setRegistering(false);
@@ -681,27 +681,27 @@ export function LayerPanel({
             <tbody>
               {rows.map((layer, index) => (
                 <LayerRow
-                  key={layer.ID}
+                  key={layer.id}
                   layer={layer}
                   position={index + 1}
                   subject={subject}
                   caps={caps}
                   movable={movableBlock(layer)}
                   readOnly={readOnly}
-                  refusal={refusals[layer.ID] ?? null}
-                  reingest={reingest[layer.ID] ?? idleReingest}
+                  refusal={refusals[layer.id] ?? null}
+                  reingest={reingest[layer.id] ?? idleReingest}
                   reingestHeld={runActive}
-                  dragging={dragging === layer.ID}
-                  over={dropEdge(rows, dragging, over, layer.ID)}
+                  dragging={dragging === layer.id}
+                  over={dropEdge(rows, dragging, over, layer.id)}
                   onDragStart={() => {
-                    setDragging(layer.ID);
+                    setDragging(layer.id);
                   }}
                   onDragOver={() => {
-                    setOver(layer.ID);
+                    setOver(layer.id);
                   }}
                   onDrop={() => {
                     if (dragging !== null) {
-                      commitMove(dragging, layer.ID);
+                      commitMove(dragging, layer.id);
                     }
                   }}
                   onDragEnd={() => {
@@ -709,13 +709,13 @@ export function LayerPanel({
                     setOver(null);
                   }}
                   onMove={(delta) => {
-                    moveBy(layer.ID, delta);
+                    moveBy(layer.id, delta);
                   }}
                   onReingest={(breakGlass) => {
-                    void runReingest(layer.ID, breakGlass);
+                    void runReingest(layer.id, breakGlass);
                   }}
                   onDismissReingest={() => {
-                    setRowReingest(layer.ID, idleReingest);
+                    setRowReingest(layer.id, idleReingest);
                   }}
                   onStopWaitingReingest={() => {
                     // The request is with the registry, which runs the
@@ -723,18 +723,18 @@ export function LayerPanel({
                     // wait is closed, so the row keeps its running annotation
                     // and its held trigger and still resolves into the report.
                     setReingest((prev) => {
-                      const state = prev[layer.ID];
+                      const state = prev[layer.id];
                       if (state === undefined || state.kind !== "running") {
                         return prev;
                       }
                       return {
                         ...prev,
-                        [layer.ID]: { ...state, watching: false },
+                        [layer.id]: { ...state, watching: false },
                       };
                     });
                   }}
                   onWrite={() => {
-                    clearRefusal(layer.ID);
+                    clearRefusal(layer.id);
                     afterWrite();
                     // An unregister moves the layer into the recoverable list,
                     // so the count the header states is re-read on every write
@@ -742,14 +742,14 @@ export function LayerPanel({
                     recoverable.reload();
                   }}
                   onUnregistered={() => {
-                    setOutcome(drawn(unregisteredNote(layer.ID)));
+                    setOutcome(drawn(unregisteredNote(layer.id)));
                     takeFocus(heading.current);
                   }}
                   onRefusal={(err, retry) => {
-                    recordRefusal(layer.ID, err, retry);
+                    recordRefusal(layer.id, err, retry);
                   }}
                   onDismissRefusal={() => {
-                    clearRefusal(layer.ID);
+                    clearRefusal(layer.id);
                   }}
                 />
               ))}
@@ -858,12 +858,12 @@ function personalHolding(mine: number, cap: number | undefined): string {
  * existing order. */
 async function listOrdered(): Promise<LayerRecord[]> {
   const layers = await listLayers();
-  const byOrder = (a: LayerRecord, b: LayerRecord) => a.Order - b.Order;
+  const byOrder = (a: LayerRecord, b: LayerRecord) => a.order - b.order;
   const admin = layers
-    .filter((layer) => layer.UserDefined !== true)
+    .filter((layer) => layer.user_defined !== true)
     .sort(byOrder);
   const user = layers
-    .filter((layer) => layer.UserDefined === true)
+    .filter((layer) => layer.user_defined === true)
     .sort(byOrder);
   return [...admin, ...user];
 }
@@ -874,10 +874,10 @@ async function listOrdered(): Promise<LayerRecord[]> {
  * takes a slot the block already occupied and no row outside it moves. */
 function reordered(rows: LayerRecord[], order: string[]): LayerRecord[] {
   const block = order
-    .map((id) => rows.find((row) => row.ID === id))
+    .map((id) => rows.find((row) => row.id === id))
     .filter((row): row is LayerRecord => row !== undefined);
   let at = 0;
-  return rows.map((row) => (order.includes(row.ID) ? block[at++] : row));
+  return rows.map((row) => (order.includes(row.id) ? block[at++] : row));
 }
 
 /** inMovedOrder renders the stored rows in the order the panel has committed
@@ -892,7 +892,7 @@ function inMovedOrder(
     return rows;
   }
   const shown = moved
-    .map((id) => rows.find((row) => row.ID === id))
+    .map((id) => rows.find((row) => row.id === id))
     .filter((row): row is LayerRecord => row !== undefined);
   return shown.length === rows.length ? shown : rows;
 }
@@ -904,12 +904,12 @@ function inMovedOrder(
  * values are, so the block bounds both where the control can take a row and
  * what the request names. */
 function blockOf(rows: LayerRecord[], id: string): LayerRecord[] {
-  const moving = rows.find((row) => row.ID === id);
+  const moving = rows.find((row) => row.id === id);
   if (moving === undefined) {
     return [];
   }
   return rows.filter(
-    (row) => (row.UserDefined === true) === (moving.UserDefined === true),
+    (row) => (row.user_defined === true) === (moving.user_defined === true),
   );
 }
 
@@ -935,7 +935,7 @@ function movedOrder(
   from: string,
   onto: string,
 ): string[] | null {
-  const order = block.map((row) => row.ID);
+  const order = block.map((row) => row.id);
   const at = order.indexOf(from);
   const target = order.indexOf(onto);
   if (at < 0 || target < 0 || at === target) {
@@ -964,8 +964,8 @@ function dropEdge(
   if (dragging === null || over !== id || dragging === id) {
     return null;
   }
-  const at = rows.findIndex((row) => row.ID === dragging);
-  const target = rows.findIndex((row) => row.ID === id);
+  const at = rows.findIndex((row) => row.id === dragging);
+  const target = rows.findIndex((row) => row.id === id);
   if (at < 0 || target < 0) {
     return null;
   }
@@ -982,7 +982,7 @@ function movedNote(
   order: string[],
   id: string,
 ): string {
-  const offset = rows.findIndex((row) => order.includes(row.ID));
+  const offset = rows.findIndex((row) => order.includes(row.id));
   const at = order.indexOf(id);
   const position = offset + at + 1;
   return `${id} moved to order ${String(position)} of ${String(rows.length)}.`;
@@ -1012,7 +1012,7 @@ function blockEdgeNote(
   delta: number,
 ): string {
   const klass =
-    block[0]?.UserDefined === true ? "user-defined" : "admin-defined";
+    block[0]?.user_defined === true ? "user-defined" : "admin-defined";
   const edge = delta < 0 ? "first" : "last";
   return `${id} is already ${edge} among the ${klass} layers; it did not move.`;
 }
@@ -1099,7 +1099,7 @@ function LayerRow({
   const mayReingest = mayTake("reingest", layer, caps, subject);
   const mayEdit = mayTake(
     "update",
-    { UserDefined: layer.UserDefined, Owner: layer.Owner },
+    { user_defined: layer.user_defined, owner: layer.owner },
     caps,
     subject,
   );
@@ -1211,7 +1211,7 @@ function LayerRow({
         // the pointer reorder is lost with no sign of it. The row carries
         // its own layer ID, and the move it names is a reorder rather than
         // a copy.
-        event.dataTransfer.setData("text/plain", layer.ID);
+        event.dataTransfer.setData("text/plain", layer.id);
         event.dataTransfer.effectAllowed = "move";
         onDragStart();
       }}
@@ -1241,10 +1241,10 @@ function LayerRow({
           className="drag-handle"
           aria-label={
             readOnly
-              ? `Move ${layer.ID}: reordering is unavailable while the registry is read-only`
+              ? `Move ${layer.id}: reordering is unavailable while the registry is read-only`
               : movable
-                ? `Move ${layer.ID}: press the up or down arrow key`
-                : `Move ${layer.ID}: reordering this block requires the administrator role`
+                ? `Move ${layer.id}: press the up or down arrow key`
+                : `Move ${layer.id}: reordering this block requires the administrator role`
           }
           disabled={readOnly || !movable}
           draggable={!readOnly && movable}
@@ -1269,7 +1269,7 @@ function LayerRow({
             is the fact the panel is about, so it sits on its own line under
             the name where every row states it at the same offset. */}
         <div className="layer-id-cell">
-          <span className="layer-name">{layer.ID}</span>
+          <span className="layer-name">{layer.id}</span>
           {ownedByCaller(layer, subject) && <Badge tone="accent">yours</Badge>}
         </div>
         <div className="layer-order quiet" data-testid="layer-order">
@@ -1292,7 +1292,7 @@ function LayerRow({
             controls tripled the height of every row. */}
         <div className="row-action-bar">
           <ReingestButton
-            layerID={layer.ID}
+            layerID={layer.id}
             state={reingest}
             admitted={mayReingest}
             readOnly={readOnly}
@@ -1308,7 +1308,7 @@ function LayerRow({
             ref={overflow}
             type="button"
             className="row-overflow"
-            aria-label={`More actions for ${layer.ID}`}
+            aria-label={`More actions for ${layer.id}`}
             aria-haspopup="menu"
             aria-expanded={overflowOpen}
             onClick={() => {
@@ -1323,7 +1323,7 @@ function LayerRow({
           <RowMenu
             menuRef={menu}
             anchor={overflow}
-            label={`More actions for ${layer.ID}`}
+            label={`More actions for ${layer.id}`}
             onDismiss={() => {
               setOverflowOpen(false);
             }}
@@ -1370,7 +1370,7 @@ function LayerRow({
             }}
             onConfirm={() => {
               setConfirming(false);
-              attempt(() => unregisterLayer(layer.ID), onUnregistered);
+              attempt(() => unregisterLayer(layer.id), onUnregistered);
             }}
           />
         )}
@@ -1380,7 +1380,7 @@ function LayerRow({
       <tr className="row-detail">
         <td colSpan={6}>
           <ReingestStatus
-            layerID={layer.ID}
+            layerID={layer.id}
             state={reingest}
             onStart={(breakGlass) => {
               oweFocus();
@@ -1609,7 +1609,7 @@ function UnregisterConfirmation({
   // nothing on the page naming the whitespace. Trimming does not weaken the
   // gate, because the trimmed value still has to be the whole ID (§13.10).
   const entered = typed.trim();
-  const held = entered !== layer.ID;
+  const held = entered !== layer.id;
   // The field is empty on the first paint, so the hold stands before the
   // reader has done anything. Stating it then would open the confirmation on a
   // sentence in the refusal colour, reading as an error the reader has already
@@ -1618,7 +1618,7 @@ function UnregisterConfirmation({
   const stated = held && entered !== "";
   const holdID = useId();
   return (
-    <Modal title={`Unregister ${layer.ID}`} onClose={onCancel}>
+    <Modal title={`Unregister ${layer.id}`} onClose={onCancel}>
       <div className="modal-body">
         {/* The reach of the write leads, in the danger tone, because it is
             the half that cannot be undone by the reader alone. */}
@@ -1751,10 +1751,10 @@ function UnregisterConfirmation({
  * the name is what asserts who may write. */
 function orderNote(position: number, layer: LayerRecord): string {
   const note = `order ${String(position)}`;
-  if (layer.Owner === undefined || layer.Owner === "") {
+  if (layer.owner === undefined || layer.owner === "") {
     return note;
   }
-  return `${note} · owner ${layer.Owner}`;
+  return `${note} · owner ${layer.owner}`;
 }
 
 /** LastIngestCell states when the layer was last ingested as an age, the way

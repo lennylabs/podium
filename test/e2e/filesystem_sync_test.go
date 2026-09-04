@@ -800,8 +800,9 @@ func TestFilesystemSync_ServeStandaloneLayerPath(t *testing.T) {
 	found := false
 	for _, l := range arr {
 		lm, _ := l.(map[string]any)
-		// store.LayerConfig serializes with capitalized Go field names.
-		if lm["ID"] == "alice-personal" && lm["SourceType"] == "local" {
+		// The list answers the §7.3.1 layer object, whose members are
+		// lower snake_case.
+		if lm["id"] == "alice-personal" && lm["source_type"] == "local" {
 			found = true
 			break
 		}
@@ -829,7 +830,7 @@ func TestFilesystemSync_LayerPathFlagEnvMapping(t *testing.T) {
 	found := false
 	for _, l := range arr {
 		lm, _ := l.(map[string]any)
-		if lm["ID"] == "mylayer" {
+		if lm["id"] == "mylayer" {
 			found = true
 			break
 		}

@@ -37,29 +37,29 @@ export function UpdateLayerForm({
   onUpdated: () => void;
   onClose: () => void;
 }) {
-  const git = layer.SourceType === "git";
-  const [ref, setRef] = useState(layer.Ref ?? "");
-  const [root, setRoot] = useState(layer.Root ?? "");
-  const [localPath, setLocalPath] = useState(layer.LocalPath ?? "");
+  const git = layer.source_type === "git";
+  const [ref, setRef] = useState(layer.ref ?? "");
+  const [root, setRoot] = useState(layer.root ?? "");
+  const [localPath, setLocalPath] = useState(layer.local_path ?? "");
   const [policy, setPolicy] = useState(layer.force_push_policy ?? "tolerant");
   const [rotate, setRotate] = useState(false);
-  const editableVisibility = layer.UserDefined !== true;
-  const [isPublic, setPublic] = useState(layer.Public === true);
-  const [organization, setOrganization] = useState(layer.Organization === true);
+  const editableVisibility = layer.user_defined !== true;
+  const [isPublic, setPublic] = useState(layer.public === true);
+  const [organization, setOrganization] = useState(layer.organization === true);
   // The members already granted on an axis are displayed rather than edited,
   // because the endpoint grants on each axis and withdraws on none: a field
   // holding them would accept a deletion the registry discards while still
   // answering success, which reads to an operator as an access narrowing that
   // never happened. The field beside them names the members to add.
-  const grantedGroups = layer.Groups ?? [];
-  const grantedUsers = layer.Users ?? [];
+  const grantedGroups = layer.groups ?? [];
+  const grantedUsers = layer.users ?? [];
   // An axis the layer already grants is state rather than a choice, and it is
   // drawn as such. Offered as a checkbox it was operable in appearance and
   // inert in fact: the click changed nothing, the form still answered "Layer
   // updated", and the row still carried the axis.
   const grantedAxes = [
-    layer.Public === true ? "public" : "",
-    layer.Organization === true ? "organization" : "",
+    layer.public === true ? "public" : "",
+    layer.organization === true ? "organization" : "",
   ].filter((axis) => axis !== "");
   const [groups, setGroups] = useState("");
   const [users, setUsers] = useState("");
@@ -80,9 +80,9 @@ export function UpdateLayerForm({
   const mayNamePath = mayTake(
     "update",
     {
-      UserDefined: layer.UserDefined,
-      Owner: layer.Owner,
-      LocalPath: layer.LocalPath === undefined || layer.LocalPath === "" ? "a path" : layer.LocalPath,
+      user_defined: layer.user_defined,
+      owner: layer.owner,
+      local_path: layer.local_path === undefined || layer.local_path === "" ? "a path" : layer.local_path,
     },
     caps,
     subject,
@@ -110,7 +110,7 @@ export function UpdateLayerForm({
       patch.users = merge(grantedUsers, members(users));
     }
     setPending(true);
-    updateLayer(layer.ID, patch).then(
+    updateLayer(layer.id, patch).then(
       (next) => {
         setPending(false);
         setRefusal(null);
@@ -150,7 +150,7 @@ export function UpdateLayerForm({
       >
         <SecretReveal
           result={result}
-          outcome={`Layer ${layer.ID} is updated.`}
+          outcome={`Layer ${layer.id} is updated.`}
           acknowledged={secret.acknowledged}
           onAcknowledge={secret.setAcknowledged}
           onDone={done}
@@ -165,10 +165,10 @@ export function UpdateLayerForm({
     // rather than pushed into the row that opened it. Left inside the actions
     // cell it took that column's width, which is too narrow for a filesystem
     // path, and grew the row enough to reflow its neighbours.
-    <Modal title={`Edit ${layer.ID}`} onClose={onClose}>
+    <Modal title={`Edit ${layer.id}`} onClose={onClose}>
       <form
         className="register-form modal-form"
-        aria-label={`Update ${layer.ID}`}
+        aria-label={`Update ${layer.id}`}
         onSubmit={submit}
       >
         <div className="modal-body">
@@ -229,7 +229,7 @@ export function UpdateLayerForm({
             <fieldset className="field">
               <legend className="label">Visibility</legend>
               <GrantedAxes axes={grantedAxes} />
-              {layer.Public !== true && (
+              {layer.public !== true && (
                 <label>
                   <input
                     type="checkbox"
@@ -241,7 +241,7 @@ export function UpdateLayerForm({
                   Public
                 </label>
               )}
-              {layer.Organization !== true && (
+              {layer.organization !== true && (
                 <label>
                   <input
                     type="checkbox"

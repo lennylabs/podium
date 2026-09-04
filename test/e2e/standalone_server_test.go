@@ -817,11 +817,11 @@ func TestStandaloneServer_GitSourceLayerRegister(t *testing.T) {
 	}
 
 	// Layer must appear in GET /v1/layers with source type git. The server
-	// serializes store.LayerConfig with capitalized Go field names.
+	// answers the §7.3.1 layer object, whose members are lower snake_case.
 	var resp struct {
 		Layers []struct {
-			ID         string `json:"ID"`
-			SourceType string `json:"SourceType"`
+			ID         string `json:"id"`
+			SourceType string `json:"source_type"`
 		} `json:"layers"`
 	}
 	getJSON(t, srv.BaseURL+"/v1/layers", &resp)
@@ -1018,13 +1018,14 @@ func TestStandaloneServer_GetLayersAfterStartup(t *testing.T) {
 	})
 	srv := startServer(t, reg)
 
-	// store.LayerConfig serializes with capitalized Go field names.
+	// The server answers the §7.3.1 layer object, whose members are lower
+	// snake_case.
 	var resp struct {
 		Layers []struct {
-			ID         string `json:"ID"`
-			SourceType string `json:"SourceType"`
-			LocalPath  string `json:"LocalPath"`
-			Public     bool   `json:"Public"`
+			ID         string `json:"id"`
+			SourceType string `json:"source_type"`
+			LocalPath  string `json:"local_path"`
+			Public     bool   `json:"public"`
 		} `json:"layers"`
 	}
 	getJSON(t, srv.BaseURL+"/v1/layers", &resp)

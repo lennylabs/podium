@@ -18,11 +18,11 @@ export interface VisibilityMarker {
  * as independent grants that combine as a union. Two layers carrying the same
  * grants therefore read identically, and no axis is dropped. */
 export function visibilityMarkers(layer: LayerRecord): VisibilityMarker[] {
-  const groups = layer.Groups ?? [];
-  const users = layer.Users ?? [];
+  const groups = layer.groups ?? [];
+  const users = layer.users ?? [];
   return [
-    layer.Public === true ? { named: 'public', extra: 0 } : null,
-    layer.Organization === true ? { named: 'organization', extra: 0 } : null,
+    layer.public === true ? { named: 'public', extra: 0 } : null,
+    layer.organization === true ? { named: 'organization', extra: 0 } : null,
     groups.length > 0 ? summarize('group', groups) : null,
     users.length > 0 ? summarize('user', users) : null,
   ].filter((marker): marker is VisibilityMarker => marker !== null);
@@ -79,10 +79,10 @@ function summarize(axis: string, members: string[]): VisibilityMarker {
  * the narrow columns that report it, so a non-git layer displays no
  * reference. */
 export function ingestRef(layer: LayerRecord): string {
-  if (layer.SourceType !== 'git') {
+  if (layer.source_type !== 'git') {
     return '';
   }
-  return layer.LastIngestedRef ?? '';
+  return layer.last_ingested_ref ?? '';
 }
 
 /** shortRef abbreviates an ingest reference to what a reader compares. A
@@ -98,7 +98,7 @@ export function shortRef(ref: string): string {
  * still tracks a branch, so each half stands where the other is absent. */
 export function ingestedRef(layer: LayerRecord): string {
   const commit = ingestRef(layer);
-  const branch = layer.SourceType === 'git' ? (layer.Ref ?? '') : '';
+  const branch = layer.source_type === 'git' ? (layer.ref ?? '') : '';
   if (commit === '') {
     return branch;
   }

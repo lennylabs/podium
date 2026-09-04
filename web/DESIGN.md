@@ -307,14 +307,13 @@ decision rather than reporting a grant, and every write control on a row is
 rendered from that prediction together with the row's own fields.
 
 A layer record identifies its source, records when it was last ingested, carries
-an order value that sets its precedence, and declares who can see it. The registry
-marshals `store.LayerConfig` (`pkg/store/store.go`) directly into every layer
-response, so that struct owns the field names, their casing, and their types, and
-the design reads it there rather than from a copy in this brief. Read the struct
-before naming a field in a mock: the layer JSON is not uniformly snake_case, the
-response example in `docs/reference/http-api.md` disagrees with the struct on that
-point, and the webhook secret is deliberately absent from it. Three of the
-record's properties drive design work.
+an order value that sets its precedence, and declares who can see it. Spec §7.3.1
+fixes the layer object's member names, and §7.2.1 makes them lower snake_case, so
+the response example in `docs/reference/http-api.md` and the JSON tags on
+`store.LayerConfig` (`pkg/store/store.go`) agree. The struct is the one
+enumeration of the field list, and the design reads it there rather than from a
+copy in this brief. The webhook secret and the tenant identifier are both absent
+from the object. Three of the record's properties drive design work.
 
 - **Source.** The built-in source types are a git repository and a local
   filesystem path, listed under "Source types" in spec §4.6, and each carries a

@@ -641,8 +641,8 @@ func TestReadme_HTTPLayers(t *testing.T) {
 	if len(resp.Layers) == 0 {
 		t.Fatalf("no layers returned")
 	}
-	if _, ok := resp.Layers[0]["ID"]; !ok {
-		t.Errorf("layer entry missing ID field: %v", resp.Layers[0])
+	if _, ok := resp.Layers[0]["id"]; !ok {
+		t.Errorf("layer entry missing id field: %v", resp.Layers[0])
 	}
 }
 

@@ -59,13 +59,13 @@ func TestDeclarativeLayers_LocalLayerBootsAndServes(t *testing.T) {
 		t.Errorf("declared local layer artifact not searchable: %+v", search.Results)
 	}
 
-	// The layer is registered (store.LayerConfig has no JSON tags, so fields
-	// serialize under their Go names).
+	// The layer is registered. The list answers the §7.3.1 layer object,
+	// whose members are lower snake_case.
 	var layers struct {
 		Layers []struct {
-			ID         string `json:"ID"`
-			SourceType string `json:"SourceType"`
-			Public     bool   `json:"Public"`
+			ID         string `json:"id"`
+			SourceType string `json:"source_type"`
+			Public     bool   `json:"public"`
 		} `json:"layers"`
 	}
 	getJSON(t, srv.BaseURL+"/v1/layers", &layers)
