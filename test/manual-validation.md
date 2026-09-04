@@ -2423,8 +2423,13 @@ allowlist, and the per-receiver `debounce` field.
    post "$ALICE" '{"url":"https://127.0.0.1:9443/h","event_filter":["layer.ingested"]}'
    echo "--- alice public http (not https): SSRF scheme rejection ---"
    post "$ALICE" '{"url":"http://203.0.113.10/h","event_filter":["layer.ingested"]}'
-   echo "--- alice debounce field accepted ---"
-   post "$ALICE" '{"url":"https://203.0.113.11/h","event_filter":["layer.ingested"],"debounce":"60s"}'
+   echo "--- alice debounce field accepted, and the reported value is writable ---"
+   CREATED=$(post "$ALICE" '{"url":"https://203.0.113.11/h","event_filter":["layer.ingested"],"debounce":"60s"}')
+   echo "$CREATED"
+   RID=$(printf '%s\n' "$CREATED" | python3 -c 'import json,sys; print(json.loads(sys.stdin.readline())["id"])')
+   curl -s -w '\n%{http_code}\n' -X PUT "$PODIUM_REGISTRY/v1/webhooks/$RID" \
+     -H "Authorization: Bearer $ALICE" -H 'Content-Type: application/json' \
+     -d '{"debounce":"1m0s"}'
    ```
 
 4. Stop the server, then boot a second one identically but with
@@ -2450,10 +2455,11 @@ allowlist, and the per-receiver `debounce` field.
   requires `https`.
 - alice's POST with `"debounce":"60s"` returns HTTP 201, and the created receiver
   reports `"debounce": "1m0s"`: the field is emitted as the duration string the
-  request accepts rather than as a nanosecond count. Feeding that value back
-  through `PUT /v1/webhooks/<id>` with `{"debounce":"1m0s"}` returns HTTP 200
-  and the same value, so a client can read a receiver and write it back
-  unchanged.
+  request accepts rather than as a nanosecond count. The `PUT` that feeds that
+  value back to the created receiver returns HTTP 200 and reports
+  `"debounce": "1m0s"` again, so a client can read a receiver and write the read
+  value back unchanged. A `registry.invalid_argument` on the `PUT` means the
+  create reported a form the update path does not parse.
 - On the allowlist server, the loopback `https` POST returns HTTP 201: an
   allowlisted host overrides the address rejection (the `https` requirement still
   applies).
@@ -5016,16 +5022,21 @@ to 3 completed and the browser still signed in.
      -w '\nstatus=%{http_code}\n' | grep -i -e '"id"' -e secret -e '"code"' -e status
    curl -sS "http://127.0.0.1:8153/v1/layers" \
      -H "Authorization: Bearer $TOKEN" \
-     | grep -o -e '"[A-Z][A-Za-z]*":' -e '[Tt]enant' \
-     || echo "no Go-cased key and no tenant field"
+     | grep -o -e '"id":' -e '"[A-Z][A-Za-z]*":' -e '[Tt]enant' \
+     | sort | uniq -c
    ```
 
    **Expect.** The first command lists `own-release`, and no line carries a
-   secret value. The second command prints `no Go-cased key and no tenant
-   field`, because §7.2.1 fixes the control plane on lower snake_case names and
-   bars a layer record from restating the tenant it was read under. The first
-   command carries `-i`, so its `'"id"'` pattern matches any casing and reports
-   nothing about the spelling; the second command is what reads the spelling.
+   secret value. The second command prints one line, `4 "id":`, counting one
+   `id` member per layer this caller reads: `public-handbook`, `private-comp`,
+   `comp-readers-policy`, and `own-release`. That count is the evidence the
+   pipeline read the layer list rather than an error envelope or an empty body,
+   either of which prints nothing at all. No `"Xxx":` line and no `tenant` line
+   appears,
+   because §7.2.1 fixes the control plane on lower snake_case names and bars a
+   layer record from restating the tenant it was read under. The first command
+   carries `-i`, so its `'"id"'` pattern matches any casing and reports nothing
+   about the spelling; the second command is what reads the spelling.
    The secret is returned on registration and on a rotation and is redacted from
    every other response, so once the reveal is dismissed it cannot be read back.
    In the panel the row carries the "yours" marker, which the panel draws by
@@ -6058,7 +6069,9 @@ grep 'ingested layer' "$WORK/srv.log"
 ```
 
 **Expect.** `ingested layer reg from $WORK/reg (accepted=1, idempotent=0,
-rejected=0, advisories=1)`. The advisory is the scaffold's placeholder body.
+rejected=0, advisories=1)`. The advisory is `lint.thin_description`: the
+description above is 14 characters, one short of the 15-character threshold.
+Keep it as written, because a longer description reports `advisories=0`.
 
 Define the reader every step below pipes a response into. It prints the member
 names at each level of the document, the member names that are not lower
