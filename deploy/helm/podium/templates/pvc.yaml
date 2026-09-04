@@ -1,0 +1,19 @@
+{{- if and .Values.objects.enabled (not .Values.objects.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "podium.fullname" . }}-objects
+  labels:
+    {{- include "podium.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes:
+    - {{ .Values.objects.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.objects.size }}
+  {{- with .Values.objects.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+{{- end }}

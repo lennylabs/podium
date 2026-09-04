@@ -20,8 +20,13 @@ config:
   objectStore:
     type: s3
     bucket: ""
-    region: us-east-1
-    endpoint: ""  # set for MinIO/R2/GCS
+    # Blank so the secret can supply it. A non-empty default renders as a
+    # container env entry, which overrides the same key arriving through
+    # envFrom, so it would replace a correct secret-supplied region.
+    region: ""
+    endpoint: ""       # set for MinIO/R2/GCS
+    s3ForcePathStyle: false  # set true for MinIO/R2/Ceph
+    filesystemRoot: /objects  # used when type: filesystem
 
   # Hybrid search is off by default so a bare `helm install` boots without an
   # embedding-provider credential. Turn it on by setting both of the following
@@ -63,6 +68,11 @@ config:
     # is accepted when its aud claim carries one of them (§6.3.3).
     audience: ""
     issuer: ""
+    groupsClaim: ""       # JWT claim that carries group membership
+    # Comma-separated <token-group-value>=<group-name> pairs. The name on the
+    # right is the group a layer's `groups:` filter names. A space-separated
+    # value parses without error into one wrong entry.
+    idpGroupMapping: ""
 
   # Public mode bypasses authentication and the visibility model (§13.10). It
   # binds loopback unless the bind is explicitly allowed, and this chart renders
@@ -73,6 +83,9 @@ config:
   # identity provider: setting both fails with `config.public_mode_with_idp`.
   publicMode: false
   allowPublicBind: false
+
+  bootstrapAdmins: ""         # comma-separated list of admin identities on first boot
+  defaultLayerVisibility: ""  # public | organization | private; empty uses server default
 
   # The §13.12 / §4.5.5 discovery block is config-file-only: it has no
   # environment variable, and this chart configures the registry through env.
@@ -95,11 +108,12 @@ resources:
 service:
   type: ClusterIP
   port: 8080
+  annotations: {}
 
-# An ingress and a prometheus-operator ServiceMonitor were declared here and no
-# template rendered either, so setting them did nothing. They are removed rather
-# than left as switches that report success and change nothing. Route to the
-# Service with an ingress of your own, and scrape /metrics directly.
+# A prometheus-operator ServiceMonitor was declared here and no template
+# rendered it, so setting it did nothing. It is removed rather than left as a
+# switch that reports success and changes nothing. Scrape /metrics directly.
+# The ingress below is rendered; see the `ingress:` block.
 
 podSecurityContext:
   runAsUser: 65534
@@ -111,3 +125,77 @@ securityContext:
   readOnlyRootFilesystem: true
   capabilities:
     drop: ["ALL"]
+
+strategy:
+  type: RollingUpdate
+
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+podLabels: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+extraEnv: []
+
+# Persistent volume for filesystem object store (config.objectStore.type: filesystem).
+# Volume backing a filesystem object store. Every replica mounts the same
+# claim, and ReadWriteOnce binds it to one node, so a multi-node cluster needs
+# either an access mode of ReadWriteMany or replicaCount set to 1. Required
+# when config.objectStore.type is filesystem.
+objects:
+  enabled: false
+  existingClaim: ""
+  size: 10Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+# Secret mounted as a volume for runtime-keys (identity provider: injected-session-token).
+runtimeKeys:
+  enabled: false
+  secretName: ""
+  mountPath: /keys
+  # The key within secretName that holds the JSON key set. The registry reads
+  # mountPath/key as a file; mountPath itself is the directory the volume
+  # mounts at, and naming it instead fails the boot.
+  key: runtime-keys.json
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  path: /
+  pathType: Prefix
+  tls: []
+
+# Bundled single-replica Postgres — for evaluation and single-node pilots only.
+# Set postgresql.existingSecret to a secret with key "password"; the same secret
+# is the source for both the database's own password and the DSN the registry
+# connects with, which the deployment derives, so no DSN is written by hand.
+# §13.1 pairs a production Postgres with read replicas, which this single
+# replica is not. For production, use an external managed database, leave this
+# disabled, and supply PODIUM_POSTGRES_DSN through existingSecret. Enabling both
+# at once resolves to the bundled database: the derived DSN is set on the
+# container directly and takes precedence over the one existingSecret carries.
+postgresql:
+  enabled: false
+  fullnameOverride: ""
+  image: postgres:17-alpine
+  imagePullPolicy: IfNotPresent
+  database: podium
+  username: podium
+  existingSecret: ""
+  passwordKey: password
+  # Empty by default: the image drops to the postgres user itself and needs a
+  # writable data directory, so the registry's context does not transfer.
+  podSecurityContext: {}
+  securityContext: {}
+  podAnnotations: {}
+  resources: {}
+  persistence:
+    size: 10Gi
+    storageClass: ""
