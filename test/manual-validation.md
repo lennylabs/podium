@@ -5027,9 +5027,12 @@ to 3 completed and the browser still signed in.
    ```
 
    **Expect.** The first command lists `own-release`, and no line carries a
-   secret value. The second command prints one line, `4 "id":`, counting one
+   secret value. The second command prints one line, `3 "id":`, counting one
    `id` member per layer this caller reads: `public-handbook`, `private-comp`,
-   `comp-readers-policy`, and `own-release`. That count is the evidence the
+   and `own-release`. `comp-readers-policy` is absent because it is visible only
+   through `groups: [comp-readers]` and `$TOKEN` carries no `groups` claim: the
+   `groups` client scope is optional, and prerequisite 5 mints this token with a
+   password grant that requests no scope. That count is the evidence the
    pipeline read the layer list rather than an error envelope or an empty body,
    either of which prints nothing at all. No `"Xxx":` line and no `tenant` line
    appears,
@@ -6074,10 +6077,13 @@ description above is 14 characters, one short of the 15-character threshold.
 Keep it as written, because a longer description reports `advisories=0`.
 
 Define the reader every step below pipes a response into. It prints the member
-names at each level of the document, the member names that are not lower
+names at each level of the document, the `id` and `deleted_at` value of each
+layer record the document carries, the member names that are not lower
 snake_case, how many times the string `tenant` appears in any casing, and
-whether the document carries a secret. The block is unindented on purpose: the
-document's leading spaces would land inside the Python program.
+whether the document carries a secret. The record line is what makes the
+ordering and the tombstone stamp readable, because the member-name walk reports
+names alone. The block is unindented on purpose: the document's leading spaces
+would land inside the Python program.
 
 ```bash
 inspect() {
@@ -6093,6 +6099,11 @@ def walk(node, path):
     elif isinstance(node, list) and node:
         walk(node[0], path + "[]")
 walk(doc, "response")
+records = next((v for v in doc.values() if isinstance(v, list) and v and isinstance(v[0], dict)), None)
+if records is None and isinstance(doc.get("layer"), dict):
+    records = [doc["layer"]]
+if records:
+    print("records:", [(r.get("id"), r.get("deleted_at")) for r in records])
 print("go-cased keys:", sorted({k for k in re.findall(r"\"([A-Za-z_]+)\":", raw) if k != k.lower()}))
 print("tenant mentions:", len(re.findall(r"(?i)tenant", raw)))
 print("carries a secret value:", "webhook_secret" in doc)
@@ -6115,7 +6126,8 @@ print("carries a secret value:", "webhook_secret" in doc)
    'webhook_url']`, and `response.layer` carries `['created_at', 'deleted_at',
    'git_provider', 'groups', 'id', 'last_ingested_ref', 'local_path', 'order',
    'organization', 'owner', 'public', 'ref', 'repo', 'root', 'source_type',
-   'user_defined', 'users']`. `go-cased keys: []`, `tenant mentions: 0`, and
+   'user_defined', 'users']`. `records: [('own-release', None)]`,
+   `go-cased keys: []`, `tenant mentions: 0`, and
    `carries a secret value: True`. A member spelled `ID`, `Order`, or
    `UserDefined` here is the §7.2.1 violation this scenario exists to catch,
    and a `tenant` mention is the disclosure §7.2.1 bars: the layer's subject is
@@ -6131,7 +6143,8 @@ print("carries a secret value:", "webhook_secret" in doc)
    ```
 
    **Expect.** `response ['layer']` over the same member list step 1 printed,
-   with `go-cased keys: []`, `tenant mentions: 0`, and `carries a secret value:
+   with `records: [('own-release', None)]`, `go-cased keys: []`,
+   `tenant mentions: 0`, and `carries a secret value:
    False`. The update reports the layer under one name per value, so a client
    can feed a read back into a write, and the secret is not served again.
 
@@ -6143,7 +6156,8 @@ print("carries a secret value:", "webhook_secret" in doc)
 
    **Expect.** `response ['layers']` and `response.layers[]` carrying the
    step 1 members plus `last_ingested_at`, which the `reg` layer carries
-   because it ingested at boot. `go-cased keys: []`, `tenant mentions: 0`, and
+   because it ingested at boot. `records: [('reg', None), ('own-release',
+   None)]`, `go-cased keys: []`, `tenant mentions: 0`, and
    `carries a secret value: False`.
 
 4. Re-sequence the layers and read the response.
@@ -6153,9 +6167,11 @@ print("carries a secret value:", "webhook_secret" in doc)
    ```
 
    **Expect.** `response ['layers']` with `go-cased keys: []` and
-   `tenant mentions: 0`. The reader prints the first element, which is now
-   `own-release`, so the member list is step 1's: `last_ingested_at` is absent
-   on a layer that has never ingested. The reorder answers the whole list the
+   `tenant mentions: 0`. The record line reads `records: [('own-release',
+   None), ('reg', None)]`, which is the re-sequencing the command asked for and
+   the reverse of step 3's line. The member-name walk reports the first element,
+   now `own-release`, so the member list is step 1's: `last_ingested_at` is
+   absent on a layer that has never ingested. The reorder answers the whole list the
    caller may read, so it is a second reading of the same object under a
    different endpoint.
 
@@ -6168,7 +6184,10 @@ print("carries a secret value:", "webhook_secret" in doc)
 
    **Expect.** The unregister prints `{"unregistered": "own-release"}`. The
    deleted list carries `own-release` under the member set step 1 printed, with
-   a non-null `deleted_at`, `go-cased keys: []`, and `tenant mentions: 0`. A
+   `go-cased keys: []` and `tenant mentions: 0`. The record line reads
+   `records: [('own-release', '<stamp>')]`, where the stamp is an RFC 3339 UTC
+   time a few seconds old, so the tombstone the unregister wrote is readable
+   rather than inferred. A
    live layer carries `deleted_at` as `null` rather than omitting it, so the
    live list and the recoverable list read the same member set.
 
