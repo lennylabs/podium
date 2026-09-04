@@ -116,7 +116,7 @@ var panelLayerFields = []string{"id", "order", "user_defined", "owner", "last_in
 // bundle alone.
 var panelLayerOmitted = map[string]bool{"last_ingested_at": true, "force_push_policy": true}
 
-// Spec: §7.2.1, §7.3.1, §13.10 — the served bundle reads a layer record under
+// Spec: §7.2.1 / §7.3.1 / §13.10 — the served bundle reads a layer record under
 // the member names the registry answers, which §7.3.1 fixes as lower
 // snake_case. Reading a member under any other name yields undefined on every
 // response, which renders as a permanently absent value rather than as a

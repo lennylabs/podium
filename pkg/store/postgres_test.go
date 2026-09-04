@@ -320,7 +320,7 @@ func nonUTCPostgresDSN(dsn string) string {
 	return dsn + " timezone=" + zone
 }
 
-// Spec: §7.2.1 — the §7.3.1 layer object's timestamps are RFC 3339 in UTC.
+// Spec: §7.2.1 / §7.3.1 — the layer object's timestamps are RFC 3339 in UTC.
 // lib/pq hands a timestamptz back in the connection's session time zone and
 // nothing pins that zone, so the Postgres read normalizes created_at the way
 // it already normalizes the nullable stamps beside it. Without the

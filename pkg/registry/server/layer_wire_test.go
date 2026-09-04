@@ -134,7 +134,7 @@ func findLayer(t *testing.T, body []byte, id string) json.RawMessage {
 	return nil
 }
 
-// Spec: §7.2.1, §7.3.1 — every layer-management endpoint that returns a
+// Spec: §7.2.1 / §7.3.1 — every layer-management endpoint that returns a
 // layer returns the §7.3.1 layer object, whose member names are lower
 // snake_case. Each arm asserts set equality rather than containment.
 func TestLayerEndpoint_LayerObjectMemberNames(t *testing.T) {
@@ -262,7 +262,7 @@ func TestLayerEndpoint_LayerObjectMemberNames(t *testing.T) {
 	}
 }
 
-// Spec: §7.2.1, §7.3.1 — a caller who may read no layer reads the empty
+// Spec: §7.2.1 / §7.3.1 — a caller who may read no layer reads the empty
 // array, whose body is exactly {"layers":[]}.
 func TestLayerEndpoint_EmptyListBodyIsExact(t *testing.T) {
 	t.Parallel()
@@ -278,7 +278,7 @@ func TestLayerEndpoint_EmptyListBodyIsExact(t *testing.T) {
 	}
 }
 
-// Spec: §7.2.1, §7.3.1 — the layer object carries neither the layer's
+// Spec: §7.2.1 / §7.3.1 — the layer object carries neither the layer's
 // inbound webhook HMAC secret nor a tenant identifier. The assertion runs
 // against the raw bytes rather than a decoded key name, so it survives a
 // refactor that reintroduces either under a new name.
@@ -340,7 +340,7 @@ func TestLayerEndpoint_LayerObjectWithholdsSecretAndTenant(t *testing.T) {
 	}
 }
 
-// Spec: §7.2.1 — one name for one value across a request and its response:
+// Spec: §7.2.1 / §7.3.1 — one name for one value across a request and its response:
 // every member the register request accepts is answered under the same name.
 func TestLayerEndpoint_RequestAndResponseAgreeOnNames(t *testing.T) {
 	t.Parallel()
