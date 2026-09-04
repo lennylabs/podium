@@ -13,6 +13,12 @@ import (
 	"github.com/lennylabs/podium/pkg/webhook"
 )
 
+// maskedSecret is the sentinel the list, the single read, and the update
+// substitute for the receiver's HMAC secret. §7.2.1 returns a credential once,
+// from the operation that mints it, so every later response carries the
+// sentinel in the secret member's place.
+const maskedSecret = "***"
+
 // receiverOut is the §7.3.2 receiver object. The receiver is projected
 // rather than tagged because pkg/webhook.Receiver is persisted verbatim by
 // webhook.FileStore into the operator's store file, so a JSON tag there
@@ -91,7 +97,7 @@ func (s *Server) handleWebhooksList(w http.ResponseWriter, r *http.Request) {
 		// the HMAC key to anyone with read access.
 		out := make([]receiverOut, len(rs))
 		for i, r := range rs {
-			r.Secret = "***"
+			r.Secret = maskedSecret
 			out[i] = receiverToWire(r)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"receivers": out})
@@ -178,7 +184,7 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
 			return
 		}
-		rec.Secret = "***"
+		rec.Secret = maskedSecret
 		writeJSON(w, http.StatusOK, receiverToWire(rec))
 	case http.MethodPut:
 		// spec: §13.2.1 — editing a webhook receiver is a write endpoint,
@@ -218,7 +224,14 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 			}
 			current.Debounce = debounce
 		}
-		if body.Secret != nil {
+		if body.Secret != nil && *body.Secret != maskedSecret {
+			// A body carrying the mask sentinel is a read fed back into the
+			// update, and it carries no credential: the single read and the
+			// list substitute maskedSecret for the stored secret, because
+			// §7.2.1 returns a credential only from the operation that mints
+			// it. Writing the sentinel through would replace the receiver's
+			// HMAC key with the literal "***" and sign every later delivery
+			// with it, so the round trip leaves the stored secret alone.
 			current.Secret = *body.Secret
 		}
 		if body.EventFilter != nil {
@@ -236,7 +249,7 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
 		}
-		current.Secret = "***"
+		current.Secret = maskedSecret
 		writeJSON(w, http.StatusOK, receiverToWire(current))
 	case http.MethodDelete:
 		// spec: §13.2.1 — removing a webhook receiver is a write endpoint,

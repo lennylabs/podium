@@ -136,7 +136,8 @@ func getReceiver(t *testing.T, base, id string) map[string]json.RawMessage {
 // creating response alone.
 func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 	t.Parallel()
-	worker := &webhook.Worker{Store: webhook.NewMemoryStore(), HTTPClient: http.DefaultClient}
+	wstore := webhook.NewMemoryStore()
+	worker := &webhook.Worker{Store: wstore, HTTPClient: http.DefaultClient}
 	_, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	t.Cleanup(ts.Close)
 
@@ -188,6 +189,49 @@ func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 	}
 	if got := receiverString(t, updated, "debounce"); got != "1m0s" {
 		t.Errorf("update debounce = %q, want %q", got, "1m0s")
+	}
+	// The update reports the mask whether or not the store kept the secret, so
+	// the masking assertion above is only falsifiable against the stored value.
+	// A resent read carries the sentinel in the secret member, and §7.2.1
+	// returns the credential once, so the round trip must leave the HMAC key
+	// the create minted in place.
+	stored, err := wstore.Get(context.Background(), "default", id)
+	if err != nil {
+		t.Fatalf("read the receiver back out of the store: %v", err)
+	}
+	if stored.Secret != "s3cret-value" {
+		t.Errorf("stored secret after the round-trip PUT = %q, want the minted value", stored.Secret)
+	}
+}
+
+// Spec: §7.2.1 / §7.3.2 — the mask sentinel is refused on the update path
+// alone. A PUT naming a different secret still rotates the receiver's HMAC key.
+func TestReceiverWire_UpdateRotatesTheSecretWhenTheBodyNamesANewOne(t *testing.T) {
+	t.Parallel()
+	wstore := webhook.NewMemoryStore()
+	worker := &webhook.Worker{Store: wstore, HTTPClient: http.DefaultClient}
+	_, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
+	t.Cleanup(ts.Close)
+
+	created := postReceiver(t, ts.URL, map[string]any{
+		"url":    "https://example.test/receiver",
+		"secret": "s3cret-value",
+	})
+	id := receiverString(t, created, "id")
+
+	resp, body := mustPut(t, ts.URL, "/v1/webhooks/"+id, map[string]any{"secret": "rotated-value"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("PUT status = %d: %s", resp.StatusCode, body)
+	}
+	if got := receiverString(t, receiverObject(t, body), "secret"); got != "***" {
+		t.Errorf("update secret = %q, want the masked value", got)
+	}
+	stored, err := wstore.Get(context.Background(), "default", id)
+	if err != nil {
+		t.Fatalf("read the receiver back out of the store: %v", err)
+	}
+	if stored.Secret != "rotated-value" {
+		t.Errorf("stored secret = %q, want the rotated value", stored.Secret)
 	}
 }
 
