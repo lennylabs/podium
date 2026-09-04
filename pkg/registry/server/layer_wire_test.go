@@ -321,11 +321,26 @@ func TestLayerEndpoint_LayerObjectWithholdsSecretAndTenant(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("reorder status = %d, body=%s", resp.StatusCode, reordered)
 	}
+	live := mustGet(t, base, "/v1/layers")
+
+	// The deleted read is the one route whose records come from
+	// ListDeletedLayerConfigs, so it is driven over a tombstoned git layer
+	// rather than over an empty list. Unregistering the layer that holds the
+	// captured secret makes both assertions below carry weight on that route.
+	resp, unregistered := mustDelete(t, base, "/v1/layers?id=team-finance")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unregister status = %d, body=%s", resp.StatusCode, unregistered)
+	}
+	deletedBody := mustGet(t, base, "/v1/layers?deleted=true")
+	// findLayer fails the arm when the tombstoned layer is absent, so the
+	// assertions over deletedBody cannot silently run over an empty list.
+	findLayer(t, deletedBody, "team-finance")
+
 	bodies := map[string][]byte{
 		"POST /v1/layers":         body,
 		"PUT /v1/layers/update":   updated,
-		"GET /v1/layers":          mustGet(t, base, "/v1/layers"),
-		"GET /v1/layers?deleted":  mustGet(t, base, "/v1/layers?deleted=true"),
+		"GET /v1/layers":          live,
+		"GET /v1/layers?deleted":  deletedBody,
 		"POST /v1/layers/reorder": reordered,
 	}
 	for where, raw := range bodies {
