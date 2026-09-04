@@ -627,7 +627,7 @@ reingest`, source updates.
 - The first `layer reingest` ingests the initial commit and prints `artifact:
   deploy@0.1.0   layer: team`. The first search then returns the `deploy` skill.
 - After the new commit, `layer reingest` ingests it (the layer's
-  `LastIngestedRef` advances to the new commit), and the post-reingest search
+  `last_ingested_ref` advances to the new commit), and the post-reingest search
   returns the `rollback` skill.
 - The reingest response reports the count accepted and any rejected with a
   reason, rather than a bare zero. An artifact dropped for a cross-layer
@@ -5909,7 +5909,7 @@ in to the UI; she exists so the first grant has an issuer.
 
    **Expect.** The grant answers `201` with `{"user_id": "<the subject>"}`, and
    the registration exits `0` with the stored record printed, carrying
-   `"UserDefined": true` and this caller's subject as `Owner`. A `403` on the
+   `"user_defined": true` and this caller's subject as `owner`. A `403` on the
    grant means `PODIUM_BOOTSTRAP_ADMINS` did not name carol's `sub`, and the
    prerequisite is re-run before continuing. A `403` on the registration means
    the grant did not take effect, because a non-admin may not name a filesystem

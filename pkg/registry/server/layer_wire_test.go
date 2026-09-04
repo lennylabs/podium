@@ -153,7 +153,21 @@ func TestLayerEndpoint_LayerObjectMemberNames(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("register git status = %d, body=%s", resp.StatusCode, body)
 	}
-	assertMembers(t, "POST /v1/layers (git)", singleLayer(t, body), wantMembers("force_push_policy"))
+	gitLayer := singleLayer(t, body)
+	assertMembers(t, "POST /v1/layers (git)", gitLayer, wantMembers("force_push_policy"))
+
+	// An organization registration names neither a group nor a user, so both
+	// visibility members reach the wire as null rather than as [] or as an
+	// omitted key.
+	var gitObj map[string]json.RawMessage
+	if err := json.Unmarshal(gitLayer, &gitObj); err != nil {
+		t.Fatalf("decode git layer: %v", err)
+	}
+	for _, member := range []string{"groups", "users"} {
+		if got := string(gitObj[member]); got != "null" {
+			t.Errorf("%s on a layer that sets none = %s, want null", member, got)
+		}
+	}
 
 	// A local registration that sets no policy and has never ingested, so
 	// both conditional members are absent.
@@ -167,8 +181,9 @@ func TestLayerEndpoint_LayerObjectMemberNames(t *testing.T) {
 	local := singleLayer(t, body)
 	assertMembers(t, "POST /v1/layers (local)", local, wantMembers())
 
-	// groups and users are null when unset, and deleted_at is present and
-	// null on a live layer.
+	// groups is null when unset and deleted_at is present and null on a live
+	// layer. users carries the implicit registrant entry here, because a
+	// user-defined registration grants its registrant read access.
 	var localObj map[string]json.RawMessage
 	if err := json.Unmarshal(local, &localObj); err != nil {
 		t.Fatalf("decode local layer: %v", err)
