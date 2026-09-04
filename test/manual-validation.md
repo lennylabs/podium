@@ -2426,7 +2426,7 @@ allowlist, and the per-receiver `debounce` field.
    echo "--- alice debounce field accepted, and the reported value is writable ---"
    CREATED=$(post "$ALICE" '{"url":"https://203.0.113.11/h","event_filter":["layer.ingested"],"debounce":"60s"}')
    echo "$CREATED"
-   RID=$(printf '%s\n' "$CREATED" | python3 -c 'import json,sys; print(json.loads(sys.stdin.readline())["id"])')
+   RID=$(printf '%s\n' "$CREATED" | sed '$d' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
    curl -s -w '\n%{http_code}\n' -X PUT "$PODIUM_REGISTRY/v1/webhooks/$RID" \
      -H "Authorization: Bearer $ALICE" -H 'Content-Type: application/json' \
      -d '{"debounce":"1m0s"}'
