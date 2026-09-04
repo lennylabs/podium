@@ -324,6 +324,32 @@ Returns the per-subtree domain analysis report for the path (the same report `po
 
 **Local-source authorization.** Registering a layer whose source type is `local` or whose registration names a filesystem path on the registry host, patching a stored layer's filesystem path, restoring a stored layer that names one, and reingesting one are authorized to a caller holding the per-tenant `admin` role. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so no caller can hold the admin role and these operations are admitted there, on the same reading the layer write authorization rule above states for its own arms. Any other caller is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`, and the refusal names no filesystem path. The rule applies to a user-defined and to an admin-defined layer alike, and it is evaluated on each of those operations rather than against the stored layer list, so a layer stored before this rule was in force is refused at its next such operation rather than at startup. An inbound webhook delivery triggers a reingest and is governed by this rule on the same arm: the delivery carries the per-layer secret rather than a caller the registry can place on the admin arm, so on a registry that authenticates its callers a webhook-triggered reingest of a layer that names a filesystem path is refused. `DELETE /v1/layers` and `POST /v1/layers/reorder` name no filesystem path and re-read none, so the rule does not reach them. A `git` source whose `repo` names a network endpoint is fetched through a network transport and yields tree objects rather than host files, so the rule does not reach it; a `git` source is placed on this rule's arm by its `repo` string alone, so a `local_path` stored beside a `git` source never places a restore, a reingest, or a webhook-triggered reingest on the arm. A `git` source whose `repo` resolves to the Git file transport names a repository path on the registry host and takes the same arm, and a `repo` string the registry cannot place as a network endpoint is treated as naming a host path.
 
+**The layer object.** Every endpoint in this section that returns a layer returns the same object, with lower snake_case field names:
+
+| Field | Type | Notes |
+|:--|:--|:--|
+| `id` | string | The layer identifier, unique within the tenant. |
+| `source_type` | string | `git` or `local`. |
+| `repo` | string | The Git remote for a `git` source. |
+| `ref` | string | The tracked ref for a `git` source. |
+| `root` | string | An optional subpath within the source. |
+| `local_path` | string | The filesystem path on the registry host for a `local` source. |
+| `order` | number | Precedence within the tenant; a lower value composes first. |
+| `user_defined` | boolean | True for a personal layer, false for an admin-defined one. |
+| `owner` | string | The verified subject that owns a user-defined layer. |
+| `public` | boolean | Visibility. |
+| `organization` | boolean | Visibility. |
+| `groups` | array | Visibility. `null` when the layer grants no group. |
+| `users` | array | Visibility. `null` when the layer grants no user. |
+| `git_provider` | string | The provider whose signature scheme verifies this layer's inbound deliveries. Empty resolves to `github`. |
+| `force_push_policy` | string | `tolerant` or `strict`. Present on a layer that sets a policy and absent on one that does not. |
+| `last_ingested_at` | string | RFC 3339 timestamp of the most recent completed ingest. Absent until the layer has ingested once. |
+| `last_ingested_ref` | string | The commit SHA of the most recent completed ingest for a `git` source. |
+| `created_at` | string | RFC 3339 timestamp of the layer's registration. |
+| `deleted_at` | string | The soft-delete tombstone, or `null` on a live layer. A reader computes the remaining recovery window from it. |
+
+The object carries no tenant identifier, because these endpoints serve one tenant. It carries the layer's inbound webhook HMAC secret under no name: that credential is returned once, in the `webhook_secret` field of the registration response and of an update that requests a rotation. Timestamps are RFC 3339 in UTC.
+
 ### Register a layer
 
 ```
@@ -339,11 +365,12 @@ Body:
   "repo": "git@github.com:acme/podium-finance.git",
   "ref": "main",
   "root": "artifacts/",
+  "git_provider": "github",
   "groups": ["acme-finance"]
 }
 ```
 
-`id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. A request whose `id` names a layer that already exists in the tenant is a write against that layer and is authorized against it under the rule above, so a caller neither arm authorizes is refused with `403 auth.forbidden` rather than overwriting it.
+`id` and `source_type` are required. Visibility is set with the top-level `public`, `organization`, `groups`, and `users` fields. `git_provider` names the Git provider whose webhook signature scheme verifies this layer's inbound deliveries; it applies to a `git` source alone, and a value naming no registered provider, or any value on a `local` source, is refused with `400 registry.invalid_argument`. Omitting it resolves the layer to `github`. A request whose `id` names a layer that already exists in the tenant is a write against that layer and is authorized against it under the rule above, so a caller neither arm authorizes is refused with `403 auth.forbidden` rather than overwriting it.
 
 A registration also falls under the local-source rule above when its `source_type` is `local`, when it carries a `local_path` and its `source_type` is not `git`, or when its `repo` resolves to the Git file transport. A `git` registration is placed by its `repo` string alone, so a `local_path` sent beside a `git` `repo` naming a network endpoint does not place it on the arm. A registration the rule places on the arm and whose caller does not hold the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`.
 
@@ -353,17 +380,69 @@ The response is `201 Created` with the stored layer and, for a `git` source, the
 
 ```json
 {
-  "layer": { "id": "team-finance", "source_type": "git", "...": "..." },
+  "layer": {
+    "id": "team-finance",
+    "source_type": "git",
+    "repo": "git@github.com:acme/podium-finance.git",
+    "ref": "main",
+    "root": "artifacts/",
+    "local_path": "",
+    "order": 2,
+    "user_defined": false,
+    "owner": "alice@acme.com",
+    "public": false,
+    "organization": false,
+    "groups": ["acme-finance"],
+    "users": null,
+    "git_provider": "github",
+    "last_ingested_ref": "",
+    "created_at": "2026-09-04T10:15:00Z",
+    "deleted_at": null
+  },
   "webhook_url": "https://registry.acme.com/v1/ingest/webhook/team-finance",
   "webhook_secret": "..."
 }
 ```
+
+The registration has not ingested yet, so `last_ingested_at` is absent, and this registration sets no force-push policy, so `force_push_policy` is absent. A `local` registration, and an update that requests no secret rotation, return the layer alone without `webhook_url` and `webhook_secret`.
 
 ### List layers
 
 ```
 GET /v1/layers
 ```
+
+Returns the layers the caller can read, as an array of the layer object under the `layers` key:
+
+```json
+{
+  "layers": [
+    {
+      "id": "org-defaults",
+      "source_type": "git",
+      "repo": "git@github.com:acme/podium-org-defaults.git",
+      "ref": "main",
+      "root": "",
+      "local_path": "",
+      "order": 1,
+      "user_defined": false,
+      "owner": "",
+      "public": false,
+      "organization": true,
+      "groups": null,
+      "users": null,
+      "git_provider": "github",
+      "force_push_policy": "strict",
+      "last_ingested_at": "2026-09-04T09:00:00Z",
+      "last_ingested_ref": "9f1c2b7d4e5a6081c3d2e4f5a6b7c8d9e0f1a2b3",
+      "created_at": "2026-08-30T12:00:00Z",
+      "deleted_at": null
+    }
+  ]
+}
+```
+
+A caller who can read no layer receives `{"layers":[]}`.
 
 **Layer read visibility.** A caller holding the per-tenant `admin` role receives the tenant's whole layer list. Any other authenticated caller receives the layers that caller can see under the visibility rules, which include that caller's own user-defined layers through their implicit `users: [<registrant>]` visibility. A caller whose credential fails verification is refused with `auth.token_expired`, `auth.untrusted_token`, or `auth.untrusted_runtime`, the same refusal the registry answers on any other route that verifies the same credential. Whether presenting no credential is itself a verification failure is the configured identity provider's rule. A caller the registry resolves as anonymous rather than as a verification failure receives an empty list rather than a refusal. A layer the rule withholds is absent from the `200` response rather than refused with an error code, so the read discloses no identifier, source location, owner subject, or visibility declaration for it. A registry started with no identity provider configured, or one started in public mode, authenticates no caller, so the read returns the tenant's whole layer list there.
 
@@ -394,7 +473,7 @@ POST /v1/layers/update?id={id}
 PUT  /v1/layers/update?id={id}
 ```
 
-Patches the layer. A non-zero body field replaces the corresponding value; a zero field leaves it unchanged. The patchable fields are visibility (`public`, `organization`, `groups`, `users`), `ref`, `root`, `local_path`, `owner`, `force_push_policy`, and a webhook-secret rotation (`rotate_webhook_secret`). On a user-defined layer the registry ignores the `owner` and visibility fields and still answers `200 OK` to a caller the rule above authorizes, because that layer's owner and its implicit `users: [<owner>]` visibility are fixed at registration; the remaining fields apply as described. The identifying fields (`id`, `source_type`) are immutable.
+Patches the layer. A non-zero body field replaces the corresponding value; a zero field leaves it unchanged. The patchable fields are visibility (`public`, `organization`, `groups`, `users`), `ref`, `root`, `local_path`, `owner`, `git_provider`, `force_push_policy`, and a webhook-secret rotation (`rotate_webhook_secret`). A `git_provider` naming no registered provider, and any `git_provider` on a layer whose stored source type is not `git`, are refused with `400 registry.invalid_argument`. On a user-defined layer the registry ignores the `owner` and visibility fields and still answers `200 OK` to a caller the rule above authorizes, because that layer's owner and its implicit `users: [<owner>]` visibility are fixed at registration; the remaining fields apply as described. The identifying fields (`id`, `source_type`) are immutable.
 
 A patch is classified by the fields it carries. A patch carrying `local_path` names a filesystem path on the registry host and falls under the local-source rule above, whatever the stored layer's source type, so a caller without the `admin` role is refused with `403 auth.forbidden` carrying `details.constraint: "local_source"`. The refusal rejects the whole request rather than one field of it, so the stored configuration is unchanged and no other field the same patch carries is applied. A patch carrying no `local_path` is not reached by that rule, because the handler applies neither `source_type` nor a repository string here: `source_type` is immutable and there is no patchable `repo` field.
 
@@ -467,10 +546,18 @@ Returns the calling tenant's configured limits and current usage. Read-only and 
 ```json
 {
   "tenant_id": "acme",
-  "limits": { "...": "..." },
+  "limits": {
+    "storage_bytes": 10737418240,
+    "search_qps": 20,
+    "materialize_rate": 60,
+    "audit_volume_per_day": 1073741824,
+    "max_user_layers": 3
+  },
   "usage": { "storage_bytes": 1234567 }
 }
 ```
+
+`limits` reports the tenant's configured budget under the same five field names `GET /v1/admin/tenants` reports for the same numbers. A zero `max_user_layers` selects the deployment default of 3, and a negative value disables the cap.
 
 ---
 
@@ -608,6 +695,38 @@ DELETE /v1/webhooks/{id}       remove one receiver
 Every method on these routes requires the per-tenant admin role and returns `auth.forbidden` for a non-admin caller, because a receiver is an org-level configuration. The mutating methods are also rejected in read-only mode with `registry.read_only`. A standalone or no-auth deployment follows the same authorization path as the admin-grant endpoints: receiver registration requires an admin grant plus a token rather than remaining open.
 
 `POST` accepts `{ "url": "...", "secret": "...", "event_filter": ["..."], "debounce": "30s", "disabled": false }` and returns `201 Created` with the receiver including its secret, so the operator can record it. The registry generates a secret when the body omits one. `url` is required. `PUT` accepts the same fields and applies the ones present; re-enabling a receiver (`disabled: false`) clears its failure counter. `GET` and `DELETE` of a single receiver address it by `id`. The list response returns the receivers under the `receivers` key. List, single-read, and `PUT` responses mask the secret as `***`. `DELETE` returns `204 No Content`. The registry wires the outbound webhook worker at startup, so these routes are mounted on every deployment. Receivers are held in memory unless `PODIUM_WEBHOOK_STORE_PATH` names a file, in which case the store reloads them on restart.
+
+**The receiver object.** Every method that returns a receiver returns the same object, with lower snake_case field names:
+
+| Field | Type | Notes |
+|:--|:--|:--|
+| `id` | string | The receiver identifier. |
+| `url` | string | The delivery target. |
+| `secret` | string | The HMAC secret on the creating response, and `***` on the list, the single read, and the update. |
+| `event_filter` | array | The event names the receiver matches. `null` when the receiver matches every event. |
+| `disabled` | boolean | Whether delivery is suspended. |
+| `failure_count` | number | Consecutive delivery failures. |
+| `last_delivery` | string | RFC 3339 timestamp in UTC of the last delivery attempt. |
+| `last_failure` | string | RFC 3339 timestamp in UTC of the last failed delivery. |
+| `created_at` | string | RFC 3339 timestamp in UTC of the receiver's registration. |
+| `debounce` | string | The trailing window as a duration string, in the form the request body accepts, so a read feeds straight back into a `PUT`. Absent on a receiver that sets no window. |
+
+```json
+{
+  "id": "rcv-4f2a",
+  "url": "https://relay.acme.com/podium",
+  "secret": "***",
+  "event_filter": ["layer.ingested"],
+  "disabled": false,
+  "failure_count": 0,
+  "last_delivery": "2026-09-04T09:00:12Z",
+  "last_failure": "0001-01-01T00:00:00Z",
+  "created_at": "2026-08-30T12:00:00Z",
+  "debounce": "1m0s"
+}
+```
+
+The object carries no tenant identifier, because these endpoints serve one tenant. A receiver that has never been delivered to, and one that has never failed, reports the zero timestamp for the corresponding field.
 
 #### Receiver URL policy (SSRF)
 
