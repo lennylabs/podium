@@ -45,6 +45,11 @@ func refusalEnvelope(t *testing.T, body []byte) server.ErrorResponse {
 // assertImmutableVisibilityRefusal asserts the §7.3.1 immutable visibility
 // refusal: 400 registry.invalid_argument carrying
 // details.constraint: "immutable_visibility" and naming every asserted field.
+// The field check is anchored to the message's field-list segment rather than
+// run against the whole message, because the refusal's fixed prose already
+// contains the words "owner" and "users"; a bare substring check would pass on
+// a handler that named neither field. Callers pass the fields in sorted order,
+// which is the order the handler joins them in.
 func assertImmutableVisibilityRefusal(t *testing.T, resp *http.Response, body []byte, fields ...string) {
 	t.Helper()
 	if resp.StatusCode != http.StatusBadRequest {
@@ -57,9 +62,10 @@ func assertImmutableVisibilityRefusal(t *testing.T, resp *http.Response, body []
 	if got := env.Details["constraint"]; got != "immutable_visibility" {
 		t.Errorf("details.constraint = %v, want immutable_visibility", got)
 	}
-	for _, f := range fields {
-		if !strings.Contains(env.Message, f) {
-			t.Errorf("message %q does not name the asserted field %q", env.Message, f)
+	if len(fields) > 0 {
+		want := "the fields " + strings.Join(fields, ", ") + " cannot be patched"
+		if !strings.Contains(env.Message, want) {
+			t.Errorf("message %q does not carry the field list %q", env.Message, want)
 		}
 	}
 }
