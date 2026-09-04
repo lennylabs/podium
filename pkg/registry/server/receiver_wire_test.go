@@ -177,9 +177,23 @@ func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 
 	// DEFECT-3: the read is fed back into the update. The update accepts the
 	// reported debounce string without conversion, which is the round trip an
-	// integer-valued debounce made impossible. The secret member is dropped
-	// from the body, because the read reports the mask rather than the key and
-	// the update stores whatever secret the body names.
+	// integer-valued debounce made impossible.
+	//
+	// The secret member is dropped from the body. The read reports the mask
+	// rather than the key, and the update path stores whatever secret the body
+	// names, so replaying the member verbatim would overwrite the HMAC key with
+	// the mask sentinel. Treating the sentinel as a no-op on input is a rule
+	// this proposal does not stage, so the departure from a byte-for-byte
+	// replay is recorded under the proposal's TEST-4 and the store read-back
+	// below measures what the round trip does write.
+	stored, err := wstore.Get(context.Background(), "default", id)
+	if err != nil {
+		t.Fatalf("read the receiver back out of the store: %v", err)
+	}
+	stored.FailureCount = 7
+	if err := wstore.Put(context.Background(), stored); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
 	update := map[string]json.RawMessage{}
 	for k, v := range read {
 		if k == "secret" {
@@ -198,6 +212,22 @@ func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 	}
 	if got := receiverString(t, updated, "debounce"); got != "1m0s" {
 		t.Errorf("update debounce = %q, want %q", got, "1m0s")
+	}
+
+	// What the round trip writes, read out of the store rather than out of the
+	// re-masked response, which reports "***" whatever the update stored. The
+	// minted secret survives because the body named none. The failure budget is
+	// cleared because the read-back carries "disabled": false and re-enabling
+	// resets the counter, which is behaviour this step leaves unchanged.
+	after, err := wstore.Get(context.Background(), "default", id)
+	if err != nil {
+		t.Fatalf("read the receiver back out of the store: %v", err)
+	}
+	if after.Secret != "s3cret-value" {
+		t.Errorf("stored secret after the read-back = %q, want the minted value", after.Secret)
+	}
+	if after.FailureCount != 0 {
+		t.Errorf("stored failure count after the read-back = %d, want 0", after.FailureCount)
 	}
 }
 
