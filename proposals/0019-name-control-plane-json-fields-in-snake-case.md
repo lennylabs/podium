@@ -1,7 +1,7 @@
 # Proposal 0019: Name every control-plane JSON field in snake_case, and close the three contract defects the survey found
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-09-04). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 18 adversarial review rounds (29 findings fixed). OQ-1 is resolved in favor of the staged scope, so every endpoint in the table converts in this proposal. OQ-2 is resolved in favor of the staged bundling, so DEFECT-1's setter lands here beside the SPEC-2 sentence that names the field. OQ-3 stays an implementor's choice under the stated constraint, that registration-time and delivery-time resolution cannot disagree.
+- Status: Implemented (2026-09-04). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 18 adversarial review rounds (29 findings fixed). OQ-1 is resolved in favor of the staged scope, so every endpoint in the table converts in this proposal. OQ-2 is resolved in favor of the staged bundling, so DEFECT-1's setter lands here beside the SPEC-2 sentence that names the field. OQ-3 stays an implementor's choice under the stated constraint, that registration-time and delivery-time resolution cannot disagree.
 - Date: 2026-09-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off. Every anchor is read against `origin/main` at `acf2b54`.
@@ -49,25 +49,25 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.2 gains §7.2.1, the control-plane JSON conventions.
+- [x] **S1 · spec** — SPEC-1. §7.2 gains §7.2.1, the control-plane JSON conventions.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §7.3.1 gains the layer object paragraphs and the git-provider selection block naming both setters.
+- [x] **S2 · spec** — SPEC-2. §7.3.1 gains the layer object paragraphs and the git-provider selection block naming both setters.
       Levels: —. Depends on: S1
-- [ ] **S3 · spec** — SPEC-3. §7.3.2 gains the receiver object paragraph.
+- [x] **S3 · spec** — SPEC-3. §7.3.2 gains the receiver object paragraph.
       Levels: —. Depends on: S1
-- [ ] **S4 · code** — CODE-1, UI-1, UI-2, TEST-1, TEST-2, TEST-3, TEST-6, TEST-7, TEST-8. The layer conversion, whole and atomic: the tags and the `json:"-"` on `TenantID` in `pkg/store/store.go`; the `created_at` UTC conversion in `scanLayerConfigPG` in `pkg/store/postgres.go`; the new key-set, redaction, and Postgres-timestamp tests; every Go test that reads a Go-cased layer key, whether by decoding it or by matching it as a literal in the response body, including `test/e2e/standalone_layer_test.go:92`; `panelLayerFields`; the web UI source and its tests; the layer-record paragraph of `web/DESIGN.md`; and the rebuilt `web/bundle`.
+- [x] **S4 · code** — CODE-1, UI-1, UI-2, TEST-1, TEST-2, TEST-3, TEST-6, TEST-7, TEST-8. The layer conversion, whole and atomic: the tags and the `json:"-"` on `TenantID` in `pkg/store/store.go`; the `created_at` UTC conversion in `scanLayerConfigPG` in `pkg/store/postgres.go`; the new key-set, redaction, and Postgres-timestamp tests; every Go test that reads a Go-cased layer key, whether by decoding it or by matching it as a literal in the response body, including `test/e2e/standalone_layer_test.go:92`; `panelLayerFields`; the web UI source and its tests; the layer-record paragraph of `web/DESIGN.md`; and the rebuilt `web/bundle`.
       Levels: unit, integration, e2e. Depends on: S2
-- [ ] **S5 · code** — CODE-2, TEST-4. `receiverOut` and `receiverToWire` in `webhooks.go`, the four emission sites, the `debounce` duration string closing DEFECT-3, the UTC conversion of the three timestamp members, the receiver tests, and the `webhookReceiver` end-to-end decoder in `test/e2e/notification_sink_helpers_test.go`, which moves with its emitter.
+- [x] **S5 · code** — CODE-2, TEST-4. `receiverOut` and `receiverToWire` in `webhooks.go`, the four emission sites, the `debounce` duration string closing DEFECT-3, the UTC conversion of the three timestamp members, the receiver tests, and the `webhookReceiver` end-to-end decoder in `test/e2e/notification_sink_helpers_test.go`, which moves with its emitter.
       Levels: unit, integration, e2e. Depends on: S3
-- [ ] **S6 · code** — CODE-3, UI-3, TEST-5. The tags on `store.Quota`, `core.EffectiveLayer`, `core.ReembedResult`, and `core.ReembedFailure`; the four end-to-end `show-effective` decoders and the stale prose above one of them; the quota client in `web/ui/src` with both of its member reads (`App.tsx:1511-1514` and `surfaces/LayerPanel.tsx:814-815`), its fixtures, and the rebuilt `web/bundle`; and their tests.
+- [x] **S6 · code** — CODE-3, UI-3, TEST-5. The tags on `store.Quota`, `core.EffectiveLayer`, `core.ReembedResult`, and `core.ReembedFailure`; the four end-to-end `show-effective` decoders and the stale prose above one of them; the quota client in `web/ui/src` with both of its member reads (`App.tsx:1511-1514` and `surfaces/LayerPanel.tsx:814-815`), its fixtures, and the rebuilt `web/bundle`; and their tests.
       Levels: unit, integration, e2e. Depends on: S1
-- [ ] **S7 · code** — CODE-4, TEST-9. The `git_provider` setters closing DEFECT-1: the request field, the register and update paths, the `update` handler's allowed-mutations doc comment (`pkg/registry/server/layers.go:673-677`), the `source.git.git_provider` key in `internal/serverboot/yaml_config.go` and its assignment in `layerConfigFromEntry`, the validation against the registered provider set on both paths, and its tests, including the restart arm over a declared layer. No CLI flag is added.
+- [x] **S7 · code** — CODE-4, TEST-9. The `git_provider` setters closing DEFECT-1: the request field, the register and update paths, the `update` handler's allowed-mutations doc comment (`pkg/registry/server/layers.go:673-677`), the `source.git.git_provider` key in `internal/serverboot/yaml_config.go` and its assignment in `layerConfigFromEntry`, the validation against the registered provider set on both paths, and its tests, including the restart arm over a declared layer. No CLI flag is added.
       Levels: unit, integration, e2e. Depends on: S2, S4
-- [ ] **S8 · docs** — DOCS-1. `docs/reference/http-api.md`: the layer object, the receiver object, the named quota limits, the `git_provider` request field, and the expanded response examples. `docs/deployment/layers.md`: the prose naming both `git_provider` setters and the absence of a CLI flag.
+- [x] **S8 · docs** — DOCS-1. `docs/reference/http-api.md`: the layer object, the receiver object, the named quota limits, the `git_provider` request field, and the expanded response examples. `docs/deployment/layers.md`: the prose naming both `git_provider` setters and the absence of a CLI flag.
       Levels: —. Depends on: S4, S5, S6, S7
-- [ ] **S9 · docs** — DOCS-2. `test/manual-validation.md`: S05, S09, S35, S48, S56, and the new S58.
+- [x] **S9 · docs** — DOCS-2. `test/manual-validation.md`: S05, S09, S35, S48, S56, and the new S58.
       Levels: —. Depends on: S4, S5, S7
-- [ ] **S10 · docs** — DOCS-3. The `CHANGELOG.md` entry.
+- [x] **S10 · docs** — DOCS-3. The `CHANGELOG.md` entry.
       Levels: —. Depends on: S4, S5, S6, S7
 
 **Why S4 does not split.** `TestWebUI_ServedBundleReadsTheLayerRecordFields` fails if the server renames alone and fails if the client renames alone. The CI `web` job fails if the UI source and the committed bundle disagree. Teaching either side to accept both spellings for one commit is a dual code path and is refused by `.claude/rules/code-best-practices.md`. The bundle rebuild is the last edit before the commit is written.
