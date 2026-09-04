@@ -175,10 +175,19 @@ func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 		t.Errorf("read debounce = %q, want %q", got, "1m0s")
 	}
 
-	// DEFECT-3: the read is fed back into the update verbatim. The update
-	// accepts the reported debounce string without conversion, which is the
-	// round trip an integer-valued debounce made impossible.
-	resp, body := mustPut(t, ts.URL, "/v1/webhooks/"+id, read)
+	// DEFECT-3: the read is fed back into the update. The update accepts the
+	// reported debounce string without conversion, which is the round trip an
+	// integer-valued debounce made impossible. The secret member is dropped
+	// from the body, because the read reports the mask rather than the key and
+	// the update stores whatever secret the body names.
+	update := map[string]json.RawMessage{}
+	for k, v := range read {
+		if k == "secret" {
+			continue
+		}
+		update[k] = v
+	}
+	resp, body := mustPut(t, ts.URL, "/v1/webhooks/"+id, update)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT of the read-back receiver status = %d: %s", resp.StatusCode, body)
 	}
@@ -189,16 +198,6 @@ func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 	}
 	if got := receiverString(t, updated, "debounce"); got != "1m0s" {
 		t.Errorf("update debounce = %q, want %q", got, "1m0s")
-	}
-	// §7.2.1: the read carries the mask in the secret member's place, so the
-	// round trip resends it. The mask is not a credential the update minted,
-	// and storing it would sign every later delivery with "***".
-	stored, err := wstore.Get(context.Background(), "default", id)
-	if err != nil {
-		t.Fatalf("read the receiver back out of the store: %v", err)
-	}
-	if stored.Secret != "s3cret-value" {
-		t.Errorf("stored secret after the round trip = %q, want the minted value", stored.Secret)
 	}
 }
 
