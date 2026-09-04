@@ -15,18 +15,20 @@ import (
 
 // ReembedResult reports what `Reembed` did across the tenant. Used
 // by the admin CLI for human-readable output and by callers that
-// re-embed in response to a configured-provider change.
+// re-embed in response to a configured-provider change. It is the body
+// of the bulk arm of POST /v1/admin/reembed, so the tags carry the
+// §7.2.1 control-plane names.
 type ReembedResult struct {
-	Total     int
-	Succeeded int
-	Failed    []ReembedFailure
+	Total     int              `json:"total"`
+	Succeeded int              `json:"succeeded"`
+	Failed    []ReembedFailure `json:"failed"`
 }
 
 // ReembedFailure names an artifact whose embedding call failed.
 type ReembedFailure struct {
-	ArtifactID string
-	Version    string
-	Reason     string
+	ArtifactID string `json:"artifact_id"`
+	Version    string `json:"version"`
+	Reason     string `json:"reason"`
 }
 
 // ReembedOptions selects which artifacts a Reembed pass covers. The

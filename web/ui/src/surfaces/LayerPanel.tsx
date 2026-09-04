@@ -812,7 +812,7 @@ function PanelFoot({
   movable: boolean;
 }) {
   const quota = useAsync(() => readQuota(), []);
-  const cap = quota.value?.limits?.MaxUserLayers;
+  const cap = quota.value?.limits?.max_user_layers;
   const mine = rows.filter((row) => ownedByCaller(row, subject)).length;
   const holding = subject !== "";
   const reorderable = rows.length > 0 && !readOnly && movable;

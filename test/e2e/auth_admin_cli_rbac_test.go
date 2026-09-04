@@ -180,8 +180,8 @@ func acliAssertLayerVisible(t *testing.T, stdout, layerID string, want bool, why
 	t.Helper()
 	var eff struct {
 		Layers []struct {
-			LayerID string `json:"LayerID"`
-			Visible bool   `json:"Visible"`
+			LayerID string `json:"layer_id"`
+			Visible bool   `json:"visible"`
 		} `json:"layers"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &eff); err != nil {

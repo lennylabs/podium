@@ -756,14 +756,14 @@ func TestStandardDeploy_RevokeHappyPath(t *testing.T) {
 // orgAssertLayerVisible decodes a `podium admin show-effective` JSON response
 // and asserts the named layer's Visible flag matches want, so the test confirms
 // the per-target computation rather than only the exit code. The server
-// serializes core.EffectiveLayer with capitalized Go field names (LayerID,
-// Visible) under a "layers" array.
+// serializes core.EffectiveLayer under the §7.2.1 names (layer_id, visible,
+// reason) in a "layers" array.
 func orgAssertLayerVisible(t *testing.T, stdout, layerID string, want bool, why string) {
 	t.Helper()
 	var eff struct {
 		Layers []struct {
-			LayerID string `json:"LayerID"`
-			Visible bool   `json:"Visible"`
+			LayerID string `json:"layer_id"`
+			Visible bool   `json:"visible"`
 		} `json:"layers"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &eff); err != nil {

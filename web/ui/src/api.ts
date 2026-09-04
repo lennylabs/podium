@@ -617,18 +617,18 @@ export function unregisterLayer(id: string): Promise<unknown> {
   return request<unknown>(paths.layers + query({ id }), { ...write, method: 'DELETE' });
 }
 
-/** QuotaEnvelope is the §4.7.8 quota read. The limits are marshalled from
- * store.Quota, which carries no field tags, so each member is named after the
- * Go field. The account menu reads one of them, the per-identity cap on
- * user-defined layers. */
+/** QuotaEnvelope is the §4.7.8 quota read. The limits carry the §7.2.1
+ * control-plane names, which are the names the §7.3.3 tenant object reports
+ * for the same five numbers. The account menu reads one of them, the
+ * per-identity cap on user-defined layers. */
 export interface QuotaEnvelope {
   tenant_id?: string;
   limits?: {
-    MaxUserLayers?: number;
-    StorageBytes?: number;
-    SearchQPS?: number;
-    MaterializeRate?: number;
-    AuditVolumePerDay?: number;
+    max_user_layers?: number;
+    storage_bytes?: number;
+    search_qps?: number;
+    materialize_rate?: number;
+    audit_volume_per_day?: number;
   };
 }
 

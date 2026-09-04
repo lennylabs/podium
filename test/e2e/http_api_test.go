@@ -1555,8 +1555,8 @@ func TestHTTPAPI_AdminShowEffective(t *testing.T) {
 	var eff struct {
 		UserID string `json:"user_id"`
 		Layers []struct {
-			LayerID string `json:"LayerID"`
-			Visible bool   `json:"Visible"`
+			LayerID string `json:"layer_id"`
+			Visible bool   `json:"visible"`
 		} `json:"layers"`
 	}
 	if err := json.Unmarshal(body, &eff); err != nil {

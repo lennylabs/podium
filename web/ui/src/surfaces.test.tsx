@@ -8467,7 +8467,7 @@ describe("the layer panel", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
-      "/v1/quota": { body: { limits: { MaxUserLayers: 3 } } },
+      "/v1/quota": { body: { limits: { max_user_layers: 3 } } },
     });
     goTo("#/layers");
     render(<App />);
@@ -8508,7 +8508,7 @@ describe("the layer panel", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
-      "/v1/quota": { body: { limits: { MaxUserLayers: 0 } } },
+      "/v1/quota": { body: { limits: { max_user_layers: 0 } } },
     });
     goTo("#/layers");
     render(<App />);
@@ -8529,7 +8529,7 @@ describe("the layer panel", () => {
         body: posture({ identity_provider_configured: false }),
       },
       "/v1/layers": { body: { layers: [adminLayer(), userLayer()] } },
-      "/v1/quota": { body: { limits: { MaxUserLayers: 3 } } },
+      "/v1/quota": { body: { limits: { max_user_layers: 3 } } },
     });
     goTo("#/layers");
     render(<App />);
@@ -15749,7 +15749,7 @@ describe("the shell’s identity cluster", () => {
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/load_domain": { body: emptyDomain },
       "/v1/quota": {
-        body: { tenant_id: "acme", limits: { MaxUserLayers: 3 } },
+        body: { tenant_id: "acme", limits: { max_user_layers: 3 } },
       },
     });
     render(<App />);
@@ -15785,7 +15785,7 @@ describe("the shell’s identity cluster", () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/load_domain": { body: emptyDomain },
-      "/v1/quota": { body: { limits: { MaxUserLayers: -1 } } },
+      "/v1/quota": { body: { limits: { max_user_layers: -1 } } },
     });
     render(<App />);
     fireEvent.click(await screen.findByTestId("account-trigger"));

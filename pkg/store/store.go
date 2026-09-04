@@ -77,19 +77,22 @@ func (t Tenant) ScopePreviewEnabled() bool {
 	return t.ExposeScopePreview == nil || *t.ExposeScopePreview
 }
 
-// Quota is the per-tenant resource budget (§4.7.8).
+// Quota is the per-tenant resource budget (§4.7.8). The JSON tags carry
+// the §7.2.1 control-plane names, which are the names the §7.3.3 tenant
+// object already uses for the same five numbers, so GET /v1/quota and
+// GET /v1/admin/tenants report them identically.
 type Quota struct {
-	StorageBytes      int64
-	SearchQPS         int
-	MaterializeRate   int
-	AuditVolumePerDay int64
+	StorageBytes      int64 `json:"storage_bytes"`
+	SearchQPS         int   `json:"search_qps"`
+	MaterializeRate   int   `json:"materialize_rate"`
+	AuditVolumePerDay int64 `json:"audit_volume_per_day"`
 	// MaxUserLayers is the §7.3.1 / §1.4 cap on user-defined layers per
 	// identity ("Default cap: 3 user-defined layers per identity,
 	// configurable per tenant"; §4.4 calls it the tenant's "default
 	// user-layer cap"). Zero selects the deployment default (3); a
 	// negative value disables the cap. The register handler resolves and
 	// enforces it (pkg/registry/server/layers.go).
-	MaxUserLayers int
+	MaxUserLayers int `json:"max_user_layers"`
 }
 
 // ManifestRecord is the indexed metadata for one (artifact_id, version)
