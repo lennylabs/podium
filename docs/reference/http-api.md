@@ -387,9 +387,9 @@ The response is `201 Created` with the stored layer and, for a `git` source, the
     "ref": "main",
     "root": "artifacts/",
     "local_path": "",
-    "order": 2,
+    "order": 10,
     "user_defined": false,
-    "owner": "alice@acme.com",
+    "owner": "",
     "public": false,
     "organization": false,
     "groups": ["acme-finance"],
@@ -424,7 +424,7 @@ Returns the layers the caller can read, as an array of the layer object under th
       "ref": "main",
       "root": "",
       "local_path": "",
-      "order": 1,
+      "order": 10,
       "user_defined": false,
       "owner": "",
       "public": false,
@@ -557,7 +557,7 @@ Returns the calling tenant's configured limits and current usage. Read-only and 
 }
 ```
 
-`limits` reports the tenant's configured budget under the same five field names `GET /v1/admin/tenants` reports for the same numbers. A zero `max_user_layers` selects the deployment default of 3, and a negative value disables the cap.
+`limits` reports the tenant's configured budget under the same five field names `GET /v1/admin/tenants` reports for the same numbers. A zero `max_user_layers` selects the deployment-configured cap, which is 3 unless the deployment sets one, and a negative value disables the cap. A deployment that configures the cap explicitly applies it ahead of this per-tenant value, so the enforced cap on such a deployment is the configured one whatever this field reports.
 
 ---
 
