@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
@@ -232,5 +233,105 @@ func TestApplyYAML_CarriesDeclaredLayers(t *testing.T) {
 	}})
 	if len(c.declaredLayers) != 1 || c.declaredLayers[0].ID != "a" {
 		t.Errorf("declaredLayers = %+v, want 1 entry id=a", c.declaredLayers)
+	}
+}
+
+// Spec: §7.3.1 — the declared `source.git.git_provider` key is the setter for
+// a declared layer's git provider, and it is seeded onto the stored config so
+// the inbound webhook path verifies the delivery under that provider's
+// signature scheme.
+func TestBootstrapDeclaredLayers_GitProviderSeeded(t *testing.T) {
+	st := newMemoryStoreWithTenant(t)
+	cfg := &Config{
+		declaredLayers: []yamlLayerEntry{{
+			ID: "team-finance",
+			Source: yamlLayerSource{Git: &yamlGitSource{
+				Repo: "git@gitlab.com:acme/x.git", Ref: "main", GitProvider: "gitlab",
+			}},
+		}},
+	}
+	if _, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil, false, collocatedVectorIngest{}); err != nil {
+		t.Fatalf("bootstrapDeclaredLayers: %v", err)
+	}
+	lc, err := st.GetLayerConfig(context.Background(), "default", "team-finance")
+	if err != nil {
+		t.Fatalf("GetLayerConfig: %v", err)
+	}
+	if lc.GitProvider != "gitlab" {
+		t.Errorf("GitProvider = %q, want gitlab", lc.GitProvider)
+	}
+}
+
+// Spec: §7.3.1 — an entry that omits the key seeds the empty string, which
+// resolves to github at the point of use, so an existing registry.yaml keeps
+// its behaviour with no edit.
+func TestBootstrapDeclaredLayers_GitProviderOmittedSeedsEmpty(t *testing.T) {
+	st := newMemoryStoreWithTenant(t)
+	cfg := &Config{
+		declaredLayers: []yamlLayerEntry{{
+			ID:     "vendor",
+			Source: yamlLayerSource{Git: &yamlGitSource{Repo: "git@github.com:acme/vendor.git"}},
+		}},
+	}
+	if _, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil, false, collocatedVectorIngest{}); err != nil {
+		t.Fatalf("bootstrapDeclaredLayers: %v", err)
+	}
+	lc, err := st.GetLayerConfig(context.Background(), "default", "vendor")
+	if err != nil {
+		t.Fatalf("GetLayerConfig: %v", err)
+	}
+	if lc.GitProvider != "" {
+		t.Errorf("GitProvider = %q, want the empty string", lc.GitProvider)
+	}
+}
+
+// Spec: §7.3.1 — a declared value the provider registry does not carry aborts
+// the boot, with an error naming the layer and the value.
+func TestBootstrapDeclaredLayers_UnknownGitProviderAborts(t *testing.T) {
+	st := newMemoryStoreWithTenant(t)
+	cfg := &Config{
+		declaredLayers: []yamlLayerEntry{{
+			ID: "team-finance",
+			Source: yamlLayerSource{Git: &yamlGitSource{
+				Repo: "git@example.com:acme/x.git", GitProvider: "acme-forge-that-is-not-registered",
+			}},
+		}},
+	}
+	_, err := bootstrapDeclaredLayers(st, "default", cfg, nil, nil, false, collocatedVectorIngest{})
+	if err == nil {
+		t.Fatalf("err = nil, want a refusal for an unregistered git_provider")
+	}
+	for _, want := range []string{"team-finance", "acme-forge-that-is-not-registered"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not name %q", err, want)
+		}
+	}
+}
+
+// Spec: §7.3.1 — readYAMLConfig parses the `source.git.git_provider` key.
+func TestReadYAMLConfig_ParsesGitProvider(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.yaml")
+	body := []byte(`registry:
+  layers:
+    - id: team-finance
+      source:
+        git:
+          repo: git@gitlab.com:acme/finance.git
+          ref: main
+          git_provider: gitlab
+`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	t.Setenv("PODIUM_CONFIG_FILE", path)
+	y, err := readYAMLConfig()
+	if err != nil {
+		t.Fatalf("readYAMLConfig: %v", err)
+	}
+	if y == nil || len(y.Layers) != 1 || y.Layers[0].Source.Git == nil {
+		t.Fatalf("Layers = %+v, want one git entry", y)
+	}
+	if got := y.Layers[0].Source.Git.GitProvider; got != "gitlab" {
+		t.Errorf("git_provider = %q, want gitlab", got)
 	}
 }

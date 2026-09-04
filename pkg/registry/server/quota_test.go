@@ -57,8 +57,8 @@ func TestQuota_ReturnsLimitsAndUsage(t *testing.T) {
 	if parsed.TenantID != "default" {
 		t.Errorf("tenant_id = %q, want default", parsed.TenantID)
 	}
-	if parsed.Limits["StorageBytes"] != 1<<20 {
-		t.Errorf("limits.StorageBytes = %d, want %d", parsed.Limits["StorageBytes"], 1<<20)
+	if parsed.Limits["storage_bytes"] != 1<<20 {
+		t.Errorf("limits.storage_bytes = %d, want %d", parsed.Limits["storage_bytes"], 1<<20)
 	}
 	want := 2 * len(body)
 	if parsed.Usage["storage_bytes"] != want {

@@ -26,7 +26,7 @@ export function members(raw: string): string[] {
 export function grantedGroups(layers: readonly LayerRecord[]): string[] {
   const names = new Set<string>();
   for (const layer of layers) {
-    for (const group of layer.Groups ?? []) {
+    for (const group of layer.groups ?? []) {
       const name = group.trim();
       if (name !== '') {
         names.add(name);

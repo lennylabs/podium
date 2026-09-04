@@ -123,8 +123,8 @@ func cliRunServe(t testing.TB, env []string, timeout time.Duration, args ...stri
 	return res, timedOut
 }
 
-// cliLayerOrder returns the numeric Order of the named layer from a
-// `podium layer list` JSON body (the store serializes fields capitalized).
+// cliLayerOrder returns the numeric order of the named layer from a
+// `podium layer list` JSON body, which carries the §7.3.1 layer object.
 func cliLayerOrder(t testing.TB, stdout, id string) float64 {
 	t.Helper()
 	m := cliJSON(t, stdout)
@@ -134,8 +134,8 @@ func cliLayerOrder(t testing.TB, stdout, id string) float64 {
 		if !ok {
 			continue
 		}
-		if obj["ID"] == id {
-			if o, ok := obj["Order"].(float64); ok {
+		if obj["id"] == id {
+			if o, ok := obj["order"].(float64); ok {
 				return o
 			}
 		}
@@ -564,7 +564,7 @@ func TestCLI_LayerPathMultiLayer(t *testing.T) {
 	if layers, ok := m["layers"].([]any); ok {
 		for _, l := range layers {
 			if obj, ok := l.(map[string]any); ok {
-				if id, ok := obj["ID"].(string); ok {
+				if id, ok := obj["id"].(string); ok {
 					ids[id] = true
 				}
 			}

@@ -1483,6 +1483,12 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	if users != "" {
 		cfg.Users = strings.Split(users, "\n")
 	}
+	// lib/pq hands a timestamptz back in the connection's session time
+	// zone, and nothing here pins that zone, so a non-UTC session would
+	// otherwise emit created_at with an offset. §7.2.1 requires UTC, and
+	// the nullable stamps beside it are already normalized by
+	// ptrFromNullTime.
+	cfg.CreatedAt = cfg.CreatedAt.UTC()
 	cfg.DeletedAt = ptrFromNullTime(deletedAt)
 	cfg.LastIngestedAt = ptrFromNullTime(lastIngestedAt)
 	return cfg, nil

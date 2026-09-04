@@ -188,7 +188,7 @@ export function DeletedLayers({
             <tbody>
               {rows.map((layer) => (
                 <DeletedRow
-                  key={layer.ID}
+                  key={layer.id}
                   layer={layer}
                   subject={subject}
                   caps={caps}
@@ -256,7 +256,7 @@ function restoredNote(id: string, layers: LayerRecord[] | null): string {
   if (layers === null) {
     return `${id} is restored.`;
   }
-  const at = layers.findIndex((layer) => layer.ID === id);
+  const at = layers.findIndex((layer) => layer.id === id);
   if (at < 0) {
     return `${id} is restored.`;
   }
@@ -280,7 +280,7 @@ function DeletedRow({
   const mayRestore = mayTake('restore', layer, caps, subject);
   return (
     <tr>
-      <td className="mono layer-name">{layer.ID}</td>
+      <td className="mono layer-name">{layer.id}</td>
       <td className="source-col">
         <SourceCell layer={layer} />
       </td>
@@ -288,7 +288,7 @@ function DeletedRow({
           an active or a tombstoned layer, so the cell states the datum is
           unreported the way the unregistered date does where the record
           carries no tombstone time. */}
-      <td className="mono quiet" data-testid={`artifact-count-${layer.ID}`}>
+      <td className="mono quiet" data-testid={`artifact-count-${layer.id}`}>
         unreported
       </td>
       <td className="mono quiet">{window === null ? 'unreported' : window.unregistered}</td>
@@ -320,7 +320,7 @@ function DeletedRow({
                 who hears the row rather than sees the gauge. */}
             <span
               className={window.urgent ? 'mono accent' : 'mono quiet'}
-              data-testid={`days-left-${layer.ID}`}
+              data-testid={`days-left-${layer.id}`}
               aria-hidden="true"
             >
               {window.left}d{window.urgent ? ' left' : ''}
@@ -337,10 +337,10 @@ function DeletedRow({
         {mayRestore && (
           <button
             type="button"
-            aria-label={`Restore ${layer.ID}`}
+            aria-label={`Restore ${layer.id}`}
             disabled={readOnly}
             onClick={() => {
-              onRestore(layer.ID);
+              onRestore(layer.id);
             }}
           >
             Restore
@@ -366,10 +366,10 @@ interface RecoveryWindow {
 /** recoveryWindow derives the row's dates from the tombstone the record
  * carries, or null where it carries none. */
 function recoveryWindow(layer: LayerRecord): RecoveryWindow | null {
-  if (layer.DeletedAt === undefined || layer.DeletedAt === null || layer.DeletedAt === '') {
+  if (layer.deleted_at === undefined || layer.deleted_at === null || layer.deleted_at === '') {
     return null;
   }
-  const at = new Date(layer.DeletedAt);
+  const at = new Date(layer.deleted_at);
   if (Number.isNaN(at.getTime())) {
     return null;
   }

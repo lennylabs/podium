@@ -77,6 +77,8 @@ registry:
 
 A document that starts at `layers:` parses to an empty config and the registry ignores it without reporting an error.
 
+A `git` layer's inbound webhook deliveries are verified against one Git provider's signature scheme, which is GitHub unless the layer names another. A declared layer names it in the `source.git.git_provider` key, alongside `repo` and `ref` in the block above, with a value such as `gitlab` or `bitbucket`; a value naming no provider the registry has registered aborts startup with an error naming the layer. The declaration is the setter for a declared layer, because the registry re-seeds every declared entry from `registry.yaml` at each start and so restores the declared value over any other. A layer registered at runtime names the provider in the `git_provider` field of the `POST /v1/layers` and `POST|PUT /v1/layers/update` request body, which is sent with an HTTP client such as `curl`. Neither `podium layer register` nor `podium layer update` carries the field, and no CLI flag sets it. The field is documented in the [HTTP API reference](../reference/http-api#layer-management).
+
 Or register them at runtime:
 
 ```bash

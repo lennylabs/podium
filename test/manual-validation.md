@@ -152,6 +152,7 @@ rm -rf "$WORK"
 | S55 | The register dialog offers only what the caller can take | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S56 | The panel presents per-row only what the caller may take | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S57 | A stale prediction still refuses, and the panel says so | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S58 | Every layer response reads in snake_case | standalone | none | none | none |
 
 ---
 
@@ -416,8 +417,8 @@ collision-rejection rule.
 
 **Expected.**
 
-- `layer list` shows `base` and `team` in order (`base` at `Order` 1, `team` at
-  `Order` 2).
+- `layer list` shows `base` and `team` in order (`base` at `order` 1, `team` at
+  `order` 2).
 - `layer reingest team` reports `greet` rejected with code `ingest.collision`
   and a reason naming the layer that already contributed it: `cross-layer
   collision: "greet" already contributed by layer "base"; declare extends: greet
@@ -627,7 +628,7 @@ reingest`, source updates.
 - The first `layer reingest` ingests the initial commit and prints `artifact:
   deploy@0.1.0   layer: team`. The first search then returns the `deploy` skill.
 - After the new commit, `layer reingest` ingests it (the layer's
-  `LastIngestedRef` advances to the new commit), and the post-reingest search
+  `last_ingested_ref` advances to the new commit), and the post-reingest search
   returns the `rollback` skill.
 - The reingest response reports the count accepted and any rejected with a
   reason, rather than a bare zero. An artifact dropped for a cross-layer
@@ -2422,8 +2423,13 @@ allowlist, and the per-receiver `debounce` field.
    post "$ALICE" '{"url":"https://127.0.0.1:9443/h","event_filter":["layer.ingested"]}'
    echo "--- alice public http (not https): SSRF scheme rejection ---"
    post "$ALICE" '{"url":"http://203.0.113.10/h","event_filter":["layer.ingested"]}'
-   echo "--- alice debounce field accepted ---"
-   post "$ALICE" '{"url":"https://203.0.113.11/h","event_filter":["layer.ingested"],"debounce":"60s"}'
+   echo "--- alice debounce field accepted, and the reported value is writable ---"
+   CREATED=$(post "$ALICE" '{"url":"https://203.0.113.11/h","event_filter":["layer.ingested"],"debounce":"60s"}')
+   echo "$CREATED"
+   RID=$(printf '%s\n' "$CREATED" | sed '$d' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+   curl -s -w '\n%{http_code}\n' -X PUT "$PODIUM_REGISTRY/v1/webhooks/$RID" \
+     -H "Authorization: Bearer $ALICE" -H 'Content-Type: application/json' \
+     -d '{"debounce":"1m0s"}'
    ```
 
 4. Stop the server, then boot a second one identically but with
@@ -2447,8 +2453,13 @@ allowlist, and the per-receiver `debounce` field.
   disallowed host: the SSRF policy rejects a private address.
 - alice's public `http` POST returns `registry.invalid_argument`: the SSRF policy
   requires `https`.
-- alice's POST with `"debounce":"60s"` returns HTTP 201: the per-receiver debounce
-  window is accepted.
+- alice's POST with `"debounce":"60s"` returns HTTP 201, and the created receiver
+  reports `"debounce": "1m0s"`: the field is emitted as the duration string the
+  request accepts rather than as a nanosecond count. The `PUT` that feeds that
+  value back to the created receiver returns HTTP 200 and reports
+  `"debounce": "1m0s"` again, so a client can read a receiver and write the read
+  value back unchanged. A `registry.invalid_argument` on the `PUT` means the
+  create reported a form the update path does not parse.
 - On the allowlist server, the loopback `https` POST returns HTTP 201: an
   allowlisted host overrides the address rejection (the `https` requirement still
   applies).
@@ -5008,11 +5019,28 @@ to 3 completed and the browser still signed in.
    ```bash
    curl -sS "http://127.0.0.1:8153/v1/layers" \
      -H "Authorization: Bearer $TOKEN" \
-     -w '\nstatus=%{http_code}\n' | grep -i -e '"ID"' -e secret -e '"code"' -e status
+     -w '\nstatus=%{http_code}\n' | grep -i -e '"id"' -e secret -e '"code"' -e status
+   curl -sS "http://127.0.0.1:8153/v1/layers" \
+     -H "Authorization: Bearer $TOKEN" \
+     | grep -o -e '"id":' -e '"[A-Z][A-Za-z]*":' -e '[Tt]enant' \
+     | sort | uniq -c
    ```
 
-   **Expect.** `own-release` is listed, and no line carries a secret value. The
-   secret is returned on registration and on a rotation and is redacted from
+   **Expect.** The first command lists `own-release`, and no line carries a
+   secret value. The second command prints one line, `3 "id":`, counting one
+   `id` member per layer this caller reads: `public-handbook`, `private-comp`,
+   and `own-release`. `comp-readers-policy` is absent because it is visible only
+   through `groups: [comp-readers]` and `$TOKEN` carries no `groups` claim: the
+   `groups` client scope is optional, and prerequisite 5 mints this token with a
+   password grant that requests no scope. That count is the evidence the
+   pipeline read the layer list rather than an error envelope or an empty body,
+   either of which prints nothing at all. No `"Xxx":` line and no `tenant` line
+   appears,
+   because §7.2.1 fixes the control plane on lower snake_case names and bars a
+   layer record from restating the tenant it was read under. The first command
+   carries `-i`, so its `'"id"'` pattern matches any casing and reports nothing
+   about the spelling; the second command is what reads the spelling.
+   The secret is returned on registration and on a rotation and is redacted from
    every other response, so once the reveal is dismissed it cannot be read back.
    In the panel the row carries the "yours" marker, which the panel draws by
    comparing the layer's stored owner against the subject the posture read
@@ -5909,7 +5937,7 @@ in to the UI; she exists so the first grant has an issuer.
 
    **Expect.** The grant answers `201` with `{"user_id": "<the subject>"}`, and
    the registration exits `0` with the stored record printed, carrying
-   `"UserDefined": true` and this caller's subject as `Owner`. A `403` on the
+   `"user_defined": true` and this caller's subject as `owner`. A `403` on the
    grant means `PODIUM_BOOTSTRAP_ADMINS` did not name carol's `sub`, and the
    prerequisite is re-run before continuing. A `403` on the registration means
    the grant did not take effect, because a non-admin may not name a filesystem
@@ -6006,3 +6034,222 @@ place and the panel is loaded under it.
 **Teardown.** Revoke any remaining grant, delete `s56-notes`, and run S44's
 teardown: stop the server by its recorded PID, run `rm -rf "$WORK"`, and remove
 the IdP with `docker rm -f kc-podium` and `rm -rf "$KCERT"`.
+
+---
+
+## S58: Every layer response reads in snake_case
+
+**Goal.** Validate that the layer endpoints emit the §7.2.1 control-plane
+convention: every member name is lower snake_case, no response restates the
+tenant the layer was read under, and the layer's HMAC secret appears in the
+registration envelope alone. Validate that `git_provider` is settable over HTTP
+and refused when it names no registered provider, and that the layer panel
+still draws every column from the members the server emits.
+
+**Covers.** §7.2.1 control-plane JSON conventions, §7.3.1 the layer object and
+git-provider selection, and the §13.10 layer panel.
+
+**Why by hand.** The Go suite pins each response's key set, and the panel is
+where a divergence stops being visible: a cell that reads a member the server
+does not emit renders permanently empty rather than failing, so no API-level
+reading reports it. The `git_provider` write has no CLI flag, so the HTTP body
+is the only path a person exercises.
+
+**Prerequisites.** None beyond the build.
+
+Run the isolation block from "How to use this document", then build a
+one-artifact local layer and start the registry with the UI mounted.
+
+```bash
+mkdir -p "$WORK/reg"
+podium artifact scaffold --type skill --description "Roll a release" "$WORK/reg/release"
+podium serve --standalone --web-ui --no-embeddings \
+  --layer-path "$WORK/reg" --bind 127.0.0.1:8464 > "$WORK/srv.log" 2>&1 &
+export SRV=$!
+for i in $(seq 1 40); do curl -sf http://127.0.0.1:8464/healthz >/dev/null && break; sleep 0.5; done
+export PODIUM_REGISTRY=http://127.0.0.1:8464
+grep 'ingested layer' "$WORK/srv.log"
+```
+
+**Expect.** `ingested layer reg from $WORK/reg (accepted=1, idempotent=0,
+rejected=0, advisories=1)`. The advisory is `lint.thin_description`: the
+description above is 14 characters, one short of the 15-character threshold.
+Keep it as written, because a longer description reports `advisories=0`.
+
+Define the reader every step below pipes a response into. It prints the member
+names at each level of the document, the `id` and `deleted_at` value of each
+layer record the document carries, the member names that are not lower
+snake_case, how many times the string `tenant` appears in any casing, and
+whether the document carries a secret. The record line is what makes the
+ordering and the tombstone stamp readable, because the member-name walk reports
+names alone. The block is unindented on purpose: the document's leading spaces
+would land inside the Python program.
+
+```bash
+inspect() {
+  python3 -c '
+import json, re, sys
+raw = sys.stdin.read()
+doc = json.loads(raw)
+def walk(node, path):
+    if isinstance(node, dict):
+        print(path, sorted(node))
+        for key, value in node.items():
+            walk(value, path + "." + key)
+    elif isinstance(node, list) and node:
+        walk(node[0], path + "[]")
+walk(doc, "response")
+records = next((v for v in doc.values() if isinstance(v, list) and v and isinstance(v[0], dict)), None)
+if records is None and isinstance(doc.get("layer"), dict):
+    records = [doc["layer"]]
+if records:
+    print("records:", [(r.get("id"), r.get("deleted_at")) for r in records])
+print("go-cased keys:", sorted({k for k in re.findall(r"\"([A-Za-z_]+)\":", raw) if k != k.lower()}))
+print("tenant mentions:", len(re.findall(r"(?i)tenant", raw)))
+print("carries a secret value:", "webhook_secret" in doc)
+'
+}
+```
+
+**Steps.**
+
+1. Register a git-source layer and read the registration envelope. The
+   repository is never fetched, because registration validates the request and
+   no step here reingests the layer.
+
+   ```bash
+   podium layer register --id own-release \
+     --repo https://git.acme.internal/alice/own-release.git --ref main | inspect
+   ```
+
+   **Expect.** The envelope carries `['layer', 'webhook_secret',
+   'webhook_url']`, and `response.layer` carries `['created_at', 'deleted_at',
+   'git_provider', 'groups', 'id', 'last_ingested_ref', 'local_path', 'order',
+   'organization', 'owner', 'public', 'ref', 'repo', 'root', 'source_type',
+   'user_defined', 'users']`. `records: [('own-release', None)]`,
+   `go-cased keys: []`, `tenant mentions: 0`, and
+   `carries a secret value: True`. A member spelled `ID`, `Order`, or
+   `UserDefined` here is the §7.2.1 violation this scenario exists to catch,
+   and a `tenant` mention is the disclosure §7.2.1 bars: the layer's subject is
+   the layer, and the registry holds the tenant as a boot constant the caller
+   never supplied. `last_ingested_at` and `force_push_policy` are absent
+   because neither is set on a layer that has never ingested and names no
+   policy; both are omitted when empty rather than emitted as null.
+
+2. Patch the layer and read the response.
+
+   ```bash
+   podium layer update --id own-release --ref release | inspect
+   ```
+
+   **Expect.** `response ['layer']` over the same member list step 1 printed,
+   with `records: [('own-release', None)]`, `go-cased keys: []`,
+   `tenant mentions: 0`, and `carries a secret value:
+   False`. The update reports the layer under one name per value, so a client
+   can feed a read back into a write, and the secret is not served again.
+
+3. List the layers.
+
+   ```bash
+   podium layer list | inspect
+   ```
+
+   **Expect.** `response ['layers']` and `response.layers[]` carrying the
+   step 1 members plus `last_ingested_at`, which the `reg` layer carries
+   because it ingested at boot. `records: [('reg', None), ('own-release',
+   None)]`, `go-cased keys: []`, `tenant mentions: 0`, and
+   `carries a secret value: False`.
+
+4. Re-sequence the layers and read the response.
+
+   ```bash
+   podium layer reorder own-release reg | inspect
+   ```
+
+   **Expect.** `response ['layers']` with `go-cased keys: []` and
+   `tenant mentions: 0`. The record line reads `records: [('own-release',
+   None), ('reg', None)]`, which is the re-sequencing the command asked for and
+   the reverse of step 3's line. The member-name walk reports the first element,
+   now `own-release`, so the member list is step 1's: `last_ingested_at` is
+   absent on a layer that has never ingested. The reorder answers the whole list the
+   caller may read, so it is a second reading of the same object under a
+   different endpoint.
+
+5. Unregister the layer and read the recoverable list.
+
+   ```bash
+   podium layer unregister own-release
+   podium layer list --deleted | inspect
+   ```
+
+   **Expect.** The unregister prints `{"unregistered": "own-release"}`. The
+   deleted list carries `own-release` under the member set step 1 printed, with
+   `go-cased keys: []` and `tenant mentions: 0`. The record line reads
+   `records: [('own-release', '<stamp>')]`, where the stamp is an RFC 3339 UTC
+   time a few seconds old, so the tombstone the unregister wrote is readable
+   rather than inferred. A
+   live layer carries `deleted_at` as `null` rather than omitting it, so the
+   live list and the recoverable list read the same member set.
+
+6. Register a layer that names its git provider. The field has no CLI flag, so
+   the request body is written by hand.
+
+   ```bash
+   curl -sS -X POST "$PODIUM_REGISTRY/v1/layers" -H 'Content-Type: application/json' \
+     -d '{"id":"gl","source_type":"git","repo":"https://gitlab.acme.internal/alice/gl.git","ref":"main","git_provider":"gitlab"}' \
+     -w '\nstatus=%{http_code}\n'
+   podium layer list | python3 -c 'import json,sys; print([(l["id"], l["git_provider"]) for l in json.load(sys.stdin)["layers"]])'
+   ```
+
+   **Expect.** `status=201`, and the created layer reports `"git_provider":
+   "gitlab"`. The list prints `[('reg', ''), ('gl', 'gitlab')]`, so the value
+   the request set is the value a later read returns. A stored empty string on
+   the `gl` row means the request body reached a field the registration path
+   does not apply, and every inbound delivery to that layer would then be
+   verified under the wrong signature scheme.
+
+7. Register a layer naming a provider the registry does not carry.
+
+   ```bash
+   curl -sS -X POST "$PODIUM_REGISTRY/v1/layers" -H 'Content-Type: application/json' \
+     -d '{"id":"bad","source_type":"git","repo":"https://x.acme.internal/a.git","ref":"main","git_provider":"gitea"}' \
+     -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** `status=400` with `registry.invalid_argument` and the message
+   `git_provider "gitea" names no registered git provider (registered:
+   bitbucket, github, gitlab)`. The refusal names the field and lists what the
+   registry accepts, so the value is rejected at registration rather than
+   stored and left to fail every delivery.
+
+8. Register one user-defined layer, so the panel has a row of each class to
+   draw, then open the panel.
+
+   ```bash
+   podium layer register --id mine --user-defined --owner alice@acme.com \
+     --repo https://git.acme.internal/alice/mine.git --ref main > /dev/null
+   ```
+
+   Open `http://127.0.0.1:8464/app/#/layers` and read the three rows, which
+   stand in the precedence order the list reports: `reg`, `gl`, then `mine`.
+
+   **Expect.** The header row reads `Layer`, `Source`, `Visibility`, and
+   `Last ingest`. The `reg` row's Source cell carries a `local` chip with its
+   path, and the `gl` and `mine` rows carry a `git` chip with `main` beside it
+   and the repository beneath. The `mine` row states
+   `order 3 · owner alice@acme.com` under its name, which is the class the
+   panel reads from `user_defined` and `owner`, and its Visibility cell carries
+   a `user: alice@acme.com` marker, which the panel reads from `users`. The
+   `reg` and `gl` rows are public, so each carries the `public` marker. The
+   `Last ingest` cell reads a relative age for `reg` and `never` for the two
+   git rows, neither of which has ingested. A column that renders empty on
+   every row, or a `mine` row that states no owner, means the panel is reading
+   a member name the server no longer emits: the cell then draws permanently
+   empty and nothing in the page or the response reports it.
+
+**Cleanup.**
+
+```bash
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+rm -rf "$WORK"
+```

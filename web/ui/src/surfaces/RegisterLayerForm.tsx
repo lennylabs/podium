@@ -96,7 +96,7 @@ export function RegisterLayerForm({
   // (§13.10). Where it is absent the form submits the class the caller holds.
   const mayChooseClass = mayTake(
     'register',
-    { UserDefined: false, Owner: subject },
+    { user_defined: false, owner: subject },
     caps,
     subject,
   );
@@ -107,7 +107,7 @@ export function RegisterLayerForm({
   // not classify a repository string, so the registry answers that one.
   const mayNameLocal = mayTake(
     'register',
-    { UserDefined: true, Owner: subject, SourceType: 'local' },
+    { user_defined: true, owner: subject, source_type: 'local' },
     caps,
     subject,
   );
@@ -243,7 +243,7 @@ export function RegisterLayerForm({
       <Modal title="Layer registered" onClose={onClose} dismissible={secret.dismissible(result)}>
         <SecretReveal
           result={result}
-          outcome={`Layer ${result.layer.ID} is registered.`}
+          outcome={`Layer ${result.layer.id} is registered.`}
           acknowledged={secret.acknowledged}
           onAcknowledge={secret.setAcknowledged}
           onDone={onClose}

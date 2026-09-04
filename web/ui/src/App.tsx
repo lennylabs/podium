@@ -1509,7 +1509,7 @@ function ContrastDisc() {
  * resolved to. A negative value disables the cap, which the entry states. */
 function LayerQuota() {
   const quota = useAsync(() => readQuota(), []);
-  const cap = quota.value?.limits?.MaxUserLayers;
+  const cap = quota.value?.limits?.max_user_layers;
   if (cap === undefined || cap === 0) {
     return null;
   }

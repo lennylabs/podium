@@ -77,19 +77,22 @@ func (t Tenant) ScopePreviewEnabled() bool {
 	return t.ExposeScopePreview == nil || *t.ExposeScopePreview
 }
 
-// Quota is the per-tenant resource budget (§4.7.8).
+// Quota is the per-tenant resource budget (§4.7.8). The JSON tags carry
+// the §7.2.1 control-plane names, which are the names the §7.3.3 tenant
+// object already uses for the same five numbers, so GET /v1/quota and
+// GET /v1/admin/tenants report them identically.
 type Quota struct {
-	StorageBytes      int64
-	SearchQPS         int
-	MaterializeRate   int
-	AuditVolumePerDay int64
+	StorageBytes      int64 `json:"storage_bytes"`
+	SearchQPS         int   `json:"search_qps"`
+	MaterializeRate   int   `json:"materialize_rate"`
+	AuditVolumePerDay int64 `json:"audit_volume_per_day"`
 	// MaxUserLayers is the §7.3.1 / §1.4 cap on user-defined layers per
 	// identity ("Default cap: 3 user-defined layers per identity,
 	// configurable per tenant"; §4.4 calls it the tenant's "default
 	// user-layer cap"). Zero selects the deployment default (3); a
 	// negative value disables the cap. The register handler resolves and
 	// enforces it (pkg/registry/server/layers.go).
-	MaxUserLayers int
+	MaxUserLayers int `json:"max_user_layers"`
 }
 
 // ManifestRecord is the indexed metadata for one (artifact_id, version)
@@ -254,23 +257,34 @@ type AdminGrant struct {
 // LayerConfig is one entry in a tenant's ordered layer list (§4.6).
 // Admins manage admin-defined layers via the layer-config CLI; users
 // register personal layers (which get implicit visibility:
-// users:[<registrant>]).
+// users:[<registrant>]). The JSON tags below are the wire encoding of
+// the §7.3.1 layer object under the §7.2.1 control-plane conventions;
+// the SQL backends bind their columns to the Go fields rather than to
+// this encoding, so a tag here moves no stored row.
 type LayerConfig struct {
-	TenantID    string
-	ID          string
-	SourceType  string // "git" | "local"
-	Repo        string // git source
-	Ref         string // git source
-	Root        string // optional subpath
-	LocalPath   string // local source
-	Order       int    // precedence within the tenant (lower = lower precedence)
-	UserDefined bool
-	Owner       string // OIDC sub of the registrant for user-defined layers
+	// TenantID is withheld from every response that marshals a
+	// LayerConfig, per §7.2.1 and §7.3.1. LayerEndpoint binds one tenant
+	// at construction and every handler scopes its store calls to it, so
+	// the value is constant across every record a response carries, and
+	// emitting it would republish the registry's stored tenant identifier
+	// on a read that is not admin-gated (notably GET /v1/layers). The SQL
+	// backends persist it through an explicit column, so the tag does not
+	// affect storage.
+	TenantID    string `json:"-"`
+	ID          string `json:"id"`
+	SourceType  string `json:"source_type"` // "git" | "local"
+	Repo        string `json:"repo"`        // git source
+	Ref         string `json:"ref"`         // git source
+	Root        string `json:"root"`        // optional subpath
+	LocalPath   string `json:"local_path"`  // local source
+	Order       int    `json:"order"`       // precedence within the tenant (lower = lower precedence)
+	UserDefined bool   `json:"user_defined"`
+	Owner       string `json:"owner"` // OIDC sub of the registrant for user-defined layers
 	// Visibility fields (subset of layer.Visibility per §4.6).
-	Public       bool
-	Organization bool
-	Groups       []string
-	Users        []string
+	Public       bool     `json:"public"`
+	Organization bool     `json:"organization"`
+	Groups       []string `json:"groups"`
+	Users        []string `json:"users"`
 	// WebhookSecret is the HMAC secret for a git source's inbound webhook
 	// (§7.3.1). spec §7.3.1 frames it as a credential returned once at
 	// registration ("podium layer register returns the webhook URL and HMAC
@@ -286,12 +300,12 @@ type LayerConfig struct {
 	// verifies this layer's inbound webhook deliveries (e.g. "github",
 	// "gitlab", "bitbucket", or a custom provider registered via
 	// webhook.Default.Register). Empty defaults to "github". spec §7.3.1.
-	GitProvider string
+	GitProvider string `json:"git_provider"`
 	// LastIngestedRef records the source-specific reference (commit
 	// SHA for git) of the most recent successful ingest. The ingest
 	// pipeline reads it before snapshotting so the source provider can
 	// detect history rewrites (§7.3.1 force-push tolerance).
-	LastIngestedRef string
+	LastIngestedRef string `json:"last_ingested_ref"`
 	// ForcePushPolicy governs what happens when a force-push is
 	// detected for a git source. The empty string and "tolerant" both
 	// proceed and emit a layer.history_rewritten audit event;
@@ -305,13 +319,13 @@ type LayerConfig struct {
 	// exposes it as `last_ingested_at` for staleness monitoring. Nil
 	// until the layer has completed an ingest at least once.
 	LastIngestedAt *time.Time `json:"last_ingested_at,omitempty"`
-	CreatedAt      time.Time
+	CreatedAt      time.Time  `json:"created_at"`
 	// DeletedAt is the §8.4 soft-delete tombstone for a layer
 	// unregistered by its owner. A non-nil value hides the layer from
 	// Get/List while keeping it (and its artifacts) recoverable via
 	// RestoreLayerConfig for the 30-day window, after which the purge job
 	// hard-deletes it. Nil for an active layer.
-	DeletedAt *time.Time
+	DeletedAt *time.Time `json:"deleted_at"`
 }
 
 // stampDeprecation sets DeprecatedAt from IngestedAt (falling back to

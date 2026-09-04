@@ -933,8 +933,13 @@ func (b *browserStack) layerList(t *testing.T, cookies ...*http.Cookie) ([]strin
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("layer read = %d, want 200\nbody: %s", resp.StatusCode, body)
 	}
+	// The list answers the §7.3.1 layer object, whose members are lower
+	// snake_case. Decoding through an explicit tag rather than through
+	// store.LayerConfig keeps the assertion evidence about the wire names.
 	var got struct {
-		Layers []store.LayerConfig
+		Layers []struct {
+			ID string `json:"id"`
+		} `json:"layers"`
 	}
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("decode layer list: %v\nbody: %s", err, body)

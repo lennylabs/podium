@@ -86,10 +86,10 @@ func TestStandaloneLayer_UserDefinedOwnerManagedByLocalOperator(t *testing.T) {
 		"--registry", srv.BaseURL)
 	cliWantExit(t, reg, 0, "user-defined layer register on a standalone registry")
 
-	// The list response marshals store.LayerConfig, whose fields carry no
-	// JSON tags, so the class and the owner are spelled Go-side.
+	// The list response carries the §7.3.1 layer object, whose members are
+	// lower snake_case, so the class and the owner are spelled that way.
 	listed := standaloneLayerList(t, srv.BaseURL)
-	for _, want := range []string{`"ID":"alice-personal"`, `"UserDefined":true`, `"Owner":"alice@acme.com"`} {
+	for _, want := range []string{`"id":"alice-personal"`, `"user_defined":true`, `"owner":"alice@acme.com"`} {
 		if !strings.Contains(listed, want) {
 			t.Fatalf("layer list missing %s:\n%s", want, listed)
 		}

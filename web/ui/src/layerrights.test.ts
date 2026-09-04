@@ -26,26 +26,26 @@ describe('mayTake', () => {
   /** ownGit is a user-defined layer alice owns whose source reads no host
    * path. Every operation is admitted on it for her. */
   const ownGit: LayerTarget = {
-    UserDefined: true,
-    Owner: 'alice@acme.com',
-    SourceType: 'git',
+    user_defined: true,
+    owner: 'alice@acme.com',
+    source_type: 'git',
   };
   /** fileTransportRow is a stored record whose repository string resolves to
    * go-git's file transport. LayerRecord satisfies LayerTarget structurally
    * and carries Repo, which the client deliberately does not classify. */
   const fileTransportRow = {
-    UserDefined: true,
-    Owner: 'alice@acme.com',
-    SourceType: 'git',
-    Repo: '/srv/other-tenant',
+    user_defined: true,
+    owner: 'alice@acme.com',
+    source_type: 'git',
+    repo: '/srv/other-tenant',
   };
   /** ownLocal is the same layer registered against a directory on the
    * registry host, which is what the local-source rule guards. */
   const ownLocal: LayerTarget = {
-    UserDefined: true,
-    Owner: 'alice@acme.com',
-    SourceType: 'local',
-    LocalPath: '/Users/alice/registry',
+    user_defined: true,
+    owner: 'alice@acme.com',
+    source_type: 'local',
+    local_path: '/Users/alice/registry',
   };
 
   it('mirrors the server arms over the caller, the target, and the operation', () => {
@@ -67,13 +67,13 @@ describe('mayTake', () => {
       // its stored Owner field says.
       {
         name: 'admin-defined row, its stored owner',
-        target: { UserDefined: false, Owner: 'alice@acme.com', SourceType: 'git' },
+        target: { user_defined: false, owner: 'alice@acme.com', source_type: 'git' },
         caps: closed,
         subject: 'alice@acme.com',
         want: [],
       },
       // A record carrying neither key is admin-defined and unowned.
-      { name: 'bare record', target: { SourceType: 'git' }, caps: closed, subject: 'alice@acme.com', want: [] },
+      { name: 'bare record', target: { source_type: 'git' }, caps: closed, subject: 'alice@acme.com', want: [] },
       // The local-source rule: the four operations that read the source are
       // refused on a host path, and unregister and reorder name no path and
       // re-read none, so they stay with the write rule alone.
@@ -91,14 +91,14 @@ describe('mayTake', () => {
       // Edit present while the Local path field inside it is withheld.
       {
         name: 'owner patching a local layer without its path',
-        target: { UserDefined: true, Owner: 'alice@acme.com' },
+        target: { user_defined: true, owner: 'alice@acme.com' },
         caps: closed,
         subject: 'alice@acme.com',
         want: ops,
       },
       {
         name: 'owner patching a local layer with its path',
-        target: { UserDefined: true, Owner: 'alice@acme.com', LocalPath: '/Users/alice/registry' },
+        target: { user_defined: true, owner: 'alice@acme.com', local_path: '/Users/alice/registry' },
         caps: closed,
         subject: 'alice@acme.com',
         want: ['unregister', 'reorder'],
@@ -118,10 +118,10 @@ describe('mayTake', () => {
       {
         name: 'owner of a git layer carrying a stored path',
         target: {
-          UserDefined: true,
-          Owner: 'alice@acme.com',
-          SourceType: 'git',
-          LocalPath: '/tmp/stale',
+          user_defined: true,
+          owner: 'alice@acme.com',
+          source_type: 'git',
+          local_path: '/tmp/stale',
         },
         caps: closed,
         subject: 'alice@acme.com',
@@ -132,10 +132,10 @@ describe('mayTake', () => {
       {
         name: 'owner of a custom-source layer carrying a path',
         target: {
-          UserDefined: true,
-          Owner: 'alice@acme.com',
-          SourceType: 'oci',
-          LocalPath: '/tmp/oci',
+          user_defined: true,
+          owner: 'alice@acme.com',
+          source_type: 'oci',
+          local_path: '/tmp/oci',
         },
         caps: closed,
         subject: 'alice@acme.com',
@@ -152,7 +152,7 @@ describe('mayTake', () => {
       // no owner the caller matches, so it reduces to the admin arm.
       {
         name: 'admin-defined registration by an authenticated non-admin',
-        target: { UserDefined: false, Owner: 'alice@acme.com' },
+        target: { user_defined: false, owner: 'alice@acme.com' },
         caps: closed,
         subject: 'alice@acme.com',
         want: [],
@@ -160,7 +160,7 @@ describe('mayTake', () => {
       // The registration the dialog's Local folder option would build.
       {
         name: 'local registration by an authenticated non-admin',
-        target: { UserDefined: true, Owner: 'alice@acme.com', SourceType: 'local' },
+        target: { user_defined: true, owner: 'alice@acme.com', source_type: 'local' },
         caps: closed,
         subject: 'alice@acme.com',
         want: ['unregister', 'reorder'],
@@ -177,10 +177,10 @@ describe('mayTake', () => {
   // settled with every. It carries no condition on the block's length.
   it('settles a reorder over every row of the block the move would name', () => {
     const mine: LayerTarget[] = [
-      { UserDefined: true, Owner: 'alice@acme.com' },
-      { UserDefined: true, Owner: 'alice@acme.com', SourceType: 'local', LocalPath: '/tmp/x' },
+      { user_defined: true, owner: 'alice@acme.com' },
+      { user_defined: true, owner: 'alice@acme.com', source_type: 'local', local_path: '/tmp/x' },
     ];
-    const mixed: LayerTarget[] = [...mine, { UserDefined: false, Owner: 'ops@acme.com' }];
+    const mixed: LayerTarget[] = [...mine, { user_defined: false, owner: 'ops@acme.com' }];
     const settle = (block: LayerTarget[]): boolean =>
       block.every((row) => mayTake('reorder', row, closed, 'alice@acme.com'));
     expect(settle(mine)).toBe(true);

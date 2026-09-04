@@ -90,9 +90,9 @@ func orgDecodeBody(t *testing.T, b []byte, dst any) {
 }
 
 // orgLayerOf returns the nested "layer" object from a register/update
-// response. The server serializes store.LayerConfig with capitalized Go
-// field names (no json tags), so callers read keys like "ID", "Public",
-// "Groups", "Users", "Ref" from the returned map.
+// response. The server answers the §7.3.1 layer object under the §7.2.1
+// lower snake_case convention, so callers read keys like "id", "public",
+// "groups", "users", and "ref" from the returned map.
 func orgLayerOf(t *testing.T, obj map[string]any) map[string]any {
 	t.Helper()
 	lay, ok := obj["layer"].(map[string]any)
@@ -296,8 +296,8 @@ func TestStandardDeploy_LayerRegisterOrganization(t *testing.T) {
 	}
 	var obj map[string]any
 	orgDecodeBody(t, []byte(res.Stdout), &obj)
-	if lay := orgLayerOf(t, obj); lay["ID"] != "org-defaults" {
-		t.Errorf("response layer.ID=%v, want org-defaults", lay["ID"])
+	if lay := orgLayerOf(t, obj); lay["id"] != "org-defaults" {
+		t.Errorf("response layer.id=%v, want org-defaults", lay["id"])
 	}
 	if v, _ := obj["webhook_url"].(string); v == "" {
 		t.Errorf("webhook_url absent or empty in response")
@@ -330,10 +330,10 @@ func TestStandardDeploy_LayerRegisterGroup(t *testing.T) {
 	var obj map[string]any
 	orgDecodeBody(t, []byte(res.Stdout), &obj)
 	lay := orgLayerOf(t, obj)
-	if lay["ID"] != "team-finance" {
-		t.Errorf("id=%v, want team-finance", lay["ID"])
+	if lay["id"] != "team-finance" {
+		t.Errorf("id=%v, want team-finance", lay["id"])
 	}
-	groups, _ := lay["Groups"].([]any)
+	groups, _ := lay["groups"].([]any)
 	found := map[string]bool{}
 	for _, g := range groups {
 		found[fmt.Sprintf("%v", g)] = true
@@ -364,14 +364,14 @@ func TestStandardDeploy_LayerRegisterGroupAndUser(t *testing.T) {
 	var obj map[string]any
 	orgDecodeBody(t, []byte(res.Stdout), &obj)
 	lay := orgLayerOf(t, obj)
-	if lay["ID"] != "platform-shared" {
-		t.Errorf("id=%v, want platform-shared", lay["ID"])
+	if lay["id"] != "platform-shared" {
+		t.Errorf("id=%v, want platform-shared", lay["id"])
 	}
-	if _, ok := lay["Groups"]; !ok {
-		t.Errorf("Groups field absent")
+	if _, ok := lay["groups"]; !ok {
+		t.Errorf("groups field absent")
 	}
-	if _, ok := lay["Users"]; !ok {
-		t.Errorf("Users field absent")
+	if _, ok := lay["users"]; !ok {
+		t.Errorf("users field absent")
 	}
 }
 
@@ -393,11 +393,11 @@ func TestStandardDeploy_LayerRegisterPublic(t *testing.T) {
 	var obj map[string]any
 	orgDecodeBody(t, []byte(res.Stdout), &obj)
 	lay := orgLayerOf(t, obj)
-	if lay["ID"] != "public-marketing" {
-		t.Errorf("id=%v, want public-marketing", lay["ID"])
+	if lay["id"] != "public-marketing" {
+		t.Errorf("id=%v, want public-marketing", lay["id"])
 	}
-	if lay["Public"] != true {
-		t.Errorf("public=%v, want true", lay["Public"])
+	if lay["public"] != true {
+		t.Errorf("public=%v, want true", lay["public"])
 	}
 }
 
@@ -579,8 +579,8 @@ func TestStandardDeploy_LayerUpdateRef(t *testing.T) {
 	}
 	var obj map[string]any
 	orgDecodeBody(t, []byte(res.Stdout), &obj)
-	if lay := orgLayerOf(t, obj); lay["Ref"] != "release-v2" {
-		t.Errorf("ref=%v, want release-v2", lay["Ref"])
+	if lay := orgLayerOf(t, obj); lay["ref"] != "release-v2" {
+		t.Errorf("ref=%v, want release-v2", lay["ref"])
 	}
 }
 
@@ -756,14 +756,14 @@ func TestStandardDeploy_RevokeHappyPath(t *testing.T) {
 // orgAssertLayerVisible decodes a `podium admin show-effective` JSON response
 // and asserts the named layer's Visible flag matches want, so the test confirms
 // the per-target computation rather than only the exit code. The server
-// serializes core.EffectiveLayer with capitalized Go field names (LayerID,
-// Visible) under a "layers" array.
+// serializes core.EffectiveLayer under the §7.2.1 names (layer_id, visible,
+// reason) in a "layers" array.
 func orgAssertLayerVisible(t *testing.T, stdout, layerID string, want bool, why string) {
 	t.Helper()
 	var eff struct {
 		Layers []struct {
-			LayerID string `json:"LayerID"`
-			Visible bool   `json:"Visible"`
+			LayerID string `json:"layer_id"`
+			Visible bool   `json:"visible"`
 		} `json:"layers"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &eff); err != nil {
@@ -1367,10 +1367,11 @@ func TestStandardDeploy_LayersPostWebhookURL(t *testing.T) {
 	var resp map[string]any
 	orgDecodeBody(t, body, &resp)
 
-	// The layer is nested under "layer" with capitalized Go field names.
+	// The layer is nested under "layer" and carries the §7.3.1 member
+	// names, which are lower snake_case.
 	layer := orgLayerOf(t, resp)
-	if layer["ID"] != "org-defaults" {
-		t.Errorf("layer ID=%v, want org-defaults", layer["ID"])
+	if layer["id"] != "org-defaults" {
+		t.Errorf("layer id=%v, want org-defaults", layer["id"])
 	}
 	// webhook_url and webhook_secret may be at top level or in layer.
 	webhookURL, _ := resp["webhook_url"].(string)
@@ -1685,8 +1686,8 @@ func TestStandardDeploy_UserDefinedLayerCap(t *testing.T) {
 	orgDecodeBody(t, listBody, &list)
 	owned := 0
 	for _, l := range list.Layers {
-		ud, _ := l["UserDefined"].(bool)
-		if ud && l["Owner"] == "alice@acme.com" {
+		ud, _ := l["user_defined"].(bool)
+		if ud && l["owner"] == "alice@acme.com" {
 			owned++
 		}
 	}

@@ -47,11 +47,13 @@ func (r *Registry) RevokeAdmin(ctx context.Context, userID string) error {
 	return r.store.RevokeAdmin(ctx, userID, r.tenantFor(ctx))
 }
 
-// EffectiveLayer is one entry in the result of ShowEffective.
+// EffectiveLayer is one entry in the result of ShowEffective. It reaches
+// the wire under GET /v1/admin/show-effective, so the tags carry the
+// §7.2.1 control-plane names.
 type EffectiveLayer struct {
-	LayerID string
-	Visible bool
-	Reason  string
+	LayerID string `json:"layer_id"`
+	Visible bool   `json:"visible"`
+	Reason  string `json:"reason"`
 }
 
 // ShowEffective returns the layer-by-layer visibility for a target

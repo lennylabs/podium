@@ -314,34 +314,32 @@ export interface DependencyEdge {
   kind: string;
 }
 
-/** LayerRecord mirrors store.LayerConfig, which the registry marshals
- * directly into every layer response. The casing is that struct's, which is
- * not uniformly snake_case, so each name here is read off the Go field: a
- * member the struct tags carries the tagged name, and every other member
- * carries the Go field name the marshaller falls back to. */
+/** LayerRecord is the §7.3.1 layer object every layer response carries. Its
+ * member names are lower snake_case under the §7.2.1 control-plane
+ * conventions, and they are the names the send paths already use. */
 export interface LayerRecord {
-  ID: string;
-  SourceType: string;
-  Repo?: string;
-  Ref?: string;
-  Root?: string;
-  LocalPath?: string;
-  Order: number;
-  UserDefined?: boolean;
-  Owner?: string;
-  Public?: boolean;
-  Organization?: boolean;
-  Groups?: string[] | null;
-  Users?: string[] | null;
+  id: string;
+  source_type: string;
+  repo?: string;
+  ref?: string;
+  root?: string;
+  local_path?: string;
+  order: number;
+  user_defined?: boolean;
+  owner?: string;
+  public?: boolean;
+  organization?: boolean;
+  groups?: string[] | null;
+  users?: string[] | null;
+  git_provider?: string;
   force_push_policy?: string;
   last_ingested_at?: string;
-  LastIngestedRef?: string;
-  /** DeletedAt is when the layer was unregistered. It is set on the records
-   * the deleted read returns and absent on every other layer, and the
-   * recovery surface derives the erase date from it. The field carries no
-   * omitempty tag, so an active layer marshals it as null rather than
-   * omitting it. */
-  DeletedAt?: string | null;
+  last_ingested_ref?: string;
+  /** deleted_at is when the layer was unregistered. It is set on the records
+   * the deleted read returns and null on every other layer, and the recovery
+   * surface derives the erase date from it. The member carries no omitempty
+   * tag, so an active layer marshals it as null rather than omitting it. */
+  deleted_at?: string | null;
 }
 
 /** IngestSummary is the §7.3.1 reingest result. The registry runs the whole
@@ -619,18 +617,18 @@ export function unregisterLayer(id: string): Promise<unknown> {
   return request<unknown>(paths.layers + query({ id }), { ...write, method: 'DELETE' });
 }
 
-/** QuotaEnvelope is the §4.7.8 quota read. The limits are marshalled from
- * store.Quota, which carries no field tags, so each member is named after the
- * Go field. The account menu reads one of them, the per-identity cap on
- * user-defined layers. */
+/** QuotaEnvelope is the §4.7.8 quota read. The limits carry the §7.2.1
+ * control-plane names, which are the names the §7.3.3 tenant object reports
+ * for the same five numbers. The account menu reads one of them, the
+ * per-identity cap on user-defined layers. */
 export interface QuotaEnvelope {
   tenant_id?: string;
   limits?: {
-    MaxUserLayers?: number;
-    StorageBytes?: number;
-    SearchQPS?: number;
-    MaterializeRate?: number;
-    AuditVolumePerDay?: number;
+    max_user_layers?: number;
+    storage_bytes?: number;
+    search_qps?: number;
+    materialize_rate?: number;
+    audit_volume_per_day?: number;
   };
 }
 

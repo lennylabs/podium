@@ -840,7 +840,7 @@ func TestServerOps_ForcePushPolicyStrict(t *testing.T) {
 
 	var resp struct {
 		Layers []struct {
-			ID              string `json:"ID"`
+			ID              string `json:"id"`
 			ForcePushPolicy string `json:"force_push_policy"`
 		} `json:"layers"`
 	}
@@ -888,7 +888,7 @@ func TestServerOps_ForcePushDefaultTolerant(t *testing.T) {
 
 	var resp struct {
 		Layers []struct {
-			ID              string `json:"ID"`
+			ID              string `json:"id"`
 			ForcePushPolicy string `json:"force_push_policy"`
 		} `json:"layers"`
 	}

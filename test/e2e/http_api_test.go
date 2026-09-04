@@ -10,8 +10,10 @@ package e2e
 //
 // The HTTP reference documents several routes and field names that the
 // implementation registers differently (GET vs POST load_artifact,
-// /v1/load_domain vs /v1/domains/{path}, flat vs nested layer bodies,
-// the /healthz body). Each test asserts what the server actually emits
+// /v1/load_domain vs /v1/domains/{path}, the /healthz body). The layer
+// bodies agree with the reference: the registry answers the §7.3.1 layer
+// object under the §7.2.1 lower snake_case convention, which is what the
+// reference documents. Each test asserts what the server actually emits
 // and names the divergence; unimplemented surfaces are skipped with the
 // blocking implementation-gap finding.
 
@@ -784,8 +786,12 @@ func apiLayerOrder(t testing.TB, body []byte, id string) float64 {
 	t.Helper()
 	for _, l := range apiJSONObj(t, body)["layers"].([]any) {
 		obj := l.(map[string]any)
-		if obj["ID"] == id {
-			return obj["Order"].(float64)
+		if obj["id"] == id {
+			order, ok := obj["order"].(float64)
+			if !ok {
+				t.Fatalf("layer %q carries no numeric \"order\":\n%s", id, body)
+			}
+			return order
 		}
 	}
 	t.Fatalf("layer %q not in reorder response:\n%s", id, body)
@@ -1549,8 +1555,8 @@ func TestHTTPAPI_AdminShowEffective(t *testing.T) {
 	var eff struct {
 		UserID string `json:"user_id"`
 		Layers []struct {
-			LayerID string `json:"LayerID"`
-			Visible bool   `json:"Visible"`
+			LayerID string `json:"layer_id"`
+			Visible bool   `json:"visible"`
 		} `json:"layers"`
 	}
 	if err := json.Unmarshal(body, &eff); err != nil {

@@ -185,10 +185,10 @@ func TestLayerEndpoint_RegisterUserDefinedWithVisibility(t *testing.T) {
 	}
 	var got struct {
 		Layer struct {
-			Public       bool     `json:"Public"`
-			Organization bool     `json:"Organization"`
-			Groups       []string `json:"Groups"`
-			Users        []string `json:"Users"`
+			Public       bool     `json:"public"`
+			Organization bool     `json:"organization"`
+			Groups       []string `json:"groups"`
+			Users        []string `json:"users"`
 		} `json:"layer"`
 	}
 	if err := json.Unmarshal(body, &got); err != nil {

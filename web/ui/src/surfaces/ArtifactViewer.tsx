@@ -875,7 +875,7 @@ function layerOf(layers: LayerRecord[] | null, artifact: LoadArtifactResponse): 
   if (layers === null || id === '') {
     return null;
   }
-  return layers.find((record) => record.ID === id) ?? null;
+  return layers.find((record) => record.id === id) ?? null;
 }
 
 /** ingestedLine states when the artifact's layer was last ingested and the

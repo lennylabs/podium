@@ -22,15 +22,15 @@ export type LayerOp =
 
 /** LayerTarget is the layer as the operation would name it: the stored record
  * for unregister, restore, reingest, and reorder; for update the stored
- * record's UserDefined and Owner with SourceType omitted and LocalPath taken
- * from the patch; and for register the registration the dialog would build,
- * carrying the class it asks for and the registrant as Owner.
+ * record's user_defined and owner with source_type omitted and local_path
+ * taken from the patch; and for register the registration the dialog would
+ * build, carrying the class it asks for and the registrant as owner.
  * LayerRecord satisfies it structurally, so a caller passes a row directly. */
 export interface LayerTarget {
-  UserDefined?: boolean;
-  Owner?: string;
-  SourceType?: string;
-  LocalPath?: string;
+  user_defined?: boolean;
+  owner?: string;
+  source_type?: string;
+  local_path?: string;
 }
 
 /** ownedByCaller is the panel's ownership marker. It is a property of a
@@ -42,12 +42,12 @@ export interface LayerTarget {
  * that owner names no authorized subject. */
 export function ownedByCaller(target: LayerTarget, subject: string): boolean {
   return (
-    target.UserDefined === true && subject !== "" && target.Owner === subject
+    target.user_defined === true && subject !== "" && target.owner === subject
   );
 }
 
 /** namesHostPath reports whether the operation's target names a filesystem
- * path on the registry host. It is the server predicate with its Repo
+ * path on the registry host. It is the server predicate with its repo
  * disjunct dropped and its git carve-out kept: a stored git layer carrying a
  * local_path is admitted by the server, because the Git transport never reads
  * that path, and a client predicate without the term would hide Reingest and
@@ -57,8 +57,8 @@ export function ownedByCaller(target: LayerTarget, subject: string): boolean {
  * offered the operation and answered by the registry. */
 export function namesHostPath(target: LayerTarget): boolean {
   return (
-    target.SourceType === "local" ||
-    (target.SourceType !== "git" && (target.LocalPath ?? "") !== "")
+    target.source_type === "local" ||
+    (target.source_type !== "git" && (target.local_path ?? "") !== "")
   );
 }
 
@@ -73,7 +73,7 @@ export function namesHostPath(target: LayerTarget): boolean {
  * The dialog's own layer-class control and its Local folder option predict a
  * different registration and build their own target. */
 export function newLayerTarget(subject: string): LayerTarget {
-  return { UserDefined: true, Owner: subject };
+  return { user_defined: true, owner: subject };
 }
 
 /** mayTake reports whether the registry would admit this caller on this
