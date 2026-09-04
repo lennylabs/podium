@@ -225,6 +225,10 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 			current.Debounce = debounce
 		}
 		if body.Secret != nil {
+			// A present secret member is a rotation and is stored verbatim,
+			// including the maskedSecret sentinel the list and the read
+			// report. A client feeding a read back into this endpoint drops
+			// the secret member first; every other member round-trips.
 			current.Secret = *body.Secret
 		}
 		if body.EventFilter != nil {

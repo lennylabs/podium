@@ -136,7 +136,8 @@ func getReceiver(t *testing.T, base, id string) map[string]json.RawMessage {
 // creating response alone.
 func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 	t.Parallel()
-	worker := &webhook.Worker{Store: webhook.NewMemoryStore(), HTTPClient: http.DefaultClient}
+	wstore := webhook.NewMemoryStore()
+	worker := &webhook.Worker{Store: wstore, HTTPClient: http.DefaultClient}
 	_, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	t.Cleanup(ts.Close)
 
@@ -174,10 +175,26 @@ func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 		t.Errorf("read debounce = %q, want %q", got, "1m0s")
 	}
 
-	// DEFECT-3: the read is fed back into the update verbatim. The update
-	// accepts the reported debounce string without conversion, which is the
-	// round trip an integer-valued debounce made impossible.
-	resp, body := mustPut(t, ts.URL, "/v1/webhooks/"+id, read)
+	// DEFECT-3: the read is fed back into the update. The update accepts the
+	// reported debounce string without conversion, which is the round trip an
+	// integer-valued debounce made impossible.
+	//
+	// The secret member is dropped from the body first. The read reports it as
+	// the mask sentinel, and PUT /v1/webhooks/{id} treats any present secret
+	// member as a rotation, so resending the read verbatim would store the
+	// literal "***" as the receiver's HMAC key and sign every later delivery
+	// with it. A whole-object read-back is safe for every other member. What
+	// the update path does with the sentinel is a credential-write rule on the
+	// request, which no section this change implements states, so it is left
+	// for a proposal that also settles the create path and failure_count.
+	roundTrip := make(map[string]json.RawMessage, len(read))
+	for k, v := range read {
+		if k == "secret" {
+			continue
+		}
+		roundTrip[k] = v
+	}
+	resp, body := mustPut(t, ts.URL, "/v1/webhooks/"+id, roundTrip)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("PUT of the read-back receiver status = %d: %s", resp.StatusCode, body)
 	}
@@ -188,6 +205,16 @@ func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 	}
 	if got := receiverString(t, updated, "debounce"); got != "1m0s" {
 		t.Errorf("update debounce = %q, want %q", got, "1m0s")
+	}
+	// The update reports the mask whether or not the store kept the secret, so
+	// the masking assertion above says nothing about the stored value. An
+	// update that names no secret leaves the minted HMAC key in place.
+	stored, err := wstore.Get(context.Background(), "default", id)
+	if err != nil {
+		t.Fatalf("read the receiver back out of the store: %v", err)
+	}
+	if stored.Secret != "s3cret-value" {
+		t.Errorf("stored secret after the round-trip PUT = %q, want the minted value", stored.Secret)
 	}
 }
 
