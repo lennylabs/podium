@@ -190,6 +190,16 @@ func TestReceiverWire_NamesTheSpecMembersOnEveryPath(t *testing.T) {
 	if got := receiverString(t, updated, "debounce"); got != "1m0s" {
 		t.Errorf("update debounce = %q, want %q", got, "1m0s")
 	}
+	// §7.2.1: the read carries the mask in the secret member's place, so the
+	// round trip resends it. The mask is not a credential the update minted,
+	// and storing it would sign every later delivery with "***".
+	stored, err := wstore.Get(context.Background(), "default", id)
+	if err != nil {
+		t.Fatalf("read the receiver back out of the store: %v", err)
+	}
+	if stored.Secret != "s3cret-value" {
+		t.Errorf("stored secret after the round trip = %q, want the minted value", stored.Secret)
+	}
 }
 
 // Spec: §7.2.1 / §7.3.2 — a PUT naming a secret rotates the receiver's HMAC

@@ -224,7 +224,13 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 			}
 			current.Debounce = debounce
 		}
-		if body.Secret != nil {
+		// The list, the single read, and the update emit the mask in the
+		// secret member's place, so a client that feeds a read straight back
+		// into the update resends the sentinel. §7.2.1 returns a credential
+		// once, from the operation that mints it, so the sentinel is not a key
+		// to store: replaying it leaves the receiver's HMAC secret as it is,
+		// and any other value rotates it.
+		if body.Secret != nil && *body.Secret != maskedSecret {
 			current.Secret = *body.Secret
 		}
 		if body.EventFilter != nil {
