@@ -608,7 +608,7 @@ Each layer declares one or more of the following:
 | `groups: [<oidc-group>, ...]` | Members of the listed OIDC groups.         |
 | `users: [<user-id>, ...]`     | Listed user identifiers, matched against the caller's OIDC subject or email. |
 
-Multiple fields combine as a union; a caller sees the layer if any condition matches. User-defined layers (§7.3.1) have implicit visibility `users: [<registrant>]`; the field is set automatically and cannot be widened.
+Multiple fields combine as a union; a caller sees the layer if any condition matches. User-defined layers (§7.3.1) have implicit visibility `users: [<registrant>]`; the field is set automatically and cannot be widened. The layer's owner is fixed on the same terms. Neither is patchable afterwards by any caller, including a tenant admin; §7.3.1 states the refusal the update operation returns and the re-registration that places the layer in the admin-defined class.
 
 Read-side enforcement happens at the registry on every call. Git provider permissions are not consulted at request time; visibility is governed entirely by the registry config (or, for user-defined layers, by the registration record).
 
