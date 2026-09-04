@@ -31,6 +31,14 @@ The registry exposes two surfaces:
 
 Below the inline cutoff, resources are returned inline. This avoids round-trips for small fixtures.
 
+### 7.2.1 Control-Plane JSON Conventions
+
+Every control-plane request body and response body is JSON, and every field name in it is lower snake_case: `source_type`, `last_ingested_at`, `webhook_url`. A field name is part of the API contract and is chosen for the client, so it is independent of the name the registry uses for the same value internally, and where a request and a response carry the same value they name it identically.
+
+A credential is returned once, by the operation that mints or rotates it, and no other response carries it (§7.3.1, §7.3.2). A record inside a response omits a field that restates the tenant the response is confined to, where that tenant is not the record's own subject. A field whose subject is the tenant itself is a different thing and is permitted: the §4.7.8 quota read reports the tenant whose limits it returns in a top-level `tenant_id`, and the §7.3.3 tenant object names the tenant each element describes in its `id`, on the one read that crosses orgs. A timestamp is RFC 3339 in UTC. A duration is written in the same string form the matching request field accepts, so a client returns a value it read without converting it.
+
+The convention binds every control-plane endpoint. The §6.10 error envelope, the §5 meta-tool results, the §7.6.2 bulk-fetch envelopes, and the §7.3.2 outbound event bodies are already stated in these terms and are unchanged by it. A response body whose field names are fixed by a protocol outside this specification keeps that protocol's names; the SCIM 2.0 receiver (§6.3.1) is the one such surface, and it is outside this rule.
+
 ## 7.3 Host Integration
 
 Hosts and authors choose the integration that fits their context:
