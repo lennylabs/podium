@@ -1,7 +1,7 @@
 # Proposal 0019: Name every control-plane JSON field in snake_case, and close the three contract defects the survey found
 
 - Issue: (to be filed)
-- Status: Approved (2026-09-04). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 18 adversarial review rounds (29 findings fixed). OQ-1 is resolved in favor of the staged scope, so every endpoint in the table converts in this proposal. OQ-2 is resolved in favor of the staged bundling, so DEFECT-1's setter lands here beside the SPEC-2 sentence that names the field. OQ-3 stays an implementor's choice under the stated constraint, that registration-time and delivery-time resolution cannot disagree.
+- Status: Applied to spec (2026-09-04). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. Converged after 18 adversarial review rounds (29 findings fixed). OQ-1 is resolved in favor of the staged scope, so every endpoint in the table converts in this proposal. OQ-2 is resolved in favor of the staged bundling, so DEFECT-1's setter lands here beside the SPEC-2 sentence that names the field. OQ-3 stays an implementor's choice under the stated constraint, that registration-time and delivery-time resolution cannot disagree.
 - Date: 2026-09-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off. Every anchor is read against `origin/main` at `acf2b54`.
