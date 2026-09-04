@@ -236,6 +236,13 @@ type yamlGitSource struct {
 	// "" / "tolerant" preserve prior commits and emit
 	// layer.history_rewritten; "strict" rejects a rewritten history.
 	ForcePushPolicy string `yaml:"force_push_policy,omitempty"`
+	// GitProvider names the §9.1 GitProvider whose signature scheme
+	// verifies the layer's inbound webhook deliveries. It is the setter
+	// for a declared layer, because the boot reconcile re-seeds every
+	// declared entry from this file on each start. An omitted key
+	// re-seeds the empty string, which resolves to "github" at the point
+	// of use.
+	GitProvider string `yaml:"git_provider,omitempty"`
 }
 
 type yamlLocalSource struct {

@@ -364,11 +364,10 @@ func TestLayerEndpoint_RequestAndResponseAgreeOnNames(t *testing.T) {
 	// stored member, so the response answers no field of that name.
 	requestOnly := map[string]bool{"rotate_webhook_secret": true}
 	// The response carries members no register request sets: the server
-	// assigns the precedence and the ingest bookkeeping, and git_provider
-	// has no request field yet.
+	// assigns the precedence and the ingest bookkeeping.
 	responseOnly := map[string]bool{
 		"order": true, "last_ingested_ref": true, "created_at": true,
-		"deleted_at": true, "last_ingested_at": true, "git_provider": true,
+		"deleted_at": true, "last_ingested_at": true,
 	}
 
 	req := jsonTagNames(reflect.TypeOf(server.LayerRegisterRequest{}))

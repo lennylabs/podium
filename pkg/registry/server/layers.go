@@ -17,6 +17,7 @@ import (
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/layer/source"
+	"github.com/lennylabs/podium/pkg/layer/webhook"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
@@ -481,6 +482,12 @@ type LayerRegisterRequest struct {
 	// the empty string leaves the prior value; "tolerant" explicitly
 	// resets it.
 	ForcePushPolicy string `json:"force_push_policy,omitempty"`
+	// GitProvider names the §9.1 GitProvider whose signature scheme
+	// verifies the layer's inbound webhook deliveries. The value is one
+	// the registry has registered; the empty string resolves to "github"
+	// at the point of use, which is the default every layer stored before
+	// the field existed carries. The field applies to a git source alone.
+	GitProvider string `json:"git_provider,omitempty"`
 	// RotateWebhookSecret requests a fresh HMAC webhook secret on the
 	// update path (§12 "Per-layer HMAC secret rotated via `podium layer
 	// update`"). When true on a git layer the handler regenerates
@@ -527,6 +534,29 @@ func validForcePushPolicy(p string) bool {
 	default:
 		return false
 	}
+}
+
+// gitProviderError reports why p is not settable as the git provider of a
+// layer whose source is sourceType, or the empty string when it is. The
+// registered set is read from webhook.Default at request time, which is the
+// same registry and the same read the delivery path performs
+// (webhook_ingest.go), so registration-time and delivery-time resolution
+// cannot disagree: Register is called from package init alone, so the set is
+// fixed for the life of the process.
+//
+// Spec: §7.3.1
+func gitProviderError(p, sourceType string) string {
+	if p == "" {
+		return ""
+	}
+	if sourceType != "git" {
+		return "git_provider applies to a git source alone"
+	}
+	if _, ok := webhook.Default.Get(p); !ok {
+		return fmt.Sprintf("git_provider %q names no registered git provider (registered: %s)",
+			p, strings.Join(webhook.Default.IDs(), ", "))
+	}
+	return ""
 }
 
 // LayerRegisterResponse is the POST /v1/layers JSON response.
@@ -671,7 +701,8 @@ func (e *LayerEndpoint) WebhookHandler() http.Handler {
 // the whole config and accidentally clear visibility filters.
 //
 // Allowed mutations: visibility (Public, Organization, Groups,
-// Users), Ref, Root, LocalPath, Owner, ForcePushPolicy, and a
+// Users), Ref, Root, LocalPath, Owner, GitProvider, ForcePushPolicy,
+// and a
 // webhook-secret rotation (rotate_webhook_secret). The store-bound
 // identifying fields (TenantID, ID, SourceType, CreatedAt) are
 // immutable.
@@ -711,6 +742,12 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 			"force_push_policy must be \"tolerant\" or \"strict\"")
 		return
 	}
+	// spec: §7.3.1 — the git-provider rule, read against the stored source
+	// type because the patch does not carry one.
+	if msg := gitProviderError(patch.GitProvider, cfg.SourceType); msg != "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+		return
+	}
 	// spec: §7.3.1 — the local-source authorization rule, evaluated against
 	// the patch rather than against the stored layer. The handler applies
 	// neither patch.SourceType nor patch.Repo, so a patch carrying no
@@ -725,6 +762,11 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// other patch fields).
 	if patch.ForcePushPolicy != "" {
 		cfg.ForcePushPolicy = patch.ForcePushPolicy
+	}
+	// spec: §7.3.1 — a non-empty git_provider replaces the prior value on
+	// the same terms.
+	if patch.GitProvider != "" {
+		cfg.GitProvider = patch.GitProvider
 	}
 	if patch.Ref != "" {
 		cfg.Ref = patch.Ref
@@ -809,6 +851,13 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	if !validForcePushPolicy(req.ForcePushPolicy) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument",
 			"force_push_policy must be \"tolerant\" or \"strict\"")
+		return
+	}
+	// spec: §7.3.1 — the git-provider rule: an unregistered value, and any
+	// value on a non-git source, are refused here rather than stored and
+	// left to fail every inbound delivery.
+	if msg := gitProviderError(req.GitProvider, req.SourceType); msg != "" {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 		return
 	}
 	// spec: §7.3.1 — the layer-write authorization rule, on the path that
@@ -906,6 +955,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		Root:            req.Root,
 		LocalPath:       req.LocalPath,
 		UserDefined:     userDefined,
+		GitProvider:     req.GitProvider,
 		ForcePushPolicy: req.ForcePushPolicy,
 		CreatedAt:       time.Now().UTC(),
 	}

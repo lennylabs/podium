@@ -31,6 +31,7 @@ import (
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/layer/source"
+	gitwebhook "github.com/lennylabs/podium/pkg/layer/webhook"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/metrics"
@@ -709,7 +710,17 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 		lc.Repo = entry.Source.Git.Repo
 		lc.Ref = entry.Source.Git.Ref
 		lc.Root = entry.Source.Git.Root
+		if prov := entry.Source.Git.GitProvider; prov != "" {
+			if _, ok := gitwebhook.Default.Get(prov); !ok {
+				return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf(
+					"declared git layer %s has unknown git_provider %q (registered: %s)",
+					entry.ID, prov, strings.Join(gitwebhook.Default.IDs(), ", "))
+			}
+		}
 		lc.ForcePushPolicy = entry.Source.Git.ForcePushPolicy
+		// spec: §7.3.1 — the declared value is authoritative for a
+		// declared layer: the reconcile re-seeds it on every start.
+		lc.GitProvider = entry.Source.Git.GitProvider
 	case hasLocal:
 		if entry.Source.Local.Path == "" {
 			return store.LayerConfig{}, layer.Visibility{}, fmt.Errorf("declared local layer %s is missing source.local.path", entry.ID)
