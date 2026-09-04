@@ -73,7 +73,7 @@ func registerReceiver(t *testing.T, base, url, eventType, debounce string) strin
 		t.Fatalf("register status = %d: %s", resp.StatusCode, buf)
 	}
 	var created struct {
-		ID string `json:"ID"`
+		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 		t.Fatalf("decode register response: %v", err)

@@ -66,8 +66,20 @@ func TestWebhookHardening_AdminGate(t *testing.T) {
 	// The admin can register: the same body that the non-admin was refused for
 	// succeeds for alice, proving the gate (not the body) caused the 403. The
 	// https public host passes the strict default SSRF policy.
-	if st, resp := webhookBearer(t, http.MethodPost, srv.BaseURL+"/v1/webhooks", srv.adminToken, body); st != http.StatusCreated {
-		t.Errorf("admin POST /v1/webhooks = %d, want 201\nbody: %s", st, resp)
+	st, resp = webhookBearer(t, http.MethodPost, srv.BaseURL+"/v1/webhooks", srv.adminToken, body)
+	if st != http.StatusCreated {
+		t.Fatalf("admin POST /v1/webhooks = %d, want 201\nbody: %s", st, resp)
+	}
+	// Spec: §7.2.1 / §7.3.2 — the create response is the receiver object, whose
+	// members are lower snake_case. Decoding it through webhookReceiver pins the
+	// helper's tags against the running binary's emitter, which the delivery
+	// helpers depend on to observe disabled and failure_count.
+	var rec webhookReceiver
+	if err := json.Unmarshal(resp, &rec); err != nil {
+		t.Fatalf("decode webhook create response: %v\nbody: %s", err, resp)
+	}
+	if rec.ID == "" || rec.URL != "https://"+receiverHost+"/hook" {
+		t.Errorf("receiver object decoded as %+v, want the id and url members populated\nbody: %s", rec, resp)
 	}
 }
 

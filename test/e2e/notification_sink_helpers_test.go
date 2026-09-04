@@ -443,18 +443,19 @@ func joinComma(parts []string) string {
 }
 
 // webhookReceiver is the §7.3.2 receiver record the CRUD surface returns. The
-// server marshals pkg/webhook.Receiver, which carries no struct tags, so the
-// wire keys are the Go field names (ID, URL, Secret, Disabled, FailureCount).
-// The tags below match those names exactly so FailureCount and Disabled decode
-// (case-insensitive matching does not bridge the snake_case underscore). The
-// secret is present only on the create response (POST); a later GET masks it.
+// server projects pkg/webhook.Receiver onto the receiver object, whose members
+// are lower snake_case under §7.2.1, so the tags below name the wire keys
+// exactly. Case-insensitive matching does not bridge the snake_case
+// underscore, so event_filter and failure_count decode only through the tag.
+// The secret is present only on the create response (POST); a later GET masks
+// it.
 type webhookReceiver struct {
-	ID           string   `json:"ID"`
-	URL          string   `json:"URL"`
-	Secret       string   `json:"Secret"`
-	EventFilter  []string `json:"EventFilter"`
-	Disabled     bool     `json:"Disabled"`
-	FailureCount int      `json:"FailureCount"`
+	ID           string   `json:"id"`
+	URL          string   `json:"url"`
+	Secret       string   `json:"secret"`
+	EventFilter  []string `json:"event_filter"`
+	Disabled     bool     `json:"disabled"`
+	FailureCount int      `json:"failure_count"`
 }
 
 // webhookBearer issues an HTTP request to the running server's webhook CRUD

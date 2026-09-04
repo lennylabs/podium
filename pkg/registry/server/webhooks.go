@@ -13,6 +13,60 @@ import (
 	"github.com/lennylabs/podium/pkg/webhook"
 )
 
+// receiverOut is the §7.3.2 receiver object. The receiver is projected
+// rather than tagged because pkg/webhook.Receiver is persisted verbatim by
+// webhook.FileStore into the operator's store file, so a JSON tag there
+// would rewrite an on-disk format. The projection also governs the two
+// value forms §7.2.1 fixes: debounce is emitted as the duration string the
+// request body accepts, and every timestamp is emitted in UTC.
+//
+// Spec: §7.2.1 / §7.3.2
+type receiverOut struct {
+	ID           string    `json:"id"`
+	URL          string    `json:"url"`
+	Secret       string    `json:"secret"`
+	EventFilter  []string  `json:"event_filter"`
+	Disabled     bool      `json:"disabled"`
+	FailureCount int       `json:"failure_count"`
+	LastDelivery time.Time `json:"last_delivery"`
+	LastFailure  time.Time `json:"last_failure"`
+	CreatedAt    time.Time `json:"created_at"`
+	Debounce     string    `json:"debounce,omitempty"`
+}
+
+// receiverToWire projects a stored receiver onto the §7.3.2 object. It names
+// every member the object carries, so webhook.Receiver.TenantID is withheld
+// by not appearing here: §7.2.1 bars a record from restating a tenant that is
+// not its own subject, and the receiver's subject is the receiver.
+//
+// The three timestamps are converted here rather than at the store write,
+// because Worker.recordResult stamps LastDelivery and LastFailure from a
+// clock that falls back to bare time.Now, and neither store normalizes on the
+// round trip, so a receiver already written by a registry process in a
+// non-UTC zone would otherwise keep emitting its stored offset.
+//
+// Spec: §7.2.1 / §7.3.2
+func receiverToWire(r webhook.Receiver) receiverOut {
+	out := receiverOut{
+		ID:           r.ID,
+		URL:          r.URL,
+		Secret:       r.Secret,
+		EventFilter:  r.EventFilter,
+		Disabled:     r.Disabled,
+		FailureCount: r.FailureCount,
+		LastDelivery: r.LastDelivery.UTC(),
+		LastFailure:  r.LastFailure.UTC(),
+		CreatedAt:    r.CreatedAt.UTC(),
+	}
+	// A receiver that sets no debounce omits the member; one that sets a
+	// window reports it in the string form PUT /v1/webhooks/{id} accepts, so
+	// a client feeds a read straight back into an update.
+	if r.Debounce > 0 {
+		out.Debounce = r.Debounce.String()
+	}
+	return out
+}
+
 // handleWebhooksList serves §7.3.2 receiver CRUD at the collection
 // level: GET /v1/webhooks lists, POST /v1/webhooks creates.
 func (s *Server) handleWebhooksList(w http.ResponseWriter, r *http.Request) {
@@ -35,10 +89,10 @@ func (s *Server) handleWebhooksList(w http.ResponseWriter, r *http.Request) {
 		}
 		// Strip secrets from the response so listing does not leak
 		// the HMAC key to anyone with read access.
-		out := make([]webhook.Receiver, len(rs))
+		out := make([]receiverOut, len(rs))
 		for i, r := range rs {
 			r.Secret = "***"
-			out[i] = r
+			out[i] = receiverToWire(r)
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"receivers": out})
 	case http.MethodPost:
@@ -90,7 +144,7 @@ func (s *Server) handleWebhooksList(w http.ResponseWriter, r *http.Request) {
 		}
 		// Return the secret on creation so the operator can record it;
 		// subsequent List calls mask it.
-		writeJSON(w, http.StatusCreated, rec)
+		writeJSON(w, http.StatusCreated, receiverToWire(rec))
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
 			"method not allowed: "+r.Method)
@@ -125,7 +179,7 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rec.Secret = "***"
-		writeJSON(w, http.StatusOK, rec)
+		writeJSON(w, http.StatusOK, receiverToWire(rec))
 	case http.MethodPut:
 		// spec: §13.2.1 — editing a webhook receiver is a write endpoint,
 		// rejected in read-only mode with registry.read_only.
@@ -183,7 +237,7 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		current.Secret = "***"
-		writeJSON(w, http.StatusOK, current)
+		writeJSON(w, http.StatusOK, receiverToWire(current))
 	case http.MethodDelete:
 		// spec: §13.2.1 — removing a webhook receiver is a write endpoint,
 		// rejected in read-only mode with registry.read_only.

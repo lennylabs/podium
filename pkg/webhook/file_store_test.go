@@ -2,7 +2,9 @@ package webhook_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -113,5 +115,53 @@ func TestFileStore_ListByTenant(t *testing.T) {
 	other, _ := s.List(context.Background(), "other")
 	if len(other) != 1 || other[0].ID != "c" {
 		t.Errorf("other tenant list = %+v", other)
+	}
+}
+
+// Spec: §7.3.2 — the §7.2.1 rename of the receiver's wire members is a
+// projection in pkg/registry/server, so webhook.Receiver takes no struct tag
+// and an operator store file written before the rename loads unchanged. The
+// fixture below is the on-disk form the documented "flat array of Receiver
+// structs" produces from an untagged struct.
+func TestFileStore_LoadsAnOperatorFileWrittenBeforeTheWireRename(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "webhooks.json")
+	const fixture = `[
+  {
+    "ID": "alpha",
+    "TenantID": "default",
+    "URL": "https://example.test/hook",
+    "Secret": "shh",
+    "EventFilter": ["manifest.upserted"],
+    "Disabled": true,
+    "FailureCount": 7,
+    "LastDelivery": "2026-06-30T12:00:00Z",
+    "LastFailure": "2026-06-30T13:00:00Z",
+    "CreatedAt": "2026-06-01T09:00:00Z",
+    "Debounce": 60000000000
+  }
+]`
+	if err := os.WriteFile(path, []byte(fixture), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	s, err := webhook.LoadFileStore(path)
+	if err != nil {
+		t.Fatalf("LoadFileStore: %v", err)
+	}
+	got, err := s.Get(context.Background(), "default", "alpha")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	want := webhook.Receiver{
+		ID: "alpha", TenantID: "default", URL: "https://example.test/hook",
+		Secret: "shh", EventFilter: []string{"manifest.upserted"},
+		Disabled: true, FailureCount: 7,
+		LastDelivery: time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC),
+		LastFailure:  time.Date(2026, 6, 30, 13, 0, 0, 0, time.UTC),
+		CreatedAt:    time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC),
+		Debounce:     time.Minute,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("loaded receiver = %+v, want %+v", got, want)
 	}
 }

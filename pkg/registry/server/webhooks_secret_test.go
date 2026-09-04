@@ -33,11 +33,12 @@ func TestWebhooksList_PostAutoGeneratesSecret(t *testing.T) {
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
-	// The Receiver field names use Go-style capitalization. Pull the
-	// secret out of the response and verify it's been auto-generated.
+	// The §7.3.2 receiver object names its members in lower snake_case.
+	// Pull the secret out of the response and verify it's been
+	// auto-generated.
 	var rec map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&rec)
-	secret, _ := rec["Secret"].(string)
+	secret, _ := rec["secret"].(string)
 	if secret == "" || secret == "***" {
 		t.Errorf("expected non-empty auto-generated secret, got %q", secret)
 	}

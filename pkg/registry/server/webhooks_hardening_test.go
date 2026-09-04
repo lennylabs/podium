@@ -128,7 +128,7 @@ func TestWebhookReceiverCreate_DebounceStored(t *testing.T) {
 		t.Fatalf("status = %d: %s", resp.StatusCode, buf)
 	}
 	var created struct {
-		ID string `json:"ID"`
+		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
 		t.Fatalf("decode create response: %v", err)
