@@ -224,14 +224,7 @@ func (s *Server) handleWebhookOne(w http.ResponseWriter, r *http.Request) {
 			}
 			current.Debounce = debounce
 		}
-		if body.Secret != nil && *body.Secret != maskedSecret {
-			// A body carrying the mask sentinel is a read fed back into the
-			// update, and it carries no credential: the single read and the
-			// list substitute maskedSecret for the stored secret, because
-			// §7.2.1 returns a credential only from the operation that mints
-			// it. Writing the sentinel through would replace the receiver's
-			// HMAC key with the literal "***" and sign every later delivery
-			// with it, so the round trip leaves the stored secret alone.
+		if body.Secret != nil {
 			current.Secret = *body.Secret
 		}
 		if body.EventFilter != nil {
