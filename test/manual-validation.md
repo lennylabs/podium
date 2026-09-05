@@ -6284,8 +6284,9 @@ S44's Prerequisites and steps 1 to 4, create `carol` and export `CAROL_TOKEN`
 and `CAROL_SUBJECT` before step 3's `podium serve`, start the registry with
 `PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"`, and leave it running. Step 7 issues
 a tenant-admin grant, which no caller on the stack can issue without that
-bootstrap value, and step 8 runs the recourse under it. When Keycloak or the `mkcert` CA is unavailable,
-skip and record the skip.
+bootstrap value, step 5 sends its second request as carol, and step 8 runs the
+recourse under the granted role. When Keycloak or the `mkcert` CA is
+unavailable, skip and record the skip.
 
 **Steps.**
 
@@ -6413,22 +6414,38 @@ skip and record the skip.
    and 2, and read this step again.
 
 5. Send the layer object read in step 1 back verbatim, which asserts no field.
+   Send it twice: once as the layer's own owner, and once as carol, a tenant
+   admin who is not the owner.
 
    ```bash
    curl -sS -X PUT "http://127.0.0.1:8153/v1/layers/update?id=s59-notes" \
      -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
      -d @"$WORK/s59-layer.json" -w '\nstatus=%{http_code}\n'
+   curl -sS -X PUT "http://127.0.0.1:8153/v1/layers/update?id=s59-notes" \
+     -H "Authorization: Bearer $CAROL_TOKEN" -H 'Content-Type: application/json' \
+     -d @"$WORK/s59-layer.json" -w '\nstatus=%{http_code}\n'
    ```
 
-   **Expect.** `status=200` over the layer record, still carrying
-   `"public": false`, `"organization": false`, empty `groups`, `users` holding
-   the owner alone, and the same `owner`. The body restates `owner` and `users`
-   at exactly the values the layer stores, and the rule compares those two
-   fields against the stored values, so a client that reads a layer object and
-   returns it unchanged is admitted. A `400` here means the comparison is
+   **Expect.** `status=200` from both calls, each over the layer record, still
+   carrying `"public": false`, `"organization": false`, empty `groups`, `users`
+   holding the owner alone, and the same `owner`. The body restates `owner` and
+   `users` at exactly the values the layer stores, and the rule compares those
+   two fields against the stored values, so a client that reads a layer object
+   and returns it unchanged is admitted. A `400` here means the comparison is
    reading presence rather than value, or that it is not exact, and every
    read-modify-write client on the endpoint is then refused on a patch that
    changes nothing.
+
+   The second call is the arm the stored-owner comparison exists for. Carol
+   holds the tenant-admin role from `PODIUM_BOOTSTRAP_ADMINS`, so the §7.3.1
+   layer write rule admits her on a layer she does not own, and the `owner` the
+   body carries names alice's subject rather than her own. A `200` on the first
+   call and a `400` on the second means `owner` is compared against the calling
+   subject rather than against the layer's stored owner, and every tenant admin
+   that reads a layer object and returns it unchanged is then refused. The first
+   call alone does not read that difference: on the owner, a comparison against
+   the stored owner and a comparison against the caller's subject answer
+   identically.
 
 6. Confirm a patch on any other field still applies, so the refusal is scoped to
    the five fields.
@@ -6450,17 +6467,21 @@ skip and record the skip.
      -H "Authorization: Bearer $CAROL_TOKEN" -H 'Content-Type: application/json' \
      -d "{\"user_id\":\"$SUBJECT\"}" -w '\nstatus=%{http_code}\n'
    PODIUM_SESSION_TOKEN="$TOKEN" podium layer update \
-     --registry http://127.0.0.1:8153 --id s59-notes --public --group acme-eng
+     --registry http://127.0.0.1:8153 --id s59-notes --public --group acme-eng \
+     --rotate-webhook-secret
    echo "exit=$?"
    ```
 
    **Expect.** The grant answers `201` with `{"user_id": "<the subject>"}`, and
    the update is refused with exactly step 2's reading: `exit=1`, HTTP 400,
-   `registry.invalid_argument`, and
-   `"constraint": "immutable_visibility"`. The rule reads the stored layer's
-   class rather than the caller, so the tenant-admin role does not lift it. This
-   is where the rule parts from the three neighbouring §7.3.1 rules, each of
-   which the admin arm admits. A `403` on the grant means
+   `registry.invalid_argument`, `"constraint": "immutable_visibility"`, and a
+   failure body carrying no `webhook_secret` member. The command is step 2's
+   command, rotation flag included, so the refusal's placement above the
+   rotation reads the same on a tenant admin as it does on the owner. The rule
+   reads the stored layer's class rather than the caller, so the tenant-admin
+   role does not lift it. This is where the rule parts from the three
+   neighbouring §7.3.1 rules, each of which the admin arm admits. A `403` on the
+   grant means
    `PODIUM_BOOTSTRAP_ADMINS` did not name carol's `sub`, and the prerequisite is
    re-run before continuing.
 
