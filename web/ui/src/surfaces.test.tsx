@@ -8031,7 +8031,7 @@ describe("the layer panel", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    const marker = screen.getByText("no grants — only you");
+    const marker = screen.getByText("no grants — no composed view");
     expect(marker.className).toContain("badge");
     // The marker sits in the cell a granted row uses, so the two rows put
     // their markers at the same place in the column.
@@ -8050,6 +8050,41 @@ describe("the layer panel", () => {
     expect(style.backgroundColor).toBe("rgba(0, 0, 0, 0)");
     expect(granted.background).not.toBe(style.background);
     expect(style.color).toBe("var(--meta)");
+  });
+
+  // The Edit dialog withdraws each axis, so a record that sets no visibility
+  // field is a state an operator reaches deliberately rather than one only a
+  // registration-time default produces. §4.6's evaluator matches no condition
+  // on such a record, so the row states that the layer reaches no composed
+  // view. Naming a grant its registrant retains would report an access the
+  // record does not carry.
+  it("states an admin-defined row that sets no visibility field as reaching no composed view", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
+      "/v1/layers": {
+        body: {
+          layers: [
+            {
+              id: "company",
+              source_type: "git",
+              repo: "git@github.com:acme/company.git",
+              ref: "main",
+              order: 1,
+              user_defined: false,
+              owner: "alice@acme.com",
+            },
+          ],
+        },
+      },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    const cell = screen
+      .getByRole("cell", { name: /no grants/ })
+      .querySelector(".visibility-markers") as HTMLElement;
+    expect(cell.textContent).toBe("no grants — no composed view");
+    expect(cell.textContent).not.toContain("only you");
   });
 
   // The source cell names the type it is showing and states every source
@@ -9365,7 +9400,7 @@ describe("the layer write flows", () => {
       row.querySelector("dd")?.textContent,
     ]);
     expect(rows).toEqual([
-      ["visibility", "no grants — only you"],
+      ["visibility", "no grants — no composed view"],
       ["shadowed by", "—"],
     ]);
     // The key takes the mono face the rail's keys take, which is what

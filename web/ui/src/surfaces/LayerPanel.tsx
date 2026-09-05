@@ -49,6 +49,7 @@ import type { LayerCapabilities } from "../session";
 import type { BreakGlass, LayerRecord } from "../api";
 import {
   ingestRef,
+  noGrants,
   shortRef,
   visibilityMarkers,
   visibilitySummary,
@@ -1788,7 +1789,7 @@ function VisibilityCell({ layer }: { layer: LayerRecord }) {
     // of markers whatever the grant state.
     return (
       <div className="visibility-markers">
-        <Badge tone="hollow">no grants — only you</Badge>
+        <Badge tone="hollow">{noGrants}</Badge>
       </div>
     );
   }
