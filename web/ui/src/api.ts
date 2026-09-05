@@ -488,7 +488,10 @@ const write: RequestInit = { credentials: 'same-origin' };
  * layer class, which decides both the authorization the §7.3.1 layer-write
  * rule applies to every later write and whether the registry reads the
  * visibility axes: it fixes a user-defined layer's visibility to the
- * registrant and discards what the request carries there. */
+ * registrant, and §7.3.1 refuses a registration that asserts an admin-only
+ * field on a caller the admin arm does not admit with `403 auth.forbidden`
+ * carrying `details.constraint: "admin_only_fields"`, so the axes are sent on
+ * the admin-defined class alone. */
 export interface LayerRegistration {
   id: string;
   source_type: string;
@@ -526,10 +529,13 @@ export function registerLayer(body: LayerRegistration): Promise<LayerSecretResul
 /** LayerUpdate is the partial patch the update endpoint honours. A field the
  * patch omits keeps its prior value, and the identifying fields (the tenant,
  * the layer ID, and the source type) are immutable. The visibility axes are
- * honoured on an admin-defined layer alone: §4.6 fixes a user-defined layer's
- * visibility at registration, so the registry ignores them there and still
- * answers success. Each axis grants and none revokes, which is the same
- * patch the CLI drives. */
+ * applied on an admin-defined layer: §4.6 fixes a user-defined layer's
+ * visibility at registration, and §7.3.1 refuses a patch that asserts `owner`,
+ * `public`, `organization`, `groups`, or `users` against a stored user-defined
+ * layer with `400 registry.invalid_argument` carrying
+ * `details.constraint: "immutable_visibility"`, which is why the form
+ * withholds them on that class. Each axis grants and none revokes, which is
+ * the same patch the CLI drives. */
 export interface LayerUpdate {
   ref?: string;
   root?: string;

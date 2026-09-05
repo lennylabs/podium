@@ -4,9 +4,11 @@
 // The panel serves both halves of the §13.10 role split,
 // so the form carries the layer class as a control. A user registering their
 // own layer creates a user-defined one, which is the class §7.3.1 caps per
-// user and authorizes its owner on, and the registry fixes such a layer's
-// visibility to the registrant and discards any visibility the request
-// carries, so the axes are offered on the admin-defined class alone.
+// user and authorizes its owner on. The registry fixes such a layer's
+// visibility to the registrant, and §7.3.1 refuses a registration asserting an
+// admin-only field on a caller the admin arm does not admit with
+// `403 auth.forbidden` carrying `details.constraint: "admin_only_fields"`, so
+// the axes are offered on the admin-defined class alone.
 // Visibility there is a set of independent grants that combine as a union, so
 // the form offers them as combinable checkboxes. A git source returns a
 // webhook URL and an HMAC secret, and that response and a secret rotation are
@@ -210,8 +212,10 @@ export function RegisterLayerForm({
       local_path: sourceType === 'local' ? localPath : undefined,
       user_defined: userDefined,
       // The registry derives a user-defined layer's visibility from the
-      // registrant and discards what the request carries, so the axes are
-      // sent on the admin-defined class alone.
+      // registrant and refuses a registration asserting an admin-only field
+      // with `403 auth.forbidden` carrying
+      // `details.constraint: "admin_only_fields"`, so the axes are sent on the
+      // admin-defined class alone.
       public: userDefined ? undefined : isPublic,
       organization: userDefined ? undefined : organization,
       groups: !userDefined && groupScoped ? groupMembers : undefined,
@@ -455,8 +459,10 @@ export function RegisterLayerForm({
             </fieldset>
           )}
         </div>
-        {/* §4.6 fixes a user-defined layer's visibility at registration and
-            the registry discards a later patch of it, so the note is stated
+        {/* §4.6 fixes a user-defined layer's visibility at registration, and
+            §7.3.1 refuses a later owner or visibility patch on that class with
+            `400 registry.invalid_argument` carrying
+            `details.constraint: "immutable_visibility"`, so the note is stated
             on that class alone. An admin-defined layer's visibility is what
             the update endpoint patches, and the panel's Edit control is
             where that happens.
