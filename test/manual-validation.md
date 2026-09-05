@@ -13,11 +13,6 @@ reverse-dependency impact, webhook-driven reingest, audit and right-to-be-forgot
 erasure, workspace overlays, offline-cache resilience, and importing an existing
 skill tree.
 
-The same scenarios are executed by the agentic workflow in
-`tools/workflows` (the `agentic-manual-validation` workflow), which runs one
-scenario at a time, validates the observed output, and fixes any product bug it
-finds. A person and the workflow follow the identical steps.
-
 ## How to use this document
 
 ### Build the binaries under test
@@ -32,6 +27,18 @@ Every scenario uses these fresh binaries. A stale `podium` earlier on `PATH`
 (for example a Homebrew install at `/opt/homebrew/bin/podium`) produces
 misleading results, so each scenario puts `bin/` first on `PATH` and the index
 below assumes that.
+
+### Shell
+
+The fenced blocks are bash. Run them under bash, which on macOS means starting
+`bash` before working through a scenario, because the login shell there is zsh
+and three constructs the scenarios use behave differently under it. zsh does not
+word-split an unquoted expansion, so `set -- $r` leaves the positional
+parameters empty. zsh reserves `GID` as a read-only parameter holding the
+process group ID, so assigning to it fails. zsh expands `${1:+-H "Authorization:
+Bearer $1"}` as a single word, so the header is dropped and an authenticated
+caller reaches the registry as anonymous. Each of these fails quietly and
+reports what looks like a product defect.
 
 ### Per-scenario isolation
 
@@ -2449,8 +2456,9 @@ allowlist, and the per-receiver `debounce` field.
   mode rejects an unverified caller before the handler runs.
 - bob's POST returns HTTP 403 with `auth.forbidden`, naming bob as not an admin: the
   receiver CRUD is admin-gated.
-- alice's public `https` POST returns HTTP 201 and the created receiver (id, masked
-  secret, event filter).
+- alice's public `https` POST returns HTTP 201 and the created receiver (id,
+  event filter, and the secret in full). The secret is revealed once at
+  creation, and every later read, list, and update reports it as `***`.
 - alice's loopback `https` POST returns `registry.invalid_argument` naming the
   disallowed host: the SSRF policy rejects a private address.
 - alice's public `http` POST returns `registry.invalid_argument`: the SSRF policy
