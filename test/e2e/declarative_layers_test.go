@@ -304,3 +304,72 @@ func TestDeclarativeLayers_UnknownGitProviderRefusesStart(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §7.3.1 / §4.6 — the declaration is the setter for a declared layer's
+// visibility too: a narrowing applied over HTTP holds until the next start,
+// where the boot re-seed restores the declared block. This is the documented
+// consequence of the update endpoint gaining the ability to withdraw an axis,
+// on the same terms the declared git_provider case already has.
+func TestDeclarativeLayers_HTTPVisibilityNarrowingRevertsToDeclared(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	layerRoot := writeRegistry(t, map[string]string{
+		"finance/ap/pay-invoice/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: pay vendor invoices\nsensitivity: low\n---\n\nbody\n",
+	})
+	cfgPath := filepath.Join(home, "registry.yaml")
+	cfg := "" +
+		"registry:\n" +
+		"  layers:\n" +
+		"    - id: org-defaults\n" +
+		"      source:\n" +
+		"        local:\n" +
+		"          path: " + layerRoot + "\n" +
+		"      visibility:\n" +
+		"        public: true\n"
+	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+	env := []string{
+		"HOME=" + home,
+		"PODIUM_CONFIG_FILE=" + cfgPath,
+		"PODIUM_SQLITE_PATH=" + filepath.Join(home, "podium.db"),
+		"PODIUM_INGEST_OFFLINE=true",
+	}
+
+	srv := startServerArgs(t, env, "serve", "--standalone")
+	if !layerIsPublic(t, srv, "org-defaults") {
+		t.Fatalf("the declared layer is not public at the first boot")
+	}
+	st, body := apiDo(t, http.MethodPut, srv.BaseURL+"/v1/layers/update?id=org-defaults",
+		map[string]any{"public": false})
+	apiWantStatus(t, st, 200, "withdraw the declared layer's public axis", body)
+	if layerIsPublic(t, srv, "org-defaults") {
+		t.Fatalf("the withdrawal did not apply before the restart")
+	}
+	stopProc(srv.cmd)
+
+	srv2 := startServerArgs(t, env, "serve", "--standalone")
+	if !layerIsPublic(t, srv2, "org-defaults") {
+		t.Errorf("the declared visibility was not restored at the next start")
+	}
+}
+
+// layerIsPublic reads one layer's public axis from the §7.3.1 layer object
+// the list endpoint answers.
+func layerIsPublic(t *testing.T, srv *serverProc, id string) bool {
+	t.Helper()
+	var layers struct {
+		Layers []struct {
+			ID     string `json:"id"`
+			Public bool   `json:"public"`
+		} `json:"layers"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/layers", &layers)
+	for _, l := range layers.Layers {
+		if l.ID == id {
+			return l.Public
+		}
+	}
+	t.Fatalf("layer %q missing from /v1/layers: %+v", id, layers.Layers)
+	return false
+}

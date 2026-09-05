@@ -16,8 +16,8 @@ Every significant event, each carrying a trace ID (W3C Trace Context):
 | `domain.published`             | A `DOMAIN.md` was added or changed                                 | Registry |
 | `layer.ingested`               | A layer completed an ingest cycle                                  | Registry |
 | `layer.history_rewritten`      | Force-push or history rewrite detected on a `git`-source layer     | Registry |
-| `layer.config_changed`         | Admin added, removed, or reordered admin-defined layers            | Registry |
-| `layer.user_registered`        | A user registered or unregistered a personal layer                 | Registry |
+| `layer.config_changed`         | An admin-defined layer was added, removed, restored, or patched, or the tenant's layer order was changed | Registry |
+| `layer.user_registered`        | A personal layer was registered, unregistered, patched, restored, or erased | Registry |
 | `admin.granted`                | An admin grant was added or revoked                                | Registry |
 | `visibility.denied`            | A call was rejected because the requested resource was not visible | Registry |
 | `freeze.break_glass`           | An admin used break-glass during a freeze window                   | Registry |

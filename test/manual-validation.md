@@ -154,6 +154,7 @@ rm -rf "$WORK"
 | S57 | A stale prediction still refuses, and the panel says so | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S58 | Every layer response reads in snake_case | standalone | none | none | none |
 | S59 | A personal layer's owner and visibility are fixed | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S60 | An admin-defined layer's visibility narrows | standalone | none | none | Keycloak (Docker) + mkcert CA |
 
 ---
 
@@ -4049,14 +4050,14 @@ why the previous §13.10 text could claim the UI ran a device-code flow with an
 in-browser verification handoff and no test contradicted it.
 
 **This is the stack the browser-flow scenarios run on.** S47 through S50, S55
-through S57, and S59 take their prerequisites and steps 1 to 4 from here and
+through S57, S59, and S60 take their prerequisites and steps 1 to 4 from here and
 then sign in, so a change to the Keycloak registration or the serve invocation
 below reaches each of them.
 
-**Bootstrap admin, for S56, S57, and S59.** This stack seeds no tenant-admin
+**Bootstrap admin, for S56, S57, S59, and S60.** This stack seeds no tenant-admin
 grant and sets no `PODIUM_BOOTSTRAP_ADMINS`, and `POST /v1/admin/grants` is
 itself admin-gated, so no caller on the stack as written below can issue the
-first grant. S56, S57, and S59 need one, so a run that reaches them amends step
+first grant. S56, S57, S59, and S60 need one, so a run that reaches them amends step
 3. Before step 3's `podium serve`, create a second realm user `carol` the way
 S50 step 1 creates `bob`, read her `sub` and her access token, and name that
 `sub` as the bootstrap admin:
@@ -4380,8 +4381,8 @@ misconfigured:
    (§6.3.4)`, and `config show` prints
    `oidc-jwt`. A registry in public mode shows every artifact to everyone and
    would make step 6 pass for the wrong reason. A missing sign-in line means the
-   browser flow is off, and S47 through S50, S55 through S57, and S59 cannot
-   run.
+   browser flow is off, and S47 through S50, S55 through S57, S59, and S60
+   cannot run.
 
    `config show` takes its path from `PODIUM_CONFIG_FILE` and defines no
    `--config` flag, which `serve` does; passing `--config` exits 1 with `flag
@@ -6655,11 +6656,150 @@ skip and record the skip.
    after step 8, and the panel offers `Edit` on an admin-defined row only to a
    caller holding `manage_any_layer`. The S44 signed-in caller (`admin`,
    `$SUBJECT`) holds no tenant-admin grant on this stack, so that row's overflow
-   control carries no `Edit` item and its dialog cannot be opened. The admin-defined rendering,
-   which draws an `Axes granted` label over the granted axis and the two fields
-   that add group names and user identifiers, is pinned by the
-   `web/ui/src/surfaces.test.tsx` case `states a granted visibility axis in the
-   Edit dialog rather than drawing an inert checkbox`.
+   control carries no `Edit` item and its dialog cannot be opened. The
+   admin-defined rendering, which draws an operable checkbox for each of the
+   `Public` and `Organization` axes and lists the stored group names and user
+   identifiers as tokens the reader removes, is pinned by the
+   `web/ui/src/surfaces.test.tsx` case `draws a granted visibility axis in the
+   Edit dialog as an operable checkbox`. S60 reads that rendering on a caller
+   who holds `manage_any_layer`.
+
+**Teardown.** Run S44's teardown.
+
+```bash
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+rm -rf "$WORK"
+docker rm -f kc-podium; rm -rf "$KCERT"
+```
+
+---
+
+## S60: An admin-defined layer's visibility narrows
+
+**Goal.** Validate that `POST|PUT /v1/layers/update` withdraws a visibility axis
+an admin-defined layer holds, that the withdrawal takes effect for a reading
+identity holding no tenant-admin grant, and that the layer panel's Edit dialog
+offers the axis as an operable control rather than as a statement of fact.
+
+**Covers.** The §7.3.1 patch semantics on the visibility members, §4.6 for a
+stored record that sets no visibility field, and the §13.10 layer panel's Edit
+dialog on an admin-defined row.
+
+**Why by hand.** The end-to-end suite drives the narrowing and the list read
+through the built binaries. What it does not read is the browser rendering: that
+the Edit dialog draws a checkbox for an axis the layer already grants, that
+unchecking it and submitting is accepted, and that the row reports the narrowed
+visibility afterwards.
+
+**Prerequisites.** The S44 stack, with S44's bootstrap-admin note applied: run
+S44's Prerequisites and steps 1 to 4, apply that note's amendment to step 3 so
+`carol` exists and the registry was started with
+`PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"`, and leave the registry running.
+Carol is the bootstrap operator and never signs in to the UI; her token issues
+the tenant-admin grant step 1 makes, and every write after that grant is the
+signed-in caller's. The raised `PODIUM_MAX_USER_LAYERS` S59 asks for is not
+needed here, because both layers this scenario registers are admin-defined and
+the §7.3.1 per-identity cap counts user-defined layers alone. When Keycloak or
+the `mkcert` CA is unavailable, skip and record the skip.
+
+**Steps.**
+
+1. Grant the tenant-admin role to the signed-in caller, using carol's bootstrap
+   token, and register two public admin-defined layers as that caller.
+
+   ```bash
+   curl -sS -X POST "http://127.0.0.1:8153/v1/admin/grants" \
+     -H "Authorization: Bearer $CAROL_TOKEN" -H 'Content-Type: application/json' \
+     -d "{\"user_id\":\"$SUBJECT\"}" -w '\nstatus=%{http_code}\n'
+   PODIUM_SESSION_TOKEN="$TOKEN" podium layer register \
+     --registry http://127.0.0.1:8153 --id s60-notes \
+     --repo https://git.acme.internal/acme/s60-notes.git --ref main --public > /dev/null
+   PODIUM_SESSION_TOKEN="$TOKEN" podium layer register \
+     --registry http://127.0.0.1:8153 --id s60-panel \
+     --repo https://git.acme.internal/acme/s60-panel.git --ref main --public > /dev/null
+   ```
+
+   **Expect.** The grant answers `201` with `{"user_id": "<the subject>"}`, and
+   both registrations exit `0`. A `403` on the grant means
+   `PODIUM_BOOTSTRAP_ADMINS` did not name carol's `sub`, and the prerequisite is
+   re-run before continuing. A `403` on a registration means the grant did not
+   take effect, because `public` is an admin-only registration field.
+
+2. Create the reading identity and confirm it sees both layers. Create it the
+   way S50 step 1 does, and run the creation every time this scenario is run.
+   This scenario's Prerequisites re-run S44's Prerequisites and steps 1 to 4,
+   which recreate the `kc-podium` container on an empty user set, so a `bob`
+   created by an earlier S50 or S59 run does not survive into this realm and a
+   `BOB_TOKEN` minted against the earlier realm's keys no longer verifies. When
+   bob already exists in the realm that is running, `$KC create users` reports a
+   conflict and exits non-zero, which is harmless here, because the token mint
+   below is what the rest of the step reads.
+
+   ```bash
+   $KC create users -r master -s username=bob -s enabled=true
+   $KC set-password -r master --username bob --new-password bob
+   export BOB_TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
+     -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
+     -d username=bob -d password=bob \
+     | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
+   PODIUM_SESSION_TOKEN="$BOB_TOKEN" podium layer list --registry http://127.0.0.1:8153 \
+     | python3 -c 'import json,sys; print(sorted(x["id"] for x in json.load(sys.stdin)["layers"]))'
+   ```
+
+   **Expect.** Bob's list carries `s60-notes` and `s60-panel`, because a public
+   layer is visible to every caller. Bob holds no tenant-admin grant, so the
+   list is the §4.6 evaluation of each record rather than the whole tenant's
+   layers, which is what makes step 3's re-read evidence of the withdrawal.
+
+3. Withdraw the `public` axis from `s60-notes`, read the stored record the
+   registry returns, and re-read bob's list.
+
+   ```bash
+   PODIUM_SESSION_TOKEN="$TOKEN" podium layer update \
+     --registry http://127.0.0.1:8153 --id s60-notes --public=false \
+     | python3 -c '
+   import json, sys
+   l = json.load(sys.stdin)["layer"]
+   print("public:", l["public"], "| organization:", l["organization"],
+         "| groups:", l["groups"] or [], "| users:", l["users"] or [],
+         "| ref:", l["ref"])
+   '
+   PODIUM_SESSION_TOKEN="$BOB_TOKEN" podium layer list --registry http://127.0.0.1:8153 \
+     | python3 -c 'import json,sys; print(sorted(x["id"] for x in json.load(sys.stdin)["layers"]))'
+   ```
+
+   **Expect.** The patch exits `0` and reports `public: False` with an empty
+   `groups`, an empty `users`, and `ref: main` unchanged, so the body's one
+   member was applied and the members it omitted kept their stored values.
+   Bob's list now carries `s60-panel` and omits `s60-notes`: the record sets no
+   visibility field, matches no §4.6 condition, and reaches no composed view.
+   A record still reporting `public: True` means the flag was dropped before the
+   body was built, which is the defect this scenario exists to catch.
+
+4. Read the Edit dialog on the admin-defined row and withdraw the axis through
+   it. Open `http://127.0.0.1:8153/app/#/layers` in a private browser window and
+   click the sign-in control. Keycloak's login page appears; sign in as `admin`
+   with the password `admin`. The callback returns the browser to
+   `http://127.0.0.1:8153/app/`, which resolves to the catalog, so re-open
+   `http://127.0.0.1:8153/app/#/layers`. Open the overflow control on the
+   `s60-panel` row, press `Edit`, uncheck `Public`, and submit.
+
+   **Expect.** The dialog's Visibility section draws a `Public` checkbox that is
+   checked and operable, an `Organization` checkbox that is unchecked, and the
+   two token fields for group names and user identifiers. Unchecking `Public`
+   and submitting is accepted, and the dialog stays open on a confirmation panel
+   reading `Layer updated`, `Layer s60-panel is updated.`, and a `Done` control
+   that closes it. The `s60-panel` row's visibility cell changes from `public`
+   to `no grants`. A section drawing the granted axis as a
+   label with no control, or a sentence telling the reader that a grant cannot
+   be withdrawn, is the panel still built around the grant-only endpoint, and it
+   withholds a write the registry now accepts. A submission the registry refuses
+   means the form sent a member the caller may not set on this class.
+
+   The `Edit` item appears on this row because step 1 granted the signed-in
+   caller `manage_any_layer`. Without that grant the panel offers `Edit` on an
+   admin-defined row to nobody, and the dialog cannot be opened at all, which
+   S59 step 9 records.
 
 **Teardown.** Run S44's teardown.
 

@@ -38,11 +38,13 @@ const immutableRepo = "https://github.com/acme/notes.git"
 // listedLayer is the subset of a layer record `podium layer list` prints that
 // the assertions here read.
 type listedLayer struct {
-	ID          string   `json:"id"`
-	UserDefined bool     `json:"user_defined"`
-	Owner       string   `json:"owner"`
-	Public      bool     `json:"public"`
-	Users       []string `json:"users"`
+	ID           string   `json:"id"`
+	UserDefined  bool     `json:"user_defined"`
+	Owner        string   `json:"owner"`
+	Public       bool     `json:"public"`
+	Organization bool     `json:"organization"`
+	Groups       []string `json:"groups"`
+	Users        []string `json:"users"`
 }
 
 // cliLayer runs `podium layer list` in env and returns the record with id,

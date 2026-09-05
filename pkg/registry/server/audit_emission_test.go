@@ -97,10 +97,10 @@ func layerAuditHarness(t *testing.T, sink *audit.FileSink, id layer.Identity) st
 	return ts.URL
 }
 
-// spec: §8.1 — "layer.user_registered | When a user registered or
-// unregistered a personal layer." A user-defined layer register and the
-// matching unregister both emit layer.user_registered, naming the owner and
-// the register-versus-unregister action.
+// spec: §8.1 — "layer.user_registered | A personal layer was registered,
+// unregistered, patched, restored, or erased." A user-defined layer register
+// and the matching unregister both emit layer.user_registered, naming the
+// owner and the register-versus-unregister action.
 func TestLayerEndpoint_EmitsUserRegistered(t *testing.T) {
 	t.Parallel()
 	sink := newAuditSink(t)
@@ -130,10 +130,11 @@ func TestLayerEndpoint_EmitsUserRegistered(t *testing.T) {
 	}
 }
 
-// spec: §8.1 — "layer.config_changed | When an admin added, removed, or
-// reordered admin-defined layers." Registering and reordering admin-defined
-// layers emits layer.config_changed with the add and reorder actions; a
-// personal-layer event type must not appear.
+// spec: §8.1 — "layer.config_changed | An admin-defined layer was added,
+// removed, restored, or patched, or the tenant's layer order was changed."
+// Registering and reordering admin-defined layers emits layer.config_changed
+// with the add and reorder actions; a personal-layer event type must not
+// appear.
 func TestLayerEndpoint_EmitsConfigChanged(t *testing.T) {
 	t.Parallel()
 	sink := newAuditSink(t)

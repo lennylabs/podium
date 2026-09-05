@@ -77,7 +77,7 @@ type LayerEndpoint struct {
 	// reorder. It is the §8.3 registry sink (a file sink or an EndpointSink
 	// when redirected to a SIEM). Nil is a no-op.
 	auditSink audit.Sink
-	// publishEvent fans a §7.6 layer.config_changed onto the registry event
+	// publishEvent fans a §7.5.4 layer.config_changed onto the registry event
 	// bus so a `podium sync --watch` subscriber re-resolves its profile. It
 	// is distinct from auditSink, which records the §8.1 event for an
 	// operator rather than waking a client. Nil is a no-op, which is the
@@ -403,10 +403,17 @@ func (e *LayerEndpoint) WithEraseSink(file *audit.FileSink) *LayerEndpoint {
 	return e
 }
 
-// emitLayerEvent records the §8.1 audit event for a register or unregister
-// action: layer.user_registered for a personal (user-defined) layer with
-// its owner as caller, or layer.config_changed for an admin-defined layer.
-func (e *LayerEndpoint) emitLayerEvent(r *http.Request, cfg store.LayerConfig, action string) {
+// emitLayerEvent records the §8.1 audit event for a per-layer action:
+// layer.user_registered for a personal (user-defined) layer with its owner as
+// caller, or layer.config_changed for an admin-defined layer.
+//
+// before is the record the operation started from, and cfg the record it
+// produced. A register, unregister, restore, and erase pass a zero before,
+// which every difference test reads as a change. Only update passes the
+// record it read, because only update can store what the layer already held.
+//
+// Spec: §7.3.1, §8.1
+func (e *LayerEndpoint) emitLayerEvent(r *http.Request, before, cfg store.LayerConfig, action string) {
 	typ := audit.EventLayerConfigChanged
 	if cfg.UserDefined {
 		typ = audit.EventLayerUserRegistered
@@ -418,17 +425,108 @@ func (e *LayerEndpoint) emitLayerEvent(r *http.Request, cfg store.LayerConfig, a
 		fields["owner"] = cfg.Owner
 	}
 	emitAuditEvent(e.auditSink, r, e.caller(r), typ, cfg.ID, fields)
-	// Spec: §7.6 — the watcher re-resolves its profile on
+	// Spec: §7.5.4 — the watcher re-resolves its profile on
 	// layer.config_changed, so an admin layer change wakes it. A personal
-	// layer emits layer.user_registered instead and is not a §7.6 trigger:
+	// layer emits layer.user_registered instead and is not a §7.5.4 trigger:
 	// it changes one user's composition rather than the admin-defined one
-	// every watcher in the tenant resolves.
-	if typ == audit.EventLayerConfigChanged {
+	// every watcher in the tenant resolves. The wake is further narrowed to
+	// a change the re-resolve can observe, so an ingest-credential change
+	// records its audit event and wakes nothing.
+	if typ == audit.EventLayerConfigChanged && wakesWatchers(before, cfg) {
 		e.publishConfigChanged(r.Context(), cfg.ID, fields["action"])
 	}
 }
 
-// publishConfigChanged fans a §7.6 layer.config_changed onto the event bus.
+// layerConfigEqual reports whether two stored layer records are equal for the
+// purpose of §7.3.1's unchanged-write rule. It compares Groups and Users with
+// slices.Equal rather than with reflect.DeepEqual, which separates a nil slice
+// from an empty one: a layer stored with nil groups and patched with [] would
+// then report a change that did not occur, which is what a client echoing a
+// layer object back produces. The two timestamps are compared by value for the
+// same reason, because a pointer comparison would report a change on two equal
+// instants held at different addresses.
+//
+// Spec: §7.3.1
+func layerConfigEqual(a, b store.LayerConfig) bool {
+	return a.TenantID == b.TenantID &&
+		a.ID == b.ID &&
+		a.SourceType == b.SourceType &&
+		a.Repo == b.Repo &&
+		a.Ref == b.Ref &&
+		a.Root == b.Root &&
+		a.LocalPath == b.LocalPath &&
+		a.Order == b.Order &&
+		a.UserDefined == b.UserDefined &&
+		a.Owner == b.Owner &&
+		a.Public == b.Public &&
+		a.Organization == b.Organization &&
+		slices.Equal(a.Groups, b.Groups) &&
+		slices.Equal(a.Users, b.Users) &&
+		a.WebhookSecret == b.WebhookSecret &&
+		a.GitProvider == b.GitProvider &&
+		a.LastIngestedRef == b.LastIngestedRef &&
+		a.ForcePushPolicy == b.ForcePushPolicy &&
+		timePtrEqual(a.LastIngestedAt, b.LastIngestedAt) &&
+		a.CreatedAt.Equal(b.CreatedAt) &&
+		timePtrEqual(a.DeletedAt, b.DeletedAt)
+}
+
+// timePtrEqual reports whether two optional timestamps name the same instant,
+// treating two nil values as equal.
+func timePtrEqual(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
+}
+
+// wakesWatchers reports whether the difference between two stored layer
+// configurations can alter what a §7.5.4 watcher's re-resolve produces. The
+// visibility members decide which layers a caller resolves, the order decides
+// precedence among them, and the source location decides what the layer
+// serves. A webhook secret, a force-push policy, and a git provider decide how
+// the registry ingests, which no materialized tree observes, and the ingest
+// bookkeeping and the timestamps record what an ingest already did. Owner is
+// not projected onto the §4.6 visibility record (core.VisibilityOf), and the
+// caller reaches this predicate only on the admin-defined class, where the
+// field names no authorized subject.
+//
+// Spec: §7.3.1, §7.5.4
+func wakesWatchers(before, after store.LayerConfig) bool {
+	return before.Public != after.Public ||
+		before.Organization != after.Organization ||
+		!slices.Equal(before.Groups, after.Groups) ||
+		!slices.Equal(before.Users, after.Users) ||
+		before.Order != after.Order ||
+		before.SourceType != after.SourceType ||
+		before.Repo != after.Repo ||
+		before.Ref != after.Ref ||
+		before.Root != after.Root ||
+		before.LocalPath != after.LocalPath
+}
+
+// precedenceSequence returns the tenant's layer identifiers in ascending
+// order of precedence, ties broken by identifier. §7.3.1 keys the reorder
+// event on this sequence rather than on the stored order integers, which the
+// handler renumbers to (i + 1) * 10 on every call whatever the result.
+//
+// Spec: §7.3.1
+func precedenceSequence(layers []store.LayerConfig) []string {
+	sorted := slices.Clone(layers)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Order != sorted[j].Order {
+			return sorted[i].Order < sorted[j].Order
+		}
+		return sorted[i].ID < sorted[j].ID
+	})
+	ids := make([]string, 0, len(sorted))
+	for _, l := range sorted {
+		ids = append(ids, l.ID)
+	}
+	return ids
+}
+
+// publishConfigChanged fans a §7.5.4 layer.config_changed onto the event bus.
 // The payload names the layer and the action so a receiver can tell a
 // registration from a reorder without a second call.
 func (e *LayerEndpoint) publishConfigChanged(ctx context.Context, layerID, action string) {
@@ -525,28 +623,124 @@ func adminOnlyRegistrationFields(req LayerRegisterRequest, sub string) []string 
 	return asserted
 }
 
-// assertedImmutableVisibilityFields reports the §4.6 fields the patch asserts
-// against a stored user-defined layer, in sorted order, and nothing against an
-// admin-defined one. A field is asserted by its value rather than by its
-// presence, for the reason adminOnlyRegistrationFields states: the request
-// decodes into plain string, bool, and []string fields, so an absent key and a
-// zero value are one thing after decode. The predicate loses nothing by it,
-// because register derives a user-defined layer's visibility from the
-// authenticated identity and never reads the request's public, organization,
-// or groups, so a stored layer of that class is always at public:false,
-// organization:false, no groups, users:[owner], and every widening value is
-// non-zero.
+// visibilityPatch is the §7.3.1 visibility half of an update body, resolved
+// against the members the body actually carried. LayerRegisterRequest decodes
+// into plain bool and []string members, so an absent key and a zero value are
+// one thing after decode, and the update path needs them apart: a present
+// member is applied, so "public": false withdraws the axis and an absent
+// "public" keeps the stored one. The register path needs no such distinction
+// and keeps the flat struct, which is why the presence map is read here.
 //
-// What asserts is a value that differs from what the layer stores. On the
-// three axes the class stores at their zero value, any non-zero value differs
-// by construction, so the check is the value alone. Users is the one axis
-// carrying a non-zero stored value, so it is compared, and owner is compared
-// against the layer's stored owner rather than against the caller's subject,
-// so a tenant admin who echoes back the owner they read asserts nothing.
-// store.LayerConfig marshals owner and users without omitempty, so a client
-// returning a layer object it read carries users:[<owner>] on every
-// user-defined layer, and that echo is the case these two comparisons exist
-// for.
+// This mirrors the §7.3.3 tenant PATCH, where tenantQuotaIn carries pointer
+// sub-fields and applyTo overlays the present ones.
+//
+// A member carrying JSON null resolves to the member's zero value, which
+// §7.3.1 fixes: the layer object reports an empty list as null, so a client
+// returning a layer object it read carries that value on every layer.
+//
+// Spec: §7.3.1, §4.6
+type visibilityPatch struct {
+	public       *bool
+	organization *bool
+	groups       *[]string
+	users        *[]string
+}
+
+// decodeVisibilityPatch reads the four §4.6 visibility members out of an
+// update body by presence. The member types are already validated by the
+// LayerRegisterRequest decode the caller performs on the same bytes, so the
+// error this returns is a body that is not a JSON object.
+//
+// Spec: §7.3.1
+func decodeVisibilityPatch(body []byte) (visibilityPatch, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return visibilityPatch{}, fmt.Errorf("layer update: decode body: %w", err)
+	}
+	var p visibilityPatch
+	if v, ok := raw["public"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			return visibilityPatch{}, fmt.Errorf("layer update: public: %w", err)
+		}
+		p.public = &b
+	}
+	if v, ok := raw["organization"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			return visibilityPatch{}, fmt.Errorf("layer update: organization: %w", err)
+		}
+		p.organization = &b
+	}
+	if v, ok := raw["groups"]; ok {
+		var list []string
+		if err := json.Unmarshal(v, &list); err != nil {
+			return visibilityPatch{}, fmt.Errorf("layer update: groups: %w", err)
+		}
+		p.groups = &list
+	}
+	if v, ok := raw["users"]; ok {
+		var list []string
+		if err := json.Unmarshal(v, &list); err != nil {
+			return visibilityPatch{}, fmt.Errorf("layer update: users: %w", err)
+		}
+		p.users = &list
+	}
+	return p, nil
+}
+
+// applyTo overlays the members the body carried onto cfg and leaves the rest.
+// A carried list that decodes empty is stored as nil rather than as an empty
+// slice: json.Unmarshal of [] yields a non-nil empty slice, store.LayerConfig
+// marshals Groups and Users without omitempty, and §7.3.1 fixes the read side
+// as reporting an empty list as null. Storing nil is what keeps the emptied
+// list and the never-populated list one stored value, so the layer object a
+// client echoes back is the value the endpoint just stored.
+//
+// Spec: §7.3.1, §4.6
+func (p visibilityPatch) applyTo(cfg store.LayerConfig) store.LayerConfig {
+	if p.public != nil {
+		cfg.Public = *p.public
+	}
+	if p.organization != nil {
+		cfg.Organization = *p.organization
+	}
+	if p.groups != nil {
+		cfg.Groups = nilIfEmpty(*p.groups)
+	}
+	if p.users != nil {
+		cfg.Users = nilIfEmpty(*p.users)
+	}
+	return cfg
+}
+
+// nilIfEmpty normalizes a decoded empty list to nil, so an emptied list and a
+// never-populated one are one stored value.
+func nilIfEmpty(list []string) []string {
+	if len(list) == 0 {
+		return nil
+	}
+	return list
+}
+
+// assertedImmutableVisibilityFields reports the §4.6 fields the patch would
+// change on a stored user-defined layer, in sorted order, and nothing against
+// an admin-defined one. A field asserts when the value the patch would store
+// differs from the stored one, which is the reading §7.3.1 fixes and the same
+// predicate the §8.1 emission reads. Presence alone would refuse a client that
+// reads a layer object and returns it unchanged, because that object carries
+// all four members on every layer and a user-defined layer reads back as
+// public:false, organization:false, groups:null, users:[<owner>].
+//
+// Emptying users asserts where every other zero value does not, because the
+// class stores users:[<owner>] and every other axis at its zero value: on the
+// three zero-valued axes a difference from the stored value is exactly a
+// non-zero value, and on users it is any list that is not the stored one.
+//
+// Owner is read off the flat patch because it keeps the non-empty-replaces
+// reading rather than the presence one, and it is compared against the
+// layer's stored owner rather than against the caller's subject, so a tenant
+// admin who echoes back the owner they read asserts nothing.
 //
 // The comparison is exact and neither trims nor reorders. An admitted patch
 // falls through to the application block below, which stores the value the
@@ -556,24 +750,25 @@ func adminOnlyRegistrationFields(req LayerRegisterRequest, sub string) []string 
 // both compare it exactly.
 //
 // Spec: §4.6, §7.3.1
-func assertedImmutableVisibilityFields(patch LayerRegisterRequest, cfg store.LayerConfig) []string {
+func assertedImmutableVisibilityFields(patch LayerRegisterRequest, vis visibilityPatch, cfg store.LayerConfig) []string {
 	if !cfg.UserDefined {
 		return nil
 	}
+	merged := vis.applyTo(cfg)
 	var asserted []string
-	if len(patch.Groups) > 0 {
+	if !slices.Equal(merged.Groups, cfg.Groups) {
 		asserted = append(asserted, "groups")
 	}
-	if patch.Organization {
+	if merged.Organization != cfg.Organization {
 		asserted = append(asserted, "organization")
 	}
 	if patch.Owner != "" && patch.Owner != cfg.Owner {
 		asserted = append(asserted, "owner")
 	}
-	if patch.Public {
+	if merged.Public != cfg.Public {
 		asserted = append(asserted, "public")
 	}
-	if len(patch.Users) > 0 && !slices.Equal(patch.Users, cfg.Users) {
+	if !slices.Equal(merged.Users, cfg.Users) {
 		asserted = append(asserted, "users")
 	}
 	return asserted
@@ -713,7 +908,7 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
 		}
-		e.emitLayerEvent(r, l, "erase")
+		e.emitLayerEvent(r, store.LayerConfig{}, l, "erase")
 		purged = append(purged, l.ID)
 	}
 	// spec §8.5: redact the user identity across the registry audit
@@ -750,10 +945,13 @@ func (e *LayerEndpoint) WebhookHandler() http.Handler {
 	return mux
 }
 
-// update handles PUT /v1/layers/update?id=ID. Body fields that are
-// non-zero replace the corresponding LayerConfig field; zero
-// fields keep the prior value. This shape avoids having to send
-// the whole config and accidentally clear visibility filters.
+// update handles PUT /v1/layers/update?id=ID. The body is a partial patch
+// and the two readings §7.3.1 fixes apply to it. On the visibility members
+// (public, organization, groups, users) a member the body carries is applied
+// and a member it omits keeps the layer's stored value, so "public": false
+// withdraws the axis and "groups": [] empties the list; that is what makes a
+// grant reversible without unregistering the layer. On every other member a
+// non-zero value replaces the stored one and an empty value leaves it.
 //
 // Allowed mutations: Ref, Root, LocalPath, GitProvider,
 // ForcePushPolicy, and a webhook-secret rotation
@@ -782,6 +980,10 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
 		return
 	}
+	// before is the stored record every later comparison reads: what the
+	// patch changed decides whether the handler writes, what it records, and
+	// whether it wakes a watcher.
+	before := cfg
 	// spec: §7.3.1 — the layer-write authorization rule: a user-defined
 	// layer's stored owner or a tenant admin, an admin-defined layer a
 	// tenant admin alone.
@@ -789,8 +991,22 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return
 	}
+	// The body is read once and unmarshalled twice: into the flat request for
+	// every member whose semantics are unchanged, and into a presence map for
+	// the §7.3.1 visibility members, which need an absent key and a zero value
+	// apart. LayerRegisterRequest is untouched, so register is untouched.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
 	var patch LayerRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+	if err := json.Unmarshal(body, &patch); err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	vis, err := decodeVisibilityPatch(body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
 	}
@@ -821,7 +1037,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// performs including the rotation below, so a refused patch mints no
 	// webhook secret and applies no other field it carries. It runs after
 	// the local-source gate so a patch on both arms keeps that envelope.
-	if asserted := assertedImmutableVisibilityFields(patch, cfg); len(asserted) > 0 {
+	if asserted := assertedImmutableVisibilityFields(patch, vis, cfg); len(asserted) > 0 {
 		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument",
 			fmt.Sprintf("the fields %s cannot be patched on a user-defined layer; its owner and its users:[<owner>] visibility are fixed at registration, so re-send the patch without them, or ask an administrator to re-register the layer as an admin-defined one",
 				strings.Join(asserted, ", ")),
@@ -866,26 +1082,24 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		cfg.WebhookSecret = secret
 		rotated = true
 	}
-	// spec: §4.6 — an admin may edit an admin-defined layer's owner and
-	// visibility. The block is unconditional because the immutable
-	// visibility refusal above has already returned on a user-defined
-	// layer that asserts any of these fields; what reaches here on that
-	// class restates what the layer stores, so each assignment rewrites a
-	// value with itself.
+	// spec: §7.3.1 — the patch semantics. A visibility member the body
+	// carried is applied and one it omitted keeps the stored value, so a
+	// grant is withdrawn through the same endpoint that made it. Owner keeps
+	// the non-empty-replaces reading the source members carry. The block is
+	// unconditional on the layer's class because the immutable visibility
+	// refusal above has already returned on a user-defined layer that would
+	// change any of these.
 	if patch.Owner != "" {
 		cfg.Owner = patch.Owner
 	}
-	if patch.Public {
-		cfg.Public = true
-	}
-	if patch.Organization {
-		cfg.Organization = true
-	}
-	if len(patch.Groups) > 0 {
-		cfg.Groups = patch.Groups
-	}
-	if len(patch.Users) > 0 {
-		cfg.Users = patch.Users
+	cfg = vis.applyTo(cfg)
+	// spec: §7.3.1 — a patch that stores nothing writes no record and records
+	// no §8.1 event, so a body restating what the layer holds is answered 200
+	// with the unchanged layer object and leaves the audit stream reporting
+	// only changes that happened.
+	if layerConfigEqual(before, cfg) {
+		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: cfg})
+		return
 	}
 	if err := e.store.PutLayerConfig(r.Context(), cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
@@ -893,7 +1107,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	}
 	// spec §8.1: a config mutation (including a secret rotation) is an
 	// auditable layer.config_changed / layer.user_registered event.
-	e.emitLayerEvent(r, cfg, "update")
+	e.emitLayerEvent(r, before, cfg, "update")
 	resp := LayerRegisterResponse{Layer: cfg}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
@@ -1145,7 +1359,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// spec §8.1: a user registering a personal layer emits
 	// layer.user_registered; an admin adding an admin-defined layer emits
 	// layer.config_changed.
-	e.emitLayerEvent(r, cfg, "register")
+	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "register")
 
 	resp := LayerRegisterResponse{Layer: cfg}
 	if cfg.SourceType == "git" {
@@ -1240,7 +1454,7 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
-	e.emitLayerEvent(r, cfg, "restore")
+	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "restore")
 	writeJSON(w, http.StatusOK, map[string]any{"restored": id})
 }
 
@@ -1274,7 +1488,7 @@ func (e *LayerEndpoint) unregister(w http.ResponseWriter, r *http.Request) {
 	}
 	// spec §8.1: unregistering a personal layer emits layer.user_registered;
 	// removing an admin-defined layer emits layer.config_changed.
-	e.emitLayerEvent(r, cfg, "unregister")
+	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "unregister")
 	writeJSON(w, http.StatusOK, map[string]any{"unregistered": id})
 }
 
@@ -1339,8 +1553,14 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, _ := e.store.ListLayerConfigs(r.Context(), e.tenantID)
 	sort.Slice(updated, func(i, j int) bool { return updated[i].Order < updated[j].Order })
-	// spec §8.1: reordering admin-defined layers emits layer.config_changed.
-	if len(req.Order) > 0 {
+	// spec §8.1, §7.3.1: a reorder records one layer.config_changed on the
+	// identifiers it named, whatever the class of the layers it names, where
+	// the resulting precedence sequence differs from the one the tenant held.
+	// The stored order integers cannot serve the comparison: the loop above
+	// renumbers every named layer to (i + 1) * 10 whatever the result, so a
+	// tenant whose orders were seeded otherwise would report a change on a
+	// reorder that changed no precedence.
+	if !slices.Equal(precedenceSequence(layers), precedenceSequence(updated)) {
 		emitAuditEvent(e.auditSink, r, e.caller(r), audit.EventLayerConfigChanged,
 			strings.Join(req.Order, ","), map[string]string{"action": "reorder"})
 		e.publishConfigChanged(r.Context(), strings.Join(req.Order, ","), "reorder")

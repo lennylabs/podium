@@ -478,12 +478,21 @@ func TestLayerEndpoint_ListArmsByCallerRole(t *testing.T) {
 		absent   []string // substrings the body must not carry
 	}{
 		{
+			// "private" sets no §4.6 visibility field, which is the record
+			// §4.6 states matches no condition in the evaluator: the whole
+			// list reaches this caller through §7.3.1's admin arm, which
+			// reads the caller's role rather than the layer's fields, and
+			// the case below pins that a subject-resolving non-admin does
+			// not reach it.
 			name:    "admin_reads_whole_tenant",
 			opts:    layerArmOpts{adminErr: nil, callerID: bob, configs: armLayers()},
 			path:    "/v1/layers",
 			wantIDs: []string{"private", "public", "alice-personal"},
 		},
 		{
+			// The out-of-evaluator half of §4.6's rule on a record setting
+			// no visibility field: with the admin arm denied, "private"
+			// reaches no caller the registry resolves to a subject.
 			name:    "user_reads_effective_view",
 			opts:    layerArmOpts{adminErr: server.ErrAdminRequired, callerID: bob, configs: armLayers()},
 			path:    "/v1/layers",

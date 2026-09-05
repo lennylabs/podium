@@ -706,7 +706,7 @@ func TestPluginSPI_WebhookNonMatchingFilter(t *testing.T) {
 	publishProbe(t, srv, "spi-filter-layer", "1.0.0")
 
 	// An unfiltered receiver takes every event the registry fires, and the
-	// probe registers a layer, so the §7.6 layer.config_changed can land
+	// probe registers a layer, so the §7.5.4 layer.config_changed can land
 	// first. Wait for the type under assertion rather than for a count.
 	if !all.waitForEventType("artifact.published", 5*time.Second) {
 		t.Fatalf("all-events receiver missing artifact.published; got: %+v\nserver log:\n%s", all.all(), srv.log())

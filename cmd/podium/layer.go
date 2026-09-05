@@ -68,7 +68,9 @@ func layerCmd(args []string) int {
 
 // layerUpdate sends a partial-patch PUT to /v1/layers/update?id=ID.
 // Only flags the operator passes are applied; everything else
-// keeps its prior value.
+// keeps its prior value. --clear-groups and --clear-users send an
+// empty list on their member, which the repeatable --group and
+// --user flags cannot express.
 func layerUpdate(args []string) int {
 	fs := flag.NewFlagSet("layer update", flag.ContinueOnError)
 	setUsage(fs, "Patch a registered layer's mutable fields.")
@@ -82,6 +84,8 @@ func layerUpdate(args []string) int {
 	organization := fs.Bool("organization", false, "set visibility to organization-wide")
 	forcePush := fs.String("force-push-policy", "", "git force-push handling: tolerant or strict")
 	rotateSecret := fs.Bool("rotate-webhook-secret", false, "regenerate the git layer's HMAC webhook secret and print the new value")
+	clearGroups := fs.Bool("clear-groups", false, "empty the layer's group visibility list")
+	clearUsers := fs.Bool("clear-users", false, "empty the layer's user visibility list")
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable)")
 	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable)")
@@ -93,36 +97,51 @@ func layerUpdate(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry and --id are required")
 		return 2
 	}
+	// Spec: §7.3.1 — update applies the members the body carries and preserves
+	// the ones it omits, so the body is built from the flags the operator set
+	// rather than from the flags holding a non-zero value. That is what makes
+	// `--public=false` a withdrawal instead of an argument the guard drops.
+	set := setFlags(fs)
+	if (set["group"] && *clearGroups) || (set["user"] && *clearUsers) {
+		fmt.Fprintln(os.Stderr, "error: --group cannot be combined with --clear-groups, and --user cannot be combined with --clear-users")
+		return 2
+	}
 	body := map[string]any{}
-	if *ref != "" {
+	if set["ref"] {
 		body["ref"] = *ref
 	}
-	if *root != "" {
+	if set["root"] {
 		body["root"] = *root
 	}
-	if *local != "" {
+	if set["local"] {
 		body["local_path"] = *local
 	}
-	if *forcePush != "" {
+	if set["force-push-policy"] {
 		body["force_push_policy"] = *forcePush
 	}
-	if *rotateSecret {
-		body["rotate_webhook_secret"] = true
+	if set["rotate-webhook-secret"] {
+		body["rotate_webhook_secret"] = *rotateSecret
 	}
-	if *owner != "" {
+	if set["owner"] {
 		body["owner"] = *owner
 	}
-	if *public {
-		body["public"] = true
+	if set["public"] {
+		body["public"] = *public
 	}
-	if *organization {
-		body["organization"] = true
+	if set["organization"] {
+		body["organization"] = *organization
 	}
-	if len(groups) > 0 {
+	if set["group"] {
 		body["groups"] = []string(groups)
 	}
-	if len(users) > 0 {
+	if set["user"] {
 		body["users"] = []string(users)
+	}
+	if *clearGroups {
+		body["groups"] = []string{}
+	}
+	if *clearUsers {
+		body["users"] = []string{}
 	}
 	if len(body) == 0 {
 		fmt.Fprintln(os.Stderr, "error: at least one mutable field must be provided")

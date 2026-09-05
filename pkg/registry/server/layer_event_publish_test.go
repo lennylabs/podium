@@ -67,7 +67,7 @@ func layerEventHarness(t *testing.T, rec *eventRecorder, id layer.Identity) stri
 	return ts.URL
 }
 
-// Spec: §7.6 — watch mode re-resolves the profile on every registry change
+// Spec: §7.5.4 — watch mode re-resolves the profile on every registry change
 // event, and the section names `layer.config_changed` among them alongside
 // `artifact.published` and `artifact.deprecated`. The watcher subscribes to
 // all three (`pkg/sync/watch_server.go`), so an admin layer change that never
@@ -91,7 +91,7 @@ func TestLayerEndpoint_PublishesConfigChangedOnRegister(t *testing.T) {
 	}
 }
 
-// Spec: §7.6 / §8.1 — reordering admin-defined layers changes the composed
+// Spec: §7.5.4 / §8.1 — reordering admin-defined layers changes the composed
 // profile, so it wakes a watcher the same way a registration does.
 func TestLayerEndpoint_PublishesConfigChangedOnReorder(t *testing.T) {
 	t.Parallel()
@@ -116,7 +116,7 @@ func TestLayerEndpoint_PublishesConfigChangedOnReorder(t *testing.T) {
 	}
 }
 
-// Spec: §7.6 / §8.1 — unregistering an admin-defined layer removes it from
+// Spec: §7.5.4 / §8.1 — unregistering an admin-defined layer removes it from
 // the composed profile, so it wakes a watcher too.
 func TestLayerEndpoint_PublishesConfigChangedOnUnregister(t *testing.T) {
 	t.Parallel()
@@ -134,7 +134,7 @@ func TestLayerEndpoint_PublishesConfigChangedOnUnregister(t *testing.T) {
 }
 
 // Spec: §8.1 — a personal layer emits `layer.user_registered` rather than
-// `layer.config_changed`, and §7.6 names only the latter among the watch
+// `layer.config_changed`, and §7.5.4 names only the latter among the watch
 // triggers. A personal layer belongs to one user and does not change the
 // admin-defined composition every watcher resolves, so publishing it would
 // wake every watcher in the tenant for a change none of them can see.
@@ -153,7 +153,7 @@ func TestLayerEndpoint_PersonalLayerPublishesNoConfigChange(t *testing.T) {
 	}
 }
 
-// Spec: §7.6 — the publish hook is optional. An endpoint built without one
+// Spec: §7.5.4 — the publish hook is optional. An endpoint built without one
 // records its audit event and serves the request unchanged, which is what a
 // deployment with no event bus does.
 func TestLayerEndpoint_NoPublisherIsANoOp(t *testing.T) {

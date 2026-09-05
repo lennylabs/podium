@@ -477,7 +477,9 @@ export function RegisterLayerForm({
             ⓘ
           </span>
           <span className="note-text">
-            {userDefined ? 'Visibility is fixed at registration.' : 'Visibility can be widened later from Edit. A grant cannot be withdrawn.'}
+            {userDefined
+              ? 'Visibility is fixed at registration.'
+              : 'Visibility can be widened and withdrawn later from Edit.'}
           </span>
         </p>
         <div className="modal-foot">
@@ -788,8 +790,12 @@ function VisibilityAxis({
   );
 }
 
-/** TokenInput names the members of a selected axis. The parsed members are
- * echoed back as tokens, because a comma-separated line does not show the
+/** TokenInput names the members of an axis. The Edit dialog draws it over the
+ * same members, holding the stored ones apart from the line and passing them
+ * in `tokens`, and its `onRemove` takes one back from that held array so a
+ * member carrying a comma survives an untouched dialog. `useMemberList` in
+ * `UpdateLayerForm.tsx` carries the reasoning. On this form the parsed members
+ * are echoed back as tokens, because a comma-separated line does not show the
  * reader how it was split and a mis-split grant admits the wrong people. Each
  * token removes itself, so a member entered by mistake is dropped from the
  * grant without editing a separator out of the line by hand.
@@ -798,18 +804,25 @@ function VisibilityAxis({
  * field is a text input rather than a wrapping label because the tokens and
  * the picker rows are controls, and a control inside a label steals the
  * label's click. */
-function TokenInput({
+export function TokenInput({
   label,
   value,
   onChange,
   tokens,
   known,
   held,
+  onRemove,
 }: {
   label: string;
   value: string;
   onChange: (next: string) => void;
   tokens: string[];
+  /** onRemove takes back one token when the token list is held apart from the
+   * line, which is what the Edit dialog does with a stored grant: its members
+   * are held as the array the record supplied, so a member carrying a comma
+   * survives a round trip. A field whose tokens are the line's own members
+   * omits it and the removal rewrites the line. */
+  onRemove?: (token: string) => void;
   /** held carries the id of the element stating the hold when the submit is
    * held on this field, and is absent otherwise. */
   held?: string;
@@ -853,6 +866,10 @@ function TokenInput({
               key={token}
               aria-label={`Remove ${token}`}
               onClick={() => {
+                if (onRemove !== undefined) {
+                  onRemove(token);
+                  return;
+                }
                 onChange(without(tokens, token).join(', '));
               }}
             >

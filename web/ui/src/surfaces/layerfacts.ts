@@ -34,13 +34,24 @@ export function markerText(marker: VisibilityMarker): string {
   return marker.extra > 0 ? `${marker.named} +${String(marker.extra)}` : marker.named;
 }
 
+/** noGrants is what a surface states for a record that sets no visibility
+ * field. It states the record's own fact and asserts nothing about who reads
+ * the layer, because who reads it depends on the deployment rather than on
+ * the record: §4.6 matches no condition on such a record, and the bypasses in
+ * the same section admit every caller on a registry running in public mode or
+ * configuring no identity provider. The Edit dialog withdraws each axis, so
+ * the state is one an operator reaches deliberately, and the earlier copy
+ * naming a grant the registrant retains stated an access the record does not
+ * carry. A surface that holds the §7.3.4 posture read is where a reachability
+ * reading belongs. */
+export const noGrants = 'no grants';
+
 /** visibilitySummary is every axis a layer grants on, as one line. A layer
  * that grants on no axis states that rather than rendering an empty line,
- * because §4.6 leaves such a layer visible to its registrant alone and the
- * absence of grants is the fact the reader needs. */
+ * because the absence of grants is the fact the reader needs. */
 export function visibilitySummary(layer: LayerRecord): string {
   const markers = visibilityMarkers(layer);
-  return markers.length === 0 ? 'no grants — only you' : markers.map(markerText).join(', ');
+  return markers.length === 0 ? noGrants : markers.map(markerText).join(', ');
 }
 
 /** memberBudget is how many characters of member names one marker states
