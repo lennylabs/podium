@@ -6483,9 +6483,10 @@ skip and record the skip.
    The second call is the arm the stored-owner comparison exists for. Carol
    holds the tenant-admin role from `PODIUM_BOOTSTRAP_ADMINS`, so the §7.3.1
    layer write rule admits her on a layer she does not own, and the `owner` the
-   body carries names alice's subject rather than her own. A `200` on the first
-   call and a `400` on the second means `owner` is compared against the calling
-   subject rather than against the layer's stored owner, and every tenant admin
+   body carries names `$SUBJECT`, the S44 realm user's subject, rather than
+   carol's own. A `200` on the first call and a `400` on the second means
+   `owner` is compared against the calling subject rather than against the
+   layer's stored owner, and every tenant admin
    that reads a layer object and returns it unchanged is then refused. The first
    call alone does not read that difference: on the owner, a comparison against
    the stored owner and a comparison against the caller's subject answer
@@ -6622,9 +6623,10 @@ skip and record the skip.
    flags is admitted rather than refused: it re-registers the layer as a
    personal one, resetting its webhook secret, order, registration time, and
    ingest history for no widening at all. After the conversion neither variant
-   reaches that point. `s59-notes` is admin-defined, alice holds no tenant-admin
-   grant, and the §7.3.1 layer write rule refuses her on the stored record with
-   a bare `auth.forbidden` that carries no `details`.
+   reaches that point. `s59-notes` is admin-defined, the S44 signed-in caller
+   (`admin`, `$SUBJECT`) holds no tenant-admin grant on this stack, and the
+   §7.3.1 layer write rule refuses that caller on the stored record with a bare
+   `auth.forbidden` that carries no `details`.
 
 9. Read the Edit dialog on a personal row. Open
    `http://127.0.0.1:8153/app/#/layers` in a private browser window and click
@@ -6651,9 +6653,9 @@ skip and record the skip.
 
    The `s59-notes` row offers no contrast to read here. It is admin-defined
    after step 8, and the panel offers `Edit` on an admin-defined row only to a
-   caller holding `manage_any_layer`. The signed-in caller is alice, who holds
-   no tenant-admin grant on this stack, so that row's overflow control carries no
-   `Edit` item and its dialog cannot be opened. The admin-defined rendering,
+   caller holding `manage_any_layer`. The S44 signed-in caller (`admin`,
+   `$SUBJECT`) holds no tenant-admin grant on this stack, so that row's overflow
+   control carries no `Edit` item and its dialog cannot be opened. The admin-defined rendering,
    which draws an `Axes granted` label over the granted axis and the two fields
    that add group names and user identifiers, is pinned by the
    `web/ui/src/surfaces.test.tsx` case `states a granted visibility axis in the
