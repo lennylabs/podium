@@ -11428,14 +11428,13 @@ describe("the layer write flows", () => {
     ).toBe(1);
   });
 
-  // The endpoint grants on each visibility axis and withdraws on none, so a
-  // member the layer already carries cannot be taken back from the Edit
-  // dialog. The granted members are displayed rather than held in the field,
-  // and the patch carries them however the field is edited, so no deletion is
-  // sent and answered with a plain success the operator reads as a narrowing.
+  // §7.3.1 applies each visibility member the patch carries, so a member the
+  // layer already carries is withdrawn by removing it here. The stored members
+  // seed the line, each one removes itself, and the patch carries the list the
+  // reader left rather than the stored grant plus their additions.
   //
-  // Spec: §4.6
-  it("keeps a granted user on the layer the Edit dialog patches", async () => {
+  // Spec: §4.6, §7.3.1
+  it("withdraws a stored user the Edit dialog's reader removes", async () => {
     const granted = { ...adminLayer(), users: ["alice@acme.com"] };
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
@@ -11448,35 +11447,34 @@ describe("the layer write flows", () => {
     openRowActions("company");
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const form = await screen.findByLabelText("Update company");
-    // The grant is displayed, and the field beside it names additions alone.
-    expect(
-      within(within(form).getByLabelText("Users granted")).getByText(
-        "alice@acme.com",
-      ),
-    ).toBeTruthy();
-    const add = within(form).getByLabelText(
-      "User identifiers to add, separated by commas",
+    // The stored grant seeds the line, so the reader edits the list itself.
+    const line = within(form).getByLabelText(
+      "User identifiers, separated by commas",
     ) as HTMLInputElement;
-    expect(add.value).toBe("");
-    fireEvent.change(add, { target: { value: "bob@acme.com" } });
+    expect(line.value).toBe("alice@acme.com");
+    fireEvent.change(line, {
+      target: { value: "alice@acme.com, bob@acme.com" },
+    });
+    // Each token removes itself, and the removal reaches the wire.
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Remove alice@acme.com" }),
+    );
+    expect(line.value).toBe("bob@acme.com");
     fireEvent.submit(form);
     await screen.findByText("Layer company is updated.");
     const sent = JSON.parse(bodies[bodies.length - 1]) as {
       users: string[];
     };
-    expect(sent.users).toEqual(["alice@acme.com", "bob@acme.com"]);
+    expect(sent.users).toEqual(["bob@acme.com"]);
   });
 
-  // The endpoint grants on each visibility axis and withdraws on none, so the
-  // Edit dialog states an axis the layer already grants instead of drawing a
-  // checkbox for it. A checkbox there was operable in appearance and inert in
-  // fact: clicking it changed nothing, saying nothing, and the row still
-  // carried the axis after the patch reported success. The sentence that says
-  // why the axis cannot be taken back sits with the axis, above the fields
-  // below it, so the reader looking for the control reads it.
+  // §7.3.1 applies each visibility axis the patch carries, so the Edit dialog
+  // draws an axis the layer already grants as an operable checkbox: turning it
+  // off withdraws the axis. The sentence stating that a granted axis could not
+  // be taken back is gone with the rule it described.
   //
-  // Spec: §4.6
-  it("states a granted visibility axis in the Edit dialog rather than drawing an inert checkbox", async () => {
+  // Spec: §4.6, §7.3.1
+  it("draws a granted visibility axis in the Edit dialog as an operable checkbox", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [adminLayer()] } },
@@ -11488,33 +11486,73 @@ describe("the layer write flows", () => {
     openRowActions("company");
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const form = await screen.findByLabelText("Update company");
-    // The granted axis carries no control at all, and is stated as a marker.
-    expect(within(form).queryByLabelText("Organization")).toBeNull();
-    const granted = within(form).getByLabelText("Axes granted");
-    expect(within(granted).getByText("organization")).toBeTruthy();
-    // The axis the layer does not grant is still offered, and it toggles.
+    // The granted axis is a checkbox, it is checked, and it turns off.
+    const held = within(form).getByLabelText("Organization") as HTMLInputElement;
+    expect(held.checked).toBe(true);
+    expect(held.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(held);
+    expect(held.checked).toBe(false);
+    // The axis the layer does not grant is offered on the same terms.
     const open = within(form).getByLabelText("Public") as HTMLInputElement;
-    expect(open.hasAttribute("disabled")).toBe(false);
+    expect(open.checked).toBe(false);
     fireEvent.click(open);
     expect(open.checked).toBe(true);
-    // The withdrawal sentence stands ahead of the member fields, so it is in
-    // view where the axis is read rather than below the whole fieldset.
-    const note = within(form).getByText(
-      "An axis already granted stays granted. Unregister the layer to withdraw it.",
-    );
-    const field = within(form).getByLabelText(
-      "Group names to add, separated by commas",
-    );
-    expect(
-      note.compareDocumentPosition(field) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    // The sentence that said a grant could not be taken back is gone.
+    expect(within(form).queryByLabelText("Axes granted")).toBeNull();
+    expect(form.textContent).not.toContain("stays granted");
+    // The withdrawal reaches the wire as the axis member set to false.
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    const sent = JSON.parse(bodies[bodies.length - 1]) as Record<string, unknown>;
+    expect(sent.organization).toBe(false);
+    expect(sent.public).toBe(true);
   });
 
-  // Registration is where visibility is chosen, and Edit only widens it, so
-  // the note that sends the reader to Edit says which way the change runs.
+  // The withdrawal controls are confined to the admin-defined branch. §7.3.1
+  // refuses a patch asserting a visibility member differing from the stored
+  // value on a user-defined layer, so a stored member is drawn there without a
+  // control that would take it back and the patch names no visibility member
+  // at all.
   //
-  // Spec: §4.6
-  it("tells the register dialog's reader that Edit widens visibility and withdraws nothing", async () => {
+  // Spec: §4.6, §7.3.1
+  it("offers no withdrawal control on a user-defined layer and sends no visibility member", async () => {
+    const owned = { ...userLayer(), users: ["alice@acme.com"] };
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [owned] } },
+      "PUT /v1/layers/update": { body: { layer: owned } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update alice-personal");
+    expect(within(form).queryByLabelText("Public")).toBeNull();
+    expect(within(form).queryByLabelText("Organization")).toBeNull();
+    expect(
+      within(form).queryByLabelText("User identifiers, separated by commas"),
+    ).toBeNull();
+    expect(
+      within(form).queryByRole("button", { name: "Remove alice@acme.com" }),
+    ).toBeNull();
+    fireEvent.submit(form);
+    await screen.findByText("Layer alice-personal is updated.");
+    const sent = JSON.parse(bodies[bodies.length - 1]) as Record<
+      string,
+      unknown
+    >;
+    for (const member of ["public", "organization", "groups", "users"]) {
+      expect(Object.hasOwn(sent, member)).toBe(false);
+    }
+  });
+
+  // Registration is where an admin-defined layer's visibility is first chosen,
+  // and §7.3.1's patch applies every member it carries, so the note that sends
+  // the reader to Edit says that the change runs both ways.
+  //
+  // Spec: §4.6, §7.3.1
+  it("tells the register dialog's reader that Edit both widens and withdraws visibility", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
       "/v1/layers": { body: { layers: [] } },
@@ -11531,9 +11569,7 @@ describe("the layer write flows", () => {
     expect(
       screen.getByTestId("visibility-note").querySelector(".note-text")
         ?.textContent,
-    ).toBe(
-      "Visibility can be widened later from Edit. A grant cannot be withdrawn.",
-    );
+    ).toBe("Visibility can be widened and withdrawn later from Edit.");
   });
 
   // An outcome that carries no secret closes through the same footer control
@@ -12206,14 +12242,15 @@ describe("the layer write flows", () => {
     openRowActions("company");
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const form = await screen.findByLabelText("Update company");
-    // The endpoint applies a visibility patch on an admin-defined layer, so
-    // the form carries the axes it can still grant. It grants on each axis and
-    // revokes on none, so a stored grant is stated rather than offered as a
-    // change the registry answers success to without making.
-    expect(screen.queryByLabelText("Organization")).toBeNull();
+    // The endpoint applies every visibility member the patch carries on an
+    // admin-defined layer, so the form draws each axis as a checkbox and the
+    // stored grant is read off the control rather than stated beside it.
+    expect(
+      (screen.getByLabelText("Organization") as HTMLInputElement).checked,
+    ).toBe(true);
     fireEvent.click(screen.getByLabelText("Public"));
     fireEvent.change(
-      screen.getByLabelText("Group names to add, separated by commas"),
+      screen.getByLabelText("Group names, separated by commas"),
       { target: { value: "secops" } },
     );
     fireEvent.change(screen.getByLabelText("Ref"), {

@@ -1,10 +1,12 @@
 // Updating a layer. The update is a partial patch, so a field left as the
 // stored value is sent unchanged and the registry keeps it. The visibility
 // axes are offered on an admin-defined layer, which is the class the endpoint
-// applies them to. §4.6 fixes a user-defined layer's visibility at
-// registration, and §7.3.1 refuses a patch that asserts an owner or a
-// visibility axis against a stored user-defined layer with
-// `400 registry.invalid_argument` carrying
+// applies them to: §7.3.1 applies each visibility member the patch carries and
+// keeps the stored value of each member it omits, so an axis turned off and a
+// member removed here are both withdrawn. §4.6 fixes a user-defined layer's
+// visibility at registration, and §7.3.1 refuses a patch that asserts an owner
+// or a visibility member differing from the stored value against a stored
+// user-defined layer with `400 registry.invalid_argument` carrying
 // `details.constraint: "immutable_visibility"`, so that class displays its
 // visibility rather than editing it.
 
@@ -12,7 +14,8 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 
 import { SecretReveal, useSecretAcknowledgement } from "./SecretReveal";
-import { members, merge } from "./members";
+import { members } from "./members";
+import { TokenInput } from "./RegisterLayerForm";
 import { mayTake } from "./layerrights";
 import type { LayerCapabilities } from "../session";
 import { Badge, ErrorState, Modal } from "../components/primitives";
@@ -48,23 +51,12 @@ export function UpdateLayerForm({
   const editableVisibility = layer.user_defined !== true;
   const [isPublic, setPublic] = useState(layer.public === true);
   const [organization, setOrganization] = useState(layer.organization === true);
-  // The members already granted on an axis are displayed rather than edited,
-  // because the endpoint grants on each axis and withdraws on none: a field
-  // holding them would accept a deletion the registry discards while still
-  // answering success, which reads to an operator as an access narrowing that
-  // never happened. The field beside them names the members to add.
-  const grantedGroups = layer.groups ?? [];
-  const grantedUsers = layer.users ?? [];
-  // An axis the layer already grants is state rather than a choice, and it is
-  // drawn as such. Offered as a checkbox it was operable in appearance and
-  // inert in fact: the click changed nothing, the form still answered "Layer
-  // updated", and the row still carried the axis.
-  const grantedAxes = [
-    layer.public === true ? "public" : "",
-    layer.organization === true ? "organization" : "",
-  ].filter((axis) => axis !== "");
-  const [groups, setGroups] = useState("");
-  const [users, setUsers] = useState("");
+  // The member lines are seeded from the stored grant, because the patch
+  // replaces the list rather than adding to it: what the reader leaves on the
+  // line is what the layer carries afterwards, and a token removed here is
+  // withdrawn by the write.
+  const [groups, setGroups] = useState((layer.groups ?? []).join(", "));
+  const [users, setUsers] = useState((layer.users ?? []).join(", "));
   const [result, setResult] = useState<LayerSecretResult | null>(null);
   const secret = useSecretAcknowledgement();
   const [refusal, setRefusal] = useState<unknown>(null);
@@ -103,13 +95,13 @@ export function UpdateLayerForm({
         ? { local_path: localPath, root }
         : { root };
     if (editableVisibility) {
-      // Each axis the patch carries grants, and an axis it omits keeps its
-      // stored value, so the form sends an axis the reader turned on and the
-      // stored members plus the ones they added.
+      // The patch carries every visibility member, so the registry applies
+      // each one: an axis the reader turned off is withdrawn, and a member
+      // list is stored as the reader left it.
       patch.public = isPublic;
       patch.organization = organization;
-      patch.groups = merge(grantedGroups, members(groups));
-      patch.users = merge(grantedUsers, members(users));
+      patch.groups = members(groups);
+      patch.users = members(users);
     }
     setPending(true);
     updateLayer(layer.id, patch).then(
@@ -230,57 +222,38 @@ export function UpdateLayerForm({
           {editableVisibility ? (
             <fieldset className="field">
               <legend className="label">Visibility</legend>
-              <GrantedAxes axes={grantedAxes} />
-              {layer.public !== true && (
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={isPublic}
-                    onChange={(event) => {
-                      setPublic(event.target.checked);
-                    }}
-                  />
-                  Public
-                </label>
-              )}
-              {layer.organization !== true && (
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={organization}
-                    onChange={(event) => {
-                      setOrganization(event.target.checked);
-                    }}
-                  />
-                  Organization
-                </label>
-              )}
-              <GrantedMembers label="Groups granted" members={grantedGroups} />
-              <label className="field">
-                <span className="label">
-                  Group names to add, separated by commas
-                </span>
+              <label>
                 <input
-                  type="text"
-                  value={groups}
+                  type="checkbox"
+                  checked={isPublic}
                   onChange={(event) => {
-                    setGroups(event.target.value);
+                    setPublic(event.target.checked);
                   }}
                 />
+                Public
               </label>
-              <GrantedMembers label="Users granted" members={grantedUsers} />
-              <label className="field">
-                <span className="label">
-                  User identifiers to add, separated by commas
-                </span>
+              <label>
                 <input
-                  type="text"
-                  value={users}
+                  type="checkbox"
+                  checked={organization}
                   onChange={(event) => {
-                    setUsers(event.target.value);
+                    setOrganization(event.target.checked);
                   }}
                 />
+                Organization
               </label>
+              <TokenInput
+                label="Group names, separated by commas"
+                value={groups}
+                onChange={setGroups}
+                tokens={members(groups)}
+              />
+              <TokenInput
+                label="User identifiers, separated by commas"
+                value={users}
+                onChange={setUsers}
+                tokens={members(users)}
+              />
             </fieldset>
           ) : (
             <div className="field">
@@ -344,68 +317,5 @@ export function UpdateLayerForm({
         </div>
       </form>
     </Modal>
-  );
-}
-
-/** GrantedAxes displays the axes the layer already grants, in the fixed order
- * the panel's own visibility column uses, with the sentence that says why they
- * cannot be taken back beside them. The endpoint grants on each axis and
- * withdraws on none, so an axis already stored is not a control here: it is
- * stated where the reader looking for the axis lands, at the top of the
- * fieldset, rather than under the fields below it where the dialog's default
- * scroll position leaves it out of view.
- *
- * Spec: §4.6
- */
-function GrantedAxes({ axes }: { axes: readonly string[] }) {
-  if (axes.length === 0) {
-    return null;
-  }
-  return (
-    <div className="field">
-      <span className="label">Axes granted</span>
-      <span className="visibility-markers" aria-label="Axes granted">
-        {axes.map((axis) => (
-          <Badge key={axis} tone="grant">
-            {axis}
-          </Badge>
-        ))}
-      </span>
-      <p className="quiet">
-        An axis already granted stays granted. Unregister the layer to withdraw
-        it.
-      </p>
-    </div>
-  );
-}
-
-/** GrantedMembers displays the members an axis already carries. They are drawn
- * as tokens rather than as a value in the field beside them, because the
- * registry withdraws no grant: a removable control here would report success
- * on a deletion it discarded.
- *
- * Spec: §4.6
- */
-function GrantedMembers({
-  label,
-  members: granted,
-}: {
-  label: string;
-  members: readonly string[];
-}) {
-  if (granted.length === 0) {
-    return null;
-  }
-  return (
-    <div className="field">
-      <span className="label">{label}</span>
-      <span className="token-row" aria-label={label}>
-        {granted.map((member) => (
-          <span className="token mono" key={member}>
-            {member}
-          </span>
-        ))}
-      </span>
-    </div>
   );
 }

@@ -477,7 +477,9 @@ export function RegisterLayerForm({
             ⓘ
           </span>
           <span className="note-text">
-            {userDefined ? 'Visibility is fixed at registration.' : 'Visibility can be widened later from Edit. A grant cannot be withdrawn.'}
+            {userDefined
+              ? 'Visibility is fixed at registration.'
+              : 'Visibility can be widened and withdrawn later from Edit.'}
           </span>
         </p>
         <div className="modal-foot">
@@ -788,7 +790,9 @@ function VisibilityAxis({
   );
 }
 
-/** TokenInput names the members of a selected axis. The parsed members are
+/** TokenInput names the members of an axis. The Edit dialog draws it over the
+ * same members, where the line is seeded from the stored grant and a removal
+ * withdraws it. The parsed members are
  * echoed back as tokens, because a comma-separated line does not show the
  * reader how it was split and a mis-split grant admits the wrong people. Each
  * token removes itself, so a member entered by mistake is dropped from the
@@ -798,7 +802,7 @@ function VisibilityAxis({
  * field is a text input rather than a wrapping label because the tokens and
  * the picker rows are controls, and a control inside a label steals the
  * label's click. */
-function TokenInput({
+export function TokenInput({
   label,
   value,
   onChange,

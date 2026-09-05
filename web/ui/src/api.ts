@@ -534,8 +534,9 @@ export function registerLayer(body: LayerRegistration): Promise<LayerSecretResul
  * `public`, `organization`, `groups`, or `users` against a stored user-defined
  * layer with `400 registry.invalid_argument` carrying
  * `details.constraint: "immutable_visibility"`, which is why the form
- * withholds them on that class. Each axis grants and none revokes, which is
- * the same patch the CLI drives. */
+ * withholds them on that class. A visibility member the patch carries is
+ * applied and one it omits keeps its stored value, so `public: false` and an
+ * empty `groups` withdraw. It is the same patch the CLI drives. */
 export interface LayerUpdate {
   ref?: string;
   root?: string;
