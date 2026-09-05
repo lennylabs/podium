@@ -9769,8 +9769,10 @@ describe("the layer write flows", () => {
   // §13.10 makes the panel the surface a user manages their own user-defined
   // layers on, which is the class §7.3.1 caps per user and authorizes its
   // owner on, so that is the class the form registers by default. The
-  // registry fixes such a layer's visibility to the registrant and discards
-  // what the request carries, so the axes are absent on that class.
+  // registry fixes such a layer's visibility to the registrant and refuses a
+  // registration that asserts an admin-only field with `403 auth.forbidden`
+  // carrying `details.constraint: "admin_only_fields"`, so the axes are
+  // absent on that class.
   it("registers the caller’s own layer as user-defined and offers it no visibility axes", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
@@ -12261,9 +12263,11 @@ describe("the layer write flows", () => {
     const form = await screen.findByLabelText("Update alice-personal");
     const rotate = screen.getByLabelText("Rotate the webhook secret");
     expect(rotate.hasAttribute("disabled")).toBe(true);
-    // §4.6 fixes a user-defined layer's visibility at registration, and the
-    // registry ignores a visibility patch there and still answers success, so
-    // that class displays its visibility rather than editing it.
+    // §4.6 fixes a user-defined layer's visibility at registration, and
+    // §7.3.1 refuses a visibility patch there with
+    // `400 registry.invalid_argument` carrying
+    // `details.constraint: "immutable_visibility"`, so that class displays
+    // its visibility rather than editing it.
     expect(screen.queryByLabelText("Organization")).toBeNull();
     expect(form.textContent).toContain("fixed to you at registration");
     expect(form.textContent).toContain(
@@ -12292,6 +12296,51 @@ describe("the layer write flows", () => {
     expect(
       (await screen.findByText("Layer alice-personal is updated.")).textContent,
     ).toBeTruthy();
+  });
+
+  // §7.3.1 refuses a patch that asserts `owner`, `public`, `organization`,
+  // `groups`, or `users` against a stored user-defined layer with
+  // `400 registry.invalid_argument` carrying
+  // `details.constraint: "immutable_visibility"`. The form withholds every
+  // one of those members on that class, so the refusal is unreachable from
+  // here, and the absence of all five in the sent body is the property that
+  // makes it so.
+  it("omits every immutable visibility member from a user-defined layer’s patch", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [userLayer()] } },
+      "PUT /v1/layers/update": { body: { layer: userLayer() } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update alice-personal");
+    // The visibility is displayed rather than edited on this class.
+    expect(form.textContent).toContain("fixed to you at registration");
+    expect(screen.queryByLabelText("Public")).toBeNull();
+    expect(screen.queryByLabelText("Organization")).toBeNull();
+    fireEvent.submit(form);
+    await waitFor(() => {
+      expect(
+        requests.some(
+          (r) =>
+            r.url === "/v1/layers/update?id=alice-personal" &&
+            r.method === "PUT",
+        ),
+      ).toBe(true);
+    });
+    const patch = JSON.parse(bodies.at(-1) ?? "{}") as Record<string, unknown>;
+    for (const member of [
+      "public",
+      "organization",
+      "groups",
+      "users",
+      "owner",
+    ]) {
+      expect(Object.hasOwn(patch, member)).toBe(false);
+    }
   });
 
   // The update is reviewed before it is sent, on the same terms as the
