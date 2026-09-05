@@ -118,13 +118,18 @@ func KnownMatrices() []Matrix {
 		},
 		{
 			ID:         "§4.6",
-			Title:      "Visibility unions: every subset of {public, organization, groups, users}",
+			Title:      "Visibility unions over {public, organization, groups, users}, the empty union included",
 			Phase:      7,
 			StubPrefix: "Visibility_Union",
 			Axes: [][]string{
-				// 15 non-empty subsets enumerated explicitly so the
-				// scaffolded names read clearly.
+				// The subsets are enumerated explicitly so the scaffolded
+				// names read clearly. "none" is the empty union: a stored
+				// record setting no visibility field, which registration
+				// reaches under a deployment default resolving to no field
+				// and which the §7.3.1 update endpoint reaches by
+				// withdrawing every member.
 				{
+					"none",
 					"public",
 					"organization",
 					"groups",

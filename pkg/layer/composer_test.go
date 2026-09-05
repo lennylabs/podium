@@ -95,9 +95,37 @@ func TestVisible_PublicModeBypass(t *testing.T) {
 	}
 }
 
+// Spec: §13.10 — a registry started with no request-time identity verifier
+// resolves every caller as anonymous-public, so the evaluator short-circuits
+// on that one field for every layer, a record setting no visibility field
+// included.
+// Spec: §4.6 — the no-identity bypass.
+func TestVisible_NoFieldLayerVisibleToNoResolvedCaller(t *testing.T) {
+	t.Parallel()
+	// A stored record setting no visibility field, which registration
+	// reaches whenever the deployment default resolves to no field and which
+	// the §7.3.1 update endpoint reaches by withdrawing every member.
+	l := Layer{ID: "withdrawn", Visibility: Visibility{}}
+
+	if Visible(l, Identity{Sub: "alice", IsAuthenticated: true,
+		Email: "alice@acme.com", Groups: []string{"acme-eng"}}) {
+		t.Error("a record setting no visibility field must reach no authenticated caller")
+	}
+	if Visible(l, Identity{}) {
+		t.Error("a record setting no visibility field must reach no unauthenticated caller")
+	}
+	// IsPublic is the evaluator's one record-independent arm, which public
+	// mode and a registry wiring no identity verifier both set.
+	if !Visible(l, Identity{IsPublic: true}) {
+		t.Error("the public bypass must admit a record setting no visibility field")
+	}
+}
+
 // Spec: §4.6 Visibility — every subset of {public, organization,
 // groups, users} composes as a union: a caller sees the layer if any
-// component matches, and never if none match.
+// component matches, and never if none match, which the empty subset
+// reaches for every caller the registry resolves to a subject.
+// Matrix: §4.6 (none)
 // Matrix: §4.6 (users)
 // Matrix: §4.6 (public_organization)
 // Matrix: §4.6 (public_groups)
@@ -127,6 +155,7 @@ func TestVisible_AllUnions(t *testing.T) {
 		vis  Visibility
 	}
 	subsets := []subset{
+		{"none", Visibility{}},
 		{"users", Visibility{Users: []string{"explicit-user"}}},
 		{"public_organization", Visibility{Public: true, Organization: true}},
 		{"public_groups", Visibility{Public: true, Groups: []string{"finance"}}},
@@ -171,11 +200,17 @@ func TestVisible_AllUnions(t *testing.T) {
 		}
 
 		// Unions where neither org nor public is set must reject
-		// non-matching authenticated users.
+		// non-matching authenticated users. On the empty subset this is
+		// the whole rule: it matches no condition, so it reaches no caller
+		// the registry resolves to a subject.
 		if !s.vis.Public && !s.vis.Organization {
 			if Visible(layer, noMatch) {
 				t.Errorf("%s: outsider should not be visible", s.name)
 			}
+		}
+		// Only public grants an unauthenticated caller.
+		if !s.vis.Public && Visible(layer, unauth) {
+			t.Errorf("%s: unauthenticated should not be visible", s.name)
 		}
 	}
 }

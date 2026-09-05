@@ -14,9 +14,11 @@ import (
 )
 
 // Spec: §7.3.1 — `podium layer update` issues PUT
-// /v1/layers/update?id=ID. The endpoint applies a partial patch:
-// non-zero fields replace the prior LayerConfig values, zero
-// fields are preserved.
+// /v1/layers/update?id=ID. The endpoint applies a partial patch under two
+// readings: a visibility member the body carries is applied, including at its
+// zero value, and a member it omits keeps the layer's stored value; every
+// other member replaces the stored value when it is non-empty and leaves it
+// when it is empty. This test carries no `users`, so the stored one survives.
 func TestLayerUpdate_PartialPatch(t *testing.T) {
 	t.Parallel()
 	const tenantID = "t"

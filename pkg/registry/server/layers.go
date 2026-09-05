@@ -525,28 +525,124 @@ func adminOnlyRegistrationFields(req LayerRegisterRequest, sub string) []string 
 	return asserted
 }
 
-// assertedImmutableVisibilityFields reports the §4.6 fields the patch asserts
-// against a stored user-defined layer, in sorted order, and nothing against an
-// admin-defined one. A field is asserted by its value rather than by its
-// presence, for the reason adminOnlyRegistrationFields states: the request
-// decodes into plain string, bool, and []string fields, so an absent key and a
-// zero value are one thing after decode. The predicate loses nothing by it,
-// because register derives a user-defined layer's visibility from the
-// authenticated identity and never reads the request's public, organization,
-// or groups, so a stored layer of that class is always at public:false,
-// organization:false, no groups, users:[owner], and every widening value is
-// non-zero.
+// visibilityPatch is the §7.3.1 visibility half of an update body, resolved
+// against the members the body actually carried. LayerRegisterRequest decodes
+// into plain bool and []string members, so an absent key and a zero value are
+// one thing after decode, and the update path needs them apart: a present
+// member is applied, so "public": false withdraws the axis and an absent
+// "public" keeps the stored one. The register path needs no such distinction
+// and keeps the flat struct, which is why the presence map is read here.
 //
-// What asserts is a value that differs from what the layer stores. On the
-// three axes the class stores at their zero value, any non-zero value differs
-// by construction, so the check is the value alone. Users is the one axis
-// carrying a non-zero stored value, so it is compared, and owner is compared
-// against the layer's stored owner rather than against the caller's subject,
-// so a tenant admin who echoes back the owner they read asserts nothing.
-// store.LayerConfig marshals owner and users without omitempty, so a client
-// returning a layer object it read carries users:[<owner>] on every
-// user-defined layer, and that echo is the case these two comparisons exist
-// for.
+// This mirrors the §7.3.3 tenant PATCH, where tenantQuotaIn carries pointer
+// sub-fields and applyTo overlays the present ones.
+//
+// A member carrying JSON null resolves to the member's zero value, which
+// §7.3.1 fixes: the layer object reports an empty list as null, so a client
+// returning a layer object it read carries that value on every layer.
+//
+// Spec: §7.3.1, §4.6
+type visibilityPatch struct {
+	public       *bool
+	organization *bool
+	groups       *[]string
+	users        *[]string
+}
+
+// decodeVisibilityPatch reads the four §4.6 visibility members out of an
+// update body by presence. The member types are already validated by the
+// LayerRegisterRequest decode the caller performs on the same bytes, so the
+// error this returns is a body that is not a JSON object.
+//
+// Spec: §7.3.1
+func decodeVisibilityPatch(body []byte) (visibilityPatch, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return visibilityPatch{}, fmt.Errorf("layer update: decode body: %w", err)
+	}
+	var p visibilityPatch
+	if v, ok := raw["public"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			return visibilityPatch{}, fmt.Errorf("layer update: public: %w", err)
+		}
+		p.public = &b
+	}
+	if v, ok := raw["organization"]; ok {
+		var b bool
+		if err := json.Unmarshal(v, &b); err != nil {
+			return visibilityPatch{}, fmt.Errorf("layer update: organization: %w", err)
+		}
+		p.organization = &b
+	}
+	if v, ok := raw["groups"]; ok {
+		var list []string
+		if err := json.Unmarshal(v, &list); err != nil {
+			return visibilityPatch{}, fmt.Errorf("layer update: groups: %w", err)
+		}
+		p.groups = &list
+	}
+	if v, ok := raw["users"]; ok {
+		var list []string
+		if err := json.Unmarshal(v, &list); err != nil {
+			return visibilityPatch{}, fmt.Errorf("layer update: users: %w", err)
+		}
+		p.users = &list
+	}
+	return p, nil
+}
+
+// applyTo overlays the members the body carried onto cfg and leaves the rest.
+// A carried list that decodes empty is stored as nil rather than as an empty
+// slice: json.Unmarshal of [] yields a non-nil empty slice, store.LayerConfig
+// marshals Groups and Users without omitempty, and §7.3.1 fixes the read side
+// as reporting an empty list as null. Storing nil is what keeps the emptied
+// list and the never-populated list one stored value, so the layer object a
+// client echoes back is the value the endpoint just stored.
+//
+// Spec: §7.3.1, §4.6
+func (p visibilityPatch) applyTo(cfg store.LayerConfig) store.LayerConfig {
+	if p.public != nil {
+		cfg.Public = *p.public
+	}
+	if p.organization != nil {
+		cfg.Organization = *p.organization
+	}
+	if p.groups != nil {
+		cfg.Groups = nilIfEmpty(*p.groups)
+	}
+	if p.users != nil {
+		cfg.Users = nilIfEmpty(*p.users)
+	}
+	return cfg
+}
+
+// nilIfEmpty normalizes a decoded empty list to nil, so an emptied list and a
+// never-populated one are one stored value.
+func nilIfEmpty(list []string) []string {
+	if len(list) == 0 {
+		return nil
+	}
+	return list
+}
+
+// assertedImmutableVisibilityFields reports the §4.6 fields the patch would
+// change on a stored user-defined layer, in sorted order, and nothing against
+// an admin-defined one. A field asserts when the value the patch would store
+// differs from the stored one, which is the reading §7.3.1 fixes and the same
+// predicate the §8.1 emission reads. Presence alone would refuse a client that
+// reads a layer object and returns it unchanged, because that object carries
+// all four members on every layer and a user-defined layer reads back as
+// public:false, organization:false, groups:null, users:[<owner>].
+//
+// Emptying users asserts where every other zero value does not, because the
+// class stores users:[<owner>] and every other axis at its zero value: on the
+// three zero-valued axes a difference from the stored value is exactly a
+// non-zero value, and on users it is any list that is not the stored one.
+//
+// Owner is read off the flat patch because it keeps the non-empty-replaces
+// reading rather than the presence one, and it is compared against the
+// layer's stored owner rather than against the caller's subject, so a tenant
+// admin who echoes back the owner they read asserts nothing.
 //
 // The comparison is exact and neither trims nor reorders. An admitted patch
 // falls through to the application block below, which stores the value the
@@ -556,24 +652,25 @@ func adminOnlyRegistrationFields(req LayerRegisterRequest, sub string) []string 
 // both compare it exactly.
 //
 // Spec: §4.6, §7.3.1
-func assertedImmutableVisibilityFields(patch LayerRegisterRequest, cfg store.LayerConfig) []string {
+func assertedImmutableVisibilityFields(patch LayerRegisterRequest, vis visibilityPatch, cfg store.LayerConfig) []string {
 	if !cfg.UserDefined {
 		return nil
 	}
+	merged := vis.applyTo(cfg)
 	var asserted []string
-	if len(patch.Groups) > 0 {
+	if !slices.Equal(merged.Groups, cfg.Groups) {
 		asserted = append(asserted, "groups")
 	}
-	if patch.Organization {
+	if merged.Organization != cfg.Organization {
 		asserted = append(asserted, "organization")
 	}
 	if patch.Owner != "" && patch.Owner != cfg.Owner {
 		asserted = append(asserted, "owner")
 	}
-	if patch.Public {
+	if merged.Public != cfg.Public {
 		asserted = append(asserted, "public")
 	}
-	if len(patch.Users) > 0 && !slices.Equal(patch.Users, cfg.Users) {
+	if !slices.Equal(merged.Users, cfg.Users) {
 		asserted = append(asserted, "users")
 	}
 	return asserted
@@ -750,10 +847,13 @@ func (e *LayerEndpoint) WebhookHandler() http.Handler {
 	return mux
 }
 
-// update handles PUT /v1/layers/update?id=ID. Body fields that are
-// non-zero replace the corresponding LayerConfig field; zero
-// fields keep the prior value. This shape avoids having to send
-// the whole config and accidentally clear visibility filters.
+// update handles PUT /v1/layers/update?id=ID. The body is a partial patch
+// and the two readings §7.3.1 fixes apply to it. On the visibility members
+// (public, organization, groups, users) a member the body carries is applied
+// and a member it omits keeps the layer's stored value, so "public": false
+// withdraws the axis and "groups": [] empties the list; that is what makes a
+// grant reversible without unregistering the layer. On every other member a
+// non-zero value replaces the stored one and an empty value leaves it.
 //
 // Allowed mutations: Ref, Root, LocalPath, GitProvider,
 // ForcePushPolicy, and a webhook-secret rotation
@@ -789,8 +889,22 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "auth.forbidden", err.Error())
 		return
 	}
+	// The body is read once and unmarshalled twice: into the flat request for
+	// every member whose semantics are unchanged, and into a presence map for
+	// the §7.3.1 visibility members, which need an absent key and a zero value
+	// apart. LayerRegisterRequest is untouched, so register is untouched.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
 	var patch LayerRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+	if err := json.Unmarshal(body, &patch); err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	vis, err := decodeVisibilityPatch(body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
 	}
@@ -821,7 +935,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// performs including the rotation below, so a refused patch mints no
 	// webhook secret and applies no other field it carries. It runs after
 	// the local-source gate so a patch on both arms keeps that envelope.
-	if asserted := assertedImmutableVisibilityFields(patch, cfg); len(asserted) > 0 {
+	if asserted := assertedImmutableVisibilityFields(patch, vis, cfg); len(asserted) > 0 {
 		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument",
 			fmt.Sprintf("the fields %s cannot be patched on a user-defined layer; its owner and its users:[<owner>] visibility are fixed at registration, so re-send the patch without them, or ask an administrator to re-register the layer as an admin-defined one",
 				strings.Join(asserted, ", ")),
@@ -866,27 +980,17 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		cfg.WebhookSecret = secret
 		rotated = true
 	}
-	// spec: §4.6 — an admin may edit an admin-defined layer's owner and
-	// visibility. The block is unconditional because the immutable
-	// visibility refusal above has already returned on a user-defined
-	// layer that asserts any of these fields; what reaches here on that
-	// class restates what the layer stores, so each assignment rewrites a
-	// value with itself.
+	// spec: §7.3.1 — the patch semantics. A visibility member the body
+	// carried is applied and one it omitted keeps the stored value, so a
+	// grant is withdrawn through the same endpoint that made it. Owner keeps
+	// the non-empty-replaces reading the source members carry. The block is
+	// unconditional on the layer's class because the immutable visibility
+	// refusal above has already returned on a user-defined layer that would
+	// change any of these.
 	if patch.Owner != "" {
 		cfg.Owner = patch.Owner
 	}
-	if patch.Public {
-		cfg.Public = true
-	}
-	if patch.Organization {
-		cfg.Organization = true
-	}
-	if len(patch.Groups) > 0 {
-		cfg.Groups = patch.Groups
-	}
-	if len(patch.Users) > 0 {
-		cfg.Users = patch.Users
-	}
+	cfg = vis.applyTo(cfg)
 	if err := e.store.PutLayerConfig(r.Context(), cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return

@@ -118,17 +118,26 @@ func TestLayerEndpoint_UpdateCannotWidenUserDefined(t *testing.T) {
 	t.Run("each field refused", func(t *testing.T) {
 		t.Parallel()
 		cases := []struct {
+			name  string
 			field string
 			patch map[string]any
 		}{
-			{"groups", map[string]any{"groups": []string{"acme-eng"}}},
-			{"organization", map[string]any{"organization": true}},
-			{"owner", map[string]any{"owner": "bob"}},
-			{"public", map[string]any{"public": true}},
-			{"users", map[string]any{"users": []string{"bob"}}},
+			{"groups", "groups", map[string]any{"groups": []string{"acme-eng"}}},
+			{"organization", "organization", map[string]any{"organization": true}},
+			{"owner", "owner", map[string]any{"owner": "bob"}},
+			{"public", "public", map[string]any{"public": true}},
+			{"users", "users", map[string]any{"users": []string{"bob"}}},
+			// Emptying the stored users differs from the stored
+			// users:[<owner>] and therefore asserts, where the three axes
+			// the class stores at their zero value do not. §4.6 fixes
+			// against emptying that list on the same footing as widening
+			// it, because it would leave the layer reaching no composed
+			// view including its own owner's.
+			{"empty users", "users", map[string]any{"users": []string{}}},
+			{"null users", "users", map[string]any{"users": nil}},
 		}
 		for _, tc := range cases {
-			t.Run(tc.field, func(t *testing.T) {
+			t.Run(tc.name, func(t *testing.T) {
 				t.Parallel()
 				base, st := userDefinedLayerServer(t, nil)
 				before, _ := st.GetLayerConfig(context.Background(), "t", "personal")
@@ -269,9 +278,12 @@ func TestLayerEndpoint_UpdateCannotWidenUserDefined(t *testing.T) {
 		assertImmutableVisibilityRefusal(t, pResp, pBody, "public")
 	})
 
-	// A field is asserted by a value that differs from what the layer
-	// stores, so a zero value and a value restating the stored one assert
-	// nothing and the patch's other fields apply.
+	// A field is asserted by the value the patch would store when that value
+	// differs from what the layer stores, so a zero value on an axis the
+	// class stores at its zero value, and a value restating the stored one,
+	// both assert nothing and the patch's other fields apply. Emptying the
+	// stored users is the one zero value that differs, and it is refused in
+	// the table above.
 	t.Run("the zero-value and restating bodies are admitted", func(t *testing.T) {
 		t.Parallel()
 		cases := []struct {
@@ -281,7 +293,6 @@ func TestLayerEndpoint_UpdateCannotWidenUserDefined(t *testing.T) {
 			{"public false", map[string]any{"public": false}},
 			{"organization false", map[string]any{"organization": false}},
 			{"empty groups", map[string]any{"groups": []string{}}},
-			{"empty users", map[string]any{"users": []string{}}},
 			{"empty owner", map[string]any{"owner": ""}},
 			{"owner restating the stored owner", map[string]any{"owner": "alice"}},
 			{"users restating the stored users", map[string]any{"users": []string{"alice"}}},
@@ -424,6 +435,198 @@ func TestLayerEndpoint_UpdateCannotWidenUserDefined(t *testing.T) {
 			!reflect.DeepEqual(cfg.Groups, []string{"acme-eng"}) ||
 			!reflect.DeepEqual(cfg.Users, []string{"bob"}) {
 			t.Errorf("admin-defined layer did not take the patch: %+v", cfg)
+		}
+	})
+}
+
+// Spec: §7.3.1 — the patch semantics on the update body: a visibility member
+// the body carries is applied and a member it omits keeps the layer's stored
+// value, so a grant made through this endpoint or through a registration is
+// withdrawn through this endpoint.
+// Spec: §4.6 — a grant on an admin-defined layer is withdrawn afterwards, and
+// withdrawing every member leaves a stored record setting no field.
+func TestLayerEndpoint_UpdateNarrowsAnAdminDefinedLayer(t *testing.T) {
+	t.Parallel()
+
+	// grantedLayer registers an admin-defined layer holding every axis and
+	// returns its base URL and store.
+	grantedLayer := func(t *testing.T) (string, store.Store) {
+		t.Helper()
+		base, st, cleanup := newLayerHarness(t)
+		t.Cleanup(cleanup)
+		resp, body := mustPost(t, base, "/v1/layers", map[string]any{
+			"id": "team", "source_type": "local", "local_path": "/tmp/team",
+			"public": true, "organization": true,
+			"groups": []string{"acme-eng"}, "users": []string{"alice"},
+		})
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("register status = %d: %s", resp.StatusCode, body)
+		}
+		return base, st
+	}
+	read := func(t *testing.T, st store.Store) store.LayerConfig {
+		t.Helper()
+		cfg, err := st.GetLayerConfig(context.Background(), "t", "team")
+		if err != nil {
+			t.Fatalf("GetLayerConfig: %v", err)
+		}
+		return cfg
+	}
+
+	// A present member withdraws and every omitted member is preserved.
+	t.Run("public false withdraws the axis and preserves the rest", func(t *testing.T) {
+		t.Parallel()
+		base, st := grantedLayer(t)
+		resp, body := putJSON(t, base, "/v1/layers/update?id=team", map[string]any{"public": false})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		cfg := read(t, st)
+		if cfg.Public {
+			t.Error("Public = true, want the axis withdrawn")
+		}
+		if !cfg.Organization ||
+			!reflect.DeepEqual(cfg.Groups, []string{"acme-eng"}) ||
+			!reflect.DeepEqual(cfg.Users, []string{"alice"}) {
+			t.Errorf("an omitted member did not keep its stored value: %+v", cfg)
+		}
+	})
+
+	// An emptied list is stored as nil, so the layer object reports it as
+	// null and a client echoing that object back sends the stored value.
+	t.Run("an empty groups empties the list and preserves users", func(t *testing.T) {
+		t.Parallel()
+		base, st := grantedLayer(t)
+		resp, body := putJSON(t, base, "/v1/layers/update?id=team", map[string]any{"groups": []string{}})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		cfg := read(t, st)
+		if cfg.Groups != nil {
+			t.Errorf("Groups = %#v, want nil", cfg.Groups)
+		}
+		if !reflect.DeepEqual(cfg.Users, []string{"alice"}) {
+			t.Errorf("Users = %v, want [alice] preserved", cfg.Users)
+		}
+	})
+
+	// JSON null on a list member is that member's empty value.
+	t.Run("a null users empties the list", func(t *testing.T) {
+		t.Parallel()
+		base, st := grantedLayer(t)
+		resp, body := putJSON(t, base, "/v1/layers/update?id=team", map[string]any{"users": nil})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		if cfg := read(t, st); cfg.Users != nil {
+			t.Errorf("Users = %#v, want nil", cfg.Users)
+		}
+	})
+
+	// Withdrawing every member leaves a stored record setting no visibility
+	// field, which §4.6 states reaches no composed view.
+	t.Run("every member withdrawn leaves no grant", func(t *testing.T) {
+		t.Parallel()
+		base, st := grantedLayer(t)
+		if resp, body := putJSON(t, base, "/v1/layers/update?id=team", map[string]any{
+			"public": false, "groups": []string{},
+		}); resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		resp, body := putJSON(t, base, "/v1/layers/update?id=team", map[string]any{
+			"organization": false, "users": []string{},
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		cfg := read(t, st)
+		if cfg.Public || cfg.Organization || cfg.Groups != nil || cfg.Users != nil {
+			t.Errorf("a grant survived the withdrawal: %+v", cfg)
+		}
+		// The withdrawn layer reaches no caller the registry resolves to a
+		// subject, which is §4.6's reading of a record setting no field.
+		if layer.Visible(layer.Layer{ID: "team", Visibility: layer.Visibility{}},
+			layer.Identity{Sub: "alice", IsAuthenticated: true}) {
+			t.Error("a record setting no visibility field is visible to a resolved caller")
+		}
+	})
+
+	// A withdrawal applies beside a member on the non-empty-replaces reading.
+	t.Run("a withdrawal beside a ref applies both", func(t *testing.T) {
+		t.Parallel()
+		base, st, cleanup := newLayerHarness(t)
+		t.Cleanup(cleanup)
+		mustPost(t, base, "/v1/layers", map[string]any{
+			"id": "team", "source_type": "git", "repo": "git@example/team.git",
+			"ref": "main", "public": true, "organization": true,
+		})
+		resp, body := putJSON(t, base, "/v1/layers/update?id=team", map[string]any{
+			"organization": false, "ref": "release",
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		cfg := read(t, st)
+		if cfg.Organization {
+			t.Error("Organization = true, want the axis withdrawn")
+		}
+		if cfg.Ref != "release" {
+			t.Errorf("Ref = %q, want release", cfg.Ref)
+		}
+		if !cfg.Public {
+			t.Error("Public = false, want the omitted axis preserved")
+		}
+	})
+
+	// A withdrawal beside a rotation applies both, and the fresh secret is
+	// returned once.
+	t.Run("a withdrawal beside a rotation returns the secret once", func(t *testing.T) {
+		t.Parallel()
+		base, st, cleanup := newLayerHarness(t)
+		t.Cleanup(cleanup)
+		mustPost(t, base, "/v1/layers", map[string]any{
+			"id": "team", "source_type": "git", "repo": "git@example/team.git",
+			"ref": "main", "public": true,
+		})
+		before := read(t, st)
+		resp, body := putJSON(t, base, "/v1/layers/update?id=team", map[string]any{
+			"public": false, "rotate_webhook_secret": true,
+		})
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
+		}
+		var got server.LayerRegisterResponse
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if got.WebhookSecret == "" || got.WebhookSecret == before.WebhookSecret {
+			t.Errorf("webhook_secret = %q, want a fresh secret", got.WebhookSecret)
+		}
+		if cfg := read(t, st); cfg.Public {
+			t.Error("Public = true, want the axis withdrawn beside the rotation")
+		}
+	})
+
+	// The register path is untouched: it reads the flat request, where a
+	// carried false is indistinguishable from an omission, and a
+	// registration naming no axis still takes the deployment default.
+	t.Run("a registration carrying public false is unchanged", func(t *testing.T) {
+		t.Parallel()
+		base, st, cleanup := newLayerHarness(t)
+		t.Cleanup(cleanup)
+		resp, body := mustPost(t, base, "/v1/layers", map[string]any{
+			"id": "team", "source_type": "local", "local_path": "/tmp/team",
+			"public": false, "groups": []string{"acme-eng"},
+		})
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("register status = %d: %s", resp.StatusCode, body)
+		}
+		cfg := read(t, st)
+		if cfg.Public {
+			t.Error("Public = true, want the registration's false value stored")
+		}
+		if !reflect.DeepEqual(cfg.Groups, []string{"acme-eng"}) {
+			t.Errorf("Groups = %v, want [acme-eng]", cfg.Groups)
 		}
 	})
 }
