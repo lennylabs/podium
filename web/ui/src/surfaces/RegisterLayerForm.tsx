@@ -212,10 +212,10 @@ export function RegisterLayerForm({
       local_path: sourceType === 'local' ? localPath : undefined,
       user_defined: userDefined,
       // The registry derives a user-defined layer's visibility from the
-      // registrant and refuses a registration asserting an admin-only field
-      // with `403 auth.forbidden` carrying
-      // `details.constraint: "admin_only_fields"`, so the axes are sent on the
-      // admin-defined class alone.
+      // registrant and refuses a registration asserting an admin-only field on
+      // a caller the admin arm does not admit with `403 auth.forbidden`
+      // carrying `details.constraint: "admin_only_fields"`, so the axes are
+      // sent on the admin-defined class alone.
       public: userDefined ? undefined : isPublic,
       organization: userDefined ? undefined : organization,
       groups: !userDefined && groupScoped ? groupMembers : undefined,

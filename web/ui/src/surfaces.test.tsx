@@ -9770,9 +9770,10 @@ describe("the layer write flows", () => {
   // layers on, which is the class §7.3.1 caps per user and authorizes its
   // owner on, so that is the class the form registers by default. The
   // registry fixes such a layer's visibility to the registrant and refuses a
-  // registration that asserts an admin-only field with `403 auth.forbidden`
-  // carrying `details.constraint: "admin_only_fields"`, so the axes are
-  // absent on that class.
+  // registration that asserts an admin-only field on a caller the admin arm
+  // does not admit with `403 auth.forbidden` carrying
+  // `details.constraint: "admin_only_fields"`, so the axes are absent on that
+  // class.
   it("registers the caller’s own layer as user-defined and offers it no visibility axes", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
