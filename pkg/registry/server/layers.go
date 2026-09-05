@@ -10,6 +10,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -524,6 +525,60 @@ func adminOnlyRegistrationFields(req LayerRegisterRequest, sub string) []string 
 	return asserted
 }
 
+// assertedImmutableVisibilityFields reports the §4.6 fields the patch asserts
+// against a stored user-defined layer, in sorted order, and nothing against an
+// admin-defined one. A field is asserted by its value rather than by its
+// presence, for the reason adminOnlyRegistrationFields states: the request
+// decodes into plain string, bool, and []string fields, so an absent key and a
+// zero value are one thing after decode. The predicate loses nothing by it,
+// because register derives a user-defined layer's visibility from the
+// authenticated identity and never reads the request's public, organization,
+// or groups, so a stored layer of that class is always at public:false,
+// organization:false, no groups, users:[owner], and every widening value is
+// non-zero.
+//
+// What asserts is a value that differs from what the layer stores. On the
+// three axes the class stores at their zero value, any non-zero value differs
+// by construction, so the check is the value alone. Users is the one axis
+// carrying a non-zero stored value, so it is compared, and owner is compared
+// against the layer's stored owner rather than against the caller's subject,
+// so a tenant admin who echoes back the owner they read asserts nothing.
+// store.LayerConfig marshals owner and users without omitempty, so a client
+// returning a layer object it read carries users:[<owner>] on every
+// user-defined layer, and that echo is the case these two comparisons exist
+// for.
+//
+// The comparison is exact and neither trims nor reorders. An admitted patch
+// falls through to the application block below, which stores the value the
+// patch carried, so admitting an owner that is not byte-identical to the
+// stored one would replace the stored owner with a padded string; cfg.Owner
+// bounds authorizeLayerWrite and the per-identity user-defined layer cap, and
+// both compare it exactly.
+//
+// Spec: §4.6, §7.3.1
+func assertedImmutableVisibilityFields(patch LayerRegisterRequest, cfg store.LayerConfig) []string {
+	if !cfg.UserDefined {
+		return nil
+	}
+	var asserted []string
+	if len(patch.Groups) > 0 {
+		asserted = append(asserted, "groups")
+	}
+	if patch.Organization {
+		asserted = append(asserted, "organization")
+	}
+	if patch.Owner != "" && patch.Owner != cfg.Owner {
+		asserted = append(asserted, "owner")
+	}
+	if patch.Public {
+		asserted = append(asserted, "public")
+	}
+	if len(patch.Users) > 0 && !slices.Equal(patch.Users, cfg.Users) {
+		asserted = append(asserted, "users")
+	}
+	return asserted
+}
+
 // validForcePushPolicy reports whether p is one of the §7.3.1 accepted
 // force-push policy values ("" and "tolerant" both mean tolerant; "strict"
 // rejects a rewritten history).
@@ -700,12 +755,14 @@ func (e *LayerEndpoint) WebhookHandler() http.Handler {
 // fields keep the prior value. This shape avoids having to send
 // the whole config and accidentally clear visibility filters.
 //
-// Allowed mutations: visibility (Public, Organization, Groups,
-// Users), Ref, Root, LocalPath, Owner, GitProvider, ForcePushPolicy,
-// and a
-// webhook-secret rotation (rotate_webhook_secret). The store-bound
-// identifying fields (TenantID, ID, SourceType, CreatedAt) are
-// immutable.
+// Allowed mutations: Ref, Root, LocalPath, GitProvider,
+// ForcePushPolicy, and a webhook-secret rotation
+// (rotate_webhook_secret), on either layer class; and the visibility
+// fields (Public, Organization, Groups, Users) together with Owner on
+// an admin-defined layer alone, which a patch asserting them against a
+// stored user-defined layer is refused for (§7.3.1, the immutable
+// visibility rule). The store-bound identifying fields (TenantID, ID,
+// SourceType, CreatedAt) are immutable.
 func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut && r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
@@ -757,6 +814,20 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	if !e.authorizeLocalSource(w, r, "", patch.LocalPath, "") {
 		return
 	}
+	// spec: §7.3.1 — the immutable visibility rule. A user-defined layer's
+	// owner and its implicit users:[owner] visibility are fixed at
+	// registration, so an assertion is refused rather than discarded and
+	// answered 200. It is evaluated here, above every mutation this handler
+	// performs including the rotation below, so a refused patch mints no
+	// webhook secret and applies no other field it carries. It runs after
+	// the local-source gate so a patch on both arms keeps that envelope.
+	if asserted := assertedImmutableVisibilityFields(patch, cfg); len(asserted) > 0 {
+		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument",
+			fmt.Sprintf("the fields %s cannot be patched on a user-defined layer; its owner and its users:[<owner>] visibility are fixed at registration, so re-send the patch without them, or ask an administrator to re-register the layer as an admin-defined one",
+				strings.Join(asserted, ", ")),
+			map[string]any{"constraint": "immutable_visibility"})
+		return
+	}
 	// spec: §7.3.1 — a non-empty force_push_policy replaces the prior
 	// value; the empty string leaves it unchanged (consistent with the
 	// other patch fields).
@@ -795,26 +866,26 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		cfg.WebhookSecret = secret
 		rotated = true
 	}
-	// spec: §4.6 — a user-defined layer's owner and implicit
-	// users:[owner] visibility are fixed at registration and cannot be
-	// widened, so visibility/owner patches are ignored for it. An admin
-	// may edit an admin-defined layer's visibility.
-	if !cfg.UserDefined {
-		if patch.Owner != "" {
-			cfg.Owner = patch.Owner
-		}
-		if patch.Public {
-			cfg.Public = true
-		}
-		if patch.Organization {
-			cfg.Organization = true
-		}
-		if len(patch.Groups) > 0 {
-			cfg.Groups = patch.Groups
-		}
-		if len(patch.Users) > 0 {
-			cfg.Users = patch.Users
-		}
+	// spec: §4.6 — an admin may edit an admin-defined layer's owner and
+	// visibility. The block is unconditional because the immutable
+	// visibility refusal above has already returned on a user-defined
+	// layer that asserts any of these fields; what reaches here on that
+	// class restates what the layer stores, so each assignment rewrites a
+	// value with itself.
+	if patch.Owner != "" {
+		cfg.Owner = patch.Owner
+	}
+	if patch.Public {
+		cfg.Public = true
+	}
+	if patch.Organization {
+		cfg.Organization = true
+	}
+	if len(patch.Groups) > 0 {
+		cfg.Groups = patch.Groups
+	}
+	if len(patch.Users) > 0 {
+		cfg.Users = patch.Users
 	}
 	if err := e.store.PutLayerConfig(r.Context(), cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())

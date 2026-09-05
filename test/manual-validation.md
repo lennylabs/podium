@@ -153,6 +153,7 @@ rm -rf "$WORK"
 | S56 | The panel presents per-row only what the caller may take | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S57 | A stale prediction still refuses, and the panel says so | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S58 | Every layer response reads in snake_case | standalone | none | none | none |
+| S59 | A personal layer's owner and visibility are fixed | standalone | none | none | Keycloak (Docker) + mkcert CA |
 
 ---
 
@@ -4047,18 +4048,18 @@ the page's authentication control. No Go test reads a browser rendering, which i
 why the previous §13.10 text could claim the UI ran a device-code flow with an
 in-browser verification handoff and no test contradicted it.
 
-**This is the stack the browser-flow scenarios run on.** S47 through S50 and S55
-through S57 take their prerequisites and steps 1 to 4 from here and then sign
-in, so a change to the Keycloak registration or the serve invocation below
-reaches each of them.
+**This is the stack the browser-flow scenarios run on.** S47 through S50, S55
+through S57, and S59 take their prerequisites and steps 1 to 4 from here and
+then sign in, so a change to the Keycloak registration or the serve invocation
+below reaches each of them.
 
-**Bootstrap admin, for S56 and S57 alone.** This stack seeds no tenant-admin
+**Bootstrap admin, for S56, S57, and S59.** This stack seeds no tenant-admin
 grant and sets no `PODIUM_BOOTSTRAP_ADMINS`, and `POST /v1/admin/grants` is
 itself admin-gated, so no caller on the stack as written below can issue the
-first grant. S56 and S57 need one, so a run that reaches them amends step 3 with
-two additions. Before step 3's `podium serve`, create a second realm user
-`carol` the way S50 step 1 creates `bob`, read her `sub` and her access token,
-and name that `sub` as the bootstrap admin:
+first grant. S56, S57, and S59 need one, so a run that reaches them amends step
+3. Before step 3's `podium serve`, create a second realm user `carol` the way
+S50 step 1 creates `bob`, read her `sub` and her access token, and name that
+`sub` as the bootstrap admin:
 
 ```bash
 $KC create users -r master -s username=carol -s enabled=true -s email=carol@acme.com
@@ -4072,9 +4073,26 @@ export PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"
 ```
 
 Carol is the bootstrap operator and never signs in to the UI. She exists so the
-first grant has an issuer, and `PODIUM_BOOTSTRAP_ADMINS` is the only route to
-one on a registry whose grant table starts empty. A run of S44 through S50 alone
-skips this block, and the stack behaves as it does today.
+stack holds a tenant admin who issues the first grant and who owns none of the
+layers these scenarios register, and `PODIUM_BOOTSTRAP_ADMINS` is the only route
+to one on a registry whose grant table starts empty. A run of S44 through S50
+alone skips this block, and the stack behaves as it does today.
+
+A run that reaches S59 exports one further value in the same place, before step
+3's `podium serve`:
+
+```bash
+export PODIUM_MAX_USER_LAYERS=10
+```
+
+S59 registers personal layers as the signed-in caller, and on a run that reaches
+it that caller already owns the personal layers the earlier scenarios registered
+under the same subject. `PODIUM_MAX_USER_LAYERS` raises the §7.3.1 per-identity
+cap on user-defined layers, which is 3 by default, so those registrations are
+admitted rather than refused with `429 quota.layer_count_exceeded`. The cap is
+read once at startup, so a registry already serving under the default has to be
+stopped and started again with the raised value. A run that stops short of S59
+skips this export, and the stack serves under the default cap as it does today.
 
 **Prerequisites.** A local Keycloak serving an `https` issuer the host trusts, a
 confidential client registered for the authorization-code flow, and one access
@@ -4362,7 +4380,8 @@ misconfigured:
    (§6.3.4)`, and `config show` prints
    `oidc-jwt`. A registry in public mode shows every artifact to everyone and
    would make step 6 pass for the wrong reason. A missing sign-in line means the
-   browser flow is off, and S47 through S50 and S55 through S57 cannot run.
+   browser flow is off, and S47 through S50, S55 through S57, and S59 cannot
+   run.
 
    `config show` takes its path from `PODIUM_CONFIG_FILE` and defines no
    `--config` flag, which `serve` does; passing `--config` exits 1 with `flag
@@ -6252,4 +6271,400 @@ print("carries a secret value:", "webhook_secret" in doc)
 ```bash
 kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
 rm -rf "$WORK"
+```
+
+---
+
+## S59: A personal layer's owner and visibility are fixed
+
+**Goal.** Validate that the registry refuses a patch asserting `owner`,
+`public`, `organization`, `groups`, or `users` against a stored user-defined
+layer, that it refuses whichever caller sends it, that a patch restating what
+the layer already stores is admitted, that the refusal rejects the whole
+request, and that re-registering the layer's ID as an admin-defined layer is
+the recourse that widens it.
+
+**Covers.** The §7.3.1 immutable visibility rule and its
+`details.constraint: "immutable_visibility"` discriminator, §4.6 user-defined
+layer visibility, the §8.1 layer event a refused patch does not emit, and the
+§13.10 layer panel's Edit dialog.
+
+**Why by hand.** The Go suite pins the endpoint and the CLI arms. What it does
+not read is the operator's path across them: that the refused patch left the
+stored record, the audit log, and the layer's webhook secret alone, that the
+recourse an administrator is pointed at actually widens the layer for a third
+person, and that the Edit dialog on a personal row presents the visibility as a
+statement of fact rather than as a control the registry would refuse.
+
+**Prerequisites.** The S44 stack, with S44's bootstrap-admin note applied in
+full: run S44's Prerequisites and steps 1 to 4, and apply that note's amendments
+to step 3 for both S59 arms it covers, the `carol` bootstrap admin and the
+raised `PODIUM_MAX_USER_LAYERS`. Leave the registry running. Carol is the tenant
+admin who owns none of this scenario's layers: step 5 sends its second request
+as her, step 7 sends the refused patch as her, and step 8 runs the recourse as
+her. Without the bootstrap value the stack holds no tenant admin at all, and
+neither arm can run; without the raised cap step 1 is refused with
+`429 quota.layer_count_exceeded` on a stack the earlier scenarios have already
+registered personal layers on. When Keycloak or the `mkcert` CA is unavailable,
+skip and record the skip.
+
+**Steps.**
+
+1. Register two personal layers as the signed-in caller, who holds no
+   tenant-admin grant, and read the class, the owner, and the visibility of the
+   first.
+
+   ```bash
+   PODIUM_SESSION_TOKEN="$TOKEN" podium layer register \
+     --registry http://127.0.0.1:8153 --id s59-notes --user-defined \
+     --repo https://git.acme.internal/alice/s59-notes.git --ref main \
+     > "$WORK/s59-register.json"
+   PODIUM_SESSION_TOKEN="$TOKEN" podium layer register \
+     --registry http://127.0.0.1:8153 --id s59-panel --user-defined \
+     --repo https://git.acme.internal/alice/s59-panel.git --ref main > /dev/null
+   python3 -c '
+   import hashlib, json, os
+   d = json.load(open(os.environ["WORK"] + "/s59-register.json"))
+   l = d["layer"]
+   print("user_defined:", l["user_defined"], "| owner:", l["owner"])
+   print("public:", l["public"], "| organization:", l["organization"],
+         "| groups:", l["groups"] or [], "| users:", l["users"] or [])
+   digest = hashlib.sha256(d["webhook_secret"].encode()).hexdigest()[:12]
+   open(os.environ["WORK"] + "/s59-secret.txt", "w").write(digest)
+   open(os.environ["WORK"] + "/s59-secret", "w").write(d["webhook_secret"])
+   print("secret digest:", digest, "| created_at:", l["created_at"],
+         "| order:", l["order"])
+   '
+   python3 -c '
+   import json, os
+   json.dump(json.load(open(os.environ["WORK"] + "/s59-register.json"))["layer"],
+             open(os.environ["WORK"] + "/s59-layer.json", "w"))
+   '
+   ```
+
+   **Expect.** `user_defined: True`, `owner` carrying `$SUBJECT`,
+   `public: False`, `organization: False`, `groups: []`, and
+   `users: ['<the same subject>']`. That is the visibility §4.6 fixes on the
+   class, and the registry derived it from the token rather than from the
+   request. The secret digest is a twelve-character hex string over the inbound
+   webhook secret, which the layer holds because it names a git source, and the
+   program writes that digest to `$WORK/s59-secret.txt` for step 8 to compare
+   against. It writes the secret itself to `$WORK/s59-secret`, which step 2
+   signs a delivery with. `created_at` is the time of this registration, and
+   `order` is the position the registry assigned the layer in the composition
+   list. Record both, because step 8 reads them again on the record the
+   re-registration writes. The
+   second command
+   writes the layer object to `$WORK/s59-layer.json`, which step 5 sends back
+   verbatim.
+
+   `PODIUM_SESSION_TOKEN` is the credential the CLI attaches, so the
+   registration acts as the caller the browser session holds. S44's
+   Prerequisites unset that variable, so naming it on the command line is what
+   makes the invocation authenticated at all. The repository is never fetched,
+   because no step here reingests either layer. `s59-panel` exists so step 9
+   has a personal row to open after step 8 has converted `s59-notes` to the
+   admin-defined class, and the raised `PODIUM_MAX_USER_LAYERS` the
+   Prerequisites name is what admits both registrations on a registry that
+   already holds this caller's earlier personal layers.
+
+2. Attempt to widen the layer as its own owner, in a patch that also asks for a
+   webhook-secret rotation.
+
+   ```bash
+   PODIUM_SESSION_TOKEN="$TOKEN" podium layer update \
+     --registry http://127.0.0.1:8153 --id s59-notes --public --group acme-eng \
+     --rotate-webhook-secret
+   echo "exit=$?"
+   ```
+
+   **Expect.** `exit=1`, and the printed failure reads `update failed: HTTP 400`
+   over a body carrying `"code": "registry.invalid_argument"`,
+   `"constraint": "immutable_visibility"` under `details`, and a message opening
+   `the fields groups, public cannot be patched on a user-defined layer`. Both
+   asserted field names are present and they read in sorted order, so a client
+   reporting them to a person lists them in a stable order across runs. An exit
+   of `0` with the stored record printed means the registry is running a build
+   from before the refusal, which discarded the widening and answered `200`, and
+   every later step of this scenario then reads that discard rather than the
+   rule. A `403` `auth.forbidden` here means the caller is not the layer's
+   stored owner, and step 1 is re-run before continuing.
+
+   Then read whether the secret step 1 recorded is still the layer's secret, by
+   signing an inbound delivery with it the way S27 does.
+
+   ```bash
+   BODY='{"ref":"refs/heads/main"}'
+   SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 \
+     -hmac "$(cat "$WORK/s59-secret")" | awk '{print $NF}')"
+   curl -sS -X POST -H "X-Hub-Signature-256: $SIG" \
+     -H 'Content-Type: application/json' --data "$BODY" \
+     "http://127.0.0.1:8153/v1/ingest/webhook/s59-notes" -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** A status that is not `401`, over a body that does not carry
+   `ingest.webhook_invalid`. The registry evaluates the refusal above the
+   rotation, so the rotation this same patch asked for minted nothing, and the
+   secret step 1 recorded still verifies. The delivery is not expected to
+   complete an ingest: `https://git.acme.internal/alice/s59-notes.git` is
+   unreachable, so the reading here is the signature verification outcome, and
+   the status is `502` with `ingest.source_unreachable` on a registry that can
+   reach no such host. A `401` `ingest.webhook_invalid` means the refused patch
+   rotated the stored secret before returning, and the secret the Git host holds
+   no longer signs a delivery this layer accepts.
+
+3. Confirm the stored record is unchanged.
+
+   ```bash
+   PODIUM_SESSION_TOKEN="$TOKEN" podium layer list --registry http://127.0.0.1:8153 \
+     | python3 -c '
+   import json, sys
+   l = next(x for x in json.load(sys.stdin)["layers"] if x["id"] == "s59-notes")
+   print(l["public"], l["organization"], l["groups"] or [], l["users"] or [], l["ref"])
+   '
+   ```
+
+   **Expect.** `False False [] ['<the subject>'] main`. The refusal rejected the
+   whole request, so neither field the patch carried was applied.
+
+4. Confirm the refused attempt emitted no §8.1 layer event.
+
+   ```bash
+   grep '"target":"s59-notes"' "$PODIUM_AUDIT_LOG_PATH" \
+     | grep -c '"action":"register"'
+   grep '"target":"s59-notes"' "$PODIUM_AUDIT_LOG_PATH" \
+     | grep -c '"action":"update"' || echo "no update event"
+   ```
+
+   **Expect.** `1` from the first command, the registration step 1 performed, and
+   `no update event` from the second, because `grep -c` exits non-zero on a count
+   of zero. The registry returns above every mutation the handler performs, so a
+   refused patch writes no record and emits no event. A count of `1` or more on
+   the update grep means the refusal is being evaluated after the write rather
+   than before it.
+
+   Both commands select on the event's `target`, which the registry sets to the
+   layer's ID, so the counts read this scenario's layer alone. The audit log
+   belongs to the registry S44 step 3 started, and S47 through S57 register their
+   own layers into the same file, so a whole-file count reads their events too
+   and is not the property this step exists for.
+
+   The first command is the positive control, and it runs first because the
+   second one alone proves nothing: `grep` also exits non-zero when the file is
+   missing or unreadable, so `no update event` prints on a registry that wrote no
+   audit log at all. A `grep` error naming a missing file, or a count of `0` from
+   the first command, means `PODIUM_AUDIT_LOG_PATH` was not exported into the
+   shell that ran S44 step 3's `podium serve`. Export it there, re-run steps 1
+   and 2, and read this step again.
+
+5. Send the layer object read in step 1 back verbatim, which asserts no field.
+   Send it twice: once as the layer's own owner, and once as carol, a tenant
+   admin who is not the owner.
+
+   ```bash
+   curl -sS -X PUT "http://127.0.0.1:8153/v1/layers/update?id=s59-notes" \
+     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d @"$WORK/s59-layer.json" -w '\nstatus=%{http_code}\n'
+   curl -sS -X PUT "http://127.0.0.1:8153/v1/layers/update?id=s59-notes" \
+     -H "Authorization: Bearer $CAROL_TOKEN" -H 'Content-Type: application/json' \
+     -d @"$WORK/s59-layer.json" -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** `status=200` from both calls, each over the layer record, still
+   carrying `"public": false`, `"organization": false`, empty `groups`, `users`
+   holding the owner alone, and the same `owner`. The body restates `owner` and
+   `users` at exactly the values the layer stores, and the rule compares those
+   two fields against the stored values, so a client that reads a layer object
+   and returns it unchanged is admitted. A `400` here means the comparison is
+   reading presence rather than value, or that it is not exact, and every
+   read-modify-write client on the endpoint is then refused on a patch that
+   changes nothing.
+
+   The second call is the arm the stored-owner comparison exists for. Carol
+   holds the tenant-admin role from `PODIUM_BOOTSTRAP_ADMINS`, so the §7.3.1
+   layer write rule admits her on a layer she does not own, and the `owner` the
+   body carries names `$SUBJECT`, the S44 realm user's subject, rather than
+   carol's own. A `200` on the first call and a `400` on the second means
+   `owner` is compared against the calling subject rather than against the
+   layer's stored owner, and every tenant admin
+   that reads a layer object and returns it unchanged is then refused. The first
+   call alone does not read that difference: on the owner, a comparison against
+   the stored owner and a comparison against the caller's subject answer
+   identically.
+
+6. Confirm a patch on any other field still applies, so the refusal is scoped to
+   the five fields.
+
+   ```bash
+   PODIUM_SESSION_TOKEN="$TOKEN" podium layer update \
+     --registry http://127.0.0.1:8153 --id s59-notes --ref release \
+     | python3 -c 'import json,sys; print(json.load(sys.stdin)["layer"]["ref"])'
+   ```
+
+   **Expect.** `release`. `ref`, `root`, `git_provider`, `force_push_policy`,
+   and the webhook-secret rotation stay patchable on a personal layer.
+
+7. Run step 2's command as carol, the tenant admin who does not own the layer.
+
+   ```bash
+   PODIUM_SESSION_TOKEN="$CAROL_TOKEN" podium layer update \
+     --registry http://127.0.0.1:8153 --id s59-notes --public --group acme-eng \
+     --rotate-webhook-secret
+   echo "exit=$?"
+   ```
+
+   **Expect.** Exactly step 2's reading: `exit=1`, HTTP 400,
+   `registry.invalid_argument`, `"constraint": "immutable_visibility"`, and the
+   two field names in sorted order. Carol owns no part of `s59-notes`, so the
+   §7.3.1 layer write rule admits her on its admin arm alone, and this is the
+   arm every neighbouring §7.3.1 rule admits a caller on. The rule reads the
+   stored layer's class rather than the caller, so reaching it through the admin
+   arm does not lift it, and that is where this rule parts from its three
+   neighbours. A `403` `auth.forbidden` here means the registry never
+   admitted carol as a tenant admin: `PODIUM_BOOTSTRAP_ADMINS` did not name her
+   `sub`, and the prerequisite is re-run before continuing. A `200` means the
+   rule consults the caller, and every tenant admin then widens a personal layer
+   the owner cannot.
+
+   The command is step 2's command, rotation flag included, so read the layer's
+   secret again the way step 2 does, this time against the tenant admin's
+   refusal.
+
+   ```bash
+   SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 \
+     -hmac "$(cat "$WORK/s59-secret")" | awk '{print $NF}')"
+   curl -sS -X POST -H "X-Hub-Signature-256: $SIG" \
+     -H 'Content-Type: application/json' --data "$BODY" \
+     "http://127.0.0.1:8153/v1/ingest/webhook/s59-notes" -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** Step 2's reading again: a status that is not `401`, over a body
+   that does not carry `ingest.webhook_invalid`. The refusal's placement above
+   the rotation holds on a tenant admin as it does on the owner, so this patch
+   minted nothing either. A `401` `ingest.webhook_invalid` means the admin arm
+   reaches the rotation before the refusal, which step 8's digest comparison
+   cannot recover: a secret rotated here and a secret replaced by the
+   re-registration read the same there. `BODY` is the variable step 2 exported,
+   so re-run step 2's `BODY` assignment first in a shell that has lost it.
+
+8. Take the recourse: re-register the same ID as an admin-defined layer carrying
+   the visibility the refused patch asked for, and confirm a third identity now
+   reads it. Create that third identity the way S50 step 1 does, and skip the
+   creation when S50 has already run in this shell.
+
+   ```bash
+   $KC create users -r master -s username=bob -s enabled=true
+   $KC set-password -r master --username bob --new-password bob
+   export BOB_TOKEN="$(curl -fsS -X POST "$ISSUER/protocol/openid-connect/token" \
+     -d grant_type=password -d client_id=podium -d client_secret="$KC_SECRET" \
+     -d username=bob -d password=bob \
+     | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
+   PODIUM_SESSION_TOKEN="$BOB_TOKEN" podium layer list --registry http://127.0.0.1:8153 \
+     | python3 -c 'import json,sys; print(sorted(x["id"] for x in json.load(sys.stdin)["layers"]))'
+   PODIUM_SESSION_TOKEN="$CAROL_TOKEN" podium layer register \
+     --registry http://127.0.0.1:8153 --id s59-notes \
+     --repo https://git.acme.internal/alice/s59-notes.git --ref release \
+     --public --group acme-eng \
+     | python3 -c '
+   import hashlib, json, os, sys
+   d = json.load(sys.stdin)
+   l = d["layer"]
+   print("user_defined:", l["user_defined"], "| public:", l["public"],
+         "| groups:", l["groups"] or [], "| users:", l["users"] or [], "| owner:", repr(l["owner"]))
+   print("order:", l["order"], "| last_ingested_ref:", repr(l.get("last_ingested_ref", "")),
+         "| last_ingested_at:", repr(l.get("last_ingested_at", "")))
+   print("secret digest:", hashlib.sha256(d["webhook_secret"].encode()).hexdigest()[:12],
+         "| step 1 digest:", open(os.environ["WORK"] + "/s59-secret.txt").read())
+   print("created_at:", l["created_at"])
+   '
+   PODIUM_SESSION_TOKEN="$CAROL_TOKEN" podium layer list --registry http://127.0.0.1:8153 \
+     | python3 -c '
+   import json, sys
+   print("highest order:", max((x["order"], x["id"]) for x in json.load(sys.stdin)["layers"]))
+   '
+   PODIUM_SESSION_TOKEN="$BOB_TOKEN" podium layer list --registry http://127.0.0.1:8153 \
+     | python3 -c 'import json,sys; print(sorted(x["id"] for x in json.load(sys.stdin)["layers"]))'
+   ```
+
+   **Expect.** Bob's first list omits `s59-notes`, because a user-defined layer
+   is visible to its registrant alone. The re-registration exits `0` and reports
+   `user_defined: False`, `public: True`, `groups: ['acme-eng']`, empty `users`,
+   and an empty `owner`, which is the visibility the refused patch asked for.
+   Bob's second list carries `s59-notes`, so the recourse widened the layer for
+   a caller who could not see it a moment earlier.
+
+   The re-registration replaces the stored record rather than patching it, and
+   the reported values are how that reads. `order` is recomputed at the tail of
+   the layer list, so it is greater than the value step 1 printed, and the
+   `highest order` line names `s59-notes` at exactly the reported value. Carol
+   is a tenant admin, so her list carries every layer in the tenant and the
+   maximum is the tenant-wide one. An `order` equal to the step 1 value means
+   the re-registration preserved the record's position rather than replacing
+   the record. `last_ingested_ref` and `last_ingested_at` are empty,
+   so the next ingest reads the source afresh. `secret digest` differs from the
+   `step 1 digest` printed beside it: the layer holds a new inbound webhook
+   secret, and the old one is retired, so an operator who had registered the
+   first secret at the Git host registers this one in its place or every
+   inbound delivery to the layer is rejected. Two digests that match mean the
+   re-registration carried the stored secret forward, and the operator's Git
+   host configuration is then still current. `created_at` is later than the
+   value step 1 printed, because the record is replaced rather than patched. The
+   former owner also regains a slot against the per-identity user-defined layer
+   cap.
+
+   The re-registration runs as carol, because `POST /v1/layers` under a stored
+   layer's ID is authorized on that layer's write rule, and her tenant-admin
+   role admits her there. The class resolution routes an authenticated non-admin
+   to the user-defined arm whatever the body says, so the layer's own owner
+   never registers an admin-defined layer. Up to the moment this step converts
+   the record, the same command as `$TOKEN` is refused with `auth.forbidden`
+   carrying `"constraint": "admin_only_fields"` under `details`, because it
+   asserts `public` and `groups` on the user-defined arm, and dropping those two
+   flags is admitted rather than refused: it re-registers the layer as a
+   personal one, resetting its webhook secret, order, registration time, and
+   ingest history for no widening at all. After the conversion neither variant
+   reaches that point. `s59-notes` is admin-defined, the S44 signed-in caller
+   (`admin`, `$SUBJECT`) holds no tenant-admin grant on this stack, and the
+   §7.3.1 layer write rule refuses that caller on the stored record with a bare
+   `auth.forbidden` that carries no `details`.
+
+9. Read the Edit dialog on a personal row. Open
+   `http://127.0.0.1:8153/app/#/layers` in a private browser window and click
+   the sign-in control. Keycloak's login page appears; sign in as `admin` with
+   the password `admin`. The callback returns the browser to
+   `http://127.0.0.1:8153/app/`, which resolves to the catalog rather than the
+   layer panel, so re-open `http://127.0.0.1:8153/app/#/layers`. Open the
+   overflow control on the `s59-panel` row and press `Edit`.
+
+   **Expect.** The dialog's Visibility section is a statement rather than a
+   control: it carries the text `you alone` and the sentence `A layer of your
+   own is fixed to you at registration and cannot be widened.`, and it draws no
+   Public checkbox, no Organization checkbox, and no field for group names or
+   user identifiers. The `Ref`, `Root`, and force-push controls are present, and
+   so is the webhook-secret rotation, because those fields stay patchable on the
+   class. A checkbox or a members field drawn here offers a write the registry
+   refuses with `immutable_visibility`, which is the divergence between the
+   panel's prediction and the server rule that this step exists to catch.
+
+   The text and the sentence the section prints are what separate this reading
+   from a dialog that omits the Visibility section on every row. A dialog
+   drawing no section at all carries neither `you alone` nor the sentence about
+   registration, so it fails this step rather than passing it.
+
+   The `s59-notes` row offers no contrast to read here. It is admin-defined
+   after step 8, and the panel offers `Edit` on an admin-defined row only to a
+   caller holding `manage_any_layer`. The S44 signed-in caller (`admin`,
+   `$SUBJECT`) holds no tenant-admin grant on this stack, so that row's overflow
+   control carries no `Edit` item and its dialog cannot be opened. The admin-defined rendering,
+   which draws an `Axes granted` label over the granted axis and the two fields
+   that add group names and user identifiers, is pinned by the
+   `web/ui/src/surfaces.test.tsx` case `states a granted visibility axis in the
+   Edit dialog rather than drawing an inert checkbox`.
+
+**Teardown.** Run S44's teardown.
+
+```bash
+kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+rm -rf "$WORK"
+docker rm -f kc-podium; rm -rf "$KCERT"
 ```

@@ -2,9 +2,11 @@
 // stored value is sent unchanged and the registry keeps it. The visibility
 // axes are offered on an admin-defined layer, which is the class the endpoint
 // applies them to. §4.6 fixes a user-defined layer's visibility at
-// registration, and the registry ignores an owner or a visibility patch there
-// and still answers success, so that class displays its visibility rather
-// than editing it.
+// registration, and §7.3.1 refuses a patch that asserts an owner or a
+// visibility axis against a stored user-defined layer with
+// `400 registry.invalid_argument` carrying
+// `details.constraint: "immutable_visibility"`, so that class displays its
+// visibility rather than editing it.
 
 import type { FormEvent } from "react";
 import { useState } from "react";
