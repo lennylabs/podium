@@ -146,6 +146,8 @@ Each layer refreshes from its source independently.
 
 `podium layer update --id <id>` patches a registered layer's mutable fields, including the tracked ref, the source path, and the visibility. Only the flags supplied are applied.
 
+An admin-defined layer's visibility narrows over the same command. The update endpoint applies the visibility members the patch carries and keeps the ones it omits, so `--public=false` withdraws the public axis, `--organization=false` withdraws the organization axis, `--group` and `--user` replace their stored list, and `--clear-groups` and `--clear-users` empty it. Narrowing over this path keeps the layer's order, its registration time, its ingest history, and its inbound webhook secret, which unregistering and re-registering the layer all replace. A layer whose stored record carries no visibility axis matches no visibility condition, so it reaches no caller's composed view and contributes no artifacts to a sync; a tenant admin still sees it on `podium layer list`, and re-granting an axis restores it. A layer declared in the `registry:` `layers:` list is re-seeded from `registry.yaml` at every start, visibility included, so a withdrawal applied to a declared layer over the API or the CLI reverts at the next start. Change the declaration's `visibility:` block to withdraw a declared layer durably.
+
 `podium layer unregister <id>` removes a layer, and `podium layer restore <id>` recovers one that was unregistered inside the recovery window. `podium layer list --deleted` shows what is still recoverable.
 
 The full flag set for each command is in the [CLI reference](../reference/cli#layer-management).

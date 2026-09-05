@@ -362,7 +362,10 @@ any state the CLI can reach is a state the panel must render.
   user-defined layer the registry refuses a patch asserting the owner or a
   visibility field with `400 registry.invalid_argument` carrying
   `details.constraint: "immutable_visibility"`, so the form must not offer
-  controls for values it cannot change.
+  controls for values it cannot change. On an admin-defined layer the endpoint
+  withdraws a visibility member as well as grants one, so the form offers a
+  control for every visibility axis and a member list whose entries are
+  removable.
 - **Reingest** a layer. The registry runs the whole ingest pipeline inside the
   request and answers with a summary of what the snapshot accepted, what it
   rejected, and what it conflicted on (`POST /v1/layers/reingest` in

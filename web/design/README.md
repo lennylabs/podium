@@ -169,7 +169,7 @@ The table columns are drag handle (34px), layer, source, visibility, last ingest
 
 **Unregister (17f).** A confirmation stating **both halves**: "38 artifacts will disappear from every user's view next time they sync" *and* "Recoverable for 30 days" with the date. Requires the layer ID typed to confirm.
 
-**Update.** Not yet mocked. `POST /v1/layers/update` patches visibility, ref, root, local_path, owner, force_push_policy, and rotates the webhook secret. Its controls are rendered on §13.10's rendering rule against the stored layer and the fields the patch would carry. On a user-defined layer the registry refuses an owner or visibility patch with `400 registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`, so the form must not offer controls for values it cannot change. Rotation reuses the 15f reveal and needs a disabled state on a local layer.
+**Update.** Not yet mocked. `POST /v1/layers/update` patches visibility, ref, root, local_path, owner, force_push_policy, and rotates the webhook secret. Its controls are rendered on §13.10's rendering rule against the stored layer and the fields the patch would carry. On a user-defined layer the registry refuses an owner or visibility patch with `400 registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`, so the form must not offer controls for values it cannot change. On an admin-defined layer the endpoint withdraws a visibility member as well as grants one, so the form offers a control for every visibility axis and a member list whose entries are removable. Rotation reuses the 15f reveal and needs a disabled state on a local layer.
 
 ### 6. Reingest — 17d, 17e, 18a, 18b, 18c, 18d, 18e
 

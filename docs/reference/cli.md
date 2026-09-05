@@ -487,13 +487,16 @@ podium layer update --id <id>
                     [--ref <ref>] [--root <subpath>] [--local <path>]
                     [--force-push-policy <tolerant|strict>]
                     [--rotate-webhook-secret]
-                    [--owner <oidc-sub>] [--public] [--organization]
+                    [--owner <oidc-sub>] [--public[=false]] [--organization[=false]]
                     [--group <oidc-group>]... [--user <oidc-sub-or-email>]...
+                    [--clear-groups] [--clear-users]
 ```
 
 `--rotate-webhook-secret` regenerates the Git layer's HMAC webhook secret and prints the new value.
 
-`--owner`, `--public`, `--organization`, `--group`, and `--user` apply to an admin-defined layer. Against a stored user-defined layer each of them is refused with `registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`, because that layer's owner and its implicit `users: [<owner>]` visibility are fixed at registration; the refusal rejects the whole patch, so no other flag the same command carries is applied. An administrator widens such a layer by re-registering its ID as an admin-defined layer.
+The visibility flags withdraw as well as grant, because the update endpoint applies the visibility members the command sends and leaves the ones it omits. `--public=false` withdraws the public axis and `--organization=false` withdraws the organization axis, while omitting the flag keeps the stored value. `--group` and `--user` replace the stored list with the values given on that invocation, so a repeated flag naming fewer members narrows the list. `--clear-groups` and `--clear-users` empty their list, which the repeatable flags cannot express; `--clear-groups` is rejected alongside `--group`, and `--clear-users` alongside `--user`. Withdrawing every axis leaves a layer that no caller's composed view reaches, and re-granting one restores it. A layer declared in `registry.yaml` is re-seeded from that declaration at every start, visibility included, so a withdrawal applied to a declared layer reverts at the next start; withdraw it in the declaration to make it durable.
+
+`--owner`, `--public`, `--organization`, `--group`, and `--user` apply to an admin-defined layer. Against a stored user-defined layer each of them is refused with `registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`, because that layer's owner and its implicit `users: [<owner>]` visibility are fixed at registration; the refusal rejects the whole patch, so no other flag the same command carries is applied. The refusal reads the value the flag would store against the stored one, so `--public=false` and `--organization=false` restate what such a layer holds and are admitted, while `--clear-users` empties the stored `users` and is refused. An administrator widens such a layer by re-registering its ID as an admin-defined layer.
 
 `--local` patches the layer's filesystem path on the registry host and requires the per-tenant `admin` role. A patch carrying it is rejected with `auth.forbidden` carrying `details.constraint: "local_source"` for a caller without that role, whatever the layer's stored source type. A patch that does not carry `--local` is not reached by that rule. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits the patch.
 
