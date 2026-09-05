@@ -1,7 +1,7 @@
 # Proposal 0020: Refuse an owner or visibility patch on a user-defined layer
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-09-04). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. OQ-1 is resolved in favor of the staged position, so the refusal is `400 registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`: no caller is authorized to widen a user-defined layer, so the failure is a property of the request rather than of the caller. OQ-2 is resolved in favor of the staged position, so `owner` is compared against the layer's stored owner, which is what admits a verbatim layer-object round trip for every caller the write rule admits.
+- Status: Implemented (2026-09-04). Signed off by the maintainer for implementation, whole, with every step in the checklist in scope. OQ-1 is resolved in favor of the staged position, so the refusal is `400 registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`: no caller is authorized to widen a user-defined layer, so the failure is a property of the request rather than of the caller. OQ-2 is resolved in favor of the staged position, so `owner` is compared against the layer's stored owner, which is what admits a verbatim layer-object round trip for every caller the write rule admits.
 - Date: 2026-09-04
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off. Every anchor is read against `main` at `7ec5521`, which carries proposal 0019's snake_case conversion and its `git_provider` setter, so every layer JSON member is named in its post-0019 form.
@@ -44,19 +44,19 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3. §7.3.1 gains the immutable-visibility paragraph, its **Errors** paragraph names the refusal, and §4.6's visibility sentence gains its cross-reference. Committed alone and verified before any code.
+- [x] **S1 · spec** — SPEC-1, SPEC-2, SPEC-3. §7.3.1 gains the immutable-visibility paragraph, its **Errors** paragraph names the refusal, and §4.6's visibility sentence gains its cross-reference. Committed alone and verified before any code.
       Levels: —. Depends on: —
-- [ ] **S2 · code** — CODE-1, TEST-1, TEST-2. `assertedImmutableVisibilityFields` beside `adminOnlyRegistrationFields`; the refusal in `update` placed above the rotation and below the local-source gate; the guard at `:798-818` made unconditional; the helper's unit table; and the rewrite of `TestLayerEndpoint_UpdateCannotWidenUserDefined`. Indivisible: the rewritten test asserts `400` and the old one asserts `200`, so either landing alone is a red commit.
+- [x] **S2 · code** — CODE-1, TEST-1, TEST-2. `assertedImmutableVisibilityFields` beside `adminOnlyRegistrationFields`; the refusal in `update` placed above the rotation and below the local-source gate; the guard at `:798-818` made unconditional; the helper's unit table; and the rewrite of `TestLayerEndpoint_UpdateCannotWidenUserDefined`. Indivisible: the rewritten test asserts `400` and the old one asserts `200`, so either landing alone is a red commit.
       Levels: unit, integration. Depends on: S1
-- [ ] **S3 · test** — TEST-3. The end-to-end arms through the built binary: the owner refused, the tenant admin refused identically, the non-owner refused with `auth.forbidden` ahead of this rule, the record read back unchanged, the admin's re-registration recourse widening the layer, and the owner's arm run again against a public-mode registry and refused there.
+- [x] **S3 · test** — TEST-3. The end-to-end arms through the built binary: the owner refused, the tenant admin refused identically, the non-owner refused with `auth.forbidden` ahead of this rule, the record read back unchanged, the admin's re-registration recourse widening the layer, and the owner's arm run again against a public-mode registry and refused there.
       Levels: e2e. Depends on: S2
-- [ ] **S4 · code** — UI-1, TEST-4. The two stale comments under `web/ui/src`, the added vitest case pinning that the form sends no visibility member on a user-defined layer, and the rebuilt `web/bundle` committed in this same commit whether or not it changed.
+- [x] **S4 · code** — UI-1, TEST-4. The two stale comments under `web/ui/src`, the added vitest case pinning that the form sends no visibility member on a user-defined layer, and the rebuilt `web/bundle` committed in this same commit whether or not it changed.
       Levels: unit. Depends on: S1
-- [ ] **S5 · docs** — DOC-1, DOC-2, DOC-3. `docs/reference/http-api.md:476`, `docs/reference/cli.md:430`, `docs/deployment/layers.md`, `web/design/README.md:172`, and `web/DESIGN.md:361-364`.
+- [x] **S5 · docs** — DOC-1, DOC-2, DOC-3. `docs/reference/http-api.md:476`, `docs/reference/cli.md:430`, `docs/deployment/layers.md`, `web/design/README.md:172`, and `web/DESIGN.md:361-364`.
       Levels: —. Depends on: S2
-- [ ] **S6 · docs** — DOC-4. `test/manual-validation.md` gains S59, and S44's two reusable blocks that scope themselves by enumeration are extended to name it: the stack note at `:4050-4051` and the "Bootstrap admin" amendment's heading at `:4055` and body sentence at `:4058`.
+- [x] **S6 · docs** — DOC-4. `test/manual-validation.md` gains S59, and S44's two reusable blocks that scope themselves by enumeration are extended to name it: the stack note at `:4050-4051` and the "Bootstrap admin" amendment's heading at `:4055` and body sentence at `:4058`.
       Levels: —. Depends on: S2, S3, S4
-- [ ] **S7 · docs** — DOC-5. The `CHANGELOG.md` entry.
+- [x] **S7 · docs** — DOC-5. The `CHANGELOG.md` entry.
       Levels: —. Depends on: S5
 
 **Ordering constraints.** S1 precedes every other step, per the spec-first rule. S2 is indivisible for the reason stated on its line. S2 and S4 are **not** required to be one commit, which is the finding that determines this sequence: the UI sends nothing this rule refuses, so no test spans the two sides, and the bundle rebuild follows from S4's comment edits alone. The bundle rebuild lands in S4 and nowhere else, because no later step touches `web/ui/src`.
