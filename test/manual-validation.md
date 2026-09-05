@@ -4363,7 +4363,8 @@ misconfigured:
    (§6.3.4)`, and `config show` prints
    `oidc-jwt`. A registry in public mode shows every artifact to everyone and
    would make step 6 pass for the wrong reason. A missing sign-in line means the
-   browser flow is off, and S47 through S50 and S55 through S57 cannot run.
+   browser flow is off, and S47 through S50, S55 through S57, and S59 cannot
+   run.
 
    `config show` takes its path from `PODIUM_CONFIG_FILE` and defines no
    `--config` flag, which `serve` does; passing `--config` exits 1 with `flag
@@ -6301,13 +6302,15 @@ skip and record the skip.
      --registry http://127.0.0.1:8153 --id s59-panel --user-defined \
      --repo https://git.acme.internal/alice/s59-panel.git --ref main > /dev/null
    python3 -c '
-import json, os
+import hashlib, json, os
 d = json.load(open(os.environ["WORK"] + "/s59-register.json"))
 l = d["layer"]
 print("user_defined:", l["user_defined"], "| owner:", l["owner"])
 print("public:", l["public"], "| organization:", l["organization"],
       "| groups:", l["groups"] or [], "| users:", l["users"] or [])
-print("secret length:", len(d["webhook_secret"]))
+digest = hashlib.sha256(d["webhook_secret"].encode()).hexdigest()[:12]
+open(os.environ["WORK"] + "/s59-secret.txt", "w").write(digest)
+print("secret digest:", digest, "| created_at:", l["created_at"])
 '
    python3 -c '
 import json, os
@@ -6320,9 +6323,12 @@ json.dump(json.load(open(os.environ["WORK"] + "/s59-register.json"))["layer"],
    `public: False`, `organization: False`, `groups: []`, and
    `users: ['<the same subject>']`. That is the visibility §4.6 fixes on the
    class, and the registry derived it from the token rather than from the
-   request. The secret length is non-zero, because the layer names a git
-   source. The second command writes the layer object to
-   `$WORK/s59-layer.json`, which step 5 sends back verbatim.
+   request. The secret digest is a twelve-character hex string over the inbound
+   webhook secret, which the layer holds because it names a git source, and the
+   program writes that digest to `$WORK/s59-secret.txt` for step 8 to compare
+   against. `created_at` is the time of this registration. The second command
+   writes the layer object to `$WORK/s59-layer.json`, which step 5 sends back
+   verbatim.
 
    Each Python program in this scenario is unindented inside its block on
    purpose. The document's leading spaces would land inside the program and
@@ -6455,14 +6461,16 @@ print(l["public"], l["organization"], l["groups"] or [], l["users"] or [], l["re
      --repo https://git.acme.internal/alice/s59-notes.git --ref release \
      --public --group acme-eng \
      | python3 -c '
-import json, sys
+import hashlib, json, os, sys
 d = json.load(sys.stdin)
 l = d["layer"]
 print("user_defined:", l["user_defined"], "| public:", l["public"],
       "| groups:", l["groups"] or [], "| users:", l["users"] or [], "| owner:", repr(l["owner"]))
 print("order:", l["order"], "| last_ingested_ref:", repr(l.get("last_ingested_ref", "")),
       "| last_ingested_at:", repr(l.get("last_ingested_at", "")))
-print("secret length:", len(d["webhook_secret"]))
+print("secret digest:", hashlib.sha256(d["webhook_secret"].encode()).hexdigest()[:12],
+      "| step 1 digest:", open(os.environ["WORK"] + "/s59-secret.txt").read())
+print("created_at:", l["created_at"])
 '
    PODIUM_SESSION_TOKEN="$BOB_TOKEN" podium layer list --registry http://127.0.0.1:8153 \
      | python3 -c 'import json,sys; print(sorted(x["id"] for x in json.load(sys.stdin)["layers"]))'
@@ -6479,24 +6487,35 @@ print("secret length:", len(d["webhook_secret"]))
    the reported values are how that reads. `order` is recomputed at the tail of
    the layer list, so it is the highest value the list carries rather than the
    value step 1 assigned. `last_ingested_ref` and `last_ingested_at` are empty,
-   so the next ingest reads the source afresh. `secret length` is non-zero over
-   a value that differs from step 1's: the layer holds a new inbound webhook
+   so the next ingest reads the source afresh. `secret digest` differs from the
+   `step 1 digest` printed beside it: the layer holds a new inbound webhook
    secret, and the old one is retired, so an operator who had registered the
    first secret at the Git host registers this one in its place or every
-   inbound delivery to the layer is rejected. The layer's registration time is
-   the time of this command. The former owner also regains a slot against the
-   per-identity user-defined layer cap.
+   inbound delivery to the layer is rejected. Two digests that match mean the
+   re-registration carried the stored secret forward, and the operator's Git
+   host configuration is then still current. `created_at` is later than the
+   value step 1 printed, because the record is replaced rather than patched. The
+   former owner also regains a slot against the per-identity user-defined layer
+   cap.
 
    The re-registration runs as the caller step 7 granted the tenant-admin role
    to, because `POST /v1/layers` under a stored layer's ID is authorized on that
-   layer's write rule. Running it as the owner without the grant is refused with
-   `auth.forbidden`, since the request declares an admin-defined layer.
+   layer's write rule. The class resolution routes an authenticated non-admin to
+   the user-defined arm whatever the body says, so the owner without the grant
+   never registers an admin-defined layer: the same command is refused with
+   `auth.forbidden` carrying `"constraint": "admin_only_fields"` under `details`,
+   because it asserts `public` and `groups` on the user-defined arm. Dropping
+   those two flags is admitted rather than refused, and it re-registers the layer
+   as a personal one, resetting its webhook secret, order, registration time, and
+   ingest history for no widening at all.
 
 9. Read the Edit dialog on a personal row. Open
    `http://127.0.0.1:8153/app/#/layers` in a private browser window and click
    the sign-in control. Keycloak's login page appears; sign in as `admin` with
-   the password `admin`. Open the overflow control on the `s59-panel` row and
-   press `Edit`.
+   the password `admin`. The callback returns the browser to
+   `http://127.0.0.1:8153/app/`, which resolves to the catalog rather than the
+   layer panel, so re-open `http://127.0.0.1:8153/app/#/layers`. Open the
+   overflow control on the `s59-panel` row and press `Edit`.
 
    **Expect.** The dialog's Visibility section is a statement rather than a
    control: it carries the text `you alone` and the sentence `A layer of your
