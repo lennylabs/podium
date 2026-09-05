@@ -13,11 +13,6 @@ reverse-dependency impact, webhook-driven reingest, audit and right-to-be-forgot
 erasure, workspace overlays, offline-cache resilience, and importing an existing
 skill tree.
 
-The same scenarios are executed by the agentic workflow in
-`tools/workflows` (the `agentic-manual-validation` workflow), which runs one
-scenario at a time, validates the observed output, and fixes any product bug it
-finds. A person and the workflow follow the identical steps.
-
 ## How to use this document
 
 ### Build the binaries under test
@@ -32,6 +27,17 @@ Every scenario uses these fresh binaries. A stale `podium` earlier on `PATH`
 (for example a Homebrew install at `/opt/homebrew/bin/podium`) produces
 misleading results, so each scenario puts `bin/` first on `PATH` and the index
 below assumes that.
+
+### Shell
+
+The fenced blocks run under bash and under zsh, which is the macOS login shell.
+Three differences between the two shells have produced silent failures in these
+scenarios before, so a block that behaves differently under one of them is a
+defect in this document. zsh does not word-split an unquoted expansion, it
+reserves `GID` as a read-only parameter holding the process group ID, and it
+expands `${1:+-H "Authorization: Bearer $1"}` as a single word, which drops the
+header and sends an authenticated caller to the registry as anonymous. Each of
+those reads as a product defect at the point it bites.
 
 ### Per-scenario isolation
 
@@ -2412,8 +2418,15 @@ allowlist, and the per-receiver `debounce` field.
    ```bash
    ALICE=$(go run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com)
    BOB=$(go run ./tools/minttoken --keys "$WORK/keys" --sub bob@acme.com --email bob@acme.com)
-   post() { curl -s -w '\n%{http_code}\n' -X POST "$PODIUM_REGISTRY/v1/webhooks" \
-     ${1:+-H "Authorization: Bearer $1"} -H 'Content-Type: application/json' -d "$2"; }
+   post() {
+     if [ -n "$1" ]; then
+       curl -s -w '\n%{http_code}\n' -X POST "$PODIUM_REGISTRY/v1/webhooks" \
+         -H "Authorization: Bearer $1" -H 'Content-Type: application/json' -d "$2"
+     else
+       curl -s -w '\n%{http_code}\n' -X POST "$PODIUM_REGISTRY/v1/webhooks" \
+         -H 'Content-Type: application/json' -d "$2"
+     fi
+   }
 
    echo "--- anonymous (no token): rejected ---"
    post "" '{"url":"https://203.0.113.10/h","event_filter":["layer.ingested"]}'
@@ -2449,8 +2462,9 @@ allowlist, and the per-receiver `debounce` field.
   mode rejects an unverified caller before the handler runs.
 - bob's POST returns HTTP 403 with `auth.forbidden`, naming bob as not an admin: the
   receiver CRUD is admin-gated.
-- alice's public `https` POST returns HTTP 201 and the created receiver (id, masked
-  secret, event filter).
+- alice's public `https` POST returns HTTP 201 and the created receiver (id,
+  event filter, and the secret in full). The secret is revealed once at
+  creation, and every later read, list, and update reports it as `***`.
 - alice's loopback `https` POST returns `registry.invalid_argument` naming the
   disallowed host: the SSRF policy rejects a private address.
 - alice's public `http` POST returns `registry.invalid_argument`: the SSRF policy
@@ -4202,10 +4216,10 @@ misconfigured:
      -s 'config."access.token.claim"=true' -s 'config."id.token.claim"=true' || true
    $KC update clients/$CID/optional-client-scopes/$SCID -r master
    $KC create groups -r master -s name=podium-comp
-   GID=$($KC get groups -r master -q search=podium-comp --fields id --format csv --noquotes)
+   GROUP_ID=$($KC get groups -r master -q search=podium-comp --fields id --format csv --noquotes)
    ADMIN_UID=$($KC get users -r master -q username=admin --fields id --format csv --noquotes)
-   $KC update users/$ADMIN_UID/groups/$GID -r master \
-     -s realm=master -s userId=$ADMIN_UID -s groupId=$GID -n
+   $KC update users/$ADMIN_UID/groups/$GROUP_ID -r master \
+     -s realm=master -s userId=$ADMIN_UID -s groupId=$GROUP_ID -n
    ```
 
    **Expect.** The scope, the mapper, the group, and the membership are created,
@@ -4513,18 +4527,19 @@ them into S21 permanently if its setup already reaches this state.
 
    ```bash
    B="http://127.0.0.1:$PORT"
-   for r in "POST $B/v1/ingest/webhook/probe" \
-            "POST $B/v1/layers" \
-            "POST $B/v1/layers/update" \
-            "POST $B/v1/layers/reorder" \
-            "POST $B/v1/layers/reingest" \
-            "POST $B/v1/layers/restore" \
-            "DELETE $B/v1/layers" \
-            "POST $B/v1/admin/erase" \
-            "POST $B/v1/admin/reembed"; do
-     set -- $r
-     printf '%s %s -> ' "$1" "$2"
-     curl -s -X "$1" "$2" -d '{}' | python3 -c "import json,sys; print(json.load(sys.stdin).get('code','(no code)'))" 2>/dev/null || echo "(unparseable)"
+   for r in "POST /v1/ingest/webhook/probe" \
+            "POST /v1/layers" \
+            "POST /v1/layers/update" \
+            "POST /v1/layers/reorder" \
+            "POST /v1/layers/reingest" \
+            "POST /v1/layers/restore" \
+            "DELETE /v1/layers" \
+            "POST /v1/admin/erase" \
+            "POST /v1/admin/reembed"; do
+     METHOD="${r%% *}"
+     TARGET="${r#* }"
+     printf '%s %s -> ' "$METHOD" "$TARGET"
+     curl -s -X "$METHOD" "$B$TARGET" -d '{}' | python3 -c "import json,sys; print(json.load(sys.stdin).get('code','(no code)'))" 2>/dev/null || echo "(unparseable)"
    done
    ```
 
