@@ -809,11 +809,18 @@ export function TokenInput({
   tokens,
   known,
   held,
+  onRemove,
 }: {
   label: string;
   value: string;
   onChange: (next: string) => void;
   tokens: string[];
+  /** onRemove takes back one token when the token list is held apart from the
+   * line, which is what the Edit dialog does with a stored grant: its members
+   * are held as the array the record supplied, so a member carrying a comma
+   * survives a round trip. A field whose tokens are the line's own members
+   * omits it and the removal rewrites the line. */
+  onRemove?: (token: string) => void;
   /** held carries the id of the element stating the hold when the submit is
    * held on this field, and is absent otherwise. */
   held?: string;
@@ -857,6 +864,10 @@ export function TokenInput({
               key={token}
               aria-label={`Remove ${token}`}
               onClick={() => {
+                if (onRemove !== undefined) {
+                  onRemove(token);
+                  return;
+                }
                 onChange(without(tokens, token).join(', '));
               }}
             >

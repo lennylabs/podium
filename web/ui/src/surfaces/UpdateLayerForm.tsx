@@ -14,7 +14,7 @@ import type { FormEvent } from "react";
 import { useState } from "react";
 
 import { SecretReveal, useSecretAcknowledgement } from "./SecretReveal";
-import { members } from "./members";
+import { members, without } from "./members";
 import { TokenInput } from "./RegisterLayerForm";
 import { mayTake } from "./layerrights";
 import type { LayerCapabilities } from "../session";
@@ -51,12 +51,8 @@ export function UpdateLayerForm({
   const editableVisibility = layer.user_defined !== true;
   const [isPublic, setPublic] = useState(layer.public === true);
   const [organization, setOrganization] = useState(layer.organization === true);
-  // The member lines are seeded from the stored grant, because the patch
-  // replaces the list rather than adding to it: what the reader leaves on the
-  // line is what the layer carries afterwards, and a token removed here is
-  // withdrawn by the write.
-  const [groups, setGroups] = useState((layer.groups ?? []).join(", "));
-  const [users, setUsers] = useState((layer.users ?? []).join(", "));
+  const groupMembers = useMemberList(layer.groups ?? []);
+  const userMembers = useMemberList(layer.users ?? []);
   const [result, setResult] = useState<LayerSecretResult | null>(null);
   const secret = useSecretAcknowledgement();
   const [refusal, setRefusal] = useState<unknown>(null);
@@ -100,8 +96,8 @@ export function UpdateLayerForm({
       // list is stored as the reader left it.
       patch.public = isPublic;
       patch.organization = organization;
-      patch.groups = members(groups);
-      patch.users = members(users);
+      patch.groups = groupMembers.tokens;
+      patch.users = userMembers.tokens;
     }
     setPending(true);
     updateLayer(layer.id, patch).then(
@@ -244,15 +240,17 @@ export function UpdateLayerForm({
               </label>
               <TokenInput
                 label="Group names, separated by commas"
-                value={groups}
-                onChange={setGroups}
-                tokens={members(groups)}
+                value={groupMembers.line}
+                onChange={groupMembers.setLine}
+                tokens={groupMembers.tokens}
+                onRemove={groupMembers.remove}
               />
               <TokenInput
                 label="User identifiers, separated by commas"
-                value={users}
-                onChange={setUsers}
-                tokens={members(users)}
+                value={userMembers.line}
+                onChange={userMembers.setLine}
+                tokens={userMembers.tokens}
+                onRemove={userMembers.remove}
               />
             </fieldset>
           ) : (
@@ -318,4 +316,38 @@ export function UpdateLayerForm({
       </form>
     </Modal>
   );
+}
+
+/** useMemberList holds one visibility member list across the dialog: the
+ * members the layer already carries, held as the array the record supplied,
+ * and the line the reader adds more on.
+ *
+ * The stored members are held apart from the line rather than joined into it,
+ * because the patch replaces the list rather than adding to it and the join is
+ * not reversible: a member carrying a comma splits into two on the way back,
+ * and one carrying padding returns trimmed. Nothing constrains a member's
+ * characters, so a DN-style group name is storable, and an unedited dialog
+ * that re-parsed the line would withdraw that grant and grant to names nobody
+ * authorized. Held as an array, an untouched dialog sends the stored list
+ * verbatim, which §7.3.1 applies as no change at all. */
+function useMemberList(stored: readonly string[]) {
+  const [kept, setKept] = useState<string[]>([...stored]);
+  const [line, setLine] = useState("");
+  // A member already stored is dropped from the additions, so the token row
+  // draws it once and the patch names it once.
+  const added = members(line).filter((member) => !kept.includes(member));
+  return {
+    line,
+    setLine,
+    /** tokens is the list the patch carries: the stored members that survive
+     * the reader's removals, followed by the ones they added. */
+    tokens: [...kept, ...added],
+    remove: (token: string) => {
+      if (kept.includes(token)) {
+        setKept(without(kept, token));
+        return;
+      }
+      setLine(without(members(line), token).join(", "));
+    },
+  };
 }

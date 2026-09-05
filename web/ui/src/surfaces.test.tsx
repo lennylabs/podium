@@ -11466,8 +11466,8 @@ describe("the layer write flows", () => {
 
   // §7.3.1 applies each visibility member the patch carries, so a member the
   // layer already carries is withdrawn by removing it here. The stored members
-  // seed the line, each one removes itself, and the patch carries the list the
-  // reader left rather than the stored grant plus their additions.
+  // render as removable tokens, the line adds more, and the patch carries the
+  // list the reader left rather than the stored grant plus their additions.
   //
   // Spec: §4.6, §7.3.1
   it("withdraws a stored user the Edit dialog's reader removes", async () => {
@@ -11483,18 +11483,20 @@ describe("the layer write flows", () => {
     openRowActions("company");
     fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     const form = await screen.findByLabelText("Update company");
-    // The stored grant seeds the line, so the reader edits the list itself.
+    // The stored member is a token of its own, and the line adds to it.
     const line = within(form).getByLabelText(
       "User identifiers, separated by commas",
     ) as HTMLInputElement;
-    expect(line.value).toBe("alice@acme.com");
-    fireEvent.change(line, {
-      target: { value: "alice@acme.com, bob@acme.com" },
-    });
+    expect(line.value).toBe("");
+    within(form).getByRole("button", { name: "Remove alice@acme.com" });
+    fireEvent.change(line, { target: { value: "bob@acme.com" } });
     // Each token removes itself, and the removal reaches the wire.
     fireEvent.click(
       within(form).getByRole("button", { name: "Remove alice@acme.com" }),
     );
+    expect(
+      within(form).queryByRole("button", { name: "Remove alice@acme.com" }),
+    ).toBeNull();
     expect(line.value).toBe("bob@acme.com");
     fireEvent.submit(form);
     await screen.findByText("Layer company is updated.");
@@ -11502,6 +11504,39 @@ describe("the layer write flows", () => {
       users: string[];
     };
     expect(sent.users).toEqual(["bob@acme.com"]);
+  });
+
+  // The stored members are held as the array the record supplied rather than
+  // joined into the line, so a member carrying a comma survives an unedited
+  // dialog. Joined and re-split it would come back as two members, and the
+  // patch would withdraw the grant the layer holds and grant to names nobody
+  // authorized, which §7.3.1 admits as a verbatim echo only while the members
+  // go out unchanged.
+  //
+  // Spec: §4.6, §7.3.1
+  it("sends a stored group carrying a comma unchanged", async () => {
+    const dn = "cn=secops,ou=groups,dc=acme,dc=com";
+    const granted = { ...adminLayer(), groups: [dn] };
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [granted] } },
+      "PUT /v1/layers/update": { body: { layer: granted } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    // The whole distinguished name is one token, so removing it withdraws the
+    // grant the reader clicked and nothing else.
+    within(form).getByRole("button", { name: `Remove ${dn}` });
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    const sent = JSON.parse(bodies[bodies.length - 1]) as {
+      groups: string[];
+    };
+    expect(sent.groups).toEqual([dn]);
   });
 
   // §7.3.1 applies each visibility axis the patch carries, so the Edit dialog
