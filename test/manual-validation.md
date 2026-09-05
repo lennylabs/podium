@@ -4075,7 +4075,8 @@ export PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"
 Carol is the bootstrap operator and never signs in to the UI. She exists so the
 stack holds a tenant admin who issues the first grant and who owns none of the
 layers these scenarios register, and `PODIUM_BOOTSTRAP_ADMINS` is the only route
-to one on a registry whose grant table starts empty.
+to one on a registry whose grant table starts empty. A run of S44 through S50
+alone skips this block, and the stack behaves as it does today.
 
 A run that reaches S59 exports one further value in the same place, before step
 3's `podium serve`:
@@ -4090,8 +4091,8 @@ under the same subject. `PODIUM_MAX_USER_LAYERS` raises the §7.3.1 per-identity
 cap on user-defined layers, which is 3 by default, so those registrations are
 admitted rather than refused with `429 quota.layer_count_exceeded`. The cap is
 read once at startup, so a registry already serving under the default has to be
-stopped and started again with the raised value. A run of S44 through S50 alone
-skips this block, and the stack behaves as it does today.
+stopped and started again with the raised value. A run that stops short of S59
+skips this export, and the stack serves under the default cap as it does today.
 
 **Prerequisites.** A local Keycloak serving an `https` issuer the host trusts, a
 confidential client registered for the authorization-code flow, and one access
@@ -6518,13 +6519,32 @@ skip and record the skip.
    arm every neighbouring §7.3.1 rule admits a caller on. The rule reads the
    stored layer's class rather than the caller, so reaching it through the admin
    arm does not lift it, and that is where this rule parts from its three
-   neighbours. The command is step 2's command, rotation flag included, so the
-   refusal's placement above the rotation reads the same on a tenant admin as it
-   does on the owner. A `403` `auth.forbidden` here means the registry never
+   neighbours. A `403` `auth.forbidden` here means the registry never
    admitted carol as a tenant admin: `PODIUM_BOOTSTRAP_ADMINS` did not name her
    `sub`, and the prerequisite is re-run before continuing. A `200` means the
    rule consults the caller, and every tenant admin then widens a personal layer
    the owner cannot.
+
+   The command is step 2's command, rotation flag included, so read the layer's
+   secret again the way step 2 does, this time against the tenant admin's
+   refusal.
+
+   ```bash
+   SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 \
+     -hmac "$(cat "$WORK/s59-secret")" | awk '{print $NF}')"
+   curl -sS -X POST -H "X-Hub-Signature-256: $SIG" \
+     -H 'Content-Type: application/json' --data "$BODY" \
+     "http://127.0.0.1:8153/v1/ingest/webhook/s59-notes" -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** Step 2's reading again: a status that is not `401`, over a body
+   that does not carry `ingest.webhook_invalid`. The refusal's placement above
+   the rotation holds on a tenant admin as it does on the owner, so this patch
+   minted nothing either. A `401` `ingest.webhook_invalid` means the admin arm
+   reaches the rotation before the refusal, which step 8's digest comparison
+   cannot recover: a secret rotated here and a secret replaced by the
+   re-registration read the same there. `BODY` is the variable step 2 exported,
+   so re-run step 2's `BODY` assignment first in a shell that has lost it.
 
 8. Take the recourse: re-register the same ID as an admin-defined layer carrying
    the visibility the refused patch asked for, and confirm a third identity now
@@ -6595,13 +6615,16 @@ skip and record the skip.
    layer's ID is authorized on that layer's write rule, and her tenant-admin
    role admits her there. The class resolution routes an authenticated non-admin
    to the user-defined arm whatever the body says, so the layer's own owner
-   never registers an admin-defined layer: the same command as `$TOKEN` is
-   refused with
-   `auth.forbidden` carrying `"constraint": "admin_only_fields"` under `details`,
-   because it asserts `public` and `groups` on the user-defined arm. Dropping
-   those two flags is admitted rather than refused, and it re-registers the layer
-   as a personal one, resetting its webhook secret, order, registration time, and
-   ingest history for no widening at all.
+   never registers an admin-defined layer. Up to the moment this step converts
+   the record, the same command as `$TOKEN` is refused with `auth.forbidden`
+   carrying `"constraint": "admin_only_fields"` under `details`, because it
+   asserts `public` and `groups` on the user-defined arm, and dropping those two
+   flags is admitted rather than refused: it re-registers the layer as a
+   personal one, resetting its webhook secret, order, registration time, and
+   ingest history for no widening at all. After the conversion neither variant
+   reaches that point. `s59-notes` is admin-defined, alice holds no tenant-admin
+   grant, and the §7.3.1 layer write rule refuses her on the stored record with
+   a bare `auth.forbidden` that carries no `details`.
 
 9. Read the Edit dialog on a personal row. Open
    `http://127.0.0.1:8153/app/#/layers` in a private browser window and click
