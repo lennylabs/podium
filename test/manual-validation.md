@@ -6787,8 +6787,10 @@ the `mkcert` CA is unavailable, skip and record the skip.
    **Expect.** The dialog's Visibility section draws a `Public` checkbox that is
    checked and operable, an `Organization` checkbox that is unchecked, and the
    two token fields for group names and user identifiers. Unchecking `Public`
-   and submitting closes the dialog, and the `s60-panel` row's visibility cell
-   changes from `public` to `no grants`. A section drawing the granted axis as a
+   and submitting is accepted, and the dialog stays open on a confirmation panel
+   reading `Layer updated`, `Layer s60-panel is updated.`, and a `Done` control
+   that closes it. The `s60-panel` row's visibility cell changes from `public`
+   to `no grants`. A section drawing the granted axis as a
    label with no control, or a sentence telling the reader that a grant cannot
    be withdrawn, is the panel still built around the grant-only endpoint, and it
    withholds a write the registry now accepts. A submission the registry refuses
