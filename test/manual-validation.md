@@ -6323,7 +6323,8 @@ whether the registry was started for S59 alone or carried through from S47.
    digest = hashlib.sha256(d["webhook_secret"].encode()).hexdigest()[:12]
    open(os.environ["WORK"] + "/s59-secret.txt", "w").write(digest)
    open(os.environ["WORK"] + "/s59-secret", "w").write(d["webhook_secret"])
-   print("secret digest:", digest, "| created_at:", l["created_at"])
+   print("secret digest:", digest, "| created_at:", l["created_at"],
+         "| order:", l["order"])
    '
    python3 -c '
    import json, os
@@ -6340,7 +6341,10 @@ whether the registry was started for S59 alone or carried through from S47.
    webhook secret, which the layer holds because it names a git source, and the
    program writes that digest to `$WORK/s59-secret.txt` for step 8 to compare
    against. It writes the secret itself to `$WORK/s59-secret`, which step 2
-   signs a delivery with. `created_at` is the time of this registration. The
+   signs a delivery with. `created_at` is the time of this registration, and
+   `order` is the position the registry assigned the layer in the composition
+   list. Record both, because step 8 reads them again on the record the
+   re-registration writes. The
    second command
    writes the layer object to `$WORK/s59-layer.json`, which step 5 sends back
    verbatim.
@@ -6544,6 +6548,11 @@ whether the registry was started for S59 alone or carried through from S47.
          "| step 1 digest:", open(os.environ["WORK"] + "/s59-secret.txt").read())
    print("created_at:", l["created_at"])
    '
+   PODIUM_SESSION_TOKEN="$CAROL_TOKEN" podium layer list --registry http://127.0.0.1:8153 \
+     | python3 -c '
+   import json, sys
+   print("highest order:", max((x["order"], x["id"]) for x in json.load(sys.stdin)["layers"]))
+   '
    PODIUM_SESSION_TOKEN="$BOB_TOKEN" podium layer list --registry http://127.0.0.1:8153 \
      | python3 -c 'import json,sys; print(sorted(x["id"] for x in json.load(sys.stdin)["layers"]))'
    ```
@@ -6557,8 +6566,12 @@ whether the registry was started for S59 alone or carried through from S47.
 
    The re-registration replaces the stored record rather than patching it, and
    the reported values are how that reads. `order` is recomputed at the tail of
-   the layer list, so it is the highest value the list carries rather than the
-   value step 1 assigned. `last_ingested_ref` and `last_ingested_at` are empty,
+   the layer list, so it is greater than the value step 1 printed, and the
+   `highest order` line names `s59-notes` at exactly the reported value. Carol
+   is a tenant admin, so her list carries every layer in the tenant and the
+   maximum is the tenant-wide one. An `order` equal to the step 1 value means
+   the re-registration preserved the record's position rather than replacing
+   the record. `last_ingested_ref` and `last_ingested_at` are empty,
    so the next ingest reads the source afresh. `secret digest` differs from the
    `step 1 digest` printed beside it: the layer holds a new inbound webhook
    secret, and the old one is retired, so an operator who had registered the
@@ -6600,17 +6613,20 @@ whether the registry was started for S59 alone or carried through from S47.
    refuses with `immutable_visibility`, which is the divergence between the
    panel's prediction and the server rule that this step exists to catch.
 
-   The `s59-notes` row is admin-defined after step 8, and its own Edit dialog is
-   the contrast that keeps this step from passing on a dialog that hides the
-   section from every row. That dialog carries an `Axes granted` label over a
-   `public` badge and the sentence `An axis already granted stays granted.
-   Unregister the layer to withdraw it.`, a `Groups granted` label over an
-   `acme-eng` token, an Organization checkbox, and the two fields that add group
-   names and user identifiers. It draws no Public checkbox, because step 8
-   granted that axis and the panel states a granted axis rather than offering to
-   take it back. The editable controls to read for the contrast are therefore the
-   Organization checkbox and the two add-member fields, none of which the
-   `s59-panel` dialog draws.
+   The text and the sentence the section prints are what separate this reading
+   from a dialog that omits the Visibility section on every row. A dialog
+   drawing no section at all carries neither `you alone` nor the sentence about
+   registration, so it fails this step rather than passing it.
+
+   The `s59-notes` row offers no contrast to read here. It is admin-defined
+   after step 8, and the panel offers `Edit` on an admin-defined row only to a
+   caller holding `manage_any_layer`. The signed-in caller is alice, who holds
+   no tenant-admin grant on this stack, so that row's overflow control carries no
+   `Edit` item and its dialog cannot be opened. The admin-defined rendering,
+   which draws an `Axes granted` label over the granted axis and the two fields
+   that add group names and user identifiers, is pinned by the
+   `web/ui/src/surfaces.test.tsx` case `states a granted visibility axis in the
+   Edit dialog rather than drawing an inert checkbox`.
 
 **Teardown.** Run S44's teardown.
 
