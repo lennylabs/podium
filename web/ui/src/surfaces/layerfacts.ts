@@ -35,14 +35,16 @@ export function markerText(marker: VisibilityMarker): string {
 }
 
 /** noGrants is what a surface states for a record that sets no visibility
- * field. §4.6's evaluator matches no condition on such a record, so the layer
- * reaches no caller's composed view, and the reader is looking at a row
- * §7.3.1's layer read visibility rule reports to the §4.7.2 admin role, whose
- * diagnostic override is the one read that still reaches the contents. The
- * Edit dialog withdraws each axis, so the state is one an operator reaches
- * deliberately, and naming a grant the registrant retains would state an
- * access the record does not carry. */
-export const noGrants = 'no grants — no composed view';
+ * field. It states the record's own fact and asserts nothing about who reads
+ * the layer, because who reads it depends on the deployment rather than on
+ * the record: §4.6 matches no condition on such a record, and the bypasses in
+ * the same section admit every caller on a registry running in public mode or
+ * configuring no identity provider. The Edit dialog withdraws each axis, so
+ * the state is one an operator reaches deliberately, and the earlier copy
+ * naming a grant the registrant retains stated an access the record does not
+ * carry. A surface that holds the §7.3.4 posture read is where a reachability
+ * reading belongs. */
+export const noGrants = 'no grants';
 
 /** visibilitySummary is every axis a layer grants on, as one line. A layer
  * that grants on no axis states that rather than rendering an empty line,

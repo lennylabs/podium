@@ -8031,7 +8031,7 @@ describe("the layer panel", () => {
     goTo("#/layers");
     render(<App />);
     await screen.findByLabelText("Layer panel");
-    const marker = screen.getByText("no grants — no composed view");
+    const marker = screen.getByText("no grants");
     expect(marker.className).toContain("badge");
     // The marker sits in the cell a granted row uses, so the two rows put
     // their markers at the same place in the column.
@@ -8054,11 +8054,12 @@ describe("the layer panel", () => {
 
   // The Edit dialog withdraws each axis, so a record that sets no visibility
   // field is a state an operator reaches deliberately rather than one only a
-  // registration-time default produces. §4.6's evaluator matches no condition
-  // on such a record, so the row states that the layer reaches no composed
-  // view. Naming a grant its registrant retains would report an access the
-  // record does not carry.
-  it("states an admin-defined row that sets no visibility field as reaching no composed view", async () => {
+  // registration-time default produces. The row states the record's own fact
+  // and asserts nothing about who reads the layer, because §4.6's bypasses
+  // admit every caller on a registry running in public mode or configuring no
+  // identity provider. Naming a grant its registrant retains would report an
+  // access the record does not carry.
+  it("states an admin-defined row that sets no visibility field as holding no grants", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ subject: "alice@acme.com" }) },
       "/v1/layers": {
@@ -8083,7 +8084,7 @@ describe("the layer panel", () => {
     const cell = screen
       .getByRole("cell", { name: /no grants/ })
       .querySelector(".visibility-markers") as HTMLElement;
-    expect(cell.textContent).toBe("no grants — no composed view");
+    expect(cell.textContent).toBe("no grants");
     expect(cell.textContent).not.toContain("only you");
   });
 
@@ -9400,7 +9401,7 @@ describe("the layer write flows", () => {
       row.querySelector("dd")?.textContent,
     ]);
     expect(rows).toEqual([
-      ["visibility", "no grants — no composed view"],
+      ["visibility", "no grants"],
       ["shadowed by", "—"],
     ]);
     // The key takes the mono face the rail's keys take, which is what
