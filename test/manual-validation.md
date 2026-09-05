@@ -4073,8 +4073,9 @@ export PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"
 ```
 
 Carol is the bootstrap operator and never signs in to the UI. She exists so the
-first grant has an issuer, and `PODIUM_BOOTSTRAP_ADMINS` is the only route to
-one on a registry whose grant table starts empty. A run of S44 through S50 alone
+stack holds a tenant admin who issues the first grant and who owns none of the
+layers these scenarios register, and `PODIUM_BOOTSTRAP_ADMINS` is the only route
+to one on a registry whose grant table starts empty. A run of S44 through S50 alone
 skips this block, and the stack behaves as it does today.
 
 **Prerequisites.** A local Keycloak serving an `https` issuer the host trusts, a
@@ -6283,9 +6284,10 @@ statement of fact rather than as a control the registry would refuse.
 S44's Prerequisites and steps 1 to 4, create `carol` and export `CAROL_TOKEN`
 and `CAROL_SUBJECT` before step 3's `podium serve`, start the registry with
 `PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT" PODIUM_MAX_USER_LAYERS=10`, and leave
-it running. Step 7 issues a tenant-admin grant, which no caller on the stack can
-issue without that bootstrap value, step 5 sends its second request as carol,
-and step 8 runs the recourse under the granted role. When Keycloak or the
+it running. Carol is the tenant admin who owns none of this scenario's layers:
+step 5 sends its second request as her, step 7 sends the refused patch as her,
+and step 8 runs the recourse as her. Without that bootstrap value the stack
+holds no tenant admin at all, and neither arm can run. When Keycloak or the
 `mkcert` CA is unavailable, skip and record the skip.
 
 `PODIUM_MAX_USER_LAYERS` raises the §7.3.1 per-identity cap on user-defined
@@ -6300,8 +6302,8 @@ whether the registry was started for S59 alone or carried through from S47.
 **Steps.**
 
 1. Register two personal layers as the signed-in caller, who holds no
-   tenant-admin grant at this point, and read the class, the owner, and the
-   visibility of the first.
+   tenant-admin grant, and read the class, the owner, and the visibility of the
+   first.
 
    ```bash
    PODIUM_SESSION_TOKEN="$TOKEN" podium layer register \
@@ -6320,6 +6322,7 @@ whether the registry was started for S59 alone or carried through from S47.
          "| groups:", l["groups"] or [], "| users:", l["users"] or [])
    digest = hashlib.sha256(d["webhook_secret"].encode()).hexdigest()[:12]
    open(os.environ["WORK"] + "/s59-secret.txt", "w").write(digest)
+   open(os.environ["WORK"] + "/s59-secret", "w").write(d["webhook_secret"])
    print("secret digest:", digest, "| created_at:", l["created_at"])
    '
    python3 -c '
@@ -6336,7 +6339,9 @@ whether the registry was started for S59 alone or carried through from S47.
    request. The secret digest is a twelve-character hex string over the inbound
    webhook secret, which the layer holds because it names a git source, and the
    program writes that digest to `$WORK/s59-secret.txt` for step 8 to compare
-   against. `created_at` is the time of this registration. The second command
+   against. It writes the secret itself to `$WORK/s59-secret`, which step 2
+   signs a delivery with. `created_at` is the time of this registration. The
+   second command
    writes the layer object to `$WORK/s59-layer.json`, which step 5 sends back
    verbatim.
 
@@ -6372,12 +6377,28 @@ whether the registry was started for S59 alone or carried through from S47.
    rule. A `403` `auth.forbidden` here means the caller is not the layer's
    stored owner, and step 1 is re-run before continuing.
 
-   The failure body carries no `webhook_secret` member. The registry evaluates
-   the refusal above the rotation, so the rotation this same patch asked for
-   minted nothing, and the secret step 1 recorded is still the one the Git host
-   must hold. A body carrying a `webhook_secret` here means the rotation ran
-   before the refusal, and the layer's stored secret has silently diverged from
-   the registered one.
+   Then read whether the secret step 1 recorded is still the layer's secret, by
+   signing an inbound delivery with it the way S27 does.
+
+   ```bash
+   BODY='{"ref":"refs/heads/main"}'
+   SIG="sha256=$(printf '%s' "$BODY" | openssl dgst -sha256 \
+     -hmac "$(cat "$WORK/s59-secret")" | awk '{print $NF}')"
+   curl -sS -X POST -H "X-Hub-Signature-256: $SIG" \
+     -H 'Content-Type: application/json' --data "$BODY" \
+     "http://127.0.0.1:8153/v1/ingest/webhook/s59-notes" -w '\nstatus=%{http_code}\n'
+   ```
+
+   **Expect.** A status that is not `401`, over a body that does not carry
+   `ingest.webhook_invalid`. The registry evaluates the refusal above the
+   rotation, so the rotation this same patch asked for minted nothing, and the
+   secret step 1 recorded still verifies. The delivery is not expected to
+   complete an ingest: `https://git.acme.internal/alice/s59-notes.git` is
+   unreachable, so the reading here is the signature verification outcome, and
+   the status is `502` with `ingest.source_unreachable` on a registry that can
+   reach no such host. A `401` `ingest.webhook_invalid` means the refused patch
+   rotated the stored secret before returning, and the secret the Git host holds
+   no longer signs a delivery this layer accepts.
 
 3. Confirm the stored record is unchanged.
 
@@ -6469,31 +6490,29 @@ whether the registry was started for S59 alone or carried through from S47.
    **Expect.** `release`. `ref`, `root`, `git_provider`, `force_push_policy`,
    and the webhook-secret rotation stay patchable on a personal layer.
 
-7. Grant the tenant-admin role to the same caller with carol's bootstrap token,
-   and run step 2's command again.
+7. Run step 2's command as carol, the tenant admin who does not own the layer.
 
    ```bash
-   curl -sS -X POST "http://127.0.0.1:8153/v1/admin/grants" \
-     -H "Authorization: Bearer $CAROL_TOKEN" -H 'Content-Type: application/json' \
-     -d "{\"user_id\":\"$SUBJECT\"}" -w '\nstatus=%{http_code}\n'
-   PODIUM_SESSION_TOKEN="$TOKEN" podium layer update \
+   PODIUM_SESSION_TOKEN="$CAROL_TOKEN" podium layer update \
      --registry http://127.0.0.1:8153 --id s59-notes --public --group acme-eng \
      --rotate-webhook-secret
    echo "exit=$?"
    ```
 
-   **Expect.** The grant answers `201` with `{"user_id": "<the subject>"}`, and
-   the update is refused with exactly step 2's reading: `exit=1`, HTTP 400,
-   `registry.invalid_argument`, `"constraint": "immutable_visibility"`, and a
-   failure body carrying no `webhook_secret` member. The command is step 2's
-   command, rotation flag included, so the refusal's placement above the
-   rotation reads the same on a tenant admin as it does on the owner. The rule
-   reads the stored layer's class rather than the caller, so the tenant-admin
-   role does not lift it. This is where the rule parts from the three
-   neighbouring §7.3.1 rules, each of which the admin arm admits. A `403` on the
-   grant means
-   `PODIUM_BOOTSTRAP_ADMINS` did not name carol's `sub`, and the prerequisite is
-   re-run before continuing.
+   **Expect.** Exactly step 2's reading: `exit=1`, HTTP 400,
+   `registry.invalid_argument`, `"constraint": "immutable_visibility"`, and the
+   two field names in sorted order. Carol owns no part of `s59-notes`, so the
+   §7.3.1 layer write rule admits her on its admin arm alone, and this is the
+   arm every neighbouring §7.3.1 rule admits a caller on. The rule reads the
+   stored layer's class rather than the caller, so reaching it through the admin
+   arm does not lift it, and that is where this rule parts from its three
+   neighbours. The command is step 2's command, rotation flag included, so the
+   refusal's placement above the rotation reads the same on a tenant admin as it
+   does on the owner. A `403` `auth.forbidden` here means the registry never
+   admitted carol as a tenant admin: `PODIUM_BOOTSTRAP_ADMINS` did not name her
+   `sub`, and the prerequisite is re-run before continuing. A `200` means the
+   rule consults the caller, and every tenant admin then widens a personal layer
+   the owner cannot.
 
 8. Take the recourse: re-register the same ID as an admin-defined layer carrying
    the visibility the refused patch asked for, and confirm a third identity now
@@ -6509,7 +6528,7 @@ whether the registry was started for S59 alone or carried through from S47.
      | python3 -c "import json,sys; print(json.load(sys.stdin)['access_token'])")"
    PODIUM_SESSION_TOKEN="$BOB_TOKEN" podium layer list --registry http://127.0.0.1:8153 \
      | python3 -c 'import json,sys; print(sorted(x["id"] for x in json.load(sys.stdin)["layers"]))'
-   PODIUM_SESSION_TOKEN="$TOKEN" podium layer register \
+   PODIUM_SESSION_TOKEN="$CAROL_TOKEN" podium layer register \
      --registry http://127.0.0.1:8153 --id s59-notes \
      --repo https://git.acme.internal/alice/s59-notes.git --ref release \
      --public --group acme-eng \
@@ -6551,11 +6570,12 @@ whether the registry was started for S59 alone or carried through from S47.
    former owner also regains a slot against the per-identity user-defined layer
    cap.
 
-   The re-registration runs as the caller step 7 granted the tenant-admin role
-   to, because `POST /v1/layers` under a stored layer's ID is authorized on that
-   layer's write rule. The class resolution routes an authenticated non-admin to
-   the user-defined arm whatever the body says, so the owner without the grant
-   never registers an admin-defined layer: the same command is refused with
+   The re-registration runs as carol, because `POST /v1/layers` under a stored
+   layer's ID is authorized on that layer's write rule, and her tenant-admin
+   role admits her there. The class resolution routes an authenticated non-admin
+   to the user-defined arm whatever the body says, so the layer's own owner
+   never registers an admin-defined layer: the same command as `$TOKEN` is
+   refused with
    `auth.forbidden` carrying `"constraint": "admin_only_fields"` under `details`,
    because it asserts `public` and `groups` on the user-defined arm. Dropping
    those two flags is admitted rather than refused, and it re-registers the layer
@@ -6592,11 +6612,9 @@ whether the registry was started for S59 alone or carried through from S47.
    Organization checkbox and the two add-member fields, none of which the
    `s59-panel` dialog draws.
 
-**Teardown.** Revoke the grant step 7 issued, and run S44's teardown.
+**Teardown.** Run S44's teardown.
 
 ```bash
-curl -sS -X DELETE "http://127.0.0.1:8153/v1/admin/grants?user_id=$SUBJECT" \
-  -H "Authorization: Bearer $CAROL_TOKEN" -w '\nstatus=%{http_code}\n'
 kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
 rm -rf "$WORK"
 docker rm -f kc-podium; rm -rf "$KCERT"
