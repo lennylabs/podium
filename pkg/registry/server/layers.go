@@ -77,7 +77,7 @@ type LayerEndpoint struct {
 	// reorder. It is the §8.3 registry sink (a file sink or an EndpointSink
 	// when redirected to a SIEM). Nil is a no-op.
 	auditSink audit.Sink
-	// publishEvent fans a §7.6 layer.config_changed onto the registry event
+	// publishEvent fans a §7.5.4 layer.config_changed onto the registry event
 	// bus so a `podium sync --watch` subscriber re-resolves its profile. It
 	// is distinct from auditSink, which records the §8.1 event for an
 	// operator rather than waking a client. Nil is a no-op, which is the
@@ -403,10 +403,17 @@ func (e *LayerEndpoint) WithEraseSink(file *audit.FileSink) *LayerEndpoint {
 	return e
 }
 
-// emitLayerEvent records the §8.1 audit event for a register or unregister
-// action: layer.user_registered for a personal (user-defined) layer with
-// its owner as caller, or layer.config_changed for an admin-defined layer.
-func (e *LayerEndpoint) emitLayerEvent(r *http.Request, cfg store.LayerConfig, action string) {
+// emitLayerEvent records the §8.1 audit event for a per-layer action:
+// layer.user_registered for a personal (user-defined) layer with its owner as
+// caller, or layer.config_changed for an admin-defined layer.
+//
+// before is the record the operation started from, and cfg the record it
+// produced. A register, unregister, restore, and erase pass a zero before,
+// which every difference test reads as a change. Only update passes the
+// record it read, because only update can store what the layer already held.
+//
+// Spec: §7.3.1, §8.1
+func (e *LayerEndpoint) emitLayerEvent(r *http.Request, before, cfg store.LayerConfig, action string) {
 	typ := audit.EventLayerConfigChanged
 	if cfg.UserDefined {
 		typ = audit.EventLayerUserRegistered
@@ -418,17 +425,108 @@ func (e *LayerEndpoint) emitLayerEvent(r *http.Request, cfg store.LayerConfig, a
 		fields["owner"] = cfg.Owner
 	}
 	emitAuditEvent(e.auditSink, r, e.caller(r), typ, cfg.ID, fields)
-	// Spec: §7.6 — the watcher re-resolves its profile on
+	// Spec: §7.5.4 — the watcher re-resolves its profile on
 	// layer.config_changed, so an admin layer change wakes it. A personal
-	// layer emits layer.user_registered instead and is not a §7.6 trigger:
+	// layer emits layer.user_registered instead and is not a §7.5.4 trigger:
 	// it changes one user's composition rather than the admin-defined one
-	// every watcher in the tenant resolves.
-	if typ == audit.EventLayerConfigChanged {
+	// every watcher in the tenant resolves. The wake is further narrowed to
+	// a change the re-resolve can observe, so an ingest-credential change
+	// records its audit event and wakes nothing.
+	if typ == audit.EventLayerConfigChanged && wakesWatchers(before, cfg) {
 		e.publishConfigChanged(r.Context(), cfg.ID, fields["action"])
 	}
 }
 
-// publishConfigChanged fans a §7.6 layer.config_changed onto the event bus.
+// layerConfigEqual reports whether two stored layer records are equal for the
+// purpose of §7.3.1's unchanged-write rule. It compares Groups and Users with
+// slices.Equal rather than with reflect.DeepEqual, which separates a nil slice
+// from an empty one: a layer stored with nil groups and patched with [] would
+// then report a change that did not occur, which is what a client echoing a
+// layer object back produces. The two timestamps are compared by value for the
+// same reason, because a pointer comparison would report a change on two equal
+// instants held at different addresses.
+//
+// Spec: §7.3.1
+func layerConfigEqual(a, b store.LayerConfig) bool {
+	return a.TenantID == b.TenantID &&
+		a.ID == b.ID &&
+		a.SourceType == b.SourceType &&
+		a.Repo == b.Repo &&
+		a.Ref == b.Ref &&
+		a.Root == b.Root &&
+		a.LocalPath == b.LocalPath &&
+		a.Order == b.Order &&
+		a.UserDefined == b.UserDefined &&
+		a.Owner == b.Owner &&
+		a.Public == b.Public &&
+		a.Organization == b.Organization &&
+		slices.Equal(a.Groups, b.Groups) &&
+		slices.Equal(a.Users, b.Users) &&
+		a.WebhookSecret == b.WebhookSecret &&
+		a.GitProvider == b.GitProvider &&
+		a.LastIngestedRef == b.LastIngestedRef &&
+		a.ForcePushPolicy == b.ForcePushPolicy &&
+		timePtrEqual(a.LastIngestedAt, b.LastIngestedAt) &&
+		a.CreatedAt.Equal(b.CreatedAt) &&
+		timePtrEqual(a.DeletedAt, b.DeletedAt)
+}
+
+// timePtrEqual reports whether two optional timestamps name the same instant,
+// treating two nil values as equal.
+func timePtrEqual(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
+}
+
+// wakesWatchers reports whether the difference between two stored layer
+// configurations can alter what a §7.5.4 watcher's re-resolve produces. The
+// visibility members decide which layers a caller resolves, the order decides
+// precedence among them, and the source location decides what the layer
+// serves. A webhook secret, a force-push policy, and a git provider decide how
+// the registry ingests, which no materialized tree observes, and the ingest
+// bookkeeping and the timestamps record what an ingest already did. Owner is
+// not projected onto the §4.6 visibility record (core.VisibilityOf), and the
+// caller reaches this predicate only on the admin-defined class, where the
+// field names no authorized subject.
+//
+// Spec: §7.3.1, §7.5.4
+func wakesWatchers(before, after store.LayerConfig) bool {
+	return before.Public != after.Public ||
+		before.Organization != after.Organization ||
+		!slices.Equal(before.Groups, after.Groups) ||
+		!slices.Equal(before.Users, after.Users) ||
+		before.Order != after.Order ||
+		before.SourceType != after.SourceType ||
+		before.Repo != after.Repo ||
+		before.Ref != after.Ref ||
+		before.Root != after.Root ||
+		before.LocalPath != after.LocalPath
+}
+
+// precedenceSequence returns the tenant's layer identifiers in ascending
+// order of precedence, ties broken by identifier. §7.3.1 keys the reorder
+// event on this sequence rather than on the stored order integers, which the
+// handler renumbers to (i + 1) * 10 on every call whatever the result.
+//
+// Spec: §7.3.1
+func precedenceSequence(layers []store.LayerConfig) []string {
+	sorted := slices.Clone(layers)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Order != sorted[j].Order {
+			return sorted[i].Order < sorted[j].Order
+		}
+		return sorted[i].ID < sorted[j].ID
+	})
+	ids := make([]string, 0, len(sorted))
+	for _, l := range sorted {
+		ids = append(ids, l.ID)
+	}
+	return ids
+}
+
+// publishConfigChanged fans a §7.5.4 layer.config_changed onto the event bus.
 // The payload names the layer and the action so a receiver can tell a
 // registration from a reorder without a second call.
 func (e *LayerEndpoint) publishConfigChanged(ctx context.Context, layerID, action string) {
@@ -810,7 +908,7 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
 		}
-		e.emitLayerEvent(r, l, "erase")
+		e.emitLayerEvent(r, store.LayerConfig{}, l, "erase")
 		purged = append(purged, l.ID)
 	}
 	// spec §8.5: redact the user identity across the registry audit
@@ -882,6 +980,10 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
 		return
 	}
+	// before is the stored record every later comparison reads: what the
+	// patch changed decides whether the handler writes, what it records, and
+	// whether it wakes a watcher.
+	before := cfg
 	// spec: §7.3.1 — the layer-write authorization rule: a user-defined
 	// layer's stored owner or a tenant admin, an admin-defined layer a
 	// tenant admin alone.
@@ -991,13 +1093,21 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		cfg.Owner = patch.Owner
 	}
 	cfg = vis.applyTo(cfg)
+	// spec: §7.3.1 — a patch that stores nothing writes no record and records
+	// no §8.1 event, so a body restating what the layer holds is answered 200
+	// with the unchanged layer object and leaves the audit stream reporting
+	// only changes that happened.
+	if layerConfigEqual(before, cfg) {
+		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: cfg})
+		return
+	}
 	if err := e.store.PutLayerConfig(r.Context(), cfg); err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
 	// spec §8.1: a config mutation (including a secret rotation) is an
 	// auditable layer.config_changed / layer.user_registered event.
-	e.emitLayerEvent(r, cfg, "update")
+	e.emitLayerEvent(r, before, cfg, "update")
 	resp := LayerRegisterResponse{Layer: cfg}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
@@ -1249,7 +1359,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// spec §8.1: a user registering a personal layer emits
 	// layer.user_registered; an admin adding an admin-defined layer emits
 	// layer.config_changed.
-	e.emitLayerEvent(r, cfg, "register")
+	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "register")
 
 	resp := LayerRegisterResponse{Layer: cfg}
 	if cfg.SourceType == "git" {
@@ -1344,7 +1454,7 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
-	e.emitLayerEvent(r, cfg, "restore")
+	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "restore")
 	writeJSON(w, http.StatusOK, map[string]any{"restored": id})
 }
 
@@ -1378,7 +1488,7 @@ func (e *LayerEndpoint) unregister(w http.ResponseWriter, r *http.Request) {
 	}
 	// spec §8.1: unregistering a personal layer emits layer.user_registered;
 	// removing an admin-defined layer emits layer.config_changed.
-	e.emitLayerEvent(r, cfg, "unregister")
+	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "unregister")
 	writeJSON(w, http.StatusOK, map[string]any{"unregistered": id})
 }
 
@@ -1443,8 +1553,14 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	}
 	updated, _ := e.store.ListLayerConfigs(r.Context(), e.tenantID)
 	sort.Slice(updated, func(i, j int) bool { return updated[i].Order < updated[j].Order })
-	// spec §8.1: reordering admin-defined layers emits layer.config_changed.
-	if len(req.Order) > 0 {
+	// spec §8.1, §7.3.1: a reorder records one layer.config_changed on the
+	// identifiers it named, whatever the class of the layers it names, where
+	// the resulting precedence sequence differs from the one the tenant held.
+	// The stored order integers cannot serve the comparison: the loop above
+	// renumbers every named layer to (i + 1) * 10 whatever the result, so a
+	// tenant whose orders were seeded otherwise would report a change on a
+	// reorder that changed no precedence.
+	if !slices.Equal(precedenceSequence(layers), precedenceSequence(updated)) {
 		emitAuditEvent(e.auditSink, r, e.caller(r), audit.EventLayerConfigChanged,
 			strings.Join(req.Order, ","), map[string]string{"action": "reorder"})
 		e.publishConfigChanged(r.Context(), strings.Join(req.Order, ","), "reorder")
