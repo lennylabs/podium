@@ -6282,9 +6282,9 @@ statement of fact rather than as a control the registry would refuse.
 **Prerequisites.** The S44 stack, with S44's bootstrap-admin note applied: run
 S44's Prerequisites and steps 1 to 4, create `carol` and export `CAROL_TOKEN`
 and `CAROL_SUBJECT` before step 3's `podium serve`, start the registry with
-`PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"`, and leave it running. Step 7 and
-step 8 issue a tenant-admin grant, which no caller on the stack can issue
-without that bootstrap value. When Keycloak or the `mkcert` CA is unavailable,
+`PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"`, and leave it running. Step 7 issues
+a tenant-admin grant, which no caller on the stack can issue without that
+bootstrap value, and step 8 runs the recourse under it. When Keycloak or the `mkcert` CA is unavailable,
 skip and record the skip.
 
 **Steps.**
@@ -6302,21 +6302,21 @@ skip and record the skip.
      --registry http://127.0.0.1:8153 --id s59-panel --user-defined \
      --repo https://git.acme.internal/alice/s59-panel.git --ref main > /dev/null
    python3 -c '
-import hashlib, json, os
-d = json.load(open(os.environ["WORK"] + "/s59-register.json"))
-l = d["layer"]
-print("user_defined:", l["user_defined"], "| owner:", l["owner"])
-print("public:", l["public"], "| organization:", l["organization"],
-      "| groups:", l["groups"] or [], "| users:", l["users"] or [])
-digest = hashlib.sha256(d["webhook_secret"].encode()).hexdigest()[:12]
-open(os.environ["WORK"] + "/s59-secret.txt", "w").write(digest)
-print("secret digest:", digest, "| created_at:", l["created_at"])
-'
+   import hashlib, json, os
+   d = json.load(open(os.environ["WORK"] + "/s59-register.json"))
+   l = d["layer"]
+   print("user_defined:", l["user_defined"], "| owner:", l["owner"])
+   print("public:", l["public"], "| organization:", l["organization"],
+         "| groups:", l["groups"] or [], "| users:", l["users"] or [])
+   digest = hashlib.sha256(d["webhook_secret"].encode()).hexdigest()[:12]
+   open(os.environ["WORK"] + "/s59-secret.txt", "w").write(digest)
+   print("secret digest:", digest, "| created_at:", l["created_at"])
+   '
    python3 -c '
-import json, os
-json.dump(json.load(open(os.environ["WORK"] + "/s59-register.json"))["layer"],
-          open(os.environ["WORK"] + "/s59-layer.json", "w"))
-'
+   import json, os
+   json.dump(json.load(open(os.environ["WORK"] + "/s59-register.json"))["layer"],
+             open(os.environ["WORK"] + "/s59-layer.json", "w"))
+   '
    ```
 
    **Expect.** `user_defined: True`, `owner` carrying `$SUBJECT`,
@@ -6329,10 +6329,6 @@ json.dump(json.load(open(os.environ["WORK"] + "/s59-register.json"))["layer"],
    against. `created_at` is the time of this registration. The second command
    writes the layer object to `$WORK/s59-layer.json`, which step 5 sends back
    verbatim.
-
-   Each Python program in this scenario is unindented inside its block on
-   purpose. The document's leading spaces would land inside the program and
-   raise an `IndentationError`.
 
    `PODIUM_SESSION_TOKEN` is the credential the CLI attaches, so the
    registration acts as the caller the browser session holds. S44's
@@ -6377,10 +6373,10 @@ json.dump(json.load(open(os.environ["WORK"] + "/s59-register.json"))["layer"],
    ```bash
    PODIUM_SESSION_TOKEN="$TOKEN" podium layer list --registry http://127.0.0.1:8153 \
      | python3 -c '
-import json, sys
-l = next(x for x in json.load(sys.stdin)["layers"] if x["id"] == "s59-notes")
-print(l["public"], l["organization"], l["groups"] or [], l["users"] or [], l["ref"])
-'
+   import json, sys
+   l = next(x for x in json.load(sys.stdin)["layers"] if x["id"] == "s59-notes")
+   print(l["public"], l["organization"], l["groups"] or [], l["users"] or [], l["ref"])
+   '
    ```
 
    **Expect.** `False False [] ['<the subject>'] main`. The refusal rejected the
@@ -6389,16 +6385,24 @@ print(l["public"], l["organization"], l["groups"] or [], l["users"] or [], l["re
 4. Confirm the refused attempt emitted no §8.1 layer event.
 
    ```bash
-   grep -c '"action":"register"' "$PODIUM_AUDIT_LOG_PATH"
-   grep -c '"action":"update"' "$PODIUM_AUDIT_LOG_PATH" || echo "no update event"
+   grep '"target":"s59-notes"' "$PODIUM_AUDIT_LOG_PATH" \
+     | grep -c '"action":"register"'
+   grep '"target":"s59-notes"' "$PODIUM_AUDIT_LOG_PATH" \
+     | grep -c '"action":"update"' || echo "no update event"
    ```
 
-   **Expect.** `2` from the first command, one per layer step 1 registered, and
+   **Expect.** `1` from the first command, the registration step 1 performed, and
    `no update event` from the second, because `grep -c` exits non-zero on a count
    of zero. The registry returns above every mutation the handler performs, so a
    refused patch writes no record and emits no event. A count of `1` or more on
    the update grep means the refusal is being evaluated after the write rather
    than before it.
+
+   Both commands select on the event's `target`, which the registry sets to the
+   layer's ID, so the counts read this scenario's layer alone. The audit log
+   belongs to the registry S44 step 3 started, and S47 through S57 register their
+   own layers into the same file, so a whole-file count reads their events too
+   and is not the property this step exists for.
 
    The first command is the positive control, and it runs first because the
    second one alone proves nothing: `grep` also exits non-zero when the file is
@@ -6479,17 +6483,17 @@ print(l["public"], l["organization"], l["groups"] or [], l["users"] or [], l["re
      --repo https://git.acme.internal/alice/s59-notes.git --ref release \
      --public --group acme-eng \
      | python3 -c '
-import hashlib, json, os, sys
-d = json.load(sys.stdin)
-l = d["layer"]
-print("user_defined:", l["user_defined"], "| public:", l["public"],
-      "| groups:", l["groups"] or [], "| users:", l["users"] or [], "| owner:", repr(l["owner"]))
-print("order:", l["order"], "| last_ingested_ref:", repr(l.get("last_ingested_ref", "")),
-      "| last_ingested_at:", repr(l.get("last_ingested_at", "")))
-print("secret digest:", hashlib.sha256(d["webhook_secret"].encode()).hexdigest()[:12],
-      "| step 1 digest:", open(os.environ["WORK"] + "/s59-secret.txt").read())
-print("created_at:", l["created_at"])
-'
+   import hashlib, json, os, sys
+   d = json.load(sys.stdin)
+   l = d["layer"]
+   print("user_defined:", l["user_defined"], "| public:", l["public"],
+         "| groups:", l["groups"] or [], "| users:", l["users"] or [], "| owner:", repr(l["owner"]))
+   print("order:", l["order"], "| last_ingested_ref:", repr(l.get("last_ingested_ref", "")),
+         "| last_ingested_at:", repr(l.get("last_ingested_at", "")))
+   print("secret digest:", hashlib.sha256(d["webhook_secret"].encode()).hexdigest()[:12],
+         "| step 1 digest:", open(os.environ["WORK"] + "/s59-secret.txt").read())
+   print("created_at:", l["created_at"])
+   '
    PODIUM_SESSION_TOKEN="$BOB_TOKEN" podium layer list --registry http://127.0.0.1:8153 \
      | python3 -c 'import json,sys; print(sorted(x["id"] for x in json.load(sys.stdin)["layers"]))'
    ```
