@@ -95,11 +95,12 @@ func TestVisible_PublicModeBypass(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 — a registry started with no request-time identity verifier
-// resolves every caller as anonymous-public, so the evaluator short-circuits
-// on that one field for every layer, a record setting no visibility field
-// included.
-// Spec: §4.6 — the no-identity bypass.
+// Spec: §4.6 — a record setting no visibility field matches no caller the
+// registry resolves to a subject, and the bypass arms admit it without
+// reading the record. A registry configured with no request-time identity
+// verifier resolves every caller as anonymous-public, so the evaluator
+// short-circuits on that one field for every layer, a record setting no
+// visibility field included.
 func TestVisible_NoFieldLayerVisibleToNoResolvedCaller(t *testing.T) {
 	t.Parallel()
 	// A stored record setting no visibility field, which registration
