@@ -6282,11 +6282,20 @@ statement of fact rather than as a control the registry would refuse.
 **Prerequisites.** The S44 stack, with S44's bootstrap-admin note applied: run
 S44's Prerequisites and steps 1 to 4, create `carol` and export `CAROL_TOKEN`
 and `CAROL_SUBJECT` before step 3's `podium serve`, start the registry with
-`PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"`, and leave it running. Step 7 issues
-a tenant-admin grant, which no caller on the stack can issue without that
-bootstrap value, step 5 sends its second request as carol, and step 8 runs the
-recourse under the granted role. When Keycloak or the `mkcert` CA is
-unavailable, skip and record the skip.
+`PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT" PODIUM_MAX_USER_LAYERS=10`, and leave
+it running. Step 7 issues a tenant-admin grant, which no caller on the stack can
+issue without that bootstrap value, step 5 sends its second request as carol,
+and step 8 runs the recourse under the granted role. When Keycloak or the
+`mkcert` CA is unavailable, skip and record the skip.
+
+`PODIUM_MAX_USER_LAYERS` raises the §7.3.1 per-identity cap on user-defined
+layers, which is 3 by default. Step 1 registers two of them under the signed-in
+caller, and that caller already owns the personal layers S48 and S56 registered
+when this scenario runs on the stack those scenarios left running. The default
+cap refuses the second registration there with
+`429 quota.layer_count_exceeded`, which reads as the cap rather than as
+anything this scenario asserts. The raised value admits both registrations
+whether the registry was started for S59 alone or carried through from S47.
 
 **Steps.**
 
@@ -6337,8 +6346,9 @@ unavailable, skip and record the skip.
    makes the invocation authenticated at all. The repository is never fetched,
    because no step here reingests either layer. `s59-panel` exists so step 9
    has a personal row to open after step 8 has converted `s59-notes` to the
-   admin-defined class; the default cap of three user-defined layers per
-   identity admits both.
+   admin-defined class, and the raised `PODIUM_MAX_USER_LAYERS` the
+   Prerequisites name is what admits both registrations on a registry that
+   already holds this caller's earlier personal layers.
 
 2. Attempt to widen the layer as its own owner, in a patch that also asks for a
    webhook-secret rotation.
