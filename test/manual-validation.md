@@ -4057,9 +4057,9 @@ below reaches each of them.
 grant and sets no `PODIUM_BOOTSTRAP_ADMINS`, and `POST /v1/admin/grants` is
 itself admin-gated, so no caller on the stack as written below can issue the
 first grant. S56, S57, and S59 need one, so a run that reaches them amends step
-3 with two additions. Before step 3's `podium serve`, create a second realm user
-`carol` the way S50 step 1 creates `bob`, read her `sub` and her access token,
-and name that `sub` as the bootstrap admin:
+3. Before step 3's `podium serve`, create a second realm user `carol` the way
+S50 step 1 creates `bob`, read her `sub` and her access token, and name that
+`sub` as the bootstrap admin:
 
 ```bash
 $KC create users -r master -s username=carol -s enabled=true -s email=carol@acme.com
@@ -4075,7 +4075,22 @@ export PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT"
 Carol is the bootstrap operator and never signs in to the UI. She exists so the
 stack holds a tenant admin who issues the first grant and who owns none of the
 layers these scenarios register, and `PODIUM_BOOTSTRAP_ADMINS` is the only route
-to one on a registry whose grant table starts empty. A run of S44 through S50 alone
+to one on a registry whose grant table starts empty.
+
+A run that reaches S59 exports one further value in the same place, before step
+3's `podium serve`:
+
+```bash
+export PODIUM_MAX_USER_LAYERS=10
+```
+
+S59 registers personal layers as the signed-in caller, and on a run that reaches
+it that caller already owns the personal layers the earlier scenarios registered
+under the same subject. `PODIUM_MAX_USER_LAYERS` raises the §7.3.1 per-identity
+cap on user-defined layers, which is 3 by default, so those registrations are
+admitted rather than refused with `429 quota.layer_count_exceeded`. The cap is
+read once at startup, so a registry already serving under the default has to be
+stopped and started again with the raised value. A run of S44 through S50 alone
 skips this block, and the stack behaves as it does today.
 
 **Prerequisites.** A local Keycloak serving an `https` issuer the host trusts, a
@@ -6280,24 +6295,17 @@ recourse an administrator is pointed at actually widens the layer for a third
 person, and that the Edit dialog on a personal row presents the visibility as a
 statement of fact rather than as a control the registry would refuse.
 
-**Prerequisites.** The S44 stack, with S44's bootstrap-admin note applied: run
-S44's Prerequisites and steps 1 to 4, create `carol` and export `CAROL_TOKEN`
-and `CAROL_SUBJECT` before step 3's `podium serve`, start the registry with
-`PODIUM_BOOTSTRAP_ADMINS="$CAROL_SUBJECT" PODIUM_MAX_USER_LAYERS=10`, and leave
-it running. Carol is the tenant admin who owns none of this scenario's layers:
-step 5 sends its second request as her, step 7 sends the refused patch as her,
-and step 8 runs the recourse as her. Without that bootstrap value the stack
-holds no tenant admin at all, and neither arm can run. When Keycloak or the
-`mkcert` CA is unavailable, skip and record the skip.
-
-`PODIUM_MAX_USER_LAYERS` raises the §7.3.1 per-identity cap on user-defined
-layers, which is 3 by default. Step 1 registers two of them under the signed-in
-caller, and that caller already owns the personal layers S48 and S56 registered
-when this scenario runs on the stack those scenarios left running. The default
-cap refuses the second registration there with
-`429 quota.layer_count_exceeded`, which reads as the cap rather than as
-anything this scenario asserts. The raised value admits both registrations
-whether the registry was started for S59 alone or carried through from S47.
+**Prerequisites.** The S44 stack, with S44's bootstrap-admin note applied in
+full: run S44's Prerequisites and steps 1 to 4, and apply that note's amendments
+to step 3 for both S59 arms it covers, the `carol` bootstrap admin and the
+raised `PODIUM_MAX_USER_LAYERS`. Leave the registry running. Carol is the tenant
+admin who owns none of this scenario's layers: step 5 sends its second request
+as her, step 7 sends the refused patch as her, and step 8 runs the recourse as
+her. Without the bootstrap value the stack holds no tenant admin at all, and
+neither arm can run; without the raised cap step 1 is refused with
+`429 quota.layer_count_exceeded` on a stack the earlier scenarios have already
+registered personal layers on. When Keycloak or the `mkcert` CA is unavailable,
+skip and record the skip.
 
 **Steps.**
 
