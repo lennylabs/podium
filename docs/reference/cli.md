@@ -427,7 +427,7 @@ For Git sources, the registry returns the webhook URL and HMAC secret to configu
 
 Visibility flags set who can see the layer. They apply to an admin-defined layer; a user-defined layer takes the fixed visibility `users: [<owner>]` instead.
 
-- `--user-defined` registers a personal layer. The registry derives its owner from the authenticated caller and sets its visibility to that owner alone. On a registry that authenticates callers, a caller without the `admin` role that sends `--public`, `--organization`, `--group`, `--user`, or an `--owner` naming another subject is rejected with `auth.forbidden` carrying `details.constraint: "admin_only_fields"`; the paragraph above states the deployments where no flag is refused, the precedence the layer write and local-source rejections take over this one, and that `--owner` is the mechanism there. `podium layer update` also ignores owner and visibility patches on a user-defined layer.
+- `--user-defined` registers a personal layer. The registry derives its owner from the authenticated caller and sets its visibility to that owner alone. On a registry that authenticates callers, a caller without the `admin` role that sends `--public`, `--organization`, `--group`, `--user`, or an `--owner` naming another subject is rejected with `auth.forbidden` carrying `details.constraint: "admin_only_fields"`; the paragraph above states the deployments where no flag is refused, the precedence the layer write and local-source rejections take over this one, and that `--owner` is the mechanism there. On the update path the rule is a different one: `podium layer update` refuses `--owner`, `--public`, `--organization`, `--group`, and `--user` against a stored user-defined layer with `registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`, whichever caller runs it, while the `admin_only_fields` refusal above is returned on the register path alone.
 - `--public` sets public visibility; `--organization` sets organization-wide visibility. Both require the per-tenant `admin` role on a registry that authenticates callers.
 - `--group` grants visibility to an OIDC group (repeatable), and requires the per-tenant `admin` role on a registry that authenticates callers.
 - `--user` grants visibility to an OIDC subject or email (repeatable), and requires the per-tenant `admin` role on a registry that authenticates callers.
@@ -492,6 +492,8 @@ podium layer update --id <id>
 ```
 
 `--rotate-webhook-secret` regenerates the Git layer's HMAC webhook secret and prints the new value.
+
+`--owner`, `--public`, `--organization`, `--group`, and `--user` apply to an admin-defined layer. Against a stored user-defined layer each of them is refused with `registry.invalid_argument` carrying `details.constraint: "immutable_visibility"`, because that layer's owner and its implicit `users: [<owner>]` visibility are fixed at registration; the refusal rejects the whole patch, so no other flag the same command carries is applied. An administrator widens such a layer by re-registering its ID as an admin-defined layer.
 
 `--local` patches the layer's filesystem path on the registry host and requires the per-tenant `admin` role. A patch carrying it is rejected with `auth.forbidden` carrying `details.constraint: "local_source"` for a caller without that role, whatever the layer's stored source type. A patch that does not carry `--local` is not reached by that rule. A registry started with no identity provider configured, or one started in public mode, authenticates no caller and admits the patch.
 

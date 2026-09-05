@@ -359,9 +359,10 @@ any state the CLI can reach is a state the panel must render.
   returns the new secret once, on the same terms as registration, so the reveal
   treatment is reused here, and only a git source carries a secret, so the
   rotation control needs an absent or disabled state on a local layer. On a
-  user-defined layer the registry ignores the owner and visibility fields and
-  still answers success, so the form must not offer controls for values it cannot
-  change.
+  user-defined layer the registry refuses a patch asserting the owner or a
+  visibility field with `400 registry.invalid_argument` carrying
+  `details.constraint: "immutable_visibility"`, so the form must not offer
+  controls for values it cannot change.
 - **Reingest** a layer. The registry runs the whole ingest pipeline inside the
   request and answers with a summary of what the snapshot accepted, what it
   rejected, and what it conflicted on (`POST /v1/layers/reingest` in
