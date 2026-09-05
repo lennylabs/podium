@@ -6343,11 +6343,13 @@ json.dump(json.load(open(os.environ["WORK"] + "/s59-register.json"))["layer"],
    admin-defined class; the default cap of three user-defined layers per
    identity admits both.
 
-2. Attempt to widen the layer as its own owner.
+2. Attempt to widen the layer as its own owner, in a patch that also asks for a
+   webhook-secret rotation.
 
    ```bash
    PODIUM_SESSION_TOKEN="$TOKEN" podium layer update \
-     --registry http://127.0.0.1:8153 --id s59-notes --public --group acme-eng
+     --registry http://127.0.0.1:8153 --id s59-notes --public --group acme-eng \
+     --rotate-webhook-secret
    echo "exit=$?"
    ```
 
@@ -6362,6 +6364,13 @@ json.dump(json.load(open(os.environ["WORK"] + "/s59-register.json"))["layer"],
    every later step of this scenario then reads that discard rather than the
    rule. A `403` `auth.forbidden` here means the caller is not the layer's
    stored owner, and step 1 is re-run before continuing.
+
+   The failure body carries no `webhook_secret` member. The registry evaluates
+   the refusal above the rotation, so the rotation this same patch asked for
+   minted nothing, and the secret step 1 recorded is still the one the Git host
+   must hold. A body carrying a `webhook_secret` here means the rotation ran
+   before the refusal, and the layer's stored secret has silently diverged from
+   the registered one.
 
 3. Confirm the stored record is unchanged.
 
@@ -6380,15 +6389,24 @@ print(l["public"], l["organization"], l["groups"] or [], l["users"] or [], l["re
 4. Confirm the refused attempt emitted no §8.1 layer event.
 
    ```bash
+   grep -c '"action":"register"' "$PODIUM_AUDIT_LOG_PATH"
    grep -c '"action":"update"' "$PODIUM_AUDIT_LOG_PATH" || echo "no update event"
    ```
 
-   **Expect.** `no update event`, because `grep -c` exits non-zero on a count of
-   zero. The registry returns above every mutation the handler performs, so a
-   refused patch writes no record and emits no event. A count of `1` or more
-   means the refusal is being evaluated after the write rather than before it.
-   The log does carry `"action":"register"` entries from step 1, which is what
-   confirms the file is the one the registry is writing to.
+   **Expect.** `2` from the first command, one per layer step 1 registered, and
+   `no update event` from the second, because `grep -c` exits non-zero on a count
+   of zero. The registry returns above every mutation the handler performs, so a
+   refused patch writes no record and emits no event. A count of `1` or more on
+   the update grep means the refusal is being evaluated after the write rather
+   than before it.
+
+   The first command is the positive control, and it runs first because the
+   second one alone proves nothing: `grep` also exits non-zero when the file is
+   missing or unreadable, so `no update event` prints on a registry that wrote no
+   audit log at all. A `grep` error naming a missing file, or a count of `0` from
+   the first command, means `PODIUM_AUDIT_LOG_PATH` was not exported into the
+   shell that ran S44 step 3's `podium serve`. Export it there, re-run steps 1
+   and 2, and read this step again.
 
 5. Send the layer object read in step 1 back verbatim, which asserts no field.
 
@@ -6525,10 +6543,19 @@ print("created_at:", l["created_at"])
    so is the webhook-secret rotation, because those fields stay patchable on the
    class. A checkbox or a members field drawn here offers a write the registry
    refuses with `immutable_visibility`, which is the divergence between the
-   panel's prediction and the server rule that this step exists to catch. The
-   `s59-notes` row is admin-defined after step 8, so its own Edit dialog draws
-   the editable axes, which is the contrast that keeps this step from passing on
-   a dialog that hides the section from every row.
+   panel's prediction and the server rule that this step exists to catch.
+
+   The `s59-notes` row is admin-defined after step 8, and its own Edit dialog is
+   the contrast that keeps this step from passing on a dialog that hides the
+   section from every row. That dialog carries an `Axes granted` label over a
+   `public` badge and the sentence `An axis already granted stays granted.
+   Unregister the layer to withdraw it.`, a `Groups granted` label over an
+   `acme-eng` token, an Organization checkbox, and the two fields that add group
+   names and user identifiers. It draws no Public checkbox, because step 8
+   granted that axis and the panel states a granted axis rather than offering to
+   take it back. The editable controls to read for the contrast are therefore the
+   Organization checkbox and the two add-member fields, none of which the
+   `s59-panel` dialog draws.
 
 **Teardown.** Revoke the grant step 7 issued, and run S44's teardown.
 
