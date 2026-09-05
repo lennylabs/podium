@@ -342,11 +342,14 @@ function useMemberList(stored: readonly string[]) {
     /** tokens is the list the patch carries: the stored members that survive
      * the reader's removals, followed by the ones they added. */
     tokens: [...kept, ...added],
+    /** remove takes one member back from both holdings at once. Dropping it
+     * from `kept` alone leaves the same name in the line free to re-enter
+     * through `added`, which redraws the token and re-grants the member in the
+     * patch, so a withdrawal the reader performed would be discarded while the
+     * dialog answered success. Rewriting the line is harmless when the token
+     * is absent from it. */
     remove: (token: string) => {
-      if (kept.includes(token)) {
-        setKept(without(kept, token));
-        return;
-      }
+      setKept(without(kept, token));
       setLine(without(members(line), token).join(", "));
     },
   };

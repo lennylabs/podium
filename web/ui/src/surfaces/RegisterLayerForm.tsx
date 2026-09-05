@@ -791,9 +791,11 @@ function VisibilityAxis({
 }
 
 /** TokenInput names the members of an axis. The Edit dialog draws it over the
- * same members, where the line is seeded from the stored grant and a removal
- * withdraws it. The parsed members are
- * echoed back as tokens, because a comma-separated line does not show the
+ * same members, holding the stored ones apart from the line and passing them
+ * in `tokens`, and its `onRemove` takes one back from that held array so a
+ * member carrying a comma survives an untouched dialog. `useMemberList` in
+ * `UpdateLayerForm.tsx` carries the reasoning. On this form the parsed members
+ * are echoed back as tokens, because a comma-separated line does not show the
  * reader how it was split and a mis-split grant admits the wrong people. Each
  * token removes itself, so a member entered by mistake is dropped from the
  * grant without editing a separator out of the line by hand.

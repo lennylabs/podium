@@ -11506,6 +11506,51 @@ describe("the layer write flows", () => {
     expect(sent.users).toEqual(["bob@acme.com"]);
   });
 
+  // A stored member the reader has also typed into the line is one token, and
+  // removing it withdraws it. Taking it out of the held array alone would let
+  // the line re-admit it, so the token would redraw and the patch would still
+  // grant the member while the dialog answered success.
+  //
+  // Spec: §4.6, §7.3.1
+  it("withdraws a stored user the reader also typed into the line", async () => {
+    const granted = { ...adminLayer(), users: ["alice@acme.com"] };
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [granted] } },
+      "PUT /v1/layers/update": { body: { layer: granted } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    const line = within(form).getByLabelText(
+      "User identifiers, separated by commas",
+    ) as HTMLInputElement;
+    fireEvent.change(line, {
+      target: { value: "alice@acme.com, bob@acme.com" },
+    });
+    // The name is stored and typed, and it draws once.
+    expect(
+      within(form).getAllByRole("button", { name: "Remove alice@acme.com" })
+        .length,
+    ).toBe(1);
+    fireEvent.click(
+      within(form).getByRole("button", { name: "Remove alice@acme.com" }),
+    );
+    expect(
+      within(form).queryByRole("button", { name: "Remove alice@acme.com" }),
+    ).toBeNull();
+    expect(line.value).toBe("bob@acme.com");
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    const sent = JSON.parse(bodies[bodies.length - 1]) as {
+      users: string[];
+    };
+    expect(sent.users).toEqual(["bob@acme.com"]);
+  });
+
   // The stored members are held as the array the record supplied rather than
   // joined into the line, so a member carrying a comma survives an unedited
   // dialog. Joined and re-split it would come back as two members, and the
