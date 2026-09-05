@@ -6726,8 +6726,14 @@ the `mkcert` CA is unavailable, skip and record the skip.
    take effect, because `public` is an admin-only registration field.
 
 2. Create the reading identity and confirm it sees both layers. Create it the
-   way S50 step 1 does, and skip the creation when S50 or S59 has already run in
-   this shell.
+   way S50 step 1 does, and run the creation every time this scenario is run.
+   This scenario's Prerequisites re-run S44's Prerequisites and steps 1 to 4,
+   which recreate the `kc-podium` container on an empty user set, so a `bob`
+   created by an earlier S50 or S59 run does not survive into this realm and a
+   `BOB_TOKEN` minted against the earlier realm's keys no longer verifies. When
+   bob already exists in the realm that is running, `$KC create users` reports a
+   conflict and exits non-zero, which is harmless here, because the token mint
+   below is what the rest of the step reads.
 
    ```bash
    $KC create users -r master -s username=bob -s enabled=true
