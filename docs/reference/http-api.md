@@ -773,7 +773,7 @@ Useful for sync watchers, downstream rebuild triggers, and eval pipelines reacti
 /scim/v2/
 ```
 
-A SCIM 2.0 receiver the configured identity provider pushes Users and Groups to. The visibility evaluator resolves `groups:` filters against the membership this endpoint records. The route is mounted only when the deployment configures a SCIM receiver.
+A SCIM 2.0 receiver the configured identity provider pushes Users and Groups to. The visibility evaluator resolves `groups:` filters against the membership this endpoint records under the identity providers that verify the caller's credential. Under `trusted-headers` a `groups:` filter matches the `X-Podium-User-Groups` value alone, and the receiver keeps recording what the identity provider pushes. The route is mounted only when the deployment configures a SCIM receiver.
 
 ---
 
