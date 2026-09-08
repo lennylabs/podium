@@ -6,6 +6,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- Under the `trusted-headers` identity provider, a layer's `groups:` filter is
+  satisfied by the `X-Podium-User-Groups` value alone. The registry no longer
+  expands a `groups:` filter against the directory pushed to the SCIM receiver
+  under that provider. This is backward-incompatible and lands in a MINOR bump,
+  which the pre-1.0 policy permits: a caller whose access rested on a
+  SCIM-pushed membership loses it, and the operator provisions that membership
+  at the gateway or moves the deployment to `oidc-jwt`.
+- When the SCIM receiver is mounted, which `PODIUM_SCIM_TOKENS` controls, the
+  registry reports the configuration at startup with the line
+  `SCIM group expansion in layer visibility: <bool> (identity provider "<name>")`.
+  A registry that mounts no receiver writes no such line.
+- `GET /v1/admin/show-effective` reports
+  `user matches layer.groups through the SCIM directory` for a layer admitted
+  through the SCIM-pushed directory, which is distinct from
+  `user matches layer.users or layer.groups` for one admitted on the caller's
+  own group claim.
+- The SCIM receiver keeps its mount on every identity provider. Setting
+  `PODIUM_SCIM_TOKENS` mounts the endpoint, and the receiver accepts, persists,
+  and serves pushes as before.
+
 ## [0.4.0] - 2026-09-05
 
 This release tightens authorization on the layer surface and fixes the

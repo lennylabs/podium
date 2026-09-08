@@ -83,6 +83,38 @@ func buildSCIMHandler(store scim.Store) *scim.Handler {
 	return &scim.Handler{Store: store, Tokens: tokens}
 }
 
+// scimResolvesGroups reports whether a layer's §4.6 `groups:` filter expands
+// against the §6.3.1 SCIM directory under the configured identity provider.
+//
+// The list is an allowlist over the providers whose caller identity comes from
+// a credential the registry verifies: oidc-jwt resolves groups through SCIM or
+// the IdpGroupMapping adapter applied to the token's group claim, and the
+// §6.3.2 injected-session-token verifier reads the token's own subject and
+// groups. It is not an allowlist over deployments that mount the receiver:
+// trusted-headers mounts it and does not consult it, because there is no token
+// to read and the gateway is the source of group membership (§6.3.3).
+//
+// The expander can only grant. layer.VisibleWith consults it exactly when the
+// caller's own groups do not match, so consulting SCIM under trusted-headers
+// would reverse a decision the gateway made and hand a caller a layer the
+// gateway kept from it.
+//
+// The default arm denies, so an unset provider, a free-form label the registry
+// resolves to no provider, and any provider added later resolve group
+// membership from the caller's own identity until they are named here. A
+// provider that gains directory-resolved group membership is added in the same
+// change that gives it one.
+//
+// Spec: §6.3.1, §6.3.2, §6.3.3
+func scimResolvesGroups(identityProvider string) bool {
+	switch identityProvider {
+	case "oidc-jwt", "injected-session-token":
+		return true
+	default:
+		return false
+	}
+}
+
 // openNotifier returns the §9 notification provider per
 // PODIUM_NOTIFICATION_PROVIDER. Returns nil when unset or when the
 // provider name resolves to "noop".
@@ -965,9 +997,10 @@ func run(ctx context.Context, stop func()) error {
 	// the SCIM IdP receiver is mounted at /scim/v2/. When
 	// PODIUM_SCIM_STORE_PATH is set, IdP-pushed users + groups
 	// persist as a JSON file at that path so they survive server
-	// restarts. The same store feeds the §4.6 visibility evaluator's
-	// `groups:` expander so layer filters resolve against
-	// IdP-pushed group membership.
+	// restarts. Under an identity provider that resolves the caller
+	// from a verified credential, the same store feeds the §4.6
+	// visibility evaluator's `groups:` expander so layer filters
+	// resolve against IdP-pushed group membership.
 	var scimStore scim.Store = scim.NewMemory()
 	if path := os.Getenv("PODIUM_SCIM_STORE_PATH"); path != "" {
 		fs, err := scim.LoadFileStore(path)
@@ -981,9 +1014,14 @@ func run(ctx context.Context, stop func()) error {
 	scimHandler := buildSCIMHandler(scimStore)
 	// The expander is held here so the §7.3.1 layer read filters against the
 	// same IdP-pushed membership the composed catalog does. A nil value is the
-	// JWT-only path both consumers already contract for.
+	// claim-only path both consumers already contract for, and it is what every
+	// provider outside scimResolvesGroups gets: one condition here settles both
+	// consumers, because both read this variable. Under trusted-headers the
+	// gateway's `X-Podium-User-Groups` is the whole of the caller's group
+	// membership (§6.3.3), so a directory entry naming the caller's unverified
+	// sub or email header value grants nothing.
 	var resolveGroup layer.GroupResolver
-	if scimHandler != nil {
+	if scimHandler != nil && scimResolvesGroups(cfg.identityProvider) {
 		resolveGroup = func(g string) []string {
 			members, err := scimStore.MembersOf(context.Background(), g)
 			if err != nil {
@@ -992,6 +1030,14 @@ func run(ctx context.Context, stop func()) error {
 			return members
 		}
 		registry = registry.WithGroupResolver(resolveGroup)
+	}
+	if scimHandler != nil {
+		// An operator reading the log can tell whether the pushed directory
+		// decides a layer read on this registry. Nothing else in the log or in
+		// the §8.1 audit stream separates a directory-derived grant from one
+		// made on the caller's asserted groups.
+		log.Printf("SCIM group expansion in layer visibility: %t (identity provider %q)",
+			resolveGroup != nil, cfg.identityProvider)
 	}
 
 	mode := server.NewModeTracker()

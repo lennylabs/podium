@@ -161,6 +161,7 @@ rm -rf "$WORK"
 | S58 | Every layer response reads in snake_case | standalone | none | none | none |
 | S59 | A personal layer's owner and visibility are fixed | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S60 | An admin-defined layer's visibility narrows | standalone | none | none | Keycloak (Docker) + mkcert CA |
+| S61 | SCIM membership does not grant under trusted-headers | standalone | none | none | none |
 
 ---
 
@@ -6823,3 +6824,140 @@ kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
 rm -rf "$WORK"
 docker rm -f kc-podium; rm -rf "$KCERT"
 ```
+
+---
+
+## S61: SCIM membership does not grant under `trusted-headers`
+
+**Goal.** Validate that a registry running the `trusted-headers` identity
+provider with the SCIM receiver mounted resolves a layer's `groups:` filter
+from `X-Podium-User-Groups` alone, that a directory entry naming the caller's
+`X-Podium-User-Sub` or `X-Podium-User-Email` value grants nothing on the data
+plane or on the layer read, and that the receiver keeps serving its directory.
+
+**Covers.** The `trusted-headers` identity provider (§6.3.3), the §6.3.1 SCIM
+receiver and directory, per-layer visibility (§4.6), the §7.3.1 layer read,
+and the startup line naming whether the directory decides a layer read.
+
+**Prerequisites.** None beyond the build. No identity provider, container, or
+certificate is needed.
+
+**Steps.**
+
+1. Run the isolation block.
+2. Write a registry config with a public layer and a group-restricted layer.
+
+   ```bash
+   mkdir -p "$WORK/pub/handbook" "$WORK/eng/deploy"
+   podium artifact scaffold --type context --description "Company handbook" --force "$WORK/pub/handbook"
+   podium artifact scaffold --type skill --description "Engineering deploy" --force "$WORK/eng/deploy"
+   cat > "$WORK/registry.yaml" <<YAML
+   registry:
+     layers:
+       - id: public-handbook
+         source: { local: { path: $WORK/pub } }
+         visibility: { public: true }
+       - id: eng-internal
+         source: { local: { path: $WORK/eng } }
+         visibility: { groups: [engineering] }
+   YAML
+   ```
+
+3. Boot the server in `trusted-headers` mode with a proxy secret and the SCIM
+   receiver mounted. The bind is loopback, so no `--allow-public-bind` is
+   needed.
+
+   ```bash
+   export PODIUM_IDENTITY_PROVIDER=trusted-headers
+   export PODIUM_TRUSTED_PROXY_SECRET=gateway-secret
+   export PODIUM_SCIM_TOKENS=scim-bearer
+   podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8134 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8134/healthz
+   export URL=http://127.0.0.1:8134
+   grep -E "identity provider|SCIM" "$WORK/srv.log"
+   ```
+
+   **Expect.** `identity provider: trusted-headers (proxy secret required on
+   every request)`, `SCIM 2.0 receiver mounted at /scim/v2/`, and `SCIM group
+   expansion in layer visibility: false (identity provider
+   "trusted-headers")`. The third line is the one this scenario exists for: it
+   names the configuration in which a pushed directory grants nothing.
+
+4. Push a SCIM user and place her in the `engineering` group.
+
+   ```bash
+   SCIM="Authorization: Bearer scim-bearer"
+   CT="Content-Type: application/scim+json"
+   SCIM_UID=$(curl -s -H "$SCIM" -H "$CT" -X POST "$URL/scim/v2/Users" \
+     -d '{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"alice@acme.com","active":true}' \
+     | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+   echo "scim user id: $SCIM_UID"
+   curl -s -o /dev/null -w "group create: %{http_code}\n" -H "$SCIM" -H "$CT" -X POST "$URL/scim/v2/Groups" \
+     -d "{\"schemas\":[\"urn:ietf:params:scim:schemas:core:2.0:Group\"],\"displayName\":\"engineering\",\"members\":[{\"value\":\"$SCIM_UID\"}]}"
+   curl -s -H "$SCIM" "$URL/scim/v2/Users/$SCIM_UID" | grep -c "\"id\":\"$SCIM_UID\""
+   curl -s -H "$SCIM" "$URL/scim/v2/Groups"
+   ```
+
+   **Expect.** `scim user id:` prints a non-empty identifier, `group create:
+   201`, the fetch-by-id prints `1`, and the group listing shows
+   `engineering` holding a member whose `value` is that identifier. The
+   fetch-by-id is the assertion that the extraction captured a real user:
+   the receiver answers `404` with a body carrying no identifier when the id
+   names no user (`pkg/scim/handler.go:169-176`), and an empty capture
+   requests the collection route, whose body carries the stored ids and never
+   the string `"id":""`, so both failures print `0`. The group read is a
+   display rather than an assertion, because the receiver stores a member
+   value verbatim and validates nothing about it
+   (`pkg/scim/handler.go:249-255`, `pkg/scim/scim.go:223-241`), so it echoes
+   back whatever the create body interpolated. A lost identifier still
+   creates the group, `MembersOf` then resolves no member
+   (`pkg/scim/scim.go:295-311`), and step 5 would pass for a reason unrelated
+   to this scenario. The capture variable avoids the name `UID`,
+   which both shells reserve as a read-only parameter holding the process
+   user id. The receiver accepts and stores the push on this registry
+   exactly as it does on an `oidc-jwt` one; what differs is what reads it. A
+   `404` from the create requests means `PODIUM_SCIM_TOKENS` was not set
+   before the registry started.
+
+5. Issue loads as the gateway would. alice is in the SCIM `engineering` group
+   throughout.
+
+   ```bash
+   code() { curl -s -o /dev/null -w "%{http_code}\n" "$@"; }
+   SEC="X-Podium-Proxy-Secret: gateway-secret"
+   echo "scim-only sub:   $(code -H "X-Podium-User-Sub: alice@acme.com" -H "$SEC" "$URL/v1/load_artifact?id=deploy")"
+   echo "scim-only email: $(code -H "X-Podium-User-Sub: opaque-123" -H "X-Podium-User-Email: alice@acme.com" -H "$SEC" "$URL/v1/load_artifact?id=deploy")"
+   echo "asserted group:  $(code -H "X-Podium-User-Sub: alice@acme.com" -H "X-Podium-User-Groups: engineering" -H "$SEC" "$URL/v1/load_artifact?id=deploy")"
+   echo "handbook:        $(code -H "X-Podium-User-Sub: alice@acme.com" -H "$SEC" "$URL/v1/load_artifact?id=handbook")"
+   echo "anon deploy:     $(code "$URL/v1/load_artifact?id=deploy")"
+   ```
+
+   **Expect.**
+
+   - `scim-only sub` and `scim-only email` return `404`. The directory names
+     alice in `engineering`, neither request carries the group header, and the
+     layer is invisible on both routes to the grant.
+   - `asserted group` returns `200`. This is the negative control: the same
+     caller and the same layer, admitted on the group the gateway asserted. A
+     run in which this line returns `404` means the fix withdrew the specified
+     grant as well as the unspecified one.
+   - `handbook` returns `200`, since the public layer needs no group.
+   - `anon deploy` returns `404`.
+
+6. Read the layer list as the same caller without the groups header.
+
+   ```bash
+   curl -s -H "X-Podium-User-Sub: alice@acme.com" -H "$SEC" "$URL/v1/layers" \
+     | python3 -c 'import json,sys; print(sorted(l["id"] for l in json.load(sys.stdin)["layers"]))'
+   ```
+
+   **Expect.** `['public-handbook']`. The body is parsed rather than grepped
+   for `"id":"`, because `writeJSON` indents the layer list
+   (`pkg/registry/server/server.go:1438-1443`) and a compact pattern matches
+   nothing whether or not the fix is applied. `eng-internal` is absent rather than
+   refused, so the read discloses no identifier, source location, or
+   visibility declaration for it. The layer read and the data plane agree,
+   which is what one gated construction site produces.
+
+**Cleanup.** Stop the server and `rm -rf "$WORK"`.

@@ -12,6 +12,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"os"
@@ -46,8 +47,10 @@ func gwHeaderGet(t *testing.T, url string, headers map[string]string) (int, []by
 // gwTrustedHeadersServer starts a standalone registry in trusted-headers mode
 // over a registry.yaml that declares a public layer and an engineering-group
 // layer, so the test can assert per-caller §4.6 visibility from the injected
-// identity headers. proxySecret, when non-empty, sets PODIUM_TRUSTED_PROXY_SECRET.
-func gwTrustedHeadersServer(t *testing.T, proxySecret string) *serverProc {
+// identity headers. proxySecret, when non-empty, sets PODIUM_TRUSTED_PROXY_SECRET,
+// and scimToken, when non-empty, sets PODIUM_SCIM_TOKENS so the same fixture
+// mounts the §6.3.1 SCIM receiver.
+func gwTrustedHeadersServer(t *testing.T, proxySecret, scimToken string) *serverProc {
 	t.Helper()
 	home := t.TempDir()
 	pubRoot := writeRegistry(t, map[string]string{"welcome/ARTIFACT.md": contextArtifact("public welcome")})
@@ -80,6 +83,9 @@ func gwTrustedHeadersServer(t *testing.T, proxySecret string) *serverProc {
 	if proxySecret != "" {
 		env = append(env, "PODIUM_TRUSTED_PROXY_SECRET="+proxySecret)
 	}
+	if scimToken != "" {
+		env = append(env, "PODIUM_SCIM_TOKENS="+scimToken)
+	}
 	return startServerArgs(t, env, "serve", "--standalone")
 }
 
@@ -89,7 +95,7 @@ func gwTrustedHeadersServer(t *testing.T, proxySecret string) *serverProc {
 // the public layer only.
 func TestGateway_TrustedHeadersVisibility(t *testing.T) {
 	t.Parallel()
-	srv := gwTrustedHeadersServer(t, "")
+	srv := gwTrustedHeadersServer(t, "", "")
 
 	alice := map[string]string{
 		"X-Podium-User-Sub":    "alice@acme.com",
@@ -121,7 +127,7 @@ func TestGateway_TrustedHeadersVisibility(t *testing.T) {
 // are honored only on a request whose X-Podium-Proxy-Secret matches.
 func TestGateway_TrustedHeadersProxySecret(t *testing.T) {
 	t.Parallel()
-	srv := gwTrustedHeadersServer(t, "s3cr3t")
+	srv := gwTrustedHeadersServer(t, "s3cr3t", "")
 
 	// Identity headers without the matching secret are discarded: anonymous,
 	// so the engineering layer is not visible.
@@ -222,5 +228,158 @@ func TestGateway_TrustedHeadersNonLoopbackBindRefused(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "config.trusted_headers_public_bind") {
 		t.Errorf("output missing 'config.trusted_headers_public_bind':\n%s", out.String())
+	}
+}
+
+// gwSCIMToken is the bearer token the trusted-headers SCIM fixture mounts its
+// §6.3.1 receiver with.
+const gwSCIMToken = "gw-scim-bearer"
+
+// gwPushSCIMMember pushes a SCIM user whose userName is userName and a SCIM
+// group named group holding it, so the pushed directory names the caller as a
+// member of the layer's `groups:` entry.
+func gwPushSCIMMember(t *testing.T, srv *serverProc, userName, group string) {
+	t.Helper()
+	st, body := oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Users",
+		gwSCIMToken, "application/scim+json", oidcSCIMUserBody(userName))
+	if st != http.StatusCreated {
+		t.Fatalf("SCIM create user %q = %d, want 201\nbody: %s\nlog:\n%s", userName, st, body, srv.log())
+	}
+	var user struct{ ID string }
+	if err := json.Unmarshal(body, &user); err != nil {
+		t.Fatalf("decode SCIM user: %v (body=%s)", err, body)
+	}
+	if user.ID == "" {
+		t.Fatalf("SCIM create user %q: response carries no id (body=%s)", userName, body)
+	}
+	st, body = oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Groups",
+		gwSCIMToken, "application/scim+json", oidcSCIMGroupBody(group, []string{user.ID}))
+	if st != http.StatusCreated {
+		t.Fatalf("SCIM create group %q = %d, want 201\nbody: %s", group, st, body)
+	}
+}
+
+// gwLayerIDs reads the §7.3.1 layer list with the given request headers and
+// reports the layer IDs it names. The read is narrowed to the caller's §4.6
+// view, and it reaches the evaluator through readableBy rather than through
+// the composed catalog, so it is the second consumer of the boot path's group
+// resolver.
+func gwLayerIDs(t *testing.T, srv *serverProc, headers map[string]string) []string {
+	t.Helper()
+	st, body := gwHeaderGet(t, srv.BaseURL+"/v1/layers", headers)
+	if st != http.StatusOK {
+		t.Fatalf("layer read = %d, want 200\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+	var resp struct {
+		Layers []struct{ ID string }
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("decode layer list: %v (body=%s)", err, body)
+	}
+	ids := make([]string, 0, len(resp.Layers))
+	for _, l := range resp.Layers {
+		ids = append(ids, l.ID)
+	}
+	return ids
+}
+
+// gwListsLayer reports whether ids holds the named layer.
+func gwListsLayer(ids []string, id string) bool {
+	for _, got := range ids {
+		if got == id {
+			return true
+		}
+	}
+	return false
+}
+
+// Spec: §4.6, §6.3.1, §6.3.3, §7.3.1 — under trusted-headers the gateway's
+// X-Podium-User-Groups is the whole of the caller's group membership, and the
+// §6.3.1 pushed directory is not consulted, because there is no token to read
+// and the gateway is the source of truth. A registry that mounts the SCIM
+// receiver keeps the endpoint and the persistence; what the directory loses is
+// its effect on a `groups:` filter.
+//
+// The two authenticated arms and the negative control read both consumers: the
+// composed catalog through load_artifact and the layer read through
+// GET /v1/layers, which reach the evaluator by different routes. The caller
+// holds no §4.7.2 admin grant, which the negative arms establish by listing
+// the public layer alone rather than the whole tenant list.
+//
+// The anonymous arms are asserted on the data plane alone, because the layer
+// read answers an unauthenticated caller the empty list before the evaluator
+// runs (§7.3.1), so the public layer is absent there as well.
+func TestGateway_TrustedHeadersIgnoresSCIMDirectory(t *testing.T) {
+	t.Parallel()
+	srv := gwTrustedHeadersServer(t, "s3cr3t", gwSCIMToken)
+	gwPushSCIMMember(t, srv, "alice@acme.com", "engineering")
+
+	const (
+		publicArtifact = "/v1/load_artifact?id=welcome"
+		engArtifact    = "/v1/load_artifact?id=secret"
+	)
+
+	// The directory names alice in engineering. The gateway sends no groups
+	// header, so neither consumer admits her to the engineering layer. The
+	// pre-fix registry admits her on both, matching the pushed userName
+	// against her asserted sub.
+	bySub := map[string]string{
+		"X-Podium-User-Sub":     "alice@acme.com",
+		"X-Podium-Proxy-Secret": "s3cr3t",
+	}
+	// The same directory entry reached through the email header, which the
+	// expander compares as well, so both routes to the grant are withdrawn.
+	byEmail := map[string]string{
+		"X-Podium-User-Sub":     "opaque-123",
+		"X-Podium-User-Email":   "alice@acme.com",
+		"X-Podium-Proxy-Secret": "s3cr3t",
+	}
+	for name, hdr := range map[string]map[string]string{"by sub": bySub, "by email": byEmail} {
+		if st, _ := gwHeaderGet(t, srv.BaseURL+engArtifact, hdr); st != 404 {
+			t.Errorf("%s: load engineering secret = %d, want 404\nlog:\n%s", name, st, srv.log())
+		}
+		ids := gwLayerIDs(t, srv, hdr)
+		if gwListsLayer(ids, "eng-layer") {
+			t.Errorf("%s: layer read lists eng-layer (%v), want the public layer alone", name, ids)
+		}
+		if !gwListsLayer(ids, "public-layer") {
+			t.Errorf("%s: layer read = %v, want it to name public-layer", name, ids)
+		}
+	}
+
+	// The negative control: the header-derived grant is intact, so the
+	// correction withdrew the directory arm alone.
+	byHeader := map[string]string{
+		"X-Podium-User-Sub":     "alice@acme.com",
+		"X-Podium-User-Groups":  "engineering",
+		"X-Podium-Proxy-Secret": "s3cr3t",
+	}
+	if st, body := gwHeaderGet(t, srv.BaseURL+engArtifact, byHeader); st != 200 {
+		t.Errorf("groups header: load engineering secret = %d, want 200\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+	if ids := gwLayerIDs(t, srv, byHeader); !gwListsLayer(ids, "eng-layer") {
+		t.Errorf("groups header: layer read = %v, want it to name eng-layer", ids)
+	}
+
+	// An anonymous caller reaches the public layer and not the engineering
+	// one, and a request carrying the identity headers without the proxy
+	// secret is anonymous on the same terms.
+	noSecret := map[string]string{
+		"X-Podium-User-Sub":   "alice@acme.com",
+		"X-Podium-User-Email": "alice@acme.com",
+	}
+	for name, hdr := range map[string]map[string]string{"anonymous": nil, "no proxy secret": noSecret} {
+		if st, body := gwHeaderGet(t, srv.BaseURL+publicArtifact, hdr); st != 200 {
+			t.Errorf("%s: load public welcome = %d, want 200\nbody: %s", name, st, body)
+		}
+		if st, _ := gwHeaderGet(t, srv.BaseURL+engArtifact, hdr); st != 404 {
+			t.Errorf("%s: load engineering secret = %d, want 404", name, st)
+		}
+	}
+
+	// The startup line reports the expansion withheld on a registry that
+	// mounts the receiver under trusted-headers.
+	if got := srv.log(); !strings.Contains(got, "SCIM group expansion in layer visibility: false") {
+		t.Errorf("boot log does not report the expansion withheld:\n%s", got)
 	}
 }

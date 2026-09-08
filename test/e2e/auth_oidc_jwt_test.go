@@ -466,3 +466,51 @@ func TestOIDCJWT_AudienceSequenceFromConfigFileBoots(t *testing.T) {
 		t.Errorf("boot log reports a refused or discarded config file:\n%s", got)
 	}
 }
+
+// Spec: §4.6, §6.3.1, §6.3.3, §7.3.1 — under oidc-jwt the registry resolves
+// the caller from a credential it verifies, so the §6.3.1 pushed directory
+// decides a `groups:` filter: a verified caller whose token carries no
+// matching group claim reads the layer because SCIM places the subject in the
+// group. The read is asserted on both consumers, the composed catalog and the
+// §7.3.1 layer read, and the startup line reports the expansion permitted.
+// test/e2e/auth_scim_visibility_test.go pins the injected-session-token half.
+func TestOIDCJWT_SCIMDirectoryDrivesVisibility(t *testing.T) {
+	requireCustomTrustStore(t)
+	const scimToken = "oidcjwt-scim-bearer"
+	idp := startOIDCTestIdP(t, "")
+	srv := gwOIDCServer(t, idp, []string{oidcAudience}, "PODIUM_SCIM_TOKENS="+scimToken)
+
+	st, body := oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Users",
+		scimToken, "application/scim+json", oidcSCIMUserBody("alice@acme.com"))
+	if st != http.StatusCreated {
+		t.Fatalf("SCIM create user = %d, want 201\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+	var user struct{ ID string }
+	if err := json.Unmarshal(body, &user); err != nil {
+		t.Fatalf("decode SCIM user: %v (body=%s)", err, body)
+	}
+	st, body = oidcSCIMDo(t, http.MethodPost, srv.BaseURL+"/scim/v2/Groups",
+		scimToken, "application/scim+json", oidcSCIMGroupBody("engineering", []string{user.ID}))
+	if st != http.StatusCreated {
+		t.Fatalf("SCIM create group = %d, want 201\nbody: %s", st, body)
+	}
+
+	// The token carries no groups claim, so the directory is the only route to
+	// the engineering layer.
+	member := idp.token(t, jwt.MapClaims{
+		"iss": idp.srv.URL,
+		"aud": oidcAudience,
+		"sub": "alice@acme.com",
+		"exp": time.Now().Add(time.Hour).Unix(),
+	})
+	if st, body := gwHeaderGet(t, srv.BaseURL+"/v1/load_artifact?id=secret", bearer(member)); st != 200 {
+		t.Errorf("SCIM member load engineering secret = %d, want 200\nbody: %s\nlog:\n%s", st, body, srv.log())
+	}
+	if ids := gwLayerIDs(t, srv, bearer(member)); !gwListsLayer(ids, "eng-layer") {
+		t.Errorf("SCIM member layer read = %v, want it to name eng-layer\nlog:\n%s", ids, srv.log())
+	}
+
+	if got := srv.log(); !strings.Contains(got, "SCIM group expansion in layer visibility: true") {
+		t.Errorf("boot log does not report the expansion permitted:\n%s", got)
+	}
+}
