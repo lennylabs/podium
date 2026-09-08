@@ -310,10 +310,11 @@ func layerReorder(args []string) int {
 	setUsage(fs, "Re-sequence the layer list.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	order, err := parseOperands(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() == 0 {
+	if len(order) == 0 {
 		fmt.Fprintln(os.Stderr, "usage: podium layer reorder <id> [<id> ...]")
 		return 2
 	}
@@ -321,7 +322,7 @@ func layerReorder(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	body := map[string]any{"order": fs.Args()}
+	body := map[string]any{"order": order}
 	out, status := doJSON(*registry+"/v1/layers/reorder", "POST", body)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "reorder failed: HTTP %d\n%s\n", status, out)
@@ -336,10 +337,11 @@ func layerUnregister(args []string) int {
 	setUsage(fs, "Remove a layer.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	id, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() != 1 {
+	if nargs != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium layer unregister <id>")
 		return 2
 	}
@@ -347,7 +349,7 @@ func layerUnregister(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	out, status := doJSON(*registry+"/v1/layers?id="+fs.Arg(0), "DELETE", nil)
+	out, status := doJSON(*registry+"/v1/layers?id="+id, "DELETE", nil)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "unregister failed: HTTP %d\n%s\n", status, out)
 		return 1
@@ -363,10 +365,11 @@ func layerRestore(args []string) int {
 	setUsage(fs, "Recover a layer unregistered within the recovery window.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	id, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() != 1 {
+	if nargs != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium layer restore <id>")
 		return 2
 	}
@@ -374,7 +377,7 @@ func layerRestore(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	out, status := doJSON(*registry+"/v1/layers/restore?id="+fs.Arg(0), "POST", nil)
+	out, status := doJSON(*registry+"/v1/layers/restore?id="+id, "POST", nil)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "restore failed: HTTP %d\n%s\n", status, out)
 		return 1
@@ -396,10 +399,11 @@ func layerReingest(args []string) int {
 	var approvers stringSliceFlag
 	fs.Var(&approvers, "approver", "break-glass approver identity (repeatable, for dual-signoff)")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	id, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() != 1 {
+	if nargs != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium layer reingest [--break-glass --justification <text>] <id>")
 		return 2
 	}
@@ -424,7 +428,7 @@ func layerReingest(args []string) int {
 		}
 		body = req
 	}
-	out, status := doJSON(*registry+"/v1/layers/reingest?id="+fs.Arg(0), "POST", body)
+	out, status := doJSON(*registry+"/v1/layers/reingest?id="+id, "POST", body)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "reingest failed: HTTP %d\n%s\n", status, out)
 		return 1
@@ -433,7 +437,7 @@ func layerReingest(args []string) int {
 	// printing the raw response body when the registry answered with something
 	// other than a cycle report (a queue-only acknowledgement from a server
 	// with no ingest runner wired, or a body that does not decode).
-	dropped, ok := writeIngestReport(os.Stdout, os.Stderr, fs.Arg(0), out)
+	dropped, ok := writeIngestReport(os.Stdout, os.Stderr, id, out)
 	if !ok {
 		fmt.Println(string(out))
 		return 0

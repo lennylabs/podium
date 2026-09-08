@@ -73,10 +73,11 @@ func adminGrantCmd(args []string) int {
 	setUsage(fs, "Grant tenant admin role to a user.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	userID, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() != 1 {
+	if nargs != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium admin grant <user-id>")
 		return 2
 	}
@@ -84,7 +85,7 @@ func adminGrantCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	body := map[string]any{"user_id": fs.Arg(0)}
+	body := map[string]any{"user_id": userID}
 	out, status := doJSON(*registry+"/v1/admin/grants", "POST", body)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "grant failed: HTTP %d\n%s\n", status, out)
@@ -102,10 +103,11 @@ func adminRevokeCmd(args []string) int {
 	setUsage(fs, "Revoke tenant admin role from a user.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	userID, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() != 1 {
+	if nargs != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium admin revoke <user-id>")
 		return 2
 	}
@@ -114,7 +116,7 @@ func adminRevokeCmd(args []string) int {
 		return 2
 	}
 	out, status := doJSON(
-		*registry+"/v1/admin/grants?user_id="+url.QueryEscape(fs.Arg(0)),
+		*registry+"/v1/admin/grants?user_id="+url.QueryEscape(userID),
 		"DELETE", nil)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "revoke failed: HTTP %d\n%s\n", status, out)
@@ -135,10 +137,11 @@ func adminShowEffectiveCmd(args []string) int {
 	groups := stringSliceFlag{}
 	fs.Var(&groups, "group", "OIDC group claim (repeatable)")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	userID, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() != 1 {
+	if nargs != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium admin show-effective <user-id>")
 		return 2
 	}
@@ -147,7 +150,7 @@ func adminShowEffectiveCmd(args []string) int {
 		return 2
 	}
 	q := url.Values{}
-	q.Set("user_id", fs.Arg(0))
+	q.Set("user_id", userID)
 	for _, g := range groups {
 		q.Add("group", g)
 	}
@@ -228,14 +231,14 @@ func adminEraseCmd(args []string) int {
 	salt := fs.String("salt", "", "salt for the GDPR erasure tombstone (per tenant, required)")
 	operator := fs.String("operator", "", "invoking admin identity recorded on user.erased (required for the local-log form)")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	userID, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() != 1 {
+	if nargs != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium admin erase <user-id>")
 		return 2
 	}
-	userID := fs.Arg(0)
 	// spec §8.5: an empty salt yields a guessable tombstone.
 	if *salt == "" {
 		fmt.Fprintln(os.Stderr, "error: --salt is required (an empty salt yields a guessable tombstone)")

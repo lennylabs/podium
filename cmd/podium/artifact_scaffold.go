@@ -97,16 +97,17 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	fs.BoolVar(&opts.force, "force", false, "overwrite an existing directory")
 	fs.BoolVar(&opts.nonInteractive, "yes", false, "fail instead of prompting when a required value is missing")
 	fs.SetOutput(errOut)
-	if err := fs.Parse(args); err != nil {
+	path, _, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
 
-	if fs.NArg() < 1 {
+	if path == "" {
 		fmt.Fprintln(errOut, "error: missing positional <path>")
 		fmt.Fprintln(errOut, "usage: podium artifact scaffold --type <type> [flags] <path>")
 		return 2
 	}
-	opts.path = fs.Arg(0)
+	opts.path = path
 
 	reader := bufio.NewReader(in)
 
