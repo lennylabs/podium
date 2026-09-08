@@ -4,6 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Podium</title>
+    <!-- The registry serves the application under /app/, so Vite's base rewrites
+         these to /app/<file>. The three marks are copied from docs/assets/logo,
+         which is where the documentation site reads the same icons from, and a
+         test asserts the two copies have not drifted. A browser caches an icon
+         aggressively, so replacing one of these needs a cache-busting query. -->
+    <link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: light)" href="/app/podium-mark-light.svg" />
+    <link rel="icon" type="image/svg+xml" media="(prefers-color-scheme: dark)" href="/app/podium-mark-dark.svg" />
+    <link rel="icon" type="image/svg+xml" href="/app/podium-tile.svg" />
+    <link rel="apple-touch-icon" href="/app/podium-tile.svg" />
     <script type="module" crossorigin src="/app/assets/index-BRIktTad.js"></script>
     <link rel="stylesheet" crossorigin href="/app/assets/index-S2y5IcGO.css">
   </head>
