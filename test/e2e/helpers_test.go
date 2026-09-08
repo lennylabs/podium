@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -322,14 +323,60 @@ func (s *serverProc) getMaybeAuth(t testing.TB, url string) (int, []byte) {
 	return resp.StatusCode, body.Bytes()
 }
 
-func freePort(t testing.TB) int {
+// listeningAddr matches the address the server reports once it has bound. The
+// server resolves a configured port of 0 to an ephemeral one, so this line is
+// the only place the chosen port appears.
+var listeningAddr = regexp.MustCompile(`podium-server listening on (127\.0\.0\.1:\d+)`)
+
+// awaitBoundAddr reads the address the server bound out of its log. Tests ask
+// for port 0 and take what the kernel gave, rather than picking a port from a
+// listener they then close: between that close and the server's own bind, any
+// other test in the package can take the same port, and the suite runs its
+// servers concurrently.
+func awaitBoundAddr(t testing.TB, s *serverProc) string {
 	t.Helper()
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("freePort: %v", err)
+	deadline := time.Now().Add(25 * time.Second)
+	for time.Now().Before(deadline) {
+		if m := listeningAddr.FindStringSubmatch(s.log()); m != nil {
+			return m[1]
+		}
+		if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
+			t.Fatalf("server exited before it reported a bound address\nlog:\n%s", s.log())
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	defer l.Close()
-	return l.Addr().(*net.TCPAddr).Port
+	t.Fatalf("server did not report a bound address within the deadline\nlog:\n%s", s.log())
+	return ""
+}
+
+// pickPortWithRace binds an ephemeral port, reads its number, and closes the
+// listener before returning, so the port is free for anyone to take between
+// this call and the moment a server binds it. Any test in the package that
+// starts a server concurrently can win that race, which is a flake.
+//
+// It exists only for a test that needs a concrete, known address before the
+// server starts: TestStandaloneServer_RegistryYAMLBind (the address goes into a
+// registry.yaml bind: key, which is the thing under test),
+// TestConfigPrecedence_CLIFlagBeatsEnv (the assertion needs two distinct
+// addresses, one of which the server must not bind),
+// TestStandaloneServer_AllowPublicBindFlag (the server binds a non-loopback
+// address, which the log line the address is read back from does not carry),
+// and deadRegistry in sdk_clients_test.go (which wants a port with nothing
+// listening at all).
+//
+// A test that merely needs a server uses startServerArgs, which binds port 0
+// and reads the address the kernel gave back out of the server's log.
+func pickPortWithRace(t testing.TB) int {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("pick port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close picked-port listener: %v", err)
+	}
+	return port
 }
 
 // startServerArgs starts `podium <args> --bind 127.0.0.1:<freeport>` with
@@ -338,9 +385,7 @@ func freePort(t testing.TB) int {
 // the readiness deadline.
 func startServerArgs(t testing.TB, env []string, args ...string) *serverProc {
 	t.Helper()
-	port := freePort(t)
-	bind := fmt.Sprintf("127.0.0.1:%d", port)
-	full := append(append([]string{}, args...), "--bind", bind)
+	full := append(append([]string{}, args...), "--bind", "127.0.0.1:0")
 
 	logf, err := os.CreateTemp(t.TempDir(), "server-*.log")
 	if err != nil {
@@ -354,13 +399,14 @@ func startServerArgs(t testing.TB, env []string, args ...string) *serverProc {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	s := &serverProc{BaseURL: "http://" + bind, logPath: logf.Name(), cmd: cmd}
+	s := &serverProc{logPath: logf.Name(), cmd: cmd}
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "HOME=") {
 			s.Home = strings.TrimPrefix(kv, "HOME=")
 		}
 	}
 	t.Cleanup(func() { stopProc(s.cmd) })
+	s.BaseURL = "http://" + awaitBoundAddr(t, s)
 
 	deadline := time.Now().Add(25 * time.Second)
 	for time.Now().Before(deadline) {

@@ -787,7 +787,7 @@ func TestSDK_PyIdentityUnchanged(t *testing.T) {
 // transport-level connection is refused immediately (no listener).
 func deadRegistry(t *testing.T) string {
 	t.Helper()
-	return "http://127.0.0.1:" + strconv.Itoa(freePort(t))
+	return "http://127.0.0.1:" + strconv.Itoa(pickPortWithRace(t))
 }
 
 // Python: an unreachable registry surfaces the structured

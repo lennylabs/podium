@@ -8,7 +8,6 @@ package e2e
 // standalone public default for endpoint-registered layers.
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,12 +135,13 @@ func TestRegistryConfig_OAuthAudienceListFromEnv(t *testing.T) {
 func TestRegistryConfig_S3MissingBucketRefusesStart(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": contextArtifact("a")})
-	bind := fmt.Sprintf("127.0.0.1:%d", freePort(t))
+	// The missing-bucket refusal fires before the listener binds, so port 0
+	// carries it.
 	res := runPodium(t, "", []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_OBJECT_STORE=s3",
 		"PODIUM_S3_BUCKET=",
-	}, "serve", "--standalone", "--layer-path", reg, "--bind", bind)
+	}, "serve", "--standalone", "--layer-path", reg, "--bind", "127.0.0.1:0")
 	if res.Exit == 0 {
 		t.Fatalf("expected non-zero exit (refuse to start)\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	}
