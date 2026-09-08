@@ -1495,8 +1495,11 @@ func TestCLI_LayerReingest(t *testing.T) {
 	srv := startServer(t, "")
 	cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL), "layer", "register", "--id", "my-layer", "--local", t.TempDir()), 0, "register")
 	res := runPodium(t, "", brEnv(srv.BaseURL), "layer", "reingest", "my-layer")
+	// §7.3.1: an empty layer drops nothing, so the cycle exits 0 and names no
+	// dropped artifact on standard error.
 	cliWantExit(t, res, 0, "layer reingest")
-	cliContains(t, res.Stdout, "queued", "reingest queued acknowledgement")
+	cliNotContains(t, res.Stderr, "rejected:", "empty layer drops nothing")
+	cliNotContains(t, res.Stderr, "conflict:", "empty layer conflicts with nothing")
 }
 
 // spec: doc "podium layer reingest", freeze-window behavior (§4.7.2). A

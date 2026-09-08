@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- `podium layer reingest` reports the ingest outcome in its exit status. It
+  exits 1 when the cycle dropped at least one artifact, which covers a
+  same-version content conflict, a lint failure, and a rejection such as the
+  public-mode sensitivity floor or a cross-layer collision, and it exits 0
+  otherwise. On a cycle the registry answers 200, each conflicted and each
+  rejected artifact is printed on standard error with its identifier, its error
+  code, and its reason, including on a cycle that accepted nothing, where the
+  command previously printed the response body to standard output and exited 0.
+  A lint drop is reported as the number of diagnostics the cycle raised, and
+  `podium lint` against the source names the artifacts behind them. A
+  non-blocking advisory and a failed embedding call are reported without
+  changing the exit status. A pipeline that gates on this command's exit status
+  will now fail a reingest that lost work; pre-1.0, no flag restores the
+  previous behavior.
 - Under the `trusted-headers` identity provider, a layer's `groups:` filter is
   satisfied by the `X-Podium-User-Groups` value alone. The registry no longer
   expands a `groups:` filter against the directory pushed to the SCIM receiver

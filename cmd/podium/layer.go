@@ -429,65 +429,136 @@ func layerReingest(args []string) int {
 		fmt.Fprintf(os.Stderr, "reingest failed: HTTP %d\n%s\n", status, out)
 		return 1
 	}
-	// §0 quickstart: print one `artifact: <id>@<version>   layer: <layer>`
-	// line per ingested artifact. Fall back to the raw response body when the
-	// registry returned no artifact list (for example a queue-only
-	// acknowledgement from a server with no ingest runner wired).
-	var parsed struct {
-		Layer     string `json:"layer"`
-		Artifacts []struct {
-			ID      string `json:"id"`
-			Version string `json:"version"`
-		} `json:"artifacts"`
-		Advisories []struct {
-			ArtifactID string `json:"artifact_id"`
-			Code       string `json:"code"`
-			Severity   string `json:"severity"`
-			Message    string `json:"message"`
-		} `json:"advisories"`
-		Conflicts []struct {
-			ArtifactID string `json:"artifact_id"`
-			Version    string `json:"version"`
-			Code       string `json:"code"`
-		} `json:"conflicts"`
-		Rejected []struct {
-			ArtifactID string `json:"artifact_id"`
-			Code       string `json:"code"`
-			Reason     string `json:"reason"`
-		} `json:"rejected"`
-	}
-	if err := json.Unmarshal(out, &parsed); err == nil && len(parsed.Artifacts) > 0 {
-		layer := parsed.Layer
-		if layer == "" {
-			layer = fs.Arg(0)
-		}
-		for _, a := range parsed.Artifacts {
-			fmt.Printf("artifact: %s@%s   layer: %s\n", a.ID, a.Version, layer)
-		}
-		// §4.6 / §3.3: print any non-blocking advisories (e.g. a cross-layer
-		// license change) so the publisher sees them on a runtime reingest.
-		for _, a := range parsed.Advisories {
-			fmt.Printf("advisory: %s [%s] %s (%s)\n", a.ArtifactID, a.Severity, a.Message, a.Code)
-		}
-		// §7.3.1: a same-version content conflict is rejected as
-		// ingest.immutable_violation even when sibling artifacts ingested. Print
-		// each so the author sees which artifact must have its version bumped.
-		// A snapshot with only conflicts surfaces as a 409 above.
-		for _, c := range parsed.Conflicts {
-			fmt.Fprintf(os.Stderr, "conflict: %s@%s rejected (%s); bump the version\n", c.ArtifactID, c.Version, c.Code)
-		}
-		// §13.10 / §4.6 / §4.7.8: an artifact dropped for a non-conflict reason
-		// (sensitivity floor, sandbox profile, cross-layer collision, quota,
-		// unresolved extends, or a data-plane resource-store failure). Print each
-		// so a mixed snapshot that accepted some artifacts still tells the author
-		// why the others did not land.
-		for _, rj := range parsed.Rejected {
-			fmt.Fprintf(os.Stderr, "rejected: %s (%s): %s\n", rj.ArtifactID, rj.Code, rj.Reason)
-		}
+	// Spec: §7.3.1 — the ingest outcome decides the exit status. Fall back to
+	// printing the raw response body when the registry answered with something
+	// other than a cycle report (a queue-only acknowledgement from a server
+	// with no ingest runner wired, or a body that does not decode).
+	dropped, ok := writeIngestReport(os.Stdout, os.Stderr, fs.Arg(0), out)
+	if !ok {
+		fmt.Println(string(out))
 		return 0
 	}
-	fmt.Println(string(out))
+	if dropped > 0 {
+		return 1
+	}
 	return 0
+}
+
+// ingestArtifact is one accepted or unchanged artifact in a reingest response.
+type ingestArtifact struct {
+	ID      string `json:"id"`
+	Version string `json:"version"`
+}
+
+// ingestAdvisory is one non-blocking §3.3 advisory raised by an ingest cycle.
+type ingestAdvisory struct {
+	ArtifactID string `json:"artifact_id"`
+	Code       string `json:"code"`
+	Severity   string `json:"severity"`
+	Message    string `json:"message"`
+}
+
+// ingestConflict is one artifact whose stored content differs at the same
+// version.
+type ingestConflict struct {
+	ArtifactID string `json:"artifact_id"`
+	Version    string `json:"version"`
+	Code       string `json:"code"`
+}
+
+// ingestRejection is one artifact the cycle rejected rather than storing.
+type ingestRejection struct {
+	ArtifactID string `json:"artifact_id"`
+	Code       string `json:"code"`
+	Reason     string `json:"reason"`
+}
+
+// ingestEmbeddingFailure is one artifact stored despite a failed §4.7 embedding
+// call.
+type ingestEmbeddingFailure struct {
+	ArtifactID string `json:"artifact_id"`
+	Version    string `json:"version"`
+	Reason     string `json:"reason"`
+}
+
+// ingestReport is the reingest response body a completed ingest cycle returns.
+// Every nested field carries an explicit JSON tag, because encoding/json
+// matches an untagged field by exact or case-insensitive name and `artifact_id`
+// does not match `ArtifactID`; without the tags each identifier and reason
+// decodes as an empty string.
+type ingestReport struct {
+	// Accepted discriminates a completed cycle from the acknowledgement a
+	// registry with no ingest runner returns. Both bodies carry `queued` and
+	// `queued_at`, so the presence of `accepted` is the only key that separates
+	// them.
+	Accepted *int   `json:"accepted"`
+	Layer    string `json:"layer"`
+	// LintFailures is the number of lint diagnostics the cycle raised, which is
+	// a diagnostic count rather than a count of artifacts: one artifact with two
+	// diagnostics reports 2. `podium lint` against the source names the
+	// artifacts behind them.
+	LintFailures      int                      `json:"lint_failures"`
+	Artifacts         []ingestArtifact         `json:"artifacts"`
+	Advisories        []ingestAdvisory         `json:"advisories"`
+	Conflicts         []ingestConflict         `json:"conflicts"`
+	Rejected          []ingestRejection        `json:"rejected"`
+	EmbeddingFailures []ingestEmbeddingFailure `json:"embedding_failures"`
+}
+
+// writeIngestReport decodes a reingest response and prints the ingest outcome.
+// It returns ok == false, having written nothing to either stream, when body
+// does not decode or carries no `accepted` key, which leaves the caller's
+// fallback print as the only output on that arm.
+//
+// On a decoded cycle report it writes the accepted and unchanged artifacts and
+// the §3.3 advisories to stdout, and each conflicted artifact, each rejected
+// artifact, the lint diagnostic count, and each §4.7 embedding failure to
+// stderr. dropped is the gate on the exit status, and it sums the conflicts,
+// the rejections, and the lint diagnostic count; because lint_failures counts
+// diagnostics rather than artifacts, dropped is not a number of artifacts.
+//
+// Spec: §7.3.1
+func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (dropped int, ok bool) {
+	var report ingestReport
+	if err := json.Unmarshal(body, &report); err != nil || report.Accepted == nil {
+		return 0, false
+	}
+	layer := report.Layer
+	if layer == "" {
+		layer = layerID
+	}
+	// §0 quickstart: one `artifact: <id>@<version>   layer: <layer>` line per
+	// accepted or unchanged artifact.
+	for _, a := range report.Artifacts {
+		fmt.Fprintf(stdout, "artifact: %s@%s   layer: %s\n", a.ID, a.Version, layer)
+	}
+	// §4.6 / §3.3: a non-blocking advisory (for example a cross-layer license
+	// change) is reported without changing the exit status.
+	for _, a := range report.Advisories {
+		fmt.Fprintf(stdout, "advisory: %s [%s] %s (%s)\n", a.ArtifactID, a.Severity, a.Message, a.Code)
+	}
+	// §7.3.1: a same-version content conflict is rejected as
+	// ingest.immutable_violation even when sibling artifacts ingested. Name each
+	// so the author sees which artifact must have its version bumped. A snapshot
+	// with only conflicts surfaces as a 409 through the transport arm.
+	for _, c := range report.Conflicts {
+		fmt.Fprintf(stderr, "conflict: %s@%s rejected (%s); bump the version\n", c.ArtifactID, c.Version, c.Code)
+	}
+	// §13.10 / §4.6 / §4.7.8: an artifact dropped for a non-conflict reason
+	// (sensitivity floor, sandbox profile, cross-layer collision, quota,
+	// unresolved extends, or a data-plane resource-store failure).
+	for _, rj := range report.Rejected {
+		fmt.Fprintf(stderr, "rejected: %s (%s): %s\n", rj.ArtifactID, rj.Code, rj.Reason)
+	}
+	if report.LintFailures > 0 {
+		fmt.Fprintf(stderr, "lint failures: %d\n", report.LintFailures)
+	}
+	// §4.7: the artifact is stored and served, so a failed embedding call is
+	// reported without changing the exit status.
+	for _, ef := range report.EmbeddingFailures {
+		fmt.Fprintf(stderr, "embedding failure: %s@%s: %s\n", ef.ArtifactID, ef.Version, ef.Reason)
+	}
+	return len(report.Conflicts) + len(report.Rejected) + report.LintFailures, true
 }
 
 // resolveLayerRegistry resolves the registry URL for the standalone `podium
