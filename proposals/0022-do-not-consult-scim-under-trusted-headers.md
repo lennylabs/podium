@@ -1,7 +1,7 @@
 # Proposal 0022: Do not consult SCIM under `trusted-headers`
 
 - Issue: (to be filed)
-- Status: Approved (2026-09-07). Verified after 9 adversarial review rounds (9 findings fixed); the open questions are resolved in favour of the staged positions.
+- Status: Applied to spec (2026-09-07). The open questions are resolved in favour of the staged positions.
 - Date: 2026-09-07
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off. Every anchor is read against `fix/scim-not-consulted-under-trusted-headers` at `822e6a9`.
