@@ -519,7 +519,10 @@ func TestStandardDeploy_LayerUnregister(t *testing.T) {
 func TestStandardDeploy_LayerReingestLocal(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
-	srv := startServer(t, reg)
+	// The registered layer is the registry's only source: booting with
+	// --layer-path reg would register the same directory twice, and the second
+	// layer's every artifact would be rejected as an ingest.collision.
+	srv := startServer(t, "")
 	orgMustRegisterLayer(t, srv.BaseURL, "local-test", reg)
 
 	res := runPodium(t, "", nil,
@@ -530,9 +533,10 @@ func TestStandardDeploy_LayerReingestLocal(t *testing.T) {
 	if res.Exit != 0 {
 		t.Fatalf("layer reingest exit=%d stderr=%s stdout=%s", res.Exit, res.Stderr, res.Stdout)
 	}
-	// stdout should be valid JSON.
-	var obj map[string]any
-	orgDecodeBody(t, []byte(res.Stdout), &obj)
+	// §7.3.1: the cycle names each accepted artifact on standard output.
+	if !strings.Contains(res.Stdout, "artifact: hello@1.0.0   layer: local-test") {
+		t.Errorf("layer reingest stdout missing the accepted artifact line:\n%s", res.Stdout)
+	}
 }
 
 // -- `podium layer reingest` fails when the layer does not exist.

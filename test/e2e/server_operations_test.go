@@ -800,7 +800,11 @@ func TestServerOps_EnvOverridesYAMLPublicMode(t *testing.T) {
 func TestServerOps_LayerReingest(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"ctx/ARTIFACT.md": opguideSimpleArtifact()})
-	srv := startServer(t, reg)
+	// The registered layer is the registry's only source: booting with
+	// --layer-path reg would register the same directory twice, and the second
+	// layer's every artifact would be rejected as an ingest.collision, which
+	// §7.3.1 reports as a non-zero exit.
+	srv := startServer(t, "")
 
 	// Register the local layer.
 	res := runPodium(t, "", nil,

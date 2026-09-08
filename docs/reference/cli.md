@@ -478,6 +478,8 @@ podium layer reingest <id> [--break-glass --justification <text> --approver <id>
 
 During a freeze window, ingest is blocked unless `--break-glass` is passed with a justification. Break-glass requires dual-signoff, so supply two distinct approver identities with repeated `--approver` flags. A grant auto-expires after 24h and queues for post-hoc security review.
 
+The command prints one line per accepted and unchanged artifact on standard output. It prints one line per conflicted or rejected artifact on standard error, carrying that artifact's identifier, its error code, and its reason, and a `lint failures: <n>` line reporting the number of lint diagnostics the cycle raised. On a request the registry answers with an error it prints that error response on standard error instead of the per-artifact lines. It exits 1 when the cycle dropped at least one artifact, when a lint diagnostic rejected one, or when the request failed. It exits 2 on a usage error and 0 otherwise. A non-blocking advisory and an artifact whose embedding call failed are reported without changing the exit status: the artifact is stored and served. Run `podium lint --registry <path>` against the source to read the per-artifact lint diagnostics, which the reingest response reports only as a count.
+
 ### `podium layer update`
 
 Patches a registered layer's mutable fields. Only the flags supplied are applied; every other field keeps its prior value. At least one mutable field is required.

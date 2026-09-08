@@ -1495,8 +1495,61 @@ func TestCLI_LayerReingest(t *testing.T) {
 	srv := startServer(t, "")
 	cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL), "layer", "register", "--id", "my-layer", "--local", t.TempDir()), 0, "register")
 	res := runPodium(t, "", brEnv(srv.BaseURL), "layer", "reingest", "my-layer")
+	// §7.3.1: an empty layer drops nothing, so the cycle exits 0 and names no
+	// dropped artifact on standard error.
 	cliWantExit(t, res, 0, "layer reingest")
-	cliContains(t, res.Stdout, "queued", "reingest queued acknowledgement")
+	cliNotContains(t, res.Stderr, "rejected:", "empty layer drops nothing")
+	cliNotContains(t, res.Stderr, "conflict:", "empty layer conflicts with nothing")
+}
+
+// Spec: §7.3.1, §13.10 — the ingest outcome decides the exit status of
+// `podium layer reingest`, observed through the built binary. Public mode
+// wires the §13.10 sensitivity floor into the runtime reingest runner, so a
+// medium-sensitivity artifact is rejected on every cycle while a
+// low-sensitivity sibling is accepted, which is what produces the mixed and
+// the rejected-only snapshots against a real registry. Each arm registers its
+// own layer with its own domain paths, because the artifact identifier derives
+// from the domain directory and two layers contributing the same identifier
+// collide instead.
+func TestCLI_LayerReingestExitStatus(t *testing.T) {
+	t.Parallel()
+	srv := startServerArgs(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_PUBLIC_MODE=true"},
+		"serve", "--standalone", "--layer-path", writeRegistry(t, nil))
+	register := func(id, dir string) {
+		t.Helper()
+		cliWantExit(t, runPodium(t, "", brEnv(srv.BaseURL),
+			"layer", "register", "--id", id, "--local", dir), 0, "register "+id)
+	}
+
+	// Mixed: one artifact ingests and one is dropped by the floor, which the
+	// registry answers 200 and the command reports on both streams.
+	mixedDir := t.TempDir()
+	mkArtifact(t, filepath.Join(mixedDir, "mixed-low"), smallteamLowArtifact("mixed low"))
+	mkArtifact(t, filepath.Join(mixedDir, "mixed-medium"), smallteamMediumArtifact("mixed medium"))
+	register("mixed-layer", mixedDir)
+	mixed := runPodium(t, "", brEnv(srv.BaseURL), "layer", "reingest", "mixed-layer")
+	cliWantExit(t, mixed, 1, "reingest a mixed snapshot")
+	cliContains(t, mixed.Stdout, "artifact: mixed-low@1.0.0", "the accepted artifact")
+	cliContains(t, mixed.Stderr, "rejected: mixed-medium (ingest.public_mode_rejects_sensitive)", "the dropped artifact")
+
+	// Rejected-only: every artifact is dropped, `artifacts` is empty, and the
+	// registry still answers 200.
+	rejectedDir := t.TempDir()
+	mkArtifact(t, filepath.Join(rejectedDir, "rejected-medium"), smallteamMediumArtifact("rejected medium"))
+	register("rejected-layer", rejectedDir)
+	rejected := runPodium(t, "", brEnv(srv.BaseURL), "layer", "reingest", "rejected-layer")
+	cliWantExit(t, rejected, 1, "reingest a rejected-only snapshot")
+	cliContains(t, rejected.Stderr, "rejected: rejected-medium (ingest.public_mode_rejects_sensitive)", "the dropped artifact")
+	cliNotContains(t, rejected.Stdout, "queued_at", "the raw response body")
+
+	// Empty layer: nothing to ingest is nothing dropped.
+	register("empty-layer", t.TempDir())
+	empty := runPodium(t, "", brEnv(srv.BaseURL), "layer", "reingest", "empty-layer")
+	cliWantExit(t, empty, 0, "reingest an empty layer")
+	cliNotContains(t, empty.Stdout, "queued_at", "the raw response body")
+	cliNotContains(t, empty.Stderr, "rejected:", "an empty layer drops nothing")
+	cliNotContains(t, empty.Stderr, "conflict:", "an empty layer conflicts with nothing")
 }
 
 // spec: doc "podium layer reingest", freeze-window behavior (§4.7.2). A
