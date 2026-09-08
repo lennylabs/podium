@@ -41,6 +41,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The SCIM receiver keeps its mount on every identity provider. Setting
   `PODIUM_SCIM_TOKENS` mounts the endpoint, and the receiver accepts, persists,
   and serves pushes as before.
+- A non-empty `PODIUM_IDP_GROUP_MAPPING` that does not resolve to a group
+  mapping table fails startup with `config.invalid_idp_group_mapping`, under
+  every identity provider. This covers a value carrying an entry without a `=`
+  or with an empty name on either side, and a value of separators or whitespace
+  alone. The registry previously logged the parse failure, dropped the whole
+  table, and started, so every group claim value reached §4.6 visibility
+  unmapped. A deployment whose setting carries a typo now refuses to start where
+  it previously started with no mapping, which is backward-incompatible and
+  lands in a MINOR bump. An unset or empty value still configures no table and
+  startup proceeds. Pre-1.0, no flag, environment variable, or configuration key
+  restores the previous behavior.
+
+### Documentation
+
+- §13.12 gains a row for `PODIUM_IDP_GROUP_MAPPING`, giving its syntax, its
+  absence from the config file, the pass-through of a claim value with no entry,
+  and the startup failure. §6.3.1 names the variable as the source of the
+  `IdpGroupMapping` table and names `config.invalid_idp_group_mapping`.
 
 ## [0.4.0] - 2026-09-05
 

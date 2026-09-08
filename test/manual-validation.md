@@ -2157,9 +2157,10 @@ misconfigurations the startup guards cover, naming the config error code rather
 than serving an unverifiable or forgeable registry.
 
 **Covers.** The `config.invalid_issuer_scheme`, `config.oidc_jwt_audience_unset`,
-and `config.trusted_headers_public_bind` startup guards, including the audience
-guard against a comma-separated list whose every entry is blank (§6.3.3, §13.10,
-§13.12).
+`config.invalid_idp_group_mapping`, and `config.trusted_headers_public_bind`
+startup guards, including the audience guard against a comma-separated list
+whose every entry is blank and the group-mapping guard against a non-empty value
+that resolves to no entry (§6.3.1, §6.3.3, §13.10, §13.12).
 
 **Steps.**
 
@@ -2207,6 +2208,27 @@ guard against a comma-separated list whose every entry is blank (§6.3.3, §13.1
    echo "exit=$?"
    ```
 
+5. A non-empty `PODIUM_IDP_GROUP_MAPPING` that resolves to no
+   `<claim-value>=<group-name>` entry is refused, both when the value carries a
+   malformed entry and when it holds separators and whitespace alone. Both runs
+   exit immediately.
+
+   ```bash
+   PODIUM_IDENTITY_PROVIDER=oidc-jwt \
+     PODIUM_OAUTH_ISSUER=https://acme.okta.example/oauth2/default \
+     PODIUM_OAUTH_AUDIENCE=https://podium.acme.example \
+     PODIUM_IDP_GROUP_MAPPING=00g1financeOID \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8133
+   echo "exit=$?"
+
+   PODIUM_IDENTITY_PROVIDER=oidc-jwt \
+     PODIUM_OAUTH_ISSUER=https://acme.okta.example/oauth2/default \
+     PODIUM_OAUTH_AUDIENCE=https://podium.acme.example \
+     PODIUM_IDP_GROUP_MAPPING=" , " \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8133
+   echo "exit=$?"
+   ```
+
 **Expected.**
 
 - Step 2 exits non-zero and prints `config.invalid_issuer_scheme`.
@@ -2217,6 +2239,12 @@ guard against a comma-separated list whose every entry is blank (§6.3.3, §13.1
   trimming and the set resolves to no audience.
 - Step 4 exits non-zero and prints `config.trusted_headers_public_bind`, naming
   the non-loopback bind address.
+- Step 5 exits non-zero and prints `config.invalid_idp_group_mapping` on the run
+  with `PODIUM_IDP_GROUP_MAPPING=00g1financeOID`, because the entry carries no
+  `=`.
+- Step 5 exits non-zero and prints `config.invalid_idp_group_mapping` again on
+  the run with `PODIUM_IDP_GROUP_MAPPING=" , "`, because the value is non-empty
+  and resolves to no entry.
 - Each server refuses to start, so no background process is left to stop.
 
 **Cleanup.** `rm -rf "$WORK"`.

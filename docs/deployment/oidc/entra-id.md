@@ -50,7 +50,7 @@ The token then carries group object IDs. Set `PODIUM_IDP_GROUP_MAPPING` on the r
 PODIUM_IDP_GROUP_MAPPING=7c52a1d4-1111-2222-3333-444455556666=engineering,9ab3f0c2-7777-8888-9999-aaaabbbbcccc=platform
 ```
 
-A malformed entry is logged and the whole mapping is dropped, so group values then pass through unchanged. There is no `registry.yaml` key for the mapping.
+A non-empty value that carries a malformed entry, or that resolves to no `<token-value>=<group-name>` entry at all, fails startup with `config.invalid_idp_group_mapping`. One malformed entry discards the well-formed entries beside it, so the registry refuses the whole setting instead of starting with a partial table. There is no `registry.yaml` key for the mapping.
 
 The layer config then references the readable name:
 
