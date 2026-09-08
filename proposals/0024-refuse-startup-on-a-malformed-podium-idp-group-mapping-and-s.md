@@ -1,7 +1,7 @@
 # Proposal 0024: Refuse startup on a malformed `PODIUM_IDP_GROUP_MAPPING`, and state the variable in §13.12
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-09-08). Verified after 10 adversarial review rounds (6 findings fixed).
+- Status: Implemented (2026-09-08). Verified after 10 adversarial review rounds (6 findings fixed).
 - Date: 2026-09-08
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -41,20 +41,24 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §13.12's identity-provider table gains the `PODIUM_IDP_GROUP_MAPPING` row, stating the syntax, the pass-through, and the `config.invalid_idp_group_mapping` refusal. Committed alone and verified before any code.
+- [x] **S1 · spec** — SPEC-1. §13.12's identity-provider table gains the `PODIUM_IDP_GROUP_MAPPING` row, stating the syntax, the pass-through, and the `config.invalid_idp_group_mapping` refusal. Committed alone and verified before any code.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §6.3.1 names `PODIUM_IDP_GROUP_MAPPING` as what carries the adapter's table, names `config.invalid_idp_group_mapping`, and points at §13.12.
+- [x] **S2 · spec** — SPEC-2. §6.3.1 names `PODIUM_IDP_GROUP_MAPPING` as what carries the adapter's table, names `config.invalid_idp_group_mapping`, and points at §13.12.
       Levels: —. Depends on: S1
-- [ ] **S3 · code** — CODE-1. The parse site records the failure on the `Config`, the warning line is removed, and `validate` returns `config.invalid_idp_group_mapping`.
+- [x] **S3 · code** — CODE-1. The parse site records the failure on the `Config`, the warning line is removed, and `validate` returns `config.invalid_idp_group_mapping`.
       Levels: unit, e2e. Depends on: S1, S2
-- [ ] **S4 · test** — TEST-1. The unit table over `LoadConfig` and `validate` covering the refused and the accepted settings.
+- [x] **S4 · test** — TEST-1. The unit table over `LoadConfig` and `validate` covering the refused and the accepted settings.
       Levels: unit. Depends on: S3
-- [ ] **S5 · test** — TEST-2. The end-to-end refusal arm through the built binary and the `config show --server` arm.
+- [x] **S5 · test** — TEST-2. The end-to-end refusal arm through the built binary and the `config show --server` arm.
       Levels: e2e. Depends on: S3
-- [ ] **S6 · docs** — DOC-1, DOC-2. The two OIDC cookbook pages, `CHANGELOG.md`, and S33 in `test/manual-validation.md`.
+- [x] **S6 · docs** — DOC-1, DOC-2. The two OIDC cookbook pages, `CHANGELOG.md`, and S33 in `test/manual-validation.md`.
       Levels: manual. Depends on: S4, S5
 
 **Ordering constraints.** S1 precedes S2 because §6.3.1's clause points at the §13.12 row, and both precede the code per `.claude/rules/spec-driven-development.md`. S4 and S5 are independent of each other and both depend on S3, because both assert a refusal that does not exist before it. S6 follows the tests so each page describes what the tested build does. `docs/deployment/oidc/google-workspace.md` and `docs/deployment/oidc/entra-id.md` are listed in `tools/doccov/manifest.yaml` (`:67`, `:69`) and the staged edits add no fenced block, so no `doccov-check` obligation is created.
+
+## Deviations from the checklist
+
+- **S7 · test** — Not carried by the checklist. It annotated the end-to-end `podium config show --server` arm in `test/e2e/auth_gateway_test.go` with its `// Matrix: §6.10 (config.invalid_idp_group_mapping)` cell, so the arm that pins the diagnostic command's exit-0 behavior is attributed to the error code alongside the refusal arm. It followed S5 and preceded S6.
 
 ## Current state and the gap
 
