@@ -87,6 +87,15 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 			if got, want := artifactKeys(srvRes), artifactKeys(fsRes); !equalStringSlices(got, want) {
 				t.Errorf("artifacts list mismatch:\n filesystem=%v\n server=    %v", want, got)
 			}
+
+			// §11 names the lock-file artifacts: list among the four things the
+			// two modes must produce identically, and the id and version alone do
+			// not carry it. content_hash is what the §14.11 reproducibility triple
+			// is pinned on and was computed from a different input on each side,
+			// and the two consumers emitted the list in different orders. The
+			// enclosing LockFile is not compared, because its target path,
+			// timestamps, and source provenance legitimately differ.
+			assertLockArtifactsEqual(t, fsTarget, srvTarget)
 		})
 	}
 }
@@ -187,4 +196,33 @@ func equalStringSlices(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// assertLockArtifactsEqual compares the artifacts: list each consumer wrote,
+// position for position and field for field: the id, the version, the content
+// hash, the layer that supplied it, and where it landed. The lists are compared
+// as written, because WriteLock orders them, so a divergence in either the
+// order or the records fails here.
+func assertLockArtifactsEqual(t *testing.T, fsTarget, srvTarget string) {
+	t.Helper()
+	fsLock, err := sync.ReadLock(fsTarget)
+	if err != nil {
+		t.Fatalf("reading the filesystem lock: %v", err)
+	}
+	srvLock, err := sync.ReadLock(srvTarget)
+	if err != nil {
+		t.Fatalf("reading the server lock: %v", err)
+	}
+	if len(fsLock.Artifacts) == 0 {
+		t.Fatalf("the filesystem lock recorded no artifacts")
+	}
+	if len(fsLock.Artifacts) != len(srvLock.Artifacts) {
+		t.Fatalf("lock artifact count: filesystem=%d server=%d", len(fsLock.Artifacts), len(srvLock.Artifacts))
+	}
+	for i, want := range fsLock.Artifacts {
+		got := srvLock.Artifacts[i]
+		if got != want {
+			t.Errorf("lock artifact %d differs between the modes:\n filesystem=%+v\n server=    %+v", i, want, got)
+		}
+	}
 }

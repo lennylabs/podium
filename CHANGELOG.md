@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **The lock file's artifacts list across sync modes** (§11, §7.5.3, §14.11): a `podium sync` against a filesystem registry and a `podium sync` against `podium serve --standalone --layer-path` on the same directory now record the same `artifacts:` list. They agreed on neither the records nor the order. The filesystem consumer hashed `SKILL.md` in place of the manifest for a skill, while the registry hashes the manifest, `SKILL.md`, and every bundled resource, so a frontmatter-only edit to `ARTIFACT.md` changed the materialized output while the recorded `content_hash` stood still, and the same artifact carried a different hash in each mode. Both now derive the hash from one implementation. An artifact with no `SKILL.md` contributes no additional bytes and its hash is unchanged, so only a skill's recorded hash moves. Separately, the two consumers emitted the list in different orders; it is now ordered by artifact id and then materialized path at the point the lock is written. The first `podium sync` after this change reports the target as changed, because the recorded hashes and the list order both move, and sets `PODIUM_CHANGED` for a workspace workflow gated on it. No materialized file changes and the next sync reports unchanged.
+
 ### Changed
 
 - `podium layer reingest` reports the ingest outcome in its exit status. It

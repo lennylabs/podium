@@ -425,21 +425,7 @@ func lockContentHash(rec materialRecord) string {
 // key order, so the digest is deterministic across runs. The result is the
 // spec's "sha256:<hex>" form. spec: §7.5.3, §14.11.
 func contentHashFor(rec materialRecord) string {
-	var parts [][]byte
-	if len(rec.SkillBytes) > 0 {
-		parts = append(parts, rec.SkillBytes)
-	} else {
-		parts = append(parts, rec.ArtifactBytes)
-	}
-	keys := make([]string, 0, len(rec.Resources))
-	for k := range rec.Resources {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		parts = append(parts, []byte(k), rec.Resources[k])
-	}
-	return "sha256:" + version.ContentHash(parts...)
+	return "sha256:" + version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
 }
 
 // offlineFirstNoop builds the §7.4 offline-first result for a sync whose

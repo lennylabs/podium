@@ -245,6 +245,32 @@ func less(a, b Pin) bool {
 	return a.Patch < b.Patch
 }
 
+// CanonicalContentHash returns the §4.7.6 content hash of one artifact: the
+// digest over its manifest bytes, its SKILL.md bytes when it carries one, and
+// every bundled resource in sorted-path order. The digest carries no "sha256:"
+// prefix; a caller that stores or serves the value adds one.
+//
+// It exists so the registry and the filesystem consumer cannot compute the hash
+// differently. They did: the filesystem path hashed SKILL.md *instead of* the
+// manifest for a skill, so a frontmatter-only edit left the lock's content_hash
+// unmoved while the materialized output changed, and the same artifact hashed
+// differently in the two deployment modes, which §11 requires to agree.
+//
+// An absent SKILL.md contributes no bytes, so a non-skill artifact hashes the
+// same under this function as it did under either of the two it replaced.
+func CanonicalContentHash(artifactBytes, skillBytes []byte, resources map[string][]byte) string {
+	parts := [][]byte{artifactBytes, skillBytes}
+	keys := make([]string, 0, len(resources))
+	for k := range resources {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		parts = append(parts, []byte(k), resources[k])
+	}
+	return ContentHash(parts...)
+}
+
 // ContentHash returns the SHA-256 hex digest of the canonicalized bytes.
 // Spec §4.7 invariant: ingest is keyed by this hash.
 func ContentHash(bytes ...[]byte) string {
