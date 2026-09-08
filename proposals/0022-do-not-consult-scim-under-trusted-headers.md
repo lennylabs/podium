@@ -1,7 +1,7 @@
 # Proposal 0022: Do not consult SCIM under `trusted-headers`
 
 - Issue: (to be filed)
-- Status: Draft
+- Status: Verified (2026-09-07). Converged after 9 adversarial review rounds (9 findings fixed); awaiting sign-off.
 - Date: 2026-09-07
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off. Every anchor is read against `fix/scim-not-consulted-under-trusted-headers` at `822e6a9`.
@@ -13,7 +13,7 @@ This document stages the proposed spec, code, test, and documentation changes. I
 - The boot path builds the §6.3.1 SCIM group expander only under an identity provider whose group membership the registry resolves from a credential it verifies. Today it builds the expander whenever `PODIUM_SCIM_TOKENS` names at least one bearer token (`internal/serverboot/serverboot.go:985-995`), with no condition on the configured provider. §6.3.3 states that under `trusted-headers` "Groups come from `X-Podium-User-Groups` directly; SCIM and the `IdpGroupMapping` adapter are not consulted, because there is no token to read and the gateway is the source of truth", and the registry consults SCIM there anyway.
 - One variable feeds both wiring sites, so one condition closes both. `resolveGroup` is declared at `internal/serverboot/serverboot.go:985`, handed to the composed catalog at `:994`, and handed to the §7.3.1 layer endpoint at `:1269`. Under the condition it stays nil for every provider outside the allowlist, and a nil resolver is the claim-only path both consumers already contract for (`pkg/layer/composer.go:43-49`, `:81`). `pkg/layer` is untouched.
 - §6.3.1 gains a paragraph naming the providers its SCIM sentence applies under and binding the rule to every §4.6 evaluation the registry performs, including the §7.3.1 layer read. §6.3.1 introduces the directory with no provider qualification, and the carve-out lives two subsections away in §6.3.3.
-- The registry logs at startup whether the pushed directory decides a layer read and under which identity provider. `visibilityReason` (`pkg/registry/core/admin.go:82-95`) separates the directory-derived grant from the claim-derived one, so `GET /v1/admin/show-effective` names which arm admitted a caller. Neither signal exists today.
+- The registry logs at startup whether the pushed directory decides a layer read and under which identity provider. The line's text is fixed rather than left open, because the end-to-end arms assert both values it can report and S61 quotes it. `visibilityReason` (`pkg/registry/core/admin.go:82-95`) separates the directory-derived grant from the claim-derived one, so `GET /v1/admin/show-effective` names which arm admitted a caller. Neither signal exists today.
 - `docs/deployment/gateway-delegated-identity.md:85` documents the defect as supported behavior and is replaced. `docs/reference/http-api.md:776` states the expansion with no provider qualification and gains one. `test/manual-validation.md` gains S61, and `CHANGELOG.md` records the withdrawn grant.
 
 **Fixed decisions.**
@@ -34,6 +34,8 @@ This document stages the proposed spec, code, test, and documentation changes. I
 - **No shipped test combines `trusted-headers` with SCIM, so the suite passes with and without the fix.** `gwTrustedHeadersServer` sets no SCIM token (`test/e2e/auth_gateway_test.go:49-83`), and `test/e2e/auth_scim_visibility_test.go` runs under `injected-session-token` (`:59`). A green suite is evidence for neither direction, which is what makes the new end-to-end arms the whole verification.
 - **The positive arm has a shipped pin that must stay green.** `TestAuthSCIMVisibility_MembershipDrivesVisibility` and `TestAuthSCIMVisibility_UserDeletionRevokesVisibility` (`test/e2e/auth_scim_visibility_test.go:131`, `:207`) assert that a verified `injected-session-token` caller whose token carries no group claim sees a groups-restricted layer through SCIM, on the layer read and on the data plane. Dropping `injected-session-token` from the allowlist fails both, which is the mechanical check on the second entry.
 - **The `trusted-headers` verifier already carries a comment claiming the behavior it does not have.** `internal/serverboot/identity_verify.go:283-284` and `pkg/identity/trusted_headers.go:54-55` both state that SCIM and the `IdpGroupMapping` adapter are not consulted. The adapter half is true, because neither site calls `groups.Map`. The SCIM half is false, because the resolver is wired downstream of the verifier and read by every evaluator call. A reader auditing the verifier alone finds a correct-looking comment above incorrect behavior.
+- **CODE-3's signature change breaks a shipped test at compile time.** `visibilityReason` is package-private and is called by `pkg/registry/core/coverage_gaps_test.go:247` in its three-argument form. Landing CODE-3 without the matching test edit stops the whole `pkg/registry/core` test package from building, so S3 carries both and is marked indivisible.
+- **The anonymous arms of the layer read return no layers at all.** `readableBy` answers the empty list for an unauthenticated caller before the evaluator runs (`pkg/registry/server/layers.go:259-261`), so a public layer is absent there as well. An anonymous expectation belongs on the data plane, and TEST-3 is written that way.
 - **Parts of `test/e2e` skip silently on macOS**, so a local pass is not evidence. Check the output for `SKIP` before treating the new arms as run.
 - **The wiring line is not unit-reachable.** It sits inside the boot function, so the default `go test` profile scores it as uncovered even when an end-to-end test drives it. Measure it with `GOCOVERDIR` per `.claude/rules/test-coverage.md`.
 
@@ -43,14 +45,14 @@ This document stages the proposed spec, code, test, and documentation changes. I
       Levels: —. Depends on: —
 - [ ] **S2 · code** — CODE-1, CODE-2, TEST-1. The `scimResolvesGroups` predicate, the gated construction site, the amended comments on the SCIM block, the startup line, and the predicate's unit table. **Indivisible**: the predicate has no other caller, and the table and the predicate falsify each other.
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-3, TEST-2. `visibilityReason` separates the directory-derived grant, and its unit cases.
+- [ ] **S3 · code** — CODE-3, TEST-2. `visibilityReason` separates the directory-derived grant, and the shipped table in `pkg/registry/core/coverage_gaps_test.go` takes the new parameter and gains the directory case. **Indivisible**: the signature change breaks the shipped call at `pkg/registry/core/coverage_gaps_test.go:247`, so the package does not build until both land.
       Levels: unit. Depends on: S2
-- [ ] **S4 · test** — TEST-3, TEST-4. The end-to-end arms through the built binary: a `trusted-headers` registry with SCIM mounted refusing the directory-derived grant on both consumers, the negative control on the header-derived grant, and the `oidc-jwt` arm confirming the expansion survives where §6.3.3 requires it.
+- [ ] **S4 · test** — TEST-3, TEST-4. The end-to-end arms through the built binary: a `trusted-headers` registry with SCIM mounted refusing the directory-derived grant on both consumers, the negative control on the header-derived grant, the `oidc-jwt` arm confirming the expansion survives where §6.3.3 requires it, and the boot-log assertions that pin CODE-2's line to its withheld value on the first registry and its permitted value on the second.
       Levels: e2e. Depends on: S2
 - [ ] **S5 · docs** — DOC-1 through DOC-4. `docs/deployment/gateway-delegated-identity.md`, `docs/reference/http-api.md`, `test/manual-validation.md` with its Scenario index row, and `CHANGELOG.md`.
       Levels: —. Depends on: S3, S4
 
-**Ordering constraints.** S1 precedes the code, per `.claude/rules/spec-driven-development.md`, because CODE-1's doc comment cites the paragraph it lands. S3 depends on S2 rather than running beside it: its `trusted-headers` case asserts that the diagnostic reports the layer invisible, which only CODE-1 makes true. S4 depends on S2 alone, because its assertions are HTTP statuses and a layer list rather than a diagnostic reason. S4 follows S2 rather than preceding it, because the `trusted-headers` arm fails against the shipped boot path and would land a red test. S5 follows the code and the tests so the pages describe what the tested build does. Neither `docs/deployment/gateway-delegated-identity.md` nor `docs/reference/http-api.md` appears in `tools/doccov/manifest.yaml`, and the staged edits add no runnable fenced block to either, so no `doccov-check` obligation is created.
+**Ordering constraints.** S1 precedes the code, per `.claude/rules/spec-driven-development.md`, because CODE-1's doc comment cites the paragraph it lands. S3 depends on S2 rather than running beside it: TEST-2 drives `visibilityReason` and `ShowEffective` directly and needs nothing from S2 to compile, and the diagnostic's `trusted-headers` outcome, the unexpanded view that matches the live evaluator, holds only once CODE-1 leaves the resolver nil under that provider. Landing S3 first would ship a diagnostic that names an arm the fix has not yet withdrawn. S4 depends on S2 alone, because its assertions are HTTP statuses, a layer list, and the boot line CODE-2 adds in S2, rather than the diagnostic reason S3 adds. S4 follows S2 rather than preceding it, because the `trusted-headers` arm fails against the shipped boot path and would land a red test. S5 follows the code and the tests so the pages describe what the tested build does. Neither `docs/deployment/gateway-delegated-identity.md` nor `docs/reference/http-api.md` appears in `tools/doccov/manifest.yaml`, and the staged edits add no runnable fenced block to either, so no `doccov-check` obligation is created.
 
 ## Current state and the gap
 
@@ -115,7 +117,7 @@ Reachability is the ordinary request path. Every caller the gateway admits reach
 
 ### The grant it confers
 
-Under `trusted-headers` the registry performs no verification of the header contents (§6.3.3). The values compared against SCIM membership, `id.Sub` and `id.Email`, are the `X-Podium-User-Sub` and `X-Podium-User-Email` headers the gateway sets, trimmed (`pkg/identity/trusted_headers.go:61-75`). Three properties follow.
+Under `trusted-headers` the registry performs no verification of the header contents (§6.3.3). The values compared against SCIM membership, `id.Sub` and `id.Email`, are the `X-Podium-User-Sub` and `X-Podium-User-Email` headers the gateway sets, trimmed (`pkg/identity/trusted_headers.go:61-75`). These properties follow.
 
 **The gateway is authoritative over identifiers it may not constrain.** A gateway that authenticates a caller and then sets `X-Podium-User-Email` from a user-editable profile attribute, or from an unnormalized directory field, hands the registry a value the caller influences. The registry compares it to a SCIM `userName` for equality after trimming, with no normalization, no case folding, and no domain check. Under the specified behavior that value reaches the `users:` arm, which the operator declares layer by layer. Under the defect it also reaches every `groups:` filter in the tenant through whatever the IdP has pushed, so the set of values that produce a grant is no longer the set the operator wrote into layer configs.
 
@@ -170,7 +172,7 @@ The last three rows are cases where the expander's presence has no observable ef
 
 This adds no §6.10 error code and no matrix cell. §6.3.1 keeps its existing test citations, so `speccov-drift` gains no unsatisfied obligation, and TEST-1, TEST-3, and TEST-4 cite the section as well.
 
-## Staged change: `internal/serverboot/serverboot.go`
+## Proposed solution
 
 ### CODE-1: the provider condition at the point the expander is built
 
@@ -269,9 +271,7 @@ Add after the block above:
 
 The line names a configuration outcome and an identifier and carries no directory contents, which is what `.claude/rules/code-best-practices.md` requires of a log line. It is one line at startup on a registry that already mounts the receiver.
 
-**IMPLEMENTOR'S CHOICE:** the exact wording, subject to naming the configured provider and whether the expansion is wired, and to carrying no member identifier.
-
-## Staged change: `pkg/registry/core/admin.go`
+The line's text is fixed as staged rather than left to the implementor, because three places read it: TEST-3 asserts the withheld form, TEST-4 asserts the permitted form, and S61 step 3 quotes the whole line in its Expect block. The assertions match on the literal prefix `SCIM group expansion in layer visibility: ` followed by the boolean, so an implementor may reword the parenthetical that names the provider only by amending TEST-3, TEST-4, and S61 in the same change.
 
 ### CODE-3: the diagnostic separates the directory-derived grant
 
@@ -326,6 +326,8 @@ func visibilityReason(l layer.Layer, id layer.Identity, visible, viaDirectory bo
 
 The existing strings are unchanged and the new arm is an addition, so an operator matching on a shipped string keeps matching. A public layer never reaches the new arm, because the claim-only evaluation admits it too and `viaDirectory` is false there.
 
+`visibilityReason` is package-private and has a second, shipped caller: the table test at `pkg/registry/core/coverage_gaps_test.go:247` calls the three-argument form. The parameter is added there in the same change, or the `pkg/registry/core` test package stops compiling and every test in it goes red rather than one assertion failing. TEST-2 carries that edit.
+
 ## Edge cases and accepted failure modes
 
 | Case | Observable outcome | Where it is stated |
@@ -336,7 +338,7 @@ The existing strings are unchanged and the new arm is an addition, so an operato
 | `trusted-headers`, SCIM mounted, the layer declares `users: [<the caller's email>]` | Visible. The `users:` arm reads §4.6's table and consults no directory | Non-goals |
 | `trusted-headers`, SCIM mounted, a tenant admin reads `GET /v1/layers` | The whole tenant list, unchanged, because `readableBy`'s admin arm answers before the evaluator | TEST-3 |
 | `trusted-headers`, SCIM mounted, any SCIM CRUD request | Unchanged. The receiver stays mounted and the directory stays writable, readable, and persisted | CODE-1 |
-| `trusted-headers`, SCIM mounted, at startup | One line reporting the expansion withheld and naming the configured provider | CODE-2 |
+| `trusted-headers`, SCIM mounted, at startup | One line reporting the expansion withheld and naming the configured provider | CODE-2; TEST-3 |
 | `trusted-headers`, SCIM mounted, `GET /v1/admin/show-effective` | The unexpanded view, matching the live evaluator. Reports the expanded one today | CODE-3 |
 | `oidc-jwt` or `injected-session-token` with SCIM mounted | Unchanged: directory membership grants `groups:` visibility on both consumers, and the diagnostic names the arm | SPEC-1; the shipped `test/e2e/auth_scim_visibility_test.go`; TEST-4 |
 | SCIM not mounted, any provider | Unchanged. The resolver was already nil | CODE-1 |
@@ -362,7 +364,7 @@ The loss is silent from the caller's side, because §4.6 withholds rather than r
 
 The operator restores the access by provisioning the membership at the gateway, so the caller's request carries the group in `X-Podium-User-Groups`. That is the source of truth this provider is defined around, and every gateway that can inject `X-Podium-User-Sub` can inject `X-Podium-User-Groups`. A small, stable set of affected callers can instead be named on the layer's `users:` list, which is evaluated against the subject and email headers and consults no directory. An operator who wants the registry to resolve membership from the directory runs `oidc-jwt`, where the registry verifies the token itself and §6.3.1 and §6.3.3 authorize the directory path. Both providers apply on a standalone and on a standard backend (§6.3.3), so the switch is a configuration change.
 
-Before upgrading, an operator enumerates what will change from state the registry still holds: list the layers carrying a `groups:` filter from `registry.yaml` and from `GET /v1/layers` read as an admin, read `GET /scim/v2/Groups` for the members of each named group, and compare those `userName` values against the subject and email values the gateway sets for callers it does not also place in that group. Every match in that comparison is a caller who reached the layer through the withdrawn arm. After upgrading, the startup line reports the state on every start, so a registry that still mounts the receiver under this provider says so.
+Before upgrading, an operator enumerates what will change from state the registry still holds: list the layers carrying a `groups:` filter from `registry.yaml` and from `GET /v1/layers` read as an admin, read `GET /scim/v2/Groups` for each named group, which lists its members as opaque user ids and carries no `userName` (`pkg/scim/handler.go:230-247`, `:284-299`), resolve each member id through `GET /scim/v2/Users/{id}` to obtain the `userName` (`pkg/scim/handler.go:169-176`, `:125-137`), which is the value the evaluator matches (`pkg/scim/scim.go:295-311`), and compare those `userName` values against the subject and email values the gateway sets for callers it does not also place in that group. Every match in that comparison is a caller who reached the layer through the withdrawn arm. After upgrading, the startup line reports the state on every start, so a registry that still mounts the receiver under this provider says so.
 
 `PODIUM_SCIM_TOKENS` can stay set where the receiver serves another purpose, such as maintaining the directory across a planned move to `oidc-jwt`. Unset it where it was mounted only to feed visibility.
 
@@ -394,25 +396,28 @@ func TestSCIMResolvesGroups_ProviderAllowlist(t *testing.T) {
 
 The `oidc` case is the free-form label `selectIdentityProvider` resolves to nothing. The table is the only falsifiable statement of the unset and free-form-label arms, because those deployments resolve every caller as anonymous-public and the evaluator short-circuits before the `groups:` arm, so they have no observable end-to-end difference.
 
-**TEST-2 · unit, `pkg/registry/core`.** `visibilityReason` cases over the same layer and the same target identity, differing only in `viaDirectory`: the directory arm, the claim arm, and the unchanged public, anonymous, organization, and refusal arms. A second case drives `ShowEffective` against a registry carrying an expander that names the target and a layer declaring `groups:`, and asserts the directory reason; the same registry with no expander reports the layer invisible with the refusal reason. `// Spec: §4.6, §4.7.2, §6.3.1`.
+**TEST-2 · unit, `pkg/registry/core/coverage_gaps_test.go`.** `TestVisibilityReason_Arms` (`:196-251`) is the shipped table over the reason arms, and it is amended rather than duplicated in a new file. Its case struct gains a `viaDirectory` field, its call at `:247` becomes `visibilityReason(c.l, c.id, c.visible, c.viaDirectory)`, and its shipped cases pass `false` and keep their current `want` strings, which is what makes the additive claim above falsifiable. The table gains the directory case: the same layer and the same target identity as the "visible via users or groups" case, differing only in `viaDirectory`, expecting `"user matches layer.groups through the SCIM directory"`. A second test drives `ShowEffective` against a registry carrying an expander that names the target and a layer declaring `groups:`, and asserts the directory reason; the same registry with no expander reports the layer invisible with the refusal reason. `TestShowEffective_ReasonsPerLayer` (`:254-278`) is unchanged: its registry carries no expander, so `viaDirectory` is false for every layer, and its `team` layer is admitted on `users:` in any case. `// Spec: §4.6, §4.7.2, §6.3.1`.
 
 **TEST-3 · end-to-end, `test/e2e/auth_gateway_test.go`. This is the test that fails against the pre-fix code.** `gwTrustedHeadersServer` (`test/e2e/auth_gateway_test.go:49`) already declares a public layer and an `eng-layer` with `visibility: { groups: [engineering] }` and takes a proxy secret; it gains an optional SCIM token so the same fixture can mount the receiver. The test pushes a SCIM user whose `userName` is `alice@acme.com` and a SCIM group `engineering` holding her, reusing `oidcSCIMDo`, `oidcSCIMUserBody`, and `oidcSCIMGroupBody` (`test/e2e/auth_oidc_test.go:213`, `:239`, `:249`). Every request carries the matching `X-Podium-Proxy-Secret`. The arms:
 
 - `X-Podium-User-Sub: alice@acme.com` and no groups header. `load_artifact` on the engineering layer answers `404` and `GET /v1/layers` lists the public layer alone. Pre-fix both admit her, because the directory arm matches her subject against the pushed `userName`. This arm is the regression test.
 - `X-Podium-User-Sub: opaque-123` with `X-Podium-User-Email: alice@acme.com` and no groups header. The same two outcomes, which pins the email half of the comparison.
 - **The negative control.** The same caller with `X-Podium-User-Groups: engineering` answers `200` on the load and lists the engineering layer, before and after the fix. This proves the correction withdrew the directory arm and left the header arm intact.
-- An anonymous request reaches the public layer and not the engineering layer.
+- An anonymous request reaches the public layer and not the engineering layer on the data plane: `load_artifact` answers `200` on the public artifact and `404` on the engineering one.
 - A request carrying the identity headers and no proxy secret is anonymous on the same terms, so the correction did not shift the secret gate.
+- **The startup line.** The test reads the registry's boot log through `srv.log()` (`test/e2e/helpers_test.go:282`) and asserts it contains `SCIM group expansion in layer visibility: false`, which is CODE-2's withheld form on a registry that mounts the receiver under `trusted-headers`. This is the automated assertion on the line's withheld value, and TEST-4 pins the permitted one. The level matches the behavior: the line is written by the spawned binary at boot, and `test/e2e/auth_oidc_jwt_test.go:222-223` pins the accepted-issuer line the same way.
 
-The test carries `// Spec: §4.6, §6.3.1, §6.3.3, §7.3.1` and reads both consumers on each arm, because `readableBy` and `visibleManifests` reach the evaluator by different routes and the layer read has an admin arm that answers ahead of it. The caller holds no §4.7.2 admin grant, which the fixture asserts by reading the list as that caller and finding the public layer alone.
+The two anonymous arms are asserted on the data plane alone. On the §7.3.1 layer read an unauthenticated caller receives no layers at all, including the public one, because `readableBy` returns the empty list before the evaluator runs for any caller that is not authenticated (`pkg/registry/server/layers.go:259-261`), which is what §7.3.1 states when it says such a caller "resolves no verified subject and the read returns it no layers". Where those arms read `GET /v1/layers`, they assert an empty list.
 
-**TEST-4 · end-to-end.** An `oidc-jwt` arm asserting the expansion survives where §6.3.3 requires it: a verified caller whose token carries no matching group claim, present in the SCIM group, reads the layer on the data plane and on the layer read. `test/e2e/auth_scim_visibility_test.go` pins the `injected-session-token` half and is not modified; TEST-4 pins the other allowlisted provider, which nothing covers end to end on both consumers today.
+The test carries `// Spec: §4.6, §6.3.1, §6.3.3, §7.3.1` and reads both consumers on the two authenticated arms and on the negative control, because `readableBy` and `visibleManifests` reach the evaluator by different routes and the layer read has an admin arm that answers ahead of it. The caller holds no §4.7.2 admin grant, which the fixture asserts by reading the list as that caller and finding the public layer alone.
 
-**Non-regression.** `TestAuthSCIMVisibility_MembershipDrivesVisibility` and `TestAuthSCIMVisibility_UserDeletionRevokesVisibility` (`test/e2e/auth_scim_visibility_test.go:131`, `:207`) run unchanged and must stay green: they are the positive pin for `injected-session-token`, on the layer read and on the data plane, including the revocation direction. `test/e2e/auth_group_search_filter_test.go:38` drives a SCIM-resolved member and a claim-carrying member through one search on the same harness and must stay green. `test/e2e/auth_gateway_test.go`'s existing `trusted-headers` arms and `internal/serverboot/identity_gateway_integration_test.go` set no SCIM token, so they are unaffected.
+**TEST-4 · end-to-end.** An `oidc-jwt` arm asserting the expansion survives where §6.3.3 requires it: a verified caller whose token carries no matching group claim, present in the SCIM group, reads the layer on the data plane and on the layer read. The same arm asserts CODE-2's permitted form, reading `srv.log()` and requiring it to contain `SCIM group expansion in layer visibility: true`, so the two tests together pin both values the boolean can take and a line that reports one value under every provider fails one of them. `test/e2e/auth_scim_visibility_test.go` pins the `injected-session-token` half and is not modified; TEST-4 pins the other allowlisted provider, which nothing covers end to end on both consumers today.
 
-**Mutation checks.** Drop the `scimResolvesGroups` conjunct from the construction site and confirm TEST-1 still passes while TEST-3's first arm fails; that separation is why TEST-3 exists beside the table. Add `trusted-headers` to the allowlist and confirm TEST-1's `trusted-headers` case and TEST-3's first arm both fail. Remove `injected-session-token` and confirm both shipped SCIM visibility tests fail. Make the default arm return true and confirm TEST-1's unset, free-form-label, and unrecognized cases fail. **Gate only the `registry.WithGroupResolver` call at `internal/serverboot/serverboot.go:994` while leaving the variable populated, and confirm TEST-3's layer-read assertion on the first arm fails while its data-plane assertion passes**; that mutation is what a fix applied at a single call site produces, and it is why TEST-3 reads both consumers. Invert `viaDirectory` and confirm TEST-2's two group arms swap.
+**Non-regression.** `TestAuthSCIMVisibility_MembershipDrivesVisibility` and `TestAuthSCIMVisibility_UserDeletionRevokesVisibility` (`test/e2e/auth_scim_visibility_test.go:131`, `:207`) run unchanged and must stay green: they are the positive pin for `injected-session-token`, on the layer read and on the data plane, including the revocation direction. `test/e2e/auth_group_search_filter_test.go:38` drives a SCIM-resolved member and a claim-carrying member through one search on the same harness and must stay green. `test/e2e/auth_gateway_test.go`'s existing `trusted-headers` arms and `internal/serverboot/identity_gateway_integration_test.go` set no SCIM token, so they are unaffected. In `pkg/registry/core/coverage_gaps_test.go`, `TestShowEffective_ReasonsPerLayer` runs unchanged, and `TestVisibilityReason_Arms` is the one shipped test the change invalidates at compile time; TEST-2 amends it and its existing expectations stay as they are.
 
-**Coverage.** The predicate, the reason arm, and its discriminator are unit-covered. The construction site and the startup line run only inside the spawned binary, so the default profile scores them as uncovered; confirm them with `GOCOVERDIR=$(mktemp -d) go test ./test/e2e/...` and `go tool covdata textfmt` per `.claude/rules/test-coverage.md`. Measure the in-process half with `go test -coverpkg=./... -coverprofile=cover.out ./internal/serverboot/ ./pkg/registry/core/`, and read `codecov/patch` on the pull request rather than the local figure. Check the end-to-end output for `SKIP` before treating a local run as evidence.
+**Mutation checks.** Drop the `scimResolvesGroups` conjunct from the construction site and confirm TEST-1 still passes while TEST-3's first arm fails; that separation is why TEST-3 exists beside the table. Add `trusted-headers` to the allowlist and confirm TEST-1's `trusted-headers` case and TEST-3's first arm both fail. Remove `injected-session-token` and confirm both shipped SCIM visibility tests fail. Make the default arm return true and confirm TEST-1's unset, free-form-label, and unrecognized cases fail. **Gate only the `registry.WithGroupResolver` call at `internal/serverboot/serverboot.go:994` while leaving the variable populated, and confirm TEST-3's layer-read assertion on the first arm fails while its data-plane assertion passes**; that mutation is what a fix applied at a single call site produces, and it is why TEST-3 reads both consumers. Invert `viaDirectory` and confirm TEST-2's two group arms swap. Flip the boolean CODE-2 logs, by passing `resolveGroup == nil` in place of `resolveGroup != nil`, and confirm TEST-3's startup-line assertion and TEST-4's both fail; deleting the line fails them as well, which is what makes the line a tested signal rather than a hand-checked one.
+
+**Coverage.** The predicate, the reason arm, and its discriminator are unit-covered. The construction site and the startup line run only inside the spawned binary, so the default profile scores them as uncovered even though TEST-3 and TEST-4 assert the line's content through the boot log; confirm the execution with `GOCOVERDIR=$(mktemp -d) go test ./test/e2e/...` and `go tool covdata textfmt` per `.claude/rules/test-coverage.md`. Measure the in-process half with `go test -coverpkg=./... -coverprofile=cover.out ./internal/serverboot/ ./pkg/registry/core/`, and read `codecov/patch` on the pull request rather than the local figure. Check the end-to-end output for `SKIP` before treating a local run as evidence.
 
 ## Manual validation
 
@@ -486,20 +491,36 @@ The scenario is a hand-run rather than a suite duplicate because what it reads i
 >    ```bash
 >    SCIM="Authorization: Bearer scim-bearer"
 >    CT="Content-Type: application/scim+json"
->    UID=$(curl -s -H "$SCIM" -H "$CT" -X POST "$URL/scim/v2/Users" \
+>    SCIM_UID=$(curl -s -H "$SCIM" -H "$CT" -X POST "$URL/scim/v2/Users" \
 >      -d '{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"alice@acme.com","active":true}' \
 >      | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
->    echo "scim user id: $UID"
+>    echo "scim user id: $SCIM_UID"
 >    curl -s -o /dev/null -w "group create: %{http_code}\n" -H "$SCIM" -H "$CT" -X POST "$URL/scim/v2/Groups" \
->      -d "{\"schemas\":[\"urn:ietf:params:scim:schemas:core:2.0:Group\"],\"displayName\":\"engineering\",\"members\":[{\"value\":\"$UID\"}]}"
->    curl -s -H "$SCIM" "$URL/scim/v2/Groups" | grep -c engineering
+>      -d "{\"schemas\":[\"urn:ietf:params:scim:schemas:core:2.0:Group\"],\"displayName\":\"engineering\",\"members\":[{\"value\":\"$SCIM_UID\"}]}"
+>    curl -s -H "$SCIM" "$URL/scim/v2/Users/$SCIM_UID" | grep -c "\"id\":\"$SCIM_UID\""
+>    curl -s -H "$SCIM" "$URL/scim/v2/Groups"
 >    ```
 >
 >    **Expect.** `scim user id:` prints a non-empty identifier, `group create:
->    201`, and the group read prints a non-zero count. The receiver accepts and
->    stores the push on this registry exactly as it does on an `oidc-jwt` one;
->    what differs is what reads it. A `404` on any of the three means
->    `PODIUM_SCIM_TOKENS` was not set before the registry started.
+>    201`, the fetch-by-id prints `1`, and the group listing shows
+>    `engineering` holding a member whose `value` is that identifier. The
+>    fetch-by-id is the assertion that the extraction captured a real user:
+>    the receiver answers `404` with a body carrying no identifier when the id
+>    names no user (`pkg/scim/handler.go:169-176`), and an empty capture
+>    requests the collection route, whose body carries the stored ids and never
+>    the string `"id":""`, so both failures print `0`. The group read is a
+>    display rather than an assertion, because the receiver stores a member
+>    value verbatim and validates nothing about it
+>    (`pkg/scim/handler.go:249-255`, `pkg/scim/scim.go:223-241`), so it echoes
+>    back whatever the create body interpolated. A lost identifier still
+>    creates the group, `MembersOf` then resolves no member
+>    (`pkg/scim/scim.go:295-311`), and step 5 would pass for a reason unrelated
+>    to this scenario. The capture variable avoids the name `UID`,
+>    which both shells reserve as a read-only parameter holding the process
+>    user id. The receiver accepts and stores the push on this registry
+>    exactly as it does on an `oidc-jwt` one; what differs is what reads it. A
+>    `404` from the create requests means `PODIUM_SCIM_TOKENS` was not set
+>    before the registry started.
 >
 > 5. Issue loads as the gateway would. alice is in the SCIM `engineering` group
 >    throughout.
@@ -529,25 +550,21 @@ The scenario is a hand-run rather than a suite duplicate because what it reads i
 > 6. Read the layer list as the same caller without the groups header.
 >
 >    ```bash
->    curl -s -H "X-Podium-User-Sub: alice@acme.com" -H "$SEC" "$URL/v1/layers" | grep -o '"id":"[^"]*"'
+>    curl -s -H "X-Podium-User-Sub: alice@acme.com" -H "$SEC" "$URL/v1/layers" \
+>      | python3 -c 'import json,sys; print(sorted(l["id"] for l in json.load(sys.stdin)["layers"]))'
 >    ```
 >
->    **Expect.** `public-handbook` alone. `eng-internal` is absent rather than
+>    **Expect.** `['public-handbook']`. The body is parsed rather than grepped
+>    for `"id":"`, because `writeJSON` indents the layer list
+>    (`pkg/registry/server/server.go:1438-1443`) and a compact pattern matches
+>    nothing whether or not the fix is applied. `eng-internal` is absent rather than
 >    refused, so the read discloses no identifier, source location, or
 >    visibility declaration for it. The layer read and the data plane agree,
 >    which is what one gated construction site produces.
 >
 > **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
-**IMPLEMENTOR'S CHOICE:** the SCIM request bodies and the identifier extraction, subject to creating one user whose `userName` equals the subject the later requests send and one group named `engineering` holding that user. The bodies above are written from the receiver's shipped contract as `test/e2e/auth_oidc_test.go:239` and `:249` build it; confirm the response envelope when the scenario is landed and adjust the extraction if it differs.
-
-## Open questions
-
-**OQ-1: `injected-session-token` in the allowlist.** The specification does not state at the provider level whether the directory applies. §6.3.1's opening sentence resolves group membership registry-side through SCIM as the general rule and names `groups` as the claim the adapter reads under this provider, §6.3.2 states nothing about groups, and §6.3.3's per-provider sentences cover the registry-process providers alone. SPEC-1's staged position is that it applies, on two grounds: the injected token carries a subject the directory is keyed by, so the reason §6.3.3 gives for the `trusted-headers` carve-out ("there is no token to read") does not hold here; and the registry verifies the token's signature on every call (§6.3.2), so the identity is one the registry established rather than one a second system asserted. The alternative reading is that a runtime acting on a user's behalf is the authority on that user's groups the way a gateway is, which would forbid the expansion and change shipped behavior on that provider. Choosing the alternative fails both shipped SCIM visibility end-to-end tests, which is the mechanical consequence to weigh. This is a decision for the reviewer rather than a settled cell.
-
-**OQ-2: whether `PODIUM_SCIM_TOKENS` under `trusted-headers` should refuse startup.** The staged position mounts the receiver and logs that the directory decides no read, because the identity provider writes it, a later provider change reads it, and refusing would stop a running deployment on an input that is now inert. The alternative refuses at startup, on the reasoning that a mounted receiver whose data no decision reads is a misconfiguration the operator should be told about once rather than a line they may not read. The log line is the weaker signal of the two. A refusal would need a §6.10 config code and its `matrix-audit` entry, which SPEC-1 does not stage.
-
-**OQ-3: whether the diagnostic's second re-evaluation is worth its cost.** CODE-3 evaluates each layer twice on `GET /v1/admin/show-effective`, once with the expander and once without. The endpoint is admin-gated, runs over the tenant's layer list, and is not on a read path, so the cost is bounded. The alternative is to leave the reason string collapsed and rely on the startup line alone, which tells an operator whether the directory can decide a read on this registry and not which layers it decided.
+**IMPLEMENTOR'S CHOICE:** the SCIM request bodies and the identifier extraction, subject to the constraints that follow. The scenario creates one user whose `userName` equals the subject the later requests send and one group named `engineering` holding that user. The extracted value is the created user's `id` from the create response, is non-empty, and is not the process user id, so the capture variable is a name neither bash nor zsh reserves. Step 4 fetches the user by that extracted id and asserts the receiver returns it, so a lost identifier fails step 4 rather than passing step 5 for the wrong reason. The group member value is not the assertion, because the receiver stores it verbatim and echoes it back for any value the create body carried. The bodies above are written from the receiver's shipped contract as `test/e2e/auth_oidc_test.go:239` and `:249` build it; confirm the response envelope when the scenario is landed and adjust the extraction if it differs.
 
 ## Documentation changes
 
@@ -560,6 +577,37 @@ The scenario is a hand-run rather than a suite duplicate because what it reads i
 **DOC-4.** `CHANGELOG.md` gains an entry under `## [Unreleased]` recording the withdrawn grant as backward-incompatible under a MINOR bump: under `trusted-headers`, a layer's `groups:` filter is satisfied by `X-Podium-User-Groups` alone, a caller whose access rested on a SCIM-pushed membership loses it, and the operator provisions that membership at the gateway or moves to `oidc-jwt`. The entry names the startup line and the new diagnostic reason, and states that the SCIM receiver keeps its mount on every provider.
 
 The OIDC cookbook pages that describe the expansion (`docs/deployment/oidc/index.md:59`, `docs/deployment/oidc/okta.md:107`, `docs/deployment/oidc/entra-id.md:146`) each sit inside a guide configuring `oidc-jwt`, where the statement stays true, and are not touched. `docs/deployment/access-control.md:126` and `docs/deployment/integrations.md:92` describe SCIM as a group-membership source without naming a provider and make no claim about `trusted-headers`; both stay true and are left as they are.
+
+## Resolved in adversarial review
+
+### Pass 1 (2026-09-07, automated)
+
+- **CODE-3's parameter broke a shipped test no edit list named.** `visibilityReason` has a second caller, the table at `pkg/registry/core/coverage_gaps_test.go:247`, which calls the three-argument form, so the staged signature stopped the `pkg/registry/core` test package from compiling. S3 now names the file and is marked indivisible, TEST-2 stages the amendment to `TestVisibilityReason_Arms` (the `viaDirectory` field, the amended call, the shipped cases passing `false`, and the directory case), CODE-3 states why the edit is required, and Non-regression records that `TestShowEffective_ReasonsPerLayer` runs unchanged. A Summary bullet names the compile-time trap.
+- **TEST-3's anonymous arms asserted a public layer on a consumer that returns none.** `readableBy` returns the empty list for an unauthenticated caller before the evaluator runs (`pkg/registry/server/layers.go:259-261`), which §7.3.1 states. The anonymous arm and the no-proxy-secret arm are now asserted on the data plane, the "both consumers" reading is scoped to the two authenticated arms and the negative control, and a Summary bullet records the asymmetry.
+- **S61 step 4 assigned to `UID`, which both shells reserve.** The capture is renamed to `SCIM_UID` in the assignment, the echo, and the group body, so the group is created with the user's real identifier. Step 4 also fetches the user by the captured id, so a lost identifier fails step 4 instead of making step 5 pass for an unrelated reason, and the scenario's IMPLEMENTOR'S CHOICE carries those constraints.
+- **The first fix's group-read check matched every possible capture.** The receiver stores a group member value verbatim and validates nothing about it (`pkg/scim/handler.go:249-255`, `pkg/scim/scim.go:223-241`), and `groupToSCIM` re-emits it unchanged (`pkg/scim/handler.go:236-247`), so `grep -c "\"value\":\"$SCIM_UID\""` matched the string the shell had interpolated, including the empty one a failed extraction produces. Step 4 now fetches `/scim/v2/Users/$SCIM_UID` and counts `"id":"$SCIM_UID"` in the response, which the store can refuse: an unknown id answers `404` with a body carrying no identifier (`pkg/scim/handler.go:169-176`), and an empty capture falls through to the collection route, whose body never carries `"id":""`. The group listing stays in the step as a display, and the Expect and the IMPLEMENTOR'S CHOICE say which of the two is the assertion.
+- **S61 step 6 grepped a compact pattern against an indented body.** `writeJSON` indents the layer list (`pkg/registry/server/server.go:1438-1443`), so `"id":"` matched nothing before or after the fix. The step parses the body with python3, as `test/manual-validation.md:6236` does, and expects `['public-handbook']`.
+
+### Pass 2 (2026-09-07, automated)
+
+- **S61 step 4's Expect anchored the Users-by-id 404 on the Groups handler.** The step fetches `GET /scim/v2/Users/$SCIM_UID`, which `routeUsers` dispatches to `getUser` (`pkg/scim/handler.go:73-89`), and `getUser` is the arm that answers `404` with a body carrying no identifier when the store refuses the id (`pkg/scim/handler.go:169-176`). The cited `pkg/scim/handler.go:275-282` is `getGroup`, the handler for `GET /scim/v2/Groups/{id}`. The Expect block is staged text that lands verbatim in `test/manual-validation.md`, so the wrong anchor would have shipped into the repository. The citation now names `getUser` in the Expect block and in the matching Pass 1 entry, and the argument around it is unchanged.
+
+### Pass 3 (2026-09-07, automated)
+
+- **The pre-upgrade enumeration compared group member ids against gateway header values.** `GET /scim/v2/Groups` emits each member as a `value`/`type` pair holding the registry's internal user id and carries no `userName` (`pkg/scim/handler.go:230-247`, `:284-299`), while the evaluator matches the `userName` that lives on the user record (`pkg/scim/scim.go:295-311`). Followed as written, the procedure compared internal ids against the subject and email values the gateway sets, matched nothing, and reported that no caller loses access. It is the only procedure the proposal gives an operator for finding who loses visibility at the next restart. The step now states that the group listing carries opaque member ids and resolves each id through `GET /scim/v2/Users/{id}`, whose response carries the `userName` (`pkg/scim/handler.go:169-176`, `:125-137`), before the comparison. This aligns the paragraph with the S61 analysis, which already routes its assertion through the Users endpoint for the same reason. DOC-1 and DOC-4 stage no copy of the procedure, so no other section changed.
+
+### Pass 4 (2026-09-07, automated)
+
+- **CODE-2's startup line was pinned by no automated test.** The proposal named the line one of its detectability additions and staged an edge-case row for it, and every listed test read HTTP statuses, layer lists, or the diagnostic reason, so an implementor who inverted the logged boolean or dropped the line broke nothing in the suite and only the hand-run S61 step 3 would have caught it. The behavior is written by the spawned binary at boot, which is the level `test/e2e/auth_oidc_jwt_test.go:222-223` pins the accepted-issuer line at, and TEST-3 already boots a `trusted-headers` registry with the receiver mounted while `serverProc` exposes `srv.log()` (`test/e2e/helpers_test.go:282`). TEST-3 gains an arm asserting the withheld form and TEST-4 an assertion on the permitted form, both matching the literal prefix and the boolean, so the two values the line can report are each pinned. Mutation checks gain the flipped boolean and the deleted line. CODE-2's IMPLEMENTOR'S CHOICE over the wording is withdrawn, because S61 step 3 already quoted the line verbatim and the assertions read it as well, and a blank is not allowed for text a test asserts. The edge-case row, the S4 checklist entry, the ordering paragraph's justification for S4's dependency, the Coverage paragraph, and the Summary now state the same rule.
+- **Correction to the entry above: TEST-3's startup-line arm called itself the only assertion on the line.** The same pass added a second one in TEST-4, and CODE-2, the Mutation checks, the Coverage paragraph, and this pass entry all describe two assertions, so an implementor reading TEST-3 alone would have read the TEST-4 assertion as redundant or unstaged and dropped the permitted-value half. The clause now scopes TEST-3 to the line's withheld value and names TEST-4 as the pin on the permitted one. No other statement changed, because the rest already said this.
+
+## Open questions
+
+**OQ-1: `injected-session-token` in the allowlist.** The specification does not state at the provider level whether the directory applies. §6.3.1's opening sentence resolves group membership registry-side through SCIM as the general rule and names `groups` as the claim the adapter reads under this provider, §6.3.2 states nothing about groups, and §6.3.3's per-provider sentences cover the registry-process providers alone. SPEC-1's staged position is that it applies, on two grounds: the injected token carries a subject the directory is keyed by, so the reason §6.3.3 gives for the `trusted-headers` carve-out ("there is no token to read") does not hold here; and the registry verifies the token's signature on every call (§6.3.2), so the identity is one the registry established rather than one a second system asserted. The alternative reading is that a runtime acting on a user's behalf is the authority on that user's groups the way a gateway is, which would forbid the expansion and change shipped behavior on that provider. Choosing the alternative fails both shipped SCIM visibility end-to-end tests, which is the mechanical consequence to weigh. This is a decision for the reviewer rather than a settled cell.
+
+**OQ-2: whether `PODIUM_SCIM_TOKENS` under `trusted-headers` should refuse startup.** The staged position mounts the receiver and logs that the directory decides no read, because the identity provider writes it, a later provider change reads it, and refusing would stop a running deployment on an input that is now inert. The alternative refuses at startup, on the reasoning that a mounted receiver whose data no decision reads is a misconfiguration the operator should be told about once rather than a line they may not read. The log line is the weaker signal of the two. A refusal would need a §6.10 config code and its `matrix-audit` entry, which SPEC-1 does not stage.
+
+**OQ-3: whether the diagnostic's second re-evaluation is worth its cost.** CODE-3 evaluates each layer twice on `GET /v1/admin/show-effective`, once with the expander and once without. The endpoint is admin-gated, runs over the tenant's layer list, and is not on a read path, so the cost is bounded. The alternative is to leave the reason string collapsed and rely on the startup line alone, which tells an operator whether the directory can decide a read on this registry and not which layers it decided.
 
 ## Non-goals
 
