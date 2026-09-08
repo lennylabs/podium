@@ -1,7 +1,7 @@
 # Proposal 0023: Fail `podium layer reingest` when the ingest cycle dropped artifacts
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-09-08). Verified after 7 adversarial review rounds (12 findings fixed).
+- Status: Implemented (2026-09-08). Verified after 7 adversarial review rounds (12 findings fixed).
 - Date: 2026-09-08
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -49,15 +49,15 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.3.1 gains the ingest outcome paragraph fixing the classification and the reingest exit status. Committed alone and verified before any code.
+- [x] **S1 · spec** — SPEC-1. §7.3.1 gains the ingest outcome paragraph fixing the classification and the reingest exit status. Committed alone and verified before any code.
       Levels: —. Depends on: —
-- [ ] **S2 · code** — CODE-1, CODE-2. The report printer, the removed printing gate, the exit status, and the restated assertions at `test/e2e/cli_reference_test.go:1497-1499`, `test/e2e/standard_deployment_test.go:519-536`, and `test/e2e/server_operations_test.go:800-821`. **Indivisible**: the printer has one caller, and the shipped end-to-end assertions go red the moment the gate is removed.
+- [x] **S2 · code** — CODE-1, CODE-2. The report printer, the removed printing gate, the exit status, and the restated assertions at `test/e2e/cli_reference_test.go:1497-1499`, `test/e2e/standard_deployment_test.go:519-536`, and `test/e2e/server_operations_test.go:800-821`. **Indivisible**: the printer has one caller, and the shipped end-to-end assertions go red the moment the gate is removed.
       Levels: e2e. Depends on: S1
-- [ ] **S3 · test** — TEST-1. The classification table over the printer and the exit-status test over `layerReingest`.
+- [x] **S3 · test** — TEST-1. The classification table over the printer and the exit-status test over `layerReingest`.
       Levels: unit. Depends on: S2
-- [ ] **S4 · test** — TEST-2. The end-to-end arms through the built binary on a public-mode standalone registry.
+- [x] **S4 · test** — TEST-2. The end-to-end arms through the built binary on a public-mode standalone registry.
       Levels: e2e. Depends on: S2
-- [ ] **S5 · docs** — DOC-1, DOC-2, DOC-3. `docs/reference/cli.md`, `test/manual-validation.md` (the S62 scenario, its Scenario index row, and the replaced exit-status note in S42's step 5), and `CHANGELOG.md`.
+- [x] **S5 · docs** — DOC-1, DOC-2, DOC-3. `docs/reference/cli.md`, `test/manual-validation.md` (the S62 scenario, its Scenario index row, and the replaced exit-status note in S42's step 5), and `CHANGELOG.md`.
       Levels: —. Depends on: S3, S4
 
 **Ordering constraints.** S1 precedes the code, per `.claude/rules/spec-driven-development.md`, because the printer's doc comment cites the paragraph it implements. S2 carries the three restated end-to-end assertions rather than deferring them to S4, so no step leaves the suite red. S3 and S4 are independent of each other and both depend on S2, because both assert the new exit status and would land red before it. S5 follows the tests so the page describes what the tested build does. `docs/reference/cli.md` maps to the `D-cli` slug (`tools/doccov/manifest.yaml:29-30`) and the staged edit adds no fenced block, so no `doccov-check` obligation is created.
