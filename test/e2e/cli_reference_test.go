@@ -1547,6 +1547,7 @@ func TestCLI_LayerReingestExitStatus(t *testing.T) {
 	register("empty-layer", t.TempDir())
 	empty := runPodium(t, "", brEnv(srv.BaseURL), "layer", "reingest", "empty-layer")
 	cliWantExit(t, empty, 0, "reingest an empty layer")
+	cliNotContains(t, empty.Stdout, "queued_at", "the raw response body")
 	cliNotContains(t, empty.Stderr, "rejected:", "an empty layer drops nothing")
 	cliNotContains(t, empty.Stderr, "conflict:", "an empty layer conflicts with nothing")
 }
