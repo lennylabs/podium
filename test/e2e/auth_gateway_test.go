@@ -199,6 +199,39 @@ func TestGateway_OIDCJWTMissingAudienceRefused(t *testing.T) {
 	}
 }
 
+// Spec: §6.3.1 / §13.12 — a non-empty PODIUM_IDP_GROUP_MAPPING that does not
+// resolve to a claim=group table fails startup with
+// config.invalid_idp_group_mapping, under every identity provider and so with
+// no identity-provider variable set at all. The whitespace-only value is
+// refused alongside the separators-only one: both are non-empty settings that
+// configure no table, and both are the same operator mistake.
+// Matrix: §6.10 (config.invalid_idp_group_mapping)
+func TestGateway_IdpGroupMappingMalformedRefused(t *testing.T) {
+	for _, spec := range []string{"finance", "ok=fine,broken", " ", " , "} {
+		gwExpectStartupFailure(t, "config.invalid_idp_group_mapping",
+			"PODIUM_IDP_GROUP_MAPPING="+spec,
+		)
+	}
+}
+
+// Spec: §13.12 — the refusal is a startup guard. `podium config show --server`
+// reads the same setting without validating it, so the diagnostic command that
+// an operator reaches for after the refusal still exits 0 and still names
+// PODIUM_IDP_GROUP_MAPPING as the source of the idp_group_mapping row.
+func TestGateway_IdpGroupMappingConfigShowStillRuns(t *testing.T) {
+	t.Parallel()
+	res := runPodium(t, "", []string{
+		"PODIUM_CONFIG_FILE=" + filepath.Join(t.TempDir(), "absent.yaml"),
+		"PODIUM_IDP_GROUP_MAPPING=finance",
+	}, "config", "show", "--server")
+	if res.Exit != 0 {
+		t.Fatalf("config show --server exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stdout, "PODIUM_IDP_GROUP_MAPPING") {
+		t.Errorf("config show missing the idp_group_mapping source column:\n%s", res.Stdout)
+	}
+}
+
 // Spec: §6.3.3 — trusted-headers on a multi-tenant registry requires a proxy
 // secret regardless of bind; an unset secret fails startup with
 // config.trusted_headers_multitenant_no_secret.
