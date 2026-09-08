@@ -1,7 +1,7 @@
 # Proposal 0022: Do not consult SCIM under `trusted-headers`
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-09-07). The open questions are resolved in favour of the staged positions.
+- Status: Implemented (2026-09-07). The open questions are resolved in favour of the staged positions.
 - Date: 2026-09-07
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off. Every anchor is read against `fix/scim-not-consulted-under-trusted-headers` at `822e6a9`.
@@ -41,15 +41,15 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §6.3.1 gains the paragraph naming the providers under which the SCIM expansion applies and binding the rule to every §4.6 evaluation, including the §7.3.1 layer read. Committed alone and verified before any code.
+- [x] **S1 · spec** — SPEC-1. §6.3.1 gains the paragraph naming the providers under which the SCIM expansion applies and binding the rule to every §4.6 evaluation, including the §7.3.1 layer read. Committed alone and verified before any code.
       Levels: —. Depends on: —
-- [ ] **S2 · code** — CODE-1, CODE-2, TEST-1. The `scimResolvesGroups` predicate, the gated construction site, the amended comments on the SCIM block, the startup line, and the predicate's unit table. **Indivisible**: the predicate has no other caller, and the table and the predicate falsify each other.
+- [x] **S2 · code** — CODE-1, CODE-2, TEST-1. The `scimResolvesGroups` predicate, the gated construction site, the amended comments on the SCIM block, the startup line, and the predicate's unit table. **Indivisible**: the predicate has no other caller, and the table and the predicate falsify each other.
       Levels: unit. Depends on: S1
-- [ ] **S3 · code** — CODE-3, TEST-2. `visibilityReason` separates the directory-derived grant, and the shipped table in `pkg/registry/core/coverage_gaps_test.go` takes the new parameter and gains the directory case. **Indivisible**: the signature change breaks the shipped call at `pkg/registry/core/coverage_gaps_test.go:247`, so the package does not build until both land.
+- [x] **S3 · code** — CODE-3, TEST-2. `visibilityReason` separates the directory-derived grant, and the shipped table in `pkg/registry/core/coverage_gaps_test.go` takes the new parameter and gains the directory case. **Indivisible**: the signature change breaks the shipped call at `pkg/registry/core/coverage_gaps_test.go:247`, so the package does not build until both land.
       Levels: unit. Depends on: S2
-- [ ] **S4 · test** — TEST-3, TEST-4. The end-to-end arms through the built binary: a `trusted-headers` registry with SCIM mounted refusing the directory-derived grant on both consumers, the negative control on the header-derived grant, the `oidc-jwt` arm confirming the expansion survives where §6.3.3 requires it, and the boot-log assertions that pin CODE-2's line to its withheld value on the first registry and its permitted value on the second.
+- [x] **S4 · test** — TEST-3, TEST-4. The end-to-end arms through the built binary: a `trusted-headers` registry with SCIM mounted refusing the directory-derived grant on both consumers, the negative control on the header-derived grant, the `oidc-jwt` arm confirming the expansion survives where §6.3.3 requires it, and the boot-log assertions that pin CODE-2's line to its withheld value on the first registry and its permitted value on the second.
       Levels: e2e. Depends on: S2
-- [ ] **S5 · docs** — DOC-1 through DOC-4. `docs/deployment/gateway-delegated-identity.md`, `docs/reference/http-api.md`, `test/manual-validation.md` with its Scenario index row, and `CHANGELOG.md`.
+- [x] **S5 · docs** — DOC-1 through DOC-4. `docs/deployment/gateway-delegated-identity.md`, `docs/reference/http-api.md`, `test/manual-validation.md` with its Scenario index row, and `CHANGELOG.md`.
       Levels: —. Depends on: S3, S4
 
 **Ordering constraints.** S1 precedes the code, per `.claude/rules/spec-driven-development.md`, because CODE-1's doc comment cites the paragraph it lands. S3 depends on S2 rather than running beside it: TEST-2 drives `visibilityReason` and `ShowEffective` directly and needs nothing from S2 to compile, and the diagnostic's `trusted-headers` outcome, the unexpanded view that matches the live evaluator, holds only once CODE-1 leaves the resolver nil under that provider. Landing S3 first would ship a diagnostic that names an arm the fix has not yet withdrawn. S4 depends on S2 alone, because its assertions are HTTP statuses, a layer list, and the boot line CODE-2 adds in S2, rather than the diagnostic reason S3 adds. S4 follows S2 rather than preceding it, because the `trusted-headers` arm fails against the shipped boot path and would land a red test. S5 follows the code and the tests so the pages describe what the tested build does. Neither `docs/deployment/gateway-delegated-identity.md` nor `docs/reference/http-api.md` appears in `tools/doccov/manifest.yaml`, and the staged edits add no runnable fenced block to either, so no `doccov-check` obligation is created.
