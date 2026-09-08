@@ -2208,10 +2208,9 @@ that resolves to no entry (§6.3.1, §6.3.3, §13.10, §13.12).
    echo "exit=$?"
    ```
 
-5. A non-empty `PODIUM_IDP_GROUP_MAPPING` that resolves to no
-   `<claim-value>=<group-name>` entry is refused, both when the value carries a
-   malformed entry and when it holds separators and whitespace alone. Both runs
-   exit immediately.
+5. A non-empty `PODIUM_IDP_GROUP_MAPPING` that carries a malformed entry is
+   refused, and so is one that resolves to no `<claim-value>=<group-name>`
+   entry. The two runs below exercise one arm each, and both exit immediately.
 
    ```bash
    PODIUM_IDENTITY_PROVIDER=oidc-jwt \
