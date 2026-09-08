@@ -57,7 +57,7 @@ The IdP returns a JWT with claims `{sub, org_id, email, exp, iss, aud, groups?}`
 
 Under `oidc-jwt` the claim read as the caller's subject and the claim read for group membership are named by configuration (§6.3.3), so a deployment whose IdP emits neither `sub` nor `groups` names the claims it does emit. A group claim is read in the multi-value form and in the single-string form an IdP emits for a caller in exactly one group. The single-string form yields one group whose name is the claim value; it is not split on any separator.
 
-For IdPs without SCIM, the `IdpGroupMapping` adapter reads OIDC group claims from the token and maps them to group names per a registry-side configuration. The adapter maps group values. The claim that carries them is named by `PODIUM_OAUTH_GROUPS_CLAIM` under `oidc-jwt` (§6.3.3) and is `groups` under `injected-session-token` (§6.3.2).
+For IdPs without SCIM, the `IdpGroupMapping` adapter reads OIDC group claims from the token and maps them to group names per a registry-side configuration. The adapter maps group values. The claim that carries them is named by `PODIUM_OAUTH_GROUPS_CLAIM` under `oidc-jwt` (§6.3.3) and is `groups` under `injected-session-token` (§6.3.2). `PODIUM_IDP_GROUP_MAPPING` (§13.12) carries the table, and a non-empty setting for it that does not resolve to a table fails startup with `config.invalid_idp_group_mapping`.
 
 Tested IdPs: Okta, Entra ID, Auth0, Google Workspace, Keycloak. SAML supported via OIDC bridge.
 
