@@ -1748,6 +1748,13 @@ type Config struct {
 	// for IdPs without SCIM. Nil or empty passes groups through unchanged.
 	// Sourced from PODIUM_IDP_GROUP_MAPPING.
 	idpGroupMapping *identity.IdpGroupMapping
+	// idpGroupMappingErr records why PODIUM_IDP_GROUP_MAPPING did not
+	// resolve to a table, for (*Config).validate to report as
+	// config.invalid_idp_group_mapping. The failure is deferred rather
+	// than returned at the parse site because LoadConfig has no error
+	// channel and also serves `podium config show --server`
+	// (cmd/podium/config.go:62), which stays usable on a malformed value.
+	idpGroupMappingErr error
 	// oauthIssuer is the §6.3.3 / §13.12 OIDC issuer URL for the oidc-jwt
 	// provider (PODIUM_OAUTH_ISSUER or identity_provider.issuer). The registry
 	// derives the JWKS from ${issuer}/.well-known/openid-configuration and
@@ -2275,14 +2282,22 @@ func LoadConfig() *Config {
 			c.defaultLayerVisibility = "private"
 		}
 	}
-	// §6.3.1 IdpGroupMapping: parse the registry-side group-mapping table
-	// from PODIUM_IDP_GROUP_MAPPING ("oktaGroupOID=finance,..."). A
-	// malformed spec is logged and ignored rather than crashing startup;
-	// groups then pass through unmapped.
+	// §6.3.1 / §13.12 IdpGroupMapping: parse the registry-side group-mapping
+	// table from PODIUM_IDP_GROUP_MAPPING ("oktaGroupOID=finance,..."). A
+	// non-empty setting that does not resolve to a table is refused by
+	// validate rather than dropped, because a table the registry ignored
+	// would leave every §4.6 `groups:` filter evaluating raw claim values.
+	// The guard tests the raw value, so a whitespace-only setting reaches
+	// the parser, resolves to an empty table, and is refused alongside a
+	// separators-only one.
 	if spec := os.Getenv("PODIUM_IDP_GROUP_MAPPING"); spec != "" {
-		if m, err := identity.ParseIdpGroupMapping(spec); err != nil {
-			log.Printf("warning: ignored PODIUM_IDP_GROUP_MAPPING: %v", err)
-		} else {
+		m, err := identity.ParseIdpGroupMapping(spec)
+		switch {
+		case err != nil:
+			c.idpGroupMappingErr = err
+		case m.Empty():
+			c.idpGroupMappingErr = fmt.Errorf("PODIUM_IDP_GROUP_MAPPING=%q resolves to no claim=group entry", spec)
+		default:
 			c.idpGroupMapping = m
 		}
 	}
@@ -2343,6 +2358,11 @@ func (c *Config) validate() error {
 	// rather than silently leaving signing disabled.
 	if c.signMode != "" && c.signMode != "registry-key" {
 		return fmt.Errorf("config.invalid_sign_mode: PODIUM_SIGN must be registry-key, got %q", c.signMode)
+	}
+	// §6.3.1 / §13.12: a non-empty PODIUM_IDP_GROUP_MAPPING that does not
+	// resolve to a table fails startup under every identity provider.
+	if c.idpGroupMappingErr != nil {
+		return fmt.Errorf("config.invalid_idp_group_mapping: %w", c.idpGroupMappingErr)
 	}
 	if c.storeType == "postgres" && c.postgresDSN == "" {
 		return fmt.Errorf("PODIUM_POSTGRES_DSN is required when PODIUM_REGISTRY_STORE=postgres")

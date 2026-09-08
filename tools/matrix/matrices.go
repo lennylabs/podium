@@ -92,6 +92,7 @@ func KnownMatrices() []Matrix {
 					"config.no_registry",
 					"config.unknown_harness",
 					"config.layer_path_ambiguous",
+					"config.invalid_idp_group_mapping",
 					"config.public_mode_with_idp",
 					"ingest.lint_failed",
 					"ingest.immutable_violation",
