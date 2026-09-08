@@ -1,7 +1,7 @@
 # Proposal 0024: Refuse startup on a malformed `PODIUM_IDP_GROUP_MAPPING`, and state the variable in §13.12
 
 - Issue: (to be filed)
-- Status: Approved (2026-09-08). Verified after 10 adversarial review rounds (6 findings fixed).
+- Status: Applied to spec (2026-09-08). Verified after 10 adversarial review rounds (6 findings fixed).
 - Date: 2026-09-08
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
