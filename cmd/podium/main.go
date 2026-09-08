@@ -133,6 +133,48 @@ func parseExit(err error) int {
 	return 2
 }
 
+// parseOperands parses args into fs and returns every positional, in the order
+// given, while tolerating flags written among them. It is the list form of
+// parsePositional.
+//
+// Without it, `podium layer reorder a b --registry URL` stops parsing at "a",
+// so --registry keeps its environment default and the flag and its value are
+// carried into fs.Args(). A command that forwards fs.Args() as data then sends
+// them as operands: the reorder request named "--registry" and the URL as two
+// of the layers to sequence.
+func parseOperands(fs *flag.FlagSet, args []string) ([]string, error) {
+	var operands []string
+	for {
+		if err := fs.Parse(args); err != nil {
+			return nil, err
+		}
+		if fs.NArg() == 0 {
+			return operands, nil
+		}
+		operands = append(operands, fs.Arg(0))
+		args = fs.Args()[1:]
+	}
+}
+
+// parsePositional parses args into fs while tolerating the command's positional
+// argument anywhere among the flags, and reports how many positionals were
+// given. The count matters: a command may take an empty operand as meaningful,
+// as `podium search --type context ""` does to browse a type, and a sentinel
+// empty string cannot tell that apart from an operand nobody supplied.
+//
+// It returns the first positional and the total count. A command taking exactly
+// one argument rejects n != 1; one taking an optional argument checks n == 0.
+func parsePositional(fs *flag.FlagSet, args []string) (pos string, n int, err error) {
+	ops, err := parseOperands(fs, args)
+	if err != nil {
+		return "", 0, err
+	}
+	if len(ops) == 0 {
+		return "", 0, nil
+	}
+	return ops[0], len(ops), nil
+}
+
 const usage = `usage: podium <command> [flags]
 
 Commands:
@@ -987,10 +1029,11 @@ func searchCmd(args []string) int {
 	tagsFlag := fs.String("tags", "", "comma-separated tag filter")
 	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	query, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() == 0 {
+	if nargs == 0 {
 		fmt.Fprintln(os.Stderr, "usage: podium search <query> [flags]")
 		return 2
 	}
@@ -998,7 +1041,7 @@ func searchCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	params := map[string]string{"query": fs.Arg(0)}
+	params := map[string]string{"query": query}
 	if *typeFilter != "" {
 		params["type"] = *typeFilter
 	}
@@ -1056,14 +1099,15 @@ func domainAnalyze(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	path := fs.String("path", "", "subtree to analyze (empty = root)")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	positional, _, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
 	// Accept a positional <path> (consistent with `domain show` and
 	// `domain search`, and the §4.5 CLI form `podium domain analyze [<path>]`).
 	// The --path flag stays accepted for back-compat; an explicit flag wins.
-	if *path == "" && fs.NArg() > 0 {
-		*path = fs.Arg(0)
+	if *path == "" && positional != "" {
+		*path = positional
 	}
 	if *registry == "" {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
@@ -1088,7 +1132,8 @@ func domainShow(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	path, _, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
 	if *registry == "" {
@@ -1096,8 +1141,8 @@ func domainShow(args []string) int {
 		return 2
 	}
 	params := map[string]string{}
-	if fs.NArg() > 0 {
-		params["path"] = fs.Arg(0)
+	if path != "" {
+		params["path"] = path
 	}
 	body := mustGetJSON(*registry, "/v1/load_domain", params)
 	if *asJSON {
@@ -1121,10 +1166,11 @@ func domainSearch(args []string) int {
 	// alongside the default human-readable ranked table.
 	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	query, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() == 0 {
+	if nargs == 0 {
 		fmt.Fprintln(os.Stderr, "usage: podium domain search <query> [flags]")
 		return 2
 	}
@@ -1132,7 +1178,7 @@ func domainSearch(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	params := map[string]string{"query": fs.Arg(0), "top_k": fmt.Sprintf("%d", *topK)}
+	params := map[string]string{"query": query, "top_k": fmt.Sprintf("%d", *topK)}
 	if *scope != "" {
 		params["scope"] = *scope
 	}
@@ -1182,10 +1228,11 @@ func artifactShow(args []string) int {
 	// frontmatter at the top.
 	asJSON := fs.Bool("json", false, "JSON output")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	id, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() == 0 {
+	if nargs == 0 {
 		fmt.Fprintln(os.Stderr, "usage: podium artifact show <id>")
 		return 2
 	}
@@ -1193,7 +1240,7 @@ func artifactShow(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	params := map[string]string{"id": fs.Arg(0)}
+	params := map[string]string{"id": id}
 	if *version != "" {
 		params["version"] = *version
 	}

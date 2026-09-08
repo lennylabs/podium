@@ -26,12 +26,13 @@ func signCmd(args []string) int {
 	contentHash := fs.String("content-hash", "", "sha256:<hex> content hash (lower-level alternative to <artifact>)")
 	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"), "noop|registry-managed|sigstore-keyless")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	artifact, _, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
 
 	hash := *contentHash
-	if fs.NArg() > 0 {
+	if artifact != "" {
 		if *contentHash != "" {
 			fmt.Fprintln(os.Stderr, "error: pass either <artifact> or --content-hash, not both")
 			return 2
@@ -40,7 +41,7 @@ func signCmd(args []string) int {
 			fmt.Fprintln(os.Stderr, "error: --registry is required to resolve <artifact>")
 			return 2
 		}
-		h, _, code := resolveArtifactSignature(*registry, fs.Arg(0))
+		h, _, code := resolveArtifactSignature(*registry, artifact)
 		if code != 0 {
 			return code
 		}
@@ -81,13 +82,14 @@ func verifyCmd(args []string) int {
 	signature := fs.String("signature", "", "signature envelope (lower-level; pairs with --content-hash)")
 	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"), "noop|registry-managed|sigstore-keyless")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	artifact, _, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
 
 	hash := *contentHash
 	sig := *signature
-	if fs.NArg() > 0 {
+	if artifact != "" {
 		if *contentHash != "" {
 			fmt.Fprintln(os.Stderr, "error: pass either <artifact> or --content-hash, not both")
 			return 2
@@ -96,7 +98,7 @@ func verifyCmd(args []string) int {
 			fmt.Fprintln(os.Stderr, "error: --registry is required to resolve <artifact>")
 			return 2
 		}
-		h, storedSig, code := resolveArtifactSignature(*registry, fs.Arg(0))
+		h, storedSig, code := resolveArtifactSignature(*registry, artifact)
 		if code != 0 {
 			return code
 		}
@@ -107,7 +109,7 @@ func verifyCmd(args []string) int {
 			sig = storedSig
 		}
 		if sig == "" {
-			fmt.Fprintf(os.Stderr, "verify failed: artifact %s has no stored signature; ingest with a signer or pass --signature\n", fs.Arg(0))
+			fmt.Fprintf(os.Stderr, "verify failed: artifact %s has no stored signature; ingest with a signer or pass --signature\n", artifact)
 			return 1
 		}
 	}

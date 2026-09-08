@@ -15,10 +15,11 @@ func impactCmd(args []string) int {
 	setUsage(fs, "List artifacts that depend on a given artifact.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	id, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
-	if fs.NArg() != 1 {
+	if nargs != 1 {
 		fmt.Fprintln(os.Stderr, "usage: podium impact <artifact-id>")
 		return 2
 	}
@@ -26,7 +27,7 @@ func impactCmd(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: --registry is required")
 		return 2
 	}
-	out, status := doJSON(*registry+"/v1/dependents?id="+fs.Arg(0), "GET", nil)
+	out, status := doJSON(*registry+"/v1/dependents?id="+id, "GET", nil)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "impact failed: HTTP %d\n%s\n", status, out)
 		return 1
