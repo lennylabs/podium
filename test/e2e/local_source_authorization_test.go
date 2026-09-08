@@ -150,7 +150,9 @@ const bootEscapedBytes = "OUTSIDE-SECRET-PAYLOAD"
 // binds, so its absence is evidence that survives the process.
 func serveExpectBootFailure(t *testing.T, env []string, args ...string) string {
 	t.Helper()
-	bind := localBind(freePort(t))
+	// Port 0 is enough: the boot is expected to abort before it binds, and the
+	// assertion below reads the absence of the banner rather than the port.
+	const bind = "127.0.0.1:0"
 	full := append(append([]string{}, args...), "--bind", bind)
 	res := runBin(t, cmdharness.Bin(t, "podium"), "", append(env, "PODIUM_NO_AUTOSTANDALONE=1"), nil, 30*time.Second, full...)
 	out := res.Stdout + res.Stderr

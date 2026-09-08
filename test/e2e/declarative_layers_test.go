@@ -8,7 +8,6 @@ package e2e
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -289,11 +288,11 @@ func TestDeclarativeLayers_UnknownGitProviderRefusesStart(t *testing.T) {
 	home := t.TempDir()
 	cfgPath := declaredGitProviderConfig(t, home, "team-finance",
 		"git@example.com:acme/finance.git", "acme-forge-that-is-not-registered")
-	bind := fmt.Sprintf("127.0.0.1:%d", freePort(t))
+	// The boot aborts before the listener binds, so port 0 suffices.
 	res := runPodium(t, "", []string{
 		"HOME=" + home,
 		"PODIUM_CONFIG_FILE=" + cfgPath,
-	}, "serve", "--standalone", "--bind", bind)
+	}, "serve", "--standalone", "--bind", "127.0.0.1:0")
 	if res.Exit == 0 {
 		t.Fatalf("expected a non-zero exit (refuse to start)\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	}

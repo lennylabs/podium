@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -794,6 +795,29 @@ func run(ctx context.Context, stop func()) error {
 	cfg := LoadConfig()
 	if err := cfg.validate(); err != nil {
 		return err
+	}
+
+	// The listener is opened here, before anything reads the bind address,
+	// because a configured port of 0 resolves to an ephemeral one and every
+	// consumer downstream is built from the address the process actually holds:
+	// the §7.2 object-store URLs, the §7.3.2 webhook targets, and the
+	// bootstrapped sync.yaml registry URL.
+	//
+	// A failure is carried rather than returned, and reported at the serve call
+	// below. The listener used to be opened inside http.Server.ListenAndServe
+	// at the end of this function, so every startup refusal this function
+	// performs was reported before a bind was attempted. Returning here instead
+	// would put a bind failure ahead of them, and an operator whose
+	// configuration is refused would read "address already in use" rather than
+	// the §6.10 code naming what is wrong with their configuration.
+	configuredBind := cfg.bind
+	ln, bindErr := net.Listen("tcp", configuredBind)
+	if bindErr == nil {
+		defer func() { _ = ln.Close() }()
+		cfg.bind = ln.Addr().String()
+		if cfg.publicURLFromBind {
+			cfg.publicURL = "http://" + cfg.bind
+		}
 	}
 
 	// §13.10 / §14.3 / §14.10: apply the zero-flag standalone policy — refuse to
@@ -1600,8 +1624,17 @@ func run(ctx context.Context, stop func()) error {
 	// authentication is skipped and that a non-loopback bind requires
 	// --allow-public-bind.
 	emitStartupBanner(os.Stderr, cfg.publicMode)
+	// Every startup refusal above has had its chance, so a bind that could not
+	// be satisfied is reported here, which is where it surfaced when the
+	// listener was opened by http.Server.ListenAndServe.
+	if bindErr != nil {
+		return fmt.Errorf("serve: bind %s: %w", configuredBind, bindErr)
+	}
+	// cfg.bind is the address the listener actually holds, resolved at the bind
+	// above, so this line reports an ephemeral port rather than the zero the
+	// operator configured.
 	log.Printf("podium-server listening on %s (mode=%s)", cfg.bind, cfg.modeBanner())
-	return serveUntilShutdown(ctx, stop, httpServer)
+	return serveUntilShutdown(ctx, stop, httpServer, ln)
 }
 
 // serveUntilShutdown runs srv until ctx is cancelled, then stops accepting
@@ -1609,10 +1642,11 @@ func run(ctx context.Context, stop func()) error {
 // ctx and stop with it. stop() restores the default signal handler so a second
 // SIGINT or SIGTERM aborts a stuck drain and terminates the process. It returns
 // nil on a clean drain, srv.Shutdown's error if the drain times out, or
-// srv.ListenAndServe's error when the listener never comes up.
-func serveUntilShutdown(ctx context.Context, stop func(), srv *http.Server) error {
+// srv.Serve's error when the accept loop stops on its own. The caller opens
+// the listener, so a bind failure is reported before this runs.
+func serveUntilShutdown(ctx context.Context, stop func(), srv *http.Server, ln net.Listener) error {
 	serveErr := make(chan error, 1)
-	go func() { serveErr <- srv.ListenAndServe() }()
+	go func() { serveErr <- srv.Serve(ln) }()
 	select {
 	case err := <-serveErr:
 		return err
@@ -1761,12 +1795,16 @@ type Config struct {
 	objectStore    string
 	filesystemRoot string
 	publicURL      string
-	presignTTL     time.Duration
-	s3Endpoint     string
-	s3Region       string
-	s3Bucket       string
-	s3AccessKey    string
-	s3SecretKey    string
+	// publicURLFromBind records that publicURL was derived from the configured
+	// bind rather than set by the operator. A bind that resolves a port of 0 to
+	// an ephemeral one has to redo that derivation once the address is known.
+	publicURLFromBind bool
+	presignTTL        time.Duration
+	s3Endpoint        string
+	s3Region          string
+	s3Bucket          string
+	s3AccessKey       string
+	s3SecretKey       string
 	// s3ForcePathStyle maps to §13.12 PODIUM_S3_FORCE_PATH_STYLE. TLS is
 	// derived from the PODIUM_S3_ENDPOINT URL scheme (§13.12 documents the
 	// endpoint as a URL), so there is no separate use-SSL knob.
@@ -2270,6 +2308,7 @@ func LoadConfig() *Config {
 	}
 	if c.publicURL == "" {
 		c.publicURL = "http://" + c.bind
+		c.publicURLFromBind = true
 	}
 	return c
 }

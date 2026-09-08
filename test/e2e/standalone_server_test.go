@@ -293,8 +293,9 @@ func TestStandaloneServer_ConfigShowLayersPathSource(t *testing.T) {
 // bind key in registry.yaml changes listen address.
 func TestStandaloneServer_RegistryYAMLBind(t *testing.T) {
 	t.Parallel()
-	port := freePort(t)
-	bind := fmt.Sprintf("127.0.0.1:%d", port)
+	// The address under test goes into the registry.yaml bind: key, so it has
+	// to be known before the server starts.
+	bind := fmt.Sprintf("127.0.0.1:%d", pickPortWithRace(t))
 
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
@@ -535,12 +536,13 @@ func TestStandaloneServer_PublicModeHealthz(t *testing.T) {
 // default surfaces config.public_bind_refused at startup, naming the address.
 func TestStandaloneServer_PublicModeLoopbackEnforce(t *testing.T) {
 	t.Parallel()
-	port := freePort(t)
+	// The refusal is about the non-loopback host, so port 0 carries it and no
+	// listener is ever opened.
 	out := smallteamRawExecFail(t,
 		[]string{
 			"HOME=" + t.TempDir(),
 			"PODIUM_PUBLIC_MODE=true",
-			fmt.Sprintf("PODIUM_BIND=0.0.0.0:%d", port),
+			"PODIUM_BIND=0.0.0.0:0",
 		},
 		"serve", "--standalone")
 	if !strings.Contains(out, "config.public_bind_refused") {
@@ -553,7 +555,10 @@ func TestStandaloneServer_PublicModeLoopbackEnforce(t *testing.T) {
 // bind a non-loopback address (typically behind an authenticated proxy).
 func TestStandaloneServer_AllowPublicBindFlag(t *testing.T) {
 	t.Parallel()
-	port := freePort(t)
+	// This server does bind, and it binds a non-loopback address, which the
+	// listen line the ephemeral-port path reads back does not carry. The
+	// address has to be known up front, so the port is picked with the race.
+	port := pickPortWithRace(t)
 	srv := startServerExplicitBind(t, fmt.Sprintf("0.0.0.0:%d", port), port,
 		[]string{"HOME=" + t.TempDir()},
 		"serve", "--standalone", "--public-mode", "--allow-public-bind")

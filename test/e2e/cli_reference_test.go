@@ -17,7 +17,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,8 +96,6 @@ func cliResults(t testing.TB, s string) []map[string]any {
 }
 
 var versionRE = regexp.MustCompile(`\d+\.\d+`)
-
-func localBind(port int) string { return fmt.Sprintf("127.0.0.1:%d", port) }
 
 // cliRunServe runs `podium serve ...` under a hard deadline so a
 // serve invocation that is expected to fail (config validation, mutual
@@ -606,9 +603,10 @@ func TestCLI_PublicModeSurfacedInMCPHealthTool(t *testing.T) {
 // spec: doc "Server — podium serve", `--public-mode` mutually exclusive
 // with an identity provider.
 func TestCLI_PublicModeExcludesIdP(t *testing.T) {
-	port := freePort(t)
+	// The mutual-exclusion check refuses before anything binds, so port 0 is
+	// enough and no port has to be reserved for a listener that never opens.
 	env := []string{"HOME=" + t.TempDir(), "PODIUM_IDENTITY_PROVIDER=oauth-device-code"}
-	res, timedOut := cliRunServe(t, env, 20*time.Second, "serve", "--public-mode", "--bind", localBind(port))
+	res, timedOut := cliRunServe(t, env, 20*time.Second, "serve", "--public-mode", "--bind", "127.0.0.1:0")
 	if timedOut {
 		t.Fatalf("serve --public-mode with an IdP did not exit; expected the mutual-exclusion error")
 	}
@@ -619,8 +617,9 @@ func TestCLI_PublicModeExcludesIdP(t *testing.T) {
 // --allow-public-bind is passed, failing fast at startup with
 // config.public_bind_refused and naming the address.
 func TestServe_PublicModeNonLoopbackRefused(t *testing.T) {
-	port := freePort(t)
-	bind := fmt.Sprintf("0.0.0.0:%d", port)
+	// The refusal is about the non-loopback host, so port 0 carries it and
+	// nothing binds. The error names the configured address verbatim.
+	bind := "0.0.0.0:0"
 	env := []string{"HOME=" + t.TempDir()}
 	res, timedOut := cliRunServe(t, env, 20*time.Second, "serve", "--public-mode", "--bind", bind)
 	if timedOut {

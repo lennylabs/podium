@@ -429,7 +429,7 @@ func startServerCLIBind(t *testing.T, env []string, cliBind string) *serverProc 
 // Spec: §13.12 (precedence CLI flag > env), §13.10 (the serve --bind override).
 func TestConfigPrecedence_CLIFlagBeatsEnv(t *testing.T) {
 	t.Parallel()
-	// Two distinct ports. freePort releases immediately, so reserve the env
+	// Two distinct ports. pickPortWithRace releases immediately, so reserve the env
 	// port by holding its listener open for the life of the test; that both
 	// guarantees the two ports differ and proves the env port was never bound
 	// by the server (the server would fail to bind a held port, but the CLI
@@ -440,7 +440,7 @@ func TestConfigPrecedence_CLIFlagBeatsEnv(t *testing.T) {
 	}
 	defer envLn.Close()
 	envBind := envLn.Addr().String()
-	cliBind := fmt.Sprintf("127.0.0.1:%d", freePort(t))
+	cliBind := fmt.Sprintf("127.0.0.1:%d", pickPortWithRace(t))
 
 	srv := startServerCLIBind(t, []string{
 		"HOME=" + t.TempDir(),
@@ -463,34 +463,25 @@ func TestConfigPrecedence_CLIFlagBeatsEnv(t *testing.T) {
 
 // ---- standard-mode fail-fast names the missing credential -----
 
-// serveExpectStartupError runs `podium serve --bind <freeport>` with the given
+// serveExpectStartupError runs `podium serve --bind 127.0.0.1:0` with the given
 // env and a short deadline, expecting the process to exit non-zero before it
 // binds. It returns the combined stderr/stdout. The bind never succeeds, so the
 // readiness loop is replaced by a bounded Wait. A still-running process after
 // the deadline is a failure (the server bound instead of refusing).
+//
+// The unbound listener is asserted from the boot's own banner rather than by
+// probing a port after the run. A probe races every other server in the package
+// (another test can take the port and answer the probe), and the process has
+// exited by the time it runs, so its port is free whatever the boot did.
 func serveExpectStartupError(t *testing.T, env []string) (exitCode int, output string) {
 	t.Helper()
-	port := freePort(t)
-	bind := fmt.Sprintf("127.0.0.1:%d", port)
-	// Confirm nothing answers on the port before and after, so "exited before
-	// bind" is meaningful.
 	res := runBin(t, cmdharness.Bin(t, "podium"), "", append(env, "PODIUM_NO_AUTOSTANDALONE=1"), nil, 20*time.Second,
-		"serve", "--bind", bind)
-	if st := getStatusNoFatal("http://" + bind + "/healthz"); st == 200 {
-		t.Fatalf("server bound %s instead of refusing to start; stderr=%s", bind, res.Stderr)
+		"serve", "--bind", "127.0.0.1:0")
+	out := res.Stderr + res.Stdout
+	if strings.Contains(out, "listening on") {
+		t.Fatalf("server bound a listener instead of refusing to start\noutput:\n%s", out)
 	}
-	return res.Exit, res.Stderr + res.Stdout
-}
-
-// getStatusNoFatal GETs url and returns its status, or 0 on any transport error
-// (connection refused, the expected outcome when no server bound).
-func getStatusNoFatal(url string) int {
-	resp, err := httpClient.Get(url)
-	if err != nil {
-		return 0
-	}
-	defer resp.Body.Close()
-	return resp.StatusCode
+	return res.Exit, out
 }
 
 // serveNoBindExpectRefusal runs `podium serve` with the given args and env but

@@ -20,7 +20,6 @@ package e2e
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -36,9 +35,8 @@ import (
 // regression backstop.
 func vbExpectRefuseToStart(t *testing.T, reg, wantKey string, extra ...string) {
 	t.Helper()
-	bind := fmt.Sprintf("127.0.0.1:%d", freePort(t))
 	res := runPodium(t, "", vbServerEnv(t, extra...),
-		"serve", "--standalone", "--layer-path", reg, "--bind", bind)
+		"serve", "--standalone", "--layer-path", reg, "--bind", "127.0.0.1:0")
 	if res.Exit == 0 {
 		t.Fatalf("expected non-zero exit (refuse to start)\nstdout:\n%s\nstderr:\n%s", res.Stdout, res.Stderr)
 	}
