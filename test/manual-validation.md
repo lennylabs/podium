@@ -162,6 +162,7 @@ rm -rf "$WORK"
 | S59 | A personal layer's owner and visibility are fixed | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S60 | An admin-defined layer's visibility narrows | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S61 | SCIM membership does not grant under trusted-headers | standalone | none | none | none |
+| S62 | A reingest that drops an artifact fails | standalone | none | none | none |
 
 ---
 
@@ -3796,9 +3797,9 @@ podium layer reingest --registry "$PODIUM_REGISTRY" reg 2>&1 | grep -iE "rejecte
    the author named a stored version explicitly and is entitled to be told why
    it was refused.
 
-   Note that `podium layer reingest` exits `0` here, because other artifacts in
-   the layer were accepted. Assert on the output rather than on the exit
-   status.
+   Note that `podium layer reingest` exits `1` here, because the cycle dropped
+   `team/pinned`. Read the printed reason rather than inferring it from the
+   exit status.
 
 6. Exhaust a line: a parent whose only version is deprecated.
 
@@ -6961,3 +6962,126 @@ certificate is needed.
    which is what one gated construction site produces.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
+
+---
+
+## S62: A reingest that drops an artifact fails
+
+**Goal.** Validate that `podium layer reingest` exits 1 when the ingest cycle
+dropped an artifact, that each dropped artifact is named on standard error
+with its identifier, its error code, and its reason, that this holds on a
+cycle that accepted nothing, and that a clean cycle still exits 0.
+
+**Covers.** The §7.3.1 ingest outcome and the reingest exit status, and the
+§13.10 public-mode sensitivity floor as the rejection this scenario uses.
+
+**Why by hand.** The end-to-end suite reads the exit code and the two streams
+through the harness. What it does not read is the operator's terminal: that
+the accepted artifact and the dropped one arrive on different streams, that
+redirecting standard output still leaves the rejection visible, and that the
+shell's `$?` is what a cron job or a CI step would gate on.
+
+**Prerequisites.** A built `podium` binary on `PATH`. No identity provider,
+container, or certificate is required.
+
+**Steps.**
+
+1. Create the working directory and the three layer directories this scenario
+   registers, then start a public-mode standalone registry that ingests none
+   of them at boot. Every artifact sits under its own domain path, because a
+   canonical artifact identifier derives from its domain directory and two
+   layers contributing the same identifier is a cross-layer collision.
+
+   ```bash
+   export WORK="$(mktemp -d)"
+   export REG="http://127.0.0.1:8080"
+   mkdir -p "$WORK/mixed/ops/runbook" "$WORK/mixed/ops/payroll" \
+     "$WORK/rejected/finance/ledger" "$WORK/clean/ops/oncall"
+   write_artifact() {
+     cat > "$1" <<EOF
+   ---
+   type: context
+   version: 1.0.0
+   description: $2
+   sensitivity: $3
+   ---
+
+   $2
+   EOF
+   }
+   write_artifact "$WORK/mixed/ops/runbook/ARTIFACT.md" \
+     "Restarting the ingest worker after a failed deploy." low
+   write_artifact "$WORK/mixed/ops/payroll/ARTIFACT.md" \
+     "Reconciling the monthly payroll export." medium
+   write_artifact "$WORK/rejected/finance/ledger/ARTIFACT.md" \
+     "Closing the monthly ledger." medium
+   write_artifact "$WORK/clean/ops/oncall/ARTIFACT.md" \
+     "Handing over the on-call pager." low
+   PODIUM_PUBLIC_MODE=true podium serve --standalone \
+     > "$WORK/server.log" 2>&1 &
+   echo "$!" > "$WORK/server.pid"
+   sleep 2
+   ```
+
+   **Expect.** The server is listening on `$REG` and `$WORK/server.log`
+   reports the registry started in public mode. No `--layer-path` is passed,
+   so the registry ingests nothing at boot and the only ingests are the ones
+   the steps below trigger. A refusal to start means the address is in use;
+   restart with `PODIUM_BIND=127.0.0.1:8099`, set
+   `export REG="http://127.0.0.1:8099"`, and repeat.
+
+2. Register the mixed layer as a local source and reingest it, keeping the two
+   streams apart.
+
+   ```bash
+   podium layer register --registry "$REG" --id s62-mixed \
+     --local "$WORK/mixed" > /dev/null
+   podium layer reingest --registry "$REG" s62-mixed \
+     > "$WORK/out.txt" 2> "$WORK/err.txt"
+   echo "exit=$?"
+   cat "$WORK/out.txt"
+   cat "$WORK/err.txt"
+   ```
+
+   **Expect.** `exit=1`. `$WORK/out.txt` carries one
+   `artifact: ...   layer: s62-mixed` line for the runbook artifact and no
+   line for the payroll artifact. `$WORK/err.txt` carries one `rejected:`
+   line naming the payroll artifact, its error code, and the sensitivity
+   reason, and carries no raw JSON body. `exit=0` is the shipped behavior
+   this scenario exists to catch.
+
+3. Register the layer holding a medium artifact alone and reingest it, so the
+   cycle accepts nothing.
+
+   ```bash
+   podium layer register --registry "$REG" --id s62-rejected \
+     --local "$WORK/rejected" > /dev/null
+   podium layer reingest --registry "$REG" s62-rejected \
+     > "$WORK/out2.txt" 2> "$WORK/err2.txt"
+   echo "exit=$?"
+   cat "$WORK/out2.txt"
+   cat "$WORK/err2.txt"
+   ```
+
+   **Expect.** `exit=1`. `$WORK/err2.txt` carries the `rejected:` line naming
+   the ledger artifact and its error code. `$WORK/out2.txt` is empty, and in
+   particular carries no pretty-printed JSON body. A JSON body on standard
+   output with `exit=0` is the shipped behavior on a cycle that accepted
+   nothing.
+
+4. Register the layer holding a low-sensitivity artifact alone and reingest it
+   twice, so the second cycle changes nothing.
+
+   ```bash
+   podium layer register --registry "$REG" --id s62-clean \
+     --local "$WORK/clean" > /dev/null
+   podium layer reingest --registry "$REG" s62-clean; echo "exit=$?"
+   podium layer reingest --registry "$REG" s62-clean; echo "exit=$?"
+   ```
+
+   **Expect.** Both report `exit=0` and both print the
+   `artifact: ...   layer: s62-clean` line for the on-call artifact, because
+   an unchanged artifact is reported on the same line as an accepted one and
+   is not a drop.
+
+**Cleanup.** `kill "$(cat "$WORK/server.pid")"` and `rm -rf "$WORK"`.
