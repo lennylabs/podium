@@ -90,7 +90,7 @@ func (r *Registry) ShowEffective(ctx context.Context, target layer.Identity) ([]
 // record from one admitted on the groups the caller's credential carries, and
 // the two read as one answer to an operator who cannot tell them apart.
 //
-// Spec: §4.6, §4.7.2, §6.3.1
+// Spec: §4.6 / §4.7.2 / §6.3.1
 func visibilityReason(l layer.Layer, id layer.Identity, visible, viaDirectory bool) string {
 	switch {
 	case l.Visibility.Public:

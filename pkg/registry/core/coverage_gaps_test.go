@@ -191,10 +191,9 @@ func TestLogf_NonPositiveIsZeroElseNaturalLog(t *testing.T) {
 
 // --- visibilityReason (admin.go) ----------------------------------------
 
-// visibilityReason returns a stable one-liner per switch arm of the
-// visibility outcome. Each case below selects one arm.
-//
-// Spec: §4.6, §4.7.2, §6.3.1
+// Spec: §4.6 / §4.7.2 / §6.3.1 — visibilityReason returns a stable one-liner
+// per switch arm of the visibility outcome, and the directory-derived grant
+// takes its own arm. Each case below selects one arm.
 func TestVisibilityReason_Arms(t *testing.T) {
 	t.Parallel()
 	authed := layer.Identity{Sub: "alice", IsAuthenticated: true}
@@ -287,11 +286,10 @@ func TestShowEffective_ReasonsPerLayer(t *testing.T) {
 	}
 }
 
-// ShowEffective reports the directory-derived grant separately from the
-// claim-derived one: the same layer and caller are admitted with the SCIM
-// reason when an expander names the caller, and refused when none is wired.
-//
-// Spec: §4.6, §4.7.2, §6.3.1
+// Spec: §4.6 / §4.7.2 / §6.3.1 — ShowEffective reports the directory-derived
+// grant separately from the claim-derived one: the same layer and caller are
+// admitted with the SCIM reason when an expander names the caller, and refused
+// when none is wired.
 func TestShowEffective_DirectoryGrantReportedSeparately(t *testing.T) {
 	t.Parallel()
 	st := gapMemStore(t)
