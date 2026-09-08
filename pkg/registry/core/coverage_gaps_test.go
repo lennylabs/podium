@@ -191,18 +191,21 @@ func TestLogf_NonPositiveIsZeroElseNaturalLog(t *testing.T) {
 
 // --- visibilityReason (admin.go) ----------------------------------------
 
-// Spec: §4.6 / §4.7.2 — visibilityReason returns a stable one-liner per
-// switch arm of the visibility outcome. Each case below selects one arm.
+// visibilityReason returns a stable one-liner per switch arm of the
+// visibility outcome. Each case below selects one arm.
+//
+// Spec: §4.6, §4.7.2, §6.3.1
 func TestVisibilityReason_Arms(t *testing.T) {
 	t.Parallel()
 	authed := layer.Identity{Sub: "alice", IsAuthenticated: true}
 	anon := layer.Identity{IsPublic: true}
 	cases := []struct {
-		name    string
-		l       layer.Layer
-		id      layer.Identity
-		visible bool
-		want    string
+		name         string
+		l            layer.Layer
+		id           layer.Identity
+		visible      bool
+		viaDirectory bool
+		want         string
 	}{
 		{
 			name:    "public layer",
@@ -233,6 +236,14 @@ func TestVisibilityReason_Arms(t *testing.T) {
 			want:    "user matches layer.users or layer.groups",
 		},
 		{
+			name:         "visible through the SCIM directory",
+			l:            layer.Layer{Visibility: layer.Visibility{Users: []string{"alice"}}},
+			id:           authed,
+			visible:      true,
+			viaDirectory: true,
+			want:         "user matches layer.groups through the SCIM directory",
+		},
+		{
 			name:    "authenticated but not in users or groups",
 			l:       layer.Layer{Visibility: layer.Visibility{Users: []string{"bob"}}},
 			id:      authed,
@@ -244,7 +255,7 @@ func TestVisibilityReason_Arms(t *testing.T) {
 		c := c
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			if got := visibilityReason(c.l, c.id, c.visible); got != c.want {
+			if got := visibilityReason(c.l, c.id, c.visible, c.viaDirectory); got != c.want {
 				t.Errorf("visibilityReason() = %q, want %q", got, c.want)
 			}
 		})
@@ -273,6 +284,48 @@ func TestShowEffective_ReasonsPerLayer(t *testing.T) {
 	}
 	if e := byID["team"]; !e.Visible || e.Reason != "user matches layer.users or layer.groups" {
 		t.Errorf("team layer = %+v, want visible via users", e)
+	}
+}
+
+// ShowEffective reports the directory-derived grant separately from the
+// claim-derived one: the same layer and caller are admitted with the SCIM
+// reason when an expander names the caller, and refused when none is wired.
+//
+// Spec: §4.6, §4.7.2, §6.3.1
+func TestShowEffective_DirectoryGrantReportedSeparately(t *testing.T) {
+	t.Parallel()
+	st := gapMemStore(t)
+	layers := []layer.Layer{
+		{ID: "eng", Precedence: 1, Visibility: layer.Visibility{Groups: []string{"engineering"}}},
+	}
+	target := layer.Identity{Sub: "alice", IsAuthenticated: true}
+
+	withDirectory := New(st, "t", layers).WithGroupResolver(func(group string) []string {
+		if group == "engineering" {
+			return []string{"alice"}
+		}
+		return nil
+	})
+	got, err := withDirectory.ShowEffective(context.Background(), target)
+	if err != nil {
+		t.Fatalf("ShowEffective: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ShowEffective returned %d entries, want 1", len(got))
+	}
+	if !got[0].Visible || got[0].Reason != "user matches layer.groups through the SCIM directory" {
+		t.Errorf("with expander = %+v, want visible with the SCIM directory reason", got[0])
+	}
+
+	claimOnly, err := New(st, "t", layers).ShowEffective(context.Background(), target)
+	if err != nil {
+		t.Fatalf("ShowEffective: %v", err)
+	}
+	if len(claimOnly) != 1 {
+		t.Fatalf("ShowEffective returned %d entries, want 1", len(claimOnly))
+	}
+	if claimOnly[0].Visible || claimOnly[0].Reason != "user is not in layer.users or layer.groups" {
+		t.Errorf("without expander = %+v, want invisible with the refusal reason", claimOnly[0])
 	}
 }
 

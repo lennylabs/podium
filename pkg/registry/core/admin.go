@@ -67,10 +67,15 @@ func (r *Registry) ShowEffective(ctx context.Context, target layer.Identity) ([]
 	out := make([]EffectiveLayer, 0, len(resolved))
 	for _, l := range resolved {
 		visible := layer.VisibleWith(l, target, r.resolveGroup)
+		// A caller the expander admits and the claim-only evaluation refuses was
+		// admitted through the §6.3.1 directory rather than on the groups the
+		// caller's credential carries. The re-evaluation runs on an admin
+		// diagnostic over the tenant's layer list and is not on a read path.
+		viaDirectory := visible && r.resolveGroup != nil && !layer.VisibleWith(l, target, nil)
 		out = append(out, EffectiveLayer{
 			LayerID: l.ID,
 			Visible: visible,
-			Reason:  visibilityReason(l, target, visible),
+			Reason:  visibilityReason(l, target, visible, viaDirectory),
 		})
 	}
 	return out, nil
@@ -79,7 +84,14 @@ func (r *Registry) ShowEffective(ctx context.Context, target layer.Identity) ([]
 // visibilityReason returns a stable one-liner explaining why l is
 // visible to id (or not). Operators grep for these in support
 // conversations.
-func visibilityReason(l layer.Layer, id layer.Identity, visible bool) string {
+//
+// The group arms are reported separately: a caller admitted on membership the
+// registry resolved from the §6.3.1 directory was admitted on a different
+// record from one admitted on the groups the caller's credential carries, and
+// the two read as one answer to an operator who cannot tell them apart.
+//
+// Spec: §4.6, §4.7.2, §6.3.1
+func visibilityReason(l layer.Layer, id layer.Identity, visible, viaDirectory bool) string {
 	switch {
 	case l.Visibility.Public:
 		return "layer.public=true"
@@ -87,6 +99,8 @@ func visibilityReason(l layer.Layer, id layer.Identity, visible bool) string {
 		return "caller is anonymous; layer requires authentication"
 	case l.Visibility.Organization && id.IsAuthenticated && visible:
 		return "layer.organization=true and identity is authenticated"
+	case viaDirectory:
+		return "user matches layer.groups through the SCIM directory"
 	case visible:
 		return "user matches layer.users or layer.groups"
 	default:
