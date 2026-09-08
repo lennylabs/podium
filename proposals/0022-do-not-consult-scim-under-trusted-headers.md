@@ -1,7 +1,7 @@
 # Proposal 0022: Do not consult SCIM under `trusted-headers`
 
 - Issue: (to be filed)
-- Status: Verified (2026-09-07). Converged after 9 adversarial review rounds (9 findings fixed); awaiting sign-off.
+- Status: Approved (2026-09-07). Verified after 9 adversarial review rounds (9 findings fixed); the open questions are resolved in favour of the staged positions.
 - Date: 2026-09-07
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off. Every anchor is read against `fix/scim-not-consulted-under-trusted-headers` at `822e6a9`.
@@ -607,7 +607,11 @@ The OIDC cookbook pages that describe the expansion (`docs/deployment/oidc/index
 
 **OQ-2: whether `PODIUM_SCIM_TOKENS` under `trusted-headers` should refuse startup.** The staged position mounts the receiver and logs that the directory decides no read, because the identity provider writes it, a later provider change reads it, and refusing would stop a running deployment on an input that is now inert. The alternative refuses at startup, on the reasoning that a mounted receiver whose data no decision reads is a misconfiguration the operator should be told about once rather than a line they may not read. The log line is the weaker signal of the two. A refusal would need a §6.10 config code and its `matrix-audit` entry, which SPEC-1 does not stage.
 
+**Resolved 2026-09-07 by the reviewer: the staged position stands.** The registry mounts the receiver and logs. Turning a setting that is inert after this fix into a boot failure would stop a running deployment on an input that is no longer dangerous, and the refusal would carry a new error code this proposal does not stage.
+
 **OQ-3: whether the diagnostic's second re-evaluation is worth its cost.** CODE-3 evaluates each layer twice on `GET /v1/admin/show-effective`, once with the expander and once without. The endpoint is admin-gated, runs over the tenant's layer list, and is not on a read path, so the cost is bounded. The alternative is to leave the reason string collapsed and rely on the startup line alone, which tells an operator whether the directory can decide a read on this registry and not which layers it decided.
+
+**Resolved 2026-09-07 by the reviewer: the staged position stands.** CODE-3 is kept. The second evaluation passes a nil resolver, so it performs no directory lookup and repeats an in-memory comparison on an admin-gated diagnostic. It is the only live answer to which layers the directory decides for a given caller, which is the question this change creates for an operator and which no §8.1 field records.
 
 ## Non-goals
 
