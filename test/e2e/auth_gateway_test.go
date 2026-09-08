@@ -218,6 +218,7 @@ func TestGateway_IdpGroupMappingMalformedRefused(t *testing.T) {
 // reads the same setting without validating it, so the diagnostic command that
 // an operator reaches for after the refusal still exits 0 and still names
 // PODIUM_IDP_GROUP_MAPPING as the source of the idp_group_mapping row.
+// Matrix: §6.10 (config.invalid_idp_group_mapping)
 func TestGateway_IdpGroupMappingConfigShowStillRuns(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{
