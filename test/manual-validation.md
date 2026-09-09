@@ -7246,8 +7246,9 @@ done
    carries four entries in ascending `id` order, and both hooks carry an entry
    of their own against the shared `materialized_path`
    (`.claude/settings.json` under `claude-code`, `.codex/config.toml` under
-   `codex`), as do both rules against `AGENTS.md` under `codex`. One entry per
-   file is the §7.5.3 violation this step catches.
+   `codex`), as do both rules against `AGENTS.md` under `codex`. A lock that
+   carries one entry per materialized path, with only the id that sorts last
+   surviving, is the §7.5.3 violation this step catches.
 
 7. Read the composition inside the shared files.
 
