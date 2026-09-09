@@ -244,3 +244,28 @@ func repeat(s string, n int) string {
 	}
 	return string(out)
 }
+
+// Spec: §4.7.6 — the content hash covers the artifact's manifest, its
+// SKILL.md, and its bundled resources. §4.7.6 fixes neither the order of
+// those slots nor the order in which resources are folded in, so both are
+// implementation decisions of CanonicalContentHash. This test pins them:
+// the manifest precedes SKILL.md, the resources follow, and each resource
+// contributes its path then its bytes in ascending path order regardless of
+// the map's insertion order.
+func TestCanonicalContentHash_ComposesManifestSkillAndSortedResources(t *testing.T) {
+	t.Parallel()
+	resources := map[string][]byte{}
+	resources["ref.md"] = []byte("R")
+	resources["a.md"] = []byte("A")
+
+	got := CanonicalContentHash([]byte("artifact"), []byte("skill"), resources)
+	want := ContentHash(
+		[]byte("artifact"),
+		[]byte("skill"),
+		[]byte("a.md"), []byte("A"),
+		[]byte("ref.md"), []byte("R"),
+	)
+	if got != want {
+		t.Errorf("CanonicalContentHash = %q, want %q", got, want)
+	}
+}
