@@ -7307,8 +7307,8 @@ grep 'audit-log podium' "$WORK/proj/ws/.claude/settings.json"
 ```
 
    **Expect.** `changed=true`, and the merged file carries
-   `audit-log podium --verbose`. `changed=false` here is the shipped behavior
-   this step exists to catch: the file is rewritten, and a
+   `audit-log podium --verbose`. `changed=false` is the behavior this step
+   exists to catch: the file is rewritten, and a
    `skip_if_no_changes` publish command gated on the variable skips the target
    that changed. On Linux the edit is `sed -i` without the empty argument.
 
