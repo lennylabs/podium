@@ -567,35 +567,43 @@ func lockMergeKinds(lock *LockFile) map[string]string {
 }
 
 // lockChanged reports whether the new lock's materialized set differs from the
-// prior lock's: a path present in one and absent from the other, or a path whose
-// recorded content hash changed. It feeds Result.Changed and the workspace
-// workflow's $PODIUM_CHANGED. A nil prior lock (a first sync into an empty
-// target) is treated as changed whenever the new lock materialized anything, and
-// as unchanged when both are empty.
+// prior lock's: an entry present in one and absent from the other, or an entry
+// whose recorded content hash changed. Entries are compared per (artifact id,
+// materialized path) pair, so every artifact contributing to a shared file
+// participates. It feeds Result.Changed and the workspace workflow's
+// $PODIUM_CHANGED. A nil prior lock (a first sync into an empty target) is
+// treated as changed whenever the new lock materialized anything, and as
+// unchanged when both are empty.
 func lockChanged(prior, next *LockFile) bool {
-	priorHashes := lockPathHashes(prior)
-	nextHashes := lockPathHashes(next)
+	priorHashes := lockEntryHashes(prior)
+	nextHashes := lockEntryHashes(next)
 	if len(priorHashes) != len(nextHashes) {
 		return true
 	}
-	for path, hash := range nextHashes {
-		if priorHashes[path] != hash {
+	for entry, hash := range nextHashes {
+		if priorHashes[entry] != hash {
 			return true
 		}
 	}
 	return false
 }
 
-// lockPathHashes returns the materialized paths recorded in a lock, each mapped
-// to its content hash. A nil lock returns an empty map.
-func lockPathHashes(lock *LockFile) map[string]string {
+// lockEntryHashes returns the content hash recorded against each (artifact id,
+// materialized path) pair in a lock. The key carries the artifact ID because a
+// materialized path is shared whenever two artifacts config-merge or inject into
+// one file (two mcp-servers on .mcp.json, two hooks on .claude/settings.json,
+// two rules on AGENTS.md), and a path-only key kept just the last entry, so
+// editing the artifact whose entry did not survive reported no change though the
+// file was rewritten. A nil lock returns an empty map.
+// Spec: §11 (idempotent re-sync).
+func lockEntryHashes(lock *LockFile) map[string]string {
 	out := map[string]string{}
 	if lock == nil {
 		return out
 	}
 	for _, a := range lock.Artifacts {
 		if a.MaterializedPath != "" {
-			out[a.MaterializedPath] = a.ContentHash
+			out[a.ID+"\x00"+a.MaterializedPath] = a.ContentHash
 		}
 	}
 	return out
