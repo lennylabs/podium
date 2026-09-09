@@ -1,6 +1,7 @@
 package sync
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -142,20 +143,20 @@ func TestLockFile_WriteSortsEntriesByIDThenPath(t *testing.T) {
 	}
 }
 
-// Spec: §7.5.3 — the §7.5.3 ordering is a property of the written file. Every
-// step after the sort can fail, so WriteLock normalizes a copy: a caller whose
-// write failed still holds the entries in the order it assembled them, and the
-// §7.5.2 change comparison over that slice reads what the caller built.
-func TestLockFile_WriteLeavesTheCallersEntriesUntouched(t *testing.T) {
+// Spec: §7.5.3 — the ordering is a property of the written file. Every step
+// after the sort can fail, so WriteLock normalizes a copy and the caller's
+// value survives a successful and a failed write exactly as it was handed over.
+func TestLockFile_WriteLeavesTheCallersValueUntouched(t *testing.T) {
 	t.Parallel()
 	unsorted := []LockArtifact{
 		{ID: "team/review", MaterializedPath: "skills/review/SKILL.md"},
 		{ID: "acme/deploy", MaterializedPath: "agents/deploy.md"},
 	}
-	want := lockIDPaths(unsorted)
+	wantOrder := lockIDPaths(unsorted)
 
-	// A regular file as the target makes MkdirAll fail, which is the failure
-	// path that used to reorder the caller's slice and write nothing.
+	// A regular file as the target makes MkdirAll fail, which is the first
+	// failable step and the one that used to run after the caller's slice had
+	// already been reordered.
 	notADir := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
@@ -163,20 +164,53 @@ func TestLockFile_WriteLeavesTheCallersEntriesUntouched(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		target    string
+		version   int
 		wantWrite bool
 	}{
-		{name: "write succeeds", target: t.TempDir(), wantWrite: true},
-		{name: "write fails", target: notADir, wantWrite: false},
+		{name: "write succeeds", target: t.TempDir(), version: 1, wantWrite: true},
+		{name: "version left to the default", target: t.TempDir(), version: 0, wantWrite: true},
+		{name: "write fails", target: notADir, version: 1, wantWrite: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			lf := &LockFile{Version: 1, Artifacts: slices.Clone(unsorted)}
+			lf := &LockFile{Version: tc.version, Artifacts: slices.Clone(unsorted)}
 			err := WriteLock(tc.target, lf)
 			if tc.wantWrite != (err == nil) {
 				t.Fatalf("WriteLock error = %v, want write = %v", err, tc.wantWrite)
 			}
-			if got := lockIDPaths(lf.Artifacts); !slices.Equal(got, want) {
-				t.Errorf("caller's entries were reordered:\n got %v\nwant %v", got, want)
+			if !tc.wantWrite {
+				// Pin where the write failed. A future up-front validation that
+				// returned before MkdirAll would leave this case asserting
+				// nothing about the order the sort runs in.
+				var pe *os.PathError
+				if !errors.As(err, &pe) || pe.Op != "mkdir" {
+					t.Errorf("want the failure at MkdirAll, got %v", err)
+				}
+			}
+			if got := lockIDPaths(lf.Artifacts); !slices.Equal(got, wantOrder) {
+				t.Errorf("caller's entries were reordered:\n got %v\nwant %v", got, wantOrder)
+			}
+			if lf.Version != tc.version {
+				t.Errorf("caller's Version = %d, want %d", lf.Version, tc.version)
 			}
 		})
+	}
+}
+
+// Spec: §7.5.3 — the lock schema carries `version: 1`. A caller that leaves the
+// field unset gets the schema version in the written file. WriteLock stamps it
+// on the copy it marshals, so the file is the only place the default is
+// observable.
+func TestLockFile_WriteFillsInTheSchemaVersion(t *testing.T) {
+	t.Parallel()
+	target := t.TempDir()
+	if err := WriteLock(target, &LockFile{Target: target}); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+	out, err := ReadLock(target)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+	if out.Version != 1 {
+		t.Errorf("written version = %d, want 1", out.Version)
 	}
 }
