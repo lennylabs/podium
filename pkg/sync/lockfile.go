@@ -109,16 +109,15 @@ func ReadLock(target string) (*LockFile, error) {
 // WriteLock writes the lock file atomically (`.tmp` + rename) so readers
 // see either the previous or the new content.
 //
-// The artifacts list is ordered here rather than by each caller. §11 requires a
-// sync against a filesystem registry and one against a standalone server on the
-// same directory to produce an identical artifacts list, and the two walked
-// their sources in different orders, so every position in the list disagreed
-// while the records themselves matched. Ordering at the single write point makes
-// the two agree without either consumer knowing about the other, and it keeps a
-// committed lock (§14.11) diffing on what changed rather than on what moved.
+// Spec: §7.5.3 states the list order: entries are ordered by id, and the
+// entries one artifact contributes are ordered among themselves by
+// materialized_path. The sort lands here because WriteLock is the single point
+// every writer of the file passes, covering sync.Run, the §7.5.5 override
+// paths, and the §7.8 publish render.
 //
-// The key is the id and then the materialized path, because one artifact holds
-// one entry per file it writes and a skill writes two.
+// The sync path already hands over the set in this order, so the sort is a
+// no-op there. It stays because it is what normalizes a lock an override
+// rewrites in place and a lock an older build wrote in a different order.
 func WriteLock(target string, lf *LockFile) error {
 	if lf.Version == 0 {
 		lf.Version = 1
