@@ -385,3 +385,53 @@ func readString(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// A scalar key two artifacts both set is supplied by the fragment folded last.
+// §7.5 fixes the fold order as ascending canonical artifact ID and states the
+// composition rule over it, so the two together decide which layer's value a
+// shared config-merge target ends up carrying: two mcp-servers sharing a `name:`
+// key one entry, and whichever artifact sorts last supplies a contested member.
+//
+// The sentence's other two arms are pinned elsewhere. Array concatenation in
+// fold order is asserted over a real two-layer sync by the §11 equivalence
+// test's hook-order check, and member-by-member object merging by
+// TestWrite_InjectAndMergeIntegration above, which keeps a user entry beside two
+// artifact entries. This arm was the one nothing covered: reversing deepMerge's
+// final assignment to first-writer-wins leaves pkg/materialize, pkg/adapter,
+// pkg/sync, test/materialization, and test/integration green.
+//
+// Spec: §7.5
+func TestMergeJSON_ContestedScalarTakesTheLastFoldedFragment(t *testing.T) {
+	dest := t.TempDir()
+	// Both fragments name one mcp-server, so they merge into one entry. They
+	// agree on nothing but the key: each sets `command`, and only the first
+	// carries `args`, which must survive the second.
+	files := []adapter.File{
+		{
+			Path:    ".mcp.json",
+			Op:      adapter.OpMergeJSON,
+			Content: []byte(`{"mcpServers":{"shared":{"command":"from-first","args":["--keep"]}}}`),
+		},
+		{
+			Path:    ".mcp.json",
+			Op:      adapter.OpMergeJSON,
+			Content: []byte(`{"mcpServers":{"shared":{"command":"from-last"}}}`),
+		},
+	}
+	if err := Write(dest, files); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	got := readString(t, filepath.Join(dest, ".mcp.json"))
+	if !strings.Contains(got, `"from-last"`) {
+		t.Errorf("the contested scalar did not take the last folded fragment's value:\n%s", got)
+	}
+	if strings.Contains(got, `"from-first"`) {
+		t.Errorf("the first fragment's value survived a key the last fragment also set:\n%s", got)
+	}
+	// The rule governs the contested key alone; a member only one fragment sets
+	// is still merged in, so a later fragment does not replace the whole entry.
+	if !strings.Contains(got, `"--keep"`) {
+		t.Errorf("a member only the first fragment set was dropped:\n%s", got)
+	}
+}
