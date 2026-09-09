@@ -43,29 +43,29 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.5 states the ascending canonical artifact ID materialization order, its scope against §4.6 and §6.4, and its effect inside a shared target of either kind, the JSON config-merge targets and the marker-block targets. Committed alone and verified before any code.
+- [x] **S1 · spec** — SPEC-1. §7.5 states the ascending canonical artifact ID materialization order, its scope against §4.6 and §6.4, and its effect inside a shared target of either kind, the JSON config-merge targets and the marker-block targets. Committed alone and verified before any code.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §7.5.3 states the one-entry-per-file rule and the `artifacts:` list order.
+- [x] **S2 · spec** — SPEC-2. §7.5.3 states the one-entry-per-file rule and the `artifacts:` list order.
       Levels: —. Depends on: S1
-- [ ] **S3 · code** — CODE-1. `selectRecords` returns the materialization set in ascending canonical ID order.
+- [x] **S3 · code** — CODE-1. `selectRecords` returns the materialization set in ascending canonical ID order.
       Levels: unit, integration. Depends on: S1, S2
-- [ ] **S4 · code** — CODE-2. `WriteLock`'s doc comment names §7.5.3 as the invariant's source and states that sync already arrives in that order. The sort and its key are unchanged, so the step reaches no test level.
+- [x] **S4 · code** — CODE-2. `WriteLock`'s doc comment names §7.5.3 as the invariant's source and states that sync already arrives in that order. The sort and its key are unchanged, so the step reaches no test level.
       Levels: —. Depends on: S2, S3
-- [ ] **S5 · code** — CODE-3. The change comparison keys by (artifact id, materialized path), so every contributor to a shared path participates.
+- [x] **S5 · code** — CODE-3. The change comparison keys by (artifact id, materialized path), so every contributor to a shared path participates.
       Levels: unit. Depends on: S3
-- [ ] **S6 · code** — CODE-4. The §6.6 step-2 integrity gate delegates to `version.CanonicalContentHash`.
+- [x] **S6 · code** — CODE-4. The §6.6 step-2 integrity gate delegates to `version.CanonicalContentHash`.
       Levels: unit. Depends on: —
-- [ ] **S7 · code** — CODE-5. `contentHashFor`'s doc comment describes the composition the code now uses. The function body is unchanged, so the step reaches no test level.
+- [x] **S7 · code** — CODE-5. `contentHashFor`'s doc comment describes the composition the code now uses. The function body is unchanged, so the step reaches no test level.
       Levels: —. Depends on: —
-- [ ] **S8 · test** — TEST-1. One unit test pinning `version.CanonicalContentHash`'s slot order and sorted-path rule.
+- [x] **S8 · test** — TEST-1. One unit test pinning `version.CanonicalContentHash`'s slot order and sorted-path rule.
       Levels: unit. Depends on: —
-- [ ] **S9 · test** — TEST-2. The `contentHashFor` unit tests assert both hash slots and stop describing the removed either/or.
+- [x] **S9 · test** — TEST-2. The `contentHashFor` unit tests assert both hash slots and stop describing the removed either/or.
       Levels: unit. Depends on: S7
-- [ ] **S10 · test** — TEST-3. `pkg/sync/sync_order_test.go` pins the ascending-ID order through `Run`, including the toggle-add tail, and pins the shared-path change comparison.
+- [x] **S10 · test** — TEST-3. `pkg/sync/sync_order_test.go` pins the ascending-ID order through `Run`, including the toggle-add tail, and pins the shared-path change comparison.
       Levels: unit. Depends on: S3, S5
-- [ ] **S11 · test** — TEST-4. The §11 equivalence test gains one function over a test-local colliding fixture, run under `claude-code` and `codex`, and its stale `assertLockArtifactsEqual` comment is corrected. The existing `none` / `claude-code` loop is not edited.
+- [x] **S11 · test** — TEST-4. The §11 equivalence test gains one function over a test-local colliding fixture, run under `claude-code` and `codex`, and its stale `assertLockArtifactsEqual` comment is corrected. The existing `none` / `claude-code` loop is not edited.
       Levels: integration. Depends on: S3, S4
-- [ ] **S12 · docs** — DOC-1. `CHANGELOG.md`'s unreleased `### Fixed` bullet is rewritten as the items listed under DOC-1, and `test/manual-validation.md` gains S63.
+- [x] **S12 · docs** — DOC-1. `CHANGELOG.md`'s unreleased `### Fixed` bullet is rewritten as the items listed under DOC-1, and `test/manual-validation.md` gains S63.
       Levels: manual. Depends on: S10, S11
 
 **Ordering constraints.** S1 precedes S2 because §7.5.3's sentence states in the lock file what §7.5 fixes for the materialization. Both precede the code per `.claude/rules/spec-driven-development.md`. S6, S7, S8, and S9 form the content-hash lane the branch left half-finished. S6, S7, and S8 depend on nothing, S9 depends on S7 alone, and a reviewer can take the lane without waiting for the ordering work. S12 follows the tests so the CHANGELOG describes what the tested build does.
