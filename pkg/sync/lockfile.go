@@ -118,17 +118,24 @@ func ReadLock(target string) (*LockFile, error) {
 // The sync path already hands over the set in this order, so the sort is a
 // no-op there. It stays because it is what normalizes a lock an override
 // rewrites in place and a lock an older build wrote in a different order.
+//
+// The normalization applies to a copy. Every step after it can fail, and a
+// caller that sorted the slice it passed in would find its own entries
+// reordered by a call that wrote nothing, so the caller's LockFile and its
+// artifacts slice are left exactly as they were handed over.
 func WriteLock(target string, lf *LockFile) error {
-	if lf.Version == 0 {
-		lf.Version = 1
+	out := *lf
+	if out.Version == 0 {
+		out.Version = 1
 	}
-	slices.SortStableFunc(lf.Artifacts, func(a, b LockArtifact) int {
+	out.Artifacts = slices.Clone(lf.Artifacts)
+	slices.SortStableFunc(out.Artifacts, func(a, b LockArtifact) int {
 		if c := strings.Compare(a.ID, b.ID); c != 0 {
 			return c
 		}
 		return strings.Compare(a.MaterializedPath, b.MaterializedPath)
 	})
-	data, err := yaml.Marshal(lf)
+	data, err := yaml.Marshal(&out)
 	if err != nil {
 		return err
 	}
