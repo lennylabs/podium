@@ -655,6 +655,22 @@ func selectRecords(scope ScopeFilter, all []materialRecord, toggles LockToggles)
 		}
 		out = kept
 	}
+	// The materialization set is returned in ascending canonical artifact ID
+	// order (§7.5), which is the order both registry sources can produce and
+	// the order the merge fold, Result.Artifacts, and the lock all inherit.
+	//
+	// It selects no artifact: a canonical-ID collision is resolved by Walk
+	// before the records arrive (pkg/registry/filesystem/walk.go), and
+	// applyOverlay replaces in place. It does decide the fold order inside a
+	// shared merge target, and there the key is not the canonical ID: mcpName
+	// keys the mcpServers entry by the artifact's name: frontmatter
+	// (pkg/adapter/layout.go), so two distinct IDs can write one key. How a
+	// shared target composes once the fragments arrive in this order is stated
+	// in §7.5. Filesystem mode previously folded in layer-precedence order and
+	// server mode in ID order; this makes both fold in ID order, which is the
+	// only order a server source can produce, since the sync manifest carries
+	// layer IDs and never the tenant's layer_order:.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
