@@ -446,7 +446,7 @@ toggles:
       removed_at: 2026-05-05T14:36:00Z
 ```
 
-The lock file is written atomically (`.tmp` + rename) on every sync, watch event, and override invocation. The `profile:` field is the **active profile** for that target. `override`, `save-as`, and `profile edit` use it as the default when no `--profile` flag is given. Concurrent writers against the same target's lock file (e.g., two `podium sync --watch` processes pointed at one directory) are undefined; operators are expected to keep a single sync owner per target.
+The lock file is written atomically (`.tmp` + rename) on every sync, watch event, and override invocation. An artifact that materializes more than one file contributes one `artifacts:` entry per file. The list is ordered by `id`, and the entries an artifact contributes are ordered among themselves by `materialized_path`. The `profile:` field is the **active profile** for that target. `override`, `save-as`, and `profile edit` use it as the default when no `--profile` flag is given. Concurrent writers against the same target's lock file (e.g., two `podium sync --watch` processes pointed at one directory) are undefined; operators are expected to keep a single sync owner per target.
 
 The target directory is created if it doesn't exist. The same is true for `<target>/.podium/`. `podium sync` errors only when the target path exists but is not writable.
 
