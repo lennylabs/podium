@@ -419,11 +419,13 @@ func lockContentHash(rec materialRecord) string {
 	return contentHashFor(rec)
 }
 
-// contentHashFor computes the §7.5.3 content_hash for a materialized record.
-// It hashes the served content bytes (a skill's frontmatter+body when present,
-// otherwise the artifact frontmatter) followed by each large resource in sorted
-// key order, so the digest is deterministic across runs. The result is the
-// spec's "sha256:<hex>" form. spec: §7.5.3, §14.11.
+// contentHashFor computes the §7.5.3 content_hash for a filesystem-source
+// record from its served bytes, through version.CanonicalContentHash so the
+// registry's ingest and this consumer cannot compute it differently (§4.6,
+// §11). The record supplies all three slots: the manifest bytes, the SKILL.md
+// bytes when the artifact carries one, and every bundled resource, inline and
+// large alike. The result carries the spec's "sha256:<hex>" prefix, which
+// CanonicalContentHash omits. spec: §4.7.6, §7.5.3, §14.11.
 func contentHashFor(rec materialRecord) string {
 	return "sha256:" + version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
 }
