@@ -65,6 +65,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   absence from the config file, the pass-through of a claim value with no entry,
   and the startup failure. §6.3.1 names the variable as the source of the
   `IdpGroupMapping` table and names `config.invalid_idp_group_mapping`.
+- The Codex rows of `docs/consuming/configure-your-harness.md` name the artifact
+  ID as the key Podium reconciles a `.codex/config.toml` entry by. The hook row
+  previously named the native event, which selects the TOML table the entry
+  lands in rather than identifying the entry, so a reader could expect two hook
+  artifacts on one event to merge into a single entry. Each artifact keeps its
+  own marker block, and the `mcp-server` row states the matching consequence for
+  a name already present in the file.
 
 ## [0.4.0] - 2026-09-05
 
