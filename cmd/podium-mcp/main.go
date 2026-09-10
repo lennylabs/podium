@@ -38,7 +38,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1755,9 +1754,10 @@ func decodeInlineResources(resp *loadArtifactResponse) error {
 // sub-threshold artifacts that carry no signature this is the only integrity
 // gate the spec defines, so step 2 runs the match for every artifact type.
 //
-// The recomputation reproduces the registry's ingest canonicalization
-// (contentHashOf over version.ContentHash): the original ARTIFACT.md bytes, the
-// SKILL.md slot, then each bundled resource in sorted-path order.
+// The recomputation reproduces the registry's ingest canonicalization through
+// the shared version.CanonicalContentHash, which composes the original
+// ARTIFACT.md bytes, the SKILL.md slot, and each bundled resource in
+// sorted-path order.
 //   - For a skill the SKILL.md slot carries the verbatim SKILL.md the registry
 //     ships in skill_raw; the content_hash covers those bytes, which the prose
 //     body alone could not reproduce.
@@ -1776,19 +1776,11 @@ func (s *mcpServer) verifyContentHash(resp loadArtifactResponse) error {
 	if resp.ManifestMerged {
 		artifactBytes = []byte(resp.RawFrontmatter)
 	}
-	// Slot 1: the verbatim SKILL.md for a skill (skill_raw), empty otherwise —
-	// matching the registry's contentHashOf, which hashes rec.SkillBytes (nil
-	// for non-skills) in this position.
-	parts := [][]byte{artifactBytes, []byte(resp.SkillRaw)}
-	keys := make([]string, 0, len(resp.Resources))
-	for k := range resp.Resources {
-		keys = append(keys, k)
+	resources := make(map[string][]byte, len(resp.Resources))
+	for k, v := range resp.Resources {
+		resources[k] = []byte(v)
 	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		parts = append(parts, []byte(k), []byte(resp.Resources[k]))
-	}
-	got := "sha256:" + version.ContentHash(parts...)
+	got := "sha256:" + version.CanonicalContentHash(artifactBytes, []byte(resp.SkillRaw), resources)
 	if got != resp.ContentHash {
 		return fmt.Errorf("materialize.content_hash_mismatch: recomputed %s does not match served %s", got, resp.ContentHash)
 	}

@@ -458,3 +458,59 @@ func TestDeliver_InvalidBase64Rejected(t *testing.T) {
 		t.Errorf("code = %v, want materialize.invalid_base64", m["code"])
 	}
 }
+
+// Spec: §6.6 step 2 / §4.7.6 — the step-2 gate composes the recomputed hash
+// through the shared version.CanonicalContentHash, so a bundle of several
+// resources verifies against the digest the registry's ingest produced over
+// the same parts, and a single altered served byte in any resource is
+// rejected before materialization.
+func TestDeliver_MultiResourceContentHashRoundTrip(t *testing.T) {
+	t.Parallel()
+	fm := "---\ntype: context\n---\nbody"
+	resources := map[string]string{
+		"data/b.txt":  "second",
+		"data/a.txt":  "first",
+		"docs/c.md":   "third",
+		"data/aa.txt": "fourth",
+	}
+	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{
+		"data/b.txt":  []byte("second"),
+		"data/a.txt":  []byte("first"),
+		"docs/c.md":   []byte("third"),
+		"data/aa.txt": []byte("fourth"),
+	})
+	newResp := func() loadArtifactResponse {
+		copied := make(map[string]string, len(resources))
+		for k, v := range resources {
+			copied[k] = v
+		}
+		return loadArtifactResponse{
+			ID: "team/x", Type: "context", Version: "1.0.0",
+			Frontmatter: fm, Resources: copied, ContentHash: hash,
+		}
+	}
+
+	dest := t.TempDir()
+	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
+	out := s.deliverLoadArtifact(newResp(), deliverOpts{harness: "none", destination: dest})
+	m := out.(map[string]any)
+	if _, isErr := m["error"]; isErr {
+		t.Fatalf("untampered bundle rejected: %v", m)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dest, "team/x", "data/aa.txt")); string(b) != "fourth" {
+		t.Errorf("resource data/aa.txt = %q, want fourth", b)
+	}
+
+	tamperedDest := t.TempDir()
+	ts := newTestServer(t, &config{harness: "none", materializeRoot: tamperedDest, verifyPolicy: sign.PolicyNever})
+	tampered := newResp()
+	tampered.Resources["docs/c.md"] = "thirD" // one byte altered after the hash was fixed
+	out = ts.deliverLoadArtifact(tampered, deliverOpts{harness: "none", destination: tamperedDest})
+	m = out.(map[string]any)
+	if code, _ := m["code"].(string); code != "materialize.content_hash_mismatch" {
+		t.Errorf("code = %v, want materialize.content_hash_mismatch", m["code"])
+	}
+	if entries, _ := os.ReadDir(tamperedDest); len(entries) != 0 {
+		t.Errorf("tampered bundle left files in destination: %v", entries)
+	}
+}

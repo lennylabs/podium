@@ -10,19 +10,24 @@ import (
 
 // spec: §7.5.3, §14.11 — the lock file pins each artifact's content_hash so the
 // committed lock captures reproducible (id, version, content_hash) triples.
-// contentHashFor hashes the served content bytes (a skill's frontmatter+body
-// when present) plus resources in sorted key order, in the "sha256:<hex>" form.
+// contentHashFor hashes the manifest bytes, then the SKILL.md bytes when the
+// artifact carries one, then every resource in sorted key order, in the
+// "sha256:<hex>" form.
 func TestContentHashFor_SkillBytesAndResources(t *testing.T) {
 	t.Parallel()
+	art := []byte("---\ntype: skill\n---")
 	skill := []byte("---\nname: pay\n---\nbody")
 	rec := materialRecord{
-		ID:         "finance/ap/pay-invoice",
-		SkillBytes: skill,
-		Resources:  map[string][]byte{"ref.md": []byte("R"), "a.md": []byte("A")},
+		ID:            "finance/ap/pay-invoice",
+		ArtifactBytes: art,
+		SkillBytes:    skill,
+		Resources:     map[string][]byte{"ref.md": []byte("R"), "a.md": []byte("A")},
 	}
 	got := contentHashFor(rec)
-	// Resources contribute in sorted key order: a.md, then ref.md.
+	// The manifest leads, the SKILL.md bytes follow, and resources contribute in
+	// sorted key order: a.md, then ref.md.
 	want := "sha256:" + version.ContentHash(
+		art,
 		skill,
 		[]byte("a.md"), []byte("A"),
 		[]byte("ref.md"), []byte("R"),
@@ -35,9 +40,9 @@ func TestContentHashFor_SkillBytesAndResources(t *testing.T) {
 	}
 }
 
-// When SkillBytes is empty the artifact frontmatter bytes are hashed instead.
-// spec: §7.5.3.
-func TestContentHashFor_FallsBackToArtifactBytes(t *testing.T) {
+// An artifact with no SKILL.md contributes no bytes for that slot, so the
+// digest is the one over the manifest bytes alone. spec: §7.5.3.
+func TestContentHashFor_NoSkillHashesManifestAlone(t *testing.T) {
 	t.Parallel()
 	art := []byte("---\ntype: agent\n---")
 	rec := materialRecord{ID: "x", ArtifactBytes: art}

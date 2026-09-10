@@ -419,27 +419,15 @@ func lockContentHash(rec materialRecord) string {
 	return contentHashFor(rec)
 }
 
-// contentHashFor computes the §7.5.3 content_hash for a materialized record.
-// It hashes the served content bytes (a skill's frontmatter+body when present,
-// otherwise the artifact frontmatter) followed by each large resource in sorted
-// key order, so the digest is deterministic across runs. The result is the
-// spec's "sha256:<hex>" form. spec: §7.5.3, §14.11.
+// contentHashFor computes the §7.5.3 content_hash for a filesystem-source
+// record from its served bytes, through version.CanonicalContentHash so the
+// registry's ingest and this consumer cannot compute it differently (§4.6,
+// §11). The record supplies all three slots: the manifest bytes, the SKILL.md
+// bytes when the artifact carries one, and every bundled resource, inline and
+// large alike. The result carries the spec's "sha256:<hex>" prefix, which
+// CanonicalContentHash omits. spec: §4.7.6, §7.5.3, §14.11.
 func contentHashFor(rec materialRecord) string {
-	var parts [][]byte
-	if len(rec.SkillBytes) > 0 {
-		parts = append(parts, rec.SkillBytes)
-	} else {
-		parts = append(parts, rec.ArtifactBytes)
-	}
-	keys := make([]string, 0, len(rec.Resources))
-	for k := range rec.Resources {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		parts = append(parts, []byte(k), rec.Resources[k])
-	}
-	return "sha256:" + version.ContentHash(parts...)
+	return "sha256:" + version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
 }
 
 // offlineFirstNoop builds the §7.4 offline-first result for a sync whose
@@ -581,35 +569,43 @@ func lockMergeKinds(lock *LockFile) map[string]string {
 }
 
 // lockChanged reports whether the new lock's materialized set differs from the
-// prior lock's: a path present in one and absent from the other, or a path whose
-// recorded content hash changed. It feeds Result.Changed and the workspace
-// workflow's $PODIUM_CHANGED. A nil prior lock (a first sync into an empty
-// target) is treated as changed whenever the new lock materialized anything, and
-// as unchanged when both are empty.
+// prior lock's: an entry present in one and absent from the other, or an entry
+// whose recorded content hash changed. Entries are compared per (artifact id,
+// materialized path) pair, so every artifact contributing to a shared file
+// participates. It feeds Result.Changed and the workspace workflow's
+// $PODIUM_CHANGED. A nil prior lock (a first sync into an empty target) is
+// treated as changed whenever the new lock materialized anything, and as
+// unchanged when both are empty.
 func lockChanged(prior, next *LockFile) bool {
-	priorHashes := lockPathHashes(prior)
-	nextHashes := lockPathHashes(next)
+	priorHashes := lockEntryHashes(prior)
+	nextHashes := lockEntryHashes(next)
 	if len(priorHashes) != len(nextHashes) {
 		return true
 	}
-	for path, hash := range nextHashes {
-		if priorHashes[path] != hash {
+	for entry, hash := range nextHashes {
+		if priorHashes[entry] != hash {
 			return true
 		}
 	}
 	return false
 }
 
-// lockPathHashes returns the materialized paths recorded in a lock, each mapped
-// to its content hash. A nil lock returns an empty map.
-func lockPathHashes(lock *LockFile) map[string]string {
+// lockEntryHashes returns the content hash recorded against each (artifact id,
+// materialized path) pair in a lock. The key carries the artifact ID because a
+// materialized path is shared whenever two artifacts config-merge or inject into
+// one file (two mcp-servers on .mcp.json, two hooks on .claude/settings.json,
+// two rules on AGENTS.md), and a path-only key kept just the last entry, so
+// editing the artifact whose entry did not survive reported no change though the
+// file was rewritten. A nil lock returns an empty map.
+// Spec: §11 (idempotent re-sync).
+func lockEntryHashes(lock *LockFile) map[string]string {
 	out := map[string]string{}
 	if lock == nil {
 		return out
 	}
 	for _, a := range lock.Artifacts {
 		if a.MaterializedPath != "" {
-			out[a.MaterializedPath] = a.ContentHash
+			out[a.ID+"\x00"+a.MaterializedPath] = a.ContentHash
 		}
 	}
 	return out
@@ -669,6 +665,22 @@ func selectRecords(scope ScopeFilter, all []materialRecord, toggles LockToggles)
 		}
 		out = kept
 	}
+	// The materialization set is returned in ascending canonical artifact ID
+	// order (§7.5), which is the order both registry sources can produce and
+	// the order the merge fold, Result.Artifacts, and the lock all inherit.
+	//
+	// It selects no artifact: a canonical-ID collision is resolved by Walk
+	// before the records arrive (pkg/registry/filesystem/walk.go), and
+	// applyOverlay replaces in place. It does decide the fold order inside a
+	// shared merge target, and there the key is not the canonical ID: mcpName
+	// keys the mcpServers entry by the artifact's name: frontmatter
+	// (pkg/adapter/layout.go), so two distinct IDs can write one key. How a
+	// shared target composes once the fragments arrive in this order is stated
+	// in §7.5. Filesystem mode previously folded in layer-precedence order and
+	// server mode in ID order; this makes both fold in ID order, which is the
+	// only order a server source can produce, since the sync manifest carries
+	// layer IDs and never the tenant's layer_order:.
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 

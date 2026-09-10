@@ -348,8 +348,8 @@ Codex consumes `AGENTS.md` for rules and now has native skill, subagent, and hoo
 | `skill` | `.agents/skills/<name>/SKILL.md` (folder per skill; note the `.agents/` root, not `.codex/`). |
 | `agent` | `.codex/agents/<name>.toml` |
 | `rule` | Injected into the root `AGENTS.md` between Podium-managed markers. |
-| `hook` | Merged into the `[hooks]` table in `.codex/config.toml`, keyed by the native event (for example `[[hooks.Stop]]`). |
-| `mcp-server` | Merged into `.codex/config.toml` under `[mcp_servers]`. |
+| `hook` | Spliced into `.codex/config.toml` between Podium-managed markers keyed by the artifact ID, so a re-sync reconciles only Podium's entries. The hook's native event names the TOML table the block lands in (for example `[[hooks.Stop]]`), and two artifacts on one event produce two separate `[[hooks.<Event>]]` blocks. |
+| `mcp-server` | Spliced into `.codex/config.toml` under `[mcp_servers]`, between Podium-managed markers keyed by the artifact ID. An entry whose name already exists in the file yields a second `[mcp_servers.<name>]` table. |
 | `command` | No project-level target. Codex custom prompts are user-scope (`~/.codex/prompts/`) and deprecated in favor of skills; exclude Codex with `target_harnesses:` or author as `type: skill`. |
 | `context` | No native concept. A `context` artifact lands at `.podium/context/<artifact-id>/`. |
 

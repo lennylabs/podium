@@ -1294,17 +1294,7 @@ func persistResources(ctx context.Context, put ResourcePutFunc, refs []store.Res
 // SHA-256 over the artifact bytes, the optional SKILL.md bytes, and
 // every bundled resource in sorted-path order. Spec §4.7.6.
 func contentHashOf(rec filesystem.ArtifactRecord) string {
-	parts := [][]byte{rec.ArtifactBytes, rec.SkillBytes}
-	keys := make([]string, 0, len(rec.Resources))
-	for k := range rec.Resources {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		parts = append(parts, []byte(k))
-		parts = append(parts, rec.Resources[k])
-	}
-	return version.ContentHash(parts...)
+	return version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
 }
 
 // edgesFor extracts cross-type dependency edges from the artifact

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **The lock file's recorded content hash across sync modes** (§11, §7.5.3, §14.11): a `podium sync` against a filesystem registry and a `podium sync` against `podium serve --standalone --layer-path` on the same directory now record the same `content_hash` for an artifact. The filesystem consumer hashed `SKILL.md` in place of the manifest for a skill, while the registry hashes the manifest, `SKILL.md`, and every bundled resource, so a frontmatter-only edit to `ARTIFACT.md` changed the materialized output while the recorded `content_hash` stood still, and the same artifact carried a different hash in each mode. Both consumers now derive the hash from the shared `version.CanonicalContentHash`. An artifact with no `SKILL.md` contributes no additional bytes and its hash is unchanged, so only a skill's recorded hash moves. The first `podium sync` after this change reports a skill-carrying target as changed, because the recorded hash moves, and it sets `PODIUM_CHANGED` for a workspace workflow gated on it.
+- **The materialization order across sync modes** (§7.5, §11): both modes now materialize the resolved set in ascending canonical artifact ID order, so config-merge fragments and inject blocks compose identically in every deployment mode and the lock's `artifacts:` list follows. A merged target that previously composed in layer order is rewritten once with the same entries in a different order, and that rewrite is not reported as a change, because the comparison reads the recorded artifact content hashes and none of them moved. Inside a shared target the order governs composition: fragments two artifacts contribute to one key of a JSON config-merge target are folded in that order and composed by value kind, and a marker-block target receives each artifact's own Podium-managed block in that order and merges no keys. In filesystem mode the composition inside a shared target can therefore differ from before, matching what server mode already did. Where two artifacts with distinct canonical IDs set the same scalar key of one JSON config-merge target, such as two `mcp-server` artifacts sharing a `name:`, the value comes from the artifact whose canonical ID sorts last, which can be the one from the lower-precedence layer where filesystem mode previously took the higher-precedence one. The first sync on this version rewrites such a target without reporting a change, so re-read merged targets after it.
+- **Change reporting over a shared materialized path** (§11): every artifact that writes into a shared materialized path now participates in the change comparison, which is keyed by artifact id together with materialized path rather than by path alone. `$PODIUM_CHANGED` is true after an edit to an artifact whose lock entry previously did not survive the per-path collapse, and a `skip_if_no_changes` command that formerly skipped that case now runs.
+
 ### Changed
 
 - `podium layer reingest` reports the ingest outcome in its exit status. It
@@ -59,6 +65,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   absence from the config file, the pass-through of a claim value with no entry,
   and the startup failure. §6.3.1 names the variable as the source of the
   `IdpGroupMapping` table and names `config.invalid_idp_group_mapping`.
+- The Codex rows of `docs/consuming/configure-your-harness.md` name the artifact
+  ID as the key Podium reconciles a `.codex/config.toml` entry by. The hook row
+  previously named the native event, which selects the TOML table the entry
+  lands in rather than identifying the entry, so a reader could expect two hook
+  artifacts on one event to merge into a single entry. Each artifact keeps its
+  own marker block, and the `mcp-server` row states the matching consequence for
+  a name already present in the file.
 
 ## [0.4.0] - 2026-09-05
 

@@ -163,6 +163,7 @@ rm -rf "$WORK"
 | S60 | An admin-defined layer's visibility narrows | standalone | none | none | Keycloak (Docker) + mkcert CA |
 | S61 | SCIM membership does not grant under trusted-headers | standalone | none | none | none |
 | S62 | A reingest that drops an artifact fails | standalone | none | none | none |
+| S63 | The two sync modes compose a shared merge target identically | solo then standalone | none | none | none |
 
 ---
 
@@ -7112,3 +7113,204 @@ container, or certificate is required.
    is not a drop.
 
 **Cleanup.** `kill "$(cat "$WORK/server.pid")"` and `rm -rf "$WORK"`.
+
+---
+
+## S63: The two sync modes compose a shared merge target identically
+
+**Goal.** Validate that a filesystem-source sync and a standalone-server sync
+over the same directory write byte-identical merged and injected files when
+two artifacts contend for one target, and that an edit to either contributor
+is reported as a change.
+
+**Covers.** The §7.5 materialization order, the §7.5.3 `artifacts:` list
+order, the §11 filesystem-to-server equivalence requirement, and the change
+comparison over a shared materialized path (§11's idempotent re-sync bullet
+over the §7.5.3 lock entries).
+
+**Why by hand.** The assertion is over the bytes of a file two artifacts wrote
+into, read side by side from two targets that were materialized through
+different registry sources. A run in which one mode orders by layer and the
+other by ID differs only inside those files, and every per-artifact file
+matches, which is what kept the divergence out of the suite.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above.
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`.
+
+2. Build a two-layer registry whose colliding pairs straddle the layers. Two
+   hooks share one event, two rules share one target, and each pair's
+   canonical IDs sort opposite to `layer_order:`. The straddle is what makes
+   the comparison non-vacuous: within one layer the filesystem walk already
+   emits alphabetically by canonical ID, which is the order the server source
+   produces globally, so a pair sitting inside one layer folds identically
+   under both modes whatever the build does. No artifact is `type: command`,
+   which is the §6.7.1 cell codex cannot translate.
+
+```bash
+mkdir -p "$WORK/reg/org-defaults" "$WORK/reg/team-finance"
+cat > "$WORK/reg/.registry-config" <<'EOF'
+multi_layer: true
+layer_order:
+  - org-defaults
+  - team-finance
+EOF
+printf 'visibility:\n  public: true\n' > "$WORK/reg/org-defaults/.layer-config"
+printf 'visibility:\n  public: true\n' > "$WORK/reg/team-finance/.layer-config"
+podium artifact scaffold --type hook --hook-event pre_tool_use \
+  --hook-action 'notify-send podium' --description "Notify on every tool call" \
+  "$WORK/reg/org-defaults/z-hooks/notify" > /dev/null
+podium artifact scaffold --type hook --hook-event pre_tool_use \
+  --hook-action 'audit-log podium' --description "Audit every tool call" \
+  "$WORK/reg/team-finance/a-hooks/audit" > /dev/null
+podium artifact scaffold --type rule --rule-mode glob --rule-globs 'src/**/*.ts' \
+  --description "Apply the org style rules" \
+  "$WORK/reg/org-defaults/z-rules/style" > /dev/null
+podium artifact scaffold --type rule --rule-mode glob --rule-globs 'src/**/*.ts' \
+  --description "Apply the finance policy rules" \
+  "$WORK/reg/team-finance/a-rules/policy" > /dev/null
+find "$WORK/reg" -name ARTIFACT.md | sed "s|$WORK/reg/||" | sort
+```
+
+   **Expect.** Four paths, `org-defaults/z-hooks/notify/ARTIFACT.md`,
+   `org-defaults/z-rules/style/ARTIFACT.md`,
+   `team-finance/a-hooks/audit/ARTIFACT.md`, and
+   `team-finance/a-rules/policy/ARTIFACT.md`. Each scaffold command supplies
+   its type-specific required flag (`--hook-event` for a hook, `--rule-globs`
+   for a glob rule), so no command blocks on a prompt reading standard input.
+
+3. Materialize the registry through the filesystem source for both harnesses.
+
+```bash
+mkdir -p "$WORK/fs-cc" "$WORK/fs-codex"
+podium sync --registry "$WORK/reg" --target "$WORK/fs-cc" --harness claude-code
+podium sync --registry "$WORK/reg" --target "$WORK/fs-codex" --harness codex
+```
+
+   **Expect.** Each run lists the four artifacts in ascending canonical ID
+   order, `a-hooks/audit`, `a-rules/policy`, `z-hooks/notify`, `z-rules/style`,
+   with the `team-finance` artifacts first even though `team-finance` is
+   second in `layer_order:`. Under `claude-code` both hooks report
+   `.claude/settings.json`; under `codex` both hooks report
+   `.codex/config.toml` and both rules report `AGENTS.md`. A listing in layer
+   order is the behavior this scenario exists to catch.
+
+4. Start a standalone server over the same directory and materialize through
+   it.
+
+```bash
+podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+  --bind 127.0.0.1:8126 > "$WORK/srv.log" 2>&1 &
+SRV=$!
+curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8126/healthz
+mkdir -p "$WORK/srv-cc" "$WORK/srv-codex"
+podium sync --registry http://127.0.0.1:8126 --target "$WORK/srv-cc" --harness claude-code
+podium sync --registry http://127.0.0.1:8126 --target "$WORK/srv-codex" --harness codex
+```
+
+   **Expect.** The health poll returns before either sync runs, and each sync
+   prints the same four artifacts in the same order as step 3, against the
+   same materialized paths.
+
+5. Compare the two targets per harness.
+
+```bash
+find "$WORK/fs-cc" -type f ! -name sync.lock | wc -l      # must be 3, not 0
+diff -r -x sync.lock "$WORK/fs-cc" "$WORK/srv-cc" && echo "IDENTICAL claude-code"
+find "$WORK/fs-codex" -type f ! -name sync.lock | wc -l   # must be 2, not 0
+diff -r -x sync.lock "$WORK/fs-codex" "$WORK/srv-codex" && echo "IDENTICAL codex"
+```
+
+   **Expect.** `3`, `IDENTICAL claude-code`, `2`, and `IDENTICAL codex`. The
+   counts run first because an empty tree compared against an empty tree also
+   reports no differences, which scores as a pass while proving nothing. The
+   lock is excluded here because its `target` and `last_synced_at` differ by
+   construction between two consumers; step 6 compares it on the fields that
+   do not.
+
+6. Compare the two locks on the fields that are not volatile, and read the
+   list order.
+
+```bash
+for h in cc codex; do
+  diff <(grep -v -e '^target:' -e '^last_synced_at:' "$WORK/fs-$h/.podium/sync.lock") \
+       <(grep -v -e '^target:' -e '^last_synced_at:' "$WORK/srv-$h/.podium/sync.lock") \
+    && echo "LOCKS IDENTICAL $h"
+  grep -e '^    - id:' -e 'materialized_path:' "$WORK/fs-$h/.podium/sync.lock"
+done
+```
+
+   **Expect.** `LOCKS IDENTICAL cc` and `LOCKS IDENTICAL codex`. Each lock
+   carries four entries in ascending `id` order, and both hooks carry an entry
+   of their own against the shared `materialized_path`
+   (`.claude/settings.json` under `claude-code`, `.codex/config.toml` under
+   `codex`), as do both rules against `AGENTS.md` under `codex`. A lock whose
+   entries are in layer order rather than ascending `id` order, or which
+   carries a single entry for a path two artifacts wrote, is the §7.5.3
+   violation this step catches.
+
+7. Read the composition inside the shared files.
+
+```bash
+cat "$WORK/fs-cc/.claude/settings.json"
+cat "$WORK/fs-codex/AGENTS.md"
+cat "$WORK/fs-codex/.codex/config.toml"
+```
+
+   **Expect.** In `.claude/settings.json` the `hooks.PreToolUse` array carries
+   the `a-hooks/audit` entry first and the `z-hooks/notify` entry second,
+   tagged by their `x-podium-id`. In `AGENTS.md` the
+   `<!-- podium:begin:a-rules/policy -->` block precedes the
+   `<!-- podium:begin:z-rules/style -->` block, and in `.codex/config.toml`
+   the `# podium:begin:a-hooks/audit` block precedes the
+   `# podium:begin:z-hooks/notify` block. Both orders are ascending canonical
+   ID rather than layer order, in both modes.
+
+8. Read the change signal through a `kind: workspace` target. No single-target
+   `podium sync` output carries it, in either the human form or `--json`, so
+   the signal is read from a `workflow.publish` command that echoes
+   `$PODIUM_CHANGED`.
+
+```bash
+mkdir -p "$WORK/proj/.podium"
+cat > "$WORK/proj/.podium/sync.yaml" <<YAML
+defaults:
+  registry: $WORK/reg
+targets:
+  - id: s63-workspace
+    kind: workspace
+    target: $WORK/proj/ws
+    harness: claude-code
+    workflow:
+      publish:
+        - sh: 'echo "changed=\$PODIUM_CHANGED"'
+YAML
+podium sync --config "$WORK/proj/.podium/sync.yaml" | tail -1
+podium sync --config "$WORK/proj/.podium/sync.yaml" | tail -1
+```
+
+   **Expect.** `changed=true` for the first run, which materialized into an
+   empty directory, then `changed=false` for the second, which wrote the same
+   tree over itself.
+
+9. Edit the hook whose lock entry the old per-path collapse discarded, and
+   re-sync. The two hooks share `.claude/settings.json`, and a comparison
+   keyed on the path alone kept the entry whose id sorts last, so an edit to
+   `a-hooks/audit` moved a hash no comparison read.
+
+```bash
+sed -i '' 's|audit-log podium|audit-log podium --verbose|' \
+  "$WORK/reg/team-finance/a-hooks/audit/ARTIFACT.md"
+podium sync --config "$WORK/proj/.podium/sync.yaml" | tail -1
+grep 'audit-log podium' "$WORK/proj/ws/.claude/settings.json"
+```
+
+   **Expect.** `changed=true`, and the merged file carries
+   `audit-log podium --verbose`. `changed=false` is the behavior this step
+   exists to catch: the file is rewritten, and a
+   `skip_if_no_changes` publish command gated on the variable skips the target
+   that changed. On Linux the edit is `sed -i` without the empty argument.
+
+**Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.

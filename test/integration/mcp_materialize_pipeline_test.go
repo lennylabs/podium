@@ -303,3 +303,68 @@ func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 		t.Errorf("large resource not materialized with decoded bytes; got tree: %v", keysOf(files))
 	}
 }
+
+// Spec: §6.6 step 2 / §4.7.6 — end to end through the real bridge: the step-2
+// gate recomputes the digest with the shared version.CanonicalContentHash, so
+// a multi-resource bundle whose served bytes are intact materializes, and the
+// same bundle with one altered resource byte is rejected with
+// materialize.content_hash_mismatch before any write.
+func TestPodiumMCP_MultiResourceContentHashRoundTrip(t *testing.T) {
+	t.Parallel()
+	fm := "---\ntype: context\n---\nbody\n"
+	resources := map[string]string{
+		"data/b.txt":  "second",
+		"data/a.txt":  "first",
+		"docs/c.md":   "third",
+		"data/aa.txt": "fourth",
+	}
+	hashed := make(map[string][]byte, len(resources))
+	for k, v := range resources {
+		hashed[k] = []byte(v)
+	}
+	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, hashed)
+
+	serve := func(served map[string]string) *httptest.Server {
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/load_artifact" {
+				b, _ := json.Marshal(map[string]any{
+					"id": "team/bundle", "version": "1.0.0", "type": "context",
+					"content_hash": hash, "frontmatter": fm, "resources": served,
+				})
+				_, _ = w.Write(b)
+				return
+			}
+			_, _ = w.Write([]byte(`{}`))
+		}))
+	}
+
+	reg := serve(resources)
+	t.Cleanup(reg.Close)
+	target := t.TempDir()
+	resp := runMCPLoad(t, reg.URL, target, "team/bundle")
+	if resp.Result.StructuredContent.Error != "" {
+		t.Fatalf("untampered bundle load failed: %s", resp.Result.StructuredContent.Error)
+	}
+	files := testharness.ReadTree(t, target)
+	for path, want := range resources {
+		if got := files["team/bundle/"+path]; got != want {
+			t.Errorf("%s = %q, want %q; tree: %v", path, got, want, keysOf(files))
+		}
+	}
+
+	tampered := make(map[string]string, len(resources))
+	for k, v := range resources {
+		tampered[k] = v
+	}
+	tampered["docs/c.md"] = "thirD" // one byte altered after the hash was fixed
+	tamperedReg := serve(tampered)
+	t.Cleanup(tamperedReg.Close)
+	tamperedTarget := t.TempDir()
+	resp = runMCPLoad(t, tamperedReg.URL, tamperedTarget, "team/bundle")
+	if !strings.Contains(resp.Result.StructuredContent.Error, "materialize.content_hash_mismatch") {
+		t.Errorf("error = %q, want materialize.content_hash_mismatch", resp.Result.StructuredContent.Error)
+	}
+	if files := testharness.ReadTree(t, tamperedTarget); len(files) != 0 {
+		t.Errorf("tampered bundle was materialized: %v", keysOf(files))
+	}
+}
