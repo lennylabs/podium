@@ -849,7 +849,13 @@ Every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` c
 
 ### 4.7.6 Version Resolution and Consistency
 
-Versions are semver-named (`major.minor.patch`), author-chosen via the manifest's `version:` field. Internally, the registry stores `(artifact_id, semver, content_hash)` triples; content_hash is the SHA-256 of the canonicalized manifest + bundled resources.
+Versions are semver-named (`major.minor.patch`), author-chosen via the manifest's `version:` field. Internally, the registry stores `(artifact_id, semver, content_hash)` triples. `content_hash` is the SHA-256 digest of the artifact's canonical serialization.
+
+A framed value is its length in bytes, encoded as an unsigned 64-bit big-endian integer, followed by the bytes themselves. The canonical serialization is the framed bytes of the artifact's `ARTIFACT.md`, then the framed bytes of its `SKILL.md`, then, for each bundled resource in ascending byte-wise order of its UTF-8 path, the framed path followed by the framed body. An artifact that carries no `SKILL.md` frames a zero-length value in that position, so an absent and an empty `SKILL.md` produce the same digest.
+
+The first framed value is the artifact's own `ARTIFACT.md` as ingested, before any `extends:` merge (§4.6). A merged serialization does not reproduce the digest, so any party that recomputes the digest for an artifact declaring `extends:` recomputes over the pre-merge bytes.
+
+The registry computes the digest at ingest, the consumer recomputes it at the §6.6 delivery check, and a workspace overlay (§6.4) computes it from the overlay package's bytes. A `podium sync` against a server source records the registry's value in the §7.5.3 lock, and a filesystem-source sync computes it over the same pre-merge bytes. The framing makes the serialization injective, so no artifact that differs in a manifest byte, in `SKILL.md`, in a resource path, or in a resource body can share a content hash with another.
 
 Pinning syntax in references (`extends:`, `delegates_to:`, `mcpServers:`):
 
