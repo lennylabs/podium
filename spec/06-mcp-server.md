@@ -409,6 +409,7 @@ The MCP server is a stdio subprocess spawned by its host. The host is responsibl
 | Visibility denial on a call                   | Return a structured error naming the unreachable resource (without leaking the layer's existence); log to the registry audit stream as `visibility.denied`. |
 | Materialization destination unwritable        | Fail the `load_artifact` call with a structured error; nothing partial is left on disk.                                                                     |
 | Signature verification failure                | Fail with `materialize.signature_invalid`; do not write to disk.                                                                                            |
+| Content hash mismatch at the §6.6 step-2 check | Fail with `materialize.content_hash_mismatch`; do not write to disk. |
 | Unknown `PODIUM_HARNESS` value                | Refuse to start; CLI lists the available adapter values.                                                                                                    |
 | Adapter cannot translate an artifact          | Fail with structured error naming the missing translation; suggest `harness: none` for raw output.                                                          |
 | Binary version mismatch with host caller      | Refuse to start; host's CLI prompts an update.                                                                                                              |
