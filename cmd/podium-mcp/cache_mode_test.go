@@ -4,12 +4,19 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/version"
 )
@@ -275,5 +282,120 @@ func TestLoadArtifactFromCache_Missing(t *testing.T) {
 	_, err := srv.loadArtifactFromCache("sha256:absent", "x")
 	if err == nil || !strings.Contains(err.Error(), "cache miss") {
 		t.Errorf("err = %v, want cache miss", err)
+	}
+}
+
+// unframedContentHash reproduces the pre-framing §4.7.6 composition: the
+// SHA-256 over the plain concatenation of the manifest bytes, the SKILL.md
+// bytes, and each resource's path and body in ascending path order, with no
+// length prefix on any part. It exists so a test can write the cache state an
+// upgraded consumer inherits from the previous binary.
+func unframedContentHash(artifactBytes, skillBytes []byte, resources map[string][]byte) string {
+	h := sha256.New()
+	h.Write(artifactBytes)
+	h.Write(skillBytes)
+	keys := make([]string, 0, len(resources))
+	for k := range resources {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		h.Write([]byte(k))
+		h.Write(resources[k])
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// Spec: §6.5, §6.6 — the resolution index is keyed by (id, version) rather
+// than by content, so an upgraded consumer whose cache still holds a
+// pre-upgrade bucket resolves that hash, hits it, and fails the step 2 check.
+// Clearing the cache directory is the documented remedy.
+// Matrix: §6.10 (materialize.content_hash_mismatch)
+func TestOfflineFirst_PreUpgradeCacheBucketRefusesTheLoad(t *testing.T) {
+	t.Parallel()
+	const fm = "---\ntype: context\nversion: 1.0.0\n---\n"
+	const body = "cached-body"
+	resources := map[string]string{"references/notes.md": "notes\n"}
+	resourceBytes := map[string][]byte{"references/notes.md": []byte("notes\n")}
+	preUpgrade := "sha256:" + unframedContentHash([]byte(fm), nil, resourceBytes)
+
+	respBody := loadArtifactJSON(t, map[string]any{
+		"id": "team/x", "type": "context", "version": "1.0.0",
+		"manifest_body": body, "frontmatter": fm, "resources": resources,
+	})
+	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(respBody))
+	}))
+	defer registry.Close()
+
+	dir := t.TempDir()
+	newServer := func(t *testing.T) (*mcpServer, *resolutionCache) {
+		t.Helper()
+		cache, err := newContentCache(dir)
+		if err != nil {
+			t.Fatalf("newContentCache: %v", err)
+		}
+		resolutions := newResolutionCache(dir)
+		return &mcpServer{
+			cfg: &config{
+				cacheDir: dir, cacheMode: "offline-first", registry: registry.URL,
+				harness: "none", verifyPolicy: sign.PolicyNever, resolutionTTL: 30 * time.Second,
+			},
+			cache:       cache,
+			resolutions: resolutions,
+			adapters:    adapter.DefaultRegistry(),
+			http:        &http.Client{},
+		}, resolutions
+	}
+
+	// A bucket and a resolution entry the previous binary would have written.
+	srv, resolutions := newServer(t)
+	if err := srv.cache.put(preUpgrade, fm, body, resources); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+	resolutions.PutVersion("team/x", "1.0.0", preUpgrade, time.Now())
+
+	out := srv.loadArtifact(map[string]any{"id": "team/x", "version": "1.0.0"})
+	m, ok := out.(map[string]any)
+	if !ok {
+		t.Fatalf("loadArtifact = %T (%v), want map", out, out)
+	}
+	if got, _ := m["error"].(string); !strings.Contains(got, "materialize.content_hash_mismatch") {
+		t.Errorf("error = %v, want materialize.content_hash_mismatch", m["error"])
+	}
+	// The index is left in place, which is why `podium cache prune` is not the
+	// remedy: the entry that resolves to the stale bucket survives it.
+	if got, hit := resolutions.Resolve("team/x", "1.0.0", time.Now(), 30*time.Second, true); !hit || got != preUpgrade {
+		t.Errorf("Resolve = %q hit=%v, want %q, true", got, hit, preUpgrade)
+	}
+	if err := resolutions.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Clearing the cache directory is the remedy: the next fetch warms a bucket
+	// under the canonical hash and the load passes the §6.6 step 2 check.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("RemoveAll: %v", err)
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	srv2, resolutions2 := newServer(t)
+	defer resolutions2.Close()
+	out2 := srv2.loadArtifact(map[string]any{"id": "team/x", "version": "1.0.0"})
+	m2, ok := out2.(map[string]any)
+	if !ok {
+		t.Fatalf("loadArtifact = %T (%v), want map", out2, out2)
+	}
+	if _, isErr := m2["error"]; isErr {
+		t.Fatalf("load after clearing the cache directory failed: %v", m2["error"])
+	}
+	if m2["manifest_body"] != body {
+		t.Errorf("manifest_body = %v, want %q", m2["manifest_body"], body)
+	}
+	want := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, resourceBytes)
+	if m2["content_hash"] != want {
+		t.Errorf("content_hash = %v, want %v", m2["content_hash"], want)
 	}
 }
