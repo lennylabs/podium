@@ -335,7 +335,7 @@ The list of canonical events grows as new harnesses introduce events that warran
 
 ## 4.4 Bundled Resources
 
-Bundled resources ship with the artifact package and are discovered implicitly from the directory: every file under the artifact's root other than `ARTIFACT.md` (and, for skills, `SKILL.md`) is a bundled resource. There is no `resources:` list in frontmatter; what's in the folder ships, and the manifest references files inline in prose.
+Bundled resources ship with the artifact package and are discovered implicitly from the directory: every file under the artifact's root other than the root `ARTIFACT.md` (and, for skills, the root `SKILL.md`) is a bundled resource, including a file whose own name or whose parent directory's name begins with a dot, and including a file named `SKILL.md` in a subdirectory of the package. Every file below a nested directory that carries its own `ARTIFACT.md` is excluded from the enclosing artifact's set. No ignore file, size threshold, or name pattern removes a file from the set; the §4.1 size caps are lint diagnostics over the set. The set is what the §4.7.6 content hash covers. There is no `resources:` list in frontmatter; what's in the folder ships, and the manifest references files inline in prose.
 
 The registry stores bundled resources content-addressed by SHA-256 in object storage; bytes are deduplicated across all artifact versions within an org's storage namespace. Presigned URLs deliver them at load time.
 
@@ -856,6 +856,12 @@ A framed value is its length in bytes, encoded as an unsigned 64-bit big-endian 
 The first framed value is the artifact's own `ARTIFACT.md` as ingested, before any `extends:` merge (§4.6). A merged serialization does not reproduce the digest, so any party that recomputes the digest for an artifact declaring `extends:` recomputes over the pre-merge bytes.
 
 The registry computes the digest at ingest, the consumer recomputes it at the §6.6 delivery check, and a workspace overlay (§6.4) computes it from the overlay package's bytes. A `podium sync` against a server source records the registry's value in the §7.5.3 lock, and a filesystem-source sync computes it over the same pre-merge bytes. The framing makes the serialization injective, so no artifact that differs in a manifest byte, in `SKILL.md`, in a resource path, or in a resource body can share a content hash with another.
+
+The bundled resources the serialization covers are the artifact's §4.4 bundled resources: every file under the artifact package's root directory, including files and directories whose names begin with a dot, other than the package root's `ARTIFACT.md` and, for a skill, the package root's `SKILL.md`, and excluding every file below a directory that carries its own `ARTIFACT.md`. A file named `SKILL.md` in a subdirectory of the package is a bundled resource. No ignore file, size threshold, or name pattern removes a file from the set. A resource's path is its slash-separated path relative to the package root.
+
+Every framed value is the bytes as ingested. The registry applies no line-ending, Unicode, whitespace, case, or byte-order-mark normalization to the manifest, to `SKILL.md`, to a resource path, or to a resource body. Paths are framed and ordered as raw UTF-8 bytes, so two paths that differ only in Unicode normal form or in letter case are distinct resources.
+
+A bundled resource's framed body is its full bytes, whether the registry stores those bytes inline on the manifest record or in object storage above the §4.1 inline cutoff.
 
 Pinning syntax in references (`extends:`, `delegates_to:`, `mcpServers:`):
 
