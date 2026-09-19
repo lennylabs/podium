@@ -1109,12 +1109,12 @@ func TestExtends_MergedDeliversRawFrontmatterForHash(t *testing.T) {
 	}
 	// The served (merged) frontmatter strips extends and folds in the parent, so
 	// it must not reproduce the stored hash...
-	if "sha256:"+version.ContentHash([]byte(r.Frontmatter)) == r.ContentHash {
+	if "sha256:"+version.CanonicalContentHash([]byte(r.Frontmatter), nil, nil) == r.ContentHash {
 		t.Error("served merged frontmatter unexpectedly reproduced the content hash")
 	}
 	// ...but the pre-merge raw_frontmatter (the child's authored ARTIFACT.md, no
 	// skill and no resources here) reproduces it exactly.
-	if got := "sha256:" + version.ContentHash([]byte(r.RawFrontmatter)); got != r.ContentHash {
+	if got := "sha256:" + version.CanonicalContentHash([]byte(r.RawFrontmatter), nil, nil); got != r.ContentHash {
 		t.Errorf("raw_frontmatter does not reproduce content hash: got %s, want %s", got, r.ContentHash)
 	}
 	if !strings.Contains(r.RawFrontmatter, "extends: "+exParentID) {
@@ -1150,12 +1150,12 @@ func TestSkill_ContentHashCoversSkillRaw(t *testing.T) {
 		t.Errorf("skill_raw is not the verbatim SKILL.md:\n got %q\nwant %q", r.SkillRaw, skillMD)
 	}
 	// The bridge recomputes the hash over (ARTIFACT.md, SKILL.md, resources).
-	if got := "sha256:" + version.ContentHash([]byte(r.Frontmatter), []byte(r.SkillRaw)); got != r.ContentHash {
+	if got := "sha256:" + version.CanonicalContentHash([]byte(r.Frontmatter), []byte(r.SkillRaw), nil); got != r.ContentHash {
 		t.Errorf("ContentHash(frontmatter, skill_raw) = %s, want stored %s", got, r.ContentHash)
 	}
 	// The prose body / ARTIFACT.md alone does not reproduce the hash, which is
 	// why skipping the check for skills left them unverified.
-	if "sha256:"+version.ContentHash([]byte(r.Frontmatter)) == r.ContentHash {
+	if "sha256:"+version.CanonicalContentHash([]byte(r.Frontmatter), nil, nil) == r.ContentHash {
 		t.Error("hash reproduced without skill_raw; the SKILL.md is not actually covered")
 	}
 }

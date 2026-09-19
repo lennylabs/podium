@@ -5,9 +5,11 @@ package version
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -246,37 +248,54 @@ func less(a, b Pin) bool {
 }
 
 // CanonicalContentHash returns the §4.7.6 content hash of one artifact: the
-// digest over its manifest bytes, its SKILL.md bytes when it carries one, and
-// every bundled resource in sorted-path order. The digest carries no "sha256:"
-// prefix; a caller that stores or serves the value adds one.
+// SHA-256 digest over the framed manifest bytes, the framed SKILL.md bytes, and
+// each bundled resource's framed path and framed body in ascending path order.
+// A framed value is its length as an unsigned 64-bit big-endian integer
+// followed by its bytes. The digest carries no "sha256:" prefix; a caller that
+// stores or serves the value adds one.
 //
-// It exists so the registry and the filesystem consumer cannot compute the hash
-// differently. They did: the filesystem path hashed SKILL.md *instead of* the
-// manifest for a skill, so a frontmatter-only edit left the lock's content_hash
-// unmoved while the materialized output changed, and the same artifact hashed
-// differently in the two deployment modes, which §11 requires to agree.
+// The framing is what makes the serialization injective. Without it the digest
+// is a function of the concatenation of the parts, so a byte moved across a
+// part boundary leaves it unchanged and a resource named "ab" with body "c"
+// hashes the same as one named "a" with body "bc". Every place the digest
+// stands in for the artifact under an independent attestation then stops
+// binding the bytes: the §4.7.9 signature envelope is produced over the hash at
+// ingest and verified over the served hash, so a re-partitioned delivery would
+// carry a valid signature from the legitimate signer; an @sha256: pin resolves
+// against the stored value; and the §7.5.3 lock records it. The §6.6 step-2
+// gate is where a consumer recomputes this value from the served bytes.
 //
-// An absent SKILL.md contributes no bytes, so a non-skill artifact hashes the
-// same under this function as it did under either of the two it replaced.
+// It also exists so the registry and the filesystem consumer cannot compute the
+// hash differently. They did: the filesystem path hashed SKILL.md instead of
+// the manifest for a skill, so a frontmatter-only edit left the lock's
+// content_hash unmoved while the materialized output changed.
+//
+// An absent SKILL.md frames a zero-length value, so an absent and an empty
+// SKILL.md hash alike. That is deliberate: ingest passes a nil SKILL.md slot
+// while the consumer passes the wire's omitempty skill_raw as a non-nil empty
+// slice for the same artifact, and manifest parsing refuses input with no
+// frontmatter, so no stored artifact carries a zero-byte SKILL.md.
 func CanonicalContentHash(artifactBytes, skillBytes []byte, resources map[string][]byte) string {
-	parts := [][]byte{artifactBytes, skillBytes}
+	h := sha256.New()
+	writeFramed(h, artifactBytes)
+	writeFramed(h, skillBytes)
 	keys := make([]string, 0, len(resources))
 	for k := range resources {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		parts = append(parts, []byte(k), resources[k])
-	}
-	return ContentHash(parts...)
-}
-
-// ContentHash returns the SHA-256 hex digest of the canonicalized bytes.
-// Spec §4.7 invariant: ingest is keyed by this hash.
-func ContentHash(bytes ...[]byte) string {
-	h := sha256.New()
-	for _, b := range bytes {
-		_, _ = h.Write(b)
+		writeFramed(h, []byte(k))
+		writeFramed(h, resources[k])
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// writeFramed writes v's length as an unsigned 64-bit big-endian integer
+// followed by v itself (§4.7.6). A hash never fails a write.
+func writeFramed(w io.Writer, v []byte) {
+	var n [8]byte
+	binary.BigEndian.PutUint64(n[:], uint64(len(v)))
+	_, _ = w.Write(n[:])
+	_, _ = w.Write(v)
 }

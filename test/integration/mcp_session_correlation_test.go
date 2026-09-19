@@ -109,7 +109,7 @@ func TestPodiumMCP_SessionPinsLatestEndToEnd(t *testing.T) {
 			"\ndescription: A reusable finance context for the team.\nsensitivity: low\n---\n"
 		if err := st.PutManifest(context.Background(), store.ManifestRecord{
 			TenantID: "default", ArtifactID: "finance/a", Version: ver,
-			ContentHash: "sha256:" + version.ContentHash([]byte(fm)), Type: "context",
+			ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil), Type: "context",
 			Sensitivity: "low", Layer: "L", IngestedAt: at, Frontmatter: []byte(fm),
 		}); err != nil {
 			t.Fatalf("PutManifest %s: %v", ver, err)

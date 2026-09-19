@@ -110,7 +110,7 @@ func TestLoadArtifactFromCache_SkillRawRoundTrip(t *testing.T) {
 	skillRaw := "---\nname: runbook\ndescription: A runbook\n---\n\n# runbook\n\nbody\n"
 	// The registry keys ingest by ContentHash(ARTIFACT.md, SKILL.md, …) with
 	// SKILL.md in slot 1 (verifyContentHash mirrors this).
-	hash := "sha256:" + version.ContentHash([]byte(frontmatter), []byte(skillRaw))
+	hash := "sha256:" + version.CanonicalContentHash([]byte(frontmatter), []byte(skillRaw), nil)
 
 	if err := cache.put(hash, frontmatter, body, nil); err != nil {
 		t.Fatalf("put: %v", err)
@@ -150,7 +150,7 @@ func TestVerifyContentHash_CacheServedSkillWithoutSkillRawFails(t *testing.T) {
 	}
 	frontmatter := "---\ntype: skill\nversion: 0.1.0\n---\n\nbody\n"
 	skillRaw := "---\nname: x\ndescription: x\n---\n\n# x\n"
-	hash := "sha256:" + version.ContentHash([]byte(frontmatter), []byte(skillRaw))
+	hash := "sha256:" + version.CanonicalContentHash([]byte(frontmatter), []byte(skillRaw), nil)
 
 	// Store WITHOUT putExtras to model the pre-fix cache layout.
 	if err := cache.put(hash, frontmatter, "body", nil); err != nil {
@@ -181,7 +181,7 @@ func TestEnforceSignaturePolicy_CacheServedSignedSkill(t *testing.T) {
 	}
 	frontmatter := "---\ntype: skill\nversion: 0.1.0\nsensitivity: high\n---\n\nbody\n"
 	skillRaw := "---\nname: signed\ndescription: signed\n---\n\n# signed\n"
-	hash := "sha256:" + version.ContentHash([]byte(frontmatter), []byte(skillRaw))
+	hash := "sha256:" + version.CanonicalContentHash([]byte(frontmatter), []byte(skillRaw), nil)
 
 	// Registry-managed signer over the canonical hash, mirroring ingest.
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
@@ -242,7 +242,7 @@ func TestEnforceSignaturePolicy_CacheServedHighSensitivityUnsignedRefused(t *tes
 	}
 	// Frontmatter declares high sensitivity; the bucket stores no signature.
 	frontmatter := "---\ntype: context\nversion: 1.0.0\nsensitivity: high\n---\n\nbody\n"
-	hash := "sha256:" + version.ContentHash([]byte(frontmatter))
+	hash := "sha256:" + version.CanonicalContentHash([]byte(frontmatter), nil, nil)
 	if err := cache.put(hash, frontmatter, "", nil); err != nil {
 		t.Fatalf("put: %v", err)
 	}

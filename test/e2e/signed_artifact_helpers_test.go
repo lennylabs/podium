@@ -123,7 +123,7 @@ func newSignedArtifactFixture(t *testing.T, spec signedArtifactSpec) *signedArti
 	// ARTIFACT.md bytes in slot 0, an empty skill_raw slot in slot 1. This
 	// reproduces the registry's contentHashOf, which the consumer's
 	// verifyContentHash recomputes (§6.6 step 2).
-	contentHash := "sha256:" + version.ContentHash([]byte(fm), []byte(""))
+	contentHash := "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(""), nil)
 
 	signer := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub, KeyID: spec.KeyID}
 	envelope, err := signer.Sign(context.Background(), contentHash)

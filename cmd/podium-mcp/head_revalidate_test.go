@@ -18,7 +18,7 @@ import (
 func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
 	t.Parallel()
 	const fm = "---\ntype: context\n---\n"
-	hash := "sha256:" + version.ContentHash([]byte(fm), nil)
+	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil)
 	var gets, heads int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -71,7 +71,7 @@ func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
 func TestLoadArtifact_AlwaysRevalidate_HeadMismatchFullFetches(t *testing.T) {
 	t.Parallel()
 	const cachedFM = "---\ntype: context\nversion: 1.0.0\n---\n"
-	cachedHash := "sha256:" + version.ContentHash([]byte(cachedFM), nil)
+	cachedHash := "sha256:" + version.CanonicalContentHash([]byte(cachedFM), nil, nil)
 	respBody := loadArtifactJSON(t, map[string]any{
 		"id": "team/x", "type": "context", "version": "2.0.0",
 		"manifest_body": "fresh-body", "frontmatter": "---\ntype: context\nversion: 2.0.0\n---\n",

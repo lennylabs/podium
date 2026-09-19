@@ -30,7 +30,7 @@ func mbStubRegistry(t *testing.T, id, artifactMD string, status int) (*httptest.
 	t.Helper()
 	sum := sha256.Sum256([]byte(artifactMD))
 	key := hex.EncodeToString(sum[:])
-	contentHash := "sha256:" + version.ContentHash([]byte(artifactMD))
+	contentHash := "sha256:" + version.CanonicalContentHash([]byte(artifactMD), nil, nil)
 	var bodyHits int32
 
 	mux := http.NewServeMux()

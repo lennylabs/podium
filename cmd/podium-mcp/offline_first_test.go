@@ -21,7 +21,7 @@ import (
 func TestLoadArtifact_OfflineFirst_StaleLatestServedFromCache(t *testing.T) {
 	t.Parallel()
 	const fm = "---\ntype: context\n---\n"
-	hash := "sha256:" + version.ContentHash([]byte(fm), nil)
+	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil)
 	var calls int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

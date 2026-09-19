@@ -19,34 +19,21 @@ import (
 func loadArtifactJSON(t *testing.T, fields map[string]any) string {
 	t.Helper()
 	fm, _ := fields["frontmatter"].(string)
-	parts := [][]byte{[]byte(fm), nil}
+	var resources map[string][]byte
 	if res, ok := fields["resources"].(map[string]string); ok {
-		keys := make([]string, 0, len(res))
-		for k := range res {
-			keys = append(keys, k)
-		}
-		sortStrings(keys)
-		for _, k := range keys {
-			parts = append(parts, []byte(k), []byte(res[k]))
+		resources = make(map[string][]byte, len(res))
+		for k, v := range res {
+			resources[k] = []byte(v)
 		}
 	}
 	if _, set := fields["content_hash"]; !set {
-		fields["content_hash"] = "sha256:" + version.ContentHash(parts...)
+		fields["content_hash"] = "sha256:" + version.CanonicalContentHash([]byte(fm), nil, resources)
 	}
 	b, err := json.Marshal(fields)
 	if err != nil {
 		t.Fatalf("marshal stub response: %v", err)
 	}
 	return string(b)
-}
-
-// sortStrings is a tiny dependency-free sort for the test helper.
-func sortStrings(s []string) {
-	for i := 1; i < len(s); i++ {
-		for j := i; j > 0 && s[j-1] > s[j]; j-- {
-			s[j-1], s[j] = s[j], s[j-1]
-		}
-	}
 }
 
 func newTestServer(t *testing.T, cfg *config) *mcpServer {

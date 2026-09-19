@@ -26,12 +26,8 @@ func TestContentHashFor_SkillBytesAndResources(t *testing.T) {
 	got := contentHashFor(rec)
 	// The manifest leads, the SKILL.md bytes follow, and resources contribute in
 	// sorted key order: a.md, then ref.md.
-	want := "sha256:" + version.ContentHash(
-		art,
-		skill,
-		[]byte("a.md"), []byte("A"),
-		[]byte("ref.md"), []byte("R"),
-	)
+	want := "sha256:" + version.CanonicalContentHash(art, skill,
+		map[string][]byte{"a.md": []byte("A"), "ref.md": []byte("R")})
 	if got != want {
 		t.Errorf("contentHashFor = %q, want %q", got, want)
 	}
@@ -40,14 +36,16 @@ func TestContentHashFor_SkillBytesAndResources(t *testing.T) {
 	}
 }
 
-// An artifact with no SKILL.md contributes no bytes for that slot, so the
-// digest is the one over the manifest bytes alone. spec: §7.5.3.
-func TestContentHashFor_NoSkillHashesManifestAlone(t *testing.T) {
+// An artifact with no SKILL.md frames a zero-length value in that slot, so the
+// digest is the §4.7.6 canonical one over the manifest with a nil SKILL.md and
+// no resources rather than a digest over the manifest bytes alone. spec:
+// §7.5.3.
+func TestContentHashFor_NoSkillFramesAnEmptySkillSlot(t *testing.T) {
 	t.Parallel()
 	art := []byte("---\ntype: agent\n---")
 	rec := materialRecord{ID: "x", ArtifactBytes: art}
 	got := contentHashFor(rec)
-	want := "sha256:" + version.ContentHash(art)
+	want := "sha256:" + version.CanonicalContentHash(art, nil, nil)
 	if got != want {
 		t.Errorf("contentHashFor = %q, want %q", got, want)
 	}

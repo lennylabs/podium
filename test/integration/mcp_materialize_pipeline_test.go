@@ -95,7 +95,7 @@ func TestPodiumMCP_SkillContentHashVerifies(t *testing.T) {
 	t.Parallel()
 	fm := "---\ntype: skill\n---\n"
 	skillRaw := "---\nname: demo\ndescription: a demo skill\n---\nskill prose\n"
-	hash := "sha256:" + version.ContentHash([]byte(fm), []byte(skillRaw))
+	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(skillRaw), nil)
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/load_artifact" {
 			b, _ := json.Marshal(map[string]any{
@@ -127,7 +127,7 @@ func TestPodiumMCP_SkillTamperedSkillRawRejected(t *testing.T) {
 	t.Parallel()
 	fm := "---\ntype: skill\n---\n"
 	skillRaw := "---\nname: demo\ndescription: a demo skill\n---\nskill prose\n"
-	hash := "sha256:" + version.ContentHash([]byte(fm), []byte(skillRaw))
+	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(skillRaw), nil)
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/load_artifact" {
 			b, _ := json.Marshal(map[string]any{
@@ -161,7 +161,7 @@ func TestPodiumMCP_MergedManifestContentHashVerifies(t *testing.T) {
 	t.Parallel()
 	raw := "---\ntype: context\nextends: shared/parent@1.x\n---\nbody"
 	served := "---\ntype: context\n---\nbody" // re-serialized, parent stripped
-	hash := "sha256:" + version.ContentHash([]byte(raw))
+	hash := "sha256:" + version.CanonicalContentHash([]byte(raw), nil, nil)
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/load_artifact" {
 			b, _ := json.Marshal(map[string]any{
@@ -242,7 +242,7 @@ func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 	fm := "---\ntype: context\n---\n"
 	// Artifact-level hash over frontmatter + the (sorted) bundled resource,
 	// matching the registry's canonicalization.
-	artHash := "sha256:" + version.ContentHash([]byte(fm), nil, []byte("data/big.bin"), blob)
+	artHash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"data/big.bin": blob})
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/load_artifact" {
 			b, _ := json.Marshal(map[string]any{

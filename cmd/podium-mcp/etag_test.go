@@ -20,7 +20,7 @@ import (
 func TestLoadArtifact_SendsIfNoneMatchAndServes304FromCache(t *testing.T) {
 	t.Parallel()
 	const fm = "---\ntype: context\n---\n"
-	hash := "sha256:" + version.ContentHash([]byte(fm), nil)
+	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil)
 
 	var sawIfNoneMatch atomic.Value
 	sawIfNoneMatch.Store("")
@@ -75,9 +75,9 @@ func TestLoadArtifact_SendsIfNoneMatchAndServes304FromCache(t *testing.T) {
 func TestLoadArtifact_ConditionalGET200ServesFreshBody(t *testing.T) {
 	t.Parallel()
 	const cachedFM = "---\ntype: context\nversion: 1.0.0\n---\n"
-	cachedHash := "sha256:" + version.ContentHash([]byte(cachedFM), nil)
+	cachedHash := "sha256:" + version.CanonicalContentHash([]byte(cachedFM), nil, nil)
 	const freshFM = "---\ntype: context\nversion: 2.0.0\n---\n"
-	freshHash := "sha256:" + version.ContentHash([]byte(freshFM), nil)
+	freshHash := "sha256:" + version.CanonicalContentHash([]byte(freshFM), nil, nil)
 	respBody := loadArtifactJSON(t, map[string]any{
 		"id": "team/x", "type": "context", "version": "2.0.0",
 		"content_hash": freshHash, "manifest_body": "fresh-body", "frontmatter": freshFM,

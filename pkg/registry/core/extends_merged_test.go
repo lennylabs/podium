@@ -90,11 +90,11 @@ func TestLoadArtifact_MergedDeliversRawFrontmatter(t *testing.T) {
 		t.Fatal("RawFrontmatter empty for a merged manifest, consumer cannot reproduce the hash")
 	}
 	// The served (merged) frontmatter must not reproduce the hash...
-	if "sha256:"+version.ContentHash(got.Frontmatter) == got.ContentHash {
+	if "sha256:"+version.CanonicalContentHash(got.Frontmatter, nil, nil) == got.ContentHash {
 		t.Error("served merged Frontmatter unexpectedly reproduced the content hash")
 	}
 	// ...but the pre-merge RawFrontmatter (no skill, no resources here) must.
-	if recomputed := "sha256:" + version.ContentHash(got.RawFrontmatter); recomputed != got.ContentHash {
+	if recomputed := "sha256:" + version.CanonicalContentHash(got.RawFrontmatter, nil, nil); recomputed != got.ContentHash {
 		t.Errorf("RawFrontmatter does not reproduce content hash: got %s, want %s", recomputed, got.ContentHash)
 	}
 }

@@ -73,7 +73,7 @@ func fixtureResp(id, frontmatter string) loadArtifactResponse {
 		Type:        "context",
 		Version:     "1.0.0",
 		Frontmatter: frontmatter,
-		ContentHash: "sha256:" + version.ContentHash([]byte(frontmatter)),
+		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(frontmatter), nil, nil),
 	}
 }
 
@@ -235,7 +235,7 @@ func TestDeliver_TamperedInlineResourceRejected(t *testing.T) {
 		ID: "team/x", Type: "context", Version: "1.0.0", Frontmatter: fm,
 		Resources: map[string]string{"data/a.txt": "original"},
 	}
-	resp.ContentHash = "sha256:" + version.ContentHash([]byte(fm), nil, []byte("data/a.txt"), []byte("original"))
+	resp.ContentHash = "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"data/a.txt": []byte("original")})
 	// Tamper the resource after the hash was fixed.
 	resp.Resources["data/a.txt"] = "tampered"
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
@@ -256,7 +256,7 @@ func TestDeliver_ContentHashMatchAccepts(t *testing.T) {
 		ID: "team/x", Type: "context", Version: "1.0.0", Frontmatter: fm,
 		Resources: map[string]string{"data/a.txt": "hello"},
 	}
-	resp.ContentHash = "sha256:" + version.ContentHash([]byte(fm), nil, []byte("data/a.txt"), []byte("hello"))
+	resp.ContentHash = "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"data/a.txt": []byte("hello")})
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	if _, isErr := m["error"]; isErr {
@@ -282,7 +282,7 @@ func TestDeliver_SkillVerifiesContentHash(t *testing.T) {
 		Frontmatter:  fm,
 		SkillRaw:     skillRaw,
 		ManifestBody: "skill prose",
-		ContentHash:  "sha256:" + version.ContentHash([]byte(fm), []byte(skillRaw)),
+		ContentHash:  "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(skillRaw), nil),
 	}
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
@@ -306,7 +306,7 @@ func TestDeliver_SkillTamperedSkillRawRejected(t *testing.T) {
 		Frontmatter:  fm,
 		SkillRaw:     skillRaw,
 		ManifestBody: "skill prose",
-		ContentHash:  "sha256:" + version.ContentHash([]byte(fm), []byte(skillRaw)),
+		ContentHash:  "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(skillRaw), nil),
 	}
 	// Tamper the SKILL.md after the hash was fixed.
 	resp.SkillRaw = skillRaw + "\ninjected"
@@ -334,7 +334,7 @@ func TestDeliver_MergedManifestVerifiesContentHash(t *testing.T) {
 		Frontmatter:    "---\ntype: context\n---\nbody", // re-serialized, parent stripped
 		RawFrontmatter: raw,
 		ManifestMerged: true,
-		ContentHash:    "sha256:" + version.ContentHash([]byte(raw)),
+		ContentHash:    "sha256:" + version.CanonicalContentHash([]byte(raw), nil, nil),
 	}
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
@@ -356,7 +356,7 @@ func TestDeliver_MergedManifestTamperedRejected(t *testing.T) {
 		Frontmatter:    "---\ntype: context\n---\nbody",
 		RawFrontmatter: raw,
 		ManifestMerged: true,
-		ContentHash:    "sha256:" + version.ContentHash([]byte(raw)),
+		ContentHash:    "sha256:" + version.CanonicalContentHash([]byte(raw), nil, nil),
 	}
 	// Tamper the pre-merge bytes after the hash was fixed.
 	resp.RawFrontmatter = raw + "\ntampered"
@@ -423,7 +423,7 @@ func TestDeliver_Base64InlineResourceDecoded(t *testing.T) {
 		Resources:    map[string]string{"bin/blob": enc},
 		ResourcesB64: true,
 		// content_hash is over the DECODED bytes, matching the registry.
-		ContentHash: "sha256:" + version.ContentHash([]byte(fm), nil, []byte("bin/blob"), raw),
+		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"bin/blob": raw}),
 	}
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
