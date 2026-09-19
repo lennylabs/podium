@@ -7,6 +7,7 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // loadArtifactFromOverlay should return a load_artifact-shaped map
@@ -45,8 +46,16 @@ func TestLoadArtifactFromOverlay_ReturnsLayerOverlay(t *testing.T) {
 	if m["layer"] != "overlay" {
 		t.Errorf("layer = %v, want overlay", m["layer"])
 	}
-	if m["content_hash"] == "" {
-		t.Errorf("content_hash empty")
+	// Spec: §4.7.6 — the overlay serves the canonical hash over the whole
+	// package, the value the registry would store for the same bytes.
+	want := "sha256:" + version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
+	if m["content_hash"] != want {
+		t.Errorf("content_hash = %v, want %v", m["content_hash"], want)
+	}
+	// Spec: §6.5 — the overlay writes no content-cache bucket, so the
+	// registry-served path is the single writer of that key.
+	if s.cache.has(want) {
+		t.Errorf("overlay wrote a content-cache bucket under %s", want)
 	}
 }
 

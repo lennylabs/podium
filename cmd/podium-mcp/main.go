@@ -1834,12 +1834,17 @@ func argString(args map[string]any, key string) string {
 }
 
 // loadArtifactFromOverlay produces a load_artifact response from a
-// workspace overlay record, bypassing the registry per §6.4. The
-// content hash is computed from the artifact bytes so the response
-// shape matches the registry's.
+// workspace overlay record, bypassing the registry per §6.4. The served
+// content hash is the §4.7.6 canonical hash over the whole overlay
+// package, computed the way the registry computes it. The overlay
+// populates no §6.5 content cache, so the registry-served path stays the
+// single writer of a bucket under that key.
 func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args map[string]any) any {
-	hash := sha256.Sum256(rec.ArtifactBytes)
-	contentHash := "sha256:" + hex.EncodeToString(hash[:])
+	// §4.7.6: the overlay's served content_hash is the canonical serialization
+	// of the whole package, the same value the registry would store for it, so
+	// it moves when SKILL.md or a bundled resource changes and a promoted
+	// overlay names the package by the digest the registry names it by.
+	contentHash := "sha256:" + version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
 
 	resp := loadArtifactResponse{
 		ID:          rec.ID,
@@ -1857,9 +1862,6 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 	// matching the registry-served path (deliverLoadArtifact), so an overlay
 	// artifact's audit_redact directive is honored on the local sink too.
 	s.auditLoadArtifact(resp.ID, resp.Frontmatter)
-	if err := s.cache.put(contentHash, resp.Frontmatter, resp.ManifestBody, resp.Resources); err != nil {
-		return errorResult("cache: " + err.Error())
-	}
 	materialized := []string{}
 	var warnings []string
 	root := destFromArgs(args)
