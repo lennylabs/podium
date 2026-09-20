@@ -396,3 +396,40 @@ func TestWalk_ResolveExtendsFailsClosedOnAnAnchoredReference(t *testing.T) {
 		t.Errorf("a failed walk returned records: %v", idsOf(got))
 	}
 }
+
+// Spec: §4.6 / §4.7.6 — the resolver rewrites ArtifactBytes with the merged,
+// parent-hidden re-serialization and leaves AuthoredBytes as read from disk,
+// so the §4.7.6 digest is computed over the bytes ingest stored while
+// materialization still reads the merged form.
+func TestResolveExtends_KeepsAuthoredBytes(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	parent := "---\ntype: context\nversion: 1.0.0\nname: Base\ndescription: parent desc\n---\n\nParent body.\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child desc\nextends: acme/base\n---\n\nChild body.\n"
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
+		testharness.WriteTreeOption{Path: "team/acme/base/ARTIFACT.md", Content: parent},
+		testharness.WriteTreeOption{Path: "team/acme/child/ARTIFACT.md", Content: child},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	derived := recByID(t, got, "acme/child")
+	if string(derived.AuthoredBytes) != child {
+		t.Errorf("AuthoredBytes = %q, want the authored ARTIFACT.md %q", derived.AuthoredBytes, child)
+	}
+	if string(derived.ArtifactBytes) == child {
+		t.Error("ArtifactBytes still holds the authored bytes; the merge did not run")
+	}
+	// A record that declares no extends: carries the same bytes in both fields,
+	// so a composer reads AuthoredBytes with no fallback.
+	base := recByID(t, got, "acme/base")
+	if string(base.AuthoredBytes) != string(base.ArtifactBytes) {
+		t.Errorf("non-extends record: AuthoredBytes = %q, ArtifactBytes = %q", base.AuthoredBytes, base.ArtifactBytes)
+	}
+}

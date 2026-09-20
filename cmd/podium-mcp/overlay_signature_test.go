@@ -46,6 +46,8 @@ func TestLoadArtifactFromOverlay_PolicyAlwaysStillAllowsOverlay(t *testing.T) {
 		ID: "personal/draft",
 		ArtifactBytes: []byte(
 			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
+		AuthoredBytes: []byte(
+			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
 		Artifact: &manifest.Artifact{
 			Type:        manifest.TypeContext,
 			Version:     "1.0.0",
@@ -106,6 +108,8 @@ func TestLoadArtifactFromOverlay_PolicyMediumAndAboveAllowsLowSensitivity(t *tes
 		ID: "personal/draft",
 		ArtifactBytes: []byte(
 			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
+		AuthoredBytes: []byte(
+			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
 		Artifact: &manifest.Artifact{
 			Type:        manifest.TypeContext,
 			Version:     "1.0.0",
@@ -136,6 +140,8 @@ func TestLoadArtifactFromOverlay_HighSensitivityAllowedOnLocalAuthor(t *testing.
 		ID: "personal/high",
 		ArtifactBytes: []byte(
 			"---\ntype: context\nversion: 1.0.0\nsensitivity: high\n---\n"),
+		AuthoredBytes: []byte(
+			"---\ntype: context\nversion: 1.0.0\nsensitivity: high\n---\n"),
 		Artifact: &manifest.Artifact{
 			Type:        manifest.TypeContext,
 			Version:     "1.0.0",
@@ -165,6 +171,7 @@ func TestLoadArtifactFromOverlay_PolicyNeverAlwaysAllows(t *testing.T) {
 	rec := &filesystem.ArtifactRecord{
 		ID:            "personal/x",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nsensitivity: high\n---\n"),
+		AuthoredBytes: []byte("---\ntype: skill\nversion: 1.0.0\nsensitivity: high\n---\n"),
 		Artifact: &manifest.Artifact{
 			Type:        manifest.TypeSkill,
 			Version:     "1.0.0",

@@ -13,7 +13,9 @@ import (
 // assembly (§13.11.3). For each record that declares extends:, it resolves
 // the parent chain, merges parent → child, and rewrites the record's
 // ArtifactBytes (extends stripped per §4.6 hidden-parent privacy) and parsed
-// Artifact in place.
+// Artifact in place. AuthoredBytes is left as loaded, because the §4.7.6
+// digest is defined over the authored ARTIFACT.md and the merged
+// re-serialization does not reproduce it.
 //
 // Two parent forms are supported, matching the server resolver:
 //

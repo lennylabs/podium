@@ -1124,6 +1124,7 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		Layer:         filesystem.Layer{ID: layerID},
 		Artifact:      a,
 		ArtifactBytes: bytes,
+		AuthoredBytes: bytes,
 		Resources:     map[string][]byte{},
 	}
 	if a.Type == manifest.TypeSkill {
@@ -1283,10 +1284,13 @@ func persistResources(ctx context.Context, put ResourcePutFunc, refs []store.Res
 }
 
 // contentHashOf computes the canonical content hash for an artifact:
-// SHA-256 over the artifact bytes, the optional SKILL.md bytes, and
-// every bundled resource in sorted-path order. Spec §4.7.6.
+// SHA-256 over the authored ARTIFACT.md bytes, the optional SKILL.md bytes,
+// and every bundled resource in sorted-path order. This walk does not resolve
+// extends:, so AuthoredBytes and ArtifactBytes hold the same bytes here; the
+// field names the digest's input so every composer reads one field. Spec
+// §4.7.6.
 func contentHashOf(rec filesystem.ArtifactRecord) string {
-	return version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
+	return version.CanonicalContentHash(rec.AuthoredBytes, rec.SkillBytes, rec.Resources)
 }
 
 // edgesFor extracts cross-type dependency edges from the artifact

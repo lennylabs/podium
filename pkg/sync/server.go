@@ -131,6 +131,7 @@ func fetchServerRecord(ctx context.Context, client *http.Client, base, token, id
 		LayerID:       layerID,
 		ContentHash:   resp.ContentHash,
 		ArtifactBytes: []byte(resp.Frontmatter),
+		AuthoredBytes: []byte(resp.Frontmatter),
 		Resources:     resources,
 	}
 	// Parse the served frontmatter so the §4.3 target_harnesses gate runs.

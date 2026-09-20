@@ -125,6 +125,13 @@ type materialRecord struct {
 	ArtifactBytes []byte
 	SkillBytes    []byte
 	Resources     map[string][]byte
+	// AuthoredBytes is the filesystem source's hashing input: the authored
+	// ARTIFACT.md as read from disk, before the extends: resolver rewrites
+	// ArtifactBytes with the merged, parent-hidden re-serialization (§4.6).
+	// contentHashFor reads it so this consumer and ingest hash the same bytes
+	// for an extends: child (§4.7.6). The server source copies the served
+	// frontmatter into it.
+	AuthoredBytes []byte
 	// ContentHash is the registry's authoritative §6.6 content hash for a
 	// server-source record, decoded from the /v1/load_artifact response. The
 	// lock pins it verbatim so the committed (id, version, content_hash) triple
@@ -411,7 +418,8 @@ func stripHarnessConfigPrefix(target string, files []adapter.File) {
 // (decoded from /v1/load_artifact), used verbatim so the committed lock matches
 // the registry's system-of-record hash even when an extends-merged manifest's
 // served bytes no longer reproduce it (§4.6). A filesystem source has no
-// recorded hash, so it is computed from the served bytes. spec: §14.11, §7.5.3.
+// recorded hash, so it is computed from the authored bytes.
+// spec: §14.11, §7.5.3.
 func lockContentHash(rec materialRecord) string {
 	if rec.ContentHash != "" {
 		return rec.ContentHash
@@ -420,14 +428,15 @@ func lockContentHash(rec materialRecord) string {
 }
 
 // contentHashFor computes the §7.5.3 content_hash for a filesystem-source
-// record from its served bytes, through version.CanonicalContentHash so the
-// registry's ingest and this consumer cannot compute it differently (§4.6,
-// §11). The record supplies all three slots: the manifest bytes, the SKILL.md
-// bytes when the artifact carries one, and every bundled resource, inline and
-// large alike. The result carries the spec's "sha256:<hex>" prefix, which
+// record over the authored ARTIFACT.md bytes rather than the merged form the
+// extends: resolver writes into ArtifactBytes, so this consumer, ingest, and
+// the §6.6 check hash the same bytes for an extends: child (§4.7.6). The
+// record supplies the other slots as before: the SKILL.md bytes when the
+// artifact carries one, and every bundled resource, inline and large alike.
+// The result carries the spec's "sha256:<hex>" prefix, which
 // CanonicalContentHash omits. spec: §4.7.6, §7.5.3, §14.11.
 func contentHashFor(rec materialRecord) string {
-	return "sha256:" + version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
+	return "sha256:" + version.CanonicalContentHash(rec.AuthoredBytes, rec.SkillBytes, rec.Resources)
 }
 
 // offlineFirstNoop builds the §7.4 offline-first result for a sync whose
@@ -506,6 +515,7 @@ func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, 
 			LayerID:       rec.Layer.ID,
 			Artifact:      rec.Artifact,
 			ArtifactBytes: rec.ArtifactBytes,
+			AuthoredBytes: rec.AuthoredBytes,
 			SkillBytes:    rec.SkillBytes,
 			Resources:     rec.Resources,
 		}
@@ -545,6 +555,7 @@ func filesystemRecords(opts Options) ([]materialRecord, error) {
 			LayerID:       rec.Layer.ID,
 			Artifact:      rec.Artifact,
 			ArtifactBytes: rec.ArtifactBytes,
+			AuthoredBytes: rec.AuthoredBytes,
 			SkillBytes:    rec.SkillBytes,
 			Resources:     rec.Resources,
 		})

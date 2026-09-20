@@ -29,6 +29,7 @@ func TestLoadArtifactFromOverlay_ReturnsLayerOverlay(t *testing.T) {
 	rec := &filesystem.ArtifactRecord{
 		ID:            "personal/hello/greet",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\n---\n"),
+		AuthoredBytes: []byte("---\ntype: skill\nversion: 1.0.0\n---\n"),
 		SkillBytes:    []byte("---\nname: greet\n---\nbody\n"),
 		Artifact: &manifest.Artifact{
 			Type:    manifest.TypeSkill,
@@ -50,7 +51,7 @@ func TestLoadArtifactFromOverlay_ReturnsLayerOverlay(t *testing.T) {
 	}
 	// Spec: §4.7.6 — the overlay serves the canonical hash over the whole
 	// package, the value the registry would store for the same bytes.
-	want := "sha256:" + version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
+	want := "sha256:" + version.CanonicalContentHash(rec.AuthoredBytes, rec.SkillBytes, rec.Resources)
 	if m["content_hash"] != want {
 		t.Errorf("content_hash = %v, want %v", m["content_hash"], want)
 	}
@@ -79,6 +80,7 @@ func TestLoadArtifactFromOverlay_MaterializesWhenConfigured(t *testing.T) {
 	rec := &filesystem.ArtifactRecord{
 		ID:            "personal/hello/greet",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nname: greet\ndescription: x\n---\n"),
+		AuthoredBytes: []byte("---\ntype: skill\nversion: 1.0.0\nname: greet\ndescription: x\n---\n"),
 		SkillBytes:    []byte("---\nname: greet\ndescription: x\n---\nhello\n"),
 		Artifact: &manifest.Artifact{
 			Type:        manifest.TypeSkill,
@@ -114,6 +116,7 @@ func TestLoadArtifactFromOverlay_UnknownHarnessReturnsError(t *testing.T) {
 	rec := &filesystem.ArtifactRecord{
 		ID:            "x",
 		ArtifactBytes: []byte("---\ntype: skill\n---\n"),
+		AuthoredBytes: []byte("---\ntype: skill\n---\n"),
 		Artifact:      &manifest.Artifact{Type: manifest.TypeSkill},
 	}
 	got := s.loadArtifactFromOverlay(rec, map[string]any{"harness": "definitely-not-real"})
@@ -158,6 +161,7 @@ func TestLoadArtifactFromOverlay_ServesTheCanonicalContentHash(t *testing.T) {
 		return &filesystem.ArtifactRecord{
 			ID:            "personal/hello/greet",
 			ArtifactBytes: artifactBytes,
+			AuthoredBytes: artifactBytes,
 			SkillBytes:    skill,
 			Artifact: &manifest.Artifact{
 				Type:    manifest.TypeSkill,

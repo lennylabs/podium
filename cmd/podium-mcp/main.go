@@ -1844,7 +1844,7 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 	// of the whole package, the same value the registry would store for it, so
 	// it moves when SKILL.md or a bundled resource changes and a promoted
 	// overlay names the package by the digest the registry names it by.
-	contentHash := "sha256:" + version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
+	contentHash := "sha256:" + version.CanonicalContentHash(rec.AuthoredBytes, rec.SkillBytes, rec.Resources)
 
 	resp := loadArtifactResponse{
 		ID:          rec.ID,
