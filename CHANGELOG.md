@@ -64,17 +64,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `PODIUM_REGISTRY_STORE=sqlite` and `PODIUM_SQLITE_PATH` naming a new database
   file outside the deployment's store directory, then start the deployment with
   `PODIUM_SIGN_KEY_PATH` naming that file. Rows the summary names as untouched
-  keep their stored hash and fail on an upgraded consumer. A `body_unavailable`
-  row is repaired by making the object readable, raising
-  `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` where the read timed out, and starting
-  the registry again: the start left the record of the rewrite unset, so the
-  rewrite runs again. A `body_missing`, `unreproducible`, or
-  `signature_unverified` row is repaired by publishing a new version of the
-  artifact, because the record of the rewrite is set and no later start
-  examines that row again. A deployment that starts more than one registry
-  process with signing on provisions the key file at
-  `PODIUM_SIGN_KEY_PATH` before the start, because processes that each generate
-  a key at one path overwrite each other's key. A registry on Kubernetes whose
+  keep their stored hash, and an untouched row still at the pre-framing digest
+  fails every load on an upgraded consumer with
+  `materialize.content_hash_mismatch`. A row is classified
+  `signature_unverified` on its verification result at whichever digest it
+  holds, and the consumer's §4.7.9 policy decides that row's outcome, so such a
+  row already at the framed digest loads where the policy does not cover the
+  artifact's sensitivity. A `body_unavailable` row is repaired by making the
+  object readable, raising `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` where the read
+  timed out, and starting the registry again: the start left the record of the
+  rewrite unset, so the rewrite runs again. A `body_missing` row, an
+  `unreproducible` row, and a `signature_unverified` row whose signing key is
+  gone are repaired by publishing a new version of the artifact, because the
+  record of the rewrite is set and no later start examines that row again. Where
+  the summary reports every signed row as `signature_unverified` because the
+  configured key is a different key from the one that signed those rows, restore
+  the backup the upgrade order takes and start again with the key that signed
+  them. A deployment that starts more than one registry process with signing on
+  provisions the key file at `PODIUM_SIGN_KEY_PATH` before the start, because
+  processes that each generate a key at one path overwrite each other's key. A registry on Kubernetes whose
   store is large raises the chart's `startupProbe.failureThreshold` for the
   upgrade, because the process answers no probe until the rewrite finishes.
 
@@ -103,8 +111,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   takes, reverts the registry and every consumer together, and clears each
   reverted consumer's cache, because a consumer that ran the new binary holds
   buckets and `id@<semver>` resolution pins keyed by the framed digest and the
-  previous binary serves them from the cache and refuses each with
-  `materialize.content_hash_mismatch` whatever the restored store holds.
+  previous binary serves them from the cache in the modes the next paragraph
+  names and refuses each with `materialize.content_hash_mismatch` whatever the
+  restored store holds.
 
   **Clear each consumer's cache.** The caches do not repair themselves, and the
   clear applies on every binary change in either direction, on the upgrade and
