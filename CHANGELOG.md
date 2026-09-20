@@ -65,18 +65,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   file outside the deployment's store directory, then start the deployment with
   `PODIUM_SIGN_KEY_PATH` naming that file. Rows the summary names as untouched
   keep their stored hash, and an untouched row still at the pre-framing digest
-  fails every load on an upgraded consumer with
-  `materialize.content_hash_mismatch`. A row is classified
-  `signature_unverified` on its verification result at whichever digest it
-  holds, and the consumer's §4.7.9 policy decides that row's outcome, so such a
-  row already at the framed digest loads where the policy does not cover the
-  artifact's sensitivity. A `body_unavailable` row is repaired by making the
+  fails every load on an upgraded consumer. The code the consumer reports
+  depends on the row's class. An unsigned row, a validly signed row, and an
+  `unreproducible` row fail with `materialize.content_hash_mismatch`. A
+  `body_missing` or `body_unavailable` row fails earlier than that check, at the
+  resource fetch, with `materialize.fetch_failed`, or with
+  `registry.unavailable` where the row holds no inline body and the registry has
+  no object store. A row is classified `signature_unverified` on its
+  verification result at whichever digest it holds, and the consumer's §4.7.9
+  policy decides that row's outcome, so such a row already at the framed digest
+  loads where the policy does not cover the artifact's sensitivity. A `body_unavailable` row is repaired by making the
   object readable, raising `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` where the read
   timed out, and starting the registry again: the start left the record of the
-  rewrite unset, so the rewrite runs again. A `body_missing` row, an
-  `unreproducible` row, and a `signature_unverified` row whose signing key is
-  gone are repaired by publishing a new version of the artifact, because the
-  record of the rewrite is set and no later start examines that row again. Where
+  rewrite unset, so the rewrite runs again. An `unreproducible` row and a
+  `signature_unverified` row whose signing key is gone are repaired by
+  publishing a new version of the artifact, because the record of the rewrite is
+  set and no later start examines those rows again. A `body_missing` row is
+  repaired by publishing a new version as well, and where the summary reports
+  that no object-store read returned a body, or reports rows that hold the
+  record of the rewrite back, that record stays unset and the next start runs
+  the rewrite over those rows again. Where
   the summary reports every signed row as `signature_unverified` because the
   configured key is a different key from the one that signed those rows, restore
   the backup the upgrade order takes and start again with the key that signed
