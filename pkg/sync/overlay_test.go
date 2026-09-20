@@ -146,15 +146,20 @@ func TestRun_OverlayRecordLockHashesItsAuthoredManifest(t *testing.T) {
 	}
 	want := "sha256:" + version.CanonicalContentHash([]byte(overlayBody), nil, nil)
 	empty := "sha256:" + version.CanonicalContentHash(nil, nil, nil)
+	var seen int
 	for _, la := range lock.Artifacts {
 		if la.ID != "finance/intro" {
 			continue
 		}
+		seen++
 		if la.ContentHash == empty {
 			t.Fatalf("lock %s content_hash is the digest over an empty manifest", la.ID)
 		}
 		if la.ContentHash != want {
 			t.Errorf("lock %s content_hash = %q, want the overlay manifest digest %q", la.ID, la.ContentHash, want)
 		}
+	}
+	if seen == 0 {
+		t.Fatalf("lock has no finance/intro entry: %+v", lock.Artifacts)
 	}
 }
