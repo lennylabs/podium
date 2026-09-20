@@ -161,6 +161,17 @@ spec:
             {{- with .Values.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
+          # The registry answers no probe path until its boot work finishes,
+          # and a release that migrates a stored value rewrites every stored
+          # row on the first start of the new version. A startup probe holds
+          # the liveness and readiness probes off until it succeeds, so the
+          # kubelet does not restart a pod that is still migrating.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: {{ .Values.startupProbe.periodSeconds }}
+            failureThreshold: {{ .Values.startupProbe.failureThreshold }}
           livenessProbe:
             httpGet:
               path: /healthz

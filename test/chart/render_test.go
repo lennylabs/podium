@@ -9,9 +9,13 @@
 package chart
 
 import (
+	"errors"
+	"io"
 	"os/exec"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // render runs `helm template` with the given overrides and returns the
@@ -201,5 +205,93 @@ func TestChart_ExternalDatabaseInstallKeepsItsEnvBlock(t *testing.T) {
 		if envValue(m, key) == "" {
 			t.Errorf("a default install renders no %s", key)
 		}
+	}
+}
+
+// probe is the subset of a container probe this file reads.
+type probe struct {
+	HTTPGet struct {
+		Path string `yaml:"path"`
+		Port string `yaml:"port"`
+	} `yaml:"httpGet"`
+	PeriodSeconds    int `yaml:"periodSeconds"`
+	FailureThreshold int `yaml:"failureThreshold"`
+}
+
+// renderedContainer is the registry container as the manifests carry it.
+type renderedContainer struct {
+	Name           string `yaml:"name"`
+	StartupProbe   *probe `yaml:"startupProbe"`
+	LivenessProbe  *probe `yaml:"livenessProbe"`
+	ReadinessProbe *probe `yaml:"readinessProbe"`
+}
+
+// registryContainer decodes the rendered manifests and returns the registry
+// container. Decoding rather than matching text is what lets the assertions
+// read a probe's own fields instead of a line that happens to sit nearby.
+func registryContainer(t *testing.T, manifests string) renderedContainer {
+	t.Helper()
+	dec := yaml.NewDecoder(strings.NewReader(manifests))
+	for {
+		var doc struct {
+			Kind string `yaml:"kind"`
+			Spec struct {
+				Template struct {
+					Spec struct {
+						Containers []renderedContainer `yaml:"containers"`
+					} `yaml:"spec"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		}
+		err := dec.Decode(&doc)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("decode manifests: %v", err)
+		}
+		if doc.Kind != "Deployment" {
+			continue
+		}
+		for _, c := range doc.Spec.Template.Spec.Containers {
+			if c.Name == "podium-server" {
+				return c
+			}
+		}
+	}
+	t.Fatal("the manifests carry no podium-server container")
+	return renderedContainer{}
+}
+
+// The registry answers no probe path until its boot work finishes, and a
+// release that migrates a stored value rewrites every stored row on the first
+// start of the new version. Without a startup probe the kubelet's liveness
+// probe restarts the pod mid-rewrite, and a restart during the planning step
+// makes no progress, so the pod restarts forever.
+//
+// Spec: §13.4
+func TestChart_RegistryContainerCarriesAStartupProbe(t *testing.T) {
+	t.Parallel()
+	c := registryContainer(t, render(t))
+
+	if c.StartupProbe == nil {
+		t.Fatal("the registry container carries no startupProbe, so the kubelet restarts a pod that is still migrating its stored values")
+	}
+	p := c.StartupProbe
+	const minBudget = 600 // ten minutes, in seconds
+	if p.HTTPGet.Path != "/healthz" || p.HTTPGet.Port != "http" ||
+		p.PeriodSeconds*p.FailureThreshold < minBudget {
+		t.Errorf("startupProbe is %s at port %q with a budget of %ds (%d x %d); want /healthz at port \"http\" with at least %ds",
+			p.HTTPGet.Path, p.HTTPGet.Port, p.PeriodSeconds*p.FailureThreshold, p.PeriodSeconds, p.FailureThreshold, minBudget)
+	}
+	if c.LivenessProbe == nil || c.ReadinessProbe == nil {
+		t.Error("the startup probe replaced a liveness or readiness probe rather than holding it off")
+	}
+
+	// An operator with a large store raises the threshold for the upgrade that
+	// migrates stored values, so the value has to reach the manifest.
+	c = registryContainer(t, render(t, "startupProbe.failureThreshold=240"))
+	if c.StartupProbe == nil || c.StartupProbe.FailureThreshold != 240 {
+		t.Errorf("startupProbe.failureThreshold=240 did not reach the manifest: %+v", c.StartupProbe)
 	}
 }
