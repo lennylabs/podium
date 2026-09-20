@@ -352,3 +352,65 @@ func TestCanonicalContentHash_IgnoresMapInsertionOrder(t *testing.T) {
 		t.Errorf("insertion order changed the digest: %q != %q", a, b)
 	}
 }
+
+// Spec: §4.7.6 — a resource path is framed as the bytes it was ingested as,
+// with no Unicode normal-form conversion and no case folding, so the same
+// name in NFC and in NFD is two resources and "A.md" and "a.md" are two
+// resources. A normalization step added to the composer would move every
+// stored hash that carries such a path, and this test is the one place that
+// catches it: neither resource walk converts a path either.
+func TestCanonicalContentHash_PathBytesAreNotNormalized(t *testing.T) {
+	t.Parallel()
+	const nfc = "caf\xc3\xa9.md"  // the UTF-8 of U+00E9
+	const nfd = "cafe\xcc\x81.md" // "e" followed by the UTF-8 of U+0301
+	body := []byte("resource body")
+	cases := []struct {
+		name string
+		a, b string
+	}{
+		{
+			name: "NFC/NFD",
+			a:    CanonicalContentHash([]byte("M"), nil, map[string][]byte{nfc: body}),
+			b:    CanonicalContentHash([]byte("M"), nil, map[string][]byte{nfd: body}),
+		},
+		{
+			name: "letter case",
+			a:    CanonicalContentHash([]byte("M"), nil, map[string][]byte{"A.md": body}),
+			b:    CanonicalContentHash([]byte("M"), nil, map[string][]byte{"a.md": body}),
+		},
+	}
+	for _, c := range cases {
+		if c.a == c.b {
+			t.Errorf("%s: two distinct paths share the digest %q", c.name, c.a)
+		}
+	}
+}
+
+// Spec: §4.7.6 — a part is framed as the bytes it was ingested as, with no
+// line-ending conversion and no byte-order-mark stripping. The mark case sits
+// on a resource body because manifest.SplitFrontmatter anchors the
+// frontmatter at the first byte and refuses a manifest that opens with one,
+// so no stored manifest carries it.
+func TestCanonicalContentHash_BodyBytesAreNotNormalized(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		a, b string
+	}{
+		{
+			name: "line endings",
+			a:    CanonicalContentHash([]byte("M"), nil, map[string][]byte{"r.md": []byte("a\r\nb\n")}),
+			b:    CanonicalContentHash([]byte("M"), nil, map[string][]byte{"r.md": []byte("a\nb\n")}),
+		},
+		{
+			name: "byte-order mark",
+			a:    CanonicalContentHash([]byte("M"), nil, map[string][]byte{"r.md": []byte("\xef\xbb\xbfx\n")}),
+			b:    CanonicalContentHash([]byte("M"), nil, map[string][]byte{"r.md": []byte("x\n")}),
+		},
+	}
+	for _, c := range cases {
+		if c.a == c.b {
+			t.Errorf("%s: two distinct bodies share the digest %q", c.name, c.a)
+		}
+	}
+}

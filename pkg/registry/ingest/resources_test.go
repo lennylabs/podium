@@ -11,6 +11,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // putRecorder is a fake ingest.ResourcePut that records every uploaded
@@ -138,5 +139,43 @@ func TestIngest_NoResourcesYieldsNoRefs(t *testing.T) {
 	}
 	if len(mr.Resources) != 0 {
 		t.Errorf("Resources = %+v, want none", mr.Resources)
+	}
+}
+
+// Spec: §4.7.6, §4.4 — a resource whose bytes exceed the inline cutoff is
+// hashed over its full body, and the stored row keeps no inline copy of it.
+// The digest is therefore reproducible from the row's Frontmatter, its
+// SkillRaw, and the body fetched from object storage, which is what the
+// §13.4 rehash pass rests on.
+func TestIngest_ContentHashCoversTheFullBodyOfAnObjectStoreResource(t *testing.T) {
+	t.Parallel()
+	const path = "data/big.bin"
+	large := []byte(strings.Repeat("C", objectstore.InlineCutoff+1024))
+	files := fstest.MapFS{
+		"finance/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(skillArtifact())},
+		"finance/run/SKILL.md":    &fstest.MapFile{Data: []byte(skillBody("run"))},
+		"finance/run/" + path:     &fstest.MapFile{Data: large},
+	}
+	rec := newPutRecorder()
+	st := newStore(t)
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "t", LayerID: "L", Files: files, ResourcePut: rec.put,
+	}); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	mr, err := st.GetManifest(context.Background(), "t", "finance/run", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if len(mr.Resources) != 1 || mr.Resources[0].Path != path {
+		t.Fatalf("Resources = %+v, want one entry for %s", mr.Resources, path)
+	}
+	full := "sha256:" + version.CanonicalContentHash(mr.Frontmatter, mr.SkillRaw,
+		map[string][]byte{path: large})
+	empty := "sha256:" + version.CanonicalContentHash(mr.Frontmatter, mr.SkillRaw,
+		map[string][]byte{path: nil})
+	if mr.Resources[0].Inline != nil || mr.ContentHash != full || full == empty {
+		t.Errorf("Inline = %d bytes, ContentHash = %q, want nil inline and the digest over the full body %q (empty-body digest %q)",
+			len(mr.Resources[0].Inline), mr.ContentHash, full, empty)
 	}
 }

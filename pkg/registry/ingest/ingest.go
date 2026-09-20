@@ -1127,8 +1127,8 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		AuthoredBytes: bytes,
 		Resources:     map[string][]byte{},
 	}
+	skillPath := joinPath(dir, "SKILL.md")
 	if a.Type == manifest.TypeSkill {
-		skillPath := joinPath(dir, "SKILL.md")
 		skillBytes, err := fs.ReadFile(fsys, skillPath)
 		if err != nil {
 			// spec: §7.3.1/§6.10 — a SKILL.md the confinement refuses is a
@@ -1164,8 +1164,15 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 			}
 			return nil
 		}
-		base := d.Name()
-		if base == "ARTIFACT.md" || (a.Type == manifest.TypeSkill && base == "SKILL.md") {
+		// spec: §4.4/§4.7.6 — the resource set excludes the package root's
+		// ARTIFACT.md and, for a skill, the package root's SKILL.md. A
+		// SKILL.md in a subdirectory is an ordinary bundled resource, which
+		// is the rule captureResources in pkg/registry/filesystem applies;
+		// comparing the base name here instead would drop it and give the
+		// two walks two digests for one package. A nested ARTIFACT.md is a
+		// package boundary the directory arm above has already skipped, so
+		// the base-name comparison reaches only the root's.
+		if d.Name() == "ARTIFACT.md" || (a.Type == manifest.TypeSkill && p == skillPath) {
 			return nil
 		}
 		data, err := fs.ReadFile(fsys, p)

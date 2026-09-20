@@ -12,6 +12,7 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // fixture builders --------------------------------------------------------
@@ -584,5 +585,63 @@ func TestIngest_UnreadableSnapshotDirectoryIsSourceUnreachable(t *testing.T) {
 	}
 	if !errors.Is(err, source.ErrSourceUnreachable) {
 		t.Errorf("error %q is not source.ErrSourceUnreachable", err)
+	}
+}
+
+// Spec: §4.7.6, §7.3.1 — before the resource set included a skill's
+// subdirectory SKILL.md, a row for such a package was stored with a digest
+// over the narrower set and without that file's bytes. Reingesting the
+// package recomputes over the wider set, so the hash differs at the same
+// (artifact_id, version) and §7.3.1's "Same version, different content_hash"
+// case reports a conflict and writes nothing. The author bumps the
+// artifact's version; no reingest repairs the stored row.
+func TestIngest_SubdirectorySkillRowIsNotRepairableByReingest(t *testing.T) {
+	t.Parallel()
+	const referencesSkill = "reference skill body\n"
+	artifact := skillArtifact()
+	body := skillBody("run")
+	// The pre-CODE-6 row: the same package ingested with the subdirectory
+	// SKILL.md outside the resource set.
+	st := newStore(t)
+	if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1", LayerID: "L", Files: fstest.MapFS{
+			"finance/run/ARTIFACT.md": &fstest.MapFile{Data: []byte(artifact)},
+			"finance/run/SKILL.md":    &fstest.MapFile{Data: []byte(body)},
+		},
+	}); err != nil {
+		t.Fatalf("seed ingest: %v", err)
+	}
+	seeded, err := st.GetManifest(context.Background(), "tenant-1", "finance/run", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest (seed): %v", err)
+	}
+
+	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
+		TenantID: "tenant-1", LayerID: "L", Files: fstest.MapFS{
+			"finance/run/ARTIFACT.md":         &fstest.MapFile{Data: []byte(artifact)},
+			"finance/run/SKILL.md":            &fstest.MapFile{Data: []byte(body)},
+			"finance/run/references/SKILL.md": &fstest.MapFile{Data: []byte(referencesSkill)},
+		},
+	})
+	if err != nil {
+		t.Fatalf("reingest: %v", err)
+	}
+	wantNew := "sha256:" + version.CanonicalContentHash([]byte(artifact), []byte(body),
+		map[string][]byte{"references/SKILL.md": []byte(referencesSkill)})
+	if len(res.Conflicts) != 1 || res.Accepted != 0 || len(res.LintFailures) != 0 {
+		t.Fatalf("reingest result = %+v, want exactly one conflict and nothing accepted", res)
+	}
+	c := res.Conflicts[0]
+	if c.ArtifactID != "finance/run" || c.OldHash != seeded.ContentHash || c.NewHash != wantNew {
+		t.Errorf("conflict = %+v, want finance/run with OldHash %q and NewHash %q",
+			c, seeded.ContentHash, wantNew)
+	}
+	got, err := st.GetManifest(context.Background(), "tenant-1", "finance/run", "1.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest: %v", err)
+	}
+	if got.ContentHash != seeded.ContentHash {
+		t.Errorf("stored ContentHash = %q, want the seeded %q: the reingest must write nothing",
+			got.ContentHash, seeded.ContentHash)
 	}
 }
