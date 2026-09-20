@@ -8,12 +8,123 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
-- **The lock file's recorded content hash across sync modes** (§11, §7.5.3, §14.11): a `podium sync` against a filesystem registry and a `podium sync` against `podium serve --standalone --layer-path` on the same directory now record the same `content_hash` for an artifact. The filesystem consumer hashed `SKILL.md` in place of the manifest for a skill, while the registry hashes the manifest, `SKILL.md`, and every bundled resource, so a frontmatter-only edit to `ARTIFACT.md` changed the materialized output while the recorded `content_hash` stood still, and the same artifact carried a different hash in each mode. Both consumers now derive the hash from the shared `version.CanonicalContentHash`. An artifact with no `SKILL.md` contributes no additional bytes and its hash is unchanged, so only a skill's recorded hash moves. The first `podium sync` after this change reports a skill-carrying target as changed, because the recorded hash moves, and it sets `PODIUM_CHANGED` for a workspace workflow gated on it.
-- **The materialization order across sync modes** (§7.5, §11): both modes now materialize the resolved set in ascending canonical artifact ID order, so config-merge fragments and inject blocks compose identically in every deployment mode and the lock's `artifacts:` list follows. A merged target that previously composed in layer order is rewritten once with the same entries in a different order, and that rewrite is not reported as a change, because the comparison reads the recorded artifact content hashes and none of them moved. Inside a shared target the order governs composition: fragments two artifacts contribute to one key of a JSON config-merge target are folded in that order and composed by value kind, and a marker-block target receives each artifact's own Podium-managed block in that order and merges no keys. In filesystem mode the composition inside a shared target can therefore differ from before, matching what server mode already did. Where two artifacts with distinct canonical IDs set the same scalar key of one JSON config-merge target, such as two `mcp-server` artifacts sharing a `name:`, the value comes from the artifact whose canonical ID sorts last, which can be the one from the lower-precedence layer where filesystem mode previously took the higher-precedence one. The first sync on this version rewrites such a target without reporting a change, so re-read merged targets after it.
+- **The recorded content hash of an artifact that declares `extends:`** (§4.7.6, §7.5.3): a `podium sync` against a filesystem registry recorded a different `content_hash` for such an artifact than a `podium sync` against a registry recorded for the same artifact, because the filesystem consumer hashed the manifest it had merged with the parent while the registry hashed the manifest the author wrote. Both now record the §4.7.6 digest over the child's authored `ARTIFACT.md`. A filesystem-source lock entry for such a child therefore no longer moves when only its parent changed.
+
+  A registry excluded a file named `SKILL.md` at any depth inside a skill package from the bundled-resource set, while a filesystem-source consumer excluded only the copy at the package root, so a skill carrying a file such as `references/SKILL.md` carried a different content hash in each mode. Both now exclude the package root's copy alone, and that file is an ordinary bundled resource. A stored row for such a package is republished under a new `version:`, because a registry refuses an ingest of an existing `(artifact_id, version)` whose content hash differs from the stored one.
+- **The lock file's recorded content hash across sync modes** (§11, §7.5.3, §14.11): a `podium sync` against a filesystem registry and a `podium sync` against `podium serve --standalone --layer-path` on the same directory now record the same `content_hash` for an artifact. The filesystem consumer hashed `SKILL.md` in place of the manifest for a skill, while the registry hashes the manifest, `SKILL.md`, and every bundled resource, so a frontmatter-only edit to `ARTIFACT.md` changed the materialized output while the recorded `content_hash` stood still, and the same artifact carried a different hash in each mode. Both consumers now derive the hash from the shared `version.CanonicalContentHash`. The content hash of every artifact moves in this release, and the `Changed` entry on the content-hash serialization states what moves and what an operator does about it.
+- **The materialization order across sync modes** (§7.5, §11): both modes now materialize the resolved set in ascending canonical artifact ID order, so config-merge fragments and inject blocks compose identically in every deployment mode and the lock's `artifacts:` list follows. A merged target that previously composed in layer order is rewritten once with the same entries in a different order. Inside a shared target the order governs composition: fragments two artifacts contribute to one key of a JSON config-merge target are folded in that order and composed by value kind, and a marker-block target receives each artifact's own Podium-managed block in that order and merges no keys. In filesystem mode the composition inside a shared target can therefore differ from before, matching what server mode already did. Where two artifacts with distinct canonical IDs set the same scalar key of one JSON config-merge target, such as two `mcp-server` artifacts sharing a `name:`, the value comes from the artifact whose canonical ID sorts last, which can be the one from the lower-precedence layer where filesystem mode previously took the higher-precedence one. Re-read merged targets after the first sync on this version.
 - **Change reporting over a shared materialized path** (§11): every artifact that writes into a shared materialized path now participates in the change comparison, which is keyed by artifact id together with materialized path rather than by path alone. `$PODIUM_CHANGED` is true after an edit to an artifact whose lock entry previously did not survive the per-path collapse, and a `skip_if_no_changes` command that formerly skipped that case now runs.
 
 ### Changed
 
+- **The §4.7.6 content hash length-frames its parts** (§4.7.6, §13.4, §6.4,
+  §6.5): the canonical serialization now prefixes every part with its length
+  before the SHA-256, so every content hash Podium computes moves. This reaches
+  every stored manifest row, every `@sha256:` pin recorded against one, every
+  §4.7.9 signature envelope, every `content_hash` recorded in a committed
+  `sync.lock`, and every `content_hash` a §7.3.2 webhook subscriber recorded
+  from an event payload. Podium is pre-1.0, so the change carries no algorithm
+  identifier, no negotiation, no dual computation, and no compatibility path for
+  the previous digest. This entry is the release's upgrade note.
+
+  **Upgrade order for the registry.** Stop every registry process that uses the
+  store. In a clustered deployment that means scaling the registry to zero
+  replicas, because the Helm chart's default rolling update would start the new
+  version beside the previous one, and a registry still running the previous
+  binary ingests under the previous digest: a row it writes after the new
+  version's first start has examined its tenant is never rewritten. Back up the
+  registry store after the stop, so that the backup holds every write the
+  previous binary made. Restoring that backup is the only route back to the
+  previous binary, and it is the only way to make the rewrite run again once it
+  has completed. Install the new binary or image. Start the registry. There is
+  no command to run: the first start rewrites every stored content hash before
+  it ingests or serves anything, re-signs each row it rewrites where signing is
+  configured, and appends one `artifact.signed` event per re-signed row to the
+  audit sink, with the manifest-declared §8.2 redaction ingest applies. It
+  leaves the tenant's dependency rows, layer configs, admin grants, and tenants
+  untouched, and it re-ingests nothing. A `podium layer reingest` is neither
+  required nor sufficient, because a reingest reaches only the version each
+  artifact directory currently declares.
+
+  **Read the summary line the start logs.** It carries the counts of rows
+  rewritten, rows already migrated, and rows left untouched by class, and it is
+  followed by one line per untouched row naming that row and its class. A start
+  that is refused instead, with a message naming `PODIUM_SIGN` and
+  `PODIUM_SIGN_KEY_PATH`, means the store holds signed rows and the registry was
+  started without its signing mode or without the key that signed them. Start
+  again with `PODIUM_SIGN=registry-key` and `PODIUM_SIGN_KEY_PATH` naming that
+  key. A registry on Kubernetes cannot write a generated key under the chart's
+  read-only root filesystem, so a chart deployment that signs already reads its
+  key from a file the pod mounts, and the refusal there means
+  `PODIUM_SIGN_KEY_PATH` does not name that file. Where no copy of the key
+  survives, no start configuration clears the refusal against the deployment's
+  own store: write a persistent key file first by starting the new binary with
+  `PODIUM_SIGN=registry-key` and `PODIUM_SIGN_KEY_PATH` against a store that
+  holds no signed row, such as `podium serve --standalone` with
+  `PODIUM_REGISTRY_STORE=sqlite` and `PODIUM_SQLITE_PATH` naming a new database
+  file outside the deployment's store directory, then start the deployment with
+  `PODIUM_SIGN_KEY_PATH` naming that file. Rows the summary names as untouched
+  keep their stored hash and fail on an upgraded consumer. A row whose resource
+  body the registry could not read is repaired by making that object readable
+  and starting the registry again, which runs the rewrite again. A row of any
+  other untouched class is repaired by publishing a new version of the
+  artifact. A deployment that starts more
+  than one registry process with signing on provisions the key file at
+  `PODIUM_SIGN_KEY_PATH` before the start, because processes that each generate
+  a key at one path overwrite each other's key. A registry on Kubernetes whose
+  store is large raises the chart's `startupProbe.failureThreshold` for the
+  upgrade, because the process answers no probe until the rewrite finishes.
+
+  **Migrating with `podium admin migrate-to-standard`.** The command copies rows
+  as the source stores them and clears the target store's record of the rewrite,
+  so the target's next start rewrites the copied rows under the signing key that
+  signed the source's rows. No registry process runs on the target store while
+  the command runs, so a target registry that is already running, such as one
+  installed ahead of the migration, is stopped before the command's first run.
+  The target registry is started, or restarted, only after a run of the command
+  that exits 0. Recreate the target store empty before the command runs again
+  when a run failed with the immutability error at a copied row, or when a
+  registry started on the target store, or the source registry started on the
+  new version, at any point after the command's first run against it began.
+
+  **Rolling the consumers.** Roll consumers to the new binary after the registry
+  has started on it, and clear each consumer's cache as the next paragraph
+  states. A consumer and a filesystem-source `podium sync` each recompute the
+  digest, so the binary a consumer runs decides whether its load of a row
+  succeeds: an upgraded consumer fails every load of a row the registry has not
+  yet rewritten, and a consumer still on the previous binary fails every load of
+  a rewritten row, each with `materialize.content_hash_mismatch`. Loads fail for
+  the consumers that have not yet rolled, between the registry's first start on
+  the new binary and the last consumer rolling, so schedule the consumer roll
+  inside the same maintenance window. A return to the previous binary restores the backup the upgrade order
+  takes, reverts the registry and every consumer together, and clears each
+  reverted consumer's cache, because a consumer that ran the new binary holds
+  buckets and `id@<semver>` resolution pins keyed by the framed digest and the
+  previous binary serves them from the cache and refuses each with
+  `materialize.content_hash_mismatch` whatever the restored store holds.
+
+  **Clear each consumer's cache.** The caches do not repair themselves, and the
+  clear applies on every binary change in either direction, on the upgrade and
+  on a return to the previous binary. The §6.5 resolution index is keyed by
+  artifact id and version, it survives a binary change, and a pinned entry never
+  expires, so an upgraded consumer in `offline-first` or `offline-only`, and an
+  `always-revalidate` consumer whose registry is unreachable and which takes the
+  §7.4 degraded-network fallback, resolves a pre-upgrade hash, hits the stale
+  bucket, and fails the load with `materialize.content_hash_mismatch`.
+  `always-revalidate` recovers on its own through its HEAD comparison only while
+  the registry answers, so that mode needs the clear too, before its next
+  registry outage. The cache directory is `$PODIUM_CACHE_DIR` when that variable
+  is set and `~/.podium/cache` when it is not. Remove that directory wholesale,
+  or run `podium cache prune --days 0` together with
+  `rm -rf <cache dir>/.resolutions`, because prune resolves the same default but
+  is age-based and skips the resolution index. Object storage is keyed per blob
+  and is unaffected. A `podium sync` rewrites the `content_hash` of every entry
+  in its lock file on its first run against the new registry, and that run
+  reports every target as changed.
+
+  A §6.4 workspace overlay now serves the canonical hash over its whole package,
+  so an overlay skill's `content_hash` moves when its `SKILL.md` or one of its
+  bundled resources changes.
 - `podium layer reingest` reports the ingest outcome in its exit status. It
   exits 1 when the cycle dropped at least one artifact, which covers a
   same-version content conflict, a lint failure, and a rejection such as the

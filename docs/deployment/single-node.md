@@ -183,7 +183,7 @@ For everyday team use, enable the `oidc-jwt` provider instead. Each developer au
 ## Operational notes
 
 - **Backup.** A periodic snapshot of `~/.podium/standalone/` captures the SQLite file, the object directory, and any signing keys the deployment generated there (`audit.key` when audit anchoring is enabled, `registry-signing.key` when `--sign registry-key` is set). Include `~/.podium/audit.log` in the same snapshot, because the audit stream sits outside that directory unless `PODIUM_AUDIT_LOG_PATH` moves it.
-- **Upgrades.** Replace the binary and restart. Schema migrations run on first start of the new version.
+- **Upgrades.** Replace the binary and restart. Schema migrations run on first start of the new version. A release whose changelog names a migration of the values stored under the schema rewrites those values on that first start as well, so take the backup described above before replacing the binary, because returning to the previous binary requires restoring it. That changelog entry states the order.
 - **Performance.** A single-node deployment is sized for tens of developers rather than thousands of QPS. For higher scale, see [Clustered](clustered).
 - **Observability.** A Prometheus endpoint is served on `/metrics` unless `PODIUM_METRICS=false` turns it off. The reference Grafana dashboard is in the repository at `deploy/grafana-dashboard.json`.
 

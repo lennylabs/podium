@@ -164,6 +164,7 @@ rm -rf "$WORK"
 | S61 | SCIM membership does not grant under trusted-headers | standalone | none | none | none |
 | S62 | A reingest that drops an artifact fails | standalone | none | none | none |
 | S63 | The two sync modes compose a shared merge target identically | solo then standalone | none | none | none |
+| S64 | A registry migrates its stored hashes on the first start | standalone | none | none | none |
 
 ---
 
@@ -1372,7 +1373,9 @@ SQLite plus filesystem deployment lands in Postgres plus S3 with parity.
 cross-store parity.
 
 **Prerequisites.** `make services-up` and `test.env` (Postgres, S3). Skip if
-absent.
+absent. The scenario erases the local Postgres and MinIO volumes in step 3, so
+any state another scenario left in those services is lost. Run it when no other
+scenario's data is needed.
 
 **Steps.**
 
@@ -1380,14 +1383,31 @@ absent.
 2. Build standalone state: author a registry, serve standalone, register a
    Git layer, and confirm a search returns results (as in S09, on
    `127.0.0.1:8116`). Stop the standalone server.
-3. Load the standard-store environment and run the migration. The migration
+3. Recreate the target stores empty. The migration refuses a copied row that
+   the target already holds at a different content hash, so a Postgres volume
+   carrying a row an earlier run wrote fails the command. `make services-down`
+   does not serve here, because it keeps the volumes.
+
+   ```bash
+   (cd ~/projects/podium && docker compose down -v && make services-up)
+   until [ "$(docker inspect -f '{{.State.Status}}' podium-bootstrap 2>/dev/null)" = "exited" ]; do
+     sleep 2
+   done
+   (cd ~/projects/podium && docker compose ps -a)
+   ```
+
+   **Expect.** `postgres` and `minio` report `running` and `bootstrap` reports
+   `exited (0)`, which is the bucket bootstrap having completed. No registry is
+   started against these stores before step 4.
+
+4. Load the standard-store environment and run the migration. The migration
    command takes its target from `--postgres <dsn>` and `--object-store <url>`
    (the §13.4 short form). The `--object-store` S3 URL carries the endpoint,
    bucket, credentials, region, and TLS toggle from `test.env`. The standalone
    source lives under `$WORK`, so name it with `--source-sqlite` and
    `--source-objects`. The `PODIUM_REGISTRY_STORE`, `PODIUM_OBJECT_STORE`, and
    `PODIUM_VECTOR_BACKEND` exports select the standard backends for the
-   `podium serve --strict` run in step 4.
+   `podium serve --strict` run in step 5.
 
    ```bash
    set -a; source ~/projects/podium/test.env; set +a
@@ -1400,13 +1420,9 @@ absent.
      --source-objects "$WORK/objects"
    ```
 
-4. Serve in strict mode against the standard stores and compare. The Postgres
-   registry store keeps a persistent volume across `make services-up` and
-   `make services-down`, and every standard-mode scenario writes under the same
-   deterministic `default` org schema, so a prior run's layers and artifacts
-   survive into this one and appear alongside the migrated `team` layer and
-   `deploy` skill. The comparison below confirms the migrated state is present
-   rather than that the listing contains only the migrated set.
+5. Serve in strict mode against the standard stores and compare. Step 3
+   recreated the Postgres and MinIO volumes, so the store holds the migrated
+   rows alone and the listing below is the migrated set.
 
    ```bash
    podium serve --strict --bind 127.0.0.1:8117 > "$WORK/srv2.log" 2>&1 &
@@ -1426,9 +1442,8 @@ absent.
   in the manifest, so the filesystem object store holds no blobs and the object
   count is zero.
 - The standard server lists the migrated `team` Git layer and returns the
-  migrated `deploy` skill in a search for `deploy`. Layers and artifacts left in
-  the persistent Postgres store by earlier standard-mode runs may also appear in
-  the listing and the result set.
+  migrated `deploy` skill in a search for `deploy`, and those are the only rows
+  the store holds.
 
 **Cleanup.** Stop the server, `rm -rf "$WORK"`, and `make services-down`.
 
@@ -7312,5 +7327,200 @@ grep 'audit-log podium' "$WORK/proj/ws/.claude/settings.json"
    exists to catch: the file is rewritten, and a
    `skip_if_no_changes` publish command gated on the variable skips the target
    that changed. On Linux the edit is `sed -i` without the empty argument.
+
+**Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
+---
+
+## S64: A registry migrates its stored hashes on the first start
+
+**Goal.** Validate that an artifact whose stored hash the registry rewrote on
+start loads through the MCP consumer with a matching content hash, that a §6.4
+workspace overlay serves a hash that moves when its `SKILL.md` changes, and
+that a consumer pointed at a store carrying a pre-upgrade hash refuses the load
+with `materialize.content_hash_mismatch` until the registry has migrated it.
+
+**Covers.** The §4.7.6 canonical serialization, the §6.6 step-2 delivery check,
+the §6.4 overlay response, and the §13.4 first-start rewrite. The pre-upgrade
+consumer cache is covered by the automated suite instead, because the bucket
+that refusal needs is one the pre-upgrade binary wrote.
+
+**Why by hand.** The failure is a disagreement between two processes over a
+serialization, and the refusal direction requires a store that was written by
+one algorithm and read by another, which no in-process test constructs.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above.
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`.
+
+2. Author one skill carrying an `ARTIFACT.md`, a `SKILL.md`, and two bundled
+   resources. A manifest-only artifact exercises one framed slot and hides a
+   slot-order defect, so the two resources are what make the comparison
+   non-vacuous.
+
+   ```bash
+   mkdir -p "$WORK/reg/close-reporting"
+   podium artifact scaffold --type skill --description "Run the variance analysis" \
+     "$WORK/reg/close-reporting/variance" > /dev/null
+   printf 'print("variance")\n' > "$WORK/reg/close-reporting/variance/scripts.py"
+   printf 'Variance explained.\n' > "$WORK/reg/close-reporting/variance/notes.md"
+   ls "$WORK/reg/close-reporting/variance"
+   ```
+
+   **Expect.** `ARTIFACT.md`, `SKILL.md`, `notes.md`, and `scripts.py`.
+
+3. Start the registry over that directory and load the artifact through the MCP
+   consumer. The artifact's id carries its domain path, which `podium search`
+   prints; `load_artifact` with the bare name returns `registry.not_found`.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8127 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8127/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8127
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"close-reporting/variance"}}}'
+   printf '%s\n%s\n' "$INIT" "$LOAD" | podium-mcp 2>/dev/null \
+     | tail -1 | grep -o '"content_hash":"[^"]*"' | tail -1
+   ```
+
+   **Expect.** The server log's first line reports the rewrite over an empty
+   store, `rehash: 0 rewritten, 0 already migrated, ...`, and the load prints
+   one `content_hash`, of the form
+   `"content_hash":"sha256:cb81ac9dcecf8a644e8614e93f90851f1801151c00c64a4e90d12daacc2379b8"`.
+   Record the value as the served hash; the digest covers the scaffolded
+   manifest, so a different scaffold template produces a different value. A
+   refusal here is the disagreement this scenario exists to catch.
+
+4. Read the overlay's served hash on either side of an edit to its `SKILL.md`.
+
+   ```bash
+   mkdir -p "$WORK/overlay"
+   podium artifact scaffold --type skill --description "Local draft skill" "$WORK/overlay/draft" > /dev/null
+   LOADO='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"draft"}}}'
+   printf '%s\n%s\n' "$INIT" "$LOADO" | PODIUM_OVERLAY_PATH="$WORK/overlay" podium-mcp 2>/dev/null \
+     | tail -1 | grep -o '"content_hash":"[^"]*"' | tail -1
+   printf '\nExtra local guidance.\n' >> "$WORK/overlay/draft/SKILL.md"
+   printf '%s\n%s\n' "$INIT" "$LOADO" | PODIUM_OVERLAY_PATH="$WORK/overlay" podium-mcp 2>/dev/null \
+     | tail -1 | grep -o '"content_hash":"[^"]*"' | tail -1
+   ```
+
+   **Expect.** Two `content_hash` values that differ, such as
+   `sha256:8c90d58634b221cdd8c462d0c4149d7934bec895185e4bec0e16de9e8732cf26`
+   and
+   `sha256:57053072665ffa3fb0d78bc3e447c607793b50d42434d2720d2d18f0354b9904`.
+   Two equal values are the defect this step catches: the overlay response
+   would then be reporting a hash of the manifest alone.
+
+5. Return the stored hash to the pre-upgrade value and read the refusal. The
+   server is stopped for the edit and started again with the
+   `content-hash-framing` marker still present, so the start skips the rewrite
+   and serves the edited value. The `shasum` line computes the pre-upgrade
+   digest by hand, as the concatenation of `ARTIFACT.md`, `SKILL.md`, and each
+   bundled resource's path followed by its body in ascending path order, with
+   no length prefixes; no shipped tool computes it. The load runs against an
+   empty `$PODIUM_CACHE_DIR` in the default `always-revalidate` mode, so the
+   consumer fetches the edited value. An `offline-first` load would not surface
+   it, because a resolution hit serves the bucket it resolved and the
+   recomputation then compares that bucket against itself.
+
+   ```bash
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   D="$WORK/reg/close-reporting/variance"
+   OLD=$( { cat "$D/ARTIFACT.md" "$D/SKILL.md"; printf 'notes.md'; cat "$D/notes.md"; \
+            printf 'scripts.py'; cat "$D/scripts.py"; } | shasum -a 256 | cut -d' ' -f1 )
+   sqlite3 "$PODIUM_SQLITE_PATH" \
+     "update manifests set content_hash='sha256:$OLD' where artifact_id='close-reporting/variance';"
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8127 > "$WORK/srv2.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8127/healthz
+   grep -c rehash "$WORK/srv2.log"
+   rm -rf "$PODIUM_CACHE_DIR"
+   printf '%s\n%s\n' "$INIT" "$LOAD" | podium-mcp 2>/dev/null | tail -1 \
+     | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["structuredContent"]["error"])'
+   ```
+
+   **Expect.** `grep -c rehash` prints `0`, because the marker is set. The load
+   prints the refusal verbatim:
+   `materialize.content_hash_mismatch: recomputed sha256:cb81ac9dcecf8a644e8614e93f90851f1801151c00c64a4e90d12daacc2379b8 does not match served sha256:10c0696a3627c93aff5aec81f43d93bad03775b83491a68433255b8636121dcd`,
+   where the recomputed value is step 3's served hash and the served value is
+   `$OLD`. A successful load here means the consumer is not recomputing the
+   digest.
+
+6. Migrate the store and confirm the target rewrites the copied rows. The
+   scenario's own server is stopped for the whole step, because no registry
+   process runs on a store the command writes. The target is built by starting
+   a registry once over a second fixture, which sets the target's marker, and
+   stopping it; the second fixture shares no artifact id with the first, so no
+   copied row collides with a row the target already holds.
+
+   ```bash
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   mkdir -p "$WORK/reg2/ops"
+   podium artifact scaffold --type skill --description "Rotate the ops keys" "$WORK/reg2/ops/rotate" > /dev/null
+   PODIUM_SQLITE_PATH="$WORK/target.db" PODIUM_FILESYSTEM_ROOT="$WORK/target-objects" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg2" \
+     --bind 127.0.0.1:8128 > "$WORK/target1.log" 2>&1 &
+   T=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8128/healthz
+   kill "$T" 2>/dev/null; wait "$T" 2>/dev/null
+   podium admin migrate-to-standard --target-store=sqlite \
+     --target-sqlite "$WORK/target.db" --target-objects "$WORK/target-objects" \
+     --source-sqlite "$WORK/podium.db" --source-objects "$WORK/objects"
+   sqlite3 "$WORK/target.db" "select count(*) from data_migrations;"
+   PODIUM_SQLITE_PATH="$WORK/target.db" PODIUM_FILESYSTEM_ROOT="$WORK/target-objects" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg2" \
+     --bind 127.0.0.1:8128 > "$WORK/target2.log" 2>&1 &
+   T=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8128/healthz
+   grep rehash "$WORK/target2.log"
+   rm -rf "$PODIUM_CACHE_DIR"
+   printf '%s\n%s\n' "$INIT" "$LOAD" | PODIUM_REGISTRY=http://127.0.0.1:8128 podium-mcp 2>/dev/null \
+     | tail -1 | grep -o '"content_hash":"[^"]*"' | tail -1
+   kill "$T" 2>/dev/null; wait "$T" 2>/dev/null
+   ```
+
+   **Expect.** The command reports `manifests: 1` in its source plan, then
+   `metadata migration complete (0 admin grant(s) preserved)` and `object
+   migration complete (4 blob(s))`, and warns that the audit history was not
+   copied. `select count(*) from data_migrations` prints `0`, which is the
+   cleared marker. The target's start then logs
+   `rehash: 1 rewritten, 1 already migrated, 0 signature_unverified, 0
+   unreproducible, 0 body_missing, 0 body_unavailable (0 unread), 0 in
+   conflict, 0 in error, 0 event(s) not appended`: the copied row is the
+   rewritten one and the target's own row is the migrated one. The load prints
+   step 3's served hash. A summary line reporting `0 rewritten` means the
+   command did not clear the marker.
+
+7. Repair the scenario's own store and confirm the rewrite runs once. Deleting
+   the marker row returns the store to the state a pre-upgrade store is in.
+
+   ```bash
+   sqlite3 "$PODIUM_SQLITE_PATH" "delete from data_migrations where name='content-hash-framing';"
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8127 > "$WORK/srv3.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8127/healthz
+   grep rehash "$WORK/srv3.log"
+   rm -rf "$PODIUM_CACHE_DIR"
+   printf '%s\n%s\n' "$INIT" "$LOAD" | podium-mcp 2>/dev/null \
+     | tail -1 | grep -o '"content_hash":"[^"]*"' | tail -1
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8127 > "$WORK/srv4.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8127/healthz
+   grep -c rehash "$WORK/srv4.log"
+   ```
+
+   **Expect.** The first start logs
+   `rehash: 1 rewritten, 0 already migrated, 0 signature_unverified, 0
+   unreproducible, 0 body_missing, 0 body_unavailable (0 unread), 0 in
+   conflict, 0 in error, 0 event(s) not appended`, and the load that step 5
+   refused prints step 3's served hash. The restart prints `0`, because the
+   marker the first start recorded holds the rewrite back.
 
 **Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.

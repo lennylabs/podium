@@ -119,11 +119,11 @@ The audit-integrity pass runs inside the registry on the `PODIUM_AUDIT_VERIFY_IN
 Schema migrations are bundled in the registry binary and applied additively on startup: a new version creates tables and columns when absent and never drops or rewrites existing ones, so an upgrade migrates the database forward in place. Recommended cadence:
 
 1. **Pre-upgrade.** Read the changelog and the migration notes for the target version. If a migration is non-trivial (reshuffling embeddings, changing the audit schema), schedule a maintenance window.
-2. **Canary.** Roll one registry replica to the new version. Watch metrics for 30 min and confirm latency, error rate, and cache hit rate are unchanged.
-3. **Roll.** Roll the rest of the replicas. Because migrations are additive, an older replica ignores the new tables and columns, so old and new replicas coexist during the roll.
+2. **Canary.** Roll one registry replica to the new version. Watch metrics for 30 min and confirm latency, error rate, and cache hit rate are unchanged. A release whose changelog names a migration of the values stored under the schema has no canary phase, because the first replica on the new version rewrites the stored values that every replica on the previous version still reads and writes. For such a release, follow the upgrade order that changelog entry states, in a maintenance window: stop every replica, back up the store, provision the signing key file first where signing is on, and start the replicas together on the new version.
+3. **Roll.** Roll the rest of the replicas. Because migrations are additive, an older replica ignores the new tables and columns, so old and new replicas coexist during the roll. The additive guarantee covers the database schema and does not cover the values stored under it, so a release whose changelog names a migration of those values does not permit mixed-version replicas.
 4. **Verify.** After the roll completes, confirm `/readyz` reports `ready` on every replica and that the audit-integrity pass logs no gap on its next run.
 
-Roll back by reverting the binary. The additive schema stays forward-compatible with the previous version's binary, so an older binary continues to run against the migrated database.
+Roll back by reverting the binary. The additive schema stays forward-compatible with the previous version's binary, so an older binary continues to run against a schema-migrated database. A release whose changelog names a migration of the values stored under the schema is reverted differently: restore the store from the backup that changelog's upgrade order takes, revert the registry and its consumers together, and clear each reverted consumer's cache as that changelog entry states.
 
 ---
 
