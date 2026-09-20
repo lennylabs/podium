@@ -182,6 +182,10 @@ var sharedTableStmts = []string{
 		identity TEXT PRIMARY KEY,
 		granted_at TIMESTAMPTZ NOT NULL
 	)`,
+	`CREATE TABLE IF NOT EXISTS public.data_migrations (
+		name TEXT PRIMARY KEY,
+		applied_at TIMESTAMPTZ NOT NULL
+	)`,
 }
 
 // sharedIndexStmts index the cross-org tables in public.
@@ -468,7 +472,7 @@ func (p *Postgres) ResetForTest(ctx context.Context) error {
 		}
 	}
 	if _, err := p.db.ExecContext(ctx,
-		`TRUNCATE public.tenants, public.vector_pending RESTART IDENTITY`); err != nil {
+		`TRUNCATE public.tenants, public.vector_pending, public.data_migrations RESTART IDENTITY`); err != nil {
 		return err
 	}
 	p.mu.Lock()
@@ -905,20 +909,115 @@ func (p *Postgres) GetManifest(ctx context.Context, tenantID, artifactID, versio
 	return rec, err
 }
 
+// RehashManifest rewrites one row's content hash and signature under the
+// compare-and-swap the Store interface documents. It carries no deleted_at
+// condition, because the §13.4 migration rewrites a soft-deleted row a
+// restore would bring back.
+func (p *Postgres) RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, newHash, signature string) error {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	stmt := `
+		UPDATE manifests SET content_hash = $1, signature = $2
+		WHERE tenant_id = $3 AND artifact_id = $4 AND version = $5 AND content_hash = $6`
+	if oldHash == newHash {
+		// A rewrite that only attaches a first envelope is a
+		// compare-and-swap on the signature instead, so two replicas
+		// running the same pass cannot both sign one row.
+		stmt += ` AND signature = ''`
+	}
+	res, err := conn.ExecContext(ctx, stmt,
+		newHash, signature, tenantID, artifactID, version, oldHash)
+	if err != nil {
+		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
+	}
+	if n > 0 {
+		return nil
+	}
+	// Read the row back to tell an absent key from a stored value that no
+	// longer matches what the caller read.
+	var existing string
+	err = conn.QueryRowContext(ctx, `
+		SELECT content_hash FROM manifests
+		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
+		tenantID, artifactID, version).Scan(&existing)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
+	}
+	return ErrImmutableViolation
+}
+
+// DataMigrationApplied reports whether the named §13.4 stored-value rewrite
+// has completed against this database. The marker is store-wide, so it lives
+// in public beside the other cross-org tables.
+func (p *Postgres) DataMigrationApplied(ctx context.Context, name string) (bool, error) {
+	row := p.db.QueryRowContext(ctx, `SELECT 1 FROM public.data_migrations WHERE name = $1`, name)
+	var dummy int
+	err := row.Scan(&dummy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: data migration %s: %w", name, err)
+	}
+	return true, nil
+}
+
+// SetDataMigrationApplied records or removes the named marker. Both
+// directions are idempotent.
+func (p *Postgres) SetDataMigrationApplied(ctx context.Context, name string, applied bool) error {
+	var err error
+	if applied {
+		_, err = p.db.ExecContext(ctx, `
+			INSERT INTO public.data_migrations (name, applied_at) VALUES ($1, $2)
+			ON CONFLICT (name) DO NOTHING`, name, time.Now().UTC())
+	} else {
+		_, err = p.db.ExecContext(ctx, `DELETE FROM public.data_migrations WHERE name = $1`, name)
+	}
+	if err != nil {
+		return fmt.Errorf("store: data migration %s: %w", name, err)
+	}
+	return nil
+}
+
 // ListManifests returns every manifest for the tenant, ordered by
 // artifact ID then version.
 func (p *Postgres) ListManifests(ctx context.Context, tenantID string) ([]ManifestRecord, error) {
+	return p.listManifests(ctx, tenantID, false)
+}
+
+// ListManifestsIncludingDeleted returns the tenant's manifests without the
+// §8.4 tombstone filter, so the §13.4 stored-value migration reaches the rows
+// a restored layer would serve.
+func (p *Postgres) ListManifestsIncludingDeleted(ctx context.Context, tenantID string) ([]ManifestRecord, error) {
+	return p.listManifests(ctx, tenantID, true)
+}
+
+func (p *Postgres) listManifests(ctx context.Context, tenantID string, includeDeleted bool) ([]ManifestRecord, error) {
 	conn, release, err := p.org(ctx, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
+	tombstone := "AND deleted_at IS NULL"
+	if includeDeleted {
+		tombstone = ""
+	}
 	rows, err := conn.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
 		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw
 		FROM manifests
-		WHERE tenant_id = $1 AND deleted_at IS NULL
+		WHERE tenant_id = $1 `+tombstone+`
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
 	if err != nil {
 		return nil, err

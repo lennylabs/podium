@@ -23,6 +23,10 @@ type Memory struct {
 	// vectorPending is the §4.7.2 transactional vector outbox, keyed like
 	// manifests (tenant/artifact@version).
 	vectorPending map[string]VectorPending
+	// migrations holds the §13.4 data-migration markers, keyed by name. It
+	// is store-wide rather than per tenant, and mu guards it like every
+	// other map here.
+	migrations map[string]bool
 }
 
 // NewMemory returns a fresh in-memory Store.
@@ -36,6 +40,7 @@ func NewMemory() *Memory {
 		layers:        map[string]LayerConfig{},
 		domains:       map[string]DomainRecord{},
 		vectorPending: map[string]VectorPending{},
+		migrations:    map[string]bool{},
 	}
 }
 
@@ -219,13 +224,71 @@ func (s *Memory) GetManifest(_ context.Context, tenantID, artifactID, version st
 	return rec, nil
 }
 
+// RehashManifest rewrites one row's content hash and signature under the
+// compare-and-swap the Store interface documents. It reaches a soft-deleted
+// row, because the §13.4 migration rewrites the rows a restore would bring
+// back.
+func (s *Memory) RehashManifest(_ context.Context, tenantID, artifactID, version, oldHash, newHash, signature string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	rec, ok := s.manifests[mkey(tenantID, artifactID, version)]
+	if !ok {
+		return ErrNotFound
+	}
+	if rec.ContentHash != oldHash {
+		return ErrImmutableViolation
+	}
+	// A rewrite that only attaches a first envelope is a compare-and-swap on
+	// the signature instead, so two replicas running the same pass cannot
+	// both sign one row.
+	if oldHash == newHash && rec.Signature != "" {
+		return ErrImmutableViolation
+	}
+	rec.ContentHash = newHash
+	rec.Signature = signature
+	s.manifests[mkey(tenantID, artifactID, version)] = rec
+	return nil
+}
+
 // ListManifests returns every manifest for the tenant in stable order.
 func (s *Memory) ListManifests(_ context.Context, tenantID string) ([]ManifestRecord, error) {
+	return s.listManifests(tenantID, false)
+}
+
+// ListManifestsIncludingDeleted returns the tenant's manifests without the
+// §8.4 tombstone filter, so the §13.4 stored-value migration reaches the rows
+// a restored layer would serve.
+func (s *Memory) ListManifestsIncludingDeleted(_ context.Context, tenantID string) ([]ManifestRecord, error) {
+	return s.listManifests(tenantID, true)
+}
+
+// DataMigrationApplied reports whether the named §13.4 stored-value rewrite
+// has completed against this store.
+func (s *Memory) DataMigrationApplied(_ context.Context, name string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.migrations[name], nil
+}
+
+// SetDataMigrationApplied records or removes the named marker. Both
+// directions are idempotent.
+func (s *Memory) SetDataMigrationApplied(_ context.Context, name string, applied bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if applied {
+		s.migrations[name] = true
+		return nil
+	}
+	delete(s.migrations, name)
+	return nil
+}
+
+func (s *Memory) listManifests(tenantID string, includeDeleted bool) ([]ManifestRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []ManifestRecord
 	for _, rec := range s.manifests {
-		if rec.TenantID == tenantID && rec.DeletedAt == nil {
+		if rec.TenantID == tenantID && (includeDeleted || rec.DeletedAt == nil) {
 			out = append(out, rec)
 		}
 	}
