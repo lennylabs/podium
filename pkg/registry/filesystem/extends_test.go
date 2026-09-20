@@ -397,39 +397,62 @@ func TestWalk_ResolveExtendsFailsClosedOnAnAnchoredReference(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 / §4.7.6 — the resolver rewrites ArtifactBytes with the merged,
-// parent-hidden re-serialization and leaves AuthoredBytes as read from disk,
-// so the §4.7.6 digest is computed over the bytes ingest stored while
+// Spec: §4.6, §4.7.6, §13.11.3 — the resolver rewrites ArtifactBytes with the
+// merged, parent-hidden re-serialization and leaves AuthoredBytes as read from
+// disk, so the §4.7.6 digest is computed over the bytes ingest stored while
 // materialization still reads the merged form.
-func TestResolveExtends_KeepsAuthoredBytes(t *testing.T) {
+func TestResolveExtends_KeepsTheAuthoredBytesBesideTheMergedBytes(t *testing.T) {
 	t.Parallel()
-	root := t.TempDir()
-	parent := "---\ntype: context\nversion: 1.0.0\nname: Base\ndescription: parent desc\n---\n\nParent body.\n"
-	child := "---\ntype: context\nversion: 2.0.0\ndescription: child desc\nextends: acme/base\n---\n\nChild body.\n"
-	testharness.WriteTree(t, root,
-		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
-		testharness.WriteTreeOption{Path: "team/acme/base/ARTIFACT.md", Content: parent},
-		testharness.WriteTreeOption{Path: "team/acme/child/ARTIFACT.md", Content: child},
-	)
-	reg, err := Open(root)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
+	parent := "---\ntype: context\nversion: 1.0.0\nname: Base\ndescription: parent desc\nsensitivity: low\ntags:\n  - shared\n---\n\nParent body.\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child desc\nsensitivity: high\nextends: x\ntags:\n  - team\n---\n\nChild body.\n"
+	write := func(t *testing.T) string {
+		t.Helper()
+		root := t.TempDir()
+		testharness.WriteTree(t, root,
+			testharness.WriteTreeOption{
+				Path:    ".registry-config",
+				Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
+			},
+			testharness.WriteTreeOption{Path: "team-shared/x/ARTIFACT.md", Content: parent},
+			testharness.WriteTreeOption{Path: "personal/x/ARTIFACT.md", Content: child},
+		)
+		return root
 	}
-	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: true})
-	if err != nil {
-		t.Fatalf("Walk: %v", err)
+	walk := func(t *testing.T, root string, resolve bool) ArtifactRecord {
+		t.Helper()
+		reg, err := Open(root)
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyHighestWins, ResolveExtends: resolve})
+		if err != nil {
+			t.Fatalf("Walk(ResolveExtends=%v): %v", resolve, err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("got %d records, want 1 (%v)", len(got), idsOf(got))
+		}
+		return got[0]
 	}
-	derived := recByID(t, got, "acme/child")
-	if string(derived.AuthoredBytes) != child {
-		t.Errorf("AuthoredBytes = %q, want the authored ARTIFACT.md %q", derived.AuthoredBytes, child)
+
+	merged := walk(t, write(t), true)
+	if string(merged.AuthoredBytes) != child {
+		t.Errorf("AuthoredBytes = %q, want the authored ARTIFACT.md %q", merged.AuthoredBytes, child)
 	}
-	if string(derived.ArtifactBytes) == child {
-		t.Error("ArtifactBytes still holds the authored bytes; the merge did not run")
+	if !strings.Contains(string(merged.AuthoredBytes), "extends:") {
+		t.Error("AuthoredBytes no longer declares extends:; the resolver overwrote the authored bytes")
 	}
-	// A record that declares no extends: carries the same bytes in both fields,
-	// so a composer reads AuthoredBytes with no fallback.
-	base := recByID(t, got, "acme/base")
-	if string(base.AuthoredBytes) != string(base.ArtifactBytes) {
-		t.Errorf("non-extends record: AuthoredBytes = %q, ArtifactBytes = %q", base.AuthoredBytes, base.ArtifactBytes)
+	if strings.Contains(string(merged.ArtifactBytes), "extends:") {
+		t.Errorf("ArtifactBytes still declares extends:\n%s", merged.ArtifactBytes)
+	}
+	if string(merged.ArtifactBytes) == string(merged.AuthoredBytes) {
+		t.Error("ArtifactBytes equals AuthoredBytes; the merge did not run")
+	}
+
+	// Without the resolver the two fields carry the same bytes, so a composer
+	// reads AuthoredBytes with no fallback.
+	unresolved := walk(t, write(t), false)
+	if string(unresolved.AuthoredBytes) != child || string(unresolved.ArtifactBytes) != child {
+		t.Errorf("unresolved record: AuthoredBytes = %q, ArtifactBytes = %q, want both %q",
+			unresolved.AuthoredBytes, unresolved.ArtifactBytes, child)
 	}
 }

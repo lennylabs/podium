@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/sync"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // makeRegistryWithFile is a small variant of makeRegistry that lets
@@ -113,5 +114,47 @@ func TestRun_OverlayAppendsNewArtifact(t *testing.T) {
 	}
 	if !ids["finance/intro"] || !ids["marketing/deck"] {
 		t.Errorf("expected both registry+overlay ids, got %v", ids)
+	}
+}
+
+// Spec: §4.7.6, §6.4, §7.5.3 — an overlay record's lock entry carries the
+// canonical digest over the overlay's own ARTIFACT.md. applyOverlay builds its
+// own record, so an implementation that drops the authored bytes there records
+// the digest over an empty manifest instead.
+func TestRun_OverlayRecordLockHashesItsAuthoredManifest(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	registryBody := "---\ntype: context\nversion: 1.0.0\ndescription: registry\nsensitivity: low\n---\n\nfrom registry\n"
+	overlayBody := "---\ntype: context\nversion: 2.0.0\ndescription: overlay\nsensitivity: low\n---\n\nfrom overlay\n"
+	registry := makeRegistryWithBody(t, dir, registryBody)
+	ovl := makeOverlayWithBody(t, dir, overlayBody)
+	target := filepath.Join(dir, "out")
+	if _, err := sync.Run(sync.Options{
+		RegistryPath: registry,
+		OverlayPath:  ovl,
+		Target:       target,
+		AdapterID:    "none",
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	lock, err := sync.ReadLock(target)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+	if lock == nil || len(lock.Artifacts) == 0 {
+		t.Fatalf("lock missing artifacts: %+v", lock)
+	}
+	want := "sha256:" + version.CanonicalContentHash([]byte(overlayBody), nil, nil)
+	empty := "sha256:" + version.CanonicalContentHash(nil, nil, nil)
+	for _, la := range lock.Artifacts {
+		if la.ID != "finance/intro" {
+			continue
+		}
+		if la.ContentHash == empty {
+			t.Fatalf("lock %s content_hash is the digest over an empty manifest", la.ID)
+		}
+		if la.ContentHash != want {
+			t.Errorf("lock %s content_hash = %q, want the overlay manifest digest %q", la.ID, la.ContentHash, want)
+		}
 	}
 }

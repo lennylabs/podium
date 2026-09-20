@@ -21,3 +21,9 @@ Each layer contains a representative cross-section of the first-class
 types: `skill`, `agent`, `context`, `command`, `rule`, `hook`, and
 `mcp-server`. Bundled resources span Python scripts, Markdown
 references, JSON schemas, and a binary blob.
+
+`personal/notes/glossary-notes` extends `company-glossary` in `org-defaults`
+with no version pin. The §11 filesystem ↔ server equivalence test requires the
+fixture to carry an `extends:` child, because the two consumers obtain a
+derived artifact's manifest bytes by different routes and its lock entry is
+what pins them to one §4.7.6 content hash.

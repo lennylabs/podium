@@ -82,13 +82,21 @@ func TestLockContentHash_PrefersRegistryValue(t *testing.T) {
 	}
 }
 
-// spec: §7.5.3 — a filesystem source carries no recorded hash, so
-// lockContentHash falls back to the digest computed over the served bytes.
-func TestLockContentHash_FallsBackToComputed(t *testing.T) {
+// Spec: §4.7.6, §7.5.3 — a filesystem source carries no recorded hash, so
+// lockContentHash computes one, and it computes it over the authored
+// ARTIFACT.md rather than over the merged, parent-hidden re-serialization the
+// extends: resolver leaves in ArtifactBytes.
+func TestLockContentHash_FilesystemSourceHashesTheAuthoredManifest(t *testing.T) {
 	t.Parallel()
-	rec := materialRecord{ID: "x", ArtifactBytes: []byte("served bytes"), AuthoredBytes: []byte("served bytes")} // no ContentHash
-	if got, want := lockContentHash(rec), contentHashFor(rec); got != want {
-		t.Errorf("lockContentHash = %q, want the computed digest %q", got, want)
+	authored := []byte("---\ntype: context\nversion: 2.0.0\ndescription: child desc\nextends: acme/base\n---\n\nChild body.\n")
+	merged := []byte("---\ntype: context\nversion: 2.0.0\ndescription: child desc\nname: Base\n---\n\nChild body.\n")
+	rec := materialRecord{ID: "acme/child", ArtifactBytes: merged, AuthoredBytes: authored} // no ContentHash
+	want := "sha256:" + version.CanonicalContentHash(authored, nil, nil)
+	if got := lockContentHash(rec); got != want {
+		t.Errorf("lockContentHash = %q, want the authored-bytes digest %q", got, want)
+	}
+	if overMerged := "sha256:" + version.CanonicalContentHash(merged, nil, nil); want == overMerged {
+		t.Fatal("test setup: the authored and the merged bytes hash alike; the fixture proves nothing")
 	}
 }
 
@@ -168,20 +176,25 @@ func TestRun_LockRecordsVersionAndContentHash(t *testing.T) {
 	}
 }
 
-// spec: §4.7.6, §7.5.3 — a filesystem-source sync pins the digest over the
+// Spec: §4.7.6, §7.5.3 — a filesystem-source sync pins the digest over the
 // authored ARTIFACT.md for an extends: child, which is the value ingest stores
 // and a server-source sync records, rather than the digest over the merged
-// re-serialization the extends: resolver writes into ArtifactBytes.
-func TestRun_FilesystemSourceLockHashesTheAuthoredManifest(t *testing.T) {
+// re-serialization the extends: resolver writes into ArtifactBytes. The parent
+// sits in the layer layer_order: places first, so the resolver finds it through
+// the effective view.
+func TestRun_FilesystemSourceLockHashesAnExtendsChildBeforeTheMerge(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
 	target := t.TempDir()
 	parent := "---\ntype: context\nversion: 1.0.0\nname: Base\ndescription: parent desc\n---\n\nParent body.\n"
 	child := "---\ntype: context\nversion: 2.0.0\ndescription: child desc\nextends: acme/base\n---\n\nChild body.\n"
 	testharness.WriteTree(t, registry,
-		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\n"},
-		testharness.WriteTreeOption{Path: "team/acme/base/ARTIFACT.md", Content: parent},
-		testharness.WriteTreeOption{Path: "team/acme/child/ARTIFACT.md", Content: child},
+		testharness.WriteTreeOption{
+			Path:    ".registry-config",
+			Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
+		},
+		testharness.WriteTreeOption{Path: "team-shared/acme/base/ARTIFACT.md", Content: parent},
+		testharness.WriteTreeOption{Path: "personal/acme/child/ARTIFACT.md", Content: child},
 	)
 	if _, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"}); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -207,16 +220,17 @@ func TestRun_FilesystemSourceLockHashesTheAuthoredManifest(t *testing.T) {
 			t.Fatal("test setup: the merged bytes hash to the authored digest; the fixture proves nothing")
 		}
 	}
-	var got string
+	var seen int
 	for _, la := range lock.Artifacts {
-		if la.ID == "acme/child" {
-			got = la.ContentHash
+		if la.ID != "acme/child" {
+			continue
+		}
+		seen++
+		if la.ContentHash != want {
+			t.Errorf("lock content_hash = %q, want the authored-bytes digest %q", la.ContentHash, want)
 		}
 	}
-	if got == "" {
+	if seen == 0 {
 		t.Fatalf("lock has no acme/child entry: %+v", lock.Artifacts)
-	}
-	if got != want {
-		t.Errorf("lock content_hash = %q, want the authored-bytes digest %q", got, want)
 	}
 }
