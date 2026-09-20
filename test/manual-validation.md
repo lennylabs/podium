@@ -1390,15 +1390,19 @@ scenario's data is needed.
 
    ```bash
    (cd ~/projects/podium && docker compose down -v && make services-up)
+   until [ "$(docker inspect -f '{{.State.Health.Status}}' podium-postgres 2>/dev/null)" = "healthy" ]; do
+     sleep 2
+   done
    until [ "$(docker inspect -f '{{.State.Status}}' podium-bootstrap 2>/dev/null)" = "exited" ]; do
      sleep 2
    done
    (cd ~/projects/podium && docker compose ps -a)
    ```
 
-   **Expect.** `postgres` and `minio` report `running` and `bootstrap` reports
-   `exited (0)`, which is the bucket bootstrap having completed. No registry is
-   started against these stores before step 4.
+   **Expect.** Both loops return, so Postgres reports `healthy` and the bucket
+   bootstrap has completed. `docker compose ps -a` then reports `postgres` and
+   `minio` as `running` and `bootstrap` as `exited (0)`. No registry is started
+   against these stores before step 4.
 
 4. Load the standard-store environment and run the migration. The migration
    command takes its target from `--postgres <dsn>` and `--object-store <url>`
@@ -7329,6 +7333,7 @@ grep 'audit-log podium' "$WORK/proj/ws/.claude/settings.json"
    that changed. On Linux the edit is `sed -i` without the empty argument.
 
 **Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
+
 ---
 
 ## S64: A registry migrates its stored hashes on the first start

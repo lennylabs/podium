@@ -47,8 +47,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   artifact directory currently declares.
 
   **Read the summary line the start logs.** It carries the counts of rows
-  rewritten, rows already migrated, and rows left untouched by class, and it is
-  followed by one line per untouched row naming that row and its class. A start
+  rewritten, rows already migrated, and rows left untouched by class, and the
+  start logs one line per untouched row naming that row and its class. A start
   that is refused instead, with a message naming `PODIUM_SIGN` and
   `PODIUM_SIGN_KEY_PATH`, means the store holds signed rows and the registry was
   started without its signing mode or without the key that signed them. Start
@@ -64,12 +64,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `PODIUM_REGISTRY_STORE=sqlite` and `PODIUM_SQLITE_PATH` naming a new database
   file outside the deployment's store directory, then start the deployment with
   `PODIUM_SIGN_KEY_PATH` naming that file. Rows the summary names as untouched
-  keep their stored hash and fail on an upgraded consumer. A row whose resource
-  body the registry could not read is repaired by making that object readable
-  and starting the registry again, which runs the rewrite again. A row of any
-  other untouched class is repaired by publishing a new version of the
-  artifact. A deployment that starts more
-  than one registry process with signing on provisions the key file at
+  keep their stored hash and fail on an upgraded consumer. A `body_unavailable`
+  row is repaired by making the object readable, raising
+  `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` where the read timed out, and starting
+  the registry again: the start left the record of the rewrite unset, so the
+  rewrite runs again. A `body_missing`, `unreproducible`, or
+  `signature_unverified` row is repaired by publishing a new version of the
+  artifact, because the record of the rewrite is set and no later start
+  examines that row again. A deployment that starts more than one registry
+  process with signing on provisions the key file at
   `PODIUM_SIGN_KEY_PATH` before the start, because processes that each generate
   a key at one path overwrite each other's key. A registry on Kubernetes whose
   store is large raises the chart's `startupProbe.failureThreshold` for the
