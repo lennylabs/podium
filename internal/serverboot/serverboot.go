@@ -283,6 +283,9 @@ func envInt(key string, def int) int {
 const (
 	defaultWebUIAuthTransactionTTL   = 10 * time.Minute
 	defaultWebUIOAuthExchangeTimeout = 10 * time.Second
+	// defaultMigrationObjectReadTimeout is the §13.12 default deadline on each
+	// object-storage read the §13.4 first-start stored-value rewrite makes.
+	defaultMigrationObjectReadTimeout = 30 * time.Second
 )
 
 var defaultWebUIOAuthScopes = []string{"openid", "profile", "email", "groups"}
@@ -884,16 +887,61 @@ func run(ctx context.Context, stop func()) error {
 		resourcePut = objStore.Put
 	}
 
+	// §13.4: refuse a start that would generate a signing key while the
+	// content-hash rewrite below has not completed and a stored row carries a
+	// §4.7.9 signature. It runs ahead of the loader whatever the bind outcome,
+	// so a refused start writes no key and the next start with the same
+	// configuration is refused the same way.
+	if err := refuseGeneratedSigningKey(ctx, st, cfg.signMode); err != nil {
+		return err
+	}
+
 	// §13.10 / §4.7.9 ingest signing: when --sign registry-key (PODIUM_SIGN)
 	// is set, every accepted manifest's content hash is signed with the
 	// registry-managed key. Disabled by default; the bootstrap and reingest
 	// paths leave the signature envelope empty.
-	ingestSigner, err := registrySignerFor(cfg.signMode)
+	signProvider, err := registrySignerFor(cfg.signMode)
 	if err != nil {
 		return fmt.Errorf("registry signing key: %w", err)
 	}
-	if ingestSigner != nil {
+	var ingestSigner ingest.SignerFunc
+	if signProvider != nil {
+		ingestSigner = signProvider.Sign
 		log.Printf("ingest signing: registry-managed key (§4.7.9)")
+	}
+
+	// §8.3 audit sink and §8.2 query-text scrubber. Both read only cfg, and
+	// they are resolved here rather than at the mount below because the §13.4
+	// rewrite emits one artifact.signed event per row it re-signs.
+	//
+	// auditSink is the sink every event is emitted through (a file sink, or an
+	// EndpointSink when PODIUM_AUDIT_LOG_PATH names a SIEM endpoint).
+	// auditFile is the same sink in its file form, non-nil only for the file
+	// case; the §8.6 anchor/verify, §8.4 retention, and §8.5 erasure paths
+	// rewrite the on-disk chain and run only against it. A nil scrubber means
+	// an operator disabled scrubbing.
+	auditSink, auditFile := openAuditSink(cfg)
+	scrubber, err := cfg.piiRedaction.BuildScrubber()
+	if err != nil {
+		return fmt.Errorf("pii redaction config: %w", err)
+	}
+
+	// §13.4: rewrite every stored §4.7.6 content hash from the bytes the
+	// registry holds, once per store, before the bootstrap ingest and before
+	// anything is served. A start whose listener never bound does not run it:
+	// rewriting and re-signing the store another process is still serving,
+	// only to exit on the bind error, is the one failure the guard prevents.
+	if bindErr == nil {
+		if err := rehashStoredHashes(ctx, rehashDeps{
+			Store:       st,
+			Objects:     objStore,
+			ReadTimeout: cfg.migrationObjectReadTimeout,
+			Signer:      signProvider,
+			Sink:        auditSink,
+			Scrubber:    scrubber,
+		}); err != nil {
+			return err
+		}
 	}
 
 	// §4.7.2: route ingest embedding through the transactional outbox when the
@@ -1425,27 +1473,12 @@ func run(ctx context.Context, stop func()) error {
 	}
 	mux.Handle("/", srv.Handler())
 
-	// §8.3 audit sink: file-backed, hash-chained, shared by the
-	// anchor scheduler, the retention scheduler, the read-only
-	// probe transition events, and the §8.1 meta-tool emission
-	// hook on the registry. Nil when the path can't be resolved
-	// (probes still log; downstream features that need the sink
-	// gracefully no-op).
-	// auditSink is the §8.3 registry sink every event is emitted through
-	// (a file sink, or an EndpointSink when PODIUM_AUDIT_LOG_PATH names a
-	// SIEM endpoint). auditFile is the same sink in its file form,
-	// non-nil only for the file case; the §8.6 anchor/verify, §8.4 retention,
-	// and §8.5 erasure paths rewrite the on-disk chain and run only against
-	// it.
-	auditSink, auditFile := openAuditSink(cfg)
-	// §8.2 default-on query-text scrubbing: build the scrubber from the
-	// resolved PIIRedactionConfig (env PODIUM_PII_REDACTION + registry.yaml
-	// pii_redaction). A nil scrubber means an operator disabled it. Resolved
-	// here unconditionally so the reingest runner's audit emitter shares it.
-	scrubber, err := cfg.piiRedaction.BuildScrubber()
-	if err != nil {
-		return fmt.Errorf("pii redaction config: %w", err)
-	}
+	// The §8.3 sink and the §8.2 scrubber are opened before the §13.4 rewrite
+	// above, which emits through them. They are shared from here by the anchor
+	// scheduler, the retention scheduler, the read-only probe transition
+	// events, the §8.1 meta-tool emission hook on the registry, and the
+	// reingest runner's audit emitter.
+	//
 	// §8.4 optional sampling for high-volume low-sensitivity events
 	// (e.g. domain.loaded at 10%). Built from PODIUM_AUDIT_SAMPLE_RATES;
 	// nil when unset, in which case every event is kept.
@@ -1719,6 +1752,13 @@ type Config struct {
 	// http.Client.Timeout is no deadline at all and the registry's own
 	// http.Server carries ReadHeaderTimeout alone.
 	webUIOAuthExchangeTimeout time.Duration
+	// migrationObjectReadTimeout bounds each object-storage read the §13.4
+	// first-start stored-value rewrite makes
+	// (PODIUM_MIGRATION_OBJECT_READ_TIMEOUT, §13.12). Environment only; there
+	// is no registry.yaml key. An unset, unparsable, or non-positive value
+	// takes the 30-second default, because run's context carries no deadline
+	// and the object-store providers set none of their own.
+	migrationObjectReadTimeout time.Duration
 	// signMode is the §13.10 ingest-signing selection (--sign /
 	// PODIUM_SIGN). Standalone signing is disabled by default; the only
 	// accepted value is "registry-key", which signs every accepted manifest
@@ -2096,6 +2136,7 @@ func LoadConfig() *Config {
 		webUIOAuthTokenEndpoint:         os.Getenv("PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT"),
 		webUIOAuthScopes:                envScopeSet("PODIUM_WEB_UI_OAUTH_SCOPES", defaultWebUIOAuthScopes),
 		webUIOAuthExchangeTimeout:       envPositiveDuration("PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT", defaultWebUIOAuthExchangeTimeout),
+		migrationObjectReadTimeout:      envPositiveDuration("PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", defaultMigrationObjectReadTimeout),
 		signMode:                        os.Getenv("PODIUM_SIGN"),
 		identityProvider:                os.Getenv("PODIUM_IDENTITY_PROVIDER"),
 		oauthAudiences:                  identity.NormalizeAudiences(splitCSVTrim(os.Getenv("PODIUM_OAUTH_AUDIENCE"))),

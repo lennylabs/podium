@@ -863,15 +863,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			// audit_redact directive has a concrete target, then redact.
 			// Structural keys win on collision. The redacted map is what
 			// AuditEmit receives, so a raw value never leaves this closure.
-			redactExtra := manifest.FrontmatterFields(mr.Frontmatter, mr.AuditRedact)
-			redacted := func(base map[string]string) map[string]string {
-				for k, v := range redactExtra {
-					if _, ok := base[k]; !ok {
-						base[k] = v
-					}
-				}
-				return audit.RedactFields(base, mr.AuditRedact)
-			}
+			redacted := ArtifactEventRedactor(mr)
 			req.AuditEmit("artifact.published", mr.ArtifactID, redacted(map[string]string{
 				"version":      mr.Version,
 				"content_hash": mr.ContentHash,
@@ -1687,4 +1679,39 @@ func groupLintErrors(diags []lint.Diagnostic) map[string][]lint.Diagnostic {
 		out[d.ArtifactID] = append(out[d.ArtifactID], d)
 	}
 	return out
+}
+
+// ArtifactEventRedactor returns the §8.2 manifest-declared redaction for one
+// stored artifact: a function that merges the author-named sensitive
+// frontmatter fields into an event's context, without overwriting a structural
+// key, and then replaces every named value with "[redacted]". A raw value never
+// leaves the returned function.
+//
+// The key set is the record's AuditRedact when it carries one, and otherwise
+// the audit_redact of the record's parsed frontmatter, because the SQL backends
+// store no audit_redact column and a row read back from them carries an empty
+// AuditRedact. A frontmatter that does not parse yields no key set and no added
+// field, so the base context passes through unredacted.
+//
+// Ingest calls it for the artifact.published, artifact.deprecated, and
+// artifact.signed events it emits; the §13.4 rehash pass calls it for the
+// artifact.signed event it appends for each row it re-signs, so a re-signed row
+// carries the redaction its own manifest declares. Neither applies a directive
+// an extends: child inherits.
+func ArtifactEventRedactor(mr store.ManifestRecord) func(base map[string]string) map[string]string {
+	keys := mr.AuditRedact
+	if len(keys) == 0 {
+		if art, err := manifest.ParseArtifact(mr.Frontmatter); err == nil {
+			keys = art.AuditRedact
+		}
+	}
+	extra := manifest.FrontmatterFields(mr.Frontmatter, keys)
+	return func(base map[string]string) map[string]string {
+		for k, v := range extra {
+			if _, ok := base[k]; !ok {
+				base[k] = v
+			}
+		}
+		return audit.RedactFields(base, keys)
+	}
 }

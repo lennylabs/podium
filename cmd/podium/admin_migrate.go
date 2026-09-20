@@ -353,6 +353,16 @@ func pumpStore(plan *migrationPlan, target store.Store) error {
 	for _, t := range plan.tenants {
 		_ = target.CreateTenant(ctx, t)
 	}
+	// §13.4: a target whose store recorded the content-hash rewrite would
+	// never rewrite the rows copied in afterwards, which carry the source's
+	// stored hash and signature unchanged. Clearing before the first write
+	// leaves a pump that fails partway with an unmarked target, so its next
+	// start rewrites whatever was copied.
+	if plan.manifestCount > 0 {
+		if err := target.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, false); err != nil {
+			return fmt.Errorf("clear data-migration marker: %w", err)
+		}
+	}
 	for tenantID, manifests := range plan.manifests {
 		for _, m := range manifests {
 			if err := target.PutManifest(ctx, m); err != nil {

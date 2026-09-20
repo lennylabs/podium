@@ -100,13 +100,46 @@ func TestRegistrySignerFor(t *testing.T) {
 		t.Fatal("registrySignerFor(registry-key) = nil, want a signer")
 	}
 	// A registry-managed signature is a non-empty JSON envelope over the
-	// content hash. spec: §4.7.9.
-	env, err := signer(context.Background(), "sha256:"+strings.Repeat("ab", 32))
+	// content hash, and the same provider verifies it. spec: §4.7.9. The
+	// §13.4 rehash pass relies on that round trip: it verifies a stored
+	// envelope with the loader's own provider before it rewrites the row.
+	hash := "sha256:" + strings.Repeat("ab", 32)
+	env, err := signer.Sign(context.Background(), hash)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
 	if !strings.Contains(env, "signature") {
 		t.Errorf("signature envelope = %q, want a JSON object with a signature field", env)
+	}
+	if err := signer.Verify(context.Background(), hash, env); err != nil {
+		t.Errorf("Verify over the provider's own envelope: %v", err)
+	}
+}
+
+// Spec: §13.4, §13.12 — PODIUM_MIGRATION_OBJECT_READ_TIMEOUT bounds each
+// object-storage read the first-start stored-value rewrite makes. An unset,
+// zero, negative, or unparsable value takes the 30-second default, because a
+// zero deadline is no deadline at all and run's context carries none.
+func TestLoadConfig_MigrationObjectReadTimeout(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		set   bool
+		want  time.Duration
+	}{
+		{name: "unset", want: 30 * time.Second},
+		{name: "zero", value: "0", set: true, want: 30 * time.Second},
+		{name: "negative", value: "-1s", set: true, want: 30 * time.Second},
+		{name: "unparsable", value: "later", set: true, want: 30 * time.Second},
+		{name: "configured", value: "2s", set: true, want: 2 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setEnvForTest(t, "PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", tc.value, tc.set)
+			if got := LoadConfig().migrationObjectReadTimeout; got != tc.want {
+				t.Errorf("migrationObjectReadTimeout = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
