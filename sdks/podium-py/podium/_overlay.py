@@ -268,7 +268,13 @@ class LocalOverlay:
     def _load(self) -> None:
         if not self.path or not os.path.isdir(self.path):
             return
-        for dirpath, _dirnames, filenames in os.walk(self.path):
+        for dirpath, dirnames, filenames in os.walk(self.path):
+            # spec §6.4 — an overlay carries the registry-side layers' format,
+            # so discovery skips a dot-prefixed directory below the overlay
+            # root together with everything under it, as walkLayer does in
+            # pkg/registry/filesystem/walk.go. The root itself is exempt,
+            # because the default overlay path is <CWD>/.podium/overlay/.
+            dirnames[:] = [d for d in dirnames if not d.startswith(".")]
             rel = os.path.relpath(dirpath, self.path)
             canonical = "" if rel in (".", "") else rel.replace(os.sep, "/")
             if "DOMAIN.md" in filenames:
@@ -312,7 +318,11 @@ class LocalOverlay:
         skip = {"ARTIFACT.md"}
         if art_type == "skill":
             skip.add("SKILL.md")
-        for sub, _d, files in os.walk(dirpath):
+        for sub, dirs, files in os.walk(dirpath):
+            # spec §4.4 — the files of a nested package are not resources of
+            # the enclosing one, so the walk stops at a subdirectory that
+            # directly contains an ARTIFACT.md.
+            dirs[:] = [d for d in dirs if not _has_artifact_manifest(os.path.join(sub, d))]
             for name in files:
                 full = os.path.join(sub, name)
                 relname = os.path.relpath(full, dirpath).replace(os.sep, "/")
@@ -401,6 +411,16 @@ class LocalOverlay:
 
     def get(self, artifact_id: str) -> OverlayArtifact | None:
         return self.artifacts.get(artifact_id)
+
+
+def _has_artifact_manifest(dirpath: str) -> bool:
+    """Report whether dirpath directly contains an ARTIFACT.md (§4.4).
+
+    Mirrors hasArtifactManifest in pkg/registry/filesystem/walk.go: the test
+    is the manifest alone, so a subdirectory holding only a SKILL.md is an
+    ordinary part of the enclosing package.
+    """
+    return os.path.isfile(os.path.join(dirpath, "ARTIFACT.md"))
 
 
 def _read_resource(path: str) -> object:

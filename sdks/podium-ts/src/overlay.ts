@@ -355,7 +355,12 @@ export class LocalOverlay {
         }
       }
       for (const e of entries) {
-        if (e.isDirectory()) await walk(path.join(dir, e.name));
+        // spec §6.4 — an overlay carries the registry-side layers' format, so
+        // discovery skips a dot-prefixed directory below the overlay root
+        // together with everything under it, as walkLayer does in
+        // pkg/registry/filesystem/walk.go. The root itself is exempt, because
+        // the default overlay path is <CWD>/.podium/overlay/.
+        if (e.isDirectory() && !e.name.startsWith(".")) await walk(path.join(dir, e.name));
       }
     };
     await walk(overlayPath);
@@ -388,7 +393,14 @@ export class LocalOverlay {
     if (fields.type === "skill") skip.add("SKILL.md");
     const resources: Record<string, string> = {};
     const collect = async (sub: string): Promise<void> => {
-      for (const e of await fs.readdir(sub, { withFileTypes: true })) {
+      const entries = await fs.readdir(sub, { withFileTypes: true });
+      // spec §4.4 — the files of a nested package are not resources of the
+      // enclosing one, so the walk stops at a subdirectory that directly
+      // contains an ARTIFACT.md. The test is the manifest alone, mirroring
+      // hasArtifactManifest in pkg/registry/filesystem/walk.go, so a
+      // subdirectory holding only a SKILL.md stays part of this package.
+      if (sub !== dir && entries.some((e) => e.isFile() && e.name === "ARTIFACT.md")) return;
+      for (const e of entries) {
         const full = path.join(sub, e.name);
         if (e.isDirectory()) {
           await collect(full);

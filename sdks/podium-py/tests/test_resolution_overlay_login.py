@@ -201,6 +201,43 @@ def test_load_artifact_resolves_overlay_first(tmp_path):
     assert "overlay body" in art.manifest_body
 
 
+# Spec: §4.4, §6.4 — the overlay carries the registry-side layers' format, so
+# the SDK loader's resource set is every file under the package root,
+# dot-prefixed names included, other than the root ARTIFACT.md, a skill's root
+# SKILL.md, and the files of a nested package; and discovery skips a
+# dot-prefixed directory below the overlay root. The overlay root itself sits
+# under .podium/, so the root exemption is exercised here too.
+def test_overlay_resource_set_matches_the_registry_walk(tmp_path):
+    overlay = tmp_path / ".podium" / "overlay"
+    _write(str(overlay / "outer" / "ARTIFACT.md"), "---\ntype: skill\nversion: 0.1.0\n---\nouter\n")
+    _write(str(overlay / "outer" / "SKILL.md"), "outer skill body\n")
+    _write(str(overlay / "outer" / "notes.md"), "line one\r\nline two\r\n")
+    _write(str(overlay / "outer" / ".hidden-note"), "hidden note body\n")
+    _write(str(overlay / "outer" / ".tooling" / "config.json"), '{"tool":"config"}\n')
+    _write(str(overlay / "outer" / "references" / "SKILL.md"), "reference skill body\n")
+    _write(
+        str(overlay / "outer" / "inner" / "ARTIFACT.md"),
+        "---\ntype: context\nversion: 0.1.0\n---\ninner\n",
+    )
+    _write(str(overlay / "outer" / "inner" / "data.txt"), "inner data\n")
+    _write(
+        str(overlay / "outer" / ".nested" / "ARTIFACT.md"),
+        "---\ntype: context\nversion: 0.1.0\n---\nnested\n",
+    )
+    _write(str(overlay / "outer" / ".nested" / "note.txt"), "nested note\n")
+
+    index = _overlay.LocalOverlay(str(overlay))
+
+    assert set(index.artifacts) == {"outer", "outer/inner"}
+    assert set(index.artifacts["outer"].resources) == {
+        "notes.md",
+        ".hidden-note",
+        ".tooling/config.json",
+        "references/SKILL.md",
+    }
+    assert set(index.artifacts["outer/inner"].resources) == {"data.txt"}
+
+
 def test_overlay_path_cwd_fallback(tmp_path, monkeypatch):
     # spec §6.4 step 3 — <CWD>/.podium/overlay/ fallback when no env/explicit.
     monkeypatch.delenv("PODIUM_OVERLAY_PATH", raising=False)

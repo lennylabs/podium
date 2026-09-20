@@ -158,6 +158,39 @@ describe("overlay merge", () => {
     expect(overlay.artifacts.size).toBe(0);
   });
 
+  // Spec: §4.4, §6.4 — the overlay carries the registry-side layers' format,
+  // so the loader's resource set is every file under the package root,
+  // dot-prefixed names included, other than the root ARTIFACT.md, a skill's
+  // root SKILL.md, and the files of a nested package; and discovery skips a
+  // dot-prefixed directory below the overlay root. The overlay root itself
+  // sits under .podium/, so the root exemption is exercised here too.
+  it("LocalOverlay.load matches the registry walk's resource set", async () => {
+    const overlay = join(dir, ".podium", "overlay");
+    const write = async (rel: string, body: string): Promise<void> => {
+      const full = join(overlay, ...rel.split("/"));
+      await mkdir(join(full, ".."), { recursive: true });
+      await writeFile(full, body);
+    };
+    await write("outer/ARTIFACT.md", "---\ntype: skill\nversion: 0.1.0\n---\nouter\n");
+    await write("outer/SKILL.md", "outer skill body\n");
+    await write("outer/notes.md", "line one\r\nline two\r\n");
+    await write("outer/.hidden-note", "hidden note body\n");
+    await write("outer/.tooling/config.json", '{"tool":"config"}\n');
+    await write("outer/references/SKILL.md", "reference skill body\n");
+    await write("outer/inner/ARTIFACT.md", "---\ntype: context\nversion: 0.1.0\n---\ninner\n");
+    await write("outer/inner/data.txt", "inner data\n");
+    await write("outer/.nested/ARTIFACT.md", "---\ntype: context\nversion: 0.1.0\n---\nnested\n");
+    await write("outer/.nested/note.txt", "nested note\n");
+
+    const index = await LocalOverlay.load(overlay);
+
+    expect(new Set(index.artifacts.keys())).toEqual(new Set(["outer", "outer/inner"]));
+    expect(new Set(Object.keys(index.get("outer")!.resources))).toEqual(
+      new Set(["notes.md", ".hidden-note", ".tooling/config.json", "references/SKILL.md"]),
+    );
+    expect(new Set(Object.keys(index.get("outer/inner")!.resources))).toEqual(new Set(["data.txt"]));
+  });
+
   it("rrfFuse ranks an id present in both lists highest", () => {
     const fused = rrfFuse([["a", "b"], ["b", "c"]]);
     const top = [...fused.entries()].sort((x, y) => y[1] - x[1])[0][0];
