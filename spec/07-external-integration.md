@@ -334,6 +334,7 @@ defaults:
   harness: claude-code
   target: ~/.claude/
   profile: project-default # default profile when --profile is not passed
+  verify_signatures: always # never | always — see §4.7.9
 
 profiles:
   project-default:
@@ -381,6 +382,8 @@ targets:
           skip_if_no_changes: true
         - run: ["git", "-C", "$PODIUM_WORKDIR", "push", "origin", "$PODIUM_GIT_BRANCH"]
 ```
+
+`defaults.verify_signatures` sets the §4.7.9 signature policy the MCP server applies when `PODIUM_VERIFY_SIGNATURES` is unset. The MCP server resolves it across the three file scopes by the precedence above, discovering the workspace by the same walk up from CWD, so a project-local `sync.local.yaml` value overrides a project-shared one. It is the only signing-related key in this block: verification key material is resolved from the environment and from the registry's key file, in the order §4.7.9 states, and is never written to or read from `sync.yaml`.
 
 **Registry source.** `defaults.registry` accepts either a URL or a filesystem path; the client adapts:
 
