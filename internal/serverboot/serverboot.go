@@ -887,6 +887,14 @@ func run(ctx context.Context, stop func()) error {
 		resourcePut = objStore.Put
 	}
 
+	// §13.12 signing: refuse a start whose generated signing key would sit on
+	// storage with a different fate from the store it signs. It runs before
+	// the §13.4 refusal and the loader, so a refused start writes no key and
+	// rewrites no row.
+	if err := refuseUnpersistedSigningKey(cfg); err != nil {
+		return err
+	}
+
 	// §13.4: refuse a start that would generate a signing key while the
 	// content-hash rewrite below has not completed and a stored row carries a
 	// §4.7.9 signature. It runs ahead of the loader whatever the bind outcome,
@@ -896,10 +904,10 @@ func run(ctx context.Context, stop func()) error {
 		return err
 	}
 
-	// §13.10 / §4.7.9 ingest signing: when --sign registry-key (PODIUM_SIGN)
-	// is set, every accepted manifest's content hash is signed with the
-	// registry-managed key. Disabled by default; the bootstrap and reingest
-	// paths leave the signature envelope empty.
+	// §13.10 / §4.7.9 ingest signing: signing is on by default, so every
+	// accepted manifest's content hash is signed with the registry-managed
+	// key. --sign none (PODIUM_SIGN=none) turns it off, and the bootstrap and
+	// reingest paths then leave the signature envelope empty.
 	signProvider, err := registrySignerFor(cfg.signMode)
 	if err != nil {
 		return fmt.Errorf("registry signing key: %w", err)
@@ -1760,9 +1768,10 @@ type Config struct {
 	// and the object-store providers set none of their own.
 	migrationObjectReadTimeout time.Duration
 	// signMode is the §13.10 ingest-signing selection (--sign /
-	// PODIUM_SIGN). Standalone signing is disabled by default; the only
-	// accepted value is "registry-key", which signs every accepted manifest
-	// with a registry-managed Ed25519 key (§4.7.9).
+	// PODIUM_SIGN). The accepted values are "registry-key" and "none". An
+	// empty value resolves to "registry-key", which signs every accepted
+	// manifest with a registry-managed Ed25519 key (§4.7.9); "none" turns
+	// signing off.
 	signMode         string
 	identityProvider string
 	// oauthAudiences is the §6.3.3 accepted-audience set. A token satisfies
@@ -2394,11 +2403,13 @@ func (c *Config) validate() error {
 	if err := startup.Validate(); err != nil {
 		return err
 	}
-	// §13.10 signing: the only accepted --sign / PODIUM_SIGN value is
-	// "registry-key"; reject anything else at startup so a typo is named
-	// rather than silently leaving signing disabled.
-	if c.signMode != "" && c.signMode != "registry-key" {
-		return fmt.Errorf("config.invalid_sign_mode: PODIUM_SIGN must be registry-key, got %q", c.signMode)
+	// §13.10 signing: --sign / PODIUM_SIGN accepts "registry-key" and "none",
+	// and an empty value resolves to "registry-key". Anything else is refused
+	// at startup so a typo is named rather than silently read as a mode.
+	switch c.signMode {
+	case "", "registry-key", "none":
+	default:
+		return fmt.Errorf("config.invalid_sign_mode: PODIUM_SIGN must be registry-key or none, got %q", c.signMode)
 	}
 	// §6.3.1 / §13.12: a non-empty PODIUM_IDP_GROUP_MAPPING that does not
 	// resolve to a table fails startup under every identity provider.

@@ -233,6 +233,7 @@ func TestDeployment_MCPLoadArtifactMaterializes(t *testing.T) {
 		"PODIUM_HARNESS=claude-code",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, toolCall(1, "load_artifact", map[string]any{"id": "greetings/hello"}))
 	result := rpcResult(t, res.Stdout, 1)
 	if paths, _ := result["materialized_at"].([]any); len(paths) == 0 {
@@ -308,6 +309,7 @@ func TestDeployment_ContentCacheShared(t *testing.T) {
 			"PODIUM_HARNESS=none",
 			"PODIUM_MATERIALIZE_ROOT=" + t.TempDir(),
 			"PODIUM_CACHE_DIR=" + cache,
+			"PODIUM_VERIFY_SIGNATURES=never",
 		}, toolCall(1, "load_artifact", map[string]any{"id": "x"}))
 		return res.Stdout
 	}

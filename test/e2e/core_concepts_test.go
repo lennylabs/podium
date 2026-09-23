@@ -300,6 +300,7 @@ func TestCoreConcept_MCPMaterialize(t *testing.T) {
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, toolCall(1, "load_artifact", map[string]any{"id": "company-glossary"}))
 	result := rpcResult(t, res.Stdout, 1)
 	if paths, _ := result["materialized_at"].([]any); len(paths) == 0 {
@@ -316,6 +317,7 @@ func TestCoreConcept_MCPNoMaterializeRoot(t *testing.T) {
 	res := mcpExec(t, []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, toolCall(1, "load_artifact", map[string]any{"id": "company-glossary"}))
 	result := rpcResult(t, res.Stdout, 1)
 	if result["id"] != "company-glossary" {
@@ -450,6 +452,7 @@ func TestCoreConcept_LoadArtifactAbsolutePaths(t *testing.T) {
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, toolCall(1, "load_artifact", map[string]any{"id": "company-glossary"}))
 	result := rpcResult(t, res.Stdout, 1)
 	paths, _ := result["materialized_at"].([]any)
@@ -526,6 +529,7 @@ func TestCoreConcept_LazyNavigation(t *testing.T) {
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	},
 		toolCall(1, "load_domain", map[string]any{}),
 		toolCall(2, "search_artifacts", map[string]any{"scope": "finance"}),
@@ -857,6 +861,7 @@ func TestCoreConcept_PerCallHarnessOverride(t *testing.T) {
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, toolCall(1, "load_artifact", map[string]any{"id": "rules/ts-style", "harness": "cursor"}))
 	if rpcResult(t, res.Stdout, 1) == nil {
 		t.Fatalf("load_artifact returned no result")

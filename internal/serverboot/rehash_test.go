@@ -444,8 +444,8 @@ func TestRehashStoredHashes_RefusesToStrandASignature(t *testing.T) {
 		t.Fatal("rehashStoredHashes = nil, want a refusal over the signed row")
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "PODIUM_SIGN") || !strings.Contains(msg, "PODIUM_SIGN_KEY_PATH") || !strings.Contains(msg, "acme/alpha@1.0.0") {
-		t.Errorf("error = %q, want PODIUM_SIGN, PODIUM_SIGN_KEY_PATH and the row named", msg)
+	if !strings.Contains(msg, "PODIUM_SIGN=none") || !strings.Contains(msg, "PODIUM_SIGN_KEY_PATH") || !strings.Contains(msg, "acme/alpha@1.0.0") {
+		t.Errorf("error = %q, want PODIUM_SIGN=none, PODIUM_SIGN_KEY_PATH and the row named", msg)
 	}
 	if got := readRow(t, st, unsigned).ContentHash; got != before.ContentHash {
 		t.Errorf("unsigned row beside the refusal was written: %s", got)
@@ -1208,7 +1208,7 @@ func TestRefuseGeneratedSigningKey_RefusesBeforeTheLoaderRuns(t *testing.T) {
 
 	t.Run("signing off", func(t *testing.T) {
 		t.Setenv("PODIUM_SIGN_KEY_PATH", t.TempDir()+"/registry-signing.key")
-		if err := refuseGeneratedSigningKey(ctx, newStore(t), ""); err != nil {
+		if err := refuseGeneratedSigningKey(ctx, newStore(t), "none"); err != nil {
 			t.Errorf("refuseGeneratedSigningKey with signing off = %v, want nil", err)
 		}
 	})

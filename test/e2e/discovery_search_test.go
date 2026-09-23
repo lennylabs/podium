@@ -31,7 +31,14 @@ import (
 
 // ---- helpers ----------------------------------------------------------------
 
-func brEnv(baseURL string) []string { return []string{"PODIUM_REGISTRY=" + baseURL} }
+// brEnv and brMatEnv build the environment for the podium and podium-mcp
+// processes these suites spawn. The registry signs at ingest by default
+// (§13.10) and a bridge verifies any signature it is served under every policy
+// above never (§4.7.9), so these suites, whose subject is not signing, set
+// never. The podium CLI does not read the variable.
+func brEnv(baseURL string) []string {
+	return []string{"PODIUM_REGISTRY=" + baseURL, "PODIUM_VERIFY_SIGNATURES=never"}
+}
 
 func brMatEnv(t *testing.T, baseURL, mat string, extra ...string) []string {
 	return append([]string{
@@ -39,6 +46,7 @@ func brMatEnv(t *testing.T, baseURL, mat string, extra ...string) []string {
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, extra...)
 }
 

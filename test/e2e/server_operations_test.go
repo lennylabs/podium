@@ -310,6 +310,7 @@ func opguidePopulateSourceSQLite(t *testing.T, home, sqlitePath string) {
 		[]string{
 			"HOME=" + home,
 			"PODIUM_SQLITE_PATH=" + sqlitePath,
+			"PODIUM_SIGN=none",
 		},
 		"serve", "--standalone", "--layer-path", reg)
 
@@ -702,6 +703,7 @@ func TestServerOps_SandboxReadOnlyFsMCP(t *testing.T) {
 			"PODIUM_HARNESS=none",
 			"PODIUM_MATERIALIZE_ROOT=" + mat,
 			"PODIUM_CACHE_DIR=" + t.TempDir(),
+			"PODIUM_VERIFY_SIGNATURES=never",
 		},
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{
 			"protocolVersion": "2024-11-05",

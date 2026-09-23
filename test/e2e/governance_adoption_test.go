@@ -241,14 +241,15 @@ func TestGovernance_SensitivityDefaultsLow(t *testing.T) {
 
 // TestProgressive_6_UnsetVerifySignaturesLoadsLow confirms that when
 // PODIUM_VERIFY_SIGNATURES is not set, a low-sensitivity unsigned artifact
-// loads without a signature error.
+// loads without a signature error. The registry starts unsigned, because it
+// signs at ingest by default and the subject is an unsigned artifact.
 func TestGovernance_UnsetVerifySignaturesLoadsLow(t *testing.T) {
 	t.Parallel()
 	id := "eng/low-artifact"
 	reg := writeRegistry(t, map[string]string{
 		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nsensitivity: low\ndescription: Low sensitivity.\n---\n\nbody\n",
 	})
-	srv := startServer(t, reg)
+	srv := startServerUnsigned(t, reg)
 	mat := t.TempDir()
 	// No PODIUM_VERIFY_SIGNATURES in the env.
 	env := []string{
@@ -554,7 +555,7 @@ func TestGovernance_MediumAndAboveBlocksUnsignedMedium(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Medium unsigned.\nsensitivity: medium\n---\n\nbody\n",
 	})
-	srv := startServer(t, reg)
+	srv := startServerUnsigned(t, reg)
 	mat := t.TempDir()
 	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=medium-and-above")
 	res := mcpExec(t, env,
@@ -712,10 +713,10 @@ func TestGovernance_SignMissingContentHash(t *testing.T) {
 // exit criterion: a validly-signed high-sensitivity artifact materializes under
 // an enforcing verification policy, while the same artifact left unsigned cannot
 // be loaded. The signed half uses the signedArtifactFixture, which
-// attaches a real registry-managed signature envelope at the registry boundary
-// (the standalone filesystem bootstrap attaches none). The unsigned half uses
-// the filesystem server, which serves the artifact without a signature, so the
-// enforcing consumer refuses it.
+// attaches a real registry-managed signature envelope at the registry boundary.
+// The unsigned half uses a filesystem server started with PODIUM_SIGN=none,
+// which serves the artifact without a signature, so the enforcing consumer
+// refuses it.
 //
 // Doc note: progressive-adoption.md's Month 3 step names
 // PODIUM_VERIFY_SIGNATURES=high-only. The product accepts only never |
@@ -741,8 +742,8 @@ func TestGovernance_SignedArtifactMaterializes(t *testing.T) {
 		t.Error("signed fixture registry was never consulted")
 	}
 
-	// Unsigned high-sensitivity artifact: the filesystem server attaches no
-	// signature, so the enforcing consumer refuses the load. The doc's Month 3
+	// Unsigned high-sensitivity artifact: the filesystem server starts with
+	// signing off, so the enforcing consumer refuses the load. The doc's Month 3
 	// exit criterion is "an unsigned high-sensitivity artifact cannot be loaded";
 	// the surfaced error code is materialize.signature_missing.
 	assertUnsignedHighRefused(t, "security/playbook/unsigned")
@@ -905,9 +906,12 @@ func TestGovernance_SandboxEnforcementBlocks(t *testing.T) {
 	})
 	srv := startServer(t, reg)
 	mat := t.TempDir()
+	// The registry signs at ingest by default and the subject is the sandbox
+	// refusal, so the bridge verifies no signature.
 	env := progMCPEnv(t, srv.BaseURL, mat,
 		"PODIUM_ENFORCE_SANDBOX_PROFILE=true",
-		"PODIUM_HOST_SANDBOXES=restricted")
+		"PODIUM_HOST_SANDBOXES=restricted",
+		"PODIUM_VERIFY_SIGNATURES=never")
 	res := mcpExec(t, env,
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05", "clientInfo": map[string]any{"name": "test", "version": "0"}, "capabilities": map[string]any{}}},
 		toolCall(2, "load_artifact", map[string]any{"id": id}))
@@ -941,8 +945,10 @@ func TestGovernance_SandboxInformationalWithoutEnforcement(t *testing.T) {
 	srv := startServer(t, reg)
 	mat := t.TempDir()
 	// No PODIUM_ENFORCE_SANDBOX_PROFILE: the field is informational and the
-	// artifact materializes successfully.
-	env := progMCPEnv(t, srv.BaseURL, mat)
+	// artifact materializes successfully. The registry signs at ingest by
+	// default and the subject is the sandbox field, so the bridge verifies no
+	// signature.
+	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=never")
 	res := mcpExec(t, env,
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05", "clientInfo": map[string]any{"name": "test", "version": "0"}, "capabilities": map[string]any{}}},
 		toolCall(2, "load_artifact", map[string]any{"id": id}))
@@ -957,15 +963,16 @@ func TestGovernance_SandboxInformationalWithoutEnforcement(t *testing.T) {
 // assertUnsignedHighRefused boots a filesystem server holding one unsigned
 // high-sensitivity artifact, loads it through the real bridge under the
 // medium-and-above policy, and asserts the load is refused with
-// materialize.signature_missing. The filesystem bootstrap attaches no signature,
-// so an enforcing consumer rejects the artifact: this is the "unsigned does not
-// load" half of the doc's signing-posture claims.
+// materialize.signature_missing. The server starts with PODIUM_SIGN=none, which
+// is what keeps its fixture unsigned, because the registry signs at ingest by
+// default (§13.10); an enforcing consumer then rejects the artifact. This is
+// the "unsigned does not load" half of the doc's signing-posture claims.
 func assertUnsignedHighRefused(t *testing.T, id string) {
 	t.Helper()
 	reg := writeRegistry(t, map[string]string{
 		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Unsigned high-sensitivity artifact.\nsensitivity: high\n---\n\nsecret body\n",
 	})
-	srv := startServer(t, reg)
+	srv := startServerUnsigned(t, reg)
 	mat := t.TempDir()
 	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=medium-and-above")
 	res := mcpExec(t, env, toolCall(2, "load_artifact", map[string]any{"id": id}))
@@ -980,8 +987,8 @@ func assertUnsignedHighRefused(t *testing.T, id string) {
 // straight to Month 3's signing posture. The behavioral claim is that a signed
 // artifact loads and an unsigned one does not. The signed half uses the
 // signedArtifactFixture (a real registry-managed envelope over an
-// offline key); the unsigned half uses the filesystem server, which attaches no
-// signature. The same doc note as TestGovernance_SignedArtifactMaterializes
+// offline key); the unsigned half uses a filesystem server started with
+// PODIUM_SIGN=none, which attaches no signature. The same doc note as TestGovernance_SignedArtifactMaterializes
 // applies: the literal high-only env value is rejected by the product, so the
 // enforcing policy used here is medium-and-above over high-sensitivity content.
 func TestGovernance_ComplianceDrivenSigning(t *testing.T) {
@@ -1110,7 +1117,7 @@ func TestGovernance_AlwaysPolicyRejectsLowUnsigned(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{
 		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Low always.\nsensitivity: low\n---\n\nbody\n",
 	})
-	srv := startServer(t, reg)
+	srv := startServerUnsigned(t, reg)
 	mat := t.TempDir()
 	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=always")
 	res := mcpExec(t, env,

@@ -1857,10 +1857,11 @@ func TestCLI_SignPositionalArtifact(t *testing.T) {
 }
 
 // spec: §4.7.9 — `podium verify <artifact>` resolves the stored
-// signature. The standalone server signs no artifacts at ingest, so an
-// unsigned artifact reports the missing envelope rather than passing.
+// signature. The registry signs at ingest by default (§13.10), so the server
+// starts with signing off, and an unsigned artifact reports the missing
+// envelope rather than passing.
 func TestCLI_VerifyPositionalArtifactUnsigned(t *testing.T) {
-	srv := startServer(t, cliReg(t))
+	srv := startServerUnsigned(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "verify", "finance/invoice")
 	cliWantNonZero(t, res, "verify <artifact> unsigned")
 	cliContains(t, res.Stderr, "no stored signature", "missing-signature message")

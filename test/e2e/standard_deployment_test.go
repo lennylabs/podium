@@ -1078,6 +1078,7 @@ func TestStandardDeploy_MigrateToStandardDryRun(t *testing.T) {
 	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_SQLITE_PATH=" + srcDB,
+		"PODIUM_SIGN=none",
 	}, "serve", "--standalone", "--layer-path", reg)
 	// Register a layer to populate the DB.
 	orgMustRegisterLayer(t, srv.BaseURL, "migrate-test-layer", reg)
@@ -1148,6 +1149,7 @@ func TestStandardDeploy_MigrateToSQLite(t *testing.T) {
 	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_SQLITE_PATH=" + srcDB,
+		"PODIUM_SIGN=none",
 	}, "serve", "--standalone", "--layer-path", reg)
 	orgMustRegisterLayer(t, srv.BaseURL, "migrate-layer", reg)
 	stopProc(srv.cmd)
@@ -1186,6 +1188,7 @@ func TestStandardDeploy_MigrateAuditLog(t *testing.T) {
 	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_SQLITE_PATH=" + srcDB,
+		"PODIUM_SIGN=none",
 	}, "serve", "--standalone", "--layer-path", reg)
 	stopProc(srv.cmd)
 	time.Sleep(300 * time.Millisecond)

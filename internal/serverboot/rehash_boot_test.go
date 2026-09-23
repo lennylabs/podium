@@ -55,6 +55,10 @@ func newBootFixture(t *testing.T) *bootFixture {
 	t.Setenv("PODIUM_LAYER_PATH", layerPath)
 	t.Setenv("PODIUM_AUDIT_LOG_PATH", f.auditPath)
 	t.Setenv("PODIUM_BIND", f.addr)
+	// The registry signs by default (§13.10), so a fixture that is not about
+	// signing turns it off; a case that signs sets registry-key and its key.
+	t.Setenv("PODIUM_SIGN", "none")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
 	return f
 }
 
@@ -272,10 +276,10 @@ func TestRun_RefusesToStrandAStoredSignature(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	t.Setenv("PODIUM_SIGN", "")
+	t.Setenv("PODIUM_SIGN", "none")
 	_, err := f.boot(t)
-	if err == nil || !strings.Contains(err.Error(), "PODIUM_SIGN") {
-		t.Fatalf("run = %v, want a refusal naming PODIUM_SIGN", err)
+	if err == nil || !strings.Contains(err.Error(), "PODIUM_SIGN=none") {
+		t.Fatalf("run = %v, want a refusal naming PODIUM_SIGN=none", err)
 	}
 	after := f.openStoreDirect(t)
 	ctx := context.Background()
@@ -391,4 +395,184 @@ func TestRun_BindFailureStillRefusesAGeneratedKey(t *testing.T) {
 
 	_, runErr = f.boot(t)
 	assert(t, runErr)
+}
+
+// defaultKeyDirStore points the fixture's store at <home>/.podium/standalone,
+// the directory the default signing key resolves to, so the §13.12
+// persistence refusal passes a start with PODIUM_SIGN_KEY_PATH unset.
+func (f *bootFixture) defaultKeyDirStore(t *testing.T) {
+	t.Helper()
+	f.sqlitePath = filepath.Join(f.home, ".podium", "standalone", "podium.db")
+	t.Setenv("PODIUM_SQLITE_PATH", f.sqlitePath)
+}
+
+// Spec: §4.7.9, §13.4, §13.10 — the default signing mode reaches the
+// generated-key refusal: a start with no signing variable set, no key file,
+// and a signed stored row while the rewrite has not completed is refused.
+// The store sits beside the default key so the persistence refusal, which
+// run calls first, passes and the start reaches refuseGeneratedSigningKey.
+func TestRun_DefaultSigningRefusesAGeneratedKey(t *testing.T) {
+	f := newBootFixture(t)
+	f.defaultKeyDirStore(t)
+	t.Setenv("PODIUM_SIGN", "registry-key")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", f.keyPath)
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	st := f.openStoreDirect(t)
+	rows := downgradeRows(t, st, f.keyPath)
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	t.Setenv("PODIUM_SIGN", "")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
+	_, err := f.boot(t)
+	if err == nil || !strings.Contains(err.Error(), "names no file") {
+		t.Fatalf("run = %v, want the generated-key refusal", err)
+	}
+	defaultKey := filepath.Join(f.home, ".podium", "standalone", "registry-signing.key")
+	if _, serr := os.Stat(defaultKey); serr == nil {
+		t.Error("a key file exists at the default path after a refused start")
+	}
+	after := f.openStoreDirect(t)
+	for _, seeded := range rows {
+		rec, gerr := after.GetManifest(context.Background(), seeded.TenantID, seeded.ArtifactID, seeded.Version)
+		if gerr != nil {
+			t.Fatalf("get manifest: %v", gerr)
+		}
+		if rec.ContentHash != seeded.ContentHash || rec.Signature != seeded.Signature {
+			t.Errorf("%s was written by a refused start", rec.ArtifactID)
+		}
+	}
+}
+
+// Spec: §4.7.9, §13.4 — a key file that is present but did not sign the stored
+// rows passes the generated-key refusal. The start is not refused, the pass
+// classifies those rows signature_unverified and records completion, and the
+// rows keep their stored hash: the accepted failure mode §4.7.9 records.
+func TestRun_WrongKeyPresentLeavesSignedRowsUnverified(t *testing.T) {
+	f := newBootFixture(t)
+	t.Setenv("PODIUM_SIGN", "registry-key")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", f.keyPath)
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	st := f.openStoreDirect(t)
+	rows := downgradeRows(t, st, f.keyPath)
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	other := filepath.Join(f.home, "other-signing.key")
+	if _, err := loadOrGenerateRegistrySigner(other); err != nil {
+		t.Fatalf("generate the other key: %v", err)
+	}
+	t.Setenv("PODIUM_SIGN_KEY_PATH", other)
+	logs, err := f.boot(t)
+	if err != nil {
+		t.Fatalf("start with another key present = %v, want no refusal", err)
+	}
+	if !strings.Contains(logs, "signature_unverified") {
+		t.Errorf("logs do not classify the rows signature_unverified:\n%s", logs)
+	}
+	after := f.openStoreDirect(t)
+	ctx := context.Background()
+	for _, seeded := range rows {
+		rec, gerr := after.GetManifest(ctx, seeded.TenantID, seeded.ArtifactID, seeded.Version)
+		if gerr != nil {
+			t.Fatalf("get manifest: %v", gerr)
+		}
+		if rec.ContentHash != seeded.ContentHash {
+			t.Errorf("%s content_hash = %s, want the stored %s", rec.ArtifactID, rec.ContentHash, seeded.ContentHash)
+		}
+	}
+	applied, aerr := after.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+	if aerr != nil || !applied {
+		t.Errorf("marker applied = %v (err %v), want true", applied, aerr)
+	}
+}
+
+// Spec: §13.12, §4.7.9 — a store outside the directory the default key
+// resolves to needs PODIUM_SIGN_KEY_PATH. A first start on home A with the
+// default SQLite store generates A's key and signs its row. A second start on a
+// fresh home B pointing at A's store is refused by the persistence refusal and
+// generates no key under B. A third start on B with PODIUM_SIGN_KEY_PATH naming
+// A's key starts, and the row's signature verifies under that key.
+// onlyRow returns the one manifest row the fixture's single-artifact layer
+// stores, across every tenant.
+func onlyRow(t *testing.T, st store.Store) store.ManifestRecord {
+	t.Helper()
+	ctx := context.Background()
+	tenants, err := st.ListTenants(ctx)
+	if err != nil {
+		t.Fatalf("list tenants: %v", err)
+	}
+	var out []store.ManifestRecord
+	for _, tenant := range tenants {
+		recs, err := st.ListManifestsIncludingDeleted(ctx, tenant.ID)
+		if err != nil {
+			t.Fatalf("list manifests: %v", err)
+		}
+		out = append(out, recs...)
+	}
+	if len(out) != 1 {
+		t.Fatalf("store holds %d row(s), want 1", len(out))
+	}
+	return out[0]
+}
+
+func TestRun_StoreOutsideTheKeyDirectoryNeedsAKeyPath(t *testing.T) {
+	f := newBootFixture(t)
+	f.defaultKeyDirStore(t)
+	t.Setenv("PODIUM_SIGN", "")
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("first start on home A: %v", err)
+	}
+	keyA := filepath.Join(f.home, ".podium", "standalone", "registry-signing.key")
+	if _, err := os.Stat(keyA); err != nil {
+		t.Fatalf("the first start generated no key under home A: %v", err)
+	}
+	st := f.openStoreDirect(t)
+	ctx := context.Background()
+	rec := onlyRow(t, st)
+	if rec.Signature == "" {
+		t.Fatal("the first start stored the row unsigned")
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	homeB := t.TempDir()
+	t.Setenv("HOME", homeB)
+	t.Setenv("USERPROFILE", homeB)
+	_, err := f.boot(t)
+	if err == nil || !strings.Contains(err.Error(), "PODIUM_SIGN_KEY_PATH") || !strings.Contains(err.Error(), "PODIUM_SIGN=none") {
+		t.Fatalf("second start on home B = %v, want the persistence refusal naming PODIUM_SIGN_KEY_PATH and PODIUM_SIGN=none", err)
+	}
+	if _, serr := os.Stat(filepath.Join(homeB, ".podium", "standalone", "registry-signing.key")); serr == nil {
+		t.Error("a refused start generated a key under home B")
+	}
+	after := f.openStoreDirect(t)
+	got := onlyRow(t, after)
+	if got.ContentHash != rec.ContentHash || got.Signature != rec.Signature {
+		t.Error("the refused start wrote the stored row")
+	}
+	if err := after.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	t.Setenv("PODIUM_SIGN_KEY_PATH", keyA)
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("third start on home B with A's key: %v", err)
+	}
+	final := f.openStoreDirect(t)
+	row := onlyRow(t, final)
+	signer, err := loadOrGenerateRegistrySigner(keyA)
+	if err != nil {
+		t.Fatalf("load A's key: %v", err)
+	}
+	if err := signer.Verify(ctx, row.ContentHash, row.Signature); err != nil {
+		t.Errorf("the row's signature does not verify under A's key: %v", err)
+	}
 }

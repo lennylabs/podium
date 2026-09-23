@@ -47,14 +47,55 @@ package e2e
 // runtime trust model).
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
+
+// msSigningKeySeed is the fixed 32-byte seed of the standard-stack signing
+// key. The registry signs at ingest by default (§13.10), and a standard boot
+// resolves its key under a fresh HOME unless PODIUM_SIGN_KEY_PATH names one.
+// The live Postgres persists across runs and across test binaries, so every
+// standard-stack boot signs under this one key: a row a previous run signed
+// then still verifies, and no boot finds a signed row beside an absent key.
+const msSigningKeySeed = "podium-e2e-standard-stack-key-01"
+
+var (
+	// msSigningKeyDir is the directory TestMain creates for the shared key.
+	msSigningKeyDir string
+	// msSigningKeyOnce guards the one write of the key file; msSigningKeyFile
+	// and msSigningKeyErr hold its outcome for every later caller.
+	msSigningKeyOnce sync.Once
+	msSigningKeyFile string
+	msSigningKeyErr  error
+)
+
+// msSigningKeyPath returns the path of the shared standard-stack signing key,
+// written on the first call in the format the registry's key loader reads: a
+// private: line and a public: line at mode 0o600. Spec: §4.7.9, §13.12.
+func msSigningKeyPath(t testing.TB) string {
+	t.Helper()
+	msSigningKeyOnce.Do(func() {
+		priv := ed25519.NewKeyFromSeed([]byte(msSigningKeySeed))
+		pub := priv.Public().(ed25519.PublicKey)
+		body := "private: " + base64.StdEncoding.EncodeToString(priv) + "\n" +
+			"public: " + base64.StdEncoding.EncodeToString(pub) + "\n"
+		path := filepath.Join(msSigningKeyDir, "registry-signing.key")
+		msSigningKeyErr = os.WriteFile(path, []byte(body), 0o600)
+		msSigningKeyFile = path
+	})
+	if msSigningKeyErr != nil {
+		t.Fatalf("write the standard-stack signing key: %v", msSigningKeyErr)
+	}
+	return msSigningKeyFile
+}
 
 // msSkipIfNoStack skips the test unless a live Postgres DSN and the S3 bucket
 // are configured. It returns the resolved DSN, bucket, and region. serverboot
@@ -139,6 +180,9 @@ func msStartStandardServerEnv(t *testing.T, dsn, bucket, region, pemPath string,
 		// unverifiable caller is still rejected at the verifier before
 		// visibility is consulted, which the negative control asserts.
 		"PODIUM_DEFAULT_LAYER_VISIBILITY=public",
+		// Every standard boot on the shared database signs under one key
+		// (§13.12), so none generates its own under its fresh HOME.
+		"PODIUM_SIGN_KEY_PATH=" + msSigningKeyPath(t),
 	}
 	env = append(env, extraEnv...)
 	return startServerArgs(t, env, "serve")

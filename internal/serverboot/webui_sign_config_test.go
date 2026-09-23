@@ -57,21 +57,24 @@ func TestValidate_WebUINonLoopbackAllowed(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 — the only accepted --sign / PODIUM_SIGN value is
-// registry-key; any other value is named at startup rather than silently
-// leaving signing disabled.
+// Spec: §13.10 — --sign / PODIUM_SIGN accepts registry-key and none;
+// any other value is named at startup rather than silently read as a mode.
+// Matrix: §6.10 (config.invalid_sign_mode)
 func TestValidate_SignModeRejectsUnknown(t *testing.T) {
 	c := &Config{bind: "127.0.0.1:8080", signMode: "sigstore", storeType: "sqlite", objectStore: "filesystem"}
 	err := c.validate()
 	if err == nil || !strings.Contains(err.Error(), "config.invalid_sign_mode") {
 		t.Errorf("validate() = %v, want config.invalid_sign_mode", err)
 	}
+	if err != nil && !strings.Contains(err.Error(), "registry-key or none") {
+		t.Errorf("validate() = %v, want the message to name both accepted values", err)
+	}
 }
 
-// Spec: §13.10 — registry-key is accepted; an empty value (signing
-// disabled) is accepted.
+// Spec: §13.10 — registry-key and none are accepted, and an empty value
+// (which resolves to registry-key) is accepted.
 func TestValidate_SignModeAccepts(t *testing.T) {
-	for _, mode := range []string{"", "registry-key"} {
+	for _, mode := range []string{"", "registry-key", "none"} {
 		c := &Config{bind: "127.0.0.1:8080", signMode: mode, storeType: "sqlite", objectStore: "filesystem"}
 		if err := c.validate(); err != nil {
 			t.Errorf("validate() with signMode=%q = %v, want nil", mode, err)
@@ -80,16 +83,25 @@ func TestValidate_SignModeAccepts(t *testing.T) {
 }
 
 // Spec: §13.10 / §4.7.9 — registrySignerFor returns a working
-// registry-managed signer for "registry-key" and nil when signing is disabled.
+// registry-managed signer for an empty mode and for "registry-key", because
+// the registry signs by default, and nil for "none".
 func TestRegistrySignerFor(t *testing.T) {
 	t.Setenv("PODIUM_SIGN_KEY_PATH", t.TempDir()+"/registry-signing.key")
 
-	off, err := registrySignerFor("")
+	off, err := registrySignerFor("none")
+	if err != nil {
+		t.Fatalf("registrySignerFor(none): %v", err)
+	}
+	if off != nil {
+		t.Errorf("registrySignerFor(none) = non-nil, want nil (signing off)")
+	}
+
+	def, err := registrySignerFor("")
 	if err != nil {
 		t.Fatalf("registrySignerFor(\"\"): %v", err)
 	}
-	if off != nil {
-		t.Errorf("registrySignerFor(\"\") = non-nil, want nil (signing disabled)")
+	if def == nil {
+		t.Fatal("registrySignerFor(\"\") = nil, want a signer (signing is on by default)")
 	}
 
 	signer, err := registrySignerFor("registry-key")

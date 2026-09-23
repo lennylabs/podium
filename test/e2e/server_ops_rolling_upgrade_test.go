@@ -288,6 +288,9 @@ func ruStartUpgradedServer(t *testing.T, dsn, keysPath string) *serverProc {
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
 		"PODIUM_RUNTIME_KEYS_PATH=" + keysPath,
 		"PODIUM_BOOTSTRAP_ADMINS=alice@acme.com",
+		// Every standard boot on the shared database signs under one key
+		// (§13.12), so none generates its own under its fresh HOME.
+		"PODIUM_SIGN_KEY_PATH=" + msSigningKeyPath(t),
 		"PODIUM_DEFAULT_LAYER_VISIBILITY=public",
 	}, "serve")
 }

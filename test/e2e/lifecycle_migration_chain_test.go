@@ -77,7 +77,10 @@ func TestLifecycle_MigrationChainFilesystemStandaloneStandard(t *testing.T) {
 
 	// ---- Stage 2: standalone ingest -----------------------------------------
 	// Boot a standalone server over the same source with an explicit SQLite path
-	// and filesystem object root so the migration can read them in stage 3.
+	// and filesystem object root so the migration can read them in stage 3. It
+	// signs under the key the standard target holds, which is the documented
+	// key-copy step in effect, so the target's first-start pass classifies the
+	// migrated row migrated rather than signature_unverified (§13.4).
 	home := t.TempDir()
 	sqlitePath := filepath.Join(home, "standalone.db")
 	objectsRoot := filepath.Join(home, "objects")
@@ -85,6 +88,7 @@ func TestLifecycle_MigrationChainFilesystemStandaloneStandard(t *testing.T) {
 		"HOME=" + home,
 		"PODIUM_SQLITE_PATH=" + sqlitePath,
 		"PODIUM_FILESYSTEM_ROOT=" + objectsRoot,
+		"PODIUM_SIGN_KEY_PATH=" + msSigningKeyPath(t),
 	}, "serve", "--standalone", "--layer-path", reg)
 
 	// load_artifact returns the artifact; capture its content hash (the immutable

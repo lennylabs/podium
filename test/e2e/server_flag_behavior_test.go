@@ -152,6 +152,28 @@ func TestServerFlags_SignRegistryKey(t *testing.T) {
 	}
 }
 
+// Spec: §13.10, §4.7.9 — the registry signs at ingest by default. A
+// standalone server started with no --sign flag and no PODIUM_SIGN serves a
+// non-empty §4.7.9 signature on load_artifact.
+func TestServerFlags_SignsByDefault(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"my-skill/ARTIFACT.md": smallteamLowArtifact("default-signed artifact"),
+	})
+	srv := startServer(t, reg)
+
+	var r struct {
+		Signature string `json:"signature"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=my-skill", &r)
+	if r.Signature == "" {
+		t.Errorf("load_artifact signature is empty, want a registry-managed envelope\nlog:\n%s", srv.log())
+	}
+	if !strings.Contains(srv.log(), "ingest signing: registry-managed key") {
+		t.Errorf("startup log missing the registry-managed signing line:\n%s", srv.log())
+	}
+}
+
 // (spec: §13.10 lines 116, 223) — a first-run standalone
 // `podium serve` auto-bootstraps ~/.podium/sync.yaml with defaults.registry
 // pointing at the local server, so a consumer resolves the registry without an
@@ -185,6 +207,7 @@ func TestServerFlags_AutoBootstrapsSyncYAML(t *testing.T) {
 
 // an unrecognized --sign value is refused at startup; the process
 // exits non-zero before binding a listener.
+// Matrix: §6.10 (config.invalid_sign_mode)
 func TestServerFlags_SignRejectsUnknown(t *testing.T) {
 	t.Parallel()
 	out := runPodium(t, "", []string{"HOME=" + t.TempDir()},

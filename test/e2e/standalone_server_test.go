@@ -956,6 +956,7 @@ func TestStandaloneServer_MCPLoadArtifact(t *testing.T) {
 			"PODIUM_HARNESS=none",
 			"PODIUM_MATERIALIZE_ROOT=" + mat,
 			"PODIUM_CACHE_DIR=" + t.TempDir(),
+			"PODIUM_VERIFY_SIGNATURES=never",
 		},
 		toolCall(1, "load_artifact", map[string]any{"id": id}),
 	)
@@ -1138,7 +1139,7 @@ func TestStandaloneServer_SchemaRestartIdempotent(t *testing.T) {
 
 	// First start: creates the SQLite file.
 	srv1 := startServerArgs(t,
-		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + sqlitePath},
+		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + sqlitePath, "PODIUM_SIGN=none"},
 		"serve", "--standalone", "--layer-path", reg)
 	// Confirm it's up.
 	getJSON(t, srv1.BaseURL+"/healthz", nil)
@@ -1147,7 +1148,7 @@ func TestStandaloneServer_SchemaRestartIdempotent(t *testing.T) {
 
 	// Second start: must not produce a migration error.
 	srv2 := startServerArgs(t,
-		[]string{"HOME=" + t.TempDir(), "PODIUM_SQLITE_PATH=" + sqlitePath},
+		[]string{"HOME=" + t.TempDir(), "PODIUM_SQLITE_PATH=" + sqlitePath, "PODIUM_SIGN=none"},
 		"serve", "--standalone", "--layer-path", reg)
 	var health struct {
 		Mode string `json:"mode"`
@@ -1173,7 +1174,7 @@ func TestStandaloneServer_MigrateToStandardSQLite(t *testing.T) {
 
 	// Populate source SQLite by starting and stopping the server.
 	srv := startServerArgs(t,
-		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + srcDB},
+		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + srcDB, "PODIUM_SIGN=none"},
 		"serve", "--standalone", "--layer-path", reg)
 	getJSON(t, srv.BaseURL+"/healthz", nil)
 	stopProc(srv.cmd)
@@ -1206,7 +1207,7 @@ func TestStandaloneServer_MigrateToStandardDryRun(t *testing.T) {
 	})
 
 	srv := startServerArgs(t,
-		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + srcDB},
+		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + srcDB, "PODIUM_SIGN=none"},
 		"serve", "--standalone", "--layer-path", reg)
 	getJSON(t, srv.BaseURL+"/healthz", nil)
 	stopProc(srv.cmd)

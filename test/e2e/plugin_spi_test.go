@@ -941,6 +941,7 @@ func TestPluginSPI_HarnessNoneCanonicalLayout(t *testing.T) {
 			"PODIUM_HARNESS=none",
 			"PODIUM_MATERIALIZE_ROOT=" + mat,
 			"PODIUM_CACHE_DIR=" + t.TempDir(),
+			"PODIUM_VERIFY_SIGNATURES=never",
 		},
 		toolCall(1, "load_artifact", map[string]any{"id": id}),
 	)

@@ -146,7 +146,9 @@ func loadRehashSkill(t testing.TB, baseURL string) string {
 func TestE2E_BootRehashesStoredContentHashes(t *testing.T) {
 	home := t.TempDir()
 	sqlitePath := filepath.Join(home, "podium.db")
-	env := []string{"HOME=" + home, "PODIUM_REGISTRY_STORE=sqlite", "PODIUM_SQLITE_PATH=" + sqlitePath}
+	// The subject is the content-hash rewrite, so signing is off (§13.10
+	// signs by default).
+	env := []string{"HOME=" + home, "PODIUM_REGISTRY_STORE=sqlite", "PODIUM_SQLITE_PATH=" + sqlitePath, "PODIUM_SIGN=none"}
 	reg := rehashRegistry(t)
 
 	first := startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
@@ -241,6 +243,7 @@ func TestE2E_MigratedTargetRewritesCopiedRows(t *testing.T) {
 		"PODIUM_REGISTRY_STORE=sqlite",
 		"PODIUM_SQLITE_PATH=" + srcDB,
 		"PODIUM_FILESYSTEM_ROOT=" + srcObjs,
+		"PODIUM_SIGN=none",
 	}
 	source := startServerArgs(t, srcEnv, "serve", "--standalone", "--layer-path", rehashRegistry(t))
 	stopProc(source.cmd)
@@ -257,6 +260,7 @@ func TestE2E_MigratedTargetRewritesCopiedRows(t *testing.T) {
 		"PODIUM_REGISTRY_STORE=sqlite",
 		"PODIUM_SQLITE_PATH=" + tgtDB,
 		"PODIUM_FILESYSTEM_ROOT=" + tgtObjs,
+		"PODIUM_SIGN=none",
 	}
 	otherReg := writeRegistry(t, map[string]string{
 		"ops/acme/other/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\nsensitivity: low\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",

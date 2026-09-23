@@ -15,7 +15,9 @@ func TestServeCmd_StandaloneFlagsSetEnv(t *testing.T) {
 	t.Setenv("PODIUM_WEB_UI", "")
 	t.Setenv("PODIUM_WEB_UI_ALLOW_PUBLIC_BIND", "")
 	t.Setenv("PODIUM_NO_EMBEDDINGS", "")
-	t.Setenv("PODIUM_SIGN", "")
+	// An unset PODIUM_SIGN already resolves to registry-key (§13.10), so the
+	// fixture starts from none to make the flag's side effect observable.
+	t.Setenv("PODIUM_SIGN", "none")
 	t.Setenv("PODIUM_REGISTRY_STORE", "postgres")
 	t.Setenv("PODIUM_POSTGRES_DSN", "")
 	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
@@ -37,9 +39,9 @@ func TestServeCmd_StandaloneFlagsSetEnv(t *testing.T) {
 }
 
 // Spec: §13.10 — an unrecognized --sign value is named at startup
-// rather than silently leaving signing disabled.
+// rather than silently read as a signing mode.
 func TestServeCmd_SignRejectsUnknownValue(t *testing.T) {
-	t.Setenv("PODIUM_SIGN", "")
+	t.Setenv("PODIUM_SIGN", "none")
 	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
 	t.Setenv("PODIUM_REGISTRY_STORE", "sqlite")
 	t.Setenv("PODIUM_SQLITE_PATH", filepath.Join(t.TempDir(), "podium.db"))

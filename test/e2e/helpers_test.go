@@ -437,6 +437,18 @@ func startServer(t testing.TB, registry string) *serverProc {
 	return startServerArgs(t, []string{"HOME=" + t.TempDir()}, args...)
 }
 
+// startServerUnsigned is startServer with ingest signing off. The registry
+// signs at ingest by default (§13.10), so a case whose subject is an unsigned
+// artifact states that here rather than inheriting a signed fixture.
+func startServerUnsigned(t testing.TB, registry string) *serverProc {
+	t.Helper()
+	args := []string{"serve", "--standalone"}
+	if registry != "" {
+		args = append(args, "--layer-path", registry)
+	}
+	return startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_SIGN=none"}, args...)
+}
+
 // stopProc asks the process to stop, then force-kills if it lingers.
 func stopProc(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {

@@ -30,9 +30,13 @@ const standupArtifact = "---\n" +
 	"Reformat the user's free-text input into the team's standup format.\n"
 
 // mcpServerEnv returns the env a podium-mcp subprocess needs to talk to a
-// standalone server without touching the developer's real cache dir.
+// standalone server without touching the developer's real cache dir. The
+// registry signs at ingest by default (§13.10) and a consumer verifies any
+// signature it is served under every policy above never (§4.7.9), so the
+// bridge these suites spawn verifies nothing; a suite whose subject is signing
+// states its own policy and key.
 func mcpServerEnv(t *testing.T, baseURL string) []string {
-	return []string{"PODIUM_REGISTRY=" + baseURL, "PODIUM_CACHE_DIR=" + t.TempDir()}
+	return []string{"PODIUM_REGISTRY=" + baseURL, "PODIUM_CACHE_DIR=" + t.TempDir(), "PODIUM_VERIFY_SIGNATURES=never"}
 }
 
 // the command directory and ARTIFACT.md exist at the

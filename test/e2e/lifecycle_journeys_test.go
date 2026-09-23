@@ -373,6 +373,7 @@ func TestLifecycle_InPlaceSQLiteUpgradePreservesArtifactsAndAudit(t *testing.T) 
 	bootEnv := []string{
 		"HOME=" + home,
 		"PODIUM_SQLITE_PATH=" + dbPath,
+		"PODIUM_SIGN=none",
 		"PODIUM_AUDIT_LOG_PATH=" + auditPath,
 	}
 	srv := startServerArgs(t, bootEnv, "serve", "--standalone")

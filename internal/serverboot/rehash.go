@@ -304,7 +304,7 @@ func refuseStrandedSignature(plan []rehashRow, signer sign.Provider) error {
 	if len(stranded) == 0 {
 		return nil
 	}
-	return fmt.Errorf("rehash: %d stored row(s) carry a §4.7.9 signature and need their content hash rewritten while no signer is configured: %s; set PODIUM_SIGN=registry-key and point PODIUM_SIGN_KEY_PATH at the key that signed them", len(stranded), strings.Join(stranded, ", "))
+	return fmt.Errorf("rehash: %d stored row(s) carry a §4.7.9 signature and need their content hash rewritten while no signer is configured: %s; remove PODIUM_SIGN=none and point PODIUM_SIGN_KEY_PATH at the key that signed them", len(stranded), strings.Join(stranded, ", "))
 }
 
 // rehashCounts is what the summary line reports.
