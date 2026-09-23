@@ -66,6 +66,8 @@ client = Client.from_env()         # picks up registry URL from sync.yaml + over
 2. Configure the tenant's layer list with Git-source layers and visibility rules (§4.6).
 3. Set Git webhooks pointing at the ingest endpoint (§7.3.1).
 
+The operator distributes the registry's public verification key to consumers out of band, for `PODIUM_SIGNATURE_VERIFY_KEY` (§4.7.9, §6.11).
+
 **Per developer:**
 
 4. `podium init --global --registry https://podium.acme.com`.
@@ -84,7 +86,7 @@ Operator setup as in §14.5. Per workspace:
 
 Operator setup as in §14.5. Per workspace:
 
-1. Configure the harness's MCP server entry (§6.11) with `PODIUM_REGISTRY` and `PODIUM_HARNESS`. `PODIUM_OVERLAY_PATH` is optional; when unset, the MCP server resolves the overlay from MCP roots (§6.4).
+1. Configure the harness's MCP server entry per the §6.11 recipe. `PODIUM_OVERLAY_PATH` is optional; when unset, the MCP server resolves the overlay from MCP roots (§6.4). A consumer of a remote registry also supplies the registry's verification key out of band, per §4.7.9.
 2. First call triggers OAuth device-code via MCP elicitation. Token caches in the OS keychain.
 3. Drop workspace-local artifacts under `.podium/overlay/`. The MCP server's fsnotify watcher picks up changes.
 

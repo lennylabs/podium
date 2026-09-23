@@ -510,7 +510,7 @@ Codes are namespaced (`auth.*`, `config.*`, `ingest.*`, `materialize.*`, `quota.
 
 ## 6.11 Host Configuration Recipes
 
-The Podium MCP server is a stdio binary the host spawns alongside its other MCP servers. Each host has its own MCP config format; the snippets below show what to add for the common harnesses. All three reuse the same env-var contract from §6.2.
+The Podium MCP server is a stdio binary the host spawns alongside its other MCP servers. Each host has its own MCP config format; the snippets below show what to add for the common harnesses. All three reuse the same env-var contract from §6.2. A consumer of a standard deployment supplies the registry's public verification key out of band in `PODIUM_SIGNATURE_VERIFY_KEY`. A standalone consumer, running under the same user account as its registry, resolves the key from the registry's own key file and needs neither `PODIUM_SIGNATURE_PROVIDER` nor `PODIUM_SIGNATURE_VERIFY_KEY` (§4.7.9).
 
 **Claude Desktop** (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS; equivalents on Windows/Linux):
 
@@ -521,7 +521,9 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
       "command": "podium-mcp",
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "claude-desktop"
+        "PODIUM_HARNESS": "claude-desktop",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<base64 Ed25519 public key>"
       }
     }
   }
@@ -538,7 +540,9 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
         "PODIUM_HARNESS": "claude-code",
-        "PODIUM_OVERLAY_PATH": "${WORKSPACE}/.podium/overlay/"
+        "PODIUM_OVERLAY_PATH": "${WORKSPACE}/.podium/overlay/",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<base64 Ed25519 public key>"
       }
     }
   }
@@ -554,7 +558,9 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
       "command": "podium-mcp",
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "cursor"
+        "PODIUM_HARNESS": "cursor",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<base64 Ed25519 public key>"
       }
     }
   }
@@ -570,7 +576,9 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
       "command": "podium-mcp",
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "opencode"
+        "PODIUM_HARNESS": "opencode",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<base64 Ed25519 public key>"
       }
     }
   }
@@ -586,7 +594,9 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
       "command": "podium-mcp",
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "pi"
+        "PODIUM_HARNESS": "pi",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<base64 Ed25519 public key>"
       }
     }
   }
@@ -602,7 +612,9 @@ The Podium MCP server is a stdio binary the host spawns alongside its other MCP 
       "command": "podium-mcp",
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "hermes"
+        "PODIUM_HARNESS": "hermes",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<base64 Ed25519 public key>"
       }
     }
   }
