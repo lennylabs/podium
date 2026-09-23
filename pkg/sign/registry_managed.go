@@ -11,12 +11,13 @@ import (
 	"github.com/lennylabs/podium/pkg/spi"
 )
 
-// RegistryManagedKey implements §4.7.9's per-org registry-managed
-// signing key path. The registry holds an Ed25519 keypair per tenant
-// (managed via the secret backend in production); Sign produces a
-// detached signature, Verify checks it against the configured public
-// key. Rotation is handled by the secret backend; the provider holds
-// only the currently-active keypair.
+// RegistryManagedKey implements §4.7.9's registry-managed key model. A
+// registry deployment holds one Ed25519 keypair, loaded from
+// PODIUM_SIGN_KEY_PATH, and every process serving one store signs under it
+// across every tenant. Sign produces a detached signature, and Verify
+// checks it against the configured public key. The provider holds one
+// keypair and no key set, so rotating the key invalidates every envelope
+// made under the retired key.
 //
 // Signature envelope: JSON { "key_id", "signature" } so consumers can
 // pin to a specific key fingerprint.

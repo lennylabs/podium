@@ -1866,12 +1866,18 @@ func TestCLI_VerifyPositionalArtifactUnsigned(t *testing.T) {
 	cliContains(t, res.Stderr, "no stored signature", "missing-signature message")
 }
 
-// spec: doc "Signing — podium verify" (valid signature).
+// spec: doc "Signing — podium verify" (valid signature). §4.7.9: the noop
+// provider refuses on Verify the envelope its own Sign produced, so the verify
+// half exits 1 naming the refusal.
 func TestCLI_VerifyValid(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("b", 64)
-	sig := strings.TrimSpace(runPodium(t, "", nil, "sign", "--content-hash", hash).Stdout)
-	res := runPodium(t, "", nil, "verify", "--content-hash", hash, "--signature", sig)
-	cliWantExit(t, res, 0, "verify valid")
+	sig := strings.TrimSpace(runPodium(t, "", nil, "sign", "--provider", "noop", "--content-hash", hash).Stdout)
+	if sig == "" {
+		t.Fatalf("sign produced no envelope")
+	}
+	res := runPodium(t, "", nil, "verify", "--provider", "noop", "--content-hash", hash, "--signature", sig)
+	cliWantExit(t, res, 1, "verify through the noop provider")
+	cliContains(t, res.Stderr, "the noop provider does not verify", "noop verify refusal")
 }
 
 // spec: doc "Signing — podium verify" (tampered/mismatched).

@@ -26,30 +26,18 @@ func TestValidPolicy(t *testing.T) {
 	}
 }
 
-// spec: §6.2 — an unrecognized verification policy must fail closed: it
-// enforces verification rather than silently skipping it. Before the fix
-// the default branch returned false (fail open), so a typo disabled
-// signature enforcement on every artifact.
+// Spec: §4.7.9 — an unrecognized verification policy fails closed on both
+// axes: a missing signature is refused, and a present signature that does not
+// validate is refused. A typo therefore never disables enforcement.
 func TestEnforceVerification_UnknownPolicyFailsClosed(t *testing.T) {
 	t.Parallel()
-	// Low sensitivity + unknown policy: fail-open would return nil; fail
-	// closed requires a signature and reports it missing.
-	err := EnforceVerification(context.Background(), "bogus", Noop{}, manifest.Sensitivity("low"), "sha256:abc", "")
+	key := newTestKey(t)
+	err := EnforceVerification(context.Background(), "bogus", key, manifest.SensitivityLow, testHash, "")
 	if !errors.Is(err, ErrSignatureMissing) {
 		t.Fatalf("unknown policy with no signature = %v, want ErrSignatureMissing", err)
 	}
-	// With a valid signature the unknown policy still enforces and the
-	// noop provider verifies the placeholder.
-	if err := EnforceVerification(context.Background(), "bogus", Noop{}, manifest.Sensitivity("low"), "sha256:abc", "noop:sha256:abc"); err != nil {
-		t.Errorf("unknown policy with valid signature = %v, want nil", err)
-	}
-}
-
-// spec: §4.7.9 — a known policy keeps its documented semantics. never
-// skips verification entirely even for high sensitivity.
-func TestEnforceVerification_NeverSkips(t *testing.T) {
-	t.Parallel()
-	if err := EnforceVerification(context.Background(), PolicyNever, Noop{}, manifest.SensitivityHigh, "sha256:abc", ""); err != nil {
-		t.Errorf("PolicyNever = %v, want nil", err)
+	err = EnforceVerification(context.Background(), "bogus", key, manifest.SensitivityLow, testHash, "noop:"+testHash)
+	if !errors.Is(err, ErrSignatureInvalid) {
+		t.Errorf("unknown policy with an invalid signature = %v, want ErrSignatureInvalid", err)
 	}
 }

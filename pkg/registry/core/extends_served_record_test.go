@@ -2,6 +2,8 @@ package core_test
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -98,7 +100,11 @@ func esrRegistry(st *store.Memory) *core.Registry {
 // mutually exclusive in practice. No test paired the two before this one.
 func TestExtends_ServedSignatureVerifiesAgainstServedContentHash(t *testing.T) {
 	t.Parallel()
-	signer := sign.Noop{}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	signer := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub}
 	st := esrIngest(t,
 		"---\ntype: agent\nversion: 1.0.0\ndescription: parent\nsensitivity: medium\n---\n\nparent body\n",
 		"---\ntype: agent\nversion: 2.0.0\ndescription: child\nsensitivity: medium\n"+

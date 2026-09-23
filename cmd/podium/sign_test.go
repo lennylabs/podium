@@ -48,18 +48,30 @@ func TestSignCmd_PositionalArtifactResolvesAndSigns(t *testing.T) {
 	}
 }
 
+// noopRefusal is the text Noop.Verify returns for every signature. A CLI
+// verify through the noop provider exits 1 and prints it.
+const noopRefusal = "the noop provider does not verify"
+
 // spec: §4.7.9 — `podium verify <artifact>` resolves the stored
-// signature and verifies it against the canonical content hash.
+// signature and hands it to the provider. The noop provider refuses the
+// envelope it minted itself, because that value is derived from a content hash
+// served in the clear, so the verify exits 1 naming the refusal.
 func TestVerifyCmd_PositionalArtifactVerifiesStoredSignature(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("b", 64)
-	srv, _ := loadArtifactStub(t, hash, "noop:"+hash) // noop envelope = "noop:"+hash
+	srv, hits := loadArtifactStub(t, hash, "noop:"+hash) // noop envelope = "noop:"+hash
 	t.Setenv("PODIUM_REGISTRY", srv.URL)
 	var code int
-	withStderr(t, func() {
-		code = verifyCmd([]string{"finance/ap/pay-invoice"})
+	stderr := captureStderr(t, func() {
+		code = verifyCmd([]string{"--provider", "noop", "finance/ap/pay-invoice"})
 	})
-	if code != 0 {
-		t.Errorf("verifyCmd = %d, want 0 (stored signature is valid)", code)
+	if code != 1 {
+		t.Errorf("verifyCmd = %d, want 1 (the noop provider refuses every signature)", code)
+	}
+	if !strings.Contains(stderr, noopRefusal) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, noopRefusal)
+	}
+	if *hits != 1 {
+		t.Errorf("load_artifact hits = %d, want 1", *hits)
 	}
 }
 
@@ -93,11 +105,12 @@ func TestVerifyCmd_PositionalArtifactNoStoredSignature(t *testing.T) {
 	}
 }
 
-// The lower-level `--content-hash` form keeps working unchanged.
+// spec: §4.7.9 — the lower-level `--content-hash` form signs through the
+// noop provider, and the verify half refuses the envelope it produced.
 func TestSignVerifyCmd_ContentHashFormRoundTrips(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("f", 64)
 	sigOut := captureStdout(t, func() {
-		if code := signCmd([]string{"--content-hash", hash}); code != 0 {
+		if code := signCmd([]string{"--provider", "noop", "--content-hash", hash}); code != 0 {
 			t.Fatalf("signCmd --content-hash = %d", code)
 		}
 	})
@@ -106,11 +119,14 @@ func TestSignVerifyCmd_ContentHashFormRoundTrips(t *testing.T) {
 		t.Fatalf("sign produced no envelope")
 	}
 	var code int
-	withStderr(t, func() {
-		code = verifyCmd([]string{"--content-hash", hash, "--signature", sig})
+	stderr := captureStderr(t, func() {
+		code = verifyCmd([]string{"--provider", "noop", "--content-hash", hash, "--signature", sig})
 	})
-	if code != 0 {
-		t.Errorf("verifyCmd --content-hash = %d, want 0", code)
+	if code != 1 {
+		t.Errorf("verifyCmd --content-hash = %d, want 1 (the noop provider refuses every signature)", code)
+	}
+	if !strings.Contains(stderr, noopRefusal) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, noopRefusal)
 	}
 }
 

@@ -7,6 +7,8 @@ package conformance
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"io/fs"
 	"net/http"
@@ -141,9 +143,9 @@ func keysOf(m map[string]bool) []string {
 
 // Spec: §11 / §4.7.9 — the reference fixture's artifacts sign at ingest and
 // verify at materialization time across multiple sensitivities; a tampered
-// signature is rejected with materialize.signature_invalid. The Noop provider
-// stands in for a real SignatureProvider (Sigstore / registry-managed key);
-// the signing and verification control flow is identical.
+// signature is rejected with materialize.signature_invalid. A registry-managed
+// key generated for the test signs and verifies, because the noop provider
+// refuses every signature on Verify.
 func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 	t.Parallel()
 	reg, err := filesystem.Open(referencePath(t))
@@ -155,7 +157,11 @@ func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenant, Name: tenant}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	provider := sign.Noop{}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	provider := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub}
 	signer := func(ctx context.Context, contentHash string) (string, error) {
 		return provider.Sign(ctx, contentHash)
 	}

@@ -242,7 +242,8 @@ func TestDomainAnalyze_HappyPath(t *testing.T) {
 	})
 }
 
-// verify with a noop provider where sign produces a valid envelope.
+// spec: §4.7.9 — the noop provider signs, and its Verify refuses the
+// envelope on the matching hash and on a tampered one alike.
 func TestVerifyCmd_RoundTripWithNoop(t *testing.T) {
 	out := captureStdout(t, func() {
 		withStderr(t, func() {
@@ -258,17 +259,21 @@ func TestVerifyCmd_RoundTripWithNoop(t *testing.T) {
 	if envelope == "" {
 		t.Fatalf("no envelope from signCmd")
 	}
-	// Verify against the same hash succeeds.
-	withStderr(t, func() {
-		code := verifyCmd([]string{
+	// Verify against the same hash is refused: Noop.Verify accepts nothing.
+	var code int
+	stderr := captureStderr(t, func() {
+		code = verifyCmd([]string{
 			"--provider", "noop",
 			"--content-hash", "sha256:" + strings.Repeat("b", 64),
 			"--signature", envelope,
 		})
-		if code != 0 {
-			t.Errorf("verifyCmd = %d, want 0", code)
-		}
 	})
+	if code != 1 {
+		t.Errorf("verifyCmd = %d, want 1 (the noop provider refuses every signature)", code)
+	}
+	if !strings.Contains(stderr, noopRefusal) {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, noopRefusal)
+	}
 	// Verify with a tampered hash fails.
 	withStderr(t, func() {
 		code := verifyCmd([]string{

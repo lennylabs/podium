@@ -1,7 +1,10 @@
-// Package sign exposes the SignatureProvider SPI (spec §9.1) plus
-// the medium-and-above verification policy enforced at
-// materialization time (§4.7.9). Built-ins ship a noop provider,
-// Sigstore-keyless, and registry-managed-key implementations.
+// Package sign exposes the SignatureProvider SPI (spec §9.1) plus the
+// medium-and-above verification policy enforced at materialization time
+// (§4.7.9). The policy has two axes: a signature the response carries is
+// verified under any policy other than never, and the policy governs only
+// whether a missing signature aborts the load. Built-ins ship a noop
+// provider whose Verify refuses every signature, Sigstore-keyless, and
+// registry-managed-key implementations.
 package sign
 
 import (
@@ -72,8 +75,8 @@ type Provider interface {
 }
 
 // Noop is a Provider that signs by returning a deterministic placeholder
-// and verifies by accepting any matching placeholder. Used as a safe
-// default in standalone deployments where signing is opt-in (§13.10).
+// and refuses every signature on Verify. Sign stays usable because the
+// audit anchor and the ingest tests depend on it.
 type Noop struct{}
 
 // ID returns "noop".
@@ -84,42 +87,59 @@ func (Noop) Sign(_ context.Context, contentHash string) (string, error) {
 	return "noop:" + contentHash, nil
 }
 
-// Verify accepts the placeholder produced by Sign for the same content
-// hash and rejects anything else.
-func (Noop) Verify(_ context.Context, contentHash, signature string) error {
-	want := "noop:" + contentHash
-	if signature != want {
-		return fmt.Errorf("%w: %q != %q", ErrSignatureInvalid, signature, want)
-	}
-	return nil
+// Verify always refuses. The value Sign produces is "noop:" + contentHash, and
+// contentHash is served in the clear on every load_artifact response, so
+// accepting it would let any party mint a passing signature for any artifact.
+// A deployment that does not verify says so with PODIUM_VERIFY_SIGNATURES=never
+// (§6.2); it does not say so by configuring a provider that accepts a public
+// value.
+//
+// Spec: §4.7.9
+func (Noop) Verify(_ context.Context, _, _ string) error {
+	return fmt.Errorf("%w: the noop provider does not verify; set PODIUM_SIGNATURE_PROVIDER to registry-managed or sigstore-keyless, or set PODIUM_VERIFY_SIGNATURES=never", ErrSignatureInvalid)
 }
 
-// EnforceVerification applies policy to the artifact's sensitivity and
-// returns nil when the artifact does not require verification, or the
-// result of provider.Verify when it does.
+// EnforceVerification applies policy to one served artifact.
+//
+// The two axes are separate. A signature that is present is always verified
+// under any policy other than never, because the sensitivity the policy would
+// otherwise gate on is reported by the same party that supplies the signature,
+// and for a child declaring extends: (§4.6) no attested source for it exists:
+// the merge takes the most-restrictive value (pkg/manifest/merge.go) while the
+// content hash covers only the child's pre-merge bytes. Whether a missing
+// signature aborts the load is the axis the policy governs, and only always
+// resists a registry that serves an unsigned forgery.
+//
+// Spec: §4.7.9, §6.6 step 2.
 func EnforceVerification(ctx context.Context, policy VerificationPolicy, provider Provider, sensitivity manifest.Sensitivity, contentHash, signature string) error {
-	if !needsVerification(policy, sensitivity) {
+	if policy == PolicyNever {
 		return nil
 	}
 	if signature == "" {
+		if !requiresSignature(policy, sensitivity) {
+			return nil
+		}
 		return fmt.Errorf("%w: sensitivity %q requires a signature", ErrSignatureMissing, sensitivity)
 	}
 	return provider.Verify(ctx, contentHash, signature)
 }
 
-func needsVerification(policy VerificationPolicy, s manifest.Sensitivity) bool {
+// requiresSignature reports whether a missing signature is a refusal. An
+// unrecognized policy fails closed; loadConfig refuses such a value at startup
+// (§6.2), so this is defense in depth for a direct constructor.
+//
+// Spec: §4.7.9
+func requiresSignature(policy VerificationPolicy, s manifest.Sensitivity) bool {
 	switch policy {
 	case PolicyAlways:
 		return true
 	case PolicyMediumAndAbove:
 		return s == manifest.SensitivityMedium || s == manifest.SensitivityHigh
 	case PolicyNever:
+		// EnforceVerification returns before this call under never; the arm
+		// keeps the predicate correct for the full value set.
 		return false
 	default:
-		// Fail closed: an unrecognized policy enforces verification
-		// rather than silently skipping it. loadConfig refuses such a
-		// value at startup (§6.2), so this is defense in depth for any
-		// other caller that constructs a policy directly.
 		return true
 	}
 }

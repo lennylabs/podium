@@ -639,10 +639,12 @@ func TestGovernance_SignNoop(t *testing.T) {
 	}
 }
 
-// ---- — podium verify accepts noop signature ---------------
+// ---- — podium verify refuses a noop signature ---------------
 
-// TestProgressive_27_VerifyRoundTrip signs a hash and then verifies the
-// resulting signature, asserting exit 0 and "verify ok" in stderr.
+// TestGovernance_VerifyRoundTrip signs a hash through the noop provider and
+// then verifies the resulting signature. §4.7.9: the noop provider refuses
+// every signature on Verify, including the one its own Sign produced, so the
+// verify exits 1 with "verify failed" and the refusal.
 func TestGovernance_VerifyRoundTrip(t *testing.T) {
 	t.Parallel()
 	hash := "sha256:abc123def456"
@@ -655,11 +657,13 @@ func TestGovernance_VerifyRoundTrip(t *testing.T) {
 		"--content-hash", hash,
 		"--signature", sig,
 		"--provider", "noop")
-	if verifyRes.Exit != 0 {
-		t.Fatalf("podium verify exit=%d\nstdout: %s\nstderr: %s", verifyRes.Exit, verifyRes.Stdout, verifyRes.Stderr)
+	if verifyRes.Exit != 1 {
+		t.Fatalf("podium verify exit=%d, want 1\nstdout: %s\nstderr: %s", verifyRes.Exit, verifyRes.Stdout, verifyRes.Stderr)
 	}
-	if !strings.Contains(verifyRes.Stderr, "verify ok") {
-		t.Errorf("stderr missing 'verify ok': %q", verifyRes.Stderr)
+	for _, want := range []string{"verify failed", "the noop provider does not verify"} {
+		if !strings.Contains(verifyRes.Stderr, want) {
+			t.Errorf("stderr missing %q: %q", want, verifyRes.Stderr)
+		}
 	}
 }
 
