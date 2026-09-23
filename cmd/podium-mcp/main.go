@@ -1550,34 +1550,34 @@ func absMaterializeRoot(root string) string {
 	return root
 }
 
-// deliverLoadArtifact runs §6.6 verification + materialization
-// against an already-fetched (or cached) load_artifact response.
-// Shared between the live-fetch and cache-served code paths so
-// PODIUM_VERIFY_SIGNATURES and the sandbox profile enforcement
-// run uniformly regardless of cache mode.
+// deliverLoadArtifact runs §6.6 verification and materialization against an
+// already-fetched (or cached) load_artifact response. The live-fetch and
+// cache-served paths share it, so the verification and the §4.4.1 gates run
+// uniformly regardless of cache mode.
+//
+// The order is normative. verifyServedArtifact runs first, so the §4.7.9
+// signature policy and the §6.6 step-2 content-hash recomputation pass before
+// the §8.2 read event, the §4.4.1 sandbox and runtime gates, the cache, or the
+// §6.7 adapter read any manifest content. Those consumers read frontmatter
+// that nothing binds to the served digest until the verification has run, and
+// the read event applies the manifest's audit_redact directive from those
+// bytes. A load the verification refuses therefore records no local
+// artifact.loaded event, while a load a §4.4.1 gate refuses still records one.
+//
+// Spec: §6.6 step 2, §4.7.9
 func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliverOpts) any {
 	var o deliverOpts
 	if len(opts) > 0 {
 		o = opts[0]
 	}
-	// §6.6 step 1 — when the manifest body was delivered above the inline
-	// cutoff as a presigned URL, fetch and reconstitute it before any policy
-	// gate or the content-hash check reads the frontmatter. A no-op when the
-	// body arrived inline (cache and overlay paths never presign).
-	if err := s.fetchManifestBody(&resp, o.manifestRefresh); err != nil {
-		return errorResult("materialize.fetch_failed: " + err.Error())
+	if err := s.verifyServedArtifact(&resp, o); err != nil {
+		return errorResult(err.Error())
 	}
 	// §8.1 / §8.2: record the local artifact.loaded event with the in-flight
 	// trace id and the manifest's audit_redact directive applied. Emitted here
-	// (rather than at dispatch) so the resolved frontmatter supplies the
+	// (rather than at dispatch) so the verified frontmatter supplies the
 	// sensitive field values the directive masks.
 	s.auditLoadArtifact(resp.ID, resp.Frontmatter)
-	// §4.7.9 / §6.2: enforce signature verification per
-	// PODIUM_VERIFY_SIGNATURES before the artifact materializes
-	// onto the host filesystem.
-	if err := s.enforceSignaturePolicy(resp); err != nil {
-		return errorResult("materialize.signature_invalid: " + err.Error())
-	}
 	// §4.4.1 sandbox profile enforcement.
 	if err := s.enforceSandboxPolicy(resp); err != nil {
 		return errorResult("materialize.sandbox_unsupported: " + err.Error())
@@ -1586,24 +1586,6 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	// its capabilities refuses an artifact it cannot satisfy. The error
 	// already carries the materialize.runtime_unavailable code.
 	if err := s.enforceRuntimePolicy(resp); err != nil {
-		return errorResult(err.Error())
-	}
-	// §6.6 step 1 — normalize inline resources. When the registry flags them
-	// base64, decode to raw bytes before the content-hash check and
-	// materialization so the host receives the payload rather than base64 text.
-	if err := decodeInlineResources(&resp); err != nil {
-		return errorResult(err.Error())
-	}
-	// §6.6 step 1 — fetch every large_resource via its presigned URL into the
-	// inline Resources map. Failures (network / 403 / hash mismatch) abort
-	// materialization with a structured error; a 403/expired URL is refreshed.
-	if err := s.fetchLargeResources(&resp, o.refresh); err != nil {
-		return errorResult("materialize.fetch_failed: " + err.Error())
-	}
-	// §6.6 step 2 — content-hash match. Recompute the canonical hash over the
-	// delivered manifest bytes and bundled resources and reject a mismatch
-	// before anything is cached or written.
-	if err := s.verifyContentHash(resp); err != nil {
 		return errorResult(err.Error())
 	}
 
@@ -1722,6 +1704,44 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		result["warnings"] = warnings
 	}
 	return result
+}
+
+// verifyServedArtifact runs the §6.6 step-1 reconstitution and the §6.6
+// step-2 verification on a registry-served response and returns an error
+// whose message leads with the §6.10 code the caller returns.
+// deliverLoadArtifact and the §5.0 resources mirror both call it, so neither
+// path can serve bytes the other would refuse.
+//
+// Reconstitution comes first because the recomputation hashes every bundled
+// resource: a presigned manifest body and each large resource reach resp only
+// through their fetch, and a recomputation without them refuses every
+// artifact that carries one. The signature policy runs before the
+// recomputation, so a record whose signature fails reports the signature code
+// whatever its bytes, and the recomputation runs only over a record the
+// policy passed.
+//
+// Spec: §6.6 step 2, §4.7.9, §5.0
+func (s *mcpServer) verifyServedArtifact(resp *loadArtifactResponse, o deliverOpts) error {
+	if err := s.fetchManifestBody(resp, o.manifestRefresh); err != nil {
+		return fmt.Errorf("materialize.fetch_failed: %w", err)
+	}
+	if err := decodeInlineResources(resp); err != nil {
+		return err
+	}
+	if err := s.fetchLargeResources(resp, o.refresh); err != nil {
+		return fmt.Errorf("materialize.fetch_failed: %w", err)
+	}
+	if err := s.enforceSignaturePolicy(*resp); err != nil {
+		// §6.10: a missing required signature and a signature that does not
+		// validate are separate codes with separate operator remedies, so the
+		// missing case keeps its own code rather than folding into the
+		// invalid one.
+		if errors.Is(err, sign.ErrSignatureMissing) {
+			return fmt.Errorf("materialize.signature_missing: %w", err)
+		}
+		return fmt.Errorf("materialize.signature_invalid: %w", err)
+	}
+	return s.verifyContentHash(*resp)
 }
 
 // decodeInlineResources decodes base64-encoded inline resources in place when

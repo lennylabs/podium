@@ -746,8 +746,10 @@ func TestArtifactResponse_TSRegistryError(t *testing.T) {
 
 // ---- Error handling ---------------------------------------------------------
 
-// materialize.signature_invalid when verification fails.
-func TestArtifactResponse_SignatureInvalid(t *testing.T) {
+// materialize.signature_missing when an enforcing policy loads an artifact
+// served with no signature.
+// Spec: §6.10
+func TestArtifactResponse_SignatureMissing(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("sensitivity: low"),
@@ -755,8 +757,8 @@ func TestArtifactResponse_SignatureInvalid(t *testing.T) {
 	mat := t.TempDir()
 	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_VERIFY_SIGNATURES=always", "PODIUM_MATERIALIZE_ROOT="+mat),
 		toolCall(1, "load_artifact", map[string]any{"id": "finance/ap/pay-invoice"}))
-	if e, _ := rpcResult(t, res.Stdout, 1)["error"].(string); !strings.Contains(e, "signature_invalid") {
-		t.Errorf("error=%q, want materialize.signature_invalid", e)
+	if e, _ := rpcResult(t, res.Stdout, 1)["error"].(string); !strings.Contains(e, "materialize.signature_missing") {
+		t.Errorf("error=%q, want materialize.signature_missing", e)
 	}
 }
 

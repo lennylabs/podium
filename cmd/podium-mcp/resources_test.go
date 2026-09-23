@@ -6,6 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // resourcesFixture spins up a fake registry answering /v1/sync/manifest
@@ -82,9 +85,10 @@ func TestResources_ReadReturnsManifestBody(t *testing.T) {
 			"type":          "context",
 			"frontmatter":   fm,
 			"manifest_body": "Term definitions.",
+			"content_hash":  "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
 		},
 	})
-	s := &mcpServer{cfg: &config{registry: ts.URL}, http: &http.Client{}}
+	s := &mcpServer{cfg: &config{registry: ts.URL, verifyPolicy: sign.PolicyNever}, http: &http.Client{}}
 	out := s.handleResourcesRead(json.RawMessage(`{"uri":"podium://artifact/docs/glossary"}`))
 	m, ok := out.(map[string]any)
 	if !ok {

@@ -233,8 +233,9 @@ type Request struct {
 	// stores the resulting envelope on the ManifestRecord. Optional:
 	// when nil, ingest stores no signature and downstream
 	// materialize-time verification (PODIUM_VERIFY_SIGNATURES) sees
-	// an empty envelope. Production deployments wire a real signer
-	// (sign.SigstoreKeyless / sign.RegistryManagedKey).
+	// an empty envelope. The registry wires the registry-managed key
+	// (sign.RegistryManagedKey) when its signing mode is on; no registry
+	// signing mode produces a keyless envelope (§4.7.9).
 	Signer SignerFunc
 	// AuditEmit, when non-nil, receives §8.1 audit events the
 	// ingest pipeline produces. Distinct from PublishEvent: the

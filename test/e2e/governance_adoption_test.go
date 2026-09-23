@@ -561,8 +561,8 @@ func TestGovernance_MediumAndAboveBlocksUnsignedMedium(t *testing.T) {
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05", "clientInfo": map[string]any{"name": "test", "version": "0"}, "capabilities": map[string]any{}}},
 		toolCall(2, "load_artifact", map[string]any{"id": id}))
 	errStr := progToolErr(t, res.Stdout, 2)
-	if !strings.Contains(errStr, "signature") {
-		t.Errorf("expected signature error for unsigned medium artifact under medium-and-above policy, got: %q\nstdout: %s",
+	if !strings.Contains(errStr, "materialize.signature_missing") {
+		t.Errorf("expected materialize.signature_missing for unsigned medium artifact under medium-and-above policy, got: %q\nstdout: %s",
 			errStr, res.Stdout)
 	}
 	// No file should have been materialized.
@@ -744,7 +744,7 @@ func TestGovernance_SignedArtifactMaterializes(t *testing.T) {
 	// Unsigned high-sensitivity artifact: the filesystem server attaches no
 	// signature, so the enforcing consumer refuses the load. The doc's Month 3
 	// exit criterion is "an unsigned high-sensitivity artifact cannot be loaded";
-	// the surfaced error code is materialize.signature_invalid.
+	// the surfaced error code is materialize.signature_missing.
 	assertUnsignedHighRefused(t, "security/playbook/unsigned")
 }
 
@@ -957,7 +957,7 @@ func TestGovernance_SandboxInformationalWithoutEnforcement(t *testing.T) {
 // assertUnsignedHighRefused boots a filesystem server holding one unsigned
 // high-sensitivity artifact, loads it through the real bridge under the
 // medium-and-above policy, and asserts the load is refused with
-// materialize.signature_invalid. The filesystem bootstrap attaches no signature,
+// materialize.signature_missing. The filesystem bootstrap attaches no signature,
 // so an enforcing consumer rejects the artifact: this is the "unsigned does not
 // load" half of the doc's signing-posture claims.
 func assertUnsignedHighRefused(t *testing.T, id string) {
@@ -970,7 +970,7 @@ func assertUnsignedHighRefused(t *testing.T, id string) {
 	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=medium-and-above")
 	res := mcpExec(t, env, toolCall(2, "load_artifact", map[string]any{"id": id}))
 	errStr := progToolErr(t, res.Stdout, 2)
-	if !strings.Contains(errStr, "materialize.signature_invalid") {
+	if !strings.Contains(errStr, "materialize.signature_missing") {
 		t.Fatalf("unsigned high-sensitivity artifact must be refused under the enforcing policy, got: %q\nstdout: %s", errStr, res.Stdout)
 	}
 }
@@ -1127,7 +1127,7 @@ func TestGovernance_AlwaysPolicyRejectsLowUnsigned(t *testing.T) {
 			errStr, _ = sc["error"].(string)
 		}
 	}
-	if !strings.Contains(errStr, "signature") {
+	if !strings.Contains(errStr, "materialize.signature_missing") {
 		t.Errorf("expected signature_missing error under always policy, got: %q\nstdout: %s", errStr, res.Stdout)
 	}
 	// No file should have been materialized.

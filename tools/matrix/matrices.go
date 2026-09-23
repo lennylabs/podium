@@ -102,6 +102,7 @@ func KnownMatrices() []Matrix {
 					"ingest.webhook_invalid",
 					"ingest.source_unreachable",
 					"ingest.collision",
+					"ingest.sign_failed",
 					"materialize.signature_invalid",
 					"materialize.signature_missing",
 					"materialize.runtime_unavailable",

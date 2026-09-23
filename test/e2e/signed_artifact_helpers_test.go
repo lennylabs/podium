@@ -24,7 +24,7 @@ package e2e
 // the pkg/sign unit behavior.
 //
 // Spec: §4.7.9 (each version is signed by a registry-managed key at ingest;
-// the MCP server verifies on materialization for sensitivity >= medium;
+// the MCP server verifies a served signature under any policy above never;
 // signature failure aborts with materialize.signature_invalid), §6.2
 // (PODIUM_VERIFY_SIGNATURES: never | medium-and-above | always), §6.6 step 2
 // (content-hash match over the delivered bytes).
@@ -237,6 +237,15 @@ func (f *signedArtifactFixture) TamperBody() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.frontmatter += "\n<!-- injected tamper line -->\n"
+}
+
+// StripSignature serves an empty signature and leaves every other field as
+// constructed, so an enforcing consumer observes a missing signature rather
+// than one that fails to validate.
+func (f *signedArtifactFixture) StripSignature() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.signature = ""
 }
 
 // flipLastHexNibble returns s with its final hexadecimal character changed to a

@@ -91,24 +91,88 @@ func TestSignedArtifact_TamperedBodyHitsContentHashGate(t *testing.T) {
 	}
 }
 
-// TestSignedArtifact_LowSensitivitySkipsVerification proves the policy scope:
-// under medium-and-above a low-sensitivity artifact is below the verification
-// threshold, so even a forged content hash loads (the signature is never
-// checked). This guards against the verifier over-enforcing on artifacts the
-// policy exempts.
-func TestSignedArtifact_LowSensitivitySkipsVerification(t *testing.T) {
+// TestSignedArtifact_LowSensitivityStillVerifiesAPresentSignature proves that
+// a served signature is verified under any policy above never, whatever the
+// artifact's sensitivity: an untampered low-sensitivity artifact loads, and one
+// whose served attestation no longer matches its signature is refused with
+// materialize.signature_invalid.
+//
+// Spec: §4.7.9
+func TestSignedArtifact_LowSensitivityStillVerifiesAPresentSignature(t *testing.T) {
 	t.Parallel()
 	f := newSignedArtifactFixture(t, signedArtifactSpec{Sensitivity: "low"})
 	env := f.Env(t, "medium-and-above")
 
-	// A low-sensitivity artifact is below the medium-and-above threshold, so the
-	// signature is never checked. The served bytes and content hash are left
-	// untampered, so the content-hash gate also passes. The artifact loads
-	// cleanly under the enforcing policy, confirming the verifier scopes
-	// enforcement to the configured sensitivity floor.
+	if errStr, result := loadSignedArtifact(t, env, f.ID()); errStr != "" {
+		t.Fatalf("untampered low-sensitivity artifact should load, got error: %s\nresult=%v", errStr, result)
+	}
+
+	f.TamperContentHash()
 	errStr, result := loadSignedArtifact(t, env, f.ID())
-	if errStr != "" {
-		t.Fatalf("low-sensitivity artifact should load under medium-and-above, got error: %s\nresult=%v", errStr, result)
+	if !strings.Contains(errStr, "materialize.signature_invalid") {
+		t.Fatalf("a low-sensitivity artifact whose signature does not validate must be refused, got: %q\nresult=%v", errStr, result)
+	}
+}
+
+// readSignedResource issues MCP resources/read for id through the real bridge
+// and returns (errString, text). A successful read has an empty errString.
+func readSignedResource(t *testing.T, env []string, id string) (string, string) {
+	t.Helper()
+	res := mcpExec(t, env, rpcReq{ID: 1, Method: "resources/read", Params: map[string]any{"uri": "podium://artifact/" + id}})
+	result := rpcResult(t, res.Stdout, 1)
+	if e, _ := result["error"].(string); e != "" {
+		return e, ""
+	}
+	contents, _ := result["contents"].([]any)
+	if len(contents) == 0 {
+		t.Fatalf("resources/read returned neither an error nor contents: %v", result)
+	}
+	first, _ := contents[0].(map[string]any)
+	text, _ := first["text"].(string)
+	return "", text
+}
+
+// TestSignedArtifact_ResourcesReadVerifies proves that the §5.0 resources/read
+// mirror runs the verification load_artifact runs. An untouched artifact
+// returns its text; a tamper that invalidates the signature, a tamper of the
+// body under the signature, and a stripped signature each return the code
+// load_artifact returns, and no text. Each arm runs on its own fixture so no
+// tamper carries into the next.
+//
+// Spec: §5.0, §4.7.9
+func TestSignedArtifact_ResourcesReadVerifies(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		tamper func(*signedArtifactFixture)
+		want   string
+	}{
+		{name: "untouched"},
+		{name: "signature invalid", tamper: (*signedArtifactFixture).TamperContentHash, want: "materialize.signature_invalid"},
+		{name: "body tampered", tamper: (*signedArtifactFixture).TamperBody, want: "materialize.content_hash_mismatch"},
+		{name: "signature stripped", tamper: (*signedArtifactFixture).StripSignature, want: "materialize.signature_missing"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := newSignedArtifactFixture(t, signedArtifactSpec{})
+			if c.tamper != nil {
+				c.tamper(f)
+			}
+			errStr, text := readSignedResource(t, f.Env(t, "always"), f.ID())
+			if c.want == "" {
+				if errStr != "" || !strings.Contains(text, "Signed policy body.") {
+					t.Fatalf("untouched artifact should read, got error %q, text %q", errStr, text)
+				}
+				return
+			}
+			if !strings.HasPrefix(errStr, c.want) {
+				t.Errorf("error = %q, want a leading %s", errStr, c.want)
+			}
+			if text != "" {
+				t.Errorf("refused read returned text %q", text)
+			}
+		})
 	}
 }
 
