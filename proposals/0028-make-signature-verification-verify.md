@@ -1,7 +1,7 @@
 # Proposal 0028: Make signature verification verify
 
 - Issue: (to be filed)
-- Status: Approved (2026-09-23). Verified 2026-09-23 after 12 adversarial review rounds (48 findings fixed). OQ-11 to OQ-14 resolved by the owner with the stated defaults.
+- Status: Applied to spec (2026-09-23). Verified 2026-09-23 after 12 adversarial review rounds (48 findings fixed). OQ-11 to OQ-14 resolved by the owner with the stated defaults.
 - Date: 2026-09-15
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
