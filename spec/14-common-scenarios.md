@@ -120,7 +120,7 @@ client.login()   # device-code flow before any catalog calls
        source: { git: { repo: ..., ref: main } }
        visibility: { public: true }
    ```
-3. Configure freeze windows, admin grants, signing (Sigstore-keyless or registry-managed).
+3. Configure freeze windows, admin grants, and registry-managed-key signing (§4.7.9).
 4. `podium lint` runs as a required CI check on each layer's repo.
 
 **Per author:** edit artifacts in the team's Git repo, open PR, merge. Webhook fires; registry ingests.
@@ -177,7 +177,7 @@ Registry runs entirely on an internal network with no public ingress.
 1. Deploy registry per §13.1 inside the internal network. Identity via the org's internal OIDC IdP. Object storage on internal S3-compatible storage (MinIO or similar).
 2. Layer Git repos hosted on internal Git server (GitLab/Gitea/internal GitHub Enterprise). Webhooks reach the registry over the internal network only.
 3. Embedding provider: `ollama` pointed at a local model server (no external API calls). Vector backend: pgvector (no external service).
-4. Sigstore-keyless requires public OIDC infrastructure; air-gapped deployments use the registry-managed signing key path instead.
+4. The registry signs with a registry-managed key in every deployment, and no public OIDC infrastructure is involved. An air-gapped deployment points `PODIUM_SIGN_KEY_PATH` at a key file on internal storage (§4.7.9, §13.12).
 
 **Consumers:** internal endpoint only; OIDC flow stays inside the network.
 
