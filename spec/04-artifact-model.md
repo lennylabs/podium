@@ -73,7 +73,7 @@ finance/procurement/vendor-compliance-check/
 
 **Three size thresholds with distinct roles:**
 
-- **Inline cutoff (256 KB)**: below this, resource bytes are returned in the `load_artifact` response body; above, presigned URL.
+- **Inline cutoff (256 KB)**: below this, resource bytes are returned in the `load_artifact` response body; above, presigned URL. A resource the registry holds inline on the manifest record is returned inline at any size (§7.2).
 - **Per-file soft cap (1 MB)**: ingest-time warning above this.
 - **Per-package soft cap (10 MB)**: ingest-time error above this.
 
@@ -841,7 +841,7 @@ Each artifact carries:
 
 - **Sensitivity label.** `low` / `medium` / `high`, declared in frontmatter. Informational metadata exposed in `search_artifacts` and `load_artifact` responses for filtering and display. Reviewer requirements based on sensitivity are enforced in the Git provider's branch protection (e.g., path-scoped CODEOWNERS plus required-reviewer counts), not by the registry.
 - **Ownership.** Authoring rights flow through the source layer's Git permissions. The artifact's manifest can name owners informationally for routing ingest-failure notifications via the `NotificationProvider` SPI.
-- **Lifecycle.** An ingested artifact is live until a subsequent ingest sets `deprecated: true`. Deprecated artifacts return a warning when loaded and are excluded from default search results; if `replaced_by:` is set, the registry surfaces the upgrade target alongside the warning.
+- **Lifecycle.** An ingested artifact is live until a subsequent ingest sets `deprecated: true`. Deprecated artifacts return a warning when loaded and are excluded from default search results. When the manifest sets `replaced_by:`, every load of the artifact returns the upgrade target, and a load of a deprecated artifact returns it alongside the warning.
 
 ### 4.7.5 Audit
 
@@ -855,7 +855,7 @@ A framed value is its length in bytes, encoded as an unsigned 64-bit big-endian 
 
 The first framed value is the artifact's own `ARTIFACT.md` as ingested, before any `extends:` merge (§4.6). A merged serialization does not reproduce the digest, so any party that recomputes the digest for an artifact declaring `extends:` recomputes over the pre-merge bytes.
 
-The registry computes the digest at ingest, the consumer recomputes it at the §6.6 delivery check, and a workspace overlay (§6.4) computes it from the overlay package's bytes. A `podium sync` against a server source records the registry's value in the §7.5.3 lock, and a filesystem-source sync computes it over the same pre-merge bytes. The framing makes the serialization injective, so no artifact that differs in a manifest byte, in `SKILL.md`, in a resource path, or in a resource body can share a content hash with another.
+The registry computes the digest at ingest and recomputes it from a stored row's bytes at the §13.4 first-start rewrite and at the §13.4 stored-row admission check, the consumer recomputes it at the §6.6 delivery check, and a workspace overlay (§6.4) computes it from the overlay package's bytes. A `podium sync` against a server source records the registry's value in the §7.5.3 lock, and a filesystem-source sync computes it over the same pre-merge bytes. The framing makes the serialization injective, so no artifact that differs in a manifest byte, in `SKILL.md`, in a resource path, or in a resource body can share a content hash with another.
 
 The bundled resources the serialization covers are the artifact's §4.4 bundled resources: every file under the artifact package's root directory, including files and directories whose names begin with a dot, other than the package root's `ARTIFACT.md` and, for a skill, the package root's `SKILL.md`, and excluding every file below a directory that carries its own `ARTIFACT.md`. A file named `SKILL.md` in a subdirectory of the package is a bundled resource. No ignore file, size threshold, or name pattern removes a file from the set. A resource's path is its slash-separated path relative to the package root.
 

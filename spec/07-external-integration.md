@@ -27,7 +27,7 @@ The registry exposes two surfaces:
 
 **Control plane (HTTP API).** Returns metadata: manifest bodies, descriptors, search results, domain maps. Synchronous. Audited. Every call carries the host's OAuth identity and is visibility-filtered.
 
-**Data plane (object storage).** Holds bundled resources. The control plane never streams bytes for resources above the inline cutoff (256 KB). Instead, `load_artifact` returns presigned URLs that the Podium MCP server fetches directly from object storage.
+**Data plane (object storage).** Holds bundled resources. The control plane never streams bytes for a resource above the inline cutoff (256 KB) that the registry holds in object storage. Instead, `load_artifact` returns presigned URLs that the Podium MCP server fetches directly from object storage. A resource the registry holds inline on the manifest record, which includes every resource of a row ingested while no object store was configured, is returned inline whatever its size, because no object exists to presign.
 
 Below the inline cutoff, resources are returned inline. This avoids round-trips for small fixtures.
 
@@ -710,7 +710,7 @@ for result in artifacts:
 - **Visibility:** identical to `load_artifact`. Items the caller cannot see come back as `status: "error"` with `visibility.denied`; no leak about whether the artifact exists in some hidden layer.
 - **Session consistency:** with `session_id`, the first occurrence of each `(id, "latest")` in the batch freezes the resolved version for the rest of the batch and session.
 - **Partial failure** does not fail the batch. Each item carries its own status.
-- **Bandwidth:** large bundled resources travel via presigned URLs (§4.4) so the response body stays small; the SDK fetches resources concurrently after the response.
+- **Bandwidth:** a bundled resource the registry does not hold inline on the manifest record travels via a presigned URL (§4.4) so the response body stays small, and the SDK fetches those resources concurrently after the response. A resource the registry holds inline on the manifest record travels in the reference's `inline` field in place of `presigned_url`, including when a copy of it also exists in object storage, base64-encoded with `inline_base64: true` when its bytes are not valid UTF-8. The registry holds inline every resource at or below the §4.1 inline cutoff, and every resource of a row ingested while no object store was configured (§7.2), so every link it serves names an object the §13.4 stored-row admission read.
 
 **Not exposed as an MCP meta-tool** (§5). The MCP path is agent-mediated and load-on-demand; bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list. The MCP server uses this endpoint internally for cache warm-up when configured to prefetch.
 
