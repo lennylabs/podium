@@ -72,6 +72,9 @@ func (r *Registry) admitBytes(ctx context.Context, rec store.ManifestRecord) (*m
 	if got := "sha256:" + version.CanonicalContentHash(rec.Frontmatter, rec.SkillRaw, bodies); got != rec.ContentHash {
 		return nil, fmt.Errorf("%w: the stored bytes hash to %s, the row stores %s", ErrContentHashMismatch, got, rec.ContentHash)
 	}
+	if err := bindResourceRefs(rec.Resources, bodies); err != nil {
+		return nil, err
+	}
 	a, perr := manifest.ParseArtifact(rec.Frontmatter)
 	if perr != nil {
 		a = nil
@@ -98,9 +101,10 @@ func distinctResourcePaths(refs []store.ResourceRef) error {
 
 // admittedBodies assembles every bundled-resource body as the first-start
 // rewrite does, from Inline when it is set and otherwise from the object stored
-// under the ref's content hash, and binds each body to its ref's stored content
-// hash and size. The serve paths state both columns to a consumer, and the
-// §4.7.6 digest covers neither, so the check here is what binds them.
+// under the ref's content hash. It binds no ref here: bindResourceRefs runs
+// after the content-hash recompute, so every read is attempted before any ref
+// is compared and a read failure is answered as unavailable whatever the order
+// of the refs.
 func (r *Registry) admittedBodies(ctx context.Context, refs []store.ResourceRef) (map[string][]byte, error) {
 	if len(refs) == 0 {
 		return nil, nil
@@ -114,13 +118,25 @@ func (r *Registry) admittedBodies(ctx context.Context, refs []store.ResourceRef)
 				return nil, err
 			}
 		}
-		sum := sha256.Sum256(body)
-		if "sha256:"+hex.EncodeToString(sum[:]) != ref.ContentHash || int64(len(body)) != ref.Size {
-			return nil, fmt.Errorf("%w: resource %s does not match its stored content hash or size", ErrContentHashMismatch, ref.Path)
-		}
 		bodies[ref.Path] = body
 	}
 	return bodies, nil
+}
+
+// bindResourceRefs binds each ref's stored content hash and size to its
+// assembled body. The serve paths state both columns to a consumer, and the
+// §4.7.6 digest covers neither, so this check is what binds them.
+//
+// Spec: §13.4 — stored-row admission, check (1).
+func bindResourceRefs(refs []store.ResourceRef, bodies map[string][]byte) error {
+	for _, ref := range refs {
+		body := bodies[ref.Path]
+		sum := sha256.Sum256(body)
+		if "sha256:"+hex.EncodeToString(sum[:]) != ref.ContentHash || int64(len(body)) != ref.Size {
+			return fmt.Errorf("%w: resource %s does not match its stored content hash or size", ErrContentHashMismatch, ref.Path)
+		}
+	}
+	return nil
 }
 
 // readObjectBody reads one object-held body within the admission deadline. A
@@ -161,7 +177,7 @@ func checkExtendsPin(a *manifest.Artifact, pin string) error {
 	}
 	if ref == "" {
 		if pin != "" {
-			return fmt.Errorf("%w: the row stores a parent pin and its manifest declares no extends:", ErrContentHashMismatch)
+			return fmt.Errorf("%w: the row stores a parent pin and its manifest declares no extends: reference", ErrContentHashMismatch)
 		}
 		return nil
 	}
@@ -171,7 +187,7 @@ func checkExtendsPin(a *manifest.Artifact, pin string) error {
 	refID, refVersion := splitParentRef(ref)
 	pinID, pinVersion := splitParentRef(pin)
 	if refID != pinID {
-		return fmt.Errorf("%w: the parent pin names another artifact than extends:", ErrContentHashMismatch)
+		return fmt.Errorf("%w: the parent pin names another artifact than the extends: reference", ErrContentHashMismatch)
 	}
 	p, err := version.ParsePin(refVersion)
 	if err != nil {
@@ -181,7 +197,7 @@ func checkExtendsPin(a *manifest.Artifact, pin string) error {
 		return nil
 	}
 	if _, err := version.Resolve(p, []string{pinVersion}); err != nil {
-		return fmt.Errorf("%w: the parent pin's version does not satisfy extends:", ErrContentHashMismatch)
+		return fmt.Errorf("%w: the parent pin's version does not satisfy the extends: reference", ErrContentHashMismatch)
 	}
 	return nil
 }

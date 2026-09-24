@@ -335,6 +335,18 @@ func TestAdmit_RefusesAndAdmitsStoredRows(t *testing.T) {
 			},
 			sentinel: core.ErrUnavailable,
 		},
+		{
+			// Assembly reads every body before any ref is bound, so an inline
+			// ref with a wrong size ahead of an object read that times out is
+			// answered as unavailable rather than as a hash mismatch.
+			name: "an inline ref with a wrong size ahead of an object read that times out",
+			mutate: func(t *testing.T, f *admFixture, rec *store.ManifestRecord) {
+				rec.Resources[0].Size++
+				f.blockGet = make(chan struct{})
+				t.Cleanup(func() { close(f.blockGet) })
+			},
+			sentinel: core.ErrUnavailable,
+		},
 	}
 	for _, tc := range refusals {
 		t.Run(tc.name, func(t *testing.T) {
