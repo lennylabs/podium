@@ -28,8 +28,9 @@ config:
     s3ForcePathStyle: false  # set true for MinIO/R2/Ceph
     filesystemRoot: /objects  # used when type: filesystem
 
-  # Hybrid search is off by default so a bare `helm install` boots without an
-  # embedding-provider credential. Turn it on by setting both of the following
+  # Hybrid search is off by default so an install needs no embedding-provider
+  # credential. An install does need the signing key Secret named under
+  # signing: below, or signing.mode set to none. Turn hybrid search on by setting both of the following
   # and supplying the provider's key in the secret: vectorBackend.type to
   # pgvector (or pinecone/weaviate/qdrant, whose per-backend env vars from
   # §13.12 go in the same secret), and embeddingProvider.type to openai,
@@ -164,6 +165,25 @@ objects:
   size: 10Gi
   storageClass: ""
   accessMode: ReadWriteOnce
+
+# Registry signing key (§4.7.9, §13.10). The registry signs every artifact at
+# ingest, and every replica has to sign under one key, so the chart mounts an
+# operator-supplied Secret rather than letting each pod generate its own on a
+# read-only root filesystem. The Secret holds the key file the registry writes
+# on a standalone first start, with its private: and public: lines, under the
+# key named below. A render with no secretName fails unless mode is none.
+#
+# mode is registry-key or none. none turns ingest signing off; a consumer of
+# such a registry then sets PODIUM_VERIFY_SIGNATURES=never, because under its
+# default of always every unsigned artifact is refused.
+signing:
+  mode: registry-key
+  secretName: ""
+  mountPath: /signing
+  # The key within secretName that holds the key file. The registry reads
+  # mountPath/key as a file; mountPath itself is the directory the volume
+  # mounts at.
+  key: registry-signing.key
 
 # Secret mounted as a volume for runtime-keys (identity provider: injected-session-token).
 runtimeKeys:

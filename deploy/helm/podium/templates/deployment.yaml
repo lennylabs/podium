@@ -1,6 +1,10 @@
 {{- if and (eq .Values.config.objectStore.type "filesystem") (not .Values.objects.enabled) }}
 {{- fail "config.objectStore.type=filesystem requires objects.enabled=true: the object root would otherwise land on the read-only container root filesystem, where the registry logs one warning, disables the object store, and still reports ready" }}
 {{- end }}
+{{- if not (has .Values.signing.mode (list "registry-key" "none")) }}
+{{- fail (printf "signing.mode is %q; it takes registry-key or none" (toString .Values.signing.mode)) }}
+{{- end }}
+{{- $signingKey := eq .Values.signing.mode "registry-key" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -146,6 +150,17 @@ spec:
             - name: PODIUM_RUNTIME_KEYS_PATH
               value: {{ printf "%s/%s" (trimSuffix "/" .Values.runtimeKeys.mountPath) .Values.runtimeKeys.key | quote }}
             {{- end }}
+            # Every replica signs under the one key the Secret carries (§4.7.9).
+            # The variable names the key file inside the mount, as
+            # PODIUM_RUNTIME_KEYS_PATH does, because the registry reads it as a
+            # file. The loader reads an existing file and writes nothing, so the
+            # read-only mount is sufficient.
+            - name: PODIUM_SIGN
+              value: {{ .Values.signing.mode | quote }}
+            {{- if $signingKey }}
+            - name: PODIUM_SIGN_KEY_PATH
+              value: {{ printf "%s/%s" (trimSuffix "/" .Values.signing.mountPath) .Values.signing.key | quote }}
+            {{- end }}
             # Public mode and its bind override travel together. The bind above
             # is 0.0.0.0 so the kubelet can reach the probes, and public mode
             # refuses a non-loopback bind on its own, so a chart that offered
@@ -184,7 +199,7 @@ spec:
             initialDelaySeconds: 5
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
-          {{- if or .Values.objects.enabled .Values.runtimeKeys.enabled }}
+          {{- if or .Values.objects.enabled .Values.runtimeKeys.enabled $signingKey }}
           volumeMounts:
             {{- if .Values.objects.enabled }}
             - name: objects
@@ -195,8 +210,13 @@ spec:
               mountPath: {{ .Values.runtimeKeys.mountPath }}
               readOnly: true
             {{- end }}
+            {{- if $signingKey }}
+            - name: signing
+              mountPath: {{ .Values.signing.mountPath }}
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if or .Values.objects.enabled .Values.runtimeKeys.enabled }}
+      {{- if or .Values.objects.enabled .Values.runtimeKeys.enabled $signingKey }}
       volumes:
         {{- if .Values.objects.enabled }}
         - name: objects
@@ -207,6 +227,11 @@ spec:
         - name: keys
           secret:
             secretName: {{ required "runtimeKeys.secretName is required when runtimeKeys.enabled" .Values.runtimeKeys.secretName }}
+        {{- end }}
+        {{- if $signingKey }}
+        - name: signing
+          secret:
+            secretName: {{ required "signing.secretName is required unless signing.mode=none" .Values.signing.secretName }}
         {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}

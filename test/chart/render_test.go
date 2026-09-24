@@ -18,6 +18,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// withSigningKey names the signing key Secret. The chart refuses to render
+// without one unless signing.mode is none, so every case whose subject is not
+// signing passes it.
+const withSigningKey = "signing.secretName=sk"
+
 // render runs `helm template` with the given overrides and returns the
 // manifests. It skips when helm is absent so the default `go test ./...` run
 // stays clean on a machine without it.
@@ -69,7 +74,7 @@ func envValue(manifests, name string) string {
 // Spec: §13.12
 func TestChart_RuntimeKeysPathNamesAFileInsideTheMount(t *testing.T) {
 	t.Parallel()
-	m := render(t, "runtimeKeys.enabled=true", "runtimeKeys.secretName=rk")
+	m := render(t, withSigningKey, "runtimeKeys.enabled=true", "runtimeKeys.secretName=rk")
 
 	path := envValue(m, "PODIUM_RUNTIME_KEYS_PATH")
 	if path == "" {
@@ -92,7 +97,7 @@ func TestChart_RuntimeKeysPathNamesAFileInsideTheMount(t *testing.T) {
 // Spec: §13.12
 func TestChart_FilesystemObjectStoreRequiresItsVolume(t *testing.T) {
 	t.Parallel()
-	out, err := renderErr(t, "config.objectStore.type=filesystem")
+	out, err := renderErr(t, withSigningKey, "config.objectStore.type=filesystem")
 	if err == nil {
 		t.Fatal("a filesystem object store rendered with no volume behind it; the registry would disable the store and still report ready")
 	}
@@ -100,7 +105,7 @@ func TestChart_FilesystemObjectStoreRequiresItsVolume(t *testing.T) {
 		t.Errorf("the refusal does not name the value that fixes it: %s", out)
 	}
 
-	m := render(t, "config.objectStore.type=filesystem", "objects.enabled=true")
+	m := render(t, withSigningKey, "config.objectStore.type=filesystem", "objects.enabled=true")
 	if root := envValue(m, "PODIUM_FILESYSTEM_ROOT"); root == "" {
 		t.Error("objects.enabled renders no PODIUM_FILESYSTEM_ROOT")
 	} else if !strings.Contains(m, "mountPath: "+root) {
@@ -116,7 +121,7 @@ func TestChart_FilesystemObjectStoreRequiresItsVolume(t *testing.T) {
 // Spec: §13.12
 func TestChart_DefaultInstallOverridesNoSecretSuppliedKey(t *testing.T) {
 	t.Parallel()
-	m := render(t)
+	m := render(t, withSigningKey)
 
 	// Each is named in the clustered-deployment secret recipe, so a default
 	// install must leave it to envFrom.
@@ -144,7 +149,7 @@ func TestChart_DefaultInstallOverridesNoSecretSuppliedKey(t *testing.T) {
 func TestChart_BundledPostgresNameStaysDistinct(t *testing.T) {
 	t.Parallel()
 	long := strings.Repeat("a", 62)
-	m := render(t,
+	m := render(t, withSigningKey,
 		"postgresql.enabled=true",
 		"postgresql.existingSecret=s",
 		"fullnameOverride="+long)
@@ -192,7 +197,7 @@ func TestChart_BundledPostgresNameStaysDistinct(t *testing.T) {
 // Spec: §13.12
 func TestChart_ExternalDatabaseInstallKeepsItsEnvBlock(t *testing.T) {
 	t.Parallel()
-	m := render(t)
+	m := render(t, withSigningKey)
 
 	for _, key := range []string{
 		"PODIUM_BIND",
@@ -272,7 +277,7 @@ func registryContainer(t *testing.T, manifests string) renderedContainer {
 // Spec: §13.4
 func TestChart_RegistryContainerCarriesAStartupProbe(t *testing.T) {
 	t.Parallel()
-	c := registryContainer(t, render(t))
+	c := registryContainer(t, render(t, withSigningKey))
 
 	if c.StartupProbe == nil {
 		t.Fatal("the registry container carries no startupProbe, so the kubelet restarts a pod that is still migrating its stored values")
@@ -290,8 +295,93 @@ func TestChart_RegistryContainerCarriesAStartupProbe(t *testing.T) {
 
 	// An operator with a large store raises the threshold for the upgrade that
 	// migrates stored values, so the value has to reach the manifest.
-	c = registryContainer(t, render(t, "startupProbe.failureThreshold=240"))
+	c = registryContainer(t, render(t, withSigningKey, "startupProbe.failureThreshold=240"))
 	if c.StartupProbe == nil || c.StartupProbe.FailureThreshold != 240 {
 		t.Errorf("startupProbe.failureThreshold=240 did not reach the manifest: %+v", c.StartupProbe)
+	}
+}
+
+// signingMountPath is the chart's default signing.mountPath.
+const signingMountPath = "/signing"
+
+// Every replica has to sign under one key, and the pod's root filesystem is
+// read-only, so the chart mounts an operator-supplied Secret and points
+// PODIUM_SIGN_KEY_PATH at the key file inside it. A path naming the mount
+// directory itself, or a mount that is writable or absent, leaves the
+// registry unable to load the key the operator supplied.
+//
+// Spec: §4.7.9, §13.12
+func TestChart_SigningKeyMountsTheSecret(t *testing.T) {
+	t.Parallel()
+	m := render(t, withSigningKey)
+
+	if got := envValue(m, "PODIUM_SIGN"); got != "registry-key" {
+		t.Errorf("PODIUM_SIGN is %q; want registry-key", got)
+	}
+	path := envValue(m, "PODIUM_SIGN_KEY_PATH")
+	if !strings.HasPrefix(path, signingMountPath+"/") {
+		t.Errorf("PODIUM_SIGN_KEY_PATH is %q, which is not a file inside the mount at %q", path, signingMountPath)
+	}
+	mount := "- name: signing\n              mountPath: " + signingMountPath + "\n              readOnly: true\n"
+	if !strings.Contains(m, mount) {
+		t.Errorf("no read-only signing mount at %s:\n%s", signingMountPath, m)
+	}
+	volume := "- name: signing\n          secret:\n            secretName: sk\n"
+	if !strings.Contains(m, volume) {
+		t.Errorf("no signing volume from Secret sk:\n%s", m)
+	}
+}
+
+// Signing is on by default, and a pod cannot generate a shared key, so a
+// render that names no Secret would start replicas that each fail to load a
+// key. The chart refuses it at render time and names the value that fixes it.
+//
+// Spec: §13.10
+func TestChart_DefaultRenderRequiresTheSigningSecret(t *testing.T) {
+	t.Parallel()
+	out, err := renderErr(t)
+	if err == nil {
+		t.Fatal("a default render succeeded with no signing key Secret")
+	}
+	if !strings.Contains(out, "signing.secretName") {
+		t.Errorf("the refusal does not name signing.secretName: %s", out)
+	}
+}
+
+// signing.mode=none turns ingest signing off. The render carries the mode and
+// nothing that would point the registry at a key file or mount a Secret that
+// the operator was not asked to create.
+//
+// Spec: §13.12
+func TestChart_SigningModeNoneMountsNoKey(t *testing.T) {
+	t.Parallel()
+	m := render(t, "signing.mode=none")
+
+	if got := envValue(m, "PODIUM_SIGN"); got != "none" {
+		t.Errorf("PODIUM_SIGN is %q; want none", got)
+	}
+	if got := envValue(m, "PODIUM_SIGN_KEY_PATH"); got != "" {
+		t.Errorf("signing.mode=none renders PODIUM_SIGN_KEY_PATH=%q", got)
+	}
+	if strings.Contains(m, "- name: signing\n") {
+		t.Errorf("signing.mode=none renders a signing mount or volume:\n%s", m)
+	}
+}
+
+// An unknown mode would otherwise reach the registry as PODIUM_SIGN and fail
+// the boot on every replica. The chart refuses it at render time and names
+// the accepted values.
+//
+// Spec: §13.12
+func TestChart_UnknownSigningModeFailsTheRender(t *testing.T) {
+	t.Parallel()
+	out, err := renderErr(t, withSigningKey, "signing.mode=sigstore-keyless")
+	if err == nil {
+		t.Fatal("an unknown signing.mode rendered")
+	}
+	for _, want := range []string{"signing.mode", "registry-key", "none"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("the refusal does not name %q: %s", want, out)
+		}
 	}
 }
