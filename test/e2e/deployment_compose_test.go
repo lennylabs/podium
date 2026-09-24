@@ -107,6 +107,9 @@ func TestDeployCompose_RegistryServiceWiring(t *testing.T) {
 		"PODIUM_S3_BUCKET":        func(v string) bool { return v == "podium" },
 		"PODIUM_BOOTSTRAP_ADMINS": func(v string) bool { return v != "" },
 		"PODIUM_BIND":             func(v string) bool { return strings.HasPrefix(v, "0.0.0.0:") },
+		// Spec: §13.10, §13.12 — the stack has no key management, so it pins
+		// signing off rather than minting a fresh key on every recreate.
+		"PODIUM_SIGN": func(v string) bool { return v == "none" },
 	}
 	for key, ok := range checks {
 		v, present := env[key]

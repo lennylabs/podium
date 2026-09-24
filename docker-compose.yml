@@ -148,6 +148,13 @@ services:
       # The evaluation stack has no key, so it opts out to BM25 keyword search.
       # Remove this and supply a provider and its key to exercise hybrid search.
       PODIUM_NO_EMBEDDINGS: "true"
+      # §13.12: the registry signs at ingest by default and generates its key
+      # under the container's home, which no volume persists while
+      # postgres_data persists the store. The evaluation stack has no key
+      # management, so a recreate would mint a fresh key and strand every
+      # envelope the previous key made. Signing is off here, and a consumer
+      # pointed at this stack sets PODIUM_VERIFY_SIGNATURES=never.
+      PODIUM_SIGN: "none"
     ports:
       - "127.0.0.1:8080:8080"
 
