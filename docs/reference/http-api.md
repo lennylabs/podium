@@ -225,7 +225,7 @@ Response:
 }
 ```
 
-A resource at or below the inline cutoff (256 KB) is returned in `resources`, a map of package-relative path to inline bytes. A larger resource is returned in `large_resources`, a map of path to a presigned URL into object storage that the consumer fetches directly; the registry does not proxy the bytes. When any inline resource is binary, the whole `resources` map is base64-encoded and `resources_base64` is `true`. A canonical manifest above the cutoff is delivered the same way, as `manifest_body_url` with the inline `manifest_body` cleared. The `load_artifacts` batch endpoint below returns each artifact's resources as an array of objects rather than these maps.
+A resource at or below the inline cutoff (256 KB) is returned in `resources`, a map of package-relative path to inline bytes. A larger resource is returned in `large_resources`, a map of path to a presigned URL into object storage that the consumer fetches directly; the registry does not proxy the bytes. A resource the registry holds inline on the manifest record, which includes every resource of a row ingested while no object store was configured, is returned in `resources` at any size. When any inline resource is binary, the whole `resources` map is base64-encoded and `resources_base64` is `true`. A canonical manifest above the cutoff is delivered the same way, as `manifest_body_url` with the inline `manifest_body` cleared. The `load_artifacts` batch endpoint below returns each artifact's resources as an array of objects rather than these maps.
 
 ### `load_artifacts` (bulk)
 
@@ -266,6 +266,8 @@ Response: an array of per-item envelopes. Each item has its own `status` (`ok` o
   }
 ]
 ```
+
+Each entry of an item's `resources` array carries `path` and `content_hash`, and either `presigned_url` or, for a resource the registry holds inline, `inline`, with `inline_base64: true` when the bytes are not valid UTF-8. On a deployment with an object store, a resource at or below the inline cutoff arrives in `inline`, and only a resource the registry read from object storage carries a `presigned_url`.
 
 Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied`. No leak about whether the artifact exists in some hidden layer.
 

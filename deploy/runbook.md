@@ -52,16 +52,43 @@ high` is rejected.
 ## Object-storage outage
 
 **Detection.** Sustained `materialize.*` errors in audit;
-object-storage SLA dashboard shows degradation.
+`registry.unavailable` on `load_artifact` and on `artifacts:batchLoad`
+items; `materialize.fetch_failed` on a consumer's fetch of a manifest
+body or a large resource; the object-storage SLA dashboard shows
+degradation.
 
-**Impact.** `load_artifact` returns inline manifest bodies; bundled
-resources fail to materialize. Already-cached resources continue to
-serve from the MCP cache.
+**Impact.** The registry admits each stored row before it serves the
+row's content, and admission reads the object-held bodies of every row
+in the requested artifact's `extends:` chain, parents included. A full
+`load_artifact` of an artifact whose chain holds any object-held
+bundled-resource body is refused with `registry.unavailable`. A full
+load whose manifest document goes through the manifest-body channel (a
+document above the 256 KiB inline cutoff) is refused with
+`registry.unavailable` when the registry's object-store write or stat
+fails. A full load whose presigned manifest-body or large-resource
+fetch fails returns `materialize.fetch_failed` at the consumer. Only a
+load whose whole chain holds inline bundled resources, and whose
+manifest document is below the cutoff, loads in full. A HEAD
+revalidation and a matching conditional GET read no object storage and
+are answered from the stored content hash, so a consumer in any cache
+mode keeps serving a cached copy whose content hash is unchanged, and an
+`offline-first` or `offline-only` consumer serves a resolution hit
+without calling the registry.
+
+An object store opened at the wrong root or bucket is a different
+condition. That store reports every body absent rather than failing its
+reads, so the registry refuses every object-held row with
+`materialize.content_hash_mismatch` rather than `registry.unavailable`.
+Point the object store at the right root or bucket and restart. The
+first start after an upgrade that met this condition runs the rewrite
+of stored content hashes again, because that condition held the
+rewrite's completion record back.
 
 **Mitigation.**
 1. Verify object-storage health at the provider.
 2. Affected hosts: check `~/.podium/cache` hit rate via `podium
-   cache stats`. Cached content remains usable.
+   cache stats`. Cached content remains usable in every cache mode
+   for an artifact whose content hash is unchanged.
 3. Once recovered, no registry-side action needed; clients retry on
    next call.
 
@@ -118,13 +145,35 @@ registry's local disk pressure affects logs and the WAL.
 
 ## Signature verification failure storm
 
-**Detection.** `materialize.signature_invalid` events spike.
+**Detection.** `materialize.signature_invalid` or
+`materialize.signature_missing` events spike, at the registry, which
+logs each stored-row refusal with the tenant, artifact ID, version, and
+reason, or at consumers. `podium-mcp` processes exit at start with
+`config.signature_provider_unavailable`.
 
 **Impact.** Affected artifacts fail to materialize. Other artifacts
-unaffected.
+unaffected. A `podium-mcp` that refuses to start serves nothing.
 
 **Mitigation.**
 1. Verify the artifact signatures are correct via `podium verify
-   <id>`.
-2. If a key was compromised, rotate it via `podium admin rotate-key`.
-3. Affected ingests can be replayed once the keys are correct.
+   <id>`, with `PODIUM_SIGNATURE_VERIFY_KEY` set to the registry's
+   public key. For a consumer-side refusal, confirm the consumer's
+   `PODIUM_SIGNATURE_PROVIDER`, its verification key, and that the
+   registry does not run with `PODIUM_SIGN=none` under an `always`
+   policy.
+2. For a row whose stored content hash is already the rewritten
+   digest, which covers a key lost or rotated after the first start of
+   the release and a migrated row the source had already rewritten:
+   restore the key that signed the rows, where it still exists, to
+   `PODIUM_SIGN_KEY_PATH`, and restart the registry, which loads its
+   key only at start.
+3. For a row the first-start rewrite left at the previous content hash
+   as `signature_unverified`, restoring the key alone does not repair
+   it. Restore the backup the upgrade order takes and start with the
+   key that signed the rows, or, on a migration target, recreate the
+   target store empty and re-run `podium admin migrate-to-standard`
+   with the source's key in place. Either route runs the rewrite again
+   and re-signs the rows.
+4. Where neither route is available, or the key that signed the rows
+   no longer exists, ingest a new version of each affected artifact.
+   No other path re-signs a stored row.

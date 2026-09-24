@@ -261,12 +261,17 @@ steps:
 `podium sync` runs the fetch, adapt, hook, and write steps in batch, over the
 caller's effective view or over the subset an active scope selects. It performs
 no signature or content-hash verification. That check belongs to the
-`load_artifact` path above, which is where `PODIUM_VERIFY_SIGNATURES` applies.
+`load_artifact` path above as `podium-mcp` runs it, which is where
+`PODIUM_VERIFY_SIGNATURES` applies. A signing registry verifies each stored row
+before it serves it to any reader, `podium sync` included.
 
 The `load_artifact` response delivers the manifest body and the bundled
-resources below the inline cutoff directly. A larger resource, and a
-manifest above the cutoff, arrive as a URL into object storage: presigned
-and time-limited with the S3 backend, and the registry's own
+resources below the inline cutoff directly. On a registry with an object
+store, a larger resource, and a manifest above the cutoff, arrive as a URL into
+object storage. A resource the registry holds inline on the manifest record,
+which includes every resource of an artifact ingested while no object store was
+configured, is returned inline at any size. An object-storage URL is presigned
+and time-limited with the S3 backend, and it is the registry's own
 `/objects/<content-hash>` route, authorized by the caller's session token,
 with the filesystem backend a single node uses by default. Materialization
 is the write step that lands all of it on disk. Through the MCP server these

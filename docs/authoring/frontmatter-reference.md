@@ -88,7 +88,7 @@ lint_suppress: [lint.skill_ref_validate]   # advisory lint rule codes to silence
 | `license` | Optional | SPDX identifier. |
 | `search_visibility` | Optional | `indexed` (default) or `direct-only`. `direct-only` artifacts don't appear in `search_artifacts` results; they're reachable via `load_artifact` if the caller knows the ID. |
 | `deprecated` | Optional | Boolean. When `true`, `load_artifact` returns a warning, and the artifact is excluded from default search results. |
-| `replaced_by` | Optional | Suggested upgrade target. Surfaced when `load_artifact` returns the deprecation warning. |
+| `replaced_by` | Optional | Suggested upgrade target. Returned by every `load_artifact` of the artifact, and alongside the deprecation warning when the artifact is deprecated (§4.7.4). |
 | `release_notes` | Optional | Free text. |
 | `audit_redact` | Optional | List of frontmatter field names whose values the registry replaces with `[redacted]` in audit log entries that reference this artifact. |
 | `lint_suppress` | Optional | List of lint rule codes to silence for this artifact. Only advisory (non-error) rules honor the list; hard-error rules still fire. |

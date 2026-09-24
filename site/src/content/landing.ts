@@ -388,7 +388,7 @@ export const landing: LandingContent = {
         plus: [
           "Multi-tenancy",
           "SCIM group sync",
-          "Signing and transparency log",
+          "Transparency-log anchoring of the audit chain",
           "High availability",
         ],
       },

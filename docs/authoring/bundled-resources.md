@@ -53,7 +53,7 @@ Size thresholds:
 
 | Threshold | Limit | Behavior |
 |:--|:--|:--|
-| Inline cutoff | 256 KB | At or below this, resource bytes are returned in the `load_artifact` response body. Above it, the response carries a URL to fetch them from. |
+| Inline cutoff | 256 KB | At or below this, resource bytes are returned in the `load_artifact` response body. Above it, the response carries a URL to fetch them from, unless the registry holds the resource inline, as it does for every resource of an artifact ingested while no object store was configured. |
 | Per-file soft cap | 1 MB | Ingest-time warning above this. |
 | Per-package soft cap | 10 MB | Ingest-time error above this. |
 

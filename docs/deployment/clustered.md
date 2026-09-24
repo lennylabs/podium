@@ -1,7 +1,7 @@
 ---
 title: Clustered
 nav_order: 3
-description: Replicated registry behind a load balancer, backed by Postgres, object storage, and an OIDC IdP. Adds multi-tenancy, freeze windows, signing, hash-chained audit, and SCIM.
+description: Replicated registry behind a load balancer, backed by Postgres, object storage, and an OIDC IdP. Adds multi-tenancy, freeze windows, hash-chained audit, and SCIM.
 ---
 
 # Clustered
@@ -32,7 +32,7 @@ For day-two operations covering capacity, monitoring, alerts, backup, and upgrad
 - **Visibility evaluated against a verified identity.** A clustered deployment sets the registry's own identity provider to `oidc-jwt` or `trusted-headers`, so `public`, `organization`, OIDC `groups`, and `users` are evaluated against a verified caller on every call. A single-node deployment runs the same evaluator once it configures one of those providers. Authoring rights stay in the Git provider's branch protection. That scope statement is about writing content into a source the registry already reads; which caller may declare a layer that makes the registry read a given filesystem path is authorized to a tenant admin, because the registry process reads that path with its own rights rather than with the registrant's. See [Access control](access-control) and [Layers](layers#who-may-register-a-local-source-layer).
 - **Audit across replicas.** Every read, ingest, and admin action carries the same hash-chain integrity a single-node deployment writes, and each replica maintains its own chain, which is why the topology above centralizes the stream on one SIEM endpoint. Anchoring a chain head to a public transparency log applies to a replica that keeps the on-disk sink, because the anchor and verify passes walk the file.
 - **Freeze windows.** A `freeze_windows:` list under `registry:` in `registry.yaml` rejects ingest with `ingest.frozen` during critical periods such as year-end close and release cuts. A single-node deployment reads the same list. `podium layer reingest --break-glass --justification <text> --approver <approver-id> <layer-id>` overrides an active window. The override needs a justification and two distinct approvers, and the authenticated caller counts as one of them.
-- **Signing.** Sigstore-keyless (preferred) or a registry-managed key (fallback). Signature verification on materialization is configurable per deployment, and `PODIUM_VERIFY_SIGNATURES=medium-and-above` is the typical setting.
+- **Signing.** The registry signs every artifact at ingest with its registry-managed Ed25519 key by default, and every replica signs under the one key the chart mounts from a Secret (see [Deploy the registry](#2-deploy-the-registry)). No registry signing mode produces a Sigstore-keyless envelope. Each `podium-mcp` consumer verifies what it loads under `PODIUM_VERIFY_SIGNATURES`, whose values are `always`, the default, and `never`.
 - **SCIM 2.0.** Group membership push from OIDC IdPs that support it. Layer visibility references group claims directly.
 - **GDPR erasure.** `podium admin erase --salt <tenant-salt> <user-id>` unregisters the user's user-defined layers, redacts their identity across the registry audit stream behind a `redacted-<sha256(user_id+salt)>` tombstone, and returns the purged layer ids plus the count of redacted audit events.
 - **Quotas.** Per-org limits on storage, search QPS, materialization rate, and audit volume.
@@ -94,13 +94,40 @@ User-defined layers (registered at runtime by individual users) sit above admin-
 - An object storage bucket on S3, GCS, MinIO, or R2.
 - An OIDC IdP with device-code flow support.
 
-For a quick stand-up, the repo ships a `docker-compose.yml` that brings up the evaluation stack with `docker compose up -d`: the registry, a pgvector Postgres, MinIO object storage, a Dex OIDC IdP, and a one-shot bootstrap container that creates the MinIO bucket. The stack sets `PODIUM_NO_EMBEDDINGS`, so search runs over manifest text with no embedding provider and no API key. Remove that variable and supply a provider with its key to exercise hybrid search. The registry seeds the first tenant and admin grant itself at boot, from the default tenant plus the identity in `PODIUM_BOOTSTRAP_ADMINS`. The registry service selects no identity provider, so it authenticates no caller and the seeded grant is unreachable until an operator configures one; the service publishes its port on the host loopback interface for that reason. The stack runs single-replica services with default credentials on local volumes, so it is unsuitable for production. It wires the same components a clustered deployment wires, so consumers exercise the same code paths.
+For a quick stand-up, the repo ships a `docker-compose.yml` that brings up the evaluation stack with `docker compose up -d`: the registry, a pgvector Postgres, MinIO object storage, a Dex OIDC IdP, and a one-shot bootstrap container that creates the MinIO bucket. The stack sets `PODIUM_NO_EMBEDDINGS`, so search runs over manifest text with no embedding provider and no API key. Remove that variable and supply a provider with its key to exercise hybrid search. The registry seeds the first tenant and admin grant itself at boot, from the default tenant plus the identity in `PODIUM_BOOTSTRAP_ADMINS`. The registry service selects no identity provider, so it authenticates no caller and the seeded grant is unreachable until an operator configures one; the service publishes its port on the host loopback interface for that reason. The stack pins `PODIUM_SIGN: "none"`, because it has no key management and a recreated registry container would otherwise generate a fresh signing key on every recreate, so a `podium-mcp` consumer pointed at it sets `PODIUM_VERIFY_SIGNATURES=never`. The stack runs single-replica services with default credentials on local volumes, so it is unsuitable for production. It wires the same components a clustered deployment wires, so consumers exercise the same code paths.
 
 ### 2. Deploy the registry
 
-The chart lives at `deploy/helm/podium`. Its templates render the backend selectors from the `config.*.type` values and read every credential and per-backend setting from the Kubernetes secret named by `existingSecret`:
+The chart lives at `deploy/helm/podium`. Its templates render the backend selectors from the `config.*.type` values and read every credential and per-backend setting from the Kubernetes secret named by `existingSecret`.
+
+The registry signs at ingest by default, and every replica serving one store signs under the same key, so the chart mounts an operator-supplied signing key from a Secret rather than letting each pod generate its own. Generate the key file with one standalone first start on a scratch home:
 
 ```bash
+KEY_DIR="$(mktemp -d)"
+env -i PATH="$PATH" HOME="$KEY_DIR" PODIUM_SIGN_KEY_PATH="$KEY_DIR/registry-signing.key" \
+  podium serve --standalone --no-embeddings --bind 127.0.0.1:0 >"$KEY_DIR/serve.log" 2>&1 &
+SERVE_PID=$!
+while kill -0 "$SERVE_PID" 2>/dev/null && ! grep -q 'listening on' "$KEY_DIR/serve.log"; do sleep 1; done
+kill "$SERVE_PID"
+wait "$SERVE_PID" || true
+```
+
+The start runs under `env -i` with only `PATH`, a fresh `HOME`, and `PODIUM_SIGN_KEY_PATH`. The first start of this release runs the one-shot rewrite of stored content hashes on whatever store it opens, signing each row under the configured key, so a start on the operator's own home would sign the operator's personal standalone store under the cluster key and spend that store's one rewrite. Clearing the environment also keeps an inherited `PODIUM_SQLITE_PATH`, `PODIUM_FILESYSTEM_ROOT`, `PODIUM_CONFIG_FILE`, or `PODIUM_REGISTRY_STORE` from pointing the start at a store in use. The key file, `$KEY_DIR/registry-signing.key`, is written with mode `0600` and carries a `private:` line and a `public:` line. Copy it into the deployment's backup, because the registry refuses every row the key signed once the key is lost, and delete `$KEY_DIR` after the Secret below is created.
+
+Every consumer of the deployment verifies under the public half. Extract it:
+
+```bash
+awk '/^public:/{print $2}' "$KEY_DIR/registry-signing.key"
+```
+
+The output is the base64 text after the `public:` prefix, without the prefix, which is the form `PODIUM_SIGNATURE_VERIFY_KEY` requires. Every consumer sets it in `PODIUM_SIGNATURE_VERIFY_KEY` (see [Configure your harness](../consuming/configure-your-harness)).
+
+Create the Secrets and install the chart:
+
+```bash
+kubectl create secret generic podium-signing-key \
+  --from-file=registry-signing.key="$KEY_DIR/registry-signing.key"
+
 kubectl create secret generic podium-secrets \
   --from-literal=PODIUM_BIND=0.0.0.0:8080 \
   --from-literal=PODIUM_POSTGRES_DSN="$POSTGRES_DSN" \
@@ -115,12 +142,15 @@ helm install podium ./deploy/helm/podium \
   --set config.objectStore.type=s3 \
   --set config.vectorBackend.type=pgvector \
   --set config.identityProvider.type=oidc-jwt \
-  --set existingSecret=podium-secrets
+  --set existingSecret=podium-secrets \
+  --set signing.secretName=podium-signing-key
 ```
 
-The chart installs with its defaults. `config.identityProvider.type` is `oidc-jwt`, which the registry verifies at request time; supply its issuer and audience through the secret named in `existingSecret`, which reaches the pod via `envFrom`. Hybrid search is off by default (`config.vectorBackend.type` and `config.embeddingProvider.type` are both `none`) so the registry starts without an embedding-provider credential; set both and supply the key in the same secret to turn it on. The container `env:` block takes precedence over `envFrom:`, so any value the chart renders as `env:` is set through `--set` rather than through the secret.
+A render that names no signing Secret fails with a message naming `signing.secretName`. The chart installs with its other defaults once `signing.secretName` names a Secret, or once `signing.mode=none` turns signing off; a consumer of a registry with signing off sets `PODIUM_VERIFY_SIGNATURES=never`. An upgrade of a store that already holds signed rows creates the Secret from the key that signed them, because the registry refuses every row whose envelope does not verify under its key. Every registry process serving one store resolves `PODIUM_SIGN_KEY_PATH` to the same key file. The chart's Secret mount satisfies that, a hand-rolled deployment arranges it, and a hand-rolled deployment with signing on, a Postgres store, and no `PODIUM_SIGN_KEY_PATH` is refused at start.
 
-The templates set `PODIUM_BIND`, `PODIUM_REGISTRY_STORE`, `PODIUM_OBJECT_STORE`, `PODIUM_VECTOR_BACKEND`, `PODIUM_EMBEDDING_PROVIDER`, and `PODIUM_IDENTITY_PROVIDER` on every install, from `config.bind` and those `type` values. Because they always render, blanking one in `values.yaml` emits an empty value that shadows the secret rather than deferring to it. Leave them at their defaults or set them with `--set`.
+Among those defaults, `config.identityProvider.type` is `oidc-jwt`, which the registry verifies at request time; supply its issuer and audience through the secret named in `existingSecret`, which reaches the pod via `envFrom`. Hybrid search is off by default (`config.vectorBackend.type` and `config.embeddingProvider.type` are both `none`) so the registry starts without an embedding-provider credential; set both and supply the key in the same secret to turn it on. The container `env:` block takes precedence over `envFrom:`, so any value the chart renders as `env:` is set through `--set` rather than through the secret.
+
+The templates set `PODIUM_BIND`, `PODIUM_REGISTRY_STORE`, `PODIUM_OBJECT_STORE`, `PODIUM_VECTOR_BACKEND`, `PODIUM_EMBEDDING_PROVIDER`, `PODIUM_IDENTITY_PROVIDER`, and `PODIUM_SIGN` on every install, from `config.bind`, those `type` values, and `signing.mode`, and they set `PODIUM_SIGN_KEY_PATH` whenever `signing.mode` is `registry-key`. Because they always render, blanking one in `values.yaml` emits an empty value that shadows the secret rather than deferring to it. Leave them at their defaults or set them with `--set`.
 
 Most other `config` keys render only where `values.yaml` carries a value, which covers the OIDC issuer, audience, groups claim, and group mapping, the bootstrap admins, and the default layer visibility. A key left blank renders nothing, so the secret supplies it through `envFrom`, and setting it in `values.yaml` overrides whatever the secret carries for the same name. The object-store keys carry a second condition: the S3 bucket, region, endpoint, and path-style flag render only when `config.objectStore.type` is `s3`, and the filesystem root only when it is `filesystem`. `config.publicMode` and `config.allowPublicBind` render only when set to true.
 
@@ -191,6 +221,7 @@ For each identity, the registry composes the caller's effective view from every 
 For each consumer:
 
 - Authenticated via OIDC (`podium login` once; tokens cache in the keychain).
+- `PODIUM_SIGNATURE_PROVIDER=registry-managed`, the default, and `PODIUM_SIGNATURE_VERIFY_KEY` set to the registry's public key, extracted as [Deploy the registry](#2-deploy-the-registry) shows. Without it, and without `PODIUM_VERIFY_SIGNATURES=never`, `podium-mcp` refuses to start with `config.signature_provider_unavailable`.
 - Consumer paths run as in [Configure your harness](../consuming/configure-your-harness).
 - Effective view composes admin layers (visibility-filtered) + user-defined layers + workspace local overlay.
 
@@ -205,6 +236,8 @@ podium admin migrate-to-standard --postgres <dsn> --object-store <url>
 ```
 
 The artifact directory is unchanged. Layer config moves from `~/.podium/registry.yaml` to the tenant config, and the same artifacts ingest into the new metadata store. After the export, switch consumer endpoints to the new registry URL and decommission the old host.
+
+The target registry signs with the source's key. Before the target's first start after the migration, create the signing Secret from the source's key file, replacing any Secret created from another key, as [Single node](single-node#migrating-to-clustered) shows. A target registry with no key file is refused at start. A target holding any other key starts, leaves every copied signed row untouched, and refuses each such row with `materialize.signature_invalid` to every reader under any consumer policy. [Single node](single-node#migrating-to-clustered) states the repair for each case.
 
 For the staged rollout of governance features covering identity, sensitivity labels, signing, and freeze windows, follow [Progressive adoption](progressive-adoption).
 

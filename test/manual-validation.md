@@ -46,6 +46,7 @@ server and client state into a throwaway directory so the run never touches the
 real `~/.podium`, and it puts the fresh build first on `PATH`.
 
 ```bash
+export REAL_HOME="$HOME"
 export PODIUM_BIN="$HOME/projects/podium/bin"
 export PATH="$PODIUM_BIN:$PATH"; hash -r
 export WORK="$(mktemp -d)"
@@ -54,9 +55,27 @@ export PODIUM_FILESYSTEM_ROOT="$WORK/objects"
 export PODIUM_AUDIT_LOG_PATH="$WORK/audit.log"
 export PODIUM_CACHE_DIR="$WORK/cache"
 export PODIUM_TOKEN_KEYCHAIN_NAME="podium-manual-$$"
+export PODIUM_SIGN_KEY_PATH="$WORK/registry-signing.key"
+export GOPATH="$(go env GOPATH)" GOMODCACHE="$(go env GOMODCACHE)" GOCACHE="$(go env GOCACHE)" GOENV="$(go env GOENV)"
+export DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}"
+export HOME="$WORK/home"; mkdir -p "$HOME"
 unset PODIUM_REGISTRY PODIUM_HARNESS PODIUM_SESSION_TOKEN
 which podium    # must print $PODIUM_BIN/podium
 ```
+
+The registry signs at ingest by default and generates its signing key on first
+run, and a standalone start bootstraps `~/.podium/sync.yaml`, so the block moves
+`HOME` into `$WORK` and names the key file there. `PODIUM_SIGN_KEY_PATH` also
+keeps a default-mode `podium serve` from being refused for a key that would sit
+outside the directory holding `$PODIUM_SQLITE_PATH`, and a `podium-mcp` in the
+same shell resolves its verification key from the same file. `REAL_HOME` keeps
+the operator's home for the repository paths the scenarios reach, and the Go
+and Docker exports keep the module cache, the build cache, and the Docker CLI's
+plugins where they were, so `go run` and `docker compose` work under the new
+`HOME`. The block sets these before it moves `HOME`, because each expands the
+operator's real home. A scenario whose subject is an unsigned registry sets
+`PODIUM_SIGN=none` in its own steps, and S19, S64, S66, and S68 are the
+scenarios that do.
 
 Confirm `which podium` prints the path under `$PODIUM_BIN`. If it prints a
 Homebrew or other path, the `PATH` export did not take; open a new shell and
@@ -165,6 +184,11 @@ rm -rf "$WORK"
 | S62 | A reingest that drops an artifact fails | standalone | none | none | none |
 | S63 | The two sync modes compose a shared merge target identically | solo then standalone | none | none | none |
 | S64 | A registry migrates its stored hashes on the first start | standalone | none | none | none |
+| S65 | First run verifies with no configuration | standalone | none | none | none |
+| S66 | Signing on an existing registry signs no stored row | standalone | none | none | none |
+| S67 | `podium verify --provider noop` refuses | none | none | none | none |
+| S68 | A stale `never` is announced | standalone | none | none | none |
+| S69 | The registry refuses a row edited in its store | standalone | none | none | none |
 
 ---
 
@@ -553,14 +577,14 @@ search.
 
 **Prerequisites.** `OPENAI_API_KEY` in `test.env` with available quota. If the
 key is absent, skip and record the reason. Load it with `set -a; source
-~/projects/podium/test.env; set +a`.
+$REAL_HOME/projects/podium/test.env; set +a`.
 
 **Steps.**
 
 1. Run the isolation block, then load the key.
 
    ```bash
-   set -a; source ~/projects/podium/test.env; set +a
+   set -a; source $REAL_HOME/projects/podium/test.env; set +a
    ```
 
 2. Create the same registry as S07 (the `reconcile` and `rotate-oncall` skills).
@@ -748,7 +772,9 @@ reaches a running registry and the meta-tools return live results.
    ```
 
 3. Drive the MCP bridge over stdio with two JSON-RPC requests: initialize, then
-   list tools.
+   list tools. The bridge verifies under the default `always` policy and
+   resolves the registry's public key from `$PODIUM_SIGN_KEY_PATH`, which the
+   isolation block exports and the server wrote.
 
    ```bash
    printf '%s\n%s\n' \
@@ -758,8 +784,12 @@ reaches a running registry and the meta-tools return live results.
    ```
 
 4. Optionally, wire the bridge into Claude Code (`claude mcp add podium --
-   env PODIUM_REGISTRY=$PODIUM_REGISTRY -- $PODIUM_BIN/podium-mcp`), open the
-   harness, and ask it to search the catalog. This part is observed in the
+   env PODIUM_REGISTRY=$PODIUM_REGISTRY PODIUM_SIGN_KEY_PATH=$PODIUM_SIGN_KEY_PATH
+   -- $PODIUM_BIN/podium-mcp`), open the harness, and ask it to search the
+   catalog. The harness spawns the bridge outside this shell, so the entry
+   names the key file the server wrote; without it the bridge resolves the key
+   under the operator's real home and refuses to start with
+   `config.signature_provider_unavailable`. This part is observed in the
    harness UI.
 
 **Expected.**
@@ -922,8 +952,8 @@ absent.
    is exercised against newly ingested bytes.
 
    ```bash
-   cd ~/projects/podium && make services-up
-   set -a; source ~/projects/podium/test.env; set +a
+   cd $REAL_HOME/projects/podium && make services-up
+   set -a; source $REAL_HOME/projects/podium/test.env; set +a
    export PODIUM_REGISTRY_STORE=postgres
    export PODIUM_OBJECT_STORE=s3
    export PODIUM_VECTOR_BACKEND=pgvector
@@ -1002,8 +1032,8 @@ selection.
    creates the per-org schema inside it but does not create the database itself.
 
    ```bash
-   cd ~/projects/podium && make services-up
-   set -a; source ~/projects/podium/test.env; set +a
+   cd $REAL_HOME/projects/podium && make services-up
+   set -a; source $REAL_HOME/projects/podium/test.env; set +a
    export PODIUM_REGISTRY_STORE=postgres
    export PODIUM_OBJECT_STORE=s3
    export PODIUM_VECTOR_BACKEND=pinecone
@@ -1086,8 +1116,8 @@ if absent.
    shared self-embedding index.
 
    ```bash
-   cd ~/projects/podium && make services-up
-   set -a; source ~/projects/podium/test.env; set +a
+   cd $REAL_HOME/projects/podium && make services-up
+   set -a; source $REAL_HOME/projects/podium/test.env; set +a
    export PODIUM_REGISTRY_STORE=postgres
    export PODIUM_OBJECT_STORE=s3
    export PODIUM_VECTOR_BACKEND=pinecone
@@ -1218,7 +1248,7 @@ that loading a deprecated artifact surfaces the replacement.
 
    ```bash
    # bump the version in $WORK/repo/deploy/ARTIFACT.md to 2.0.0, then:
-   cd "$WORK/repo" && git commit -aqm "deploy 2.0.0"
+   cd "$WORK/repo" && git -c user.email=alice@acme.com -c user.name=alice commit -aqm "deploy 2.0.0"
    podium layer reingest --registry "$PODIUM_REGISTRY" team
    podium artifact show --registry "$PODIUM_REGISTRY" deploy
    ```
@@ -1236,7 +1266,7 @@ that loading a deprecated artifact surfaces the replacement.
    ```bash
    # set version: 3.0.0 and add `deprecated: true` and
    # `replaced_by: deploy@2.0.0` to $WORK/repo/deploy/ARTIFACT.md, then:
-   cd "$WORK/repo" && git commit -aqm "deploy 3.0.0 deprecated"
+   cd "$WORK/repo" && git -c user.email=alice@acme.com -c user.name=alice commit -aqm "deploy 3.0.0 deprecated"
    podium layer reingest --registry "$PODIUM_REGISTRY" team
    podium search --registry "$PODIUM_REGISTRY" "deploy"
    podium artifact show --registry "$PODIUM_REGISTRY" --version 3.0.0 deploy
@@ -1261,7 +1291,7 @@ that loading a deprecated artifact surfaces the replacement.
 ## S19: Signing and signature verification
 
 **Goal.** Validate ingest-time signing and consumer-side verification: a signed
-high-sensitivity artifact loads under a verification policy, and an unsigned one
+high-sensitivity artifact loads under the `always` policy, and an unsigned one
 is refused.
 
 **Covers.** Standalone deployment, `serve --sign registry-key`,
@@ -1292,7 +1322,7 @@ is refused.
    ```bash
    curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=signed-runbook" \
      | python3 -c 'import sys,json; print(json.load(sys.stdin)["signature"])'
-   export PODIUM_VERIFY_SIGNATURES=medium-and-above
+   export PODIUM_VERIFY_SIGNATURES=always
    podium artifact show --registry "$PODIUM_REGISTRY" signed-runbook
    ```
 
@@ -1314,11 +1344,14 @@ is refused.
    ```
 
 5. Author a second high-sensitivity artifact, serve it on a separate port
-   without `--sign`, and load it through the bridge under the same enforcing
-   policy. An unsigned high-sensitivity artifact is refused.
+   with signing turned off (`PODIUM_SIGN=none`) and its own key path, and load
+   it through the bridge under the same enforcing policy. The registry signs by
+   default, so this server turns signing off explicitly. An unsigned artifact
+   is refused.
 
    ```bash
    podium artifact scaffold --type skill --sensitivity high --description "Unsigned runbook" "$WORK/reg-unsigned/unsigned-runbook"
+   PODIUM_SIGN=none PODIUM_SIGN_KEY_PATH="$WORK/registry-sign2.key" \
    PODIUM_SQLITE_PATH="$WORK/podium2.db" PODIUM_FILESYSTEM_ROOT="$WORK/objects2" \
      podium serve --standalone --no-embeddings --layer-path "$WORK/reg-unsigned" \
      --bind 127.0.0.1:8116 > "$WORK/srv-unsigned.log" 2>&1 &
@@ -1328,7 +1361,7 @@ is refused.
      | PODIUM_REGISTRY=http://127.0.0.1:8116 \
        PODIUM_HARNESS=none \
        PODIUM_MATERIALIZE_ROOT="$WORK/out-unsigned" \
-       PODIUM_VERIFY_SIGNATURES=medium-and-above \
+       PODIUM_VERIFY_SIGNATURES=always \
        PODIUM_SIGNATURE_PROVIDER=registry-managed \
        PODIUM_SIGNATURE_VERIFY_KEY="$PODIUM_SIGNATURE_VERIFY_KEY" \
        podium-mcp 2>/dev/null | python3 -m json.tool
@@ -1348,17 +1381,17 @@ is refused.
   response carries a `signature` envelope (`{"key_id":...,"signature":...}`).
 - `podium artifact show` prints the signed artifact's body. The CLI read path
   does not verify; it confirms the artifact loads.
-- With `PODIUM_VERIFY_SIGNATURES=medium-and-above`, loading the signed
-  high-sensitivity artifact through the MCP bridge verifies the signature and
-  materializes the artifact under `$WORK/out`.
-- An unsigned high-sensitivity artifact loaded under the same policy fails with
-  `materialize.signature_invalid` (`signature_missing: sensitivity "high"
-  requires a signature`) and writes nothing. A signature that does not validate
-  against the configured public key fails the same way
-  (`signature_invalid: signature does not verify`).
-- `PODIUM_VERIFY_SIGNATURES` accepts `never`, `medium-and-above`, or `always`.
-  Any other value exits the bridge with a nonzero status and the message
-  `PODIUM_VERIFY_SIGNATURES must be never | medium-and-above | always`.
+- With `PODIUM_VERIFY_SIGNATURES=always`, loading the signed high-sensitivity
+  artifact through the MCP bridge verifies the signature and materializes the
+  artifact under `$WORK/out`.
+- The unsigned artifact loaded under the same policy fails with
+  `materialize.signature_missing` and writes nothing. A signature that does not
+  validate against the configured public key fails with
+  `materialize.signature_invalid` (`signature_invalid: signature does not
+  verify`).
+- `PODIUM_VERIFY_SIGNATURES` accepts `never` or `always`. Any other value exits
+  the bridge with a nonzero status and the message `PODIUM_VERIFY_SIGNATURES
+  must be never | always`.
 
 **Cleanup.** Stop both servers (`kill "$SRV" "$SRV2"`) and `rm -rf "$WORK"`.
 
@@ -1389,14 +1422,14 @@ scenario's data is needed.
    does not serve here, because it keeps the volumes.
 
    ```bash
-   (cd ~/projects/podium && docker compose down -v && make services-up)
+   (cd $REAL_HOME/projects/podium && docker compose down -v && make services-up)
    until [ "$(docker inspect -f '{{.State.Health.Status}}' podium-postgres 2>/dev/null)" = "healthy" ]; do
      sleep 2
    done
    until [ "$(docker inspect -f '{{.State.Status}}' podium-bootstrap 2>/dev/null)" = "exited" ]; do
      sleep 2
    done
-   (cd ~/projects/podium && docker compose ps -a)
+   (cd $REAL_HOME/projects/podium && docker compose ps -a)
    ```
 
    **Expect.** Both loops return, so Postgres reports `healthy` and the bucket
@@ -1414,7 +1447,7 @@ scenario's data is needed.
    `podium serve --strict` run in step 5.
 
    ```bash
-   set -a; source ~/projects/podium/test.env; set +a
+   set -a; source $REAL_HOME/projects/podium/test.env; set +a
    export PODIUM_REGISTRY_STORE=postgres PODIUM_OBJECT_STORE=s3 PODIUM_VECTOR_BACKEND=pgvector
    S3URL="s3://${PODIUM_S3_ACCESS_KEY_ID}:${PODIUM_S3_SECRET_ACCESS_KEY}@localhost:9000/${PODIUM_S3_BUCKET}?region=${PODIUM_S3_REGION}&ssl=false"
    podium admin migrate-to-standard \
@@ -1971,7 +2004,9 @@ registry.
    export PODIUM_REGISTRY=http://127.0.0.1:8123
    ```
 
-3. Search through the bridge without and then with the overlay.
+3. Search through the bridge without and then with the overlay. The bridge
+   resolves the registry's public key from `$PODIUM_SIGN_KEY_PATH`, which the
+   isolation block exports.
 
    ```bash
    echo "--- no overlay: registry only ---"
@@ -2012,7 +2047,10 @@ cache mode.
 **Steps.**
 
 1. Run the isolation block.
-2. Serve a registry and warm the bridge cache by loading an artifact once.
+2. Serve a registry and warm the bridge cache by loading an artifact once. The
+   registry signs the artifact, and the bridge verifies it under the default
+   `always` policy with the public key it resolves from `$PODIUM_SIGN_KEY_PATH`,
+   which the isolation block exports.
 
    ```bash
    podium artifact scaffold --type skill --description "Cached runbook" "$WORK/reg/runbook"
@@ -2845,11 +2883,11 @@ FS farm is available.
    capture is what records an observed document behind the split-issuer rule.
 
    ```bash
-   mkdir -p ~/projects/podium/test/fixtures
+   mkdir -p $REAL_HOME/projects/podium/test/fixtures
    curl -sf "$ISSUER/.well-known/openid-configuration" | python3 -m json.tool \
      | sed "s/$ADFS_HOST/adfs.acme.example/g" \
-     > ~/projects/podium/test/fixtures/adfs-openid-configuration.redacted.json
-   python3 -c "import json;d=json.load(open('$HOME/projects/podium/test/fixtures/adfs-openid-configuration.redacted.json'));print(d['issuer']);print(d.get('access_token_issuer'));print(d['jwks_uri'])"
+     > $REAL_HOME/projects/podium/test/fixtures/adfs-openid-configuration.redacted.json
+   python3 -c "import json;d=json.load(open('$REAL_HOME/projects/podium/test/fixtures/adfs-openid-configuration.redacted.json'));print(d['issuer']);print(d.get('access_token_issuer'));print(d['jwks_uri'])"
    ```
 
 3. Acquire an AD FS access token through steps 2 to 5 of the baseline part,
@@ -3154,23 +3192,17 @@ content hash, so verification could not succeed.
 
 **Watch out for.** Two commands look like they exercise this and do not.
 `PODIUM_SIGNATURE_PROVIDER` is read by `podium sign`, `podium verify`, and
-`podium-mcp`; `podium serve` does not read it, and enables ingest signing only
-through `--sign registry-key`. And `podium sync` runs no signature check at
-all, so `PODIUM_VERIFY_SIGNATURES` in front of it is a no-op that accepts an
+`podium-mcp`; `podium serve` does not read it. Ingest signing is on unless
+`PODIUM_SIGN=none` or `--sign none` turns it off. And `podium sync` runs no
+signature check at all, so `PODIUM_VERIFY_SIGNATURES` in front of it is a no-op that accepts an
 invalid value silently. A scenario built on either one passes whether or not
 the defect is present.
 
 **Steps.**
 
-1. Run the isolation block, then add the signing-key override. Without it
-   `--sign registry-key` writes into the operator's real `~/.podium`.
+1. Run the isolation block.
 
-```bash
-export PODIUM_SIGN_KEY_PATH="$WORK/registry-signing.key"
-```
-
-2. Build a parent and an inheriting child at a sensitivity that requires
-   verification. Strip the leading indentation before running the heredocs.
+2. Build a parent and an inheriting child. Strip the leading indentation before running the heredocs.
 
 ```bash
 mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
@@ -4717,7 +4749,10 @@ published anywhere and has to be built locally and loaded into the cluster. That
 is a property of the development chart rather than a defect.
 
 **The stock defaults are a production topology, not a self-contained one.** A
-bare `helm install` with no overrides renders `PODIUM_REGISTRY_STORE=postgres`,
+bare `helm install` with no overrides fails to render, naming
+`signing.secretName`, because the registry signs at ingest by default and the
+chart mounts its signing key from an operator-supplied Secret. A render
+carrying only `--set signing.secretName=<name>` renders `PODIUM_REGISTRY_STORE=postgres`,
 `PODIUM_OBJECT_STORE=s3`, and `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, and takes the
 DSN, the bucket, and the issuer from the secret named by `existingSecret`. There
 is no dependency-free configuration to fall back on: the chart declares no
@@ -4776,7 +4811,29 @@ rather than trying to avoid them.
 
    **Expect.** `Bucket created successfully`.
 
-4. Create the secret the chart's `existingSecret` names. The chart injects it
+4. Generate the registry signing key with the commands
+   `docs/deployment/clustered.md` gives, with the scratch directory under
+   `$WORK`, and create the Secret the chart's `signing.secretName` names. The
+   start runs under `env -i` with its own scratch `HOME`, so it opens no store
+   the operator uses.
+
+   ```bash
+   KEY_DIR="$(mktemp -d "$WORK/signing-key.XXXXXX")"
+   env -i PATH="$PATH" HOME="$KEY_DIR" PODIUM_SIGN_KEY_PATH="$KEY_DIR/registry-signing.key" \
+     podium serve --standalone --no-embeddings --bind 127.0.0.1:0 >"$KEY_DIR/serve.log" 2>&1 &
+   SERVE_PID=$!
+   while kill -0 "$SERVE_PID" 2>/dev/null && ! grep -q 'listening on' "$KEY_DIR/serve.log"; do sleep 1; done
+   kill "$SERVE_PID"
+   wait "$SERVE_PID" || true
+   ls -l "$KEY_DIR/registry-signing.key"
+   kubectl create secret generic podium-signing-key \
+     --from-file=registry-signing.key="$KEY_DIR/registry-signing.key"
+   ```
+
+   **Expect.** `ls -l` reads `-rw-------` for the key file, and `kubectl`
+   reports `secret/podium-signing-key created`.
+
+5. Create the secret the chart's `existingSecret` names. The chart injects it
    with `envFrom`, so every key becomes an environment variable in the pod, and
    this is the only way to set a `PODIUM_*` variable the templates do not render.
 
@@ -4798,18 +4855,21 @@ rather than trying to avoid them.
 
    ```bash
    helm template t deploy/helm/podium --set existingSecret="" \
+     --set signing.secretName=podium-signing-key \
      | kubectl apply --dry-run=server -f -
    ```
 
    **Expect.** Both objects report `created (server dry run)`. A failure naming
    `envFrom[0].secretRef.name: Required value` means the guard on the block has
-   been lost.
+   been lost. The render passes `signing.secretName` so that the only refusal
+   it can show is that one.
 
-5. Install the chart and wait for the pod.
+6. Install the chart and wait for the pod.
 
    ```bash
    helm install podium deploy/helm/podium \
      --set replicaCount=1 \
+     --set signing.secretName=podium-signing-key \
      --set config.identityProvider.type=""
    kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=podium --timeout=180s
    kubectl get pods -l app.kubernetes.io/name=podium
@@ -4829,6 +4889,7 @@ rather than trying to avoid them.
 
    ```bash
    helm upgrade podium deploy/helm/podium --set replicaCount=1 \
+     --set signing.secretName=podium-signing-key \
      --set config.identityProvider.type="" \
      --set config.publicMode=true --set config.allowPublicBind=true
    ```
@@ -4842,7 +4903,7 @@ rather than trying to avoid them.
    exists to catch; read `kubectl logs` for the reason rather than the pod
    status.
 
-6. Confirm the registry serves through the Service rather than only inside the
+7. Confirm the registry serves through the Service rather than only inside the
    pod, which is what the probes and the Service selector together establish.
 
    ```bash
@@ -4860,12 +4921,15 @@ rather than trying to avoid them.
    so a pod that is `Ready` and a `/healthz` that does not answer would mean the
    probes are pointed somewhere else.
 
-7. **Negative control.** Re-install with the identity provider the chart once
-   defaulted to and confirm the deployment refuses it.
+8. **Negative control.** Re-install with the identity provider the chart once
+   defaulted to and confirm the deployment refuses it. The upgrade passes
+   `signing.secretName` so that it renders and the pod reaches the startup
+   guard.
 
    ```bash
    helm upgrade podium deploy/helm/podium \
      --set replicaCount=1 \
+     --set signing.secretName=podium-signing-key \
      --set config.identityProvider.type=oauth-device-code
    sleep 20
    kubectl get pods -l app.kubernetes.io/name=podium
@@ -4878,7 +4942,7 @@ rather than trying to avoid them.
    is the defect that made a default `helm install` unable to start before the
    chart's `values.yaml` was corrected, reproduced at the deployment level rather
    than asserted against a file. A run where this pod becomes `Ready` means the
-   startup guard is not doing its job, and step 5's success then establishes
+   startup guard is not doing its job, and step 6's success then establishes
    nothing.
 
 **Cleanup.**
@@ -4887,6 +4951,7 @@ rather than trying to avoid them.
 helm uninstall podium
 kind delete cluster --name podium-s46
 docker rmi ghcr.io/lennylabs/podium:0.0.0-dev
+rm -rf "$WORK"
 ```
 
 ---
@@ -7341,11 +7406,13 @@ grep 'audit-log podium' "$WORK/proj/ws/.claude/settings.json"
 **Goal.** Validate that an artifact whose stored hash the registry rewrote on
 start loads through the MCP consumer with a matching content hash, that a §6.4
 workspace overlay serves a hash that moves when its `SKILL.md` changes, and
-that a consumer pointed at a store carrying a pre-upgrade hash refuses the load
-with `materialize.content_hash_mismatch` until the registry has migrated it.
+that the registry's §13.4 stored-row admission refuses a row carrying a
+pre-upgrade hash with `materialize.content_hash_mismatch` until the registry has
+migrated it.
 
 **Covers.** The §4.7.6 canonical serialization, the §6.6 step-2 delivery check,
-the §6.4 overlay response, and the §13.4 first-start rewrite. The pre-upgrade
+the §6.4 overlay response, the §13.4 first-start rewrite, and the §13.4
+stored-row admission that refuses an unmigrated row. The pre-upgrade
 consumer cache is covered by the automated suite instead, because the bucket
 that refusal needs is one the pre-upgrade binary wrote.
 
@@ -7355,7 +7422,14 @@ one algorithm and read by another, which no in-process test constructs.
 
 **Steps.**
 
-1. Run the isolation block from "Per-scenario isolation" above.
+1. Run the isolation block from "Per-scenario isolation" above, then turn
+   signing off for every registry the scenario starts and verification off for
+   every load. The scenario's subject is the unsigned content-hash path, and
+   every **Expect** block below holds only for an unsigned row.
+
+   ```bash
+   export PODIUM_SIGN=none PODIUM_VERIFY_SIGNATURES=never
+   ```
 
    **Expect.** `which podium` prints `$PODIUM_BIN/podium`.
 
@@ -7422,12 +7496,14 @@ one algorithm and read by another, which no in-process test constructs.
 5. Return the stored hash to the pre-upgrade value and read the refusal. The
    server is stopped for the edit and started again with the
    `content-hash-framing` marker still present, so the start skips the rewrite
-   and serves the edited value. The `shasum` line computes the pre-upgrade
+   and holds the edited value. The registry's §13.4 stored-row admission
+   recomputes the row's hash on the full load and refuses it before any
+   consumer check runs. The `shasum` line computes the pre-upgrade
    digest by hand, as the concatenation of `ARTIFACT.md`, `SKILL.md`, and each
    bundled resource's path followed by its body in ascending path order, with
    no length prefixes; no shipped tool computes it. The load runs against an
    empty `$PODIUM_CACHE_DIR` in the default `always-revalidate` mode, so the
-   consumer fetches the edited value. An `offline-first` load would not surface
+   consumer makes a full load, which admission answers. An `offline-first` load would not surface
    it, because a resolution hit serves the bucket it resolved and the
    recomputation then compares that bucket against itself.
 
@@ -7448,12 +7524,12 @@ one algorithm and read by another, which no in-process test constructs.
      | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["structuredContent"]["error"])'
    ```
 
-   **Expect.** `grep -c rehash` prints `0`, because the marker is set. The load
-   prints the refusal verbatim:
-   `materialize.content_hash_mismatch: recomputed sha256:cb81ac9dcecf8a644e8614e93f90851f1801151c00c64a4e90d12daacc2379b8 does not match served sha256:10c0696a3627c93aff5aec81f43d93bad03775b83491a68433255b8636121dcd`,
-   where the recomputed value is step 3's served hash and the served value is
-   `$OLD`. A successful load here means the consumer is not recomputing the
-   digest.
+   **Expect.** `grep -c rehash` prints `0`, because the marker is set. The
+   printed error begins with `materialize.content_hash_mismatch`, names
+   `close-reporting/variance`, and contains no `sha256:` digest, and
+   `$WORK/srv2.log` records the admission refusal with the artifact ID and its
+   version. A successful load here means the registry is not checking
+   stored-row admission.
 
 6. Migrate the store and confirm the target rewrites the copied rows. The
    scenario's own server is stopped for the whole step, because no registry
@@ -7529,3 +7605,376 @@ one algorithm and read by another, which no in-process test constructs.
    marker the first start recorded holds the rewrite back.
 
 **Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
+
+---
+
+## S65: First run verifies with no configuration
+
+**Goal.** Validate that a standalone registry and a `podium-mcp` consumer on
+the same machine sign and verify with no signing configuration at all: the
+registry signs by default, the bridge verifies under its `always` default, and
+both resolve the same key file.
+
+**Covers.** §4.7.9 key resolution, the §6.2 consumer defaults, the §13.10
+signing default, and the standalone bootstrap of `~/.podium/sync.yaml`.
+
+**Why by hand.** The automated suites set the verification key explicitly in
+their fixtures, so they pass when the consumer defaults ship without the
+producer default or without the shared key resolution.
+
+**Steps.**
+
+1. Run the isolation block, then drop the store and key overrides so the run
+   uses every default under the scratch `HOME`.
+
+   ```bash
+   unset PODIUM_SIGN_KEY_PATH PODIUM_SQLITE_PATH PODIUM_FILESYSTEM_ROOT
+   ```
+
+2. Serve one artifact with no signing flag, read the bootstrapped `sync.yaml`,
+   and read the key file's mode.
+
+   ```bash
+   podium artifact scaffold --type skill --description "First run skill" "$WORK/reg/first-run" > /dev/null
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8165 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8165/healthz
+   cat "$HOME/.podium/sync.yaml"
+   ls -l "$HOME/.podium/standalone/registry-signing.key"
+   ```
+
+   **Expect.** `sync.yaml` names the registry at `http://127.0.0.1:8165`, carries
+   no `verify_signatures` key, and carries no `public:` or `private:` line. `ls
+   -l` reads `-rw-------`.
+
+3. Load the artifact through the bridge with no registry, policy, provider, or
+   key in its environment.
+
+   ```bash
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"first-run"}}}'
+   printf '%s\n%s\n' "$INIT" "$LOAD" | podium-mcp 2>"$WORK/mcp.log" | tail -1 \
+     | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["structuredContent"]; print(r.get("error") or "loaded " + r["content_hash"])'
+   cat "$WORK/mcp.log"
+   ```
+
+   **Expect.** The load prints `loaded sha256:...`. The bridge's stderr carries
+   no `WARN: signature verification is off` line. An exit naming
+   `config.signature_provider_unavailable` means the bridge did not resolve the
+   key file the registry wrote, and `materialize.signature_missing` means the
+   registry did not sign at ingest.
+
+**Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
+
+---
+
+## S66: Signing on an existing registry signs no stored row
+
+**Goal.** Validate that turning signing on over a store whose rows were
+ingested unsigned leaves those rows unsigned, that the registry refuses them to
+every reader, and that only a new version of the artifact carries an envelope.
+
+**Covers.** §13.4 stored-row admission, the §13.4 first-start rewrite's
+completion record, and §4.7.9 ingest signing.
+
+**Why by hand.** The claim under test is that no path re-signs a stored row,
+including `podium layer reingest`, which reads as the obvious repair. Reading
+the stored `signature` column confirms what the registry holds rather than what
+a load reports.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Ingest one artifact with signing off, then stop the registry. The first
+   start records the §13.4 rewrite as complete.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Early skill" "$WORK/reg/early" > /dev/null
+   PODIUM_SIGN=none podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8166 > "$WORK/srv1.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8166/healthz
+   kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   ```
+
+3. Restart with the default signing mode and load the earlier version through
+   `curl` and through `podium-mcp`.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8166 > "$WORK/srv2.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8166/healthz
+   export PODIUM_REGISTRY=http://127.0.0.1:8166
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   load_http() { curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=early&version=$1" \
+     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("code") or "loaded signature=" + repr(d.get("signature")))'; }
+   load_mcp() { printf '%s\n%s\n' "$INIT" \
+     "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"load_artifact\",\"arguments\":{\"id\":\"early\",\"version\":\"$1\"}}}" \
+     | PODIUM_CACHE_DIR="$(mktemp -d "$WORK/cache.XXXXXX")" podium-mcp 2>/dev/null | tail -1 \
+     | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["structuredContent"]; print(r.get("error") or "loaded")'; }
+   load_http 0.1.0
+   load_mcp 0.1.0
+   ```
+
+   **Expect.** Both loads print an error beginning with
+   `materialize.signature_missing`.
+
+4. Reingest the layer and load the earlier version again, then read the stored
+   `signature` column.
+
+   ```bash
+   podium layer reingest --registry "$PODIUM_REGISTRY" reg
+   load_http 0.1.0
+   load_mcp 0.1.0
+   sqlite3 "$PODIUM_SQLITE_PATH" "select quote(signature) from manifests where artifact_id='early' and version='0.1.0';"
+   ```
+
+   **Expect.** Both loads print `materialize.signature_missing` again, and the
+   `sqlite3` query prints `''`. A load that succeeds here means a reingest
+   re-signed the stored row, which this scenario exists to catch.
+
+5. Raise the artifact's version, reingest, and load both versions.
+
+   ```bash
+   sed -i.bak 's/^version: 0.1.0$/version: 0.2.0/' "$WORK/reg/early/ARTIFACT.md"
+   podium layer reingest --registry "$PODIUM_REGISTRY" reg
+   load_http 0.2.0
+   load_mcp 0.2.0
+   load_http 0.1.0
+   ```
+
+   **Expect.** The new version loads with a non-empty `signature` through
+   `curl` and loads through the bridge. The earlier version still prints
+   `materialize.signature_missing`.
+
+**Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
+
+---
+
+## S67: `podium verify --provider noop` refuses
+
+**Goal.** Validate that the `noop` provider refuses the placeholder envelope it
+produces, at the command an operator types.
+
+**Covers.** The §4.7.9 `noop` provider and `podium sign` and `podium verify`.
+
+**Why by hand.** The `noop:<content_hash>` placeholder is computable from any
+served `content_hash`, so a permissive `noop` verifier admits a forged
+envelope. The operator surface is where a reintroduced permissive verifier
+would be trusted.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Sign a content hash with `noop` and verify the result with `noop`.
+
+   ```bash
+   H="sha256:$(printf 'podium' | shasum -a 256 | cut -d' ' -f1)"
+   SIG="$(podium sign --provider noop --content-hash "$H")"
+   echo "$SIG"
+   podium verify --provider noop --content-hash "$H" --signature "$SIG"; echo "exit=$?"
+   ```
+
+   **Expect.** `podium sign` prints `noop:` followed by `$H`. `podium verify`
+   prints `verify failed: signature_invalid: the noop provider does not
+   verify` on stderr and `exit=1`. `exit=0` means the `noop` verifier accepts
+   its own placeholder, which this scenario exists to catch.
+
+**Cleanup.** `rm -rf "$WORK"`.
+
+---
+
+## S68: A stale `never` is announced
+
+**Goal.** Validate that a machine carrying `defaults.verify_signatures: never`
+in `~/.podium/sync.yaml`, as an earlier release's standalone bootstrap wrote it,
+loads without verification and says so on the bridge's stderr.
+
+**Covers.** The §7.5.2 `defaults.verify_signatures` key and the §4.7.9 policy
+resolution.
+
+**Why by hand.** No release rewrites that line, and a machine carrying it
+verifies nothing, including against another registry. The startup warning is
+the one place the operator learns that, and no assertion on a load result
+observes it.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Serve an unsigned registry and write the stale line into the user-global
+   `sync.yaml`, replacing the file the bootstrap wrote.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Stale skill" "$WORK/reg/stale" > /dev/null
+   PODIUM_SIGN=none podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8168 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8168/healthz
+   printf 'defaults:\n  registry: http://127.0.0.1:8168\n  verify_signatures: never\n' > "$HOME/.podium/sync.yaml"
+   ```
+
+3. Load through the bridge and read its stderr.
+
+   ```bash
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"stale"}}}'
+   printf '%s\n%s\n' "$INIT" "$LOAD" | podium-mcp 2>"$WORK/mcp.log" | tail -1 \
+     | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["structuredContent"]; print(r.get("error") or "loaded")'
+   cat "$WORK/mcp.log"
+   ```
+
+   **Expect.** The load prints `loaded`. The stderr carries one line beginning
+   `WARN: signature verification is off because defaults.verify_signatures is
+   never in` and naming `$HOME/.podium/sync.yaml`.
+
+4. Negative control: remove the line and load again.
+
+   ```bash
+   printf 'defaults:\n  registry: http://127.0.0.1:8168\n' > "$HOME/.podium/sync.yaml"
+   printf '%s\n%s\n' "$INIT" "$LOAD" | podium-mcp; echo "exit=$?"
+   ```
+
+   **Expect.** The bridge exits non-zero naming
+   `config.signature_provider_unavailable`, because under the `always` default
+   it needs a verification key and the unsigned registry wrote none. A
+   successful load means the `never` did not come from the file.
+
+**Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
+
+---
+
+## S69: The registry refuses a row edited in its store
+
+**Goal.** Validate that the registry's stored-row admission refuses a row whose
+stored bytes, signature, or signing key no longer agree, to a direct HTTP reader
+and to the bridge alike, while a revalidating consumer keeps serving the copy it
+fetched through an admitted load, and that a batch load carries small resources
+inline.
+
+**Covers.** §13.4 stored-row admission, §7.6.2 batch resource references, and
+the §6.5 revalidation path.
+
+**Why by hand.** A unit test over the served-record assembly cannot tell a
+refusal that reaches the bridge from one that reaches a direct HTTP reader, and
+the edits run against the SQLite file a deployment holds.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Author a skill carrying three bundled resources: a small text file, a small
+   binary file, and a file above 256 KB. Serve it with the default signing mode
+   and load it through `curl` and through `podium-mcp`, then keep a copy of the
+   cache the bridge's load wrote.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Admission fixture" "$WORK/reg/admit" > /dev/null
+   printf 'small text\n' > "$WORK/reg/admit/notes.md"
+   head -c 1024 /dev/urandom > "$WORK/reg/admit/blob.bin"
+   head -c 300000 /dev/urandom | base64 > "$WORK/reg/admit/large.txt"
+   serve() { podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8169 > "$WORK/srv.log" 2>&1 &
+     SRV=$!
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8169/healthz; }
+   stop() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
+   export PODIUM_REGISTRY=http://127.0.0.1:8169
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"admit"}}}'
+   load_http() { curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=admit" \
+     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("code") or "loaded", d.get("message", ""))'; }
+   load_mcp() { printf '%s\n%s\n' "$INIT" "$LOAD" | PODIUM_CACHE_DIR="$1" podium-mcp 2>/dev/null | tail -1 \
+     | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["structuredContent"]; print(r.get("error") or "loaded")'; }
+   serve
+   load_http
+   load_mcp "$WORK/cache"
+   cp -R "$WORK/cache" "$WORK/cache-warm"
+   ```
+
+   **Expect.** Both loads print `loaded`.
+
+3. Read the batch load's resource references while the row is unedited.
+
+   ```bash
+   curl -s -X POST "$PODIUM_REGISTRY/v1/artifacts:batchLoad" -H 'Content-Type: application/json' \
+     -d '{"ids":["admit"]}' | python3 -c '
+   import sys, json
+   for r in json.load(sys.stdin)[0]["resources"]:
+       print(r["path"], "inline" in r, r.get("inline_base64", False), "presigned_url" in r)'
+   ```
+
+   **Expect.** `notes.md True False False`, whose `inline` equals the file's
+   bytes; `blob.bin True True False`; and `large.txt False False True`, which
+   also carries a `content_hash`. A small resource carrying a `presigned_url`
+   means the batch path presigns a resource admission never read.
+
+4. Stop the server, keep the row's stored `frontmatter` and `signature` in a
+   side table, and append a byte to the stored `frontmatter`. The stored
+   `content_hash` is unchanged. Restart and load through `curl`, through the
+   bridge with a new empty cache, and through the bridge with a fresh copy of
+   the warm cache. Restore the row.
+
+   ```bash
+   stop
+   sqlite3 "$PODIUM_SQLITE_PATH" "create table s69_keep as select frontmatter, signature from manifests where artifact_id='admit';"
+   sqlite3 "$PODIUM_SQLITE_PATH" "update manifests set frontmatter = frontmatter || ' ' where artifact_id='admit';"
+   serve
+   load_http
+   load_mcp "$(mktemp -d "$WORK/cache.XXXXXX")"
+   W="$(mktemp -d "$WORK/warm.XXXXXX")"; cp -R "$WORK/cache-warm/." "$W"; load_mcp "$W"
+   stop
+   sqlite3 "$PODIUM_SQLITE_PATH" "update manifests set frontmatter = (select frontmatter from s69_keep) where artifact_id='admit';"
+   ```
+
+   **Expect.** The `curl` and the empty-cache loads print
+   `materialize.content_hash_mismatch`, each naming only the artifact. The
+   warm-cache load prints `loaded`: the default `always-revalidate` bridge sends
+   a HEAD, the registry answers the unchanged stored hash without admission,
+   and the bridge serves the copy it fetched through the first, admitted load.
+
+5. Clear the stored `signature` and repeat the three loads. Restore the row.
+
+   ```bash
+   sqlite3 "$PODIUM_SQLITE_PATH" "update manifests set signature = '' where artifact_id='admit';"
+   serve
+   load_http
+   load_mcp "$(mktemp -d "$WORK/cache.XXXXXX")"
+   W="$(mktemp -d "$WORK/warm.XXXXXX")"; cp -R "$WORK/cache-warm/." "$W"; load_mcp "$W"
+   stop
+   sqlite3 "$PODIUM_SQLITE_PATH" "update manifests set signature = (select signature from s69_keep) where artifact_id='admit';"
+   ```
+
+   **Expect.** The `curl` and the empty-cache loads print
+   `materialize.signature_missing`. The warm-cache load prints `loaded`.
+
+6. Restart under a freshly generated key file, load, then restart under the
+   original key and load again.
+
+   ```bash
+   PODIUM_SIGN_KEY_PATH="$WORK/fresh.key" serve
+   load_http
+   load_mcp "$(mktemp -d "$WORK/cache.XXXXXX")"
+   stop
+   serve
+   load_http
+   load_mcp "$(mktemp -d "$WORK/cache.XXXXXX")"
+   ```
+
+   **Expect.** Under the fresh key both loads print
+   `materialize.signature_invalid`, and under the original key both print
+   `loaded`. The fresh key is generated because the start that runs after the
+   first-start rewrite has completed does not refuse a missing key file, which
+   is the lost-key case the operator guide describes.
+
+**Why each edit.** The first edit catches a registry that checks the signature
+and skips the hash, the second one that trusts the `signature` column's
+absence, and the third a registry that skips the signature check. Each refusal
+is read through a direct HTTP reader as well as through the bridge, which
+catches a refusal that reaches one and not the other. The warm-cache loads
+record that a revalidating consumer keeps serving its admitted copy while the
+stored hash is unchanged, so a refusal is observed through a full load.
+
+**Cleanup.** `stop` then `rm -rf "$WORK"`.

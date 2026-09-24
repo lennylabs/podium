@@ -136,7 +136,7 @@ adds server-side capability.
 |:--|:--|:--|:--|:--|
 | [Local](https://lennylabs.github.io/podium/deployment/local) | None | A folder, read from disk | User-driven sync | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
 | [Single node](https://lennylabs.github.io/podium/deployment/single-node) | One binary | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in local, plus discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
-| [Clustered](https://lennylabs.github.io/podium/deployment/clustered) | Replicas, Postgres, and object storage | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in single node, plus multi-tenancy, SCIM group sync, signing with a transparency log, and high availability |
+| [Clustered](https://lennylabs.github.io/podium/deployment/clustered) | Replicas, Postgres, and object storage | One or more folders or remote Git repos | User-driven sync, or agent-driven on demand | Everything in single node, plus multi-tenancy, SCIM group sync, transparency-log anchoring of the audit chain, and high availability |
 
 The artifacts are the same in every tier. The catalog on disk does not change
 when the deployment changes, and the same shared Go library parses, composes,

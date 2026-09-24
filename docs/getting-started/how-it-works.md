@@ -227,8 +227,8 @@ supporting services are managed or self-run alongside.
   constraints or identity-based visibility requirements.
 - **What runs.** Registry replicas behind a load balancer,
   Postgres (managed or self-run), object storage, and an OIDC IdP.
-- **What it adds.** Multi-tenancy, signing with a transparency log, and high
-  availability. SCIM group push, freeze windows, and the hash-chained audit
+- **What it adds.** Multi-tenancy, transparency-log anchoring of the audit
+  chain, and high availability. SCIM group push, freeze windows, and the hash-chained audit
   log run on a single node as well.
 - **Migration path.** `podium admin migrate-to-standard` exports
   a single-node deployment into the clustered stack. The same artifact
@@ -297,9 +297,11 @@ they cannot make network calls, spawn subprocesses, or write
 outside the destination.
 
 The registry returns metadata and the resource bytes below the inline
-cutoff. A resource above the cutoff, and a manifest above it, live in
-content-addressed object storage and reach the consumer as a URL the
-consumer fetches. With the S3 backend the URL is presigned, it expires
+cutoff. On a registry with an object store, a resource above the cutoff,
+and a manifest above it, live in content-addressed object storage and reach
+the consumer as a URL the consumer fetches. A registry without one keeps such
+a resource inline on the manifest record and returns it inline, and a resource
+held inline is returned inline at any size. With the S3 backend the URL is presigned, it expires
 after the configured TTL, and the fetch goes to object storage without
 passing through the registry. With the filesystem backend, which a single
 node uses by default, the URL is the registry's own `/objects/<content-hash>`

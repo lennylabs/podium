@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // ---- package-level helpers for single-node tests ----------------------------
@@ -1196,6 +1197,70 @@ func TestStandaloneServer_MigrateToStandardSQLite(t *testing.T) {
 		t.Errorf("stdout missing 'metadata migration complete':\n%s", res.Stdout)
 	}
 	mustExist(t, dstDB)
+}
+
+// Spec: §4.7.9, §13.4, §13.12 — the migration key-copy step
+// docs/deployment/single-node.md publishes. A default-mode source signs its
+// fixture, and migrate-to-standard copies the signed row into a SQLite target.
+// A target start without the source's key is refused naming
+// PODIUM_SIGN_KEY_PATH and writes no key, whether the key path is unset (the
+// persistence refusal) or names a missing file (the generated-key refusal).
+// After the page's copy step runs verbatim, the target starts, and the
+// migrated artifact's served signature verifies under the source's public key.
+func TestStandaloneServer_MigrateToStandardWithTheSourceKey(t *testing.T) {
+	t.Parallel()
+	copyStep := docBashBlock(t, "docs/deployment/single-node.md", "TARGET_SIGN_KEY_PATH")
+
+	srcHome := t.TempDir()
+	src := startServerArgs(t, []string{"HOME=" + srcHome}, "serve", "--standalone",
+		"--layer-path", writeRegistry(t, map[string]string{"mig/ARTIFACT.md": smallteamLowArtifact("migrate artifact")}))
+	stopProc(src.cmd)
+	standalone := filepath.Join(srcHome, ".podium", "standalone")
+
+	dst := t.TempDir()
+	dstDB := filepath.Join(dst, "target.db")
+	dstObjects := filepath.Join(dst, "objects")
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+		"admin", "migrate-to-standard",
+		"--source-sqlite", filepath.Join(standalone, "podium.db"),
+		"--source-objects", filepath.Join(standalone, "objects"),
+		"--target-store", "sqlite", "--target-sqlite", dstDB,
+		"--target-objects", dstObjects)
+	if res.Exit != 0 {
+		t.Fatalf("migrate-to-standard exit=%d\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+
+	targetHome := t.TempDir()
+	targetKey := filepath.Join(dst, "registry-signing.key")
+	targetEnv := []string{"HOME=" + targetHome, "PODIUM_SQLITE_PATH=" + dstDB, "PODIUM_FILESYSTEM_ROOT=" + dstObjects}
+	for _, keyEnv := range [][]string{nil, {"PODIUM_SIGN_KEY_PATH=" + targetKey}} {
+		refused := runBin(t, cmdharness.Bin(t, "podium"), "", append(append([]string{}, targetEnv...), keyEnv...), nil,
+			60*time.Second, "serve", "--standalone", "--bind", "127.0.0.1:0")
+		if refused.Exit == 0 || !strings.Contains(refused.Stderr+refused.Stdout, "PODIUM_SIGN_KEY_PATH") {
+			t.Fatalf("target start %v without the source key: exit=%d, want a refusal naming PODIUM_SIGN_KEY_PATH\nstderr=%s", keyEnv, refused.Exit, refused.Stderr)
+		}
+	}
+	mustNotExist(t, targetKey)
+	mustNotExist(t, filepath.Join(targetHome, ".podium", "standalone", "registry-signing.key"))
+
+	cp := runDocBlock(t, []string{"HOME=" + srcHome, "TARGET_SIGN_KEY_PATH=" + targetKey}, copyStep)
+	if cp.Exit != 0 {
+		t.Fatalf("documented key copy exit=%d\nstderr=%s", cp.Exit, cp.Stderr)
+	}
+	target := startServerArgs(t, append(targetEnv, "PODIUM_SIGN_KEY_PATH="+targetKey), "serve", "--standalone")
+
+	var served struct {
+		ContentHash string `json:"content_hash"`
+		Signature   string `json:"signature"`
+	}
+	getJSON(t, target.BaseURL+"/v1/load_artifact?id=mig", &served)
+	pub, err := sign.PublicKeyFromKeyFile(filepath.Join(standalone, "registry-signing.key"))
+	if err != nil {
+		t.Fatalf("read the source key: %v", err)
+	}
+	if err := (sign.RegistryManagedKey{PublicKey: pub}).Verify(context.Background(), served.ContentHash, served.Signature); err != nil {
+		t.Fatalf("migrated signature does not verify under the source key: %v\nlog:\n%s", err, target.log())
+	}
 }
 
 // podium admin migrate-to-standard --dry-run writes nothing.

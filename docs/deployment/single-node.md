@@ -88,6 +88,8 @@ podium sync
 
 For runtime discovery via the MCP server, add the Podium MCP entry to the harness's MCP config. See [Configure your harness](../consuming/configure-your-harness) for per-harness recipes.
 
+The registry signs every artifact at ingest by default, and `podium-mcp` verifies each load under `PODIUM_VERIFY_SIGNATURES=always` by default, so the MCP entry carries the registry's verification key. A client on another machine sets `PODIUM_SIGNATURE_PROVIDER=registry-managed` and `PODIUM_SIGNATURE_VERIFY_KEY` to the registry's public key, extracted from the server's key file (`~/.podium/standalone/registry-signing.key` unless `PODIUM_SIGN_KEY_PATH` moves it) with the command [Clustered](clustered#2-deploy-the-registry) shows. A client on the server host, under the same user account, resolves the key from the registry's own key file and sets neither. Without the key, and without `PODIUM_VERIFY_SIGNATURES=never`, `podium-mcp` refuses to start with `config.signature_provider_unavailable`.
+
 ---
 
 ## Authoring source: filesystem path or git repo
@@ -153,7 +155,7 @@ The shared library does the same parsing, composition, and adapter work in both 
 Single node omits the capabilities that need external services or a multi-tenant model:
 
 - **Multi-tenancy.** A single-node deployment is single-tenant.
-- **Transparency-log anchoring.** Sigstore-keyless signing requires public OIDC infrastructure.
+- **Transparency-log anchoring.** Anchoring the audit chain head to a public transparency log needs that log's infrastructure. Artifact signing is not part of this omission: a single-node registry signs every artifact with its registry-managed key by default.
 
 When any of these starts mattering, see [Clustered](clustered).
 
@@ -182,7 +184,8 @@ For everyday team use, enable the `oidc-jwt` provider instead. Each developer au
 
 ## Operational notes
 
-- **Backup.** A periodic snapshot of `~/.podium/standalone/` captures the SQLite file, the object directory, and any signing keys the deployment generated there (`audit.key` when audit anchoring is enabled, `registry-signing.key` when `--sign registry-key` is set). Include `~/.podium/audit.log` in the same snapshot, because the audit stream sits outside that directory unless `PODIUM_AUDIT_LOG_PATH` moves it.
+- **Backup.** A periodic snapshot of `~/.podium/standalone/` captures the SQLite file, the object directory, and the signing keys the deployment generated there: `registry-signing.key`, which the first run writes unless signing is off (`--sign none` or `PODIUM_SIGN=none`), and `audit.key` when audit anchoring is enabled. Include `~/.podium/audit.log` in the same snapshot, because the audit stream sits outside that directory unless `PODIUM_AUDIT_LOG_PATH` moves it.
+- **Losing the signing key.** The registry signing key belongs in the backup. Before the first start of a release has completed its rewrite of stored content hashes, a start with the key file missing is refused when the store holds signed rows. Once that rewrite has completed, a start with the key file missing generates a fresh keypair and proceeds, and the registry then refuses every row the retired key signed with `materialize.signature_invalid`, to every reader and under any consumer policy. The repair is stopping the registry, restoring the key file from the backup, and starting it again, because the registry loads its signing key once at start.
 - **Upgrades.** Replace the binary and restart. Schema migrations run on first start of the new version. A release whose changelog names a migration of the values stored under the schema rewrites those values on that first start as well, so take the backup described above before replacing the binary, because returning to the previous binary requires restoring it. That changelog entry states the order.
 - **Performance.** A single-node deployment is sized for tens of developers rather than thousands of QPS. For higher scale, see [Clustered](clustered).
 - **Observability.** A Prometheus endpoint is served on `/metrics` unless `PODIUM_METRICS=false` turns it off. The reference Grafana dashboard is in the repository at `deploy/grafana-dashboard.json`.
@@ -198,3 +201,18 @@ podium admin migrate-to-standard --postgres <dsn> --object-store <url>
 ```
 
 [Clustered](clustered) documents the same migration path from the receiving side. The artifact directory is unchanged, and layer config moves from `~/.podium/registry.yaml` to the tenant config.
+
+The target registry signs with the source's key. Before the target's first start after the migration, place the source's registry signing key at the target's `PODIUM_SIGN_KEY_PATH`, replacing any key file already there. Set `TARGET_SIGN_KEY_PATH` to the file the target's `PODIUM_SIGN_KEY_PATH` names, and copy the key on the source host:
+
+```bash
+install -m 600 ~/.podium/standalone/registry-signing.key "$TARGET_SIGN_KEY_PATH"
+```
+
+A source started with `PODIUM_SIGN_KEY_PATH` copies the file that variable names instead. On a chart deployment, create the signing Secret from the source's key file, as [Clustered](clustered#2-deploy-the-registry) shows for a generated one.
+
+Skipping the step has two outcomes. A target with no key file is refused at start, naming `PODIUM_SIGN_KEY_PATH`. A target holding any other key, including one an earlier start generated or a Secret created from a different key, starts, classifies every copied signed row `signature_unverified`, and leaves it untouched, and the outcome then depends on the source's state:
+
+- A row the source had already rewritten keeps the rewritten content hash and the source's envelope. While the target runs with the other key, the target registry refuses every such row with `materialize.signature_invalid` to every reader and under any consumer policy. Placing the source's key at the target's `PODIUM_SIGN_KEY_PATH`, replacing the other key, and restarting the target repairs those rows with no new version, because the registry loads its key only at start.
+- A row a source that never started on this release still held at the previous content hash stays at that hash, and placing the source's key alone does not repair it. Recreate the target store empty and run `podium admin migrate-to-standard` again with the source's key at the target's `PODIUM_SIGN_KEY_PATH`. The command clears the target's record of the rewrite, so the next start rewrites and re-signs the copied rows.
+
+A new version of each affected artifact is the repair only where the source store or its key no longer exists.

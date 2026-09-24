@@ -105,7 +105,7 @@ registry:
     audience: https://podium.acme.com
 ```
 
-Environment variables and CLI flags override file values. Use `${ENV_VAR}` interpolation for secrets.
+Environment variables and CLI flags override file values. Use `${ENV_VAR}` interpolation for secrets. The registry's environment also carries `PODIUM_SIGN_KEY_PATH` naming the deployment's one signing key file, or `PODIUM_SIGN=none`, because the variable has no config-file key and a registry with signing on, a Postgres store, and no key path is refused at start. [Clustered](clustered#2-deploy-the-registry) shows how to generate the key file.
 
 ---
 

@@ -22,6 +22,10 @@ package e2e
 //     docs_organization_compose_test.go without Docker.
 //   - some entries need a registered runtime key and signed JWT
 //     (skipped with honest reason).
+//   - the page's `kubectl create secret` and `helm install` lines need a
+//     cluster; TEST-8's chart render cases and manual scenario S46 cover
+//     them, and TestStandardDeploy_SigningKeyFileFromAStandaloneStart runs
+//     the key-generation and extraction blocks that precede them.
 
 import (
 	"bytes"
@@ -42,6 +46,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // ---- local helpers (prefixed with org) --------------------------------------
@@ -1741,5 +1746,98 @@ func TestStandardDeploy_AdminNoSubcommand(t *testing.T) {
 		if !strings.Contains(combined, sub) {
 			t.Errorf("admin help missing subcommand %q:\n%s", sub, combined)
 		}
+	}
+}
+
+// Spec: §4.7.9, §13.12 — the key-generation procedure docs/deployment/clustered.md
+// publishes for the chart's signing Secret. The page's commands run verbatim
+// on a test HOME that already holds an unsigned standalone store. The start
+// they make runs under env -i with a scratch HOME, so it writes a 0600 key file
+// both key-file readers accept, leaves the test HOME's store byte-for-byte as
+// it was, and creates no file there. The page's extraction command yields the
+// value a bridge's PODIUM_SIGNATURE_VERIFY_KEY takes, and a registry reading
+// the key from a read-only directory (the chart's Secret mount) signs what it
+// serves, so the bridge loads under the always default.
+func TestStandardDeploy_SigningKeyFileFromAStandaloneStart(t *testing.T) {
+	t.Parallel()
+	keygen := docBashBlock(t, "docs/deployment/clustered.md", "env -i")
+	extract := docBashBlock(t, "docs/deployment/clustered.md", "awk '/^public:/")
+
+	// A pre-existing unsigned standalone store in the operator's home.
+	home := t.TempDir()
+	unsigned := startServerArgs(t, []string{"HOME=" + home, "PODIUM_SIGN=none"},
+		"serve", "--standalone", "--layer-path", orgLocalReg(t))
+	stopProc(unsigned.cmd)
+	before := snapshotTree(t, home)
+
+	// The page's blocks run in one shell, and the trailing line reports the
+	// scratch directory mktemp chose, which BSD mktemp places outside TMPDIR.
+	binDir := filepath.Dir(cmdharness.Bin(t, "podium"))
+	res := runDocBlock(t, []string{
+		"HOME=" + home,
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}, keygen+extract+`printf '%s\n' "$KEY_DIR"`+"\n")
+	lines := strings.Split(strings.TrimSpace(res.Stdout), "\n")
+	if res.Exit != 0 || len(lines) != 2 {
+		t.Fatalf("documented key generation exit=%d\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	keyDir := strings.TrimSpace(lines[1])
+	t.Cleanup(func() { _ = os.RemoveAll(keyDir) })
+	if after := snapshotTree(t, home); after != before {
+		t.Errorf("the key-generation start changed the operator's home:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+
+	keyFile := filepath.Join(keyDir, "registry-signing.key")
+	info, err := os.Stat(keyFile)
+	if err != nil {
+		t.Fatalf("stat key file: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("key file mode = %v, want 0600", info.Mode().Perm())
+	}
+	priv, err := sign.PrivateKeyFromKeyFile(keyFile)
+	if err != nil {
+		t.Fatalf("PrivateKeyFromKeyFile: %v", err)
+	}
+	pub, err := sign.PublicKeyFromKeyFile(keyFile)
+	if err != nil {
+		t.Fatalf("PublicKeyFromKeyFile: %v", err)
+	}
+	if !pub.Equal(priv.Public()) {
+		t.Fatal("the key file's public and private lines are not one keypair")
+	}
+	verifyKey := strings.TrimSpace(lines[0])
+	if got, err := sign.PublicKeyFromBase64(verifyKey); err != nil || !got.Equal(pub) {
+		t.Fatalf("extraction output %q is not the key file's public key (err=%v)", verifyKey, err)
+	}
+
+	// The chart mounts the Secret read-only; the registry reads the key and
+	// writes nothing beside it.
+	mount := t.TempDir()
+	mounted := filepath.Join(mount, "registry-signing.key")
+	if err := os.WriteFile(mounted, []byte(readFile(t, keyFile)), 0o600); err != nil {
+		t.Fatalf("stage mounted key: %v", err)
+	}
+	if err := os.Chmod(mount, 0o500); err != nil {
+		t.Fatalf("make mount read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(mount, 0o700) })
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_SIGN_KEY_PATH=" + mounted},
+		"serve", "--standalone", "--layer-path", orgLocalReg(t))
+
+	var served struct {
+		Signature string `json:"signature"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=hello", &served)
+	if served.Signature == "" {
+		t.Fatalf("registry on the mounted key served no signature\nlog:\n%s", srv.log())
+	}
+	load := mcpExec(t, []string{
+		"PODIUM_REGISTRY=" + srv.BaseURL,
+		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_SIGNATURE_VERIFY_KEY=" + verifyKey,
+	}, toolCall(1, "load_artifact", map[string]any{"id": "hello"}))
+	if errStr, _ := rpcResult(t, load.Stdout, 1)["error"].(string); errStr != "" {
+		t.Fatalf("bridge with the extracted key refused the load: %s\nstderr=%s", errStr, load.Stderr)
 	}
 }

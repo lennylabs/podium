@@ -133,7 +133,7 @@ podium serve [--standalone] [--strict]
              [--layer-path <path>]
              [--public-mode] [--allow-public-bind]
              [--no-embeddings] [--presign-ttl-seconds <n>]
-             [--sign registry-key]
+             [--sign registry-key|none]
              [--web-ui] [--web-ui-allow-public-bind]
              [--web-ui-auth] [--web-ui-auth-transaction-ttl <duration>]
 ```
@@ -151,7 +151,7 @@ Each flag overrides the matching `PODIUM_*` env var for the duration of the proc
 | `--allow-public-bind` | Allow non-loopback bind in public mode or with trusted headers (typically behind an authenticated reverse proxy). Overrides `PODIUM_ALLOW_PUBLIC_BIND`. |
 | `--no-embeddings` | Disable embeddings and fall back to BM25-only search. Overrides `PODIUM_NO_EMBEDDINGS`. |
 | `--presign-ttl-seconds <n>` | Presigned-URL TTL in seconds. Overrides `PODIUM_PRESIGN_TTL_SECONDS` and the `object_store.presign_ttl_seconds` key in `registry.yaml`. |
-| `--sign registry-key` | Enable registry-managed-key signing on ingest. The only accepted value is `registry-key`. Overrides `PODIUM_SIGN`. |
+| `--sign <mode>` | Ingest signing mode, `registry-key` or `none`. `registry-key`, the default, signs each accepted manifest with the registry-managed key at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`), generating the keypair on first run. `none` turns ingest signing off and generates no key file, so a `podium-mcp` consumer on that machine sets `PODIUM_VERIFY_SIGNATURES=never`; on a home that carries no key file the bridge otherwise refuses to start with `config.signature_provider_unavailable`. Overrides `PODIUM_SIGN`. |
 | `--web-ui` | Mount the bundled web UI at `/app/`, and redirect `GET /` to it. Overrides `PODIUM_WEB_UI`. |
 | `--web-ui-allow-public-bind` | Allow the web UI on a non-loopback bind when an identity provider is configured, so a UI reachable beyond the loopback interface is served only by a registry that resolves a caller's identity and filters what it serves by that identity. Overrides `PODIUM_WEB_UI_ALLOW_PUBLIC_BIND`. |
 | `--web-ui-auth` | Sign the browser in through the registry with the OAuth authorization-code flow. Requires `--web-ui`, `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, public mode off, and the browser-flow acquisition values in the environment-variable table below, including `PODIUM_WEB_UI_REDIRECT_URI`, which must be an `https` URL or an `http` URL whose host is a loopback address. A configuration that fails one of those conjuncts aborts startup with `config.web_ui_auth_unconfigured`, and the [error-code catalog](error-codes) states the whole guard. Overrides `PODIUM_WEB_UI_AUTH`. |
@@ -626,6 +626,8 @@ Manifests, layer configs, admin grants, and content blobs are copied. Dependency
 
 The command copies each row as the source stores it and clears the target store's record of the rewrite of stored content hashes, so the target registry's next start rewrites the copied rows.
 
+The target registry signs with the source's key. Before the target's first start after the migration, place the source's registry signing key at the target's `PODIUM_SIGN_KEY_PATH`, replacing any key file already there, or create the chart's signing Secret from it; [Single node](../deployment/single-node#migrating-to-clustered) gives the copy step. A target with no key file is refused at start. A target holding any other key starts, leaves every copied signed row untouched, and refuses each such row with `materialize.signature_invalid`; the same section states the repair for each case.
+
 No registry process runs on the target store while the command runs, so a target registry that is already running is stopped first, and the target registry is started, or restarted, only after a run of the command that succeeds. Recreate the target store empty before the command runs again when a run failed with the immutability error, or when a registry started on the target store, or the source registry started on the new version, at any point after the command's first run against it began, because a re-run into that store fails with the immutability error at the first copied row the two stores hold at different hashes.
 
 ### Verifying integrity
@@ -684,9 +686,9 @@ podium sign --content-hash sha256:<hex> [--provider <name>]
 |:--|:--|
 | `--registry <url>` | Registry URL used to resolve the `<artifact>` form. Defaults to `PODIUM_REGISTRY`. |
 | `--content-hash sha256:<hex>` | Sign this content hash directly, instead of resolving an artifact. |
-| `--provider <name>` | Signature provider: `noop`, `registry-managed`, or `sigstore-keyless`. Defaults to `PODIUM_SIGNATURE_PROVIDER`, then `noop`. |
+| `--provider <name>` | Signature provider: `registry-managed`, `sigstore-keyless`, or `noop`. Defaults to `PODIUM_SIGNATURE_PROVIDER`, then `registry-managed`. |
 
-The `registry-managed` provider uses a per-org key managed by the registry. The `sigstore-keyless` provider produces an OIDC-attested signature with a transparency-log entry, configured through the `PODIUM_SIGSTORE_*` env vars.
+The `registry-managed` provider uses one Ed25519 keypair per registry deployment, at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`), shared by every process serving that store and across every tenant it serves. `podium sign` takes the `private:` line of that key file and does not read `PODIUM_SIGNATURE_VERIFY_KEY`. The `sigstore-keyless` provider produces an OIDC-attested signature with a transparency-log entry, configured through the `PODIUM_SIGSTORE_*` env vars. `--provider noop` signs a placeholder that `podium verify` always refuses. An invocation that cannot resolve the key it needs exits non-zero naming `config.signature_provider_unavailable`.
 
 ### `podium verify`
 
@@ -702,9 +704,11 @@ podium verify --content-hash sha256:<hex> --signature <envelope> [--provider <na
 | `--registry <url>` | Registry URL used to resolve the `<artifact>` form. Defaults to `PODIUM_REGISTRY`. |
 | `--content-hash sha256:<hex>` | Verify against this content hash directly, instead of resolving an artifact. |
 | `--signature <envelope>` | Signature envelope to verify. Pairs with `--content-hash`; overrides the stored signature in the `<artifact>` form. |
-| `--provider <name>` | Signature provider: `noop`, `registry-managed`, or `sigstore-keyless`. Defaults to `PODIUM_SIGNATURE_PROVIDER`, then `noop`. |
+| `--provider <name>` | Signature provider: `registry-managed`, `sigstore-keyless`, or `noop`. Defaults to `PODIUM_SIGNATURE_PROVIDER`, then `registry-managed`. |
 
-The MCP server verifies signatures automatically on materialization for sensitivity at or above medium (configurable per deployment).
+The `registry-managed` provider resolves the public key from `PODIUM_SIGNATURE_VERIFY_KEY` when that variable is set, and otherwise from the `public:` line of the key file at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`). A set variable that does not decode is an error naming it. `podium verify` reads no private key. An invocation that cannot resolve the key exits non-zero naming `config.signature_provider_unavailable`. `--provider noop` refuses every envelope.
+
+The MCP server verifies the signature on every artifact it loads under the default `PODIUM_VERIFY_SIGNATURES=always`, and a signing registry verifies each stored signature before it serves the row.
 
 ---
 
@@ -764,8 +768,11 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_AUDIT_SINK` | Local audit destination. |
 | `PODIUM_MATERIALIZE_ROOT` | Default destination for `load_artifact` materialization. |
 | `PODIUM_PRESIGN_TTL_SECONDS` | Override for presigned URL TTL. |
-| `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` | Registry-process boot setting, environment only and no config-file key. Deadline on each object-storage read the first-start rewrite of stored content hashes makes, 30 seconds by default. An unset, unparsable, or non-positive value takes the default, so no configuration removes the bound. |
-| `PODIUM_VERIFY_SIGNATURES` | `never`, `medium-and-above` (default), `always`. |
+| `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` | Registry-process boot setting, environment only and no config-file key. Deadline on each object-storage read the first-start rewrite of stored content hashes makes, and on each object-storage read the registry makes when it admits a stored row before serving it, 30 seconds by default. An unset, unparsable, or non-positive value takes the default, so no configuration removes the bound. |
+| `PODIUM_VERIFY_SIGNATURES` | `never` or `always` (default). Read by `podium-mcp`. Under `always`, a load whose artifact carries no signature fails with `materialize.signature_missing`; under either value above `never`, a signature the response carries is verified. `never` checks nothing. |
+| `PODIUM_SIGNATURE_VERIFY_KEY` | Base64 Ed25519 public key the `registry-managed` provider verifies with, in `podium-mcp` and `podium verify`. When set it is authoritative, and a value that does not decode is an error naming it. When unset, the public key comes from the `public:` line of the key file at `PODIUM_SIGN_KEY_PATH`. |
+| `PODIUM_SIGN_KEY_PATH` | Registry signing key file, default `~/.podium/standalone/registry-signing.key`. The registry reads it, or generates it on first run, when signing is on. `podium sign` reads its `private:` line, and `podium verify` and `podium-mcp` read its `public:` line when `PODIUM_SIGNATURE_VERIFY_KEY` is unset. |
+| `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` | Trust root for the `sigstore-keyless` provider. `podium sign` and `podium verify` read it under `--provider sigstore-keyless` whatever the policy. An unset or unreadable value does not refuse the command, and `podium verify` then refuses each envelope as `materialize.signature_invalid`. |
 | `PODIUM_IDENTITY_PROVIDER` | Consumer side (MCP server and SDKs): `oauth-device-code` (default) or `injected-session-token`. Registry process: `injected-session-token`, `oidc-jwt`, or `trusted-headers`. `oauth-device-code` has no server-side verifier, so setting it on the registry aborts startup with `config.identity_provider_unverified`. |
 | `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` | OAuth provider config. `PODIUM_OAUTH_AUDIENCE` carries the audience both acquisition flows send: the device-code flow sends the value the client resolves, and the registry's browser sign-in redirect sends the first value the registry resolved. The registry process reads the variable as a comma-separated set of audiences it accepts, while a client process sends the value verbatim as the one audience it asks for, so a client sharing the registry's environment needs `--audience` or an environment of its own. `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` is the device-authorization endpoint of the device-code flow, and the browser flow does not read it; the browser flow redirects to `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` alone, and a configuration that sets the device-code key and leaves the web-UI one empty aborts startup with `config.web_ui_auth_unconfigured`. |
 | `PODIUM_WEB_UI_OAUTH_CLIENT_ID`, `PODIUM_WEB_UI_OAUTH_CLIENT_SECRET`, `PODIUM_WEB_UI_REDIRECT_URI`, `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT` | Registry-process boot settings, environment only and no `podium serve` flag. The browser flow's acquisition values: the OAuth client identifier and credential the registry presents, the callback URL the IdP returns the browser to, and the IdP endpoints the sign-in route redirects to and the callback exchanges the code at. Each is required where `--web-ui-auth` is set. |

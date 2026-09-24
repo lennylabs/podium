@@ -16,9 +16,9 @@ This guide is a staged on-ramp for governance. It assumes a starting point of a 
 
 Goal: get artifacts flowing without governance gates.
 
-- `podium serve --standalone` on a single VM, or `podium serve --strict` against Postgres and object storage when those already exist.
+- `podium serve --standalone` on a single VM, or `podium serve --strict` against Postgres and object storage when those already exist. The registry signs every artifact at ingest by default, so a start against Postgres also sets `PODIUM_SIGN_KEY_PATH` to a key file on persistent storage, or sets `PODIUM_SIGN=none`; a registry with signing on, a Postgres store, and no key path is refused at start. A deployment that means to sign keeps signing on from Day 0: choosing `PODIUM_SIGN=none` now and turning signing on later leaves every artifact ingested before the switch unloadable, for every reader, until a new version of it is ingested.
 - One layer named `team-shared`, with `visibility: public` (the default when no identity provider is configured) and a `git` source pointing at one shared repo.
-- No `PODIUM_VERIFY_SIGNATURES` setting on the registry, which does not read it. Signature verification runs in each consumer's MCP server, which resolves its policy from `PODIUM_VERIFY_SIGNATURES`, then `defaults.verify_signatures` in `sync.yaml`, then a `medium-and-above` fallback. A zero-flag or `--standalone` server writes `defaults.verify_signatures: never` into `~/.podium/sync.yaml` on the machine it runs on, and it writes nothing under `--strict` or against Postgres, so a consumer on another machine keeps the `medium-and-above` fallback. Every artifact is `sensitivity: low` at this stage, so no policy triggers a check.
+- No `PODIUM_VERIFY_SIGNATURES` setting on the registry, which does not read it. Each consumer's MCP server verifies the signature on every artifact it loads, under a policy it resolves from `PODIUM_VERIFY_SIGNATURES`, then `defaults.verify_signatures` in `sync.yaml`, then an `always` fallback. A signing registry also verifies each stored signature before it serves the row, for every reader. A consumer on the registry's machine resolves the verification key from the registry's own key file; a consumer on another machine sets `PODIUM_SIGNATURE_PROVIDER=registry-managed` and `PODIUM_SIGNATURE_VERIFY_KEY` (see [Configure your harness](../consuming/configure-your-harness)). The `sensitivity` label plays no part in signature verification.
 - No sensitivity labels required; `sensitivity:` is optional and defaults to `low`.
 - No SCIM, no freeze windows.
 
@@ -73,17 +73,16 @@ Goal: surface the existing risk profile of artifacts. No enforcement yet.
 
 ---
 
-## Month 3: enforce signing for `sensitivity: high`
+## Month 3: enforce signing everywhere
 
-Goal: integrity guarantees on artifacts where integrity matters.
+Goal: confirm that every consumer verifies every artifact it loads.
 
-- Set `PODIUM_VERIFY_SIGNATURES=medium-and-above` in each MCP server's environment, or set `defaults.verify_signatures: medium-and-above` in each consumer's `sync.yaml`. The registry does not read this variable. Loading an unsigned `sensitivity: high` or `sensitivity: medium` artifact through the MCP server then fails with `materialize.signature_invalid`. `podium sync` runs no signature check, so a workspace materialized that way is not covered by this control.
-- Roll signing into the author flow: each `high` artifact gets signed at PR-merge time (Sigstore-keyless via OIDC, or a tenant signing key managed by the registry).
+- Confirm every consumer runs with `PODIUM_VERIFY_SIGNATURES=always`, the default, and remove any `never` that a machine's `sync.yaml` still carries; `podium-mcp` prints a startup line naming the file that supplied a `never`. The registry does not read this variable. Loading an unsigned artifact through the MCP server then fails with `materialize.signature_missing`, and one whose signature does not verify with `materialize.signature_invalid`. `podium sync` runs no signature check, so a workspace materialized that way is not covered by the consumer's control.
+- `never` fits only a registry running with `PODIUM_SIGN=none`. A signing registry refuses every row stored unsigned to every reader whatever the consumer's policy, and turning signing on over a store holding unsigned rows makes each of them unloadable until a new version of it is ingested.
+- The registry signs at ingest with its registry-managed key, one Ed25519 keypair per registry deployment at `PODIUM_SIGN_KEY_PATH`, shared by every process serving the store and across every tenant it serves.
 - Promote the lint check from warning to error: missing `sensitivity:` is now an ingest failure.
 
-**Exit criteria:** an unsigned high-sensitivity artifact cannot be loaded. The CI signing job is reliable. The signing flow is part of normal authoring.
-
-**Defer:** signing for `medium` unless a specific requirement exists. Most teams find `medium` sensitivity is the bulk of their useful catalog, and mandatory signatures slow authoring.
+**Exit criteria:** an unsigned artifact cannot be loaded through `podium-mcp`. The registry's signing key is in the backup set.
 
 ---
 
@@ -117,8 +116,8 @@ Each of these warrants a planned rollout: read the relevant spec section, run a 
 
 Common reorderings:
 
-- **Compliance-driven.** If SOC2, ISO 27001, or a customer contract requires signed-and-audited artifacts before launch, jump straight from Day 0 to Month 3's signing posture. The intermediate steps ease rollout for teams without external pressure; they are not required for correctness.
+- **Compliance-driven.** If SOC2, ISO 27001, or a customer contract requires signed-and-audited artifacts before launch, jump straight from Day 0 to Month 3's signing posture, which is setting `always` against a registry that already signs. The intermediate steps ease rollout for teams without external pressure; they are not required for correctness.
 - **Multi-tenant from the start.** A deployment that serves separate customer organizations requires multi-tenancy and OIDC from the start. Skip the single-node phase and start on the [clustered](clustered) tier with a per-tenant layer plan.
-- **High-sensitivity domain only.** If the catalog contains only `sensitivity: high` content (security playbooks, compliance runbooks), enable signing on day 1 alongside identity. Skip the advisory-sensitivity phase.
+- **High-sensitivity domain only.** If the catalog contains only `sensitivity: high` content (security playbooks, compliance runbooks), enable identity on day 1 and skip the advisory-sensitivity phase. Signing is already on from Day 0 by default. A registry that started with `PODIUM_SIGN=none` keeps every artifact ingested before signing is turned on unloadable, for every reader, until a new version of it is ingested.
 
 The order in this guide moves from lower operational friction to more control. Choose the starting point based on current requirements, then move forward as requirements change.

@@ -69,7 +69,7 @@ capability. The artifacts are the same in every tier.
 |:--|:--|:--|
 | [Local](deployment/local) | None | Authoring, lint, sync, domains, profiles, and ordered layers from disk |
 | [Single node](deployment/single-node) | One binary | Discovery through MCP or the SDKs, hybrid search, registered and remote layers with visibility, and one audit log |
-| [Clustered](deployment/clustered) | Replicas, Postgres, and object storage | Multi-tenancy, SCIM group sync, signing with a transparency log, and high availability |
+| [Clustered](deployment/clustered) | Replicas, Postgres, and object storage | Multi-tenancy, SCIM group sync, transparency-log anchoring of the audit chain, and high availability |
 
 [Server-side integrations](deployment/integrations) names the backing service
 behind each server-side concern: the metadata store, object storage, the vector
