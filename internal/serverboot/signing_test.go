@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// Spec: §13.12, §4.7.9 — a registry with signing on and no
+// Spec: §13.12 / §4.7.9 — a registry with signing on and no
 // PODIUM_SIGN_KEY_PATH refuses to start unless its store is the SQLite store
 // in the directory the default key resolves to. A memory store strands no
 // signature, and signing off or a set key path needs no refusal. The error

@@ -406,7 +406,7 @@ func (f *bootFixture) defaultKeyDirStore(t *testing.T) {
 	t.Setenv("PODIUM_SQLITE_PATH", f.sqlitePath)
 }
 
-// Spec: §4.7.9, §13.4, §13.10 — the default signing mode reaches the
+// Spec: §4.7.9 / §13.4 / §13.10 — the default signing mode reaches the
 // generated-key refusal: a start with no signing variable set, no key file,
 // and a signed stored row while the rewrite has not completed is refused.
 // The store sits beside the default key so the persistence refusal, which
@@ -447,7 +447,7 @@ func TestRun_DefaultSigningRefusesAGeneratedKey(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.9, §13.4 — a key file that is present but did not sign the stored
+// Spec: §4.7.9 / §13.4 — a key file that is present but did not sign the stored
 // rows passes the generated-key refusal. The start is not refused, the pass
 // classifies those rows signature_unverified and records completion, and the
 // rows keep their stored hash: the accepted failure mode §4.7.9 records.
@@ -493,12 +493,6 @@ func TestRun_WrongKeyPresentLeavesSignedRowsUnverified(t *testing.T) {
 	}
 }
 
-// Spec: §13.12, §4.7.9 — a store outside the directory the default key
-// resolves to needs PODIUM_SIGN_KEY_PATH. A first start on home A with the
-// default SQLite store generates A's key and signs its row. A second start on a
-// fresh home B pointing at A's store is refused by the persistence refusal and
-// generates no key under B. A third start on B with PODIUM_SIGN_KEY_PATH naming
-// A's key starts, and the row's signature verifies under that key.
 // onlyRow returns the one manifest row the fixture's single-artifact layer
 // stores, across every tenant.
 func onlyRow(t *testing.T, st store.Store) store.ManifestRecord {
@@ -522,6 +516,12 @@ func onlyRow(t *testing.T, st store.Store) store.ManifestRecord {
 	return out[0]
 }
 
+// Spec: §13.12 / §4.7.9 — a store outside the directory the default key
+// resolves to needs PODIUM_SIGN_KEY_PATH. A first start on home A with the
+// default SQLite store generates A's key and signs its row. A second start on a
+// fresh home B pointing at A's store is refused by the persistence refusal and
+// generates no key under B. A third start on B with PODIUM_SIGN_KEY_PATH naming
+// A's key starts, and the row's signature verifies under that key.
 func TestRun_StoreOutsideTheKeyDirectoryNeedsAKeyPath(t *testing.T) {
 	f := newBootFixture(t)
 	f.defaultKeyDirStore(t)

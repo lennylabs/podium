@@ -152,7 +152,7 @@ func TestServerFlags_SignRegistryKey(t *testing.T) {
 	}
 }
 
-// Spec: §13.10, §4.7.9 — the registry signs at ingest by default. A
+// Spec: §13.10 / §4.7.9 — the registry signs at ingest by default. A
 // standalone server started with no --sign flag and no PODIUM_SIGN serves a
 // non-empty §4.7.9 signature on load_artifact.
 func TestServerFlags_SignsByDefault(t *testing.T) {
