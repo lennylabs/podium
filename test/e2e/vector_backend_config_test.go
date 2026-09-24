@@ -827,6 +827,7 @@ func TestVectorBackend_MCPOverlaySearchBM25Regardless(t *testing.T) {
 
 	res := mcpExec(t,
 		[]string{
+			"PODIUM_VERIFY_SIGNATURES=never",
 			"PODIUM_REGISTRY=" + srv.BaseURL,
 			"PODIUM_OVERLAY_PATH=" + overlay,
 			"PODIUM_CACHE_DIR=" + t.TempDir(),
@@ -868,6 +869,7 @@ func TestVectorBackend_MCPMergesRegistryAndOverlayResults(t *testing.T) {
 
 	res := mcpExec(t,
 		[]string{
+			"PODIUM_VERIFY_SIGNATURES=never",
 			"PODIUM_REGISTRY=" + srv.BaseURL,
 			"PODIUM_OVERLAY_PATH=" + overlay,
 			"PODIUM_CACHE_DIR=" + t.TempDir(),

@@ -49,19 +49,11 @@ func refuseUnpersistedSigningKey(cfg *Config) error {
 }
 
 // registrySigningKeyPath resolves the registry-managed signing key's location
-// from PODIUM_SIGN_KEY_PATH, falling back to the standalone default. The loader
-// and the §13.4 generated-key refusal both call it, so the two cannot resolve
-// different files.
-func registrySigningKeyPath(env string) (string, error) {
-	if env != "" {
-		return env, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".podium", "standalone", "registry-signing.key"), nil
-}
+// from PODIUM_SIGN_KEY_PATH, falling back to the standalone default. It
+// delegates to sign.KeyFilePath, which the consumers (podium-mcp and the
+// podium sign and verify commands) also call, so the loader, the §13.4
+// generated-key refusal, and every reader resolve the same file.
+func registrySigningKeyPath(env string) (string, error) { return sign.KeyFilePath(env) }
 
 // registrySignerFor returns the §4.7.9 registry-managed signature provider for
 // the signing mode. It returns (nil, nil) only for "none", so the caller leaves

@@ -16,6 +16,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 	"github.com/lennylabs/podium/pkg/audit"
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // ---- local helpers (cli-prefixed to avoid package collisions) ----------
@@ -1834,12 +1836,15 @@ func TestCLI_AdminEraseAudited(t *testing.T) {
 // `podium sign <artifact>` / `podium verify <artifact>` resolve the
 // artifact's canonical content hash (and stored signature) via the
 // registry; the lower-level `--content-hash` / `--signature` form
-// operates on a raw hash. The noop provider is the default.
+// operates on a raw hash. The registry-managed provider is the default: sign
+// reads the private half of the registry key file, and verify reads
+// PODIUM_SIGNATURE_VERIFY_KEY when set and otherwise the key file's public
+// half.
 
 // spec: doc "Signing — podium sign" (lower-level --content-hash form).
 func TestCLI_Sign(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("a", 64)
-	res := runPodium(t, "", nil, "sign", "--content-hash", hash)
+	res := runPodium(t, "", nil, "sign", "--provider", "noop", "--content-hash", hash)
 	cliWantExit(t, res, 0, "sign")
 	if strings.TrimSpace(res.Stdout) == "" {
 		t.Fatalf("sign produced no envelope")
@@ -1851,7 +1856,7 @@ func TestCLI_Sign(t *testing.T) {
 // positional form must not be a usage error.
 func TestCLI_SignPositionalArtifact(t *testing.T) {
 	srv := startServer(t, cliReg(t))
-	res := runPodium(t, "", brEnv(srv.BaseURL), "sign", "finance/invoice")
+	res := runPodium(t, "", brEnv(srv.BaseURL), "sign", "--provider", "noop", "finance/invoice")
 	cliWantExit(t, res, 0, "sign <artifact>")
 	cliContains(t, res.Stdout, "noop:sha256:", "sign envelope over resolved hash")
 }
@@ -1867,27 +1872,91 @@ func TestCLI_VerifyPositionalArtifactUnsigned(t *testing.T) {
 	cliContains(t, res.Stderr, "no stored signature", "missing-signature message")
 }
 
-// spec: doc "Signing — podium verify" (valid signature). §4.7.9: the noop
-// provider refuses on Verify the envelope its own Sign produced, so the verify
-// half exits 1 naming the refusal.
+// spec: doc "Signing — podium verify" (valid signature). §4.7.9: on a home
+// whose standalone registry generated its key file, sign and verify with no
+// flags resolve the two halves of that file, so the round trip exits 0.
 func TestCLI_VerifyValid(t *testing.T) {
+	writeHomeKeyFile(t, cmdharness.IsolatedHome(t))
 	hash := "sha256:" + strings.Repeat("b", 64)
-	sig := strings.TrimSpace(runPodium(t, "", nil, "sign", "--provider", "noop", "--content-hash", hash).Stdout)
+	sig := strings.TrimSpace(runPodium(t, "", nil, "sign", "--content-hash", hash).Stdout)
 	if sig == "" {
 		t.Fatalf("sign produced no envelope")
 	}
-	res := runPodium(t, "", nil, "verify", "--provider", "noop", "--content-hash", hash, "--signature", sig)
-	cliWantExit(t, res, 1, "verify through the noop provider")
-	cliContains(t, res.Stderr, "the noop provider does not verify", "noop verify refusal")
+	res := runPodium(t, "", nil, "verify", "--content-hash", hash, "--signature", sig)
+	cliWantExit(t, res, 0, "verify with the registry key file")
+	cliContains(t, res.Stderr, "verify ok", "verify ok")
 }
 
-// spec: doc "Signing — podium verify" (tampered/mismatched).
+// spec: doc "Signing — podium verify" (tampered/mismatched). Both halves use
+// the registry key file, so the provider resolves and only the mismatch
+// fails.
 func TestCLI_VerifyTampered(t *testing.T) {
+	writeHomeKeyFile(t, cmdharness.IsolatedHome(t))
 	hash := "sha256:" + strings.Repeat("c", 64)
 	sig := strings.TrimSpace(runPodium(t, "", nil, "sign", "--content-hash", hash).Stdout)
+	if sig == "" {
+		t.Fatalf("sign produced no envelope")
+	}
 	other := "sha256:" + strings.Repeat("d", 64)
 	res := runPodium(t, "", nil, "verify", "--content-hash", other, "--signature", sig)
-	cliWantNonZero(t, res, "verify tampered")
+	cliWantExit(t, res, 1, "verify tampered")
+	cliContains(t, res.Stderr, "verify failed", "verification-failure message")
+	cliContains(t, res.Stderr, "signature does not verify", "verification-failure detail")
+}
+
+// spec: §4.7.9, §6.2 — with no provider flag and no resolvable key, sign and
+// verify exit 1 naming config.signature_provider_unavailable.
+func TestCLI_SignVerifyNoKeyRefuses(t *testing.T) {
+	hash := "sha256:" + strings.Repeat("e", 64)
+	res := runPodium(t, "", nil, "sign", "--content-hash", hash)
+	cliWantExit(t, res, 1, "sign with no key")
+	cliContains(t, res.Stderr, "config.signature_provider_unavailable", "sign refusal code")
+	res = runPodium(t, "", nil, "verify", "--content-hash", hash, "--signature", "envelope")
+	cliWantExit(t, res, 1, "verify with no key")
+	cliContains(t, res.Stderr, "config.signature_provider_unavailable", "verify refusal code")
+}
+
+// spec: §4.7.9 — the public half resolves in the §4.7.9 order: with the key
+// file holding key A and PODIUM_SIGNATURE_VERIFY_KEY holding key B, an
+// envelope B signed verifies and one A signed does not. A malformed variable
+// refuses naming it rather than falling through to the key file, and sign,
+// which needs the private half, ignores the variable.
+func TestCLI_VerifyKeyOrder(t *testing.T) {
+	privA, pubA := writeHomeKeyFile(t, cmdharness.IsolatedHome(t))
+	privB, pubB := newEd25519Key(t)
+	hash := "sha256:" + strings.Repeat("f", 64)
+	envB := []string{"PODIUM_SIGNATURE_VERIFY_KEY=" + base64.StdEncoding.EncodeToString(pubB)}
+	res := runPodium(t, "", envB, "verify", "--content-hash", hash, "--signature", registryEnvelope(t, privB, hash))
+	cliWantExit(t, res, 0, "verify B's envelope under B")
+	res = runPodium(t, "", envB, "verify", "--content-hash", hash, "--signature", registryEnvelope(t, privA, hash))
+	cliWantExit(t, res, 1, "verify A's envelope under B")
+
+	bad := []string{"PODIUM_SIGNATURE_VERIFY_KEY=!!!not base64"}
+	res = runPodium(t, "", bad, "verify", "--content-hash", hash, "--signature", registryEnvelope(t, privA, hash))
+	cliWantExit(t, res, 1, "verify under a malformed variable")
+	cliContains(t, res.Stderr, "config.signature_provider_unavailable", "malformed-variable refusal code")
+	cliContains(t, res.Stderr, "PODIUM_SIGNATURE_VERIFY_KEY", "malformed-variable refusal names the variable")
+
+	res = runPodium(t, "", bad, "sign", "--content-hash", hash)
+	cliWantExit(t, res, 0, "sign ignores the verify variable")
+	if err := (sign.RegistryManagedKey{PublicKey: pubA}).Verify(context.Background(), hash, strings.TrimSpace(res.Stdout)); err != nil {
+		t.Errorf("the key file's public half does not verify the envelope sign produced: %v", err)
+	}
+}
+
+// spec: §4.7.9 — a remote consumer holding only PODIUM_SIGNATURE_VERIFY_KEY
+// verifies with no key file, and sign on the same home refuses naming the key
+// path, because the variable carries a public key alone.
+func TestCLI_RemoteConsumerVerifiesWithoutKeyFile(t *testing.T) {
+	priv, pub := newEd25519Key(t)
+	env := []string{"PODIUM_SIGNATURE_VERIFY_KEY=" + base64.StdEncoding.EncodeToString(pub)}
+	hash := "sha256:" + strings.Repeat("1", 64)
+	res := runPodium(t, "", env, "verify", "--content-hash", hash, "--signature", registryEnvelope(t, priv, hash))
+	cliWantExit(t, res, 0, "remote verify")
+	res = runPodium(t, "", env, "sign", "--content-hash", hash)
+	cliWantExit(t, res, 1, "sign with no key file")
+	cliContains(t, res.Stderr, "config.signature_provider_unavailable", "sign refusal code")
+	cliContains(t, res.Stderr, "registry-signing.key", "sign refusal names the key path")
 }
 
 // ===== Cache and quota ==============================

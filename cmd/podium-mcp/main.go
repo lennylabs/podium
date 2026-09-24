@@ -26,6 +26,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -208,6 +209,12 @@ type config struct {
 	tokenKeychainName string
 	verifyPolicy      sign.VerificationPolicy
 	signatureProvider string
+	// verifier is the §4.7.9 verification material, resolved once by
+	// loadConfig through resolveVerifier. It is nil exactly when verifyPolicy
+	// is never, where sign.EnforceVerification never touches the provider;
+	// under any other policy loadConfig refuses to start rather than leave it
+	// unset.
+	verifier sign.Provider
 	// §4.4.1 sandbox enforcement.
 	enforceSandbox bool
 	hostSandboxes  []string
@@ -278,12 +285,15 @@ func loadConfig() (*config, error) {
 		oauthClientID:     envDefault("PODIUM_OAUTH_CLIENT_ID", "podium-cli"),
 		oauthScopes:       envDefault("PODIUM_OAUTH_SCOPES", "openid profile email groups"),
 		tokenKeychainName: envDefault("PODIUM_TOKEN_KEYCHAIN_NAME", "podium"),
-		// §4.7.9 / §6.2 / §13.10: never | medium-and-above | always. The
-		// default is consumer-side and resolved after sync.yaml is known
-		// (env/flag/config, then defaults.verify_signatures, then
-		// medium-and-above); an empty value here means "env did not set it."
-		verifyPolicy:      sign.VerificationPolicy(os.Getenv("PODIUM_VERIFY_SIGNATURES")),
-		signatureProvider: envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"),
+		// §4.7.9 / §6.2: never | always. The default is consumer-side and
+		// resolved after sync.yaml is known (env/flag/config, then
+		// defaults.verify_signatures across the §7.5.2 scopes, then always);
+		// an empty value here means "env did not set it."
+		verifyPolicy: sign.VerificationPolicy(os.Getenv("PODIUM_VERIFY_SIGNATURES")),
+		// §6.2: the registry-managed key is the default provider, so a
+		// standalone consumer verifies against the key file its registry
+		// generated with no configuration.
+		signatureProvider: envDefault("PODIUM_SIGNATURE_PROVIDER", "registry-managed"),
 		// §4.4.1 sandbox enforcement.
 		enforceSandbox: os.Getenv("PODIUM_ENFORCE_SANDBOX_PROFILE") == "true",
 		hostSandboxes:  splitCSV(envDefault("PODIUM_HOST_SANDBOXES", "unrestricted")),
@@ -339,17 +349,13 @@ func loadConfig() (*config, error) {
 	if !synccfg.IsServerSource(c.registry) {
 		return nil, fmt.Errorf("config.filesystem_registry_unsupported: PODIUM_REGISTRY %q is a filesystem-source registry; the MCP server speaks HTTP and requires a server source (http:// or https://). Use `podium sync` to consume a filesystem registry (§6.1, §7.5.2)", c.registry)
 	}
-	// §4.7.9 / §13.10: resolve the consumer-side signature-verification
-	// default. Precedence: an explicit env/flag/config value (already applied
-	// above) wins; otherwise honor defaults.verify_signatures from sync.yaml,
-	// which a standalone deployment writes as `never` on first run; otherwise
-	// fall back to the secure medium-and-above default.
+	// §4.7.9 / §6.2 / §7.5.2: resolve the consumer-side signature policy.
+	// Precedence: an explicit env/flag/config value (already applied above)
+	// wins; otherwise honor defaults.verify_signatures from the §7.5.2 file
+	// scopes; otherwise fall back to always.
+	policySource := ""
 	if c.verifyPolicy == "" {
-		if v := verifySignaturesFromSyncYAML(); v != "" {
-			c.verifyPolicy = sign.VerificationPolicy(v)
-		} else {
-			c.verifyPolicy = sign.PolicyMediumAndAbove
-		}
+		c.verifyPolicy, policySource = resolveSyncYAMLPolicy()
 	}
 	if c.cacheDir == "" {
 		home, err := os.UserHomeDir()
@@ -373,7 +379,10 @@ func loadConfig() (*config, error) {
 	// policies. Reject an unknown value at startup so a typo cannot silently
 	// disable signature enforcement on a security control.
 	if !sign.ValidPolicy(c.verifyPolicy) {
-		return nil, fmt.Errorf("PODIUM_VERIFY_SIGNATURES must be never | medium-and-above | always, got %q", c.verifyPolicy)
+		if policySource != "" {
+			return nil, fmt.Errorf("PODIUM_VERIFY_SIGNATURES must be never | always, got %q from defaults.verify_signatures in %s", c.verifyPolicy, policySource)
+		}
+		return nil, fmt.Errorf("PODIUM_VERIFY_SIGNATURES must be never | always, got %q", c.verifyPolicy)
 	}
 	// §6.2: PODIUM_IDENTITY_PROVIDER selects a built-in provider. Reject an
 	// unrecognized value at startup rather than silently treating it as the
@@ -398,7 +407,36 @@ func loadConfig() (*config, error) {
 	if err := checkServerVersionFromSyncYAML(buildinfo.Version); err != nil {
 		return nil, err
 	}
+	// §4.7.9 / §6.9: resolve the verification material once, after every
+	// other validation, so an earlier refusal (config.no_registry and the
+	// rest) keeps its own code on a bridge that also has no material.
+	verifier, err := resolveVerifier(c.verifyPolicy, c.signatureProvider)
+	if err != nil {
+		return nil, err
+	}
+	c.verifier = verifier
 	return c, nil
+}
+
+// resolveSyncYAMLPolicy returns the signature policy defaults.verify_signatures
+// supplies across the §7.5.2 scopes, with the path of the file that supplied
+// it, or the §6.2 always default and an empty path when no scope sets it. A
+// never a file supplied writes one line to stderr naming the file: the
+// standalone bootstrap of an earlier release wrote that line into
+// ~/.podium/sync.yaml, nothing in the product removes it, and it disables
+// verification on every registry the machine later points at.
+//
+// Spec: §4.7.9, §6.2, §7.5.2.
+func resolveSyncYAMLPolicy() (sign.VerificationPolicy, string) {
+	v, path := verifySignaturesFromSyncYAML()
+	if v == "" {
+		return sign.PolicyAlways, ""
+	}
+	policy := sign.VerificationPolicy(v)
+	if policy == sign.PolicyNever {
+		fmt.Fprintf(os.Stderr, "WARN: signature verification is off because defaults.verify_signatures is never in %s; remove defaults.verify_signatures from that file to verify under the always default (§4.7.9)\n", path)
+	}
+	return policy, path
 }
 
 func envDefault(key, def string) string {
@@ -2021,18 +2059,13 @@ type largeResourceLink struct {
 }
 
 // enforceSignaturePolicy applies the configured §4.7.9 verification
-// policy against the response. Returns nil when the policy is
-// satisfied (either signature checks out or sensitivity falls below
-// the threshold); returns the verification error otherwise.
+// policy against the response with the verifier loadConfig resolved. It
+// constructs nothing: the material was resolved once at startup. Returns nil
+// when the policy is satisfied and the verification error otherwise.
 func (s *mcpServer) enforceSignaturePolicy(resp loadArtifactResponse) error {
-	provider, err := buildSignatureProvider(s.cfg.signatureProvider)
-	if err != nil {
-		return err
-	}
 	return sign.EnforceVerification(context.Background(),
 		s.cfg.verifyPolicy,
-		provider,
-		manifest.Sensitivity(resp.Sensitivity),
+		s.cfg.verifier,
 		resp.ContentHash,
 		resp.Signature,
 	)
@@ -2189,20 +2222,58 @@ func splitCSV(s string) []string {
 	return out
 }
 
-// buildSignatureProvider mirrors the CLI side: a Noop default,
-// Sigstore-keyless when env vars supply Fulcio + Rekor, and
-// registry-managed for tenant-key deployments. The registry-managed
-// verifier loads the registry's public key from
-// PODIUM_SIGNATURE_VERIFY_KEY (base64 Ed25519) so the consumer can check
-// the detached signature envelope a load serves (§4.7.9). The registry
-// checks the stored envelope before it serves the row (§13.4 stored-row
-// admission); this check is the consumer's own.
+// resolveVerifier resolves the §4.7.9 verification material for the policy
+// and provider name. It is the whole resolution: an unrecognized name refuses
+// with config.invalid under every policy, never resolves no material and
+// returns a nil verifier, noop under an enforcing policy refuses because it
+// verifies nothing, and every other name takes its material through
+// buildSignatureProvider, whose failure refuses the start with
+// config.signature_provider_unavailable. It never returns a nil verifier with
+// a nil error under a policy above never.
+//
+// Spec: §4.7.9, §6.2, §6.9.
+func resolveVerifier(policy sign.VerificationPolicy, name string) (sign.Provider, error) {
+	switch name {
+	case "noop", "registry-managed", "sigstore-keyless":
+	default:
+		return nil, fmt.Errorf("config.invalid: unknown PODIUM_SIGNATURE_PROVIDER %q; want noop | registry-managed | sigstore-keyless", name)
+	}
+	if policy == sign.PolicyNever {
+		return nil, nil
+	}
+	if name == "noop" {
+		return nil, fmt.Errorf("config.signature_provider_unavailable: PODIUM_SIGNATURE_PROVIDER=noop verifies no signature and PODIUM_VERIFY_SIGNATURES=%s requires verification; select registry-managed or sigstore-keyless, or set PODIUM_VERIFY_SIGNATURES=never", policy)
+	}
+	provider, err := buildSignatureProvider(name)
+	if err != nil {
+		return nil, fmt.Errorf("config.signature_provider_unavailable: %w; supply the verification material or set PODIUM_VERIFY_SIGNATURES=never", err)
+	}
+	return provider, nil
+}
+
+// buildSignatureProvider constructs the named provider with its verification
+// material. It is resolveVerifier's provider-construction half and has no
+// other caller in the bridge. sigstore-keyless needs a readable trust root at
+// PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE. registry-managed takes its public key
+// in the §4.7.9 order: PODIUM_SIGNATURE_VERIFY_KEY when set, which is
+// authoritative, so a malformed value is an error and never falls through to
+// the key file; otherwise the public: line of the registry key file at
+// sign.KeyFilePath(PODIUM_SIGN_KEY_PATH), the file a standalone registry on
+// the same machine generated. PODIUM_SIGNATURE_KEY_ID, when set, pins the
+// expected key fingerprint.
 func buildSignatureProvider(name string) (sign.Provider, error) {
 	switch name {
-	case "", "noop":
+	case "noop":
 		return sign.Noop{}, nil
 	case "sigstore-keyless":
-		root, _ := os.ReadFile(os.Getenv("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE"))
+		rootPath := os.Getenv("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE")
+		if rootPath == "" {
+			return nil, errors.New("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE is unset; sigstore-keyless verification needs a trust root")
+		}
+		root, err := os.ReadFile(rootPath)
+		if err != nil {
+			return nil, fmt.Errorf("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE: %w", err)
+		}
 		return sign.SigstoreKeyless{
 			FulcioURL: os.Getenv("PODIUM_SIGSTORE_FULCIO_URL"),
 			RekorURL:  os.Getenv("PODIUM_SIGSTORE_REKOR_URL"),
@@ -2210,25 +2281,33 @@ func buildSignatureProvider(name string) (sign.Provider, error) {
 			TrustRoot: root,
 		}, nil
 	case "registry-managed":
-		// §4.7.9: verification runs in the consumer, so the MCP server holds
-		// the registry's public key. PODIUM_SIGNATURE_VERIFY_KEY carries the
-		// base64-encoded Ed25519 public key the registry publishes for its
-		// signing keypair; PODIUM_SIGNATURE_KEY_ID, when set, pins the
-		// expected key fingerprint so a signature from a rotated key is
-		// refused. When the verify key is unset the provider has no public
-		// key and Verify returns config.signature_provider_unavailable, which
-		// surfaces as materialize.signature_invalid under an enforcing policy.
-		k := sign.RegistryManagedKey{KeyID: os.Getenv("PODIUM_SIGNATURE_KEY_ID")}
-		if raw := os.Getenv("PODIUM_SIGNATURE_VERIFY_KEY"); raw != "" {
-			pub, err := sign.PublicKeyFromBase64(raw)
-			if err != nil {
-				return nil, fmt.Errorf("PODIUM_SIGNATURE_VERIFY_KEY: %w", err)
-			}
-			k.PublicKey = pub
+		pub, err := registryManagedVerifyKey()
+		if err != nil {
+			return nil, err
 		}
-		return k, nil
+		return sign.RegistryManagedKey{PublicKey: pub, KeyID: os.Getenv("PODIUM_SIGNATURE_KEY_ID")}, nil
 	}
 	return nil, fmt.Errorf("unknown PODIUM_SIGNATURE_PROVIDER: %s", name)
+}
+
+// registryManagedVerifyKey resolves the registry's public key in the §4.7.9
+// order. The error names each source tried.
+func registryManagedVerifyKey() (ed25519.PublicKey, error) {
+	if raw := os.Getenv("PODIUM_SIGNATURE_VERIFY_KEY"); raw != "" {
+		pub, err := sign.PublicKeyFromBase64(raw)
+		if err != nil {
+			return nil, fmt.Errorf("PODIUM_SIGNATURE_VERIFY_KEY: %w", err)
+		}
+		return pub, nil
+	}
+	path, err := sign.KeyFilePath(os.Getenv("PODIUM_SIGN_KEY_PATH"))
+	if err == nil {
+		var pub ed25519.PublicKey
+		if pub, err = sign.PublicKeyFromKeyFile(path); err == nil {
+			return pub, nil
+		}
+	}
+	return nil, fmt.Errorf("PODIUM_SIGNATURE_VERIFY_KEY is unset and the registry key file (PODIUM_SIGN_KEY_PATH) yields no usable public key: %w", err)
 }
 
 func resourcesAsBytes(in map[string]string) map[string][]byte {
@@ -2695,12 +2774,12 @@ type cacheExtras struct {
 	// extends-merged manifest (§4.7.6), which the content hash covers in place
 	// of the re-serialized frontmatter.
 	RawFrontmatter string
-	// Sensitivity and Signature drive the §4.7.9 signature policy. They are not
-	// inputs to the content hash, but enforceSignaturePolicy needs them: a
-	// cache-served high-sensitivity artifact that dropped its sensitivity would
-	// skip verification entirely, and one that dropped its signature envelope
-	// would fail a policy it should pass. Persisting both makes verification run
-	// uniformly whether the bytes came from the registry or the cache.
+	// Signature is what the §4.7.9 policy verifies. It is not an input to the
+	// content hash, but a cache-served artifact that dropped its envelope would
+	// fail the always policy a live fetch passes, so persisting it makes
+	// verification run uniformly whether the bytes came from the registry or
+	// the cache. Sensitivity is persisted because the response serves it; the
+	// policy reads no sensitivity.
 	Sensitivity string
 	Signature   string
 }

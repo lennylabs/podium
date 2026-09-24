@@ -19,7 +19,6 @@ import (
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
-	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -192,9 +191,9 @@ func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 			t.Errorf("artifact %q has no signature; the configured signer must sign every accepted manifest", rec.ArtifactID)
 			continue
 		}
-		// PolicyAlways verifies regardless of sensitivity, exercising the
+		// PolicyAlways verifies every served signature, exercising the
 		// §4.7.9 materialization-time check against the fixture's data.
-		if err := sign.EnforceVerification(context.Background(), sign.PolicyAlways, provider, manifest.Sensitivity(rec.Sensitivity), rec.ContentHash, rec.Signature); err != nil {
+		if err := sign.EnforceVerification(context.Background(), sign.PolicyAlways, provider, rec.ContentHash, rec.Signature); err != nil {
 			t.Errorf("verify %q (sensitivity %q): %v", rec.ArtifactID, rec.Sensitivity, err)
 		}
 		sensitivities[rec.Sensitivity] = true
@@ -216,7 +215,7 @@ func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 	if medium.ArtifactID == "" {
 		t.Fatalf("fixture carries no medium-sensitivity artifact to tamper")
 	}
-	err = sign.EnforceVerification(context.Background(), sign.PolicyMediumAndAbove, provider, manifest.Sensitivity(medium.Sensitivity), medium.ContentHash, "noop:tampered")
+	err = sign.EnforceVerification(context.Background(), sign.PolicyAlways, provider, medium.ContentHash, "noop:tampered")
 	if err == nil || !strings.Contains(err.Error(), "signature_invalid") {
 		t.Errorf("tampered signature: got err=%v, want signature_invalid", err)
 	}

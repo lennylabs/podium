@@ -166,6 +166,7 @@ func TestLoadConfig_MissingRegistryErrors(t *testing.T) {
 func TestLoadConfig_BadCacheModeErrors(t *testing.T) {
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 	t.Setenv("PODIUM_CACHE_MODE", "bogus")
+	t.Setenv("PODIUM_VERIFY_SIGNATURES", "never")
 	if _, err := loadConfig(); err == nil {
 		t.Errorf("bad cache mode: no error")
 	}
@@ -175,6 +176,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 	t.Setenv("PODIUM_CACHE_MODE", "")
 	t.Setenv("PODIUM_HARNESS", "")
+	t.Setenv("PODIUM_VERIFY_SIGNATURES", "never")
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
@@ -191,6 +193,7 @@ func TestLoadConfig_TokenEnvIndirection(t *testing.T) {
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 	t.Setenv("PODIUM_SESSION_TOKEN_ENV", "MY_HOST_TOKEN")
 	t.Setenv("MY_HOST_TOKEN", "from-named-env")
+	t.Setenv("PODIUM_VERIFY_SIGNATURES", "never")
 	cfg, err := loadConfig()
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
@@ -472,15 +475,39 @@ func TestProxyGet_UnreachableRegistryReturnsOfflineStatus(t *testing.T) {
 
 // --- buildSignatureProvider --------------------------------------------------
 
+// Spec: §4.7.9, §6.2 — noop is the one recognized provider that constructs
+// with no material. An empty or unknown name is refused, and sigstore-keyless
+// and registry-managed return the error for missing material rather than a
+// provider that fails every load. Not parallel: it mutates the environment.
 func TestBuildSignatureProvider(t *testing.T) {
-	t.Parallel()
-	for _, name := range []string{"", "noop", "sigstore-keyless", "registry-managed"} {
-		if _, err := buildSignatureProvider(name); err != nil {
-			t.Errorf("buildSignatureProvider(%q) = %v", name, err)
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE", "")
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", "")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
+	if _, err := buildSignatureProvider("noop"); err != nil {
+		t.Errorf("buildSignatureProvider(noop) = %v", err)
+	}
+	for _, name := range []string{"", "unknown", "sigstore-keyless", "registry-managed"} {
+		if _, err := buildSignatureProvider(name); err == nil {
+			t.Errorf("buildSignatureProvider(%q) with no material = nil error, want error", name)
 		}
 	}
-	if _, err := buildSignatureProvider("unknown"); err == nil {
-		t.Errorf("buildSignatureProvider(unknown) = nil error, want error")
+
+	root := filepath.Join(t.TempDir(), "root.pem")
+	if err := os.WriteFile(root, []byte("trust root"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE", root)
+	if p, err := buildSignatureProvider("sigstore-keyless"); err != nil || p.ID() != "sigstore-keyless" {
+		t.Errorf("buildSignatureProvider(sigstore-keyless) with a trust root = %v, %v", p, err)
+	}
+	pub, _, err := ed25519.GenerateKey(crand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub))
+	if p, err := buildSignatureProvider("registry-managed"); err != nil || p.ID() != "registry-managed" {
+		t.Errorf("buildSignatureProvider(registry-managed) with a verify key = %v, %v", p, err)
 	}
 }
 
@@ -488,7 +515,11 @@ func TestBuildSignatureProvider(t *testing.T) {
 // from PODIUM_SIGNATURE_VERIFY_KEY (base64 Ed25519) and pins the key id from
 // PODIUM_SIGNATURE_KEY_ID, so the resulting provider verifies a real envelope.
 // A malformed verify key is a startup error. Not parallel: it mutates env.
+// The home is hermetic so the malformed-variable arm runs against a home with
+// no key file rather than the developer's own.
 func TestBuildSignatureProvider_RegistryManagedVerifyKey(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
 	pub, priv, err := ed25519.GenerateKey(crand.Reader)
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)

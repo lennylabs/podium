@@ -7,7 +7,7 @@ package e2e
 // produces a real registry-managed signature envelope over an offline keypair
 // and drives the shipped podium-mcp verifier. This is the journey the gap
 // names: under the default-on verifier (no PODIUM_VERIFY_SIGNATURES set, which
-// falls back to the secure medium-and-above policy), a validly-signed
+// falls back to the always policy), a validly-signed
 // medium-sensitivity artifact loads and verifies, then tampering its stored
 // bytes makes the same load abort with materialize.signature_invalid, while a
 // co-resident untampered signed artifact keeps loading. The untampered control
@@ -18,12 +18,12 @@ package e2e
 // affect the other. Each holds a real signature from its own offline key,
 // verified consumer-side with that key. The policy is left unset so the binary
 // exercises its own default rather than an explicitly-configured one (§6.2: an
-// absent PODIUM_VERIFY_SIGNATURES defaults to medium-and-above).
+// absent PODIUM_VERIFY_SIGNATURES defaults to always).
 //
 // Spec: §4.7.9 (each version is signed by a registry-managed key at ingest; the
-// MCP server verifies on materialization for sensitivity >= medium; a signature
-// failure aborts with materialize.signature_invalid before anything is written
-// to disk), §6.2 (PODIUM_VERIFY_SIGNATURES defaults to medium-and-above), §6.6
+// MCP server verifies every served signature under any policy above never; a
+// signature failure aborts with materialize.signature_invalid before anything
+// is written to disk), §6.2 (PODIUM_VERIFY_SIGNATURES defaults to always), §6.6
 // step 2 (content-hash match over the delivered bytes).
 
 import (
@@ -32,9 +32,9 @@ import (
 )
 
 // signedDefaultEnv returns the fixture's consumer env with the verification
-// policy left unset, so the bridge falls back to its secure default
-// (medium-and-above). f.Env sets PODIUM_VERIFY_SIGNATURES to the passed value;
-// passing the empty string makes the binary treat it as "not configured."
+// policy left unset, so the bridge falls back to its default (always). f.Env
+// sets PODIUM_VERIFY_SIGNATURES to the passed value; passing the empty string
+// makes the binary treat it as "not configured."
 func signedDefaultEnv(t *testing.T, f *signedArtifactFixture) []string {
 	t.Helper()
 	env := f.Env(t, "")

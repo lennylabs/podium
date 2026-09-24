@@ -95,6 +95,7 @@ func KnownMatrices() []Matrix {
 					"config.invalid_idp_group_mapping",
 					"config.public_mode_with_idp",
 					"config.invalid_sign_mode",
+					"config.signature_provider_unavailable",
 					"ingest.lint_failed",
 					"ingest.immutable_violation",
 					"ingest.frozen",

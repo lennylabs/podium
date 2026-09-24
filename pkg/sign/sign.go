@@ -1,6 +1,6 @@
 // Package sign exposes the SignatureProvider SPI (spec §9.1) plus the
-// medium-and-above verification policy enforced at materialization time
-// (§4.7.9). The policy has two axes: a signature the response carries is
+// verification policy enforced at materialization time (§4.7.9), which takes
+// never or always. The policy has two axes: a signature the response carries is
 // verified under any policy other than never, and the policy governs only
 // whether a missing signature aborts the load. Built-ins ship a noop
 // provider whose Verify refuses every signature, Sigstore-keyless, and
@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/spi"
 )
 
@@ -23,9 +22,8 @@ var (
 	// ErrSignatureInvalid signals that the signature does not validate
 	// against the artifact's content hash.
 	ErrSignatureInvalid = &spi.Error{Code: "materialize.signature_invalid", Message: "signature_invalid"}
-	// ErrSignatureMissing signals that an artifact requires a signature
-	// (sensitivity ≥ medium under the default policy) but none was
-	// provided.
+	// ErrSignatureMissing signals that a response carried no signature
+	// under a policy that requires one (always, the §6.2 default).
 	ErrSignatureMissing = &spi.Error{Code: "materialize.signature_missing", Message: "signature_missing"}
 )
 
@@ -33,26 +31,27 @@ var (
 // valid signature. Maps to PODIUM_VERIFY_SIGNATURES (spec §6.2).
 type VerificationPolicy string
 
-// VerificationPolicy values.
+// VerificationPolicy values. The policy reads no sensitivity: the value is
+// reported by the party that supplies the signature, and for a child
+// declaring extends: no attested source for it exists.
 const (
-	// PolicyNever skips verification entirely.
+	// PolicyNever skips verification entirely, including a signature the
+	// response carries.
 	PolicyNever VerificationPolicy = "never"
-	// PolicyMediumAndAbove enforces signatures for sensitivity ≥ medium.
-	// Default in standard deployments per §6.2.
-	PolicyMediumAndAbove VerificationPolicy = "medium-and-above"
-	// PolicyAlways enforces signatures for every artifact.
+	// PolicyAlways verifies every signature the response carries and
+	// refuses a response that carries none. Default per §6.2.
 	PolicyAlways VerificationPolicy = "always"
 )
 
-// ValidPolicy reports whether p is one of the three recognized
+// ValidPolicy reports whether p is one of the recognized
 // PODIUM_VERIFY_SIGNATURES values (spec §6.2 / §4.7.9). Callers that
 // read the policy from configuration use this to refuse an unknown
 // value at startup rather than silently falling through to a skip.
 //
-// spec: §6.2 — PODIUM_VERIFY_SIGNATURES is never | medium-and-above | always.
+// spec: §6.2 — PODIUM_VERIFY_SIGNATURES is never | always.
 func ValidPolicy(p VerificationPolicy) bool {
 	switch p {
-	case PolicyNever, PolicyMediumAndAbove, PolicyAlways:
+	case PolicyNever, PolicyAlways:
 		return true
 	default:
 		return false
@@ -102,24 +101,25 @@ func (Noop) Verify(_ context.Context, _, _ string) error {
 // EnforceVerification applies policy to one served artifact.
 //
 // The two axes are separate. A signature that is present is always verified
-// under any policy other than never, because the sensitivity the policy would
-// otherwise gate on is reported by the same party that supplies the signature,
-// and for a child declaring extends: (§4.6) no attested source for it exists:
-// the merge takes the most-restrictive value (pkg/manifest/merge.go) while the
-// content hash covers only the child's pre-merge bytes. Whether a missing
-// signature aborts the load is the axis the policy governs, and only always
-// resists a registry that serves an unsigned forgery.
+// under any policy other than never. Whether a missing signature aborts the
+// load is the axis the policy governs. Neither axis reads the artifact's
+// sensitivity: the value is reported by the same party that supplies the
+// signature, and for a child declaring extends: (§4.6) no attested source for
+// it exists, because the merge takes the most-restrictive value
+// (pkg/manifest/merge.go) while the content hash covers only the child's
+// pre-merge bytes. Under never the provider is not touched, so a caller that
+// resolved no provider under never may pass nil.
 //
 // Spec: §4.7.9, §6.6 step 2.
-func EnforceVerification(ctx context.Context, policy VerificationPolicy, provider Provider, sensitivity manifest.Sensitivity, contentHash, signature string) error {
+func EnforceVerification(ctx context.Context, policy VerificationPolicy, provider Provider, contentHash, signature string) error {
 	if policy == PolicyNever {
 		return nil
 	}
 	if signature == "" {
-		if !requiresSignature(policy, sensitivity) {
+		if !requiresSignature(policy) {
 			return nil
 		}
-		return fmt.Errorf("%w: sensitivity %q requires a signature", ErrSignatureMissing, sensitivity)
+		return fmt.Errorf("%w: policy %q requires a signature", ErrSignatureMissing, policy)
 	}
 	return provider.Verify(ctx, contentHash, signature)
 }
@@ -129,12 +129,10 @@ func EnforceVerification(ctx context.Context, policy VerificationPolicy, provide
 // (§6.2), so this is defense in depth for a direct constructor.
 //
 // Spec: §4.7.9
-func requiresSignature(policy VerificationPolicy, s manifest.Sensitivity) bool {
+func requiresSignature(policy VerificationPolicy) bool {
 	switch policy {
 	case PolicyAlways:
 		return true
-	case PolicyMediumAndAbove:
-		return s == manifest.SensitivityMedium || s == manifest.SensitivityHigh
 	case PolicyNever:
 		// EnforceVerification returns before this call under never; the arm
 		// keeps the predicate correct for the full value set.

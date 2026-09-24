@@ -128,7 +128,7 @@ func storedHashes(t testing.TB, sqlitePath string) map[string]string {
 // empty string when the load succeeded.
 func loadRehashSkill(t testing.TB, baseURL string) string {
 	t.Helper()
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + baseURL, "PODIUM_CACHE_DIR=" + t.TempDir(), "PODIUM_MATERIALIZE_ROOT=" + t.TempDir()},
+	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + baseURL, "PODIUM_CACHE_DIR=" + t.TempDir(), "PODIUM_MATERIALIZE_ROOT=" + t.TempDir(), "PODIUM_VERIFY_SIGNATURES=never"},
 		toolCall(1, "load_artifact", map[string]any{"id": rehashSkillID}))
 	result := rpcResult(t, res.Stdout, 1)
 	if e, ok := result["error"]; ok && e != nil {

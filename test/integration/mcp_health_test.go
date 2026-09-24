@@ -28,7 +28,7 @@ func runHealthTool(t *testing.T, registry string) healthToolResult {
 	t.Helper()
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+registry)
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+registry)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "tools/call", ID: 1, Params: map[string]any{"name": "health"}},
 	}))

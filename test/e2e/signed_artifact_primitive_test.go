@@ -25,14 +25,14 @@ func loadSignedArtifact(t *testing.T, env []string, id string) (string, map[stri
 
 // TestSignedArtifact_ValidSignatureLoads proves the happy path: an artifact
 // signed by the offline keypair, served with its matching content hash, loads
-// under the enforcing medium-and-above policy with no verification error. The
+// under the enforcing always policy with no verification error. The
 // signature envelope is the real registry-managed envelope, and the consumer
 // verifies it with the offline public key wired through
 // PODIUM_SIGNATURE_VERIFY_KEY.
 func TestSignedArtifact_ValidSignatureLoads(t *testing.T) {
 	t.Parallel()
 	f := newSignedArtifactFixture(t, signedArtifactSpec{})
-	env := f.Env(t, "medium-and-above")
+	env := f.Env(t, "always")
 
 	errStr, result := loadSignedArtifact(t, env, f.ID())
 	if errStr != "" {
@@ -54,7 +54,7 @@ func TestSignedArtifact_ValidSignatureLoads(t *testing.T) {
 func TestSignedArtifact_TamperedBlobRefused(t *testing.T) {
 	t.Parallel()
 	f := newSignedArtifactFixture(t, signedArtifactSpec{})
-	env := f.Env(t, "medium-and-above")
+	env := f.Env(t, "always")
 
 	// Untampered load verifies first, establishing the valid baseline.
 	if errStr, result := loadSignedArtifact(t, env, f.ID()); errStr != "" {
@@ -78,7 +78,7 @@ func TestSignedArtifact_TamperedBlobRefused(t *testing.T) {
 func TestSignedArtifact_TamperedBodyHitsContentHashGate(t *testing.T) {
 	t.Parallel()
 	f := newSignedArtifactFixture(t, signedArtifactSpec{})
-	env := f.Env(t, "medium-and-above")
+	env := f.Env(t, "always")
 
 	if errStr, result := loadSignedArtifact(t, env, f.ID()); errStr != "" {
 		t.Fatalf("baseline signed load should pass, got error: %s\nresult=%v", errStr, result)
@@ -101,7 +101,7 @@ func TestSignedArtifact_TamperedBodyHitsContentHashGate(t *testing.T) {
 func TestSignedArtifact_LowSensitivityStillVerifiesAPresentSignature(t *testing.T) {
 	t.Parallel()
 	f := newSignedArtifactFixture(t, signedArtifactSpec{Sensitivity: "low"})
-	env := f.Env(t, "medium-and-above")
+	env := f.Env(t, "always")
 
 	if errStr, result := loadSignedArtifact(t, env, f.ID()); errStr != "" {
 		t.Fatalf("untampered low-sensitivity artifact should load, got error: %s\nresult=%v", errStr, result)
@@ -184,7 +184,7 @@ func TestSignedArtifact_ResourcesReadVerifies(t *testing.T) {
 func TestSignedArtifact_KeyPinningRejectsRotatedKey(t *testing.T) {
 	t.Parallel()
 	f := newSignedArtifactFixture(t, signedArtifactSpec{KeyID: "key-v1"})
-	env := f.Env(t, "medium-and-above")
+	env := f.Env(t, "always")
 	// Override the pinned key id to a value the envelope does not carry.
 	for i, kv := range env {
 		if strings.HasPrefix(kv, "PODIUM_SIGNATURE_KEY_ID=") {

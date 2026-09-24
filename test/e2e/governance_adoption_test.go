@@ -17,13 +17,14 @@ package e2e
 // signedArtifactFixture for the signed half and the filesystem server for the
 // unsigned half. progressive-adoption.md's Month 3 step names
 // PODIUM_VERIFY_SIGNATURES=high-only, which the product rejects (the bridge
-// accepts only never | medium-and-above | always per spec §6.2 and exits 2 on
-// any other value). The documented behavior — high-sensitivity content requires
-// a valid signature to materialize — is enforced by medium-and-above, so these
-// tests use medium-and-above over high-sensitivity content. The literal
-// high-only string is a doc inaccuracy tracked separately.
+// accepts only never | always per spec §6.2 and exits 2 on any other value).
+// The documented behavior, that high-sensitivity content requires a valid
+// signature to materialize, holds under always, which requires one for every
+// artifact, so these tests use always over high-sensitivity content. The
+// literal high-only string is a doc inaccuracy tracked separately.
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -31,6 +32,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 )
 
 // ---- local helpers ----------------------------------------------------------
@@ -237,13 +240,15 @@ func TestGovernance_SensitivityDefaultsLow(t *testing.T) {
 	}
 }
 
-// ---- — unset PODIUM_VERIFY_SIGNATURES loads low artifact --
+// ---- — PODIUM_VERIFY_SIGNATURES=never loads an unsigned low artifact --
 
-// TestProgressive_6_UnsetVerifySignaturesLoadsLow confirms that when
-// PODIUM_VERIFY_SIGNATURES is not set, a low-sensitivity unsigned artifact
-// loads without a signature error. The registry starts unsigned, because it
-// signs at ingest by default and the subject is an unsigned artifact.
-func TestGovernance_UnsetVerifySignaturesLoadsLow(t *testing.T) {
+// TestGovernance_ExplicitNeverLoadsUnsignedLow confirms that under an
+// explicit PODIUM_VERIFY_SIGNATURES=never a low-sensitivity unsigned artifact
+// loads without a signature error. The §6.2 default is always, which refuses
+// an unsigned artifact, so turning verification off is stated rather than
+// inherited. The registry starts unsigned, because it signs at ingest by
+// default and the subject is an unsigned artifact.
+func TestGovernance_ExplicitNeverLoadsUnsignedLow(t *testing.T) {
 	t.Parallel()
 	id := "eng/low-artifact"
 	reg := writeRegistry(t, map[string]string{
@@ -251,19 +256,13 @@ func TestGovernance_UnsetVerifySignaturesLoadsLow(t *testing.T) {
 	})
 	srv := startServerUnsigned(t, reg)
 	mat := t.TempDir()
-	// No PODIUM_VERIFY_SIGNATURES in the env.
-	env := []string{
-		"PODIUM_REGISTRY=" + srv.BaseURL,
-		"PODIUM_HARNESS=none",
-		"PODIUM_MATERIALIZE_ROOT=" + mat,
-		"PODIUM_CACHE_DIR=" + t.TempDir(),
-	}
+	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=never")
 	res := mcpExec(t, env,
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05", "clientInfo": map[string]any{"name": "test", "version": "0"}, "capabilities": map[string]any{}}},
 		toolCall(2, "load_artifact", map[string]any{"id": id}))
 	errStr := progToolErr(t, res.Stdout, 2)
 	if strings.Contains(errStr, "signature") {
-		t.Errorf("unexpected signature error when PODIUM_VERIFY_SIGNATURES is unset: %s", errStr)
+		t.Errorf("unexpected signature error under PODIUM_VERIFY_SIGNATURES=never: %s", errStr)
 	}
 }
 
@@ -544,32 +543,21 @@ func TestGovernance_AuditSensitivityPerLoad(t *testing.T) {
 	}
 }
 
-// ---- — medium-and-above blocks unsigned medium artifact --
+// ---- — medium-and-above is no longer a policy value ------
 
-// TestProgressive_23_MediumAndAboveBlocksUnsignedMedium verifies that
-// PODIUM_VERIFY_SIGNATURES=medium-and-above causes load_artifact to return
-// a signature error for an unsigned medium-sensitivity artifact.
-func TestGovernance_MediumAndAboveBlocksUnsignedMedium(t *testing.T) {
+// TestGovernance_MediumAndAboveRefusesStartup confirms that the deleted
+// medium-and-above value refuses the bridge's start with exit 2 and a message
+// naming the accepted values, never and always (§6.2). No path maps the old
+// value onto either survivor.
+func TestGovernance_MediumAndAboveRefusesStartup(t *testing.T) {
 	t.Parallel()
-	id := "eng/medium-unsigned"
-	reg := writeRegistry(t, map[string]string{
-		id + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Medium unsigned.\nsensitivity: medium\n---\n\nbody\n",
-	})
-	srv := startServerUnsigned(t, reg)
-	mat := t.TempDir()
-	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=medium-and-above")
-	res := mcpExec(t, env,
-		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05", "clientInfo": map[string]any{"name": "test", "version": "0"}, "capabilities": map[string]any{}}},
-		toolCall(2, "load_artifact", map[string]any{"id": id}))
-	errStr := progToolErr(t, res.Stdout, 2)
-	if !strings.Contains(errStr, "materialize.signature_missing") {
-		t.Errorf("expected materialize.signature_missing for unsigned medium artifact under medium-and-above policy, got: %q\nstdout: %s",
-			errStr, res.Stdout)
+	env := progMCPEnv(t, "http://127.0.0.1:1", t.TempDir(), "PODIUM_VERIFY_SIGNATURES=medium-and-above")
+	res := mcpExec(t, env, toolCall(1, "load_artifact", map[string]any{"id": "x"}))
+	if res.Exit != 2 {
+		t.Errorf("exit = %d, want 2\nstderr: %s", res.Exit, res.Stderr)
 	}
-	// No file should have been materialized.
-	files := readTreeAll(t, mat)
-	if len(files) != 0 {
-		t.Errorf("materialized files despite signature error: %v", files)
+	if !strings.Contains(res.Stderr, "never | always") {
+		t.Errorf("stderr %q does not name never | always", res.Stderr)
 	}
 }
 
@@ -588,7 +576,7 @@ func TestGovernance_HighOnlyFailsOpen(t *testing.T) {
 	srv := startServer(t, reg)
 	mat := t.TempDir()
 	// "high-only" is not a recognized PODIUM_VERIFY_SIGNATURES value (the valid
-	// set is never | medium-and-above | always), so the bridge fails closed at
+	// set is never | always), so the bridge fails closed at
 	// startup with a validation error rather than running with an unknown policy.
 	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=high-only")
 	res := mcpExec(t, env,
@@ -640,13 +628,33 @@ func TestGovernance_SignNoop(t *testing.T) {
 	}
 }
 
-// ---- — podium verify refuses a noop signature ---------------
+// ---- — podium verify round-trips a registry-managed envelope ----
 
-// TestGovernance_VerifyRoundTrip signs a hash through the noop provider and
-// then verifies the resulting signature. §4.7.9: the noop provider refuses
-// every signature on Verify, including the one its own Sign produced, so the
-// verify exits 1 with "verify failed" and the refusal.
+// TestGovernance_VerifyRoundTrip signs a hash with no provider flag and then
+// verifies the resulting signature with no provider flag. §4.7.9: both commands
+// default to the registry-managed key, and on a home whose standalone registry
+// generated its key file, sign reads the private half and verify the public
+// half, so the round trip exits 0 with "verify ok".
 func TestGovernance_VerifyRoundTrip(t *testing.T) {
+	t.Parallel()
+	writeHomeKeyFile(t, cmdharness.IsolatedHome(t))
+	hash := "sha256:" + strings.Repeat("ab", 32)
+	signRes := runPodium(t, "", nil, "sign", "--content-hash", hash)
+	if signRes.Exit != 0 {
+		t.Fatalf("podium sign exit=%d\nstdout: %s\nstderr: %s", signRes.Exit, signRes.Stdout, signRes.Stderr)
+	}
+	sig := strings.TrimSpace(signRes.Stdout)
+	verifyRes := runPodium(t, "", nil, "verify", "--content-hash", hash, "--signature", sig)
+	if verifyRes.Exit != 0 || !strings.Contains(verifyRes.Stderr, "verify ok") {
+		t.Fatalf("podium verify exit=%d, want 0 with verify ok\nstdout: %s\nstderr: %s", verifyRes.Exit, verifyRes.Stdout, verifyRes.Stderr)
+	}
+}
+
+// TestGovernance_VerifyNoopRefusesItsOwnEnvelope confirms that the noop
+// provider refuses every signature on Verify, including the one its own Sign
+// produced, because that value is derived from a content hash served in the
+// clear (§4.7.9).
+func TestGovernance_VerifyNoopRefusesItsOwnEnvelope(t *testing.T) {
 	t.Parallel()
 	hash := "sha256:abc123def456"
 	signRes := runPodium(t, "", nil, "sign", "--content-hash", hash, "--provider", "noop")
@@ -654,10 +662,7 @@ func TestGovernance_VerifyRoundTrip(t *testing.T) {
 		t.Fatalf("podium sign exit=%d\nstdout: %s\nstderr: %s", signRes.Exit, signRes.Stdout, signRes.Stderr)
 	}
 	sig := strings.TrimSpace(signRes.Stdout)
-	verifyRes := runPodium(t, "", nil, "verify",
-		"--content-hash", hash,
-		"--signature", sig,
-		"--provider", "noop")
+	verifyRes := runPodium(t, "", nil, "verify", "--content-hash", hash, "--signature", sig, "--provider", "noop")
 	if verifyRes.Exit != 1 {
 		t.Fatalf("podium verify exit=%d, want 1\nstdout: %s\nstderr: %s", verifyRes.Exit, verifyRes.Stdout, verifyRes.Stderr)
 	}
@@ -671,14 +676,17 @@ func TestGovernance_VerifyRoundTrip(t *testing.T) {
 // ---- — verify rejects mismatched signature ----------------
 
 // TestProgressive_28_VerifyMismatchedSignature confirms that `podium verify`
-// exits 1 and prints "verify failed" + "signature_invalid" when the signature
-// does not match the hash.
+// exits 1 and prints "verify failed" + "signature_invalid" when a
+// registry-managed envelope was made over a different hash. The verification
+// key comes from PODIUM_SIGNATURE_VERIFY_KEY, so the provider resolves and only
+// the mismatch fails.
 func TestGovernance_VerifyMismatchedSignature(t *testing.T) {
 	t.Parallel()
-	res := runPodium(t, "", nil, "verify",
-		"--content-hash", "sha256:abc123def456",
-		"--signature", "noop:sha256:wrong_hash",
-		"--provider", "noop")
+	priv, pub := newEd25519Key(t)
+	sig := registryEnvelope(t, priv, "sha256:"+strings.Repeat("cd", 32))
+	res := runPodium(t, "", []string{"PODIUM_SIGNATURE_VERIFY_KEY=" + base64.StdEncoding.EncodeToString(pub)}, "verify",
+		"--content-hash", "sha256:"+strings.Repeat("ab", 32),
+		"--signature", sig)
 	if res.Exit != 1 {
 		t.Errorf("exit=%d, want 1\nstdout: %s\nstderr: %s", res.Exit, res.Stdout, res.Stderr)
 	}
@@ -719,12 +727,11 @@ func TestGovernance_SignMissingContentHash(t *testing.T) {
 // refuses it.
 //
 // Doc note: progressive-adoption.md's Month 3 step names
-// PODIUM_VERIFY_SIGNATURES=high-only. The product accepts only never |
-// medium-and-above | always (spec §6.2); the bridge exits 2 on any other value.
-// The documented behavior — high-sensitivity artifacts require a valid signature
-// to materialize — is what medium-and-above enforces (it covers medium and high),
-// so the policy here is medium-and-above with high-sensitivity content. The
-// literal high-only string is a doc inaccuracy tracked separately.
+// PODIUM_VERIFY_SIGNATURES=high-only. The product accepts only never | always
+// (spec §6.2); the bridge exits 2 on any other value. The documented behavior,
+// that high-sensitivity artifacts require a valid signature to materialize,
+// holds under always, so the policy here is always with high-sensitivity
+// content. The literal high-only string is a doc inaccuracy tracked separately.
 func TestGovernance_SignedArtifactMaterializes(t *testing.T) {
 	t.Parallel()
 
@@ -734,7 +741,7 @@ func TestGovernance_SignedArtifactMaterializes(t *testing.T) {
 		ID:          "security/playbook/incident-response",
 		Sensitivity: "high",
 	})
-	env := f.Env(t, "medium-and-above")
+	env := f.Env(t, "always")
 	if errStr, result := loadSignedArtifact(t, env, f.ID()); errStr != "" {
 		t.Fatalf("signed high-sensitivity artifact should materialize under the enforcing policy, got: %s\nresult=%v", errStr, result)
 	}
@@ -962,7 +969,7 @@ func TestGovernance_SandboxInformationalWithoutEnforcement(t *testing.T) {
 
 // assertUnsignedHighRefused boots a filesystem server holding one unsigned
 // high-sensitivity artifact, loads it through the real bridge under the
-// medium-and-above policy, and asserts the load is refused with
+// always policy, and asserts the load is refused with
 // materialize.signature_missing. The server starts with PODIUM_SIGN=none, which
 // is what keeps its fixture unsigned, because the registry signs at ingest by
 // default (§13.10); an enforcing consumer then rejects the artifact. This is
@@ -974,7 +981,7 @@ func assertUnsignedHighRefused(t *testing.T, id string) {
 	})
 	srv := startServerUnsigned(t, reg)
 	mat := t.TempDir()
-	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=medium-and-above")
+	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=always", verifyKeyEnv(t))
 	res := mcpExec(t, env, toolCall(2, "load_artifact", map[string]any{"id": id}))
 	errStr := progToolErr(t, res.Stdout, 2)
 	if !strings.Contains(errStr, "materialize.signature_missing") {
@@ -990,7 +997,7 @@ func assertUnsignedHighRefused(t *testing.T, id string) {
 // offline key); the unsigned half uses a filesystem server started with
 // PODIUM_SIGN=none, which attaches no signature. The same doc note as TestGovernance_SignedArtifactMaterializes
 // applies: the literal high-only env value is rejected by the product, so the
-// enforcing policy used here is medium-and-above over high-sensitivity content.
+// enforcing policy used here is always over high-sensitivity content.
 func TestGovernance_ComplianceDrivenSigning(t *testing.T) {
 	t.Parallel()
 
@@ -999,7 +1006,7 @@ func TestGovernance_ComplianceDrivenSigning(t *testing.T) {
 		ID:          "compliance/runbook/soc2",
 		Sensitivity: "high",
 	})
-	env := f.Env(t, "medium-and-above")
+	env := f.Env(t, "always")
 	if errStr, result := loadSignedArtifact(t, env, f.ID()); errStr != "" {
 		t.Fatalf("signed artifact should load under the compliance signing posture, got: %s\nresult=%v", errStr, result)
 	}
@@ -1037,7 +1044,7 @@ func TestGovernance_HighSensitivityDomainSigning(t *testing.T) {
 		ID:          "security/playbook/ransomware",
 		Sensitivity: "high",
 	})
-	env := f.Env(t, "medium-and-above")
+	env := f.Env(t, "always")
 	errStr, result := loadSignedArtifact(t, env, f.ID())
 	if errStr != "" {
 		t.Fatalf("signed high-sensitivity artifact should materialize in a high-sensitivity-only catalog, got: %s\nresult=%v", errStr, result)
@@ -1119,7 +1126,7 @@ func TestGovernance_AlwaysPolicyRejectsLowUnsigned(t *testing.T) {
 	})
 	srv := startServerUnsigned(t, reg)
 	mat := t.TempDir()
-	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=always")
+	env := progMCPEnv(t, srv.BaseURL, mat, "PODIUM_VERIFY_SIGNATURES=always", verifyKeyEnv(t))
 	res := mcpExec(t, env,
 		rpcReq{ID: 1, Method: "initialize", Params: map[string]any{"protocolVersion": "2024-11-05", "clientInfo": map[string]any{"name": "test", "version": "0"}, "capabilities": map[string]any{}}},
 		toolCall(2, "load_artifact", map[string]any{"id": id}))

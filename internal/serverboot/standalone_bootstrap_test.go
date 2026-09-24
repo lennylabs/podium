@@ -111,6 +111,30 @@ func TestBootstrapStandaloneFiles_PreservesExisting(t *testing.T) {
 	}
 }
 
+// Spec: §4.7.9, §13.10 — the bootstrapped sync.yaml carries the registry
+// pointer and nothing else under every signing mode: no signature policy that
+// would relax the §6.2 always default, and no key material.
+func TestBootstrapStandaloneFiles_WritesRegistryPointerAlone(t *testing.T) {
+	for _, mode := range []string{"", "none"} {
+		t.Run("sign="+mode, func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			t.Setenv("PODIUM_NO_AUTOSTANDALONE", "")
+			t.Setenv("PODIUM_CONFIG_FILE", "")
+			bootstrapStandaloneFiles(&Config{
+				bind:      "127.0.0.1:8080",
+				publicURL: "http://127.0.0.1:8080",
+				storeType: "sqlite",
+				signMode:  mode,
+			})
+			const want = "defaults:\n  registry: http://127.0.0.1:8080\n"
+			if got := mustReadFile(t, filepath.Join(home, ".podium", "sync.yaml")); got != want {
+				t.Errorf("sync.yaml = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func mustReadFile(t testing.TB, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)

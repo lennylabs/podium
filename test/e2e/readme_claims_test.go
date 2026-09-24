@@ -512,7 +512,7 @@ func TestReadme_Readyz(t *testing.T) {
 func TestReadme_MCPInitialize(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "initialize"})
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "initialize"})
 	caps, _ := rpcResult(t, res.Stdout, 1)["capabilities"].(map[string]any)
 	if _, ok := caps["tools"]; !ok {
 		t.Errorf("initialize capabilities missing tools: %v", caps)
@@ -523,7 +523,7 @@ func TestReadme_MCPInitialize(t *testing.T) {
 func TestReadme_MCPToolsList(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list"})
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list"})
 	for _, tool := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact"} {
 		if !strings.Contains(res.Stdout, tool) {
 			t.Errorf("tools/list missing %q", tool)
@@ -538,7 +538,7 @@ func TestReadme_MCPSearchArtifacts(t *testing.T) {
 		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n",
 		"finance/close-reporting/run-variance-analysis/SKILL.md":    skillBodyDesc("run-variance-analysis", "Flag unusual variance vs forecast."),
 	}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
 	if !strings.Contains(res.Stdout, "run-variance-analysis") {
 		t.Errorf("search did not return the variance artifact:\n%s", res.Stdout)
@@ -574,7 +574,7 @@ func TestReadme_MCPLoadDomain(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/close-reporting/run/ARTIFACT.md": contextArtifact("run"),
 	}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "load_domain", map[string]any{"path": "finance/close-reporting"}))
 	result := rpcResult(t, res.Stdout, 1)
 	if _, ok := result["subdomains"]; !ok {

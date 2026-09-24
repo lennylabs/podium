@@ -16,6 +16,7 @@ const unreachableServerSource = "http://127.0.0.1:1"
 func TestMCP_OfflineFirstServesSilently(t *testing.T) {
 	t.Parallel()
 	env := []string{
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=" + unreachableServerSource,
 		"PODIUM_CACHE_MODE=offline-first",
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
@@ -34,6 +35,7 @@ func TestMCP_OfflineFirstServesSilently(t *testing.T) {
 func TestMCP_AlwaysRevalidateKeepsOfflineStatus(t *testing.T) {
 	t.Parallel()
 	env := []string{
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=" + unreachableServerSource,
 		"PODIUM_CACHE_MODE=always-revalidate",
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
@@ -52,6 +54,7 @@ func TestMCP_AlwaysRevalidateKeepsOfflineStatus(t *testing.T) {
 func TestMCP_RefusesOldHostCaller(t *testing.T) {
 	t.Parallel()
 	env := []string{
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=" + unreachableServerSource,
 		"PODIUM_MIN_CLIENT_VERSION=2.0.0",
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
@@ -88,6 +91,7 @@ func TestMCP_AcceptsHostCallerAtFloorAndWhenUnset(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			env := []string{
+				"PODIUM_VERIFY_SIGNATURES=never",
 				"PODIUM_REGISTRY=" + unreachableServerSource,
 				"PODIUM_MIN_CLIENT_VERSION=" + tc.floor,
 				"PODIUM_CACHE_DIR=" + t.TempDir(),

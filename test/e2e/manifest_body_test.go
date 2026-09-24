@@ -76,6 +76,7 @@ func TestManifestBody_BridgeFetchesReconstitutesMaterializes(t *testing.T) {
 
 	mat := t.TempDir()
 	env := []string{
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=" + ts.URL, "PODIUM_CACHE_DIR=" + t.TempDir(),
 		"HOME=" + t.TempDir(), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT=" + mat,
 	}
@@ -119,6 +120,7 @@ func TestManifestBody_BridgeFetchFailureAborts(t *testing.T) {
 
 	mat := t.TempDir()
 	env := []string{
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=" + ts.URL, "PODIUM_CACHE_DIR=" + t.TempDir(),
 		"HOME=" + t.TempDir(), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT=" + mat,
 	}

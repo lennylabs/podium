@@ -979,26 +979,32 @@ func TestStandardDeploy_LoginMissingIssuer(t *testing.T) {
 	}
 }
 
-// -- MCP server initializes successfully; PODIUM_VERIFY_SIGNATURES defaults to medium-and-above.
+// -- MCP server initializes successfully; PODIUM_VERIFY_SIGNATURES defaults to
+// always (§6.2), so an unsigned artifact is refused with
+// materialize.signature_missing. The registry starts unsigned because it signs
+// at ingest by default, and the bridge is given a verification key so it
+// starts under the default policy.
 func TestStandardDeploy_MCPVerifySignaturesDefault(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
-	srv := startServer(t, reg)
+	srv := startServerUnsigned(t, reg)
 	env := []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		verifyKeyEnv(t),
 	}
 	res := mcpExec(t, env, rpcReq{ID: 1, Method: "initialize", Params: map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "test", "version": "1"},
-	}})
+	}}, toolCall(2, "load_artifact", map[string]any{"id": "hello"}))
 	result := rpcResult(t, res.Stdout, 1)
 	if result["serverInfo"] == nil {
 		t.Errorf("initialize response missing serverInfo: %v", result)
 	}
-	// Verify the default policy is in effect: a low-sensitivity unsigned artifact
-	// should load fine under medium-and-above.
+	if errStr, _ := rpcResult(t, res.Stdout, 2)["error"].(string); !strings.HasPrefix(errStr, "materialize.signature_missing") {
+		t.Errorf("unsigned load under the default policy = %q, want materialize.signature_missing", errStr)
+	}
 }
 
 // -- the MCP bridge reads PODIUM_SESSION_TOKEN and the
@@ -1018,6 +1024,7 @@ func TestStandardDeploy_MCPSessionToken(t *testing.T) {
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_SESSION_TOKEN=" + token,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}
 	res := mcpExec(t, env, toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
@@ -1032,6 +1039,7 @@ func TestStandardDeploy_MCPSessionToken(t *testing.T) {
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_SESSION_TOKEN=not-a-valid-jwt",
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}
 	resBad := mcpExec(t, envBad, toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
 	if strings.Contains(mustJSON(rpcEnvelope(t, resBad.Stdout, 1)), "finance/run") {
@@ -1059,6 +1067,7 @@ func TestStandardDeploy_MCPSessionTokenFile(t *testing.T) {
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_SESSION_TOKEN_FILE=" + tokFile,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}
 	res := mcpExec(t, env, toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))

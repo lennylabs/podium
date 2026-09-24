@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
@@ -176,11 +175,11 @@ func TestVerifyContentHash_CacheServedSkillWithoutSkillRawFails(t *testing.T) {
 }
 
 // Spec: §4.7.9 / §6.6 — end-to-end through enforceSignaturePolicy: a signed
-// high-sensitivity skill served from cache verifies under medium-and-above when
+// high-sensitivity skill served from cache verifies under always when
 // skill_raw round-trips, because the content hash the signature covers is the
 // one the recompute reproduces. Guards the S19 cache-hit path.
 func TestEnforceSignaturePolicy_CacheServedSignedSkill(t *testing.T) {
-	// No t.Parallel: this test sets PODIUM_SIGNATURE_VERIFY_KEY via t.Setenv.
+	t.Parallel()
 	dir := t.TempDir()
 	cache, err := newContentCache(dir)
 	if err != nil {
@@ -212,10 +211,10 @@ func TestEnforceSignaturePolicy_CacheServedSignedSkill(t *testing.T) {
 
 	srv := &mcpServer{cfg: &config{
 		cacheDir:          dir,
-		verifyPolicy:      sign.PolicyMediumAndAbove,
+		verifyPolicy:      sign.PolicyAlways,
 		signatureProvider: "registry-managed",
+		verifier:          sign.RegistryManagedKey{PublicKey: pub},
 	}}
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub))
 
 	got, err := srv.loadArtifactFromCache(hash, "signed")
 	if err != nil {
@@ -234,12 +233,11 @@ func TestEnforceSignaturePolicy_CacheServedSignedSkill(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.9 / §6.6 — a high-sensitivity artifact served from cache without a
-// stored signature is refused, not waved through. Sensitivity is recovered from
-// the cached frontmatter even when no sensitivity side file was written (a
-// prefetch-warmed entry), so the policy gate fails closed with signature_missing
-// rather than skipping verification. Regression for a cache hit silently
-// bypassing §4.7.9 because the cache dropped sensitivity and the signature.
+// Spec: §4.7.9 / §6.6 — an artifact served from cache without a stored
+// signature is refused under always, not waved through. Sensitivity is still
+// recovered from the cached frontmatter when no sensitivity side file was
+// written (a prefetch-warmed entry), so the cache-served response reports what
+// a live fetch does. Regression for a cache hit silently bypassing §4.7.9.
 func TestEnforceSignaturePolicy_CacheServedHighSensitivityUnsignedRefused(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -256,7 +254,7 @@ func TestEnforceSignaturePolicy_CacheServedHighSensitivityUnsignedRefused(t *tes
 
 	srv := &mcpServer{cfg: &config{
 		cacheDir:          dir,
-		verifyPolicy:      sign.PolicyMediumAndAbove,
+		verifyPolicy:      sign.PolicyAlways,
 		signatureProvider: "noop",
 	}}
 	got, err := srv.loadArtifactFromCache(hash, "x")

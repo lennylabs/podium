@@ -26,7 +26,7 @@ package e2e
 // Spec: §4.7.9 (each version is signed by a registry-managed key at ingest;
 // the MCP server verifies a served signature under any policy above never;
 // signature failure aborts with materialize.signature_invalid), §6.2
-// (PODIUM_VERIFY_SIGNATURES: never | medium-and-above | always), §6.6 step 2
+// (PODIUM_VERIFY_SIGNATURES: never | always), §6.6 step 2
 // (content-hash match over the delivered bytes).
 
 import (
@@ -37,6 +37,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 
@@ -72,10 +74,10 @@ type signedArtifactFixture struct {
 // signedArtifactSpec configures a signedArtifactFixture. ID is the canonical
 // artifact id. Frontmatter is the full ARTIFACT.md the stub serves (frontmatter
 // plus body for a context artifact); when empty a default medium-sensitivity
-// context artifact is synthesized. Sensitivity defaults to "medium" so the
-// medium-and-above verification policy engages. KeyID, when set, is embedded in
-// the signature envelope and exposed as PODIUM_SIGNATURE_KEY_ID so key-pinning
-// can be exercised.
+// context artifact is synthesized. Sensitivity defaults to "medium"; the
+// policy reads no sensitivity, so the value only labels the fixture. KeyID,
+// when set, is embedded in the signature envelope and exposed as
+// PODIUM_SIGNATURE_KEY_ID so key-pinning can be exercised.
 type signedArtifactSpec struct {
 	ID          string
 	Type        string
@@ -264,4 +266,53 @@ func flipLastHexNibble(s string) string {
 		b[len(b)-1] = '0'
 	}
 	return string(b)
+}
+
+// newEd25519Key generates an Ed25519 keypair for one case.
+func newEd25519Key(t testing.TB) (ed25519.PrivateKey, ed25519.PublicKey) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	return priv, pub
+}
+
+// verifyKeyEnv returns a PODIUM_SIGNATURE_VERIFY_KEY entry holding a fresh
+// public key that signed nothing. A bridge whose subject is an unsigned load
+// under the always policy needs verification material to start (§4.7.9,
+// §6.9); this key supplies it without verifying any served envelope.
+func verifyKeyEnv(t testing.TB) string {
+	t.Helper()
+	_, pub := newEd25519Key(t)
+	return "PODIUM_SIGNATURE_VERIFY_KEY=" + base64.StdEncoding.EncodeToString(pub)
+}
+
+// writeHomeKeyFile writes a registry key file at the sign.KeyFilePath default
+// under home, in the format the registry writes, and returns both halves. It
+// stands in for the key file a standalone registry generates on its first
+// start.
+func writeHomeKeyFile(t testing.TB, home string) (ed25519.PrivateKey, ed25519.PublicKey) {
+	t.Helper()
+	priv, pub := newEd25519Key(t)
+	path := filepath.Join(home, ".podium", "standalone", "registry-signing.key")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := "private: " + base64.StdEncoding.EncodeToString(priv) + "\n" +
+		"public: " + base64.StdEncoding.EncodeToString(pub) + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write key file: %v", err)
+	}
+	return priv, pub
+}
+
+// registryEnvelope returns a registry-managed envelope over hash under priv.
+func registryEnvelope(t testing.TB, priv ed25519.PrivateKey, hash string) string {
+	t.Helper()
+	env, err := sign.RegistryManagedKey{PrivateKey: priv}.Sign(context.Background(), hash)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	return env
 }

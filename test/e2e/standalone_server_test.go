@@ -980,6 +980,7 @@ func TestStandaloneServer_MCPSearchArtifacts(t *testing.T) {
 
 	res := mcpExec(t,
 		[]string{
+			"PODIUM_VERIFY_SIGNATURES=never",
 			"PODIUM_REGISTRY=" + srv.BaseURL,
 			"PODIUM_CACHE_DIR=" + t.TempDir(),
 		},

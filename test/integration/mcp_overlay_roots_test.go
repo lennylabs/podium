@@ -28,6 +28,7 @@ func TestPodiumMCP_RootsListResolvesWorkspaceOverlay(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
 		"PODIUM_CACHE_DIR="+t.TempDir(),
 		"PODIUM_OVERLAY_PATH=", // ensure no inherited explicit path short-circuits roots

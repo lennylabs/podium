@@ -22,7 +22,7 @@ type clientScope struct {
 
 // defaultsKeys is the fixed print order for the merged defaults block.
 // spec: §7.7 (config show).
-var defaultsKeys = []string{"registry", "harness", "target", "profile"}
+var defaultsKeys = []string{"registry", "harness", "target", "profile", "verify_signatures"}
 
 // loadClientScopes reads the three §7.5.2 config files in precedence
 // order (low to high): user-global, project-shared, project-local.
@@ -74,6 +74,8 @@ func defaultsField(cfg *sync.SyncConfig, field string) string {
 		return cfg.Defaults.Target
 	case "profile":
 		return cfg.Defaults.Profile
+	case "verify_signatures":
+		return cfg.Defaults.VerifySignatures
 	}
 	return ""
 }

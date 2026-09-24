@@ -31,6 +31,7 @@ func TestPodiumMCP_StructuredErrorEnvelopeReachesClient(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+reg.URL,
 		"PODIUM_CACHE_DIR="+t.TempDir(),
 	)

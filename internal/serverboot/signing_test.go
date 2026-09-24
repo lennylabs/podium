@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // Spec: §13.12 / §4.7.9 — a registry with signing on and no
@@ -76,5 +78,35 @@ func TestRefuseUnpersistedSigningKey_UnresolvableHome(t *testing.T) {
 	cfg := Config{storeType: "sqlite", sqlitePath: "/var/lib/podium/podium.db"}
 	if err := refuseUnpersistedSigningKey(&cfg); err == nil {
 		t.Fatal("refuseUnpersistedSigningKey = nil with no resolvable home, want an error")
+	}
+}
+
+// Spec: §4.7.9 — the key file the registry writes is the one a consumer
+// resolves and reads: a keypair generated through loadOrGenerateRegistrySigner
+// under a fixture home, with PODIUM_SIGN_KEY_PATH unset, sits at
+// sign.KeyFilePath(""), and both halves read back through the pkg/sign
+// readers match the provider's own.
+func TestRegistrySigningKeyFile_RoundTrip(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
+	provider, err := loadOrGenerateRegistrySigner("")
+	if err != nil {
+		t.Fatalf("loadOrGenerateRegistrySigner: %v", err)
+	}
+	signer := provider.(sign.RegistryManagedKey)
+	path, err := sign.KeyFilePath("")
+	if err != nil {
+		t.Fatalf("KeyFilePath: %v", err)
+	}
+	if delegated, _ := registrySigningKeyPath(""); delegated != path {
+		t.Fatalf("registrySigningKeyPath(\"\") = %q, sign.KeyFilePath(\"\") = %q; want one path", delegated, path)
+	}
+	pub, err := sign.PublicKeyFromKeyFile(path)
+	if err != nil || !pub.Equal(signer.PublicKey) {
+		t.Errorf("PublicKeyFromKeyFile = %v, %v; want the signer's public key", pub, err)
+	}
+	priv, err := sign.PrivateKeyFromKeyFile(path)
+	if err != nil || !priv.Equal(signer.PrivateKey) {
+		t.Errorf("PrivateKeyFromKeyFile = %v, %v; want the signer's private key", priv, err)
 	}
 }

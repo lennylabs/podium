@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
@@ -64,6 +63,7 @@ func tamperedHash(resp loadArtifactResponse) loadArtifactResponse {
 // the verification's code rather than the sandbox refusal. The signed arm
 // pins the same order for a signature that does not validate.
 func TestDeliverLoadArtifact_ManifestGatesRunAfterVerification(t *testing.T) {
+	t.Parallel()
 	s := newTestServer(t, &config{harness: "none", verifyPolicy: sign.PolicyNever})
 	out := s.deliverLoadArtifact(tamperedHash(fixtureResp("team/x", sandboxedFM)))
 	if got := errorMessageText(out); !strings.HasPrefix(got, "materialize.content_hash_mismatch") {
@@ -78,13 +78,12 @@ func TestDeliverLoadArtifact_ManifestGatesRunAfterVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub))
 	resp := fixtureResp("team/x", sandboxedFM)
 	resp.Signature, err = sign.RegistryManagedKey{PrivateKey: otherPriv}.Sign(context.Background(), resp.ContentHash)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
-	s = newTestServer(t, &config{harness: "none", verifyPolicy: sign.PolicyAlways, signatureProvider: "registry-managed"})
+	s = newTestServer(t, &config{harness: "none", verifyPolicy: sign.PolicyAlways, signatureProvider: "registry-managed", verifier: sign.RegistryManagedKey{PublicKey: pub}})
 	if got := errorMessageText(s.deliverLoadArtifact(resp)); !strings.HasPrefix(got, "materialize.signature_invalid") {
 		t.Errorf("signature arm: error = %q, want materialize.signature_invalid ahead of the sandbox gate", got)
 	}

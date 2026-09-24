@@ -47,7 +47,7 @@ func TestPodiumMCP_AdvertisesAndThreadsSession(t *testing.T) {
 
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+reg.URL, "PODIUM_CACHE_DIR="+t.TempDir())
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+reg.URL, "PODIUM_CACHE_DIR="+t.TempDir())
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "initialize", ID: 1},
 		{Method: "tools/call", ID: 2, Params: map[string]any{
@@ -154,7 +154,7 @@ type bridgeProc struct {
 func newBridgeProc(t *testing.T, bin, registryURL string) *bridgeProc {
 	t.Helper()
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+registryURL, "PODIUM_CACHE_DIR="+t.TempDir())
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+registryURL, "PODIUM_CACHE_DIR="+t.TempDir())
 	in, err := cmd.StdinPipe()
 	if err != nil {
 		t.Fatalf("stdin pipe: %v", err)

@@ -499,10 +499,10 @@ func TestServerOps_SignatureInvalidTamperedArtifact(t *testing.T) {
 	t.Skip("requires a signed artifact whose stored bytes are then tampered; not expressible from filesystem bootstrap")
 }
 
-// ---- PODIUM_VERIFY_SIGNATURES default medium-and-above
+// ---- PODIUM_VERIFY_SIGNATURES default always
 
 func TestServerOps_VerifySignaturesDefault(t *testing.T) {
-	t.Skip("verifying the default blocks a tampered medium artifact requires a signed-then-tampered artifact; not expressible from filesystem bootstrap")
+	t.Skip("verifying the always default blocks a tampered artifact requires a signed-then-tampered artifact; not expressible from filesystem bootstrap")
 }
 
 // ---- visibility.denied audit event ------------------

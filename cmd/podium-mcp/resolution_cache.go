@@ -254,12 +254,11 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 	// ARTIFACT.md only (slot 1 empty) and fails content_hash_mismatch, and
 	// materializes a synthesized SKILL.md rather than the authored bytes. A
 	// present raw_frontmatter marks an extends-merged manifest so
-	// verifyContentHash hashes the pre-merge frontmatter. sensitivity and
-	// signature drive enforceSignaturePolicy: dropping sensitivity would skip
-	// §4.7.9 verification on a cache hit (a high-sensitivity artifact would
-	// materialize unverified), and dropping the signature would fail a policy it
-	// should pass. Each file is absent when its field was empty at ingest, so a
-	// plain low-sensitivity context artifact restores none of them.
+	// verifyContentHash hashes the pre-merge frontmatter. The signature is what
+	// enforceSignaturePolicy verifies, so dropping it would fail the §4.7.9
+	// always policy on a cache hit that a live fetch passes. sensitivity is
+	// restored because the response serves it; no check reads it. Each file is
+	// absent when its field was empty at ingest.
 	if sr, err := os.ReadFile(filepath.Join(bucket, "skill_raw")); err == nil {
 		resp.SkillRaw = string(sr)
 	}
@@ -278,9 +277,8 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 	// content bucket is keyed by hash, which is 1:1 with a version because the
 	// frontmatter carries the version line). Recover sensitivity from the
 	// frontmatter too when the side file is absent (a prefetch-warmed entry does
-	// not write one): the §4.7.9 policy gate must know the sensitivity so a
-	// high-sensitivity cache-served artifact is verified rather than waved
-	// through, and the frontmatter is the authoritative source for it.
+	// not write one), so a cache-served response reports the sensitivity a live
+	// fetch does.
 	if ctx := manifestContext(string(frontmatter)); ctx != nil {
 		if v, ok := ctx["version"].(string); ok {
 			resp.Version = v

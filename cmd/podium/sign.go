@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -24,7 +25,7 @@ func signCmd(args []string) int {
 	setUsage(fs, "Sign an artifact (or an explicit content hash) via the configured signature provider.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL (resolves the <artifact> form)")
 	contentHash := fs.String("content-hash", "", "sha256:<hex> content hash (lower-level alternative to <artifact>)")
-	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"), "noop|registry-managed|sigstore-keyless")
+	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "registry-managed"), "noop|registry-managed|sigstore-keyless")
 	fs.SetOutput(os.Stderr)
 	artifact, _, err := parsePositional(fs, args)
 	if err != nil {
@@ -52,7 +53,7 @@ func signCmd(args []string) int {
 		return 2
 	}
 
-	provider, err := loadSignatureProvider(*providerName)
+	provider, err := loadSignatureProvider(*providerName, keyForSign)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
@@ -80,7 +81,7 @@ func verifyCmd(args []string) int {
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL (resolves the <artifact> form)")
 	contentHash := fs.String("content-hash", "", "sha256:<hex> content hash (lower-level alternative to <artifact>)")
 	signature := fs.String("signature", "", "signature envelope (lower-level; pairs with --content-hash)")
-	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "noop"), "noop|registry-managed|sigstore-keyless")
+	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "registry-managed"), "noop|registry-managed|sigstore-keyless")
 	fs.SetOutput(os.Stderr)
 	artifact, _, err := parsePositional(fs, args)
 	if err != nil {
@@ -118,7 +119,7 @@ func verifyCmd(args []string) int {
 		return 2
 	}
 
-	provider, err := loadSignatureProvider(*providerName)
+	provider, err := loadSignatureProvider(*providerName, keyForVerify)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
@@ -158,12 +159,31 @@ func resolveArtifactSignature(registry, artifactID string) (hash, signature stri
 	return resp.ContentHash, resp.Signature, 0
 }
 
-// loadSignatureProvider builds a signing provider from the named
-// flag plus the §13 PODIUM_SIGSTORE_* / PODIUM_REGISTRY_KEY env
-// vars. The Noop provider needs no config and is the default.
-func loadSignatureProvider(name string) (sign.Provider, error) {
+// keyUse names the half of the registry-managed keypair a command needs.
+type keyUse int
+
+const (
+	// keyForSign resolves the private half, for podium sign.
+	keyForSign keyUse = iota
+	// keyForVerify resolves the public half, for podium verify.
+	keyForVerify
+)
+
+// loadSignatureProvider builds the named provider. The noop and
+// sigstore-keyless arms ignore use; sigstore-keyless reads the
+// PODIUM_SIGSTORE_* variables. The registry-managed arm, the default, resolves
+// exactly the half use names: the public half from PODIUM_SIGNATURE_VERIFY_KEY
+// when set (authoritative, so a malformed value is an error) and otherwise
+// from the registry key file at sign.KeyFilePath(PODIUM_SIGN_KEY_PATH); the
+// private half from that key file alone, because the variable carries a public
+// key only. On a standalone machine both resolve the file the registry
+// generated. A failed resolution leads with config.signature_provider_unavailable
+// and returns before any Sign or Verify call.
+//
+// Spec: §4.7.9, §6.2.
+func loadSignatureProvider(name string, use keyUse) (sign.Provider, error) {
 	switch strings.ToLower(name) {
-	case "", "noop":
+	case "noop":
 		return sign.Noop{}, nil
 	case "sigstore-keyless":
 		root, _ := os.ReadFile(os.Getenv("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE"))
@@ -174,11 +194,42 @@ func loadSignatureProvider(name string) (sign.Provider, error) {
 			TrustRoot: root,
 		}, nil
 	case "registry-managed":
-		// Loading the per-tenant key from the secret backend is the
-		// production path. The CLI shim here returns the structured
-		// type without a key; callers wiring this end-to-end supply
-		// keys via env or a file in subsequent passes.
-		return sign.RegistryManagedKey{}, nil
+		if use == keyForSign {
+			return registryManagedSigner()
+		}
+		return registryManagedVerifier()
 	}
 	return nil, fmt.Errorf("unknown signature provider: %s", name)
+}
+
+// registryManagedSigner reads the private half from the registry key file.
+// PODIUM_SIGNATURE_VERIFY_KEY is not read.
+func registryManagedSigner() (sign.Provider, error) {
+	path, err := sign.KeyFilePath(os.Getenv("PODIUM_SIGN_KEY_PATH"))
+	if err == nil {
+		var priv ed25519.PrivateKey
+		if priv, err = sign.PrivateKeyFromKeyFile(path); err == nil {
+			return sign.RegistryManagedKey{PrivateKey: priv}, nil
+		}
+	}
+	return nil, fmt.Errorf("config.signature_provider_unavailable: the registry key file (PODIUM_SIGN_KEY_PATH) yields no private key to sign with: %w", err)
+}
+
+// registryManagedVerifier resolves the public half in the §4.7.9 order.
+func registryManagedVerifier() (sign.Provider, error) {
+	if raw := os.Getenv("PODIUM_SIGNATURE_VERIFY_KEY"); raw != "" {
+		pub, err := sign.PublicKeyFromBase64(raw)
+		if err != nil {
+			return nil, fmt.Errorf("config.signature_provider_unavailable: PODIUM_SIGNATURE_VERIFY_KEY: %w", err)
+		}
+		return sign.RegistryManagedKey{PublicKey: pub}, nil
+	}
+	path, err := sign.KeyFilePath(os.Getenv("PODIUM_SIGN_KEY_PATH"))
+	if err == nil {
+		var pub ed25519.PublicKey
+		if pub, err = sign.PublicKeyFromKeyFile(path); err == nil {
+			return sign.RegistryManagedKey{PublicKey: pub}, nil
+		}
+	}
+	return nil, fmt.Errorf("config.signature_provider_unavailable: PODIUM_SIGNATURE_VERIFY_KEY is unset and the registry key file (PODIUM_SIGN_KEY_PATH) yields no usable public key: %w", err)
 }

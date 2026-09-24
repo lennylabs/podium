@@ -130,6 +130,28 @@ func TestConfigClientShow_Explain(t *testing.T) {
 	}
 }
 
+// spec: §7.5.2 — defaults.verify_signatures resolves across the scopes the
+// bridge reads: a project-local always outranks a home-global never, and
+// --explain names the winning scope.
+func TestConfigClientShow_ExplainVerifySignatures(t *testing.T) {
+	home := t.TempDir()
+	ws := t.TempDir()
+	mustWrite(t, filepath.Join(home, ".podium", "sync.yaml"), "defaults:\n  verify_signatures: never\n")
+	mustWrite(t, filepath.Join(ws, ".podium", "sync.local.yaml"), "defaults:\n  verify_signatures: always\n")
+
+	out := captureStdout(t, func() {
+		if rc := configClientShowAt(ws, home, false, "verify_signatures"); rc != 0 {
+			t.Errorf("rc = %d, want 0", rc)
+		}
+	})
+	if !strings.Contains(out, "resolved: always") {
+		t.Errorf("explain should resolve always:\n%s", out)
+	}
+	if !strings.Contains(out, "sync.local.yaml") {
+		t.Errorf("explain should name the project-local scope:\n%s", out)
+	}
+}
+
 // spec: §6.10 — JSON output stays structured for tooling.
 func TestConfigClientShow_JSON(t *testing.T) {
 	home := t.TempDir()

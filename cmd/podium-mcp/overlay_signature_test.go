@@ -97,37 +97,8 @@ func TestDeliverLoadArtifact_PolicyAlwaysRejectsUnsigned(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.9 — PolicyMediumAndAbove (the default) requires a
-// signature only for medium/high sensitivity. A low-sensitivity
-// overlay load under the default policy succeeds — that's the
-// "personal drafts work without signing keys" case.
-func TestLoadArtifactFromOverlay_PolicyMediumAndAboveAllowsLowSensitivity(t *testing.T) {
-	t.Parallel()
-	s := overlayTestServer(t, sign.PolicyMediumAndAbove)
-	rec := &filesystem.ArtifactRecord{
-		ID: "personal/draft",
-		ArtifactBytes: []byte(
-			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
-		AuthoredBytes: []byte(
-			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
-		Artifact: &manifest.Artifact{
-			Type:        manifest.TypeContext,
-			Version:     "1.0.0",
-			Sensitivity: manifest.SensitivityLow,
-		},
-	}
-	got := s.loadArtifactFromOverlay(rec, nil)
-	m, ok := got.(map[string]any)
-	if !ok {
-		t.Fatalf("type = %T", got)
-	}
-	if _, has := m["error"]; has {
-		t.Errorf("low-sensitivity overlay should not require a signature, got %v", m)
-	}
-}
-
 // Spec: §6.4 / §6.6 — a high-sensitivity overlay artifact loads
-// without signature verification even under PolicyMediumAndAbove.
+// without signature verification even under PolicyAlways.
 // This is the same trust boundary as above: overlay bytes are the
 // developer's own local files, exempt from the registry-issued
 // signature regime. Sensitivity affects how the host treats the
@@ -135,7 +106,7 @@ func TestLoadArtifactFromOverlay_PolicyMediumAndAboveAllowsLowSensitivity(t *tes
 // promote the overlay into the registry's chain of custody.
 func TestLoadArtifactFromOverlay_HighSensitivityAllowedOnLocalAuthor(t *testing.T) {
 	t.Parallel()
-	s := overlayTestServer(t, sign.PolicyMediumAndAbove)
+	s := overlayTestServer(t, sign.PolicyAlways)
 	rec := &filesystem.ArtifactRecord{
 		ID: "personal/high",
 		ArtifactBytes: []byte(
@@ -154,7 +125,7 @@ func TestLoadArtifactFromOverlay_HighSensitivityAllowedOnLocalAuthor(t *testing.
 		t.Fatalf("type = %T", got)
 	}
 	if _, has := m["error"]; has {
-		t.Errorf("high-sensitivity overlay rejected under PolicyMediumAndAbove; "+
+		t.Errorf("high-sensitivity overlay rejected under PolicyAlways; "+
 			"spec §6.6 scopes signature verification to registry-returned bytes. "+
 			"Got: %v", m["error"])
 	}

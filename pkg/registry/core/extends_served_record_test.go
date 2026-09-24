@@ -9,7 +9,6 @@ import (
 	"testing/fstest"
 
 	"github.com/lennylabs/podium/pkg/layer"
-	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -119,7 +118,7 @@ func TestExtends_ServedSignatureVerifiesAgainstServedContentHash(t *testing.T) {
 		t.Fatal("served signature is empty; the signer should have produced one at ingest")
 	}
 	if err := sign.EnforceVerification(context.Background(), sign.PolicyAlways, signer,
-		manifest.Sensitivity(got.Sensitivity), got.ContentHash, got.Signature); err != nil {
+		got.ContentHash, got.Signature); err != nil {
 		t.Errorf("the served signature does not verify against the served content hash: %v", err)
 	}
 }

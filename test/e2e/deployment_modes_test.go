@@ -183,7 +183,7 @@ func TestDeployment_HealthReadyJSON(t *testing.T) {
 func TestDeployment_MCPMetaToolsAndCapabilities(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		rpcReq{ID: 1, Method: "initialize"},
 		rpcReq{ID: 2, Method: "tools/list"},
 	)
@@ -210,7 +210,7 @@ func TestDeployment_MCPLoadDomainRoot(t *testing.T) {
 		"greetings/hello/ARTIFACT.md": greetSkillArtifact,
 		"greetings/hello/SKILL.md":    skillBody("hello"),
 	}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "load_domain", map[string]any{}))
 	result := rpcResult(t, res.Stdout, 1)
 	subs, _ := result["subdomains"].([]any)
@@ -260,6 +260,7 @@ func TestDeployment_MCPLoadArtifactNotFound(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
 	mat := t.TempDir()
 	res := mcpExec(t, []string{
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
@@ -341,6 +342,7 @@ func TestDeployment_OverlayHighestPrecedence(t *testing.T) {
 		"greetings/hello/ARTIFACT.md": contextArtifact("overlay-version"),
 	})
 	res := mcpExec(t, []string{
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_OVERLAY_PATH=" + overlay,
 		"PODIUM_HARNESS=none",

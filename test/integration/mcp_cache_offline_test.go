@@ -18,6 +18,7 @@ func loadArtifactOver(t *testing.T, registry, cacheDir string, extraEnv ...strin
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+registry,
 		"PODIUM_HARNESS=none",
 		"PODIUM_CACHE_DIR="+cacheDir,

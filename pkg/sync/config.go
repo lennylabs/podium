@@ -41,9 +41,9 @@ type Defaults struct {
 	// identity and ignores it.
 	Identity string `yaml:"identity,omitempty"`
 	// VerifySignatures is the consumer-side §4.7.9 signature-verification
-	// policy (never | medium-and-above | always). A standalone deployment
-	// writes `never` here on first run so consumers relax the default without
-	// an env var (§13.10); PODIUM_VERIFY_SIGNATURES overrides it.
+	// policy (never | always). It is operator-set and resolves across the
+	// §7.5.2 scopes like every other defaults key; PODIUM_VERIFY_SIGNATURES
+	// overrides it, and the §6.2 default when no scope sets it is always.
 	VerifySignatures string `yaml:"verify_signatures,omitempty"`
 	// MinServerVersion pins the minimum MCP server / CLI binary version this
 	// configuration requires (§6.7 "Versioning": a profile or harness

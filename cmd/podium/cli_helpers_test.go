@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -101,24 +104,29 @@ func TestEnvDefault(t *testing.T) {
 	}
 }
 
+// spec: §4.7.9, §6.2 — loadSignatureProvider builds each named provider. An
+// empty name names no provider. The registry-managed arm resolves only the
+// half its keyUse names, on a hermetic home: with no material each use
+// refuses with config.signature_provider_unavailable, the sign half never
+// reads PODIUM_SIGNATURE_VERIFY_KEY, and with a key file each use returns the
+// half it needs. Not parallel: it mutates the environment.
 func TestLoadSignatureProvider(t *testing.T) {
 	cases := []struct {
 		name    string
 		wantErr bool
 		wantTyp string
 	}{
-		{"", false, "sign.Noop"},
+		{"", true, ""},
 		{"noop", false, "sign.Noop"},
 		{"NOOP", false, "sign.Noop"},
 		{"sigstore-keyless", false, "sign.SigstoreKeyless"},
-		{"registry-managed", false, "sign.RegistryManagedKey"},
 		{"unknown", true, ""},
 	}
 	for _, c := range cases {
-		got, err := loadSignatureProvider(c.name)
+		got, err := loadSignatureProvider(c.name, keyForVerify)
 		if c.wantErr {
-			if err == nil {
-				t.Errorf("loadSignatureProvider(%q) = nil error, want error", c.name)
+			if err == nil || !strings.Contains(err.Error(), "unknown signature provider:") {
+				t.Errorf("loadSignatureProvider(%q) = %v, want the unknown-provider error", c.name, err)
 			}
 			continue
 		}
@@ -131,6 +139,31 @@ func TestLoadSignatureProvider(t *testing.T) {
 			t.Errorf("loadSignatureProvider(%q) type = %s, want %s", c.name, gotTyp, c.wantTyp)
 		}
 		_ = sign.Provider(got)
+	}
+
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", "")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
+	if _, err := loadSignatureProvider("registry-managed", keyForVerify); err == nil || !strings.Contains(err.Error(), "config.signature_provider_unavailable") {
+		t.Errorf("verify half with no material = %v, want config.signature_provider_unavailable", err)
+	}
+	other, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(other))
+	if _, err := loadSignatureProvider("registry-managed", keyForSign); err == nil || !strings.Contains(err.Error(), "config.signature_provider_unavailable") {
+		t.Errorf("sign half with only a verify key = %v, want config.signature_provider_unavailable", err)
+	}
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", "")
+	priv, pub := writeRegistryKeyFile(t)
+	verifier, err := loadSignatureProvider("registry-managed", keyForVerify)
+	if err != nil || !verifier.(sign.RegistryManagedKey).PublicKey.Equal(pub) {
+		t.Errorf("verify half with a key file = %v, %v; want the file's public key", verifier, err)
+	}
+	signer, err := loadSignatureProvider("registry-managed", keyForSign)
+	if err != nil || !signer.(sign.RegistryManagedKey).PrivateKey.Equal(priv) {
+		t.Errorf("sign half with a key file = %v, %v; want the file's private key", signer, err)
 	}
 }
 

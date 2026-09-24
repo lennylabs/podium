@@ -976,7 +976,7 @@ func TestSearch_SearchDomainsNoSubtree(t *testing.T) {
 // can distinguish a transient outage from a request rejection.
 func TestSearch_OfflineSearchArtifacts(t *testing.T) {
 	t.Parallel()
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
 		toolCall(1, "search_artifacts", map[string]any{"query": "anything"}))
 	result := rpcResult(t, res.Stdout, 1)
 	if result["status"] != "offline" {
@@ -994,7 +994,7 @@ func TestSearch_OfflineSearchArtifacts(t *testing.T) {
 // status, not an error.
 func TestSearch_OfflineLoadDomain(t *testing.T) {
 	t.Parallel()
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
 		toolCall(1, "load_domain", map[string]any{}))
 	result := rpcResult(t, res.Stdout, 1)
 	if result["status"] != "offline" {

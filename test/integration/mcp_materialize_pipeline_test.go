@@ -58,6 +58,7 @@ func TestPodiumMCP_ContentHashMismatchRejected(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+reg.URL,
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT="+target,
@@ -194,6 +195,7 @@ func runMCPLoad(t *testing.T, regURL, target, id string) mcpResult {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+regURL,
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT="+target,
@@ -269,6 +271,7 @@ func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+reg.URL,
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT="+target,

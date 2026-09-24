@@ -756,13 +756,15 @@ func TestArtifactResponse_SignatureMissing(t *testing.T) {
 	}))
 	mat := t.TempDir()
 	// The environment is stated in full rather than built on mcpServerEnv,
-	// which carries its own PODIUM_VERIFY_SIGNATURES entry.
+	// which carries its own PODIUM_VERIFY_SIGNATURES entry. The bridge needs
+	// verification material to start under always; the key signs nothing.
 	env := []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_VERIFY_SIGNATURES=always",
+		verifyKeyEnv(t),
 	}
 	res := mcpExec(t, env,
 		toolCall(1, "load_artifact", map[string]any{"id": "finance/ap/pay-invoice"}))
