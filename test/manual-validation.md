@@ -7578,8 +7578,8 @@ one algorithm and read by another, which no in-process test constructs.
 
    **Expect.** The command reports `manifests: 1` in its source plan, then
    `metadata migration complete (0 admin grant(s) preserved)` and `object
-   migration complete (4 blob(s))`, and warns that the audit history was not
-   copied. `select count(*) from data_migrations` prints `0`, which is the
+   migration complete (4 blob(s))`. `select count(*) from data_migrations`
+   prints `0`, which is the
    cleared marker. The target's start then logs
    `rehash: 1 rewritten, 1 already migrated, 0 signature_unverified, 0
    unreproducible, 0 body_missing, 0 body_unavailable (0 unread), 0 in
