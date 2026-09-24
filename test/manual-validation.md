@@ -59,6 +59,7 @@ export PODIUM_SIGN_KEY_PATH="$WORK/registry-signing.key"
 export GOPATH="$(go env GOPATH)" GOMODCACHE="$(go env GOMODCACHE)" GOCACHE="$(go env GOCACHE)" GOENV="$(go env GOENV)"
 export DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}"
 export HOME="$WORK/home"; mkdir -p "$HOME"
+cd "$WORK"
 unset PODIUM_REGISTRY PODIUM_HARNESS PODIUM_SESSION_TOKEN
 which podium    # must print $PODIUM_BIN/podium
 ```
@@ -73,7 +74,14 @@ the operator's home for the repository paths the scenarios reach, and the Go
 and Docker exports keep the module cache, the build cache, and the Docker CLI's
 plugins where they were, so `go run` and `docker compose` work under the new
 `HOME`. The block sets these before it moves `HOME`, because each expands the
-operator's real home. A scenario whose subject is an unsigned registry sets
+operator's real home. The block ends in `$WORK`, because `podium-mcp` and
+the `podium` CLI discover a workspace `.podium/sync.yaml` by walking up from the
+current directory, and a walk from the repository reaches the operator's real
+`~/.podium/sync.yaml`, whose `defaults.verify_signatures` or
+`defaults.registry` would then configure the run. A step that needs the
+repository as its working directory names it: `go -C "$REAL_HOME/projects/podium"`
+for `go run`, and a subshell `(cd "$REAL_HOME/projects/podium" && ...)` for
+`make` and `docker compose`, so the scenario's shell stays in `$WORK`. A scenario whose subject is an unsigned registry sets
 `PODIUM_SIGN=none` in its own steps, and S19, S64, S66, and S68 are the
 scenarios that do.
 
@@ -839,7 +847,7 @@ visibility, the mint helper in `tools/minttoken`.
    Seed SCIM so the `engineering` group resolves.
 
    ```bash
-   go run ./tools/minttoken --keys "$WORK/keys" >/dev/null 2>&1   # writes the keypair
+   go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" >/dev/null 2>&1   # writes the keypair
    podium admin runtime register --keys-file "$WORK/keys/runtimes.json" --issuer manual-runtime --algorithm RS256 --public-key-file "$WORK/keys/runtime-pub.pem"
    export PODIUM_IDENTITY_PROVIDER=injected-session-token
    export PODIUM_RUNTIME_KEYS_PATH="$WORK/keys/runtimes.json"
@@ -860,8 +868,8 @@ visibility, the mint helper in `tools/minttoken`.
 4. Mint a token for each caller and search.
 
    ```bash
-   ALICE=$(go run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com --groups engineering)
-   BOB=$(go run ./tools/minttoken --keys "$WORK/keys" --sub bob@acme.com --email bob@acme.com)
+   ALICE=$(go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com --groups engineering)
+   BOB=$(go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" --sub bob@acme.com --email bob@acme.com)
    echo "--- alice (engineering) ---"; PODIUM_SESSION_TOKEN="$ALICE" podium search --registry "$PODIUM_REGISTRY" ""
    echo "--- bob (no group) ---";      PODIUM_SESSION_TOKEN="$BOB"   podium search --registry "$PODIUM_REGISTRY" ""
    echo "--- anonymous ---";           podium search --registry "$PODIUM_REGISTRY" ""
@@ -899,8 +907,8 @@ show-effective`, bootstrap admins.
 3. Exercise the admin surface as alice (admin) and bob (non-admin).
 
    ```bash
-   ALICE=$(go run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com)
-   BOB=$(go run ./tools/minttoken --keys "$WORK/keys" --sub bob@acme.com --email bob@acme.com)
+   ALICE=$(go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com)
+   BOB=$(go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" --sub bob@acme.com --email bob@acme.com)
    echo "--- bob attempts an admin grant (expect refusal) ---"
    PODIUM_SESSION_TOKEN="$BOB" podium admin grant --registry "$PODIUM_REGISTRY" carol@acme.com
    echo "--- alice grants bob admin ---"
@@ -952,7 +960,7 @@ absent.
    is exercised against newly ingested bytes.
 
    ```bash
-   cd $REAL_HOME/projects/podium && make services-up
+   (cd "$REAL_HOME/projects/podium" && make services-up)
    set -a; source $REAL_HOME/projects/podium/test.env; set +a
    export PODIUM_REGISTRY_STORE=postgres
    export PODIUM_OBJECT_STORE=s3
@@ -993,7 +1001,7 @@ absent.
   an empty inline `resources` map, so the control plane does not stream the
   large body inline (§7.2 sets the inline cutoff at 256 KB).
 
-**Cleanup.** Stop the server, `rm -rf "$WORK"`, and `make services-down` when
+**Cleanup.** Stop the server, `rm -rf "$WORK"`, and `(cd "$REAL_HOME/projects/podium" && make services-down)` when
 finished with the standard-mode scenarios.
 
 ---
@@ -1032,7 +1040,7 @@ selection.
    creates the per-org schema inside it but does not create the database itself.
 
    ```bash
-   cd $REAL_HOME/projects/podium && make services-up
+   (cd "$REAL_HOME/projects/podium" && make services-up)
    set -a; source $REAL_HOME/projects/podium/test.env; set +a
    export PODIUM_REGISTRY_STORE=postgres
    export PODIUM_OBJECT_STORE=s3
@@ -1116,7 +1124,7 @@ if absent.
    shared self-embedding index.
 
    ```bash
-   cd $REAL_HOME/projects/podium && make services-up
+   (cd "$REAL_HOME/projects/podium" && make services-up)
    set -a; source $REAL_HOME/projects/podium/test.env; set +a
    export PODIUM_REGISTRY_STORE=postgres
    export PODIUM_OBJECT_STORE=s3
@@ -1422,14 +1430,14 @@ scenario's data is needed.
    does not serve here, because it keeps the volumes.
 
    ```bash
-   (cd $REAL_HOME/projects/podium && docker compose down -v && make services-up)
+   (cd "$REAL_HOME/projects/podium" && docker compose down -v && make services-up)
    until [ "$(docker inspect -f '{{.State.Health.Status}}' podium-postgres 2>/dev/null)" = "healthy" ]; do
      sleep 2
    done
    until [ "$(docker inspect -f '{{.State.Status}}' podium-bootstrap 2>/dev/null)" = "exited" ]; do
      sleep 2
    done
-   (cd $REAL_HOME/projects/podium && docker compose ps -a)
+   (cd "$REAL_HOME/projects/podium" && docker compose ps -a)
    ```
 
    **Expect.** Both loops return, so Postgres reports `healthy` and the bucket
@@ -1482,7 +1490,7 @@ scenario's data is needed.
   migrated `deploy` skill in a search for `deploy`, and those are the only rows
   the store holds.
 
-**Cleanup.** Stop the server, `rm -rf "$WORK"`, and `make services-down`.
+**Cleanup.** Stop the server, `rm -rf "$WORK"`, and `(cd "$REAL_HOME/projects/podium" && make services-down)`.
 
 ---
 
@@ -1553,7 +1561,7 @@ the single-Postgres stack.
   `registry exited read_only mode` and the audit log records a
   `registry.read_only_exited` event.
 
-**Cleanup.** Stop the server, `rm -rf "$WORK"`, and `make services-down`.
+**Cleanup.** Stop the server, `rm -rf "$WORK"`, and `(cd "$REAL_HOME/projects/podium" && make services-down)`.
 
 ---
 
@@ -1940,7 +1948,7 @@ log, `admin erase`, `admin retention`.
 
    ```bash
    podium artifact scaffold --type skill --description "Quarterly report" "$WORK/reg/report"
-   go run ./tools/minttoken --keys "$WORK/keys" >/dev/null 2>&1
+   go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" >/dev/null 2>&1
    podium admin runtime register --keys-file "$WORK/keys/runtimes.json" --issuer manual-runtime --algorithm RS256 --public-key-file "$WORK/keys/runtime-pub.pem"
    export PODIUM_IDENTITY_PROVIDER=injected-session-token
    export PODIUM_RUNTIME_KEYS_PATH="$WORK/keys/runtimes.json"
@@ -1954,7 +1962,7 @@ log, `admin erase`, `admin retention`.
 3. Generate audited activity as alice, then inspect the audit log.
 
    ```bash
-   ALICE=$(go run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com)
+   ALICE=$(go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com)
    PODIUM_SESSION_TOKEN="$ALICE" podium search --registry "$PODIUM_REGISTRY" "report"
    PODIUM_SESSION_TOKEN="$ALICE" podium artifact show --registry "$PODIUM_REGISTRY" report
    grep -c alice "$PODIUM_AUDIT_LOG_PATH"
@@ -2489,7 +2497,7 @@ allowlist, and the per-receiver `debounce` field.
 **Steps.**
 
 1. Run the isolation block.
-2. Generate a runtime key (`go run ./tools/minttoken --keys "$WORK/keys"`), write it
+2. Generate a runtime key (`go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys"`), write it
    into the keys file with `podium admin runtime register --keys-file`, then boot an
    injected-session-token standalone server against that file with `alice@acme.com`
    as a bootstrap admin over a one-artifact registry (as in S12 and
@@ -2503,8 +2511,8 @@ allowlist, and the per-receiver `debounce` field.
    the URL but does not connect.
 
    ```bash
-   ALICE=$(go run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com)
-   BOB=$(go run ./tools/minttoken --keys "$WORK/keys" --sub bob@acme.com --email bob@acme.com)
+   ALICE=$(go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com)
+   BOB=$(go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" --sub bob@acme.com --email bob@acme.com)
    post() {
      if [ -n "$1" ]; then
        curl -s -w '\n%{http_code}\n' -X POST "$PODIUM_REGISTRY/v1/webhooks" \
@@ -4592,8 +4600,8 @@ them into S21 permanently if its setup already reaches this state.
 2. Read the write set from the two shipped documents rather than from memory.
 
    ```bash
-   grep -n "read-only" -A4 docs/reference/http-api.md | grep -i "ingest webhooks"
-   grep -n "Impact" -A4 deploy/runbook.md | grep -i "ingest webhooks"
+   grep -n "read-only" -A4 "$REAL_HOME/projects/podium/docs/reference/http-api.md" | grep -i "ingest webhooks"
+   grep -n "Impact" -A4 "$REAL_HOME/projects/podium/deploy/runbook.md" | grep -i "ingest webhooks"
    ```
 
    **Expect.** Both enumerate ingest webhooks, layer admin operations, freeze
@@ -4768,7 +4776,7 @@ rather than trying to avoid them.
 1. Build the image the chart references and create the cluster.
 
    ```bash
-   cd "$(git rev-parse --show-toplevel)"
+   cd "$REAL_HOME/projects/podium"
    docker build -t ghcr.io/lennylabs/podium:0.0.0-dev .
    kind create cluster --name podium-s46
    kubectl wait --for=condition=Ready node --all --timeout=180s
@@ -4778,6 +4786,10 @@ rather than trying to avoid them.
    **Expect.** The build succeeds, the node reports `Ready`, and `kind load`
    reports the image loading onto the node. Skipping the load leaves the pod in
    `ErrImagePull`, because `0.0.0-dev` resolves to nothing in any registry.
+   The remaining steps run from the repository, because the `helm` commands
+   name the chart by its relative path. The scenario starts no `podium-mcp` and
+   no `podium` CLI command that reads `sync.yaml`, so the workspace walk from
+   this directory configures nothing.
 
 2. Deploy the chart's dependencies into the cluster: Postgres for the metadata
    store and MinIO for object storage. Both run without persistence, which is
