@@ -8,6 +8,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // seedRuntimeLayers builds a store with one admin layer present at boot and
@@ -52,7 +53,7 @@ func mustPutLayer(t *testing.T, st store.Store, c store.LayerConfig) {
 
 func mustPutManifest(t *testing.T, st store.Store, m store.ManifestRecord) {
 	t.Helper()
-	if err := st.PutManifest(context.Background(), m); err != nil {
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, m, nil, nil)); err != nil {
 		t.Fatalf("PutManifest %q: %v", m.ArtifactID, err)
 	}
 }

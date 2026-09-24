@@ -139,8 +139,9 @@ func loadRehashSkill(t testing.TB, baseURL string) string {
 
 // Spec: §4.7.6, §6.6, §13.4 — the registry rewrites every stored content hash
 // on the first start of this version, once per store. A row still at the
-// previous release's digest fails a consumer's §6.6 step-2 check, which is what
-// makes the completion record observable: with it set the second start skips the
+// previous release's digest is refused by the registry's §13.4 stored-row
+// admission check with materialize.content_hash_mismatch, which is what makes
+// the completion record observable: with it set the second start skips the
 // pass and the load is refused, and with it cleared the next start rewrites the
 // row and the same load succeeds.
 func TestE2E_BootRehashesStoredContentHashes(t *testing.T) {

@@ -1,5 +1,11 @@
 package server
 
+import (
+	"errors"
+
+	"github.com/lennylabs/podium/pkg/registry/core"
+)
+
 // spec: SS 6.10 — the structured error envelope carries a `retryable`
 // flag and a `suggested_action` remediation hint. errorCodeMeta is the
 // per-code source of truth for both so every emission path (writeError,
@@ -103,6 +109,20 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	"registry.tenant_management_unavailable": {
 		suggestedAction: "Start the registry in multi-tenant mode (PODIUM_MULTI_TENANT) on a standard backend to manage tenants.",
 	},
+}
+
+// admissionCode returns the §6.10 code of a §13.4 stored-row admission
+// refusal: the sentinel's own text, which is the code it names. None of the
+// codes has a registry entry, so each is served retryable: false.
+// Callers reach it only for an error that wraps one of the three, so the
+// registry.unavailable return is defensive.
+func admissionCode(err error) string {
+	for _, sentinel := range []error{core.ErrContentHashMismatch, core.ErrStoredSignatureMissing, core.ErrStoredSignatureInvalid} {
+		if errors.Is(err, sentinel) {
+			return sentinel.Error()
+		}
+	}
+	return "registry.unavailable"
 }
 
 // enrichEnvelope fills the retryable flag and suggested_action from the

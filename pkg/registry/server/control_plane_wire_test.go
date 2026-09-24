@@ -15,6 +15,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 	"github.com/lennylabs/podium/pkg/vector"
 )
 
@@ -207,7 +208,7 @@ func bootReembedServer(t *testing.T, failMarker string) *httptest.Server {
 		{TenantID: "default", ArtifactID: "beta", Version: "1.0.0",
 			Description: "beta desc", Body: []byte("body beta"), Layer: "L"},
 	} {
-		if err := st.PutManifest(context.Background(), m); err != nil {
+		if err := st.PutManifest(context.Background(), storetest.Seal(t, m, nil, nil)); err != nil {
 			t.Fatalf("PutManifest: %v", err)
 		}
 	}

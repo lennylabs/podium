@@ -2194,7 +2194,9 @@ func splitCSV(s string) []string {
 // registry-managed for tenant-key deployments. The registry-managed
 // verifier loads the registry's public key from
 // PODIUM_SIGNATURE_VERIFY_KEY (base64 Ed25519) so the consumer can check
-// the detached signature envelope (§4.7.9).
+// the detached signature envelope a load serves (§4.7.9). The registry
+// checks the stored envelope before it serves the row (§13.4 stored-row
+// admission); this check is the consumer's own.
 func buildSignatureProvider(name string) (sign.Provider, error) {
 	switch name {
 	case "", "noop":
@@ -2419,8 +2421,9 @@ func (s *mcpServer) headContentHash(path string, args map[string]any) (string, e
 }
 
 // batchLoadEnvelope mirrors the registry's §7.6.2 per-item batch response,
-// decoding only the fields prefetch needs to warm the cache. Bundled resources
-// travel as presigned references the consumer fetches on demand, so prefetch
+// decoding only the fields prefetch needs to warm the cache. A bundled
+// resource travels inline when the registry holds it inline on the manifest
+// record and as a presigned reference otherwise; prefetch decodes neither and
 // warms the manifest body and resolution rather than resource bytes.
 type batchLoadEnvelope struct {
 	ID           string `json:"id"`

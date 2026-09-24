@@ -541,8 +541,9 @@ export class LoadedArtifact {
 
 // Spec §7.6.2 — one bulk-load envelope with a materialize() helper. Status
 // is "ok" when the artifact resolved and "error" otherwise; the error
-// envelope carries the §6.10 code. Batch resources travel as presigned
-// references, so materialize fetches every resource.
+// envelope carries the §6.10 code. A resource the registry holds inline on
+// the manifest record travels inline, and materialize fetches every other
+// resource from its presigned reference.
 export class BatchResult {
   id: string;
   status: "ok" | "error";
@@ -553,9 +554,10 @@ export class BatchResult {
   frontmatter?: string;
   // spec: §4.3.4 / §11 — verbatim SKILL.md for a skill (byte-identical).
   skill_raw?: string;
-  // A resource carries presigned_url with an object store configured, or the
-  // bytes inline (base64-encoded when inline_base64 is set) in the
-  // standalone-without-storage mode (§7.6.2).
+  // A resource the registry holds inline on the manifest record carries its
+  // bytes inline (base64-encoded when inline_base64 is set), at any size and
+  // whether or not an object store is configured; every other resource
+  // carries presigned_url (§7.6.2).
   resources?: {
     path: string;
     presigned_url?: string;
@@ -603,10 +605,10 @@ export class BatchResult {
         suggested_action: this.error?.suggested_action,
       });
     }
-    // §7.6.2: a resource carries a presigned_url with an object store
-    // configured. In the standalone-without-storage mode it carries the bytes
-    // inline (base64-encoded when inline_base64 is set), so deliver those
-    // rather than fetching a URL that does not exist.
+    // §7.6.2: a resource the registry holds inline on the manifest record
+    // carries its bytes inline (base64-encoded when inline_base64 is set), at
+    // any size and whether or not an object store is configured. Every other
+    // resource carries a presigned_url, which is fetched.
     const large: Record<string, LargeResourceLink> = {};
     const inline: Record<string, string | Uint8Array> = {};
     for (const r of this.resources ?? []) {

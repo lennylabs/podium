@@ -10,6 +10,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 const tenant = "tenant-1"
@@ -257,21 +258,21 @@ func TestLoadArtifact_LatestResolution(t *testing.T) {
 	t.Parallel()
 	st2 := store.NewMemory()
 	_ = st2.CreateTenant(context.Background(), store.Tenant{ID: tenant})
-	_ = st2.PutManifest(context.Background(), store.ManifestRecord{
+	_ = st2.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "x", Version: "1.0.0",
 		ContentHash: "sha256:a", Type: "context", Body: []byte("v1"),
 		Layer: "team-shared",
-	})
-	_ = st2.PutManifest(context.Background(), store.ManifestRecord{
+	}, nil, nil))
+	_ = st2.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "x", Version: "2.1.0",
 		ContentHash: "sha256:b", Type: "context", Body: []byte("v2"),
 		Layer: "team-shared",
-	})
-	_ = st2.PutManifest(context.Background(), store.ManifestRecord{
+	}, nil, nil))
+	_ = st2.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "x", Version: "1.5.0",
 		ContentHash: "sha256:c", Type: "context", Body: []byte("v15"),
 		Layer: "team-shared",
-	})
+	}, nil, nil))
 	reg2 := core.New(st2, tenant, []layer.Layer{
 		{ID: "team-shared", Visibility: layer.Visibility{Public: true}, Precedence: 1},
 	})
@@ -290,10 +291,10 @@ func TestLoadArtifact_MajorPin(t *testing.T) {
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
 	for _, v := range []string{"1.0.0", "1.5.2", "1.5.10", "2.0.0"} {
-		_ = st.PutManifest(context.Background(), store.ManifestRecord{
+		_ = st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 			TenantID: tenant, ArtifactID: "x", Version: v,
 			ContentHash: "sha256:" + v, Type: "context", Layer: "L",
-		})
+		}, nil, nil))
 	}
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "L", Visibility: layer.Visibility{Public: true}, Precedence: 1},
@@ -326,14 +327,14 @@ func TestVisibility_FiltersByLayer(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
-	_ = st.PutManifest(context.Background(), store.ManifestRecord{
+	_ = st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "public-x", Version: "1.0.0",
 		ContentHash: "sha256:a", Type: "context", Layer: "public",
-	})
-	_ = st.PutManifest(context.Background(), store.ManifestRecord{
+	}, nil, nil))
+	_ = st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "private-y", Version: "1.0.0",
 		ContentHash: "sha256:b", Type: "context", Layer: "private",
-	})
+	}, nil, nil))
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "public", Visibility: layer.Visibility{Public: true}, Precedence: 1},
 		{ID: "private", Visibility: layer.Visibility{Users: []string{"specific-user"}}, Precedence: 2},

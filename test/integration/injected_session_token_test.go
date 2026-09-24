@@ -19,6 +19,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 const istAudience = "https://podium.acme.com"
@@ -110,7 +111,7 @@ func istServer(t *testing.T, audiences ...string) (*httptest.Server, *rsa.Privat
 		{TenantID: "default", ArtifactID: "finance/ap/pay-invoice", Version: "2.0.0", ContentHash: "sha256:f2", Type: "skill", Description: "pay invoice", Layer: "shared", IngestedAt: base.Add(time.Hour)},
 		{TenantID: "default", ArtifactID: "hr/policies", Version: "1.0.0", ContentHash: "sha256:h1", Type: "context", Description: "hr policies", Layer: "shared", IngestedAt: base},
 	} {
-		if err := st.PutManifest(ctx, r); err != nil {
+		if err := st.PutManifest(ctx, storetest.Seal(t, r, nil, nil)); err != nil {
 			t.Fatalf("PutManifest: %v", err)
 		}
 	}

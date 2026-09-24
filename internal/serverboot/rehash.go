@@ -107,8 +107,9 @@ func (r rehashRow) key() string {
 // the registry holds, once per store, on the first start of this version that
 // binds its listen address. It runs before the bootstrap ingest and before
 // anything is served, because an ingest that meets a row still at the previous
-// digest reports a conflict for it and a served row at the previous digest
-// fails a consumer's §6.6 step-2 check with materialize.content_hash_mismatch.
+// digest reports a conflict for it, and the registry's §13.4 stored-row
+// admission check refuses a load of a row still at the previous digest with
+// materialize.content_hash_mismatch.
 //
 // Spec: §13.4 — "A release that changes how a stored value is computed rewrites
 // the affected rows in place, from the bytes the registry holds, on the first
@@ -249,7 +250,7 @@ func (p *rehashPlanner) assemble(ctx context.Context, rec store.ManifestRecord) 
 		if p.deadlineSpent {
 			return nil, &bodyFailure{class: classBodyUnavailable, unread: true, note: fmt.Sprintf("resource %s (%s): not read, an earlier object-store read exceeded PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", ref.Path, key)}
 		}
-		body, err := getWithDeadline(ctx, p.deps.Objects, key, p.deps.ReadTimeout)
+		body, err := objectstore.GetWithDeadline(ctx, p.deps.Objects, key, p.deps.ReadTimeout)
 		switch {
 		case err == nil:
 			p.bodiesRead++
@@ -428,32 +429,6 @@ func appendSignedEvent(ctx context.Context, d rehashDeps, row rehashRow) error {
 		}),
 	}
 	return d.Sink.Append(ctx, d.Scrubber.ScrubEvent(ev))
-}
-
-// getWithDeadline reads one object under a deadline the provider does not have
-// to honor. Filesystem.Get discards its context and calls os.ReadFile, and
-// filesystem is the default object store, so a hung ReadWriteMany mount would
-// otherwise block the plan for the life of the process. The read runs in a
-// goroutine that sends on a buffered channel, so the goroutine exits whenever
-// the provider returns even though nothing reads its result.
-func getWithDeadline(ctx context.Context, p objectstore.Provider, key string, timeout time.Duration) ([]byte, error) {
-	dctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	type result struct {
-		body []byte
-		err  error
-	}
-	done := make(chan result, 1)
-	go func() {
-		body, err := p.Get(dctx, key)
-		done <- result{body: body, err: err}
-	}()
-	select {
-	case r := <-done:
-		return r.body, r.err
-	case <-dctx.Done():
-		return nil, dctx.Err()
-	}
 }
 
 // objectStoreLocation names where the object store is configured to read from,

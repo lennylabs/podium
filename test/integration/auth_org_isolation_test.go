@@ -39,6 +39,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 const (
@@ -155,20 +156,25 @@ func TestAuthOrgIsolation_OrgScopedReadsAreIsolated(t *testing.T) {
 	// at a SHARED id whose content differs per org. The shared id proves the
 	// read resolves within the caller's org schema rather than a global table:
 	// acme reads acme's content hash for the shared id, never globex's.
-	mustPut := func(tenant, artifactID, hash, desc string) {
+	// Each record's bytes are its label, so the two orgs' shared/policy rows
+	// carry distinct content hashes, and each is sealed so the §13.4 admission
+	// check serves it. mustPut returns the sealed hash.
+	mustPut := func(tenant, artifactID, label, desc string) string {
 		t.Helper()
-		if err := pg.PutManifest(ctx, store.ManifestRecord{
+		rec := storetest.Seal(t, store.ManifestRecord{
 			TenantID: tenant, ArtifactID: artifactID, Version: "1.0.0",
-			ContentHash: hash, Type: "context", Description: desc, Layer: "shared",
+			Frontmatter: []byte(label), Type: "context", Description: desc, Layer: "shared",
 			IngestedAt: base,
-		}); err != nil {
+		}, nil, nil)
+		if err := pg.PutManifest(ctx, rec); err != nil {
 			t.Fatalf("PutManifest(%s/%s): %v", tenant, artifactID, err)
 		}
+		return rec.ContentHash
 	}
-	mustPut(tenantAcme, "acme/secret/ledger", "sha256:acme-only", "acme ledger")
-	mustPut(tenantGlobex, "globex/secret/ledger", "sha256:globex-only", "globex ledger")
-	mustPut(tenantAcme, "shared/policy", "sha256:acme-policy", "acme policy")
-	mustPut(tenantGlobex, "shared/policy", "sha256:globex-policy", "globex policy")
+	mustPut(tenantAcme, "acme/secret/ledger", "acme-only", "acme ledger")
+	mustPut(tenantGlobex, "globex/secret/ledger", "globex-only", "globex ledger")
+	acmePolicyHash := mustPut(tenantAcme, "shared/policy", "acme-policy", "acme policy")
+	globexPolicyHash := mustPut(tenantGlobex, "shared/policy", "globex-policy", "globex policy")
 
 	priv, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -208,15 +214,15 @@ func TestAuthOrgIsolation_OrgScopedReadsAreIsolated(t *testing.T) {
 	if st != http.StatusOK {
 		t.Fatalf("acme reading shared/policy = %d, want 200\nbody: %s", st, body)
 	}
-	if got := orgisoContentHash(t, body); got != "sha256:acme-policy" {
-		t.Errorf("acme shared/policy content_hash = %q, want sha256:acme-policy (org schema leak)", got)
+	if got := orgisoContentHash(t, body); got != acmePolicyHash {
+		t.Errorf("acme shared/policy content_hash = %q, want %s (org schema leak)", got, acmePolicyHash)
 	}
 	st, body = orgisoGet(t, globexSrv.URL+"/v1/load_artifact?id=shared/policy", globexToken)
 	if st != http.StatusOK {
 		t.Fatalf("globex reading shared/policy = %d, want 200\nbody: %s", st, body)
 	}
-	if got := orgisoContentHash(t, body); got != "sha256:globex-policy" {
-		t.Errorf("globex shared/policy content_hash = %q, want sha256:globex-policy (org schema leak)", got)
+	if got := orgisoContentHash(t, body); got != globexPolicyHash {
+		t.Errorf("globex shared/policy content_hash = %q, want %s (org schema leak)", got, globexPolicyHash)
 	}
 
 	// Discovery is likewise org-scoped: an acme search never surfaces a globex

@@ -336,15 +336,16 @@ class BatchResult:
 
         Raises RegistryError when called on an ``error`` item so a caller
         that forgets to check ``status`` fails loudly rather than writing
-        an empty package. Batch resources travel as §7.6.2 presigned
-        references, so every resource is fetched from its URL.
+        an empty package. A resource the registry holds inline on the
+        manifest record travels inline, and every other resource travels as
+        a §7.6.2 presigned reference fetched from its URL.
         """
         if self.status != "ok":
             raise self.error or RegistryError("registry.unknown", f"cannot materialize {self.id}")
-        # §7.6.2: a resource carries a presigned_url with an object store
-        # configured. In the standalone-without-storage mode it carries the
-        # bytes inline (base64-encoded when inline_base64 is set), so deliver
-        # those rather than fetching a URL that does not exist.
+        # §7.6.2: a resource the registry holds inline on the manifest record
+        # carries its bytes inline (base64-encoded when inline_base64 is set),
+        # at any size and whether or not an object store is configured. Every
+        # other resource carries a presigned_url, which is fetched.
         inline: dict[str, str | bytes] = {}
         large: dict[str, dict[str, Any]] = {}
         for r in self.resources:

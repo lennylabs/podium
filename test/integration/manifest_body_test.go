@@ -18,6 +18,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // Spec: §6.6/§7.2 — the presigned manifest-body channel over the SQLite
@@ -46,11 +47,11 @@ func TestManifestBody_PresignedRoundTripSQLite(t *testing.T) {
 
 	body := strings.Repeat("glossary line\n", objectstore.InlineCutoff/14+200)
 	doc := []byte("---\ntype: context\nversion: 1.0.0\ndescription: Big glossary.\n---\n\n" + body)
-	if err := st.PutManifest(ctx, store.ManifestRecord{
+	if err := st.PutManifest(ctx, storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "finance/glossary", Version: "1.0.0",
 		ContentHash: "sha256:c", Type: "context", Layer: "L",
 		Frontmatter: doc, Body: []byte(body),
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 

@@ -14,6 +14,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 const benchTenant = "bench"
@@ -28,7 +29,7 @@ func seedRegistry(b *testing.B, n int) *core.Registry {
 		b.Fatalf("CreateTenant: %v", err)
 	}
 	for i := 0; i < n; i++ {
-		_ = st.PutManifest(context.Background(), store.ManifestRecord{
+		_ = st.PutManifest(context.Background(), storetest.Seal(b, store.ManifestRecord{
 			TenantID:    benchTenant,
 			ArtifactID:  fmt.Sprintf("dom%d/artifact-%d", i%32, i),
 			Version:     "1.0.0",
@@ -37,7 +38,7 @@ func seedRegistry(b *testing.B, n int) *core.Registry {
 			Description: fmt.Sprintf("Artifact %d about variance, p&l, ledgers", i),
 			Tags:        []string{"q4", "finance", fmt.Sprintf("dom-%d", i%32)},
 			Layer:       "team-shared",
-		})
+		}, nil, nil))
 	}
 	reg := core.New(st, benchTenant, []layer.Layer{
 		{ID: "team-shared", Precedence: 1, Visibility: layer.Visibility{Public: true}},

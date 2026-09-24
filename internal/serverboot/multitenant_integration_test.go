@@ -22,11 +22,19 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // multiTenantServer provisions orgs acme and globex, each owning an
 // org-specific artifact plus a shared artifact id with org-specific content,
 // behind the given verifier and the real per-request tenant router.
+// labelHash is the sealed §4.7.6 content hash of a record whose only bytes
+// are label, as multiTenantServer seeds it.
+func labelHash(label string) string {
+	return "sha256:" + version.CanonicalContentHash([]byte(label), nil, nil)
+}
+
 func multiTenantServer(t *testing.T, verify func(*http.Request) (layer.Identity, error), rejectUnknown bool) *httptest.Server {
 	t.Helper()
 	st := store.NewMemory()
@@ -35,20 +43,22 @@ func multiTenantServer(t *testing.T, verify func(*http.Request) (layer.Identity,
 			t.Fatalf("CreateTenant(%s): %v", name, err)
 		}
 	}
-	put := func(org, artifactID, hash string) {
+	// Each record's bytes are its label, so the two orgs' shared/doc rows
+	// carry distinct sealed content hashes (labelHash).
+	put := func(org, artifactID, label string) {
 		t.Helper()
-		if err := st.PutManifest(t.Context(), store.ManifestRecord{
+		if err := st.PutManifest(t.Context(), storetest.Seal(t, store.ManifestRecord{
 			TenantID: orgIDForName(org), ArtifactID: artifactID, Version: "1.0.0",
-			ContentHash: hash, Type: "context", Description: artifactID, Layer: "pub",
+			Frontmatter: []byte(label), Type: "context", Description: artifactID, Layer: "pub",
 			IngestedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		}); err != nil {
+		}, nil, nil)); err != nil {
 			t.Fatalf("PutManifest(%s/%s): %v", org, artifactID, err)
 		}
 	}
-	put("acme", "acme/secret", "sha256:acme-secret")
-	put("globex", "globex/secret", "sha256:globex-secret")
-	put("acme", "shared/doc", "sha256:acme-shared")
-	put("globex", "shared/doc", "sha256:globex-shared")
+	put("acme", "acme/secret", "acme-secret")
+	put("globex", "globex/secret", "globex-secret")
+	put("acme", "shared/doc", "acme-shared")
+	put("globex", "shared/doc", "globex-shared")
 
 	reg := core.New(st, multiTenantUnrouted, []layer.Layer{
 		{ID: "pub", Precedence: 1, Visibility: layer.Visibility{Public: true}},
@@ -105,11 +115,11 @@ func TestMultiTenant_OIDCJWTRoutesByOrg(t *testing.T) {
 	}
 
 	// The shared artifact id resolves to each org's own content.
-	if _, body := loadArtifact(t, ts.URL, "shared/doc", acme); contentHash(t, body) != "sha256:acme-shared" {
-		t.Errorf("acme shared/doc content_hash = %q, want sha256:acme-shared", contentHash(t, body))
+	if _, body := loadArtifact(t, ts.URL, "shared/doc", acme); contentHash(t, body) != labelHash("acme-shared") {
+		t.Errorf("acme shared/doc content_hash = %q, want %s", contentHash(t, body), labelHash("acme-shared"))
 	}
-	if _, body := loadArtifact(t, ts.URL, "shared/doc", globex); contentHash(t, body) != "sha256:globex-shared" {
-		t.Errorf("globex shared/doc content_hash = %q, want sha256:globex-shared", contentHash(t, body))
+	if _, body := loadArtifact(t, ts.URL, "shared/doc", globex); contentHash(t, body) != labelHash("globex-shared") {
+		t.Errorf("globex shared/doc content_hash = %q, want %s", contentHash(t, body), labelHash("globex-shared"))
 	}
 }
 

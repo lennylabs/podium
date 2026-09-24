@@ -8,6 +8,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // adminOverrideFixture seeds a tenant with one artifact in a layer visible
@@ -21,11 +22,11 @@ func adminOverrideFixture(t *testing.T) (*core.Registry, *recorder) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenantID}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenantID, ArtifactID: "team/secret", Version: "1.0.0",
 		ContentHash: "sha256:a", Type: "context", Layer: "private",
 		Description: "secret context", Body: []byte("hidden body"),
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	if err := st.GrantAdmin(context.Background(), store.AdminGrant{

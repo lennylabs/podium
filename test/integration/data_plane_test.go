@@ -66,9 +66,11 @@ func TestDataPlane_IngestToLoadArtifactRoundTrip(t *testing.T) {
 		t.Fatalf("Ingest: %v", err)
 	}
 
+	// Spec: §13.4 — admission reads the large body ingest moved to object
+	// storage, from the same object store the server presigns against.
 	reg := core.New(st, "default", []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
-	})
+	}).WithAdmission(nil, objStore, objectstore.DefaultReadTimeout)
 	srv := server.New(reg, server.WithObjectStore(objStore, "placeholder", time.Hour))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

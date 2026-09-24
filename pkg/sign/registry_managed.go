@@ -42,9 +42,10 @@ func (RegistryManagedKey) ID() string { return "registry-managed" }
 // that verifies registry-managed signatures loads the registry's public
 // key this way and constructs a RegistryManagedKey for Verify.
 //
-// spec: §4.7.9 — verification runs in the consumer (the MCP server),
-// which holds the registry's public key to check the detached
-// signature envelope.
+// spec: §4.7.9 — the consumer (the MCP server) holds the registry's public
+// key and checks the detached signature envelope a load serves. The
+// registry checks the stored envelope under its own key at the §13.4
+// stored-row admission check before it serves the row.
 func PublicKeyFromBase64(s string) (ed25519.PublicKey, error) {
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(s))
 	if err != nil {

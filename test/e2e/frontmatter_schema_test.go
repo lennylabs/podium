@@ -222,8 +222,9 @@ func TestFrontmatter_DeprecatedExcludedFromSearch(t *testing.T) {
 
 // a deprecated artifact remains reachable via load_artifact
 // and carries the deprecation signal, including the replaced_by upgrade target
-// (§4.7.4). The load path recovers replaced_by from the stored frontmatter for
-// the SQL backends, so the upgrade target round-trips into the load response.
+// (§4.7.4). The §13.4 stored-row admission check derives replaced_by from the
+// admitted frontmatter for the SQL backends, so the upgrade target round-trips
+// into the load response.
 func TestFrontmatter_DeprecatedReachableWithWarning(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, fmDeprecationRegistry(t))
@@ -944,11 +945,11 @@ func TestFrontmatter_ReleaseNotesVerbatim(t *testing.T) {
 }
 
 // replaced_by surfaces in the load response and the
-// deprecation warning. Per §4.7.4 "if replaced_by: is set, the registry surfaces
-// the upgrade target alongside the warning." The SQL metadata stores do not
-// persist replaced_by as an indexed column, so the load path recovers it from
-// the stored frontmatter (core.replacedByOf); this test asserts the deprecated
-// flag, the replaced_by upgrade target, and the warning naming it.
+// deprecation warning. Per §4.7.4 "a load of a deprecated artifact returns it
+// alongside the warning." The SQL metadata stores do not
+// persist replaced_by as an indexed column, so the §13.4 stored-row admission
+// check derives it from the admitted frontmatter; this test asserts the
+// deprecated flag, the replaced_by upgrade target, and the warning naming it.
 func TestFrontmatter_ReplacedBySurfaced(t *testing.T) {
 	t.Parallel()
 	const target = "finance/close-reporting/run-variance-analysis-v2"

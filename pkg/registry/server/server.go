@@ -355,7 +355,11 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 		})
 	}
 
-	registry := core.New(st, tenant, layers)
+	// Spec: §13.4 — admission reads the object-held bodies this ingest wrote,
+	// because ingest dropped the inline copy of every resource above the
+	// cutoff. A filesystem-source registry signs nothing, so it admits on the
+	// content hash alone.
+	registry := core.New(st, tenant, layers).WithAdmission(nil, probe.objectStore, objectstore.DefaultReadTimeout)
 	// §3.3 / §12 learn-from-usage: the standalone server reranks search and
 	// load_domain by access frequency, like the standard-topology registry.
 	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
@@ -569,10 +573,11 @@ type SearchResponse struct {
 	Domains      []DomainDescriptor   `json:"domains,omitempty"`
 }
 
-// LoadArtifactResponse is /v1/load_artifact output. Resources below
-// the §4.1 256 KB inline cutoff are returned inline as text;
-// resources above the cutoff are returned in LargeResources as
-// follow-the-URL references the consumer fetches separately.
+// LoadArtifactResponse is /v1/load_artifact output. A resource the registry
+// holds inline on the manifest record is returned inline at any size, and so
+// is an object-held resource at or below the §4.1 256 KB inline cutoff. An
+// object-held resource above the cutoff is returned in LargeResources as a
+// follow-the-URL reference the consumer fetches separately (§7.2).
 type LoadArtifactResponse struct {
 	ID           string `json:"id"`
 	Type         string `json:"type"`
@@ -1025,9 +1030,21 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	ifNoneMatch := r.Header.Get("If-None-Match")
 	res, err := s.core.LoadArtifact(r.Context(), s.identity(r), id, core.LoadArtifactOptions{
 		Version: q.Get("version"),
 		AsAdmin: asAdmin,
+		// Spec: §13.4 — a HEAD, and a GET the ETag branch below answers 304,
+		// return no content and are answered from the resolved row without
+		// stored-row admission. A GET carrying If-None-Match: * matches before
+		// the validator is read, so it takes the admitted result.
+		Revalidate: func(res *core.LoadArtifactResult) bool {
+			if r.Method == http.MethodHead {
+				return true
+			}
+			etag := contentHashETag(res.ContentHash)
+			return etag != "" && strings.TrimSpace(ifNoneMatch) != "*" && ifNoneMatchHit(ifNoneMatch, etag)
+		},
 		// §5 load_artifact "Optional session_id"; §4.7.6 — within a
 		// session the first `latest` lookup pins, so a later same-id
 		// lookup resolves to the same version even after a newer ingest.
@@ -1049,7 +1066,7 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 	// before any resource presigning so a revalidated hit avoids that work.
 	if etag := contentHashETag(res.ContentHash); etag != "" {
 		w.Header().Set("ETag", etag)
-		if ifNoneMatchHit(r.Header.Get("If-None-Match"), etag) {
+		if ifNoneMatchHit(ifNoneMatch, etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
@@ -1082,9 +1099,8 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		ManifestMerged:     res.Merged,
 		RawFrontmatter:     string(res.RawFrontmatter),
 	}
-	// §7.2 data plane: resources at or below the inline cutoff return
-	// inline; larger ones return as presigned URLs the consumer fetches
-	// directly from object storage.
+	// §7.2 data plane: each resource's source follows where admission read
+	// its bytes (see attachResources).
 	if err := s.attachResources(r.Context(), &resp, res.Resources); err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
@@ -1133,19 +1149,25 @@ func ifNoneMatchHit(ifNoneMatch, etag string) bool {
 	return false
 }
 
-// attachResources splits the §4.4 bundled resources of a load result
-// into the §7.2 inline set (at or below objectstore.InlineCutoff) and
-// the large set (above it). Small resources serve from the bytes ingest
-// stored inline, falling back to an object-store read; large resources
-// presign against the configured store.
+// attachResources places each §4.4 bundled resource of an admitted load
+// result in the §7.2 inline set or the large set. The source follows the
+// admitted ref's Inline, which records where §13.4 admission read the body:
 //
-// A large resource presigns only when an object store is configured. In
-// the standalone-without-storage mode (§13.11) ingest keeps every
-// resource inline regardless of size, so when no object store is present
-// those bytes serve inline rather than failing the load (§7.2).
+//   - Inline set, at any size: served from those bytes. A ref whose Inline is
+//     set is never presigned, because admission bound the key to the inline
+//     bytes and read no object under it.
+//   - Inline nil and above objectstore.InlineCutoff: a presigned link to the
+//     object admission read.
+//   - Inline nil and at or below the cutoff: the object, read again for
+//     inline delivery.
+//
+// A server with no object store answers an object-held ref with an error
+// rather than serving bytes.
+//
+// Spec: §4.1, §7.2, §13.4.
 func (s *Server) attachResources(ctx context.Context, resp *LoadArtifactResponse, refs []store.ResourceRef) error {
 	for _, ref := range refs {
-		if ref.Size > objectstore.InlineCutoff && s.objectStore != nil {
+		if ref.Inline == nil && ref.Size > objectstore.InlineCutoff {
 			link, err := s.presignResource(ctx, ref)
 			if err != nil {
 				return err
@@ -1402,6 +1424,13 @@ func (s *Server) writeCoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "domain.not_found", err.Error())
 	case errors.Is(err, core.ErrNotFound):
 		writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
+	case errors.Is(err, core.ErrContentHashMismatch),
+		errors.Is(err, core.ErrStoredSignatureMissing),
+		errors.Is(err, core.ErrStoredSignatureInvalid):
+		// Spec: §13.4 — a stored row that fails admission is refused with the
+		// code its sentinel names. The condition is in the stored row, so the
+		// same request fails identically until an operator repairs it.
+		writeError(w, http.StatusInternalServerError, admissionCode(err), err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 	}

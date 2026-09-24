@@ -12,6 +12,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // newSessionFixture seeds two public artifacts so search and batch load have
@@ -28,7 +29,7 @@ func newSessionFixture(t *testing.T) *httptest.Server {
 		{TenantID: "default", ArtifactID: "team/b", Version: "1.0.0",
 			ContentHash: "sha256:b", Type: "skill", Layer: "L"},
 	} {
-		if err := st.PutManifest(context.Background(), m); err != nil {
+		if err := st.PutManifest(context.Background(), storetest.Seal(t, m, nil, nil)); err != nil {
 			t.Fatalf("PutManifest: %v", err)
 		}
 	}

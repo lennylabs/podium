@@ -16,6 +16,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // liveS3Store reads PODIUM_S3_* and returns a real S3-backed object store, or
@@ -67,11 +68,11 @@ func TestManifestBody_LivePresignedOverS3(t *testing.T) {
 	if err := st.CreateTenant(t.Context(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	if err := st.PutManifest(t.Context(), store.ManifestRecord{
+	if err := st.PutManifest(t.Context(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "finance/glossary", Version: "1.0.0",
 		ContentHash: "sha256:c", Type: "context", Layer: "L",
 		Frontmatter: doc, Body: []byte(body),
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	reg := core.New(st, "default", []layer.Layer{

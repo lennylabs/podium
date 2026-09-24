@@ -6,6 +6,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // Spec: §4.3.4 / §11 — load_artifact surfaces a skill's verbatim SKILL.md so a
@@ -18,7 +19,7 @@ func TestLoadArtifact_SurfacesVerbatimSkillRaw(t *testing.T) {
 	reg, st := newRegistryWithStore(t)
 
 	const skillMD = "---\nname: lint\ndescription: Run the project linter.\ncompatibility: \"py>=3.10\"\n---\n\nRun the linter.\n"
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID:    "t",
 		ArtifactID:  "eng/lint",
 		Version:     "1.0.0",
@@ -28,7 +29,7 @@ func TestLoadArtifact_SurfacesVerbatimSkillRaw(t *testing.T) {
 		Frontmatter: []byte("---\ntype: skill\nversion: 1.0.0\n---\n"),
 		Body:        []byte("Run the linter.\n"),
 		SkillRaw:    []byte(skillMD),
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 

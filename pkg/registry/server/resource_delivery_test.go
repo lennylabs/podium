@@ -18,6 +18,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // noStoreFixture boots a server.New() registry with NO object store
@@ -31,11 +32,11 @@ func noStoreFixture(t *testing.T, refs []store.ResourceRef) *httptest.Server {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "finance/run", Version: "1.0.0",
 		ContentHash: "sha256:c", Type: "skill", Layer: "L",
 		Resources: refs,
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	reg := core.New(st, "default", []layer.Layer{
@@ -230,5 +231,66 @@ func TestBatchLoad_DeliversInlineResourcesWithoutObjectStore(t *testing.T) {
 		if !bytes.Equal(dec, want) {
 			t.Errorf("%s: inline bytes corrupted (%d vs %d)", path, len(dec), len(want))
 		}
+	}
+}
+
+// Spec: §13.4, §7.2, §7.6.2 — both serve paths choose a resource's source from
+// the admitted ref's Inline rather than the server's object store: a ref held
+// inline above the cutoff, as an ingest with no object store writes it, is
+// served inline on the single load and the batch item, and never presigned
+// at an object nobody wrote.
+func TestResourceDelivery_InlineRefAboveCutoffServedInlineWithObjectStore(t *testing.T) {
+	t.Parallel()
+	big := bytes.Repeat([]byte("q"), objectstore.InlineCutoff+64)
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
+		TenantID: "default", ArtifactID: "finance/run", Version: "1.0.0", Type: "context", Layer: "L",
+		Resources: []store.ResourceRef{{Path: "data/big.txt", Inline: big}},
+	}, nil, nil)); err != nil {
+		t.Fatalf("PutManifest: %v", err)
+	}
+	objects := objectstore.NewMemory()
+	reg := core.New(st, "default", []layer.Layer{
+		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
+	}).WithAdmission(nil, objects, objectstore.DefaultReadTimeout)
+	ts := httptest.NewServer(server.New(reg, server.WithObjectStore(objects, "placeholder", 0)).Handler())
+	t.Cleanup(ts.Close)
+
+	resp, err := http.Get(ts.URL + "/v1/load_artifact?id=finance/run")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	var single server.LoadArtifactResponse
+	if err := json.NewDecoder(resp.Body).Decode(&single); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+	if single.Resources["data/big.txt"] != string(big) {
+		t.Errorf("inline ref above the cutoff not served inline")
+	}
+	if _, ok := single.LargeResources["data/big.txt"]; ok {
+		t.Errorf("inline ref presigned: %+v", single.LargeResources)
+	}
+
+	resp, err = http.Post(ts.URL+"/v1/artifacts:batchLoad", "application/json", strings.NewReader(`{"ids":["finance/run"]}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	var batch []server.BatchLoadEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&batch); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	resp.Body.Close()
+	if len(batch) != 1 || len(batch[0].Resources) != 1 {
+		t.Fatalf("batch = %+v, want one item with one resource", batch)
+	}
+	if r := batch[0].Resources[0]; r.Inline != string(big) || r.PresignedURL != "" {
+		t.Errorf("batch resource presigned_url = %q, inline %d bytes; want inline only", r.PresignedURL, len(r.Inline))
 	}
 }

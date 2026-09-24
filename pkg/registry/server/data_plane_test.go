@@ -18,6 +18,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // dataPlaneFixture boots a server.New()-constructed registry (the path
@@ -27,7 +28,7 @@ import (
 // core load result rather than a construction-time cache.
 func dataPlaneFixture(t *testing.T) (*httptest.Server, []byte, string) {
 	t.Helper()
-	small := []byte("print('inline')\n")
+	small := []byte(dataPlaneSmall)
 	large := make([]byte, objectstore.InlineCutoff+2048)
 	for i := range large {
 		large[i] = byte('A' + i%26)
@@ -52,25 +53,30 @@ func dataPlaneFixture(t *testing.T) (*httptest.Server, []byte, string) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "finance/run", Version: "1.0.0",
-		ContentHash: "sha256:c", Type: "skill", Layer: "L",
+		Type: "skill", Layer: "L",
 		Resources: []store.ResourceRef{
 			{Path: "scripts/run.py", ContentHash: hashOf(small), Size: int64(len(small)), ContentType: "application/octet-stream", Inline: small},
 			{Path: "data/big.bin", ContentHash: hashOf(large), Size: int64(len(large)), ContentType: "application/octet-stream"},
 		},
-	}); err != nil {
+	}, objStore, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
+	// Spec: §13.4 — admission reads the object-held body from the same
+	// object store the server presigns against.
 	reg := core.New(st, "default", []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
-	})
+	}).WithAdmission(nil, objStore, objectstore.DefaultReadTimeout)
 	srv := server.New(reg, server.WithObjectStore(objStore, "placeholder", time.Hour))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	objStore.BaseURL = ts.URL
 	return ts, large, keyOf(large)
 }
+
+// dataPlaneSmall is the inline resource dataPlaneFixture seeds.
+const dataPlaneSmall = "print('inline')\n"
 
 // Spec: §7.2 — a server.New registry serves bundled
 // resources from the core load result: small ones inline, large ones as
@@ -112,10 +118,13 @@ func TestDataPlane_LoadArtifactServesResourcesFromCore(t *testing.T) {
 	}
 }
 
-// Spec: §7.6.2 — the batch endpoint returns bundled resources as a
-// presigned array {path, presigned_url, content_hash} so the response
-// stays small (previously returned no resources at all).
-func TestDataPlane_BatchLoadReturnsPresignedResources(t *testing.T) {
+// Spec: §7.6.2 — the batch endpoint returns each bundled resource as a
+// {path, presigned_url, content_hash} reference only when the registry holds
+// it in object storage; a resource the record holds inline travels inline,
+// even though a copy of it also exists in object storage.
+// Spec: §13.4 — a ref whose Inline is set is never presigned, because
+// admission read no object under its key.
+func TestDataPlane_BatchLoadPresignsOnlyObjectHeldResources(t *testing.T) {
 	t.Parallel()
 	ts, _, _ := dataPlaneFixture(t)
 	reqBody, _ := json.Marshal(map[string]any{"ids": []string{"finance/run"}})
@@ -140,10 +149,11 @@ func TestDataPlane_BatchLoadReturnsPresignedResources(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("batch resources = %d, want 2: %+v", len(got), envelopes[0].Resources)
 	}
-	for _, path := range []string{"scripts/run.py", "data/big.bin"} {
-		if got[path].PresignedURL == "" || got[path].ContentHash == "" {
-			t.Errorf("batch resource %q missing presigned_url/content_hash: %+v", path, got[path])
-		}
+	if small := got["scripts/run.py"]; small.Inline != dataPlaneSmall || small.PresignedURL != "" {
+		t.Errorf("inline resource must travel inline without presigned_url: %+v", small)
+	}
+	if big := got["data/big.bin"]; big.PresignedURL == "" || big.ContentHash == "" || big.Inline != "" {
+		t.Errorf("object-held resource missing presigned_url/content_hash: %+v", big)
 	}
 	if !strings.Contains(string(raw), "\"presigned_url\"") {
 		t.Errorf("batch resources should use presigned_url:\n%s", raw)

@@ -23,7 +23,7 @@ func TestLoadArtifact_HeadReturnsContentHash(t *testing.T) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	putVersion(t, st, "team/a", "1.0.0", "sha256:v1", time.Now().UTC())
+	hash := putVersion(t, st, "team/a", "1.0.0", time.Now().UTC())
 
 	reg := core.New(st, "default", []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
@@ -43,8 +43,8 @@ func TestLoadArtifact_HeadReturnsContentHash(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got := resp.Header.Get("X-Podium-Content-Hash"); got != "sha256:v1" {
-		t.Errorf("X-Podium-Content-Hash = %q, want sha256:v1", got)
+	if got := resp.Header.Get("X-Podium-Content-Hash"); got != hash {
+		t.Errorf("X-Podium-Content-Hash = %q, want %s", got, hash)
 	}
 	if got := resp.Header.Get("X-Podium-Version"); got != "1.0.0" {
 		t.Errorf("X-Podium-Version = %q, want 1.0.0", got)

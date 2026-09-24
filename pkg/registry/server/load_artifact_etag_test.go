@@ -19,24 +19,24 @@ import (
 // so the MCP client serves its content-addressed cache instead of
 // re-downloading.
 
-func newETagServer(t *testing.T) *httptest.Server {
+func newETagServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
 	st := store.NewMemory()
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	putVersion(t, st, "team/a", "1.0.0", "sha256:v1", time.Now().UTC())
+	hash := putVersion(t, st, "team/a", "1.0.0", time.Now().UTC())
 	reg := core.New(st, "default", []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
 	})
 	ts := httptest.NewServer(server.New(reg).Handler())
 	t.Cleanup(ts.Close)
-	return ts
+	return ts, `"` + hash + `"`
 }
 
 func TestLoadArtifact_GETSetsETag(t *testing.T) {
 	t.Parallel()
-	ts := newETagServer(t)
+	ts, etag := newETagServer(t)
 	resp, err := http.Get(ts.URL + "/v1/load_artifact?id=team/a")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
@@ -45,16 +45,16 @@ func TestLoadArtifact_GETSetsETag(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got := resp.Header.Get("ETag"); got != `"sha256:v1"` {
-		t.Errorf("ETag = %q, want %q", got, `"sha256:v1"`)
+	if got := resp.Header.Get("ETag"); got != etag {
+		t.Errorf("ETag = %q, want %q", got, etag)
 	}
 }
 
 func TestLoadArtifact_IfNoneMatchReturns304(t *testing.T) {
 	t.Parallel()
-	ts := newETagServer(t)
+	ts, etag := newETagServer(t)
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/load_artifact?id=team/a", nil)
-	req.Header.Set("If-None-Match", `"sha256:v1"`)
+	req.Header.Set("If-None-Match", etag)
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("GET: %v", err)
@@ -66,8 +66,8 @@ func TestLoadArtifact_IfNoneMatchReturns304(t *testing.T) {
 	if resp.ContentLength > 0 {
 		t.Errorf("304 returned a %d-byte body; want none", resp.ContentLength)
 	}
-	if got := resp.Header.Get("ETag"); got != `"sha256:v1"` {
-		t.Errorf("ETag = %q, want %q", got, `"sha256:v1"`)
+	if got := resp.Header.Get("ETag"); got != etag {
+		t.Errorf("ETag = %q, want %q", got, etag)
 	}
 }
 
@@ -75,7 +75,7 @@ func TestLoadArtifact_IfNoneMatchReturns304(t *testing.T) {
 // changed artifact is delivered rather than spuriously revalidated.
 func TestLoadArtifact_IfNoneMatchStaleReturns200(t *testing.T) {
 	t.Parallel()
-	ts := newETagServer(t)
+	ts, etag := newETagServer(t)
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/load_artifact?id=team/a", nil)
 	req.Header.Set("If-None-Match", `"sha256:old"`)
 	resp, err := http.DefaultClient.Do(req)
@@ -86,15 +86,15 @@ func TestLoadArtifact_IfNoneMatchStaleReturns200(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
-	if got := resp.Header.Get("ETag"); got != `"sha256:v1"` {
-		t.Errorf("ETag = %q, want %q", got, `"sha256:v1"`)
+	if got := resp.Header.Get("ETag"); got != etag {
+		t.Errorf("ETag = %q, want %q", got, etag)
 	}
 }
 
 // The wildcard If-None-Match: * matches any existing representation.
 func TestLoadArtifact_IfNoneMatchWildcardReturns304(t *testing.T) {
 	t.Parallel()
-	ts := newETagServer(t)
+	ts, _ := newETagServer(t)
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/v1/load_artifact?id=team/a", nil)
 	req.Header.Set("If-None-Match", "*")
 	resp, err := http.DefaultClient.Do(req)

@@ -283,9 +283,6 @@ func envInt(key string, def int) int {
 const (
 	defaultWebUIAuthTransactionTTL   = 10 * time.Minute
 	defaultWebUIOAuthExchangeTimeout = 10 * time.Second
-	// defaultMigrationObjectReadTimeout is the §13.12 default deadline on each
-	// object-storage read the §13.4 first-start stored-value rewrite makes.
-	defaultMigrationObjectReadTimeout = 30 * time.Second
 )
 
 var defaultWebUIOAuthScopes = []string{"openid", "profile", "email", "groups"}
@@ -1020,7 +1017,12 @@ func run(ctx context.Context, stop func()) error {
 	if cfg.multiTenant {
 		boundTenant = multiTenantUnrouted
 	}
-	registry := core.New(st, boundTenant, bootLayers)
+	// Spec: §13.4 — the registry admits each stored row before it serves the
+	// row's content, under the signer the first-start rewrite and ingest use,
+	// against the object store ingest wrote bodies into, and within the
+	// PODIUM_MIGRATION_OBJECT_READ_TIMEOUT deadline. It is set here, before
+	// the listener serves any request.
+	registry := core.New(st, boundTenant, bootLayers).WithAdmission(signProvider, objStore, cfg.migrationObjectReadTimeout)
 	// §13.12 / §4.5.5: apply the tenant registry.yaml discovery defaults
 	// and the allow_per_domain_overrides gate to load_domain rendering.
 	registry = registry.WithDiscoveryDefaults(cfg.discoveryDefaults(), cfg.allowPerDomain())
@@ -1761,7 +1763,8 @@ type Config struct {
 	// http.Server carries ReadHeaderTimeout alone.
 	webUIOAuthExchangeTimeout time.Duration
 	// migrationObjectReadTimeout bounds each object-storage read the §13.4
-	// first-start stored-value rewrite makes
+	// first-start stored-value rewrite makes and each one the §13.4 stored-row
+	// admission check makes before a load is served
 	// (PODIUM_MIGRATION_OBJECT_READ_TIMEOUT, §13.12). Environment only; there
 	// is no registry.yaml key. An unset, unparsable, or non-positive value
 	// takes the 30-second default, because run's context carries no deadline
@@ -2145,7 +2148,7 @@ func LoadConfig() *Config {
 		webUIOAuthTokenEndpoint:         os.Getenv("PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT"),
 		webUIOAuthScopes:                envScopeSet("PODIUM_WEB_UI_OAUTH_SCOPES", defaultWebUIOAuthScopes),
 		webUIOAuthExchangeTimeout:       envPositiveDuration("PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT", defaultWebUIOAuthExchangeTimeout),
-		migrationObjectReadTimeout:      envPositiveDuration("PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", defaultMigrationObjectReadTimeout),
+		migrationObjectReadTimeout:      envPositiveDuration("PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", objectstore.DefaultReadTimeout),
 		signMode:                        os.Getenv("PODIUM_SIGN"),
 		identityProvider:                os.Getenv("PODIUM_IDENTITY_PROVIDER"),
 		oauthAudiences:                  identity.NormalizeAudiences(splitCSVTrim(os.Getenv("PODIUM_OAUTH_AUDIENCE"))),
