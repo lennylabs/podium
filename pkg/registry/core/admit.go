@@ -344,11 +344,7 @@ func (r *Registry) revalidationRedactKeys(ctx context.Context, rec store.Manifes
 	}
 	var keys []string
 	for _, row := range chain {
-		own := row.AuditRedact
-		if a, perr := manifest.ParseArtifact(row.Frontmatter); perr == nil {
-			own = a.AuditRedact
-		}
-		if len(own) > 0 {
+		if own := parsedArtifact(row).AuditRedact; len(own) > 0 {
 			keys = own
 		}
 	}

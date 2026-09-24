@@ -1858,8 +1858,13 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 }
 
 // parsedArtifact decodes a record's stored frontmatter into a
-// manifest.Artifact. Ingested records always parse (ingest parsed them);
-// the indexed-field fallback is defense in depth for a malformed record.
+// manifest.Artifact. A record whose frontmatter is empty or does not parse
+// yields its stored columns instead, including every field setManifestFields
+// serves, so mergeChain and revalidationRedactKeys fold the same per-row
+// values that admission leaves on such a row.
+//
+// Spec: §13.4 — a row whose manifest is empty or does not parse is served
+// with its stored values.
 func parsedArtifact(rec store.ManifestRecord) *manifest.Artifact {
 	if a, err := manifest.ParseArtifact(rec.Frontmatter); err == nil && a != nil {
 		return a
@@ -1870,6 +1875,9 @@ func parsedArtifact(rec store.ManifestRecord) *manifest.Artifact {
 		Description: rec.Description,
 		Tags:        append([]string(nil), rec.Tags...),
 		Sensitivity: manifest.Sensitivity(rec.Sensitivity),
+		Deprecated:  rec.Deprecated,
+		ReplacedBy:  rec.ReplacedBy,
+		AuditRedact: append([]string(nil), rec.AuditRedact...),
 	}
 }
 

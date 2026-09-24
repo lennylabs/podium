@@ -1042,7 +1042,7 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 			if r.Method == http.MethodHead {
 				return true
 			}
-			etag := contentHashETag(res.ContentHash)
+			etag := validatorFor(res)
 			return etag != "" && strings.TrimSpace(ifNoneMatch) != "*" && ifNoneMatchHit(ifNoneMatch, etag)
 		},
 		// §5 load_artifact "Optional session_id"; §4.7.6 — within a
@@ -1064,7 +1064,7 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 	// content-addressed cache instead of re-downloading the manifest body and
 	// re-presigning resources. The check runs for GET and HEAD alike and
 	// before any resource presigning so a revalidated hit avoids that work.
-	if etag := contentHashETag(res.ContentHash); etag != "" {
+	if etag := validatorFor(res); etag != "" {
 		w.Header().Set("ETag", etag)
 		if ifNoneMatchHit(ifNoneMatch, etag) {
 			w.WriteHeader(http.StatusNotModified)
@@ -1113,6 +1113,14 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// validatorFor returns the HTTP validator a load_artifact response carries.
+// The Revalidate predicate and the ETag branch both read it, so the §13.4
+// admission bypass is taken for a GET only when the ETag branch answers
+// 304. A change to the validator lands in both decisions at once.
+func validatorFor(res *core.LoadArtifactResult) string {
+	return contentHashETag(res.ContentHash)
 }
 
 // contentHashETag formats a resolved content hash as a strong HTTP ETag

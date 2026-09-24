@@ -732,6 +732,43 @@ func TestLoadArtifact_RevalidatedReadEventRedactsKeys(t *testing.T) {
 	})
 }
 
+// Spec: §8.2, §13.4 — a chain root whose manifest is empty is served
+// with its stored audit_redact, deprecated, and replaced_by, so a full load and
+// a revalidation of a child that declares none record the same key set.
+func TestLoadArtifact_EmptyRootKeepsStoredFieldsInChain(t *testing.T) {
+	t.Parallel()
+	f := newAdmFixture(t)
+	root := storetest.Seal(t, store.ManifestRecord{
+		TenantID: admTenant, ArtifactID: "base/p", Version: "1.0.0", Layer: "L", Type: "context",
+		Frontmatter: nil,
+		AuditRedact: []string{"version"}, Deprecated: true, ReplacedBy: "base/q",
+	}, nil, nil)
+	f.put(t, root)
+	f.put(t, f.admChainRow(t, "team/c", "1.0.0", "base/p@1.0.0", "base/p@1.0.0", "", nil))
+	reg := f.registry(nil)
+
+	res, err := admLoad(reg, "team/c")
+	if err != nil {
+		t.Fatalf("full LoadArtifact: %v", err)
+	}
+	if !res.Deprecated || res.ReplacedBy != "base/q" {
+		t.Errorf("full load deprecated=%v replaced_by=%q, want the root's stored true and base/q", res.Deprecated, res.ReplacedBy)
+	}
+	if _, err := reg.LoadArtifact(context.Background(), layer.Identity{IsPublic: true}, "team/c",
+		core.LoadArtifactOptions{Revalidate: revalidateAll}); err != nil {
+		t.Fatalf("revalidated LoadArtifact: %v", err)
+	}
+	ev := f.events.ofType("artifact.loaded")
+	if len(ev) != 2 {
+		t.Fatalf("artifact.loaded events = %d, want 2", len(ev))
+	}
+	for i, e := range ev {
+		if !reflect.DeepEqual(e.RedactKeys, []string{"version"}) {
+			t.Errorf("read event %d RedactKeys = %v, want [version]", i, e.RedactKeys)
+		}
+	}
+}
+
 func assertRedactsVersion(t *testing.T, f *admFixture) {
 	t.Helper()
 	ev := f.events.ofType("artifact.loaded")
