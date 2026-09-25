@@ -235,7 +235,7 @@ The sentences that state the metadata-store limit, from "A party that can write 
 
 > Such a party that can also cause a restart can have content it chose signed only where the store is the SQLite store in the key file's directory: the record that the §13.4 first-start rewrite has completed is held in the metadata store, and a start whose listener binds and that finds no record runs the rewrite, which there signs with the registry's key every stored row that carries no signature and whose bytes reproduce the new digest or the previous release's digest. For every other store such a start signs no row that carries no signature. A later `sign-stored-rows --include-unsigned` signs every unsigned row present, including one such a party stored.
 
-(c) §13.12, the paragraph that begins "Signing is producer-side", as SPEC-5 leaves it: insert after "until `sign-stored-rows --include-unsigned` runs (§13.4)." the sentence "Outside the SQLite store in the key file's directory, the first start of a release that rewrites stored values also leaves unsigned rows unsigned (§13.4)."
+The matching §13.12 sentence is staged as SPEC-5 (g), because it anchors on text SPEC-5 (d) creates.
 
 ## Spec amendment: §13.3 and §13.12 key file, replicas, signing later, and the object-read deadline
 
@@ -266,6 +266,9 @@ In the same paragraph, replace the sentences "Turning signing on after the rewri
 (f) §13.12, the `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` row (`spec/13-deployment.md:418`). Replace "Deadline on each object-storage read the first-start stored-value rewrite and the stored-row admission check make (§13.4)" with "Deadline on each object-storage read the first-start stored-value rewrite, the `sign-stored-rows` command, and the stored-row admission check make (§13.4)".
 
 Each mechanism is stated once and cross-referenced elsewhere. The multi-replica roll order is stated in §4.7.9 (SPEC-1 (d)), and §13.12 cross-references it. The lost-key repair is stated in §13.12 (SPEC-5 (c)), and §13.3 cross-references it. The verification-only re-sign predicate is stated in §13.4 (SPEC-4a (a)), and the §13.4 admission paragraph and §13.12 cross-reference it.
+
+
+(g) §13.12, the paragraph that begins "Signing is producer-side", as (d) leaves it: insert after "until `sign-stored-rows --include-unsigned` runs (§13.4)." the sentence "Outside the SQLite store in the key file's directory, the first start of a release that rewrites stored values also leaves unsigned rows unsigned (§13.4)."
 
 ## Spec amendment: §11 signing test
 
