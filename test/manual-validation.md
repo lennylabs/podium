@@ -197,6 +197,9 @@ rm -rf "$WORK"
 | S67 | `podium verify --provider noop` refuses | none | none | none | none |
 | S68 | A stale `never` is announced | standalone | none | none | none |
 | S69 | The registry refuses a row edited in its store | standalone | none | none | none |
+| S70 | The hidden parent does not appear in any response body | standalone | none | none | none |
+| S71 | An `extends:` child verifies through the MCP bridge and materializes | standalone | none | none | none |
+| S72 | The artifact viewer's extends rail matches the caller's view | standalone | none | none | a desktop browser |
 
 ---
 
@@ -464,9 +467,11 @@ collision-rejection rule.
 - `layer list` shows `base` and `team` in order (`base` at `order` 1, `team` at
   `order` 2).
 - `layer reingest team` reports `greet` rejected with code `ingest.collision`
-  and a reason naming the layer that already contributed it: `cross-layer
-  collision: "greet" already contributed by layer "base"; declare extends: greet
-  to overlay it`. The team layer's non-colliding `deploy` is ingested.
+  and a reason that names the artifact and the remedy and no layer:
+  `cross-layer collision: "greet" is already contributed by another layer;
+  declare extends: greet to overlay it`. A reason that names `base` is a §4.6
+  disclosure to a layer owner who cannot read that layer. The registry log
+  names both layers. The team layer's non-colliding `deploy` is ingested.
 - Searching `greet` returns a single `greet` artifact whose description is the
   base layer's (`Base greet`), confirming the base artifact survives and the
   colliding team artifact was rejected rather than silently shadowing it.
@@ -1322,14 +1327,14 @@ is refused.
    grep "ingest signing" "$WORK/srv.log"
    ```
 
-3. Confirm the registry stored a signature at ingest, then load the artifact.
-   `podium artifact show` prints the body without verifying; the signature lives
-   in the `load_artifact` response and consumer-side verification happens at
-   materialization (next step).
+3. Confirm the registry serves a delivery signature, then load the artifact.
+   `podium artifact show` prints the body without verifying; the delivery pair
+   lives in the `load_artifact` response and consumer-side verification happens
+   at materialization (next step).
 
    ```bash
    curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=signed-runbook" \
-     | python3 -c 'import sys,json; print(json.load(sys.stdin)["signature"])'
+     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d["delivery_hash"]); print(d["delivery_signature"]); print(sorted(k for k in ("signature","raw_frontmatter","manifest_merged") if k in d))'
    export PODIUM_VERIFY_SIGNATURES=always
    podium artifact show --registry "$PODIUM_REGISTRY" signed-runbook
    ```
@@ -1386,12 +1391,16 @@ is refused.
 
 - The server signs each artifact at ingest using the registry key. The server
   log reports `ingest signing: registry-managed key`, and the `load_artifact`
-  response carries a `signature` envelope (`{"key_id":...,"signature":...}`).
+  response carries a `delivery_hash` (`sha256:<hex>`) and, in
+  `delivery_signature`, a registry-managed envelope
+  (`{"key_id":...,"signature":...}`) over that delivery hash. The third printed
+  line is `[]`, because the response carries no `signature`,
+  `raw_frontmatter`, or `manifest_merged` field.
 - `podium artifact show` prints the signed artifact's body. The CLI read path
   does not verify; it confirms the artifact loads.
 - With `PODIUM_VERIFY_SIGNATURES=always`, loading the signed high-sensitivity
-  artifact through the MCP bridge verifies the signature and materializes the
-  artifact under `$WORK/out`.
+  artifact through the MCP bridge recomputes the delivery hash, verifies the
+  delivery signature, and materializes the artifact under `$WORK/out`.
 - The unsigned artifact loaded under the same policy fails with
   `materialize.signature_missing` and writes nothing. A signature that does not
   validate against the configured public key fails with
@@ -3092,12 +3101,11 @@ bytes directly is what these steps are for.
    violation a value-only check does not catch: a restored node carries its
    author's comments and the serializer re-emits them unless it clears them.
 
-   The probe reads the `frontmatter` field alone, deliberately. The same
-   response also carries `raw_frontmatter`, which is the child's authored
-   pre-merge block and does contain `extends: shared/base@1.x`. That is the
-   sanctioned exception: a consumer reproduces the §4.7.6 content hash from it
-   when `manifest_merged` is true, so it carries the reference by design. Every
-   other served string is covered by the probe.
+   The probe reads the `frontmatter` field, which is the served string the
+   merge writes. The response carries no `raw_frontmatter`, `manifest_merged`,
+   or `signature` field, and it names the parent in `extends_pin` only because
+   this unauthenticated standalone caller can see every layer. S70 reads the
+   whole raw body as a caller that cannot see the parent's layer.
 
 5. Check the body. The child authored no prose, so it must be served none
    rather than the parent's.
@@ -3251,18 +3259,22 @@ curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=shared/base" > "$WORK/parent.json"
 python3 - "$WORK/child.json" "$WORK/parent.json" <<'PY'
 import json, sys
 c, p = (json.load(open(a)) for a in sys.argv[1:3])
-print("child  sig empty:", not c.get("signature"))
-print("parent sig empty:", not p.get("signature"))
-print("same envelope:", c.get("signature") == p.get("signature"))
+print("child  sig empty:", not c.get("delivery_signature"))
+print("parent sig empty:", not p.get("delivery_signature"))
+print("same envelope:", c.get("delivery_signature") == p.get("delivery_signature"))
+print("child delivery hash:", c.get("delivery_hash"))
+print("parent delivery hash:", p.get("delivery_hash"))
 print("child hash:", c.get("content_hash"))
 print("parent hash:", p.get("content_hash"))
 PY
 ```
 
-   **Expect.** Neither signature is empty, the two envelopes differ, and the
-   two content hashes differ. An empty signature means signing never turned on
-   and every later step is vacuous. An identical envelope across a child and
-   its parent is the defect itself.
+   **Expect.** Neither `delivery_signature` is empty and the two envelopes
+   differ, because each is minted over its own record's `delivery_hash`. The two
+   delivery hashes differ, and the two content hashes differ. An empty
+   delivery signature means signing never turned on and every later step is
+   vacuous. An identical envelope across a child and its parent is the defect
+   itself.
 
 4. Load the child through the path that enforces verification. `podium-mcp`
    is the consumer that raises `materialize.signature_invalid`, and it is
@@ -3280,9 +3292,10 @@ echo "$REQ" | PODIUM_REGISTRY="$PODIUM_REGISTRY" PODIUM_MATERIALIZE_DIR="$WORK/m
 
    **Expect.** A JSON-RPC result whose `structuredContent.content_hash` is the
    child's own hash from step 3, and whose `manifest_body` is `derived prose` with its trailing newline.
-   An error naming `materialize.signature_invalid` means the served signature
-   does not cover the served content hash, which is the defect this scenario
-   pins.
+   An error naming `materialize.signature_invalid` means the served delivery
+   signature does not cover the served delivery hash, and an error naming
+   `materialize.content_hash_mismatch` means the served bytes do not reproduce
+   the served delivery hash. Either is the defect this scenario pins.
 
 5. Negative control on the key. Without it the scenario cannot tell "verified"
    from "never checked", which is how its first version passed against the
@@ -7424,9 +7437,11 @@ migrated it.
 
 **Covers.** The §4.7.6 canonical serialization, the §6.6 step-2 delivery check,
 the §6.4 overlay response, the §13.4 first-start rewrite, and the §13.4
-stored-row admission that refuses an unmigrated row. The pre-upgrade
-consumer cache is covered by the automated suite instead, because the bucket
-that refusal needs is one the pre-upgrade binary wrote.
+stored-row admission that refuses an unmigrated row. A consumer cache bucket
+the pre-upgrade binary wrote carries no per-ID delivery side files, so the new
+`podium-mcp` treats it as a cache miss and serves nothing from it. The
+automated suite covers that miss, because the bucket it needs is one the
+pre-upgrade binary wrote.
 
 **Why by hand.** The failure is a disagreement between two processes over a
 serialization, and the refusal direction requires a store that was written by
@@ -7721,7 +7736,7 @@ a load reports.
    export PODIUM_REGISTRY=http://127.0.0.1:8166
    INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
    load_http() { curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=early&version=$1" \
-     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("code") or "loaded signature=" + repr(d.get("signature")))'; }
+     | python3 -c 'import sys,json; d=json.load(sys.stdin); print(d.get("code") or "loaded delivery_signature=" + repr(d.get("delivery_signature")))'; }
    load_mcp() { printf '%s\n%s\n' "$INIT" \
      "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"load_artifact\",\"arguments\":{\"id\":\"early\",\"version\":\"$1\"}}}" \
      | PODIUM_CACHE_DIR="$(mktemp -d "$WORK/cache.XXXXXX")" podium-mcp 2>/dev/null | tail -1 \
@@ -7757,8 +7772,8 @@ a load reports.
    load_http 0.1.0
    ```
 
-   **Expect.** The new version loads with a non-empty `signature` through
-   `curl` and loads through the bridge. The earlier version still prints
+   **Expect.** The new version loads with a non-empty `delivery_signature`
+   through `curl` and loads through the bridge. The earlier version still prints
    `materialize.signature_missing`.
 
 **Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
@@ -7990,3 +8005,367 @@ record that a revalidating consumer keeps serving its admitted copy while the
 stored hash is unchanged, so a refusal is observed through a full load.
 
 **Cleanup.** `stop` then `rm -rf "$WORK"`.
+
+---
+
+## S70: The hidden parent does not appear in any response body
+
+**Goal.** Validate that a caller who cannot see the layer contributing an
+`extends:` parent finds the parent's ID and layer in no response body the
+registry serves for the merged child, and that a chain failure names only the
+child.
+
+**Covers.** §4.6 hidden parents (withheld), §4.7.3 reverse-index visibility,
+§7.2 `extends_pin`, and §7.6.2 batch loading.
+
+**Why by hand.** The check reads raw response bytes across every read surface.
+A parsed-field assertion passes while the ID sits in another field, and each
+surface has leaked the parent at least once through a field no assertion read.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Build a two-layer registry. The lower layer holds the parent and is visible
+   to bob alone. The upper layer holds the merged child and is visible to alice
+   and bob. carol is seeded as the tenant admin for the last step. The
+   `trusted-headers` provider takes the caller from the `X-Podium-User-Sub`
+   header, so no token is minted.
+
+   ```bash
+   mkdir -p "$WORK/lower/shared/base" "$WORK/upper/team/derived"
+   cat > "$WORK/lower/shared/base/ARTIFACT.md" <<'EOF'
+   ---
+   type: context
+   version: 1.0.0
+   description: the base context
+   tags: [from-base]
+   ---
+
+   base prose
+   EOF
+   cat > "$WORK/upper/team/derived/ARTIFACT.md" <<'EOF'
+   ---
+   type: context
+   version: 2.0.0
+   description: the derived context
+   extends: shared/base@1.x
+   ---
+
+   derived prose
+   EOF
+   cat > "$WORK/registry.yaml" <<YAML
+   registry:
+     layers:
+       - id: shared-base
+         source: { local: { path: $WORK/lower } }
+         visibility: { users: [bob@acme.com] }
+       - id: team-derived
+         source: { local: { path: $WORK/upper } }
+         visibility: { users: [alice@acme.com, bob@acme.com] }
+   YAML
+   PODIUM_IDENTITY_PROVIDER=trusted-headers PODIUM_BOOTSTRAP_ADMINS=carol@acme.com \
+     podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" \
+     --bind 127.0.0.1:8170 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8170/healthz
+   export URL=http://127.0.0.1:8170
+   as() { who="$1"; shift; curl -s -H "X-Podium-User-Sub: $who@acme.com" "$@"; }
+   ```
+
+3. Confirm the control is switched on. bob can see both layers, so his load of
+   the child carries the parent pin and his reverse-index query on the parent
+   returns the child's edge.
+
+   ```bash
+   as bob "$URL/v1/load_artifact?id=team/derived" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("extends_pin"))'
+   as bob "$URL/v1/dependents?id=shared/base" | python3 -c 'import sys,json; print(json.load(sys.stdin)["edges"])'
+   ```
+
+   **Expect.** `shared/base@1.0.0`, then one edge from `team/derived` to
+   `shared/base` of kind `extends`. A `None` or an empty list means the
+   registry resolved no parent for anyone, and every later step is vacuous.
+
+4. Read every surface as alice and count the parent's ID and the parent
+   layer's ID in the raw bytes. The child's ID is counted as well, so a surface
+   that answered an error envelope does not pass the scan.
+
+   ```bash
+   scan() { printf '%-36s child=%s shared/base=%s shared-base=%s\n' "$1" \
+     "$(grep -o 'team/derived' "$WORK/body" | wc -l | tr -d ' ')" \
+     "$(grep -o 'shared/base' "$WORK/body" | wc -l | tr -d ' ')" \
+     "$(grep -o 'shared-base' "$WORK/body" | wc -l | tr -d ' ')"; }
+   for p in "/v1/load_artifact?id=team/derived" "/v1/search_artifacts?query=" \
+            "/v1/search_artifacts?query=derived" "/v1/catalog" "/v1/sync/manifest"; do
+     as alice "$URL$p" > "$WORK/body"; scan "$p"
+   done
+   as alice "$URL/v1/dependents?id=team/derived" > "$WORK/body"; scan "/v1/dependents?id=team/derived"
+   as alice -X POST -H 'Content-Type: application/json' -d '{"ids":["team/derived"]}' \
+     "$URL/v1/artifacts:batchLoad" > "$WORK/body"; scan "/v1/artifacts:batchLoad"
+   ```
+
+   **Expect.** Every line reads `shared/base=0 shared-base=0`. Every line except
+   the `/v1/dependents` one reads `child=` with a count of at least 1; the
+   dependents body for the child is an empty edge list, because nothing
+   depends on the child.
+
+5. Query the reverse index on the parent as alice.
+
+   ```bash
+   as alice -w '%{http_code}\n' "$URL/v1/dependents?id=shared/base"
+   as alice "$URL/v1/dependents?id=no/such-artifact"
+   ```
+
+   **Expect.** Status `200` with a body that parses to `{"edges": []}`, and the
+   same body for the artifact that does not exist. A `403`, a `404`, or an edge
+   list naming `team/derived` distinguishes the parent from an absent ID.
+
+6. Read alice's load response keys.
+
+   ```bash
+   as alice "$URL/v1/load_artifact?id=team/derived" | python3 -c 'import sys,json; print(sorted(json.load(sys.stdin)))'
+   ```
+
+   **Expect.** The list carries `delivery_hash` and `delivery_signature` and
+   carries no `extends_pin`, `raw_frontmatter`, `manifest_merged`, or
+   `signature`.
+
+7. Unregister the parent's layer as carol and load the child as alice again.
+
+   ```bash
+   as carol -X DELETE -w ' %{http_code}\n' "$URL/v1/layers?id=shared-base"
+   as alice -w ' %{http_code}\n' "$URL/v1/load_artifact?id=team/derived"
+   ```
+
+   **Expect.** The unregister answers `200`. The load answers `404` with a
+   `registry.not_found` envelope whose `message` is
+   `registry.not_found: team/derived`. A message naming `shared/base` discloses
+   the parent through the chain failure.
+
+**Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
+
+---
+
+## S71: An `extends:` child verifies through the MCP bridge and materializes
+
+**Goal.** Validate that the compiled `podium-mcp` recomputes the delivery hash
+of a merged child served to a caller who cannot see the parent, verifies the
+delivery signature, and materializes the merged bytes, and that one byte of the
+served frontmatter altered in transit fails the load before anything is
+written.
+
+**Covers.** §4.7.10 delivery attestation, §6.6 step 2, the §6.9
+delivery-hash mismatch row, and §7.2 integrity fields.
+
+**Why by hand.** The refusal needs a response one process composed and another
+process rejected, which no in-process test provides.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Build the two-layer registry from S70 step 2, without `PODIUM_BOOTSTRAP_ADMINS`,
+   and serve it on its own port with the default signing mode.
+
+   ```bash
+   mkdir -p "$WORK/lower/shared/base" "$WORK/upper/team/derived"
+   cat > "$WORK/lower/shared/base/ARTIFACT.md" <<'EOF'
+   ---
+   type: context
+   version: 1.0.0
+   description: the base context
+   tags: [from-base]
+   ---
+
+   base prose
+   EOF
+   cat > "$WORK/upper/team/derived/ARTIFACT.md" <<'EOF'
+   ---
+   type: context
+   version: 2.0.0
+   description: the derived context
+   extends: shared/base@1.x
+   ---
+
+   derived prose
+   EOF
+   cat > "$WORK/registry.yaml" <<YAML
+   registry:
+     layers:
+       - id: shared-base
+         source: { local: { path: $WORK/lower } }
+         visibility: { users: [bob@acme.com] }
+       - id: team-derived
+         source: { local: { path: $WORK/upper } }
+         visibility: { users: [alice@acme.com, bob@acme.com] }
+   YAML
+   PODIUM_IDENTITY_PROVIDER=trusted-headers \
+     podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" \
+     --bind 127.0.0.1:8171 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8171/healthz
+   ```
+
+3. Start two gateways in front of the registry. `podium-mcp` sends no identity
+   headers, so each gateway stamps `X-Podium-User-Sub: alice@acme.com` on every
+   request, as the gateway of a `trusted-headers` deployment does. The second
+   gateway also replaces one byte of the `frontmatter` field in each
+   `load_artifact` response, which is the in-transit alteration.
+
+   ```bash
+   cat > "$WORK/gateway.py" <<'PY'
+   import http.server, json, os, sys, urllib.error, urllib.request
+
+   UPSTREAM, USER, TAMPER = os.environ["UPSTREAM"], os.environ["AS_USER"], os.environ.get("TAMPER") == "1"
+   DROP = {"host", "content-length", "accept-encoding", "connection"}
+
+   class Gateway(http.server.BaseHTTPRequestHandler):
+       def forward(self):
+           n = int(self.headers.get("Content-Length") or 0)
+           req = urllib.request.Request(UPSTREAM + self.path, data=self.rfile.read(n) if n else None, method=self.command)
+           for k, v in self.headers.items():
+               if k.lower() not in DROP and not k.lower().startswith("x-podium-user-"):
+                   req.add_header(k, v)
+           req.add_header("X-Podium-User-Sub", USER)
+           try:
+               resp = urllib.request.urlopen(req)
+           except urllib.error.HTTPError as err:
+               resp = err
+           data = resp.read()
+           if TAMPER and self.command == "GET" and self.path.startswith("/v1/load_artifact") and resp.status == 200:
+               doc = json.loads(data)
+               doc["frontmatter"] = doc["frontmatter"].replace("derived", "derivee", 1)
+               data = json.dumps(doc).encode()
+           self.send_response(resp.status)
+           for k, v in resp.headers.items():
+               if k.lower() not in ("content-length", "transfer-encoding", "connection"):
+                   self.send_header(k, v)
+           self.send_header("Content-Length", str(len(data)))
+           self.end_headers()
+           if self.command != "HEAD":
+               self.wfile.write(data)
+
+       do_GET = do_HEAD = do_POST = do_DELETE = forward
+
+       def log_message(self, *args):
+           pass
+
+   http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), Gateway).serve_forever()
+   PY
+   UPSTREAM=http://127.0.0.1:8171 AS_USER=alice@acme.com python3 "$WORK/gateway.py" 8172 &
+   GW=$!
+   UPSTREAM=http://127.0.0.1:8171 AS_USER=alice@acme.com TAMPER=1 python3 "$WORK/gateway.py" 8173 &
+   GWT=$!
+   curl -s --retry 20 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8172/healthz
+   curl -s --retry 20 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8173/healthz
+   ```
+
+4. Read the raw response through the unaltering gateway.
+
+   ```bash
+   curl -s "http://127.0.0.1:8172/v1/load_artifact?id=team/derived" | python3 -c '
+   import sys, json
+   d = json.load(sys.stdin)
+   print("delivery_hash:", d.get("delivery_hash", "")[:14], "delivery_signature set:", bool(d.get("delivery_signature")))
+   print("removed fields present:", sorted(k for k in ("raw_frontmatter", "manifest_merged", "signature") if k in d))
+   print("extends_pin present:", "extends_pin" in d)'
+   ```
+
+   **Expect.** `delivery_hash: sha256:` followed by hex, `delivery_signature
+   set: True`, `removed fields present: []`, and `extends_pin present: False`.
+
+5. Load the child through the bridge via the unaltering gateway, with the
+   registry-managed verifier and the registry's public key.
+
+   ```bash
+   PUBKEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"team/derived"}}}'
+   load_mcp() { printf '%s\n%s\n' "$INIT" "$LOAD" \
+     | PODIUM_REGISTRY="$1" PODIUM_HARNESS=none PODIUM_MATERIALIZE_ROOT="$2" \
+       PODIUM_CACHE_DIR="$(mktemp -d "$WORK/cache.XXXXXX")" \
+       PODIUM_VERIFY_SIGNATURES=always PODIUM_SIGNATURE_PROVIDER=registry-managed \
+       PODIUM_SIGNATURE_VERIFY_KEY="$PUBKEY" podium-mcp 2>/dev/null | tail -1 \
+     | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["structuredContent"]; print(r.get("error") or "loaded " + r["content_hash"])'; }
+   load_mcp http://127.0.0.1:8172 "$WORK/out"
+   cat "$WORK/out/team/derived/ARTIFACT.md"
+   grep -rl "shared/base" "$WORK/out" || echo "no parent ID on disk"
+   ```
+
+   **Expect.** `loaded sha256:...`. The materialized `ARTIFACT.md` carries the
+   child's `description: the derived context` and the inherited `from-base`
+   tag, and the last line reads `no parent ID on disk`.
+
+6. Load the child through the altering gateway into a new destination.
+
+   ```bash
+   load_mcp http://127.0.0.1:8173 "$WORK/out-altered"
+   ls -A "$WORK/out-altered" 2>&1
+   ```
+
+   **Expect.** An error beginning
+   `materialize.content_hash_mismatch: recomputed delivery hash`, and `ls`
+   reports that `$WORK/out-altered` does not exist. A `loaded` line means the
+   bridge materialized bytes the registry did not attest. Step 5 is the
+   control that shows the same bridge, key, and registry load the unaltered
+   record.
+
+**Cleanup.** `kill "$GW" "$GWT" "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
+
+---
+
+## S72: The artifact viewer's extends rail matches the caller's view
+
+**Goal.** Validate that the web UI draws the outbound extends rail from the
+served `extends_pin`, so a caller who cannot see the parent reads the same rail
+as for an artifact that extends nothing, and makes no scoped catalog request
+that would decide the question in the browser.
+
+**Covers.** §13.10 artifact viewer, §4.6 hidden parents (withheld), and §7.2
+`extends_pin`.
+
+**Why by hand.** The assertion is what a reader sees rendered and which
+requests the browser sends, and no Go test observes either.
+
+**Prerequisites.** A desktop browser that can run two separate profiles.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Build and serve the two-layer registry from S71 step 2 with the web UI
+   mounted, on port 8174 instead of 8171, by adding `--web-ui` to the
+   `podium serve` line. Record its PID in `SRV`.
+
+3. Write `gateway.py` as in S71 step 3, and start one unaltering gateway per
+   identity. Each port is a separate browser origin.
+
+   ```bash
+   UPSTREAM=http://127.0.0.1:8174 AS_USER=alice@acme.com python3 "$WORK/gateway.py" 8175 &
+   GWA=$!
+   UPSTREAM=http://127.0.0.1:8174 AS_USER=bob@acme.com python3 "$WORK/gateway.py" 8176 &
+   GWB=$!
+   curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8175/app/
+   ```
+
+   **Expect.** `200`.
+
+4. In a browser profile used for nothing else, open the network tab, then open
+   `http://127.0.0.1:8175/app/#/artifact/team%2Fderived`.
+
+   **Expect.** The viewer shows `team/derived` and its relations rail reads
+   "This artifact extends nothing." The network tab lists no request whose URL
+   includes `/v1/catalog?scope=`. The unscoped `/v1/catalog` request the
+   sidebar footer makes on every route is not part of the check.
+
+5. In a second browser profile, open the network tab, then open
+   `http://127.0.0.1:8176/app/#/artifact/team%2Fderived`.
+
+   **Expect.** The relations rail shows the chip `shared/base@1.0.0`, drawn
+   from the served `extends_pin`, and following it opens `shared/base`. This is
+   the control that shows the rail draws a parent when the caller can see one.
+   A rail reading "This artifact extends nothing." for bob means the viewer no
+   longer reads `extends_pin`, and step 4 then proves nothing.
+
+**Cleanup.** Close both browser profiles, `kill "$GWA" "$GWB" "$SRV"; wait "$SRV"`,
+then `rm -rf "$WORK"`.

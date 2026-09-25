@@ -266,7 +266,7 @@ harness-native files, so it is where cross-harness delivery happens.
 
 A consumer calls `load_artifact(id, harness=...)`. The pipeline
 fetches bundled bytes from the registry, verifies them against the
-manifest's signature and content hash, runs the configured
+served delivery hash and the registry's signature over it, runs the configured
 `HarnessAdapter` to translate the canonical layout into the
 harness-native one, applies any `MaterializationHook` plugins, and
 writes atomically to the destination. The artifact's bundled files travel

@@ -145,43 +145,89 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
   **Rolling the consumers.** Roll consumers to the new binary after the registry
   has started on it, and clear each consumer's cache as the next paragraph
-  states. A consumer and a filesystem-source `podium sync` each recompute the
-  digest, so the binary a consumer runs decides whether its load of a row
-  succeeds: an upgraded consumer fails every load of a row the registry has not
-  yet rewritten, and a consumer still on the previous binary fails every load of
-  a rewritten row, each with `materialize.content_hash_mismatch`. Loads fail for
-  the consumers that have not yet rolled, between the registry's first start on
-  the new binary and the last consumer rolling, so schedule the consumer roll
-  inside the same maintenance window. A return to the previous binary restores the backup the upgrade order
-  takes, reverts the registry and every consumer together, and clears each
-  reverted consumer's cache, because a consumer that ran the new binary holds
-  buckets and `id@<semver>` resolution pins keyed by the framed digest and the
-  previous binary serves them from the cache in the modes the next paragraph
-  names and refuses each with `materialize.content_hash_mismatch` whatever the
-  restored store holds.
+  states. The registry's stored-row admission (§13.4) refuses a row the rewrite
+  has not rewritten to every reader, whatever binary the reader runs. An
+  upgraded `podium-mcp` recomputes no §4.7.6 digest: it checks the §4.7.10
+  delivery record the registry serves, and only a filesystem-source
+  `podium sync` recomputes the §4.7.6 digest. A consumer still on the previous
+  binary, against the upgraded registry, receives neither `signature` nor
+  `raw_frontmatter`, so it fails every load of a rewritten row with
+  `materialize.content_hash_mismatch`, or earlier with its signature refusal
+  wherever its policy requires a signature. Loads fail for the consumers that
+  have not yet rolled, between the registry's first start on the new binary and
+  the last consumer rolling, so schedule the consumer roll inside the same
+  maintenance window. A return to the previous binary restores the backup the
+  upgrade order takes, reverts the registry and every consumer together, and
+  clears each reverted consumer's cache. A reverted consumer refuses each cached
+  bucket the new binary wrote with `materialize.content_hash_mismatch`, or
+  earlier with `materialize.signature_invalid` wherever its policy requires a
+  signature, because the new binary's buckets carry no bucket-level `signature`
+  side file and the previous binary checks the signature before the content
+  hash.
 
   **Clear each consumer's cache.** The caches do not repair themselves, and the
   clear applies on every binary change in either direction, on the upgrade and
-  on a return to the previous binary. The §6.5 resolution index is keyed by
-  artifact id and version, it survives a binary change, and a pinned entry never
-  expires, so an upgraded consumer in `offline-first` or `offline-only`, and an
-  `always-revalidate` consumer whose registry is unreachable and which takes the
-  §7.4 degraded-network fallback, resolves a pre-upgrade hash, hits the stale
-  bucket, and fails the load with `materialize.content_hash_mismatch`.
-  `always-revalidate` recovers on its own through its HEAD comparison only while
-  the registry answers, so that mode needs the clear too, before its next
-  registry outage. The cache directory is `$PODIUM_CACHE_DIR` when that variable
-  is set and `~/.podium/cache` when it is not. Remove that directory wholesale,
-  or run `podium cache prune --days 0` together with
-  `rm -rf <cache dir>/.resolutions`, because prune resolves the same default but
-  is age-based and skips the resolution index. Object storage is keyed per blob
-  and is unaffected. A `podium sync` rewrites the `content_hash` of every entry
-  in its lock file on its first run against the new registry, and that run
-  reports every target as changed.
+  on a return to the previous binary. On an upgraded consumer a pre-upgrade
+  bucket carries no per-ID delivery side files and is a cache miss, so no
+  unverified record is served from it: `offline-first` and a reachable
+  `always-revalidate` fetch the artifact live, `offline-only` returns its
+  offline cache-miss error, and the §7.4 degraded-network fallback surfaces
+  `network.registry_unreachable`. The clear removes the pre-upgrade
+  `raw_frontmatter` side files, which hold the IDs of parent artifacts, and the
+  pre-upgrade `id@<semver>` resolution pins, which the §6.5 resolution index
+  keeps across a binary change and never expires. The cache directory is
+  `$PODIUM_CACHE_DIR` when that variable is set and `~/.podium/cache` when it is
+  not. Remove that directory wholesale, or run `podium cache prune --days 0`
+  together with `rm -rf <cache dir>/.resolutions`, because prune resolves the
+  same default but is age-based and skips the resolution index. Object storage
+  is keyed per blob and is unaffected. A `podium sync` rewrites the
+  `content_hash` of every entry in its lock file on its first run against the
+  new registry, and that run reports every target as changed.
 
   A §6.4 workspace overlay now serves the canonical hash over its whole package,
   so an overlay skill's `content_hash` moves when its `SKILL.md` or one of its
   bundled resources changes.
+- **`load_artifact` serves a delivery attestation, and the response fields
+  change** (§4.7.10, §6.6, §7.2, §7.6.2): the `load_artifact` response and each
+  `artifacts:batchLoad` item carry `delivery_hash`, a digest over the record the
+  registry served, which for an artifact that declares `extends:` is the merged
+  record, and `delivery_signature`, the registry's signature over it, minted per
+  response with the registry-managed key. The `load_artifact` response also
+  carries `extends_pin`, the parent pin the child resolved at ingest, present
+  only when the caller can see the parent record. The response no longer carries
+  `raw_frontmatter`, `manifest_merged`, or `signature`, and a merged manifest
+  above the inline cutoff is served through `manifest_body_url` like any other.
+  A client that read any of the removed fields reads the new ones: `podium-mcp`
+  recomputes `delivery_hash` on every load, independent of
+  `PODIUM_VERIFY_SIGNATURES` and of sensitivity, and fails a mismatch with
+  `materialize.content_hash_mismatch` before it applies its signature policy to
+  `delivery_signature`. `podium verify <artifact>` verifies the delivery pair,
+  and with `--signature` it verifies that envelope over the content hash. The
+  `load_artifact` entity tag folds in the `extends_pin` value the caller is
+  served. The delivery record carries no timestamp and no nonce, so a captured
+  record verifies when it is replayed.
+
+  Operator actions: roll the registry and the consumers together, as the
+  content-hash entry above states, because a consumer on the previous binary
+  refuses every load from the upgraded registry. Configure each consumer with
+  `PODIUM_SIGNATURE_PROVIDER=registry-managed` and the registry's public key in
+  `PODIUM_SIGNATURE_VERIFY_KEY`, because the delivery signature is a
+  registry-managed envelope whatever key model signed the artifact at ingest,
+  and a consumer configured for `sigstore-keyless` refuses it with
+  `materialize.signature_invalid`. A registry running with `PODIUM_SIGN=none`
+  serves each delivery record unsigned. A rotation of the registry key takes
+  effect on the next response, so roll each consumer's
+  `PODIUM_SIGNATURE_VERIFY_KEY` with the rotation and clear each consumer's
+  cache directory.
+- **Hidden parents are withheld on more read surfaces** (§4.6, §4.7.3):
+  `GET /v1/dependents` returns an edge only when the caller can see both of its
+  endpoints, testing the parent record an `extends` edge pinned, and answers
+  `200 {"edges":[]}` for a target the caller cannot see. A search result for a
+  child carries no `frontmatter` block when that block still names an ancestor
+  in the child's pinned chain or when the chain cannot be resolved. The
+  cross-layer collision rejection names the artifact and the `extends:` remedy
+  and no longer names the layer that already contributes the ID. The web UI
+  draws the extends rail from the served `extends_pin`.
 - **The registry signs at ingest by default, and `podium-mcp` verifies every
   load** (§4.7.9, §6.2, §13.10, §13.12): `PODIUM_SIGN` defaults to
   `registry-key`, and `PODIUM_SIGN=none` or `--sign none` turns ingest signing
@@ -292,6 +338,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   running with `PODIUM_SIGN=none`, because on a signing registry the stored-row
   admission refuses every row stored unsigned to every reader whatever the
   consumer's policy.
+
+- **The MCP server's startup cache warm-up** (§7.6.2): `podium-mcp` no longer
+  calls `/v1/artifacts:batchLoad` at startup, and it no longer reads
+  `PODIUM_PREFETCH` or the `prefetch` configuration key. Remove both from a
+  consumer's configuration; a value left in place is ignored.
 
 ### Documentation
 

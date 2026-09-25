@@ -688,11 +688,11 @@ podium sign --content-hash sha256:<hex> [--provider <name>]
 | `--content-hash sha256:<hex>` | Sign this content hash directly, instead of resolving an artifact. |
 | `--provider <name>` | Signature provider: `registry-managed`, `sigstore-keyless`, or `noop`. Defaults to `PODIUM_SIGNATURE_PROVIDER`, then `registry-managed`. |
 
-The `registry-managed` provider uses one Ed25519 keypair per registry deployment, at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`), shared by every process serving that store and across every tenant it serves. `podium sign` takes the `private:` line of that key file and does not read `PODIUM_SIGNATURE_VERIFY_KEY`. The `sigstore-keyless` provider produces an OIDC-attested signature with a transparency-log entry, configured through the `PODIUM_SIGSTORE_*` env vars. `--provider noop` signs a placeholder that `podium verify` always refuses. An invocation that cannot resolve the key it needs exits non-zero naming `config.signature_provider_unavailable`.
+The `registry-managed` provider uses one Ed25519 keypair per registry deployment, at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`), shared by every process serving that store and across every tenant it serves. `podium sign` takes the `private:` line of that key file and does not read `PODIUM_SIGNATURE_VERIFY_KEY`. The `sigstore-keyless` provider produces an OIDC-attested signature with a transparency-log entry, configured through the `PODIUM_SIGSTORE_*` env vars. `--provider noop` signs a placeholder that `podium verify` always refuses. An invocation that cannot resolve the key it needs exits non-zero naming `config.signature_provider_unavailable`. `podium verify <artifact> --signature <envelope>` checks the envelope the `<artifact>` form prints against the artifact's resolved content hash.
 
 ### `podium verify`
 
-Ad-hoc signature verification. The `<artifact>` form resolves the artifact's content hash and stored signature through the registry; an explicit `--signature` overrides the stored envelope. The `--content-hash` plus `--signature` form verifies an explicit pair. Exits 0 on a valid signature and 1 on a mismatch or other error.
+Ad-hoc signature verification. The `<artifact>` form without `--signature` resolves the artifact's delivery hash and delivery signature through the registry and verifies that pair, which is the pair `podium-mcp` verifies on a load. It verifies the pair under the public key the resolution order below finds, and it refuses a response that carries no delivery hash or no delivery signature. With `--signature`, the `<artifact>` form verifies the explicit envelope against the artifact's resolved content hash, which is what `podium sign <artifact>` signs. The `--content-hash` plus `--signature` form verifies an explicit pair. Exits 0 on a valid signature and 1 on a mismatch or other error.
 
 ```
 podium verify <artifact> [--registry <url>] [--provider <name>] [--signature <envelope>]
@@ -703,12 +703,12 @@ podium verify --content-hash sha256:<hex> --signature <envelope> [--provider <na
 |:--|:--|
 | `--registry <url>` | Registry URL used to resolve the `<artifact>` form. Defaults to `PODIUM_REGISTRY`. |
 | `--content-hash sha256:<hex>` | Verify against this content hash directly, instead of resolving an artifact. |
-| `--signature <envelope>` | Signature envelope to verify. Pairs with `--content-hash`; overrides the stored signature in the `<artifact>` form. |
+| `--signature <envelope>` | Signature envelope to verify. Pairs with `--content-hash`. In the `<artifact>` form it is verified against the resolved content hash in place of the served delivery signature. |
 | `--provider <name>` | Signature provider: `registry-managed`, `sigstore-keyless`, or `noop`. Defaults to `PODIUM_SIGNATURE_PROVIDER`, then `registry-managed`. |
 
-The `registry-managed` provider resolves the public key from `PODIUM_SIGNATURE_VERIFY_KEY` when that variable is set, and otherwise from the `public:` line of the key file at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`). A set variable that does not decode is an error naming it. `podium verify` reads no private key. An invocation that cannot resolve the key exits non-zero naming `config.signature_provider_unavailable`. `--provider noop` refuses every envelope.
+The `registry-managed` provider resolves the public key from `PODIUM_SIGNATURE_VERIFY_KEY` when that variable is set, and otherwise from the `public:` line of the key file at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`). A set variable that does not decode is an error naming it. `podium verify` reads no private key. An invocation that cannot resolve the key exits non-zero naming `config.signature_provider_unavailable`. `--provider noop` refuses every envelope. The delivery signature is always a registry-managed envelope, so the form without `--signature` verifies with `--provider registry-managed`, and `--provider sigstore-keyless` refuses it.
 
-The MCP server verifies the signature on every artifact it loads under the default `PODIUM_VERIFY_SIGNATURES=always`, and a signing registry verifies each stored signature before it serves the row.
+The MCP server verifies the delivery signature on every artifact it loads under the default `PODIUM_VERIFY_SIGNATURES=always`, after it recomputes the delivery hash, and a signing registry verifies each stored signature before it serves the row.
 
 ---
 

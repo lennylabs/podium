@@ -201,8 +201,9 @@ ASCII fallback for the diagram above (identity and visibility flow):
     marketing-public public: true             always visible     YES
 
   Visibility evaluation runs on every registry call. Layers the
-  caller cannot see are silently excluded; hidden parents merge
-  server-side when a visible child declares extends:. Public mode
+  caller cannot see are silently excluded from the view. When a
+  visible child declares extends:, a hidden parent merges server-side
+  and its ID and layer are withheld. Public mode
   and filesystem-source deployments short-circuit visibility to
   true for every layer.
 -->
@@ -252,17 +253,20 @@ host's filesystem. For `load_artifact`, the MCP server runs these
 steps:
 
 1. **Fetch**: download bytes (or read from cache).
-2. **Verify**: signature and content hash. (Bundle contents are not introspected; vulnerability scanning is a CI/CD concern, not a registry one.)
+2. **Verify**: recompute the delivery hash over the served record, then check the registry's signature over it. (Bundle contents are not introspected; vulnerability scanning is a CI/CD concern, not a registry one.)
 3. **Adapt**: run the harness adapter to translate to native format.
 4. **Hook**: run any configured `MaterializationHook` plugins for
    per-file rewrites.
 5. **Write**: atomic `.tmp + rename` write to the destination.
 
 `podium sync` runs the fetch, adapt, hook, and write steps in batch, over the
-caller's effective view or over the subset an active scope selects. It performs
-no signature or content-hash verification. That check belongs to the
-`load_artifact` path above as `podium-mcp` runs it, which is where
-`PODIUM_VERIFY_SIGNATURES` applies. A signing registry verifies each stored row
+caller's effective view or over the subset an active scope selects. It runs
+no signature check and no delivery check; those belong to the `load_artifact`
+path above as `podium-mcp` runs it, which is where `PODIUM_VERIFY_SIGNATURES`
+applies. Server-source `podium sync` compares a fetched manifest-body document
+with the content hash its link carries and fails with `manifest body content
+hash mismatch` on a difference, and it compares no fetched bundled-resource
+body with its hash. A signing registry verifies each stored row
 before it serves it to any reader, `podium sync` included.
 
 The `load_artifact` response delivers the manifest body and the bundled
