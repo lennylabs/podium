@@ -31,6 +31,14 @@ The registry exposes two surfaces:
 
 Below the inline cutoff, resources are returned inline. This avoids round-trips for small fixtures.
 
+**Integrity and reference fields.** The registry's HTTP `load_artifact` response carries three fields beside the manifest and the resources:
+
+- `delivery_hash`: the §4.7.10 digest over the record this response delivers. Present on every response.
+- `delivery_signature`: the registry's §4.7.10 signature over `delivery_hash`. Absent when the registry runs without a signing key.
+- `extends_pin`: the pinned `<id>@<version>` this artifact extends, as the registry resolved it at ingest; the manifest's `extends:` key may carry a version range, and this field carries the resolved pin rather than the authored reference, present only when the calling identity can see the parent record (§4.6). Its absence does not mean the artifact extends nothing.
+
+These are fields of the HTTP response. The §5 `load_artifact` meta-tool result does not carry them. The entity tag the registry publishes for a `load_artifact` of an `(id, version)` is computed from the content hash and the `extends_pin` value the requesting identity is served, on a full response, on a HEAD, and on a 304 alike, so a response that carries `extends_pin` publishes an entity tag that differs from the one the same `(id, version)` publishes without it, and a conditional request cannot revalidate a cached body whose `extends_pin` value differs from the one the requesting identity is served.
+
 ### 7.2.1 Control-Plane JSON Conventions
 
 Every control-plane request body and response body is JSON, and every field name in it is lower snake_case: `source_type`, `last_ingested_at`, `webhook_url`. A field name is part of the API contract and is chosen for the client, so it is independent of the name the registry uses for the same value internally, and where a request and a response carry the same value they name it identically.
@@ -691,6 +699,8 @@ for result in artifacts:
     "status": "ok",
     "version": "1.2.0",
     "content_hash": "sha256:...",
+    "delivery_hash": "sha256:...",
+    "delivery_signature": "...",
     "manifest_body": "...",
     "resources": [
       { "path": "...", "presigned_url": "...", "content_hash": "..." }
@@ -712,7 +722,7 @@ for result in artifacts:
 - **Partial failure** does not fail the batch. Each item carries its own status.
 - **Bandwidth:** a bundled resource the registry does not hold inline on the manifest record travels via a presigned URL (§4.4) so the response body stays small, and the SDK fetches those resources concurrently after the response. A resource the registry holds inline on the manifest record travels in the reference's `inline` field in place of `presigned_url`, including when a copy of it also exists in object storage, base64-encoded with `inline_base64: true` when its bytes are not valid UTF-8. The registry holds inline every resource at or below the §4.1 inline cutoff, and every resource of a row ingested while no object store was configured (§7.2), so every link it serves names an object the §13.4 stored-row admission read.
 
-**Not exposed as an MCP meta-tool** (§5). The MCP path is agent-mediated and load-on-demand; bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list. The MCP server uses this endpoint internally for cache warm-up when configured to prefetch.
+**Not exposed as an MCP meta-tool** (§5). The MCP path is agent-mediated and load-on-demand; bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list. The MCP server does not call this endpoint. It writes a §6.5 cache entry only from a `load_artifact` response whose §4.7.10 delivery record it has verified (§6.6), and it performs no startup warm-up.
 
 ## 7.7 Onboarding: `podium init`, `podium config show`, `podium login`
 
