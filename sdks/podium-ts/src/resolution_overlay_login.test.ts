@@ -120,6 +120,10 @@ describe("overlay merge", () => {
     const art = await c.loadArtifact("drafts/my-prompt");
     expect(art.id).toBe("drafts/my-prompt");
     expect(art.manifest_body).toContain("overlay body");
+    // Spec: §4.7.10 — no registry served an overlay record, so it carries no
+    // delivery attestation.
+    expect(art.delivery_hash).toBeUndefined();
+    expect(art.delivery_signature).toBeUndefined();
     expect(hitNetwork).toBe(false);
   });
 

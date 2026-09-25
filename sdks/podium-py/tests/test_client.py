@@ -465,6 +465,43 @@ def test_load_artifacts_returns_envelopes(stub_server):
     assert out[1].error is not None and out[1].error.code == "registry.not_found"
 
 
+# Spec: §4.7.10 — load_artifact passes the served delivery attestation
+# through unverified; an absent delivery_signature reads as "".
+def test_load_artifact_passes_delivery_attestation_through(stub_server):
+    stub_server.next_response = {
+        "id": "finance/run",
+        "type": "prompt",
+        "version": "1.0.0",
+        "content_hash": "sha256:c",
+        "delivery_hash": "sha256:d",
+        "delivery_signature": "sig-d",
+    }
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    art = client.load_artifact("finance/run")
+    assert (art.delivery_hash, art.delivery_signature) == ("sha256:d", "sig-d")
+
+    stub_server.next_response = {"id": "finance/run", "delivery_hash": "sha256:d"}
+    art = client.load_artifact("finance/run")
+    assert (art.delivery_hash, art.delivery_signature) == ("sha256:d", "")
+
+
+# Spec: §4.7.10 — each batchLoad envelope passes its delivery attestation
+# through; an absent delivery_signature, or an error item, reads as "".
+def test_load_artifacts_passes_delivery_attestation_through(stub_server):
+    stub_server.next_response = [
+        {"id": "a", "status": "ok", "delivery_hash": "sha256:a", "delivery_signature": "sig-a"},
+        {"id": "b", "status": "ok", "delivery_hash": "sha256:b"},
+        {"id": "c", "status": "error", "error": {"code": "registry.not_found", "message": "x"}},
+    ]
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    out = client.load_artifacts(["a", "b", "c"])
+    assert [(r.delivery_hash, r.delivery_signature) for r in out] == [
+        ("sha256:a", "sig-a"),
+        ("sha256:b", ""),
+        ("", ""),
+    ]
+
+
 # Spec: §7.6.2 — empty ids list short-circuits to an empty
 # response without a network call.
 def test_load_artifacts_empty_short_circuits(stub_server):

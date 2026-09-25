@@ -515,6 +515,11 @@ export class LoadedArtifact {
   deprecated?: boolean;
   replaced_by?: string;
   deprecation_warning?: string;
+  // spec: §4.7.10 — the registry's delivery attestation, passed through
+  // unverified. The SDK verifies nothing; a workspace-overlay load carries
+  // neither field because no registry served the record.
+  delivery_hash?: string;
+  delivery_signature?: string;
 
   constructor(data: Partial<LoadedArtifact>) {
     this.id = data.id ?? "";
@@ -536,6 +541,8 @@ export class LoadedArtifact {
     this.deprecated = data.deprecated;
     this.replaced_by = data.replaced_by;
     this.deprecation_warning = data.deprecation_warning;
+    this.delivery_hash = data.delivery_hash;
+    this.delivery_signature = data.delivery_signature;
   }
 
   async materialize(to: string, opts: MaterializeOptions = {}): Promise<string[]> {
@@ -582,6 +589,9 @@ export class BatchResult {
   deprecated?: boolean;
   replaced_by?: string;
   deprecation_warning?: string;
+  // spec: §4.7.10 — the delivery attestation, passed through unverified.
+  delivery_hash?: string;
+  delivery_signature?: string;
   error?: {
     code: string;
     message: string;
@@ -604,6 +614,8 @@ export class BatchResult {
     this.deprecated = data.deprecated;
     this.replaced_by = data.replaced_by;
     this.deprecation_warning = data.deprecation_warning;
+    this.delivery_hash = data.delivery_hash;
+    this.delivery_signature = data.delivery_signature;
     this.error = data.error;
   }
 

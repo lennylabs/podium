@@ -285,6 +285,11 @@ class LoadedArtifact:
     # spec: §4.3.4 / §11 — the verbatim SKILL.md for a skill, delivered so the
     # materialized file is byte-identical to the authored source.
     skill_raw: str = ""
+    # spec: §4.7.10 — the registry's delivery attestation, passed through
+    # unverified. The SDK verifies nothing; a workspace-overlay load leaves
+    # both empty because no registry served the record.
+    delivery_hash: str = ""
+    delivery_signature: str = ""
 
     def materialize(
         self,
@@ -340,6 +345,9 @@ class BatchResult:
     frontmatter: str = ""
     skill_raw: str = ""
     resources: list[dict[str, Any]] = field(default_factory=list)
+    # spec: §4.7.10 — the delivery attestation, passed through unverified.
+    delivery_hash: str = ""
+    delivery_signature: str = ""
     error: "RegistryError | None" = None
 
     def materialize(
@@ -457,6 +465,8 @@ def _batch_result_from(env: dict[str, Any]) -> BatchResult:
         frontmatter=env.get("frontmatter", ""),
         skill_raw=env.get("skill_raw", ""),
         resources=env.get("resources", []) or [],
+        delivery_hash=env.get("delivery_hash", ""),
+        delivery_signature=env.get("delivery_signature", ""),
         error=err,
     )
 
@@ -1337,6 +1347,8 @@ class Client:
             # §7.2 large resources travel as presigned references the
             # consumer fetches from object storage; materialize() pulls them.
             large_resources=body.get("large_resources", {}) or {},
+            delivery_hash=body.get("delivery_hash", ""),
+            delivery_signature=body.get("delivery_signature", ""),
         )
 
     def load_artifacts(

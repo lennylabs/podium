@@ -405,6 +405,47 @@ describe("Client", () => {
     expect(out[1].error?.code).toBe("registry.not_found");
   });
 
+  // Spec: §4.7.10 — loadArtifact passes the served delivery attestation
+  // through unverified; an absent delivery_signature stays undefined.
+  it("loadArtifact passes the delivery attestation through", async () => {
+    let reply: Record<string, unknown> = {
+      id: "finance/run",
+      type: "prompt",
+      content_hash: "sha256:c",
+      delivery_hash: "sha256:d",
+      delivery_signature: "sig-d",
+    };
+    const fetcher: typeof fetch = async () => new Response(JSON.stringify(reply), { status: 200 });
+    const c = new Client({ registry: "http://reg", fetcher });
+    const art = await c.loadArtifact("finance/run");
+    expect(art.delivery_hash).toBe("sha256:d");
+    expect(art.delivery_signature).toBe("sig-d");
+
+    reply = { id: "finance/run", delivery_hash: "sha256:d" };
+    const unsigned = await c.loadArtifact("finance/run");
+    expect(unsigned.delivery_hash).toBe("sha256:d");
+    expect(unsigned.delivery_signature).toBeUndefined();
+  });
+
+  // Spec: §4.7.10 — each batchLoad envelope passes its delivery attestation
+  // through; an absent delivery_signature stays undefined.
+  it("loadArtifacts passes the delivery attestation through", async () => {
+    const fetcher: typeof fetch = async () =>
+      new Response(
+        JSON.stringify([
+          { id: "a", status: "ok", delivery_hash: "sha256:a", delivery_signature: "sig-a" },
+          { id: "b", status: "ok", delivery_hash: "sha256:b" },
+        ]),
+        { status: 200 },
+      );
+    const c = new Client({ registry: "http://reg", fetcher });
+    const out = await c.loadArtifacts(["a", "b"]);
+    expect(out.map((r) => [r.delivery_hash, r.delivery_signature])).toEqual([
+      ["sha256:a", "sig-a"],
+      ["sha256:b", undefined],
+    ]);
+  });
+
   // Spec: §7.6.2 — empty ids list short-circuits without making
   // an HTTP call.
   it("loadArtifacts short-circuits on empty input", async () => {

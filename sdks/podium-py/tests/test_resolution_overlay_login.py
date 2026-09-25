@@ -199,6 +199,9 @@ def test_load_artifact_resolves_overlay_first(tmp_path):
     art = client.load_artifact("drafts/my-prompt")
     assert art.id == "drafts/my-prompt"
     assert "overlay body" in art.manifest_body
+    # Spec: §4.7.10 — no registry served an overlay record, so it carries no
+    # delivery attestation.
+    assert (art.delivery_hash, art.delivery_signature) == ("", "")
 
 
 # Spec: §4.4, §6.4 — the overlay carries the registry-side layers' format, so
