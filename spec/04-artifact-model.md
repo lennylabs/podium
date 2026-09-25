@@ -843,6 +843,10 @@ The index drives:
 - **Impact analysis.** Before deprecating an artifact, list everything that depends on it.
 - **Search ranking signals.** Frequently-depended-on artifacts surface higher.
 
+**Visibility.** Edge queries against the reverse index are filtered per caller. An edge is returned only when the requesting identity can see both of its endpoints under §4.7.2 per-layer visibility: the artifact that declared the relation and the artifact the relation names. For an `extends:` edge the endpoint tested is the parent record the child pinned at ingest (§4.7.6), so a child that overlays a lower-precedence layer's artifact under the same canonical ID (§4.6) yields no edge to a caller who cannot see that layer. The search ranking signal above is exempt from this filter: it counts an artifact's dependents across the tenant, including dependents in layers the caller cannot see.
+
+A query against an artifact the caller cannot see returns an empty edge list. It does not return an error, and it is not distinguishable from a query against an artifact that does not exist or one that nothing depends on. The query is filtered rather than refused, so the §6.9 visibility-denial row and the §8.1 `visibility.denied` event do not apply to it. Impact analysis is therefore a view of the caller's effective composition rather than of the whole tenant, and an operator assessing the blast radius of a deprecation sees the dependents in the layers that operator can read.
+
 ### 4.7.4 Classification and Lifecycle
 
 Each artifact carries:
