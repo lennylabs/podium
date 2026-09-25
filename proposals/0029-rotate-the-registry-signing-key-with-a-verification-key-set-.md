@@ -1,7 +1,7 @@
 # Proposal 0029: Rotate the registry signing key with a verification key set, and sign stored rows on operator demand
 
 - Issue: (to be filed)
-- Status: Approved (2026-09-25). Verified 2026-09-24 after 14 adversarial review rounds (50 findings fixed). OQ-1 and OQ-2 resolved by the owner.
+- Status: Applied to spec (2026-09-25). Verified 2026-09-24 after 14 adversarial review rounds (50 findings fixed). OQ-1 and OQ-2 resolved by the owner.
 - Date: 2026-09-24
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
