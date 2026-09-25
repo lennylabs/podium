@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -47,7 +48,7 @@ func hermetic(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PODIUM_CONFIG", "")
 	t.Setenv("PODIUM_VERIFY_SIGNATURES", "never")
-	for _, k := range []string{"PODIUM_SIGNATURE_PROVIDER", "PODIUM_SIGNATURE_VERIFY_KEY", "PODIUM_SIGNATURE_KEY_ID", "PODIUM_SIGN_KEY_PATH", "PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE"} {
+	for _, k := range []string{"PODIUM_SIGNATURE_PROVIDER", "PODIUM_SIGNATURE_VERIFY_KEY", "PODIUM_SIGN_KEY_PATH", "PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE"} {
 		t.Setenv(k, "")
 	}
 	chdirTemp(t)
@@ -73,6 +74,15 @@ func writeHomeKeyFile(t *testing.T) ed25519.PublicKey {
 	if err != nil {
 		t.Fatal(err)
 	}
+	writeHomeKeyFileBody(t, "private: "+base64.StdEncoding.EncodeToString(priv)+"\n"+
+		"public: "+base64.StdEncoding.EncodeToString(pub)+"\n")
+	return pub
+}
+
+// writeHomeKeyFileBody writes body verbatim at the sign.KeyFilePath default
+// under the current HOME.
+func writeHomeKeyFileBody(t *testing.T, body string) {
+	t.Helper()
 	path, err := sign.KeyFilePath("")
 	if err != nil {
 		t.Fatal(err)
@@ -80,12 +90,9 @@ func writeHomeKeyFile(t *testing.T) ed25519.PublicKey {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	body := "private: " + base64.StdEncoding.EncodeToString(priv) + "\n" +
-		"public: " + base64.StdEncoding.EncodeToString(pub) + "\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	return pub
 }
 
 // writeSyncFile writes body to path, creating its directory.
@@ -752,13 +759,22 @@ func TestLoadArtifact_PerCallDestinationMaterializes(t *testing.T) {
 // readable trust root.
 func TestLoadConfig_VerifierResolution(t *testing.T) {
 	type outcome struct {
-		code string        // refusal code, or "" when loadConfig returns
-		id   string        // resolved verifier ID, or "" for a nil verifier
-		pub  func() []byte // expected registry-managed public key, when set
-		msg  []string      // strings the refusal names
+		code string                     // refusal code, or "" when loadConfig returns
+		id   string                     // resolved verifier ID, or "" for a nil verifier
+		keys func() []ed25519.PublicKey // expected registry-managed Trusted set, when set
+		msg  []string                   // strings the refusal names
 	}
 	var keyA ed25519.PublicKey
 	keyB := testVerifyKey(t)
+	keyC := testVerifyKey(t)
+	decode := func(ks ...string) []ed25519.PublicKey {
+		out := make([]ed25519.PublicKey, len(ks))
+		for i, k := range ks {
+			b, _ := base64.StdEncoding.DecodeString(k)
+			out[i] = b
+		}
+		return out
+	}
 	rootFile := filepath.Join(t.TempDir(), "root.pem")
 	if err := os.WriteFile(rootFile, []byte("trust root"), 0o600); err != nil {
 		t.Fatal(err)
@@ -769,6 +785,8 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 		provider string
 		env      map[string]string
 		keyFile  bool
+		bodyFile bool // write fileBody verbatim as the key file
+		fileBody string
 		want     outcome
 	}{
 		{name: "unknown name under never", policy: "never", provider: "bogus", want: outcome{code: "config.invalid:", msg: []string{"bogus"}}},
@@ -779,7 +797,36 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 		{
 			name: "verify key set and decodes", policy: "always", provider: "registry-managed", keyFile: true,
 			env:  map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": keyB},
-			want: outcome{id: "registry-managed", pub: func() []byte { b, _ := base64.StdEncoding.DecodeString(keyB); return b }},
+			want: outcome{id: "registry-managed", keys: func() []ed25519.PublicKey { return decode(keyB) }},
+		},
+		{
+			name: "verify key list", policy: "always", provider: "registry-managed", keyFile: true,
+			env:  map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": keyB + " , " + keyC},
+			want: outcome{id: "registry-managed", keys: func() []ed25519.PublicKey { return decode(keyB, keyC) }},
+		},
+		{
+			name: "verify key list with a malformed second entry", policy: "always", provider: "registry-managed", keyFile: true,
+			env:  map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": keyB + ",!!!"},
+			want: outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGNATURE_VERIFY_KEY"}},
+		},
+		{
+			name: "verify key list with a trailing comma", policy: "always", provider: "registry-managed", keyFile: true,
+			env:  map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": keyB + ","},
+			want: outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGNATURE_VERIFY_KEY"}},
+		},
+		{
+			name: "key file with verify lines", policy: "always", provider: "registry-managed", bodyFile: true,
+			fileBody: "public: " + keyB + "\nverify: " + keyC + "\n",
+			want:     outcome{id: "registry-managed", keys: func() []ed25519.PublicKey { return decode(keyB, keyC) }},
+		},
+		{
+			name: "empty key file", policy: "always", provider: "registry-managed", bodyFile: true,
+			want: outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGN_KEY_PATH", "public:"}},
+		},
+		{
+			name: "key file with verify lines and no public line", policy: "always", provider: "registry-managed", bodyFile: true,
+			fileBody: "verify: " + keyC + "\n",
+			want:     outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGN_KEY_PATH", "public:"}},
 		},
 		{
 			name: "verify key set and malformed", policy: "always", provider: "registry-managed", keyFile: true,
@@ -788,7 +835,7 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 		},
 		{
 			name: "key file resolves", policy: "always", provider: "registry-managed", keyFile: true,
-			want: outcome{id: "registry-managed", pub: func() []byte { return keyA }},
+			want: outcome{id: "registry-managed", keys: func() []ed25519.PublicKey { return []ed25519.PublicKey{keyA} }},
 		},
 		{
 			name: "nothing resolves", policy: "always", provider: "registry-managed",
@@ -821,6 +868,9 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 			if c.keyFile {
 				keyA = writeHomeKeyFile(t)
 			}
+			if c.bodyFile {
+				writeHomeKeyFileBody(t, c.fileBody)
+			}
 			cfg, err := loadConfig()
 			if c.want.code != "" {
 				if err == nil || !strings.HasPrefix(err.Error(), c.want.code) {
@@ -845,10 +895,10 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 			if cfg.verifier == nil || cfg.verifier.ID() != c.want.id {
 				t.Fatalf("verifier = %v, want %s", cfg.verifier, c.want.id)
 			}
-			if c.want.pub != nil {
-				got := cfg.verifier.(sign.RegistryManagedKey).PublicKey
-				if !got.Equal(ed25519.PublicKey(c.want.pub())) {
-					t.Errorf("verifier public key = %x, want %x", got, c.want.pub())
+			if c.want.keys != nil {
+				got := cfg.verifier.(sign.RegistryManagedKey).Trusted
+				if !reflect.DeepEqual(got, c.want.keys()) {
+					t.Errorf("verifier Trusted = %x, want %x", got, c.want.keys())
 				}
 			}
 		})

@@ -37,6 +37,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -49,12 +50,12 @@ import (
 // delivery hash, signs it with the real registry-managed signer, and serves the
 // delivery pair alongside the record. Each tamper hook mutates one served value
 // after construction so a subsequent load is refused; consumer env (provider,
-// verify key, key id, registry URL) is exposed via Env.
+// verification key set, registry URL) is exposed via Env.
 type signedArtifactFixture struct {
-	ts    *httptest.Server
-	priv  ed25519.PrivateKey
-	pub   ed25519.PublicKey
-	keyID string
+	ts      *httptest.Server
+	priv    ed25519.PrivateKey
+	pub     ed25519.PublicKey
+	trusted []ed25519.PublicKey
 
 	mu                sync.Mutex
 	id                string
@@ -74,16 +75,17 @@ type signedArtifactFixture struct {
 // artifact id. Frontmatter is the full ARTIFACT.md the stub serves (frontmatter
 // plus body for a context artifact); when empty a default medium-sensitivity
 // context artifact is synthesized. Sensitivity defaults to "medium"; the
-// policy reads no sensitivity, so the value only labels the fixture. KeyID,
-// when set, is embedded in the signature envelope and exposed as
-// PODIUM_SIGNATURE_KEY_ID so key-pinning can be exercised.
+// policy reads no sensitivity, so the value only labels the fixture.
+// ExtraTrustedKeys, when set, are listed ahead of the fixture's signing key in
+// the comma-separated PODIUM_SIGNATURE_VERIFY_KEY that Env emits, so the
+// consumer's §4.7.9 verification key set holds more than one key.
 type signedArtifactSpec struct {
-	ID          string
-	Type        string
-	Version     string
-	Sensitivity string
-	Frontmatter string
-	KeyID       string
+	ID               string
+	Type             string
+	Version          string
+	Sensitivity      string
+	Frontmatter      string
+	ExtraTrustedKeys []ed25519.PublicKey
 }
 
 // newSignedArtifactFixture generates an offline Ed25519 keypair, composes the
@@ -129,7 +131,7 @@ func newSignedArtifactFixture(t *testing.T, spec signedArtifactSpec) *signedArti
 		Frontmatter: fm, ManifestBody: fm,
 	})
 
-	signer := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub, KeyID: spec.KeyID}
+	signer := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub}
 	envelope, err := signer.Sign(context.Background(), deliveryHash)
 	if err != nil {
 		t.Fatalf("sign delivery hash: %v", err)
@@ -138,7 +140,7 @@ func newSignedArtifactFixture(t *testing.T, spec signedArtifactSpec) *signedArti
 	f := &signedArtifactFixture{
 		priv:              priv,
 		pub:               pub,
-		keyID:             spec.KeyID,
+		trusted:           spec.ExtraTrustedKeys,
 		id:                id,
 		typ:               typ,
 		version:           ver,
@@ -181,10 +183,19 @@ func (f *signedArtifactFixture) PublicKeyB64() string {
 	return base64.StdEncoding.EncodeToString(f.pub)
 }
 
+// VerifyKeyList returns the comma-separated PODIUM_SIGNATURE_VERIFY_KEY value
+// Env emits: every extra trusted key, then the fixture's signing key.
+func (f *signedArtifactFixture) VerifyKeyList() string {
+	entries := make([]string, 0, len(f.trusted)+1)
+	for _, k := range f.trusted {
+		entries = append(entries, base64.StdEncoding.EncodeToString(k))
+	}
+	return strings.Join(append(entries, f.PublicKeyB64()), ",")
+}
+
 // Env returns the env var set that points the real podium-mcp binary at this
 // fixture's registry with the registry-managed verifier configured: the
-// provider, the offline public key, the optional key id, and an enforcing
-// verification policy. HOME and the cache dir are pinned to caller-supplied
+// provider, the verification key list, and an enforcing verification policy. HOME and the cache dir are pinned to caller-supplied
 // fresh temp dirs so the bridge never reads the developer's environment.
 func (f *signedArtifactFixture) Env(t *testing.T, policy string) []string {
 	t.Helper()
@@ -195,10 +206,7 @@ func (f *signedArtifactFixture) Env(t *testing.T, policy string) []string {
 		"PODIUM_HARNESS=none",
 		"PODIUM_VERIFY_SIGNATURES=" + policy,
 		"PODIUM_SIGNATURE_PROVIDER=registry-managed",
-		"PODIUM_SIGNATURE_VERIFY_KEY=" + f.PublicKeyB64(),
-	}
-	if f.keyID != "" {
-		env = append(env, "PODIUM_SIGNATURE_KEY_ID="+f.keyID)
+		"PODIUM_SIGNATURE_VERIFY_KEY=" + f.VerifyKeyList(),
 	}
 	return env
 }
@@ -257,7 +265,7 @@ func (f *signedArtifactFixture) ForgeManifestBody() {
 func (f *signedArtifactFixture) TamperDeliverySignature() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	envelope, err := sign.RegistryManagedKey{PrivateKey: f.priv, PublicKey: f.pub, KeyID: f.keyID}.
+	envelope, err := sign.RegistryManagedKey{PrivateKey: f.priv, PublicKey: f.pub}.
 		Sign(context.Background(), flipLastHexNibble(f.deliveryHash))
 	if err == nil {
 		f.deliverySignature = envelope

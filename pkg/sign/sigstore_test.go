@@ -413,7 +413,6 @@ func TestRegistryManagedKey_RoundTrip(t *testing.T) {
 	provider := sign.RegistryManagedKey{
 		PrivateKey: priv,
 		PublicKey:  pub,
-		KeyID:      "key-2026q1",
 	}
 	contentHash := hashOf([]byte("body"))
 	envelopeStr, err := provider.Sign(context.Background(), contentHash)
@@ -425,21 +424,31 @@ func TestRegistryManagedKey_RoundTrip(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.9 — Verify rejects a signature whose KeyID does not
-// match the configured key (rotation safety).
-func TestRegistryManagedKey_RejectsRotatedKey(t *testing.T) {
+// Spec: §4.7.9 — an envelope signed by a key outside the verifier's set is
+// refused, whether its key_id names that outside key or names a key inside the
+// set, because the key_id selects only the order in which keys are tried.
+func TestRegistryManagedKey_RefusesKeyOutsideSet(t *testing.T) {
 	t.Parallel()
-	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
-	signer := sign.RegistryManagedKey{
-		PrivateKey: priv, PublicKey: pub, KeyID: "key-2026q1",
+	insidePub, _, _ := ed25519.GenerateKey(rand.Reader)
+	otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	_, outsidePriv, _ := ed25519.GenerateKey(rand.Reader)
+	hash := hashOf([]byte("body"))
+	envelope, err := sign.RegistryManagedKey{PrivateKey: outsidePriv}.Sign(context.Background(), hash)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
 	}
-	envelopeStr, _ := signer.Sign(context.Background(), hashOf([]byte("body")))
-	verifier := sign.RegistryManagedKey{
-		PrivateKey: priv, PublicKey: pub, KeyID: "key-2026q2",
+	verifier := sign.RegistryManagedKey{Trusted: []ed25519.PublicKey{insidePub, otherPub}}
+	if err := verifier.Verify(context.Background(), hash, envelope); !errors.Is(err, sign.ErrSignatureInvalid) {
+		t.Errorf("outside key naming itself: got %v, want ErrSignatureInvalid", err)
 	}
-	err := verifier.Verify(context.Background(), hashOf([]byte("body")), envelopeStr)
-	if !errors.Is(err, sign.ErrSignatureInvalid) {
-		t.Fatalf("got %v, want ErrSignatureInvalid", err)
+	var env map[string]string
+	if err := json.Unmarshal([]byte(envelope), &env); err != nil {
+		t.Fatalf("parse envelope: %v", err)
+	}
+	env["key_id"] = sign.KeyIDFor(insidePub)
+	forged, _ := json.Marshal(env)
+	if err := verifier.Verify(context.Background(), hash, string(forged)); !errors.Is(err, sign.ErrSignatureInvalid) {
+		t.Errorf("outside key naming an inside key: got %v, want ErrSignatureInvalid", err)
 	}
 }
 

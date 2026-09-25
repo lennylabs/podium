@@ -70,7 +70,7 @@ func admEnvKey(t *testing.T) sign.RegistryManagedKey {
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
 	}
-	return sign.RegistryManagedKey{PrivateKey: priv, KeyID: "registry"}
+	return sign.RegistryManagedKey{PrivateKey: priv}
 }
 
 func newAdmEnv(t *testing.T, signing bool) *admEnv {

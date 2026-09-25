@@ -84,8 +84,8 @@ func TestRefuseUnpersistedSigningKey_UnresolvableHome(t *testing.T) {
 // Spec: §4.7.9 — the key file the registry writes is the one a consumer
 // resolves and reads: a keypair generated through loadOrGenerateRegistrySigner
 // under a fixture home, with PODIUM_SIGN_KEY_PATH unset, sits at
-// sign.KeyFilePath(""), and both halves read back through the pkg/sign
-// readers match the provider's own.
+// sign.KeyFilePath(""), and both halves read back through sign.ReadKeyFile
+// match the provider's own.
 func TestRegistrySigningKeyFile_RoundTrip(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
@@ -101,12 +101,11 @@ func TestRegistrySigningKeyFile_RoundTrip(t *testing.T) {
 	if delegated, _ := registrySigningKeyPath(""); delegated != path {
 		t.Fatalf("registrySigningKeyPath(\"\") = %q, sign.KeyFilePath(\"\") = %q; want one path", delegated, path)
 	}
-	pub, err := sign.PublicKeyFromKeyFile(path)
-	if err != nil || !pub.Equal(signer.PublicKey) {
-		t.Errorf("PublicKeyFromKeyFile = %v, %v; want the signer's public key", pub, err)
+	kf, err := sign.ReadKeyFile(path)
+	if err != nil {
+		t.Fatalf("ReadKeyFile: %v", err)
 	}
-	priv, err := sign.PrivateKeyFromKeyFile(path)
-	if err != nil || !priv.Equal(signer.PrivateKey) {
-		t.Errorf("PrivateKeyFromKeyFile = %v, %v; want the signer's private key", priv, err)
+	if !kf.Public.Equal(signer.PublicKey) || !kf.Private.Equal(signer.PrivateKey) {
+		t.Errorf("ReadKeyFile = %+v; want the signer's keypair", kf)
 	}
 }

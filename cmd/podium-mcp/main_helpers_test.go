@@ -511,12 +511,14 @@ func TestBuildSignatureProvider(t *testing.T) {
 	}
 }
 
-// buildSignatureProvider for registry-managed loads the verification public key
-// from PODIUM_SIGNATURE_VERIFY_KEY (base64 Ed25519) and pins the key id from
-// PODIUM_SIGNATURE_KEY_ID, so the resulting provider verifies a real envelope.
-// A malformed verify key is a startup error. Not parallel: it mutates env.
-// The home is hermetic so the malformed-variable arm runs against a home with
-// no key file rather than the developer's own.
+// buildSignatureProvider for registry-managed loads the verification key set
+// from PODIUM_SIGNATURE_VERIFY_KEY (comma-separated base64 Ed25519), so the
+// resulting provider verifies a real envelope under either listed key. A
+// malformed entry is a startup error. Not parallel: it mutates env. The home
+// is hermetic so the malformed-variable arm runs against a home with no key
+// file rather than the developer's own.
+//
+// Spec: §4.7.9, §6.2.
 func TestBuildSignatureProvider_RegistryManagedVerifyKey(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
@@ -524,36 +526,31 @@ func TestBuildSignatureProvider_RegistryManagedVerifyKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
 	}
-	hash := "sha256:" + hex.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
-	envelope, err := sign.RegistryManagedKey{PrivateKey: priv, KeyID: "key-v1"}.Sign(context.Background(), hash)
+	pub2, priv2, err := ed25519.GenerateKey(crand.Reader)
 	if err != nil {
-		t.Fatalf("Sign: %v", err)
+		t.Fatalf("GenerateKey: %v", err)
 	}
+	hash := "sha256:" + hex.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
 
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub))
-	t.Setenv("PODIUM_SIGNATURE_KEY_ID", "key-v1")
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub)+","+base64.StdEncoding.EncodeToString(pub2))
 	p, err := buildSignatureProvider("registry-managed")
 	if err != nil {
 		t.Fatalf("buildSignatureProvider(registry-managed) = %v", err)
 	}
-	if err := p.Verify(context.Background(), hash, envelope); err != nil {
-		t.Errorf("verify with wired public key: %v", err)
+	for i, k := range []ed25519.PrivateKey{priv, priv2} {
+		envelope, err := sign.RegistryManagedKey{PrivateKey: k}.Sign(context.Background(), hash)
+		if err != nil {
+			t.Fatalf("Sign: %v", err)
+		}
+		if err := p.Verify(context.Background(), hash, envelope); err != nil {
+			t.Errorf("verify under listed key %d: %v", i+1, err)
+		}
 	}
 
-	// A wrong-id pin rejects the same envelope.
-	t.Setenv("PODIUM_SIGNATURE_KEY_ID", "key-v2")
-	p2, err := buildSignatureProvider("registry-managed")
-	if err != nil {
-		t.Fatalf("buildSignatureProvider(registry-managed) = %v", err)
-	}
-	if err := p2.Verify(context.Background(), hash, envelope); err == nil {
-		t.Error("a non-pinned key id should be refused")
-	}
-
-	// A malformed verify key is a startup error.
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", "!!!not base64")
-	if _, err := buildSignatureProvider("registry-managed"); err == nil {
-		t.Error("malformed PODIUM_SIGNATURE_VERIFY_KEY should error")
+	// A malformed entry is a startup error naming the variable.
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub)+",!!!not base64")
+	if _, err := buildSignatureProvider("registry-managed"); err == nil || !strings.Contains(err.Error(), "PODIUM_SIGNATURE_VERIFY_KEY") {
+		t.Errorf("malformed PODIUM_SIGNATURE_VERIFY_KEY = %v, want an error naming the variable", err)
 	}
 }
 

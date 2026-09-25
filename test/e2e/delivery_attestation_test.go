@@ -82,10 +82,11 @@ func TestE2E_DeliverySignatureFromTheBootedRegistry(t *testing.T) {
 	keyPath := filepath.Join(t.TempDir(), "registry-signing.key")
 	signed := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_SIGN_KEY_PATH=" + keyPath},
 		"serve", "--standalone", "--sign", "registry-key", "--layer-path", reg)
-	pub, err := sign.PublicKeyFromKeyFile(keyPath)
+	kf, err := sign.ReadKeyFile(keyPath)
 	if err != nil {
 		t.Fatalf("read the registry key: %v", err)
 	}
+	pub := kf.Public
 	verifyKey := "PODIUM_SIGNATURE_VERIFY_KEY=" + base64.StdEncoding.EncodeToString(pub)
 
 	var raw map[string]any

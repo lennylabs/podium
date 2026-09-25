@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -190,20 +189,21 @@ type keyUse int
 const (
 	// keyForSign resolves the private half, for podium sign.
 	keyForSign keyUse = iota
-	// keyForVerify resolves the public half, for podium verify.
+	// keyForVerify resolves the verification key set, for podium verify.
 	keyForVerify
 )
 
 // loadSignatureProvider builds the named provider. The noop and
 // sigstore-keyless arms ignore use; sigstore-keyless reads the
 // PODIUM_SIGSTORE_* variables. The registry-managed arm, the default, resolves
-// exactly the half use names: the public half from PODIUM_SIGNATURE_VERIFY_KEY
-// when set (authoritative, so a malformed value is an error) and otherwise
-// from the registry key file at sign.KeyFilePath(PODIUM_SIGN_KEY_PATH); the
-// private half from that key file alone, because the variable carries a public
-// key only. On a standalone machine both resolve the file the registry
-// generated. A failed resolution leads with config.signature_provider_unavailable
-// and returns before any Sign or Verify call.
+// exactly the material use names: the verification key set from
+// PODIUM_SIGNATURE_VERIFY_KEY when set (authoritative, so a malformed list is
+// an error) and otherwise from the public: and verify: lines of the registry
+// key file at sign.KeyFilePath(PODIUM_SIGN_KEY_PATH); the private half from
+// that key file alone, because the variable carries public keys only. On a
+// standalone machine both resolve the file the registry generated. A failed
+// resolution leads with config.signature_provider_unavailable and returns
+// before any Sign or Verify call.
 //
 // Spec: §4.7.9, §6.2.
 func loadSignatureProvider(name string, use keyUse) (sign.Provider, error) {
@@ -228,33 +228,33 @@ func loadSignatureProvider(name string, use keyUse) (sign.Provider, error) {
 }
 
 // registryManagedSigner reads the private half from the registry key file.
-// PODIUM_SIGNATURE_VERIFY_KEY is not read.
+// PODIUM_SIGNATURE_VERIFY_KEY is not read. A key file with no private: line, a
+// consumer's public-only copy, is refused before any provider is built, so it
+// never yields a signer with a nil private key.
+//
+// Spec: §4.7.9.
 func registryManagedSigner() (sign.Provider, error) {
 	path, err := sign.KeyFilePath(os.Getenv("PODIUM_SIGN_KEY_PATH"))
 	if err == nil {
-		var priv ed25519.PrivateKey
-		if priv, err = sign.PrivateKeyFromKeyFile(path); err == nil {
-			return sign.RegistryManagedKey{PrivateKey: priv}, nil
+		var kf sign.KeyFile
+		if kf, err = sign.ReadKeyFile(path); err == nil {
+			if kf.Private != nil {
+				return sign.RegistryManagedKey{PrivateKey: kf.Private}, nil
+			}
+			err = fmt.Errorf("key file %s carries no \"private:\" line", path)
 		}
 	}
 	return nil, fmt.Errorf("config.signature_provider_unavailable: the registry key file (PODIUM_SIGN_KEY_PATH) yields no private key to sign with: %w", err)
 }
 
-// registryManagedVerifier resolves the public half in the §4.7.9 order.
+// registryManagedVerifier resolves the verification key set in the §4.7.9
+// order through sign.VerificationKeys, the resolver podium-mcp also uses.
+//
+// Spec: §4.7.9, §6.2.
 func registryManagedVerifier() (sign.Provider, error) {
-	if raw := os.Getenv("PODIUM_SIGNATURE_VERIFY_KEY"); raw != "" {
-		pub, err := sign.PublicKeyFromBase64(raw)
-		if err != nil {
-			return nil, fmt.Errorf("config.signature_provider_unavailable: PODIUM_SIGNATURE_VERIFY_KEY: %w", err)
-		}
-		return sign.RegistryManagedKey{PublicKey: pub}, nil
+	keys, err := sign.VerificationKeys(os.Getenv("PODIUM_SIGNATURE_VERIFY_KEY"), os.Getenv("PODIUM_SIGN_KEY_PATH"))
+	if err != nil {
+		return nil, fmt.Errorf("config.signature_provider_unavailable: %w", err)
 	}
-	path, err := sign.KeyFilePath(os.Getenv("PODIUM_SIGN_KEY_PATH"))
-	if err == nil {
-		var pub ed25519.PublicKey
-		if pub, err = sign.PublicKeyFromKeyFile(path); err == nil {
-			return sign.RegistryManagedKey{PublicKey: pub}, nil
-		}
-	}
-	return nil, fmt.Errorf("config.signature_provider_unavailable: PODIUM_SIGNATURE_VERIFY_KEY is unset and the registry key file (PODIUM_SIGN_KEY_PATH) yields no usable public key: %w", err)
+	return sign.RegistryManagedKey{Trusted: keys}, nil
 }

@@ -300,16 +300,19 @@ func TestVerifyCmd_VerifyKeyOutranksTheKeyFile(t *testing.T) {
 	}
 }
 
-// spec: §4.7.9 — a malformed PODIUM_SIGNATURE_VERIFY_KEY refuses verify
-// naming the variable, even though the key file resolves, and is not read by
-// sign, which takes the key file's private half.
+// spec: §4.7.9 — a malformed PODIUM_SIGNATURE_VERIFY_KEY, including a list
+// with a bad or empty entry, refuses verify naming the variable, even though
+// the key file resolves, and is not read by sign, which takes the key file's
+// private half.
 func TestSignVerifyCmd_MalformedVerifyKey(t *testing.T) {
 	_, pub := writeRegistryKeyFile(t)
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", "!!!not base64")
 	hash := "sha256:" + strings.Repeat("a", 64)
-	code, stderr := verifyContentHash(t, hash, "envelope")
-	if code != 1 || !strings.Contains(stderr, "config.signature_provider_unavailable") || !strings.Contains(stderr, "PODIUM_SIGNATURE_VERIFY_KEY") {
-		t.Errorf("verifyCmd = %d, stderr %q; want 1 naming config.signature_provider_unavailable and the variable", code, stderr)
+	for _, bad := range []string{"!!!not base64", base64.StdEncoding.EncodeToString(pub) + ",!!!", base64.StdEncoding.EncodeToString(pub) + ","} {
+		t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", bad)
+		code, stderr := verifyContentHash(t, hash, "envelope")
+		if code != 1 || !strings.Contains(stderr, "config.signature_provider_unavailable") || !strings.Contains(stderr, "PODIUM_SIGNATURE_VERIFY_KEY") {
+			t.Errorf("verifyCmd with %q = %d, stderr %q; want 1 naming config.signature_provider_unavailable and the variable", bad, code, stderr)
+		}
 	}
 	sig := signContentHash(t, hash)
 	if err := (sign.RegistryManagedKey{PublicKey: pub}).Verify(context.Background(), hash, sig); err != nil {
@@ -379,5 +382,75 @@ func TestVerifyCmd_PositionalArtifactResolutionFailures(t *testing.T) {
 		if code != 1 {
 			t.Errorf("%s: verifyCmd = %d, want 1", name, code)
 		}
+	}
+}
+
+// spec: §4.7.9 — PODIUM_SIGNATURE_VERIFY_KEY is a comma-separated list, and
+// verify accepts a signature under the second listed key.
+func TestVerifyCmd_SecondListedKey(t *testing.T) {
+	hermeticNoKeyHome(t)
+	pubA, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubB, privB, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pubA)+", "+base64.StdEncoding.EncodeToString(pubB))
+	hash := "sha256:" + strings.Repeat("b", 64)
+	if code, stderr := verifyContentHash(t, hash, signWith(t, privB, hash)); code != 0 {
+		t.Errorf("verify under the second listed key = %d, want 0; stderr %q", code, stderr)
+	}
+}
+
+// spec: §4.7.9 — with a public-only key file, a consumer's copy, podium sign
+// exits 1 with config.signature_provider_unavailable and prints no envelope,
+// while podium verify with PODIUM_SIGNATURE_VERIFY_KEY unset verifies through
+// the key-file fallback under the public: key and under a verify: key.
+func TestSignVerifyCmd_PublicOnlyKeyFile(t *testing.T) {
+	hermeticNoKeyHome(t)
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredPub, retiredPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "registry-signing.key")
+	if err := sign.WriteKeyFile(path, sign.KeyFile{Public: pub, Verify: []ed25519.PublicKey{retiredPub}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODIUM_SIGN_KEY_PATH", path)
+	hash := "sha256:" + strings.Repeat("c", 64)
+	var code int
+	var stderr string
+	stdout := captureStdout(t, func() {
+		stderr = captureStderr(t, func() { code = signCmd([]string{"--content-hash", hash}) })
+	})
+	if code != 1 || !strings.Contains(stderr, "config.signature_provider_unavailable") || strings.TrimSpace(stdout) != "" {
+		t.Errorf("signCmd = %d, stdout %q, stderr %q; want 1, no envelope, and config.signature_provider_unavailable", code, stdout, stderr)
+	}
+	for name, k := range map[string]ed25519.PrivateKey{"public": priv, "verify": retiredPriv} {
+		if code, stderr := verifyContentHash(t, hash, signWith(t, k, hash)); code != 0 {
+			t.Errorf("verify under the %s: key = %d, want 0; stderr %q", name, code, stderr)
+		}
+	}
+}
+
+// spec: §4.7.9 — an envelope podium sign mints carries the key_id of the key
+// file's signing key.
+func TestSignCmd_EnvelopeCarriesKeyID(t *testing.T) {
+	_, pub := writeRegistryKeyFile(t)
+	sig := signContentHash(t, "sha256:"+strings.Repeat("d", 64))
+	var env struct {
+		KeyID string `json:"key_id"`
+	}
+	if err := json.Unmarshal([]byte(sig), &env); err != nil {
+		t.Fatalf("parse envelope: %v", err)
+	}
+	if want := sign.KeyIDFor(pub); env.KeyID != want {
+		t.Errorf("envelope key_id = %q, want %q", env.KeyID, want)
 	}
 }

@@ -31,7 +31,7 @@ func testSigner(t *testing.T) sign.RegistryManagedKey {
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
-	return sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub, KeyID: keyIDFor(pub)}
+	return sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub}
 }
 
 // rowSeed describes one stored row the test seeds at the digest the previous

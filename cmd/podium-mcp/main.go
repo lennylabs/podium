@@ -2283,13 +2283,9 @@ func resolveVerifier(policy sign.VerificationPolicy, name string) (sign.Provider
 // buildSignatureProvider constructs the named provider with its verification
 // material. It is resolveVerifier's provider-construction half and has no
 // other caller in the bridge. sigstore-keyless needs a readable trust root at
-// PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE. registry-managed takes its public key
-// in the §4.7.9 order: PODIUM_SIGNATURE_VERIFY_KEY when set, which is
-// authoritative, so a malformed value is an error and never falls through to
-// the key file; otherwise the public: line of the registry key file at
-// sign.KeyFilePath(PODIUM_SIGN_KEY_PATH), the file a standalone registry on
-// the same machine generated. PODIUM_SIGNATURE_KEY_ID, when set, pins the
-// expected key fingerprint.
+// PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE. registry-managed takes its §4.7.9
+// verification key set from registryManagedVerifyKey and verifies under any
+// key of it.
 func buildSignatureProvider(name string) (sign.Provider, error) {
 	switch name {
 	case "noop":
@@ -2310,33 +2306,26 @@ func buildSignatureProvider(name string) (sign.Provider, error) {
 			TrustRoot: root,
 		}, nil
 	case "registry-managed":
-		pub, err := registryManagedVerifyKey()
+		keys, err := registryManagedVerifyKey()
 		if err != nil {
 			return nil, err
 		}
-		return sign.RegistryManagedKey{PublicKey: pub, KeyID: os.Getenv("PODIUM_SIGNATURE_KEY_ID")}, nil
+		return sign.RegistryManagedKey{Trusted: keys}, nil
 	}
 	return nil, fmt.Errorf("unknown PODIUM_SIGNATURE_PROVIDER: %s", name)
 }
 
-// registryManagedVerifyKey resolves the registry's public key in the §4.7.9
-// order. The error names each source tried.
-func registryManagedVerifyKey() (ed25519.PublicKey, error) {
-	if raw := os.Getenv("PODIUM_SIGNATURE_VERIFY_KEY"); raw != "" {
-		pub, err := sign.PublicKeyFromBase64(raw)
-		if err != nil {
-			return nil, fmt.Errorf("PODIUM_SIGNATURE_VERIFY_KEY: %w", err)
-		}
-		return pub, nil
-	}
-	path, err := sign.KeyFilePath(os.Getenv("PODIUM_SIGN_KEY_PATH"))
-	if err == nil {
-		var pub ed25519.PublicKey
-		if pub, err = sign.PublicKeyFromKeyFile(path); err == nil {
-			return pub, nil
-		}
-	}
-	return nil, fmt.Errorf("PODIUM_SIGNATURE_VERIFY_KEY is unset and the registry key file (PODIUM_SIGN_KEY_PATH) yields no usable public key: %w", err)
+// registryManagedVerifyKey resolves the registry's verification key set in
+// the §4.7.9 order through sign.VerificationKeys: PODIUM_SIGNATURE_VERIFY_KEY
+// when set, which is authoritative, so a malformed list is an error and never
+// falls through to the key file; otherwise the public: line and every verify:
+// line of the key file at sign.KeyFilePath(PODIUM_SIGN_KEY_PATH), the file a
+// standalone registry on the same machine generated. The error names each
+// source tried.
+//
+// Spec: §4.7.9, §6.2.
+func registryManagedVerifyKey() ([]ed25519.PublicKey, error) {
+	return sign.VerificationKeys(os.Getenv("PODIUM_SIGNATURE_VERIFY_KEY"), os.Getenv("PODIUM_SIGN_KEY_PATH"))
 }
 
 func resourcesAsBytes(in map[string]string) map[string][]byte {

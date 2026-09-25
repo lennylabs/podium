@@ -75,21 +75,18 @@ func registrySignerFor(mode string) (sign.Provider, error) {
 }
 
 // loadOrGenerateRegistrySigner reads (or creates) the registry-managed signing
-// keypair used for §4.7.9 ingest signing. It mirrors loadOrGenerateAuditSigner
-// but keeps a distinct default path so the ingest-signing key and the audit-
-// anchor key never alias.
+// keypair used for §4.7.9 ingest signing, with the key file's verify: lines as
+// the verification-only keys of its set. It shares readOrCreateKeyFile with
+// loadOrGenerateAuditSigner but keeps a distinct default path so the
+// ingest-signing key and the audit-anchor key never alias.
 func loadOrGenerateRegistrySigner(env string) (sign.Provider, error) {
 	path, err := registrySigningKeyPath(env)
 	if err != nil {
 		return nil, err
 	}
-	priv, pub, err := readOrCreateEd25519(path)
+	kf, err := readOrCreateKeyFile(path)
 	if err != nil {
 		return nil, err
 	}
-	return sign.RegistryManagedKey{
-		PrivateKey: priv,
-		PublicKey:  pub,
-		KeyID:      keyIDFor(pub),
-	}, nil
+	return sign.RegistryManagedKey{PrivateKey: kf.Private, PublicKey: kf.Public, Trusted: kf.Verify}, nil
 }

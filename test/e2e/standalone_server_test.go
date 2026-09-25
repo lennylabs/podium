@@ -1255,11 +1255,11 @@ func TestStandaloneServer_MigrateToStandardWithTheSourceKey(t *testing.T) {
 		DeliverySignature string `json:"delivery_signature"`
 	}
 	getJSON(t, target.BaseURL+"/v1/load_artifact?id=mig", &served)
-	pub, err := sign.PublicKeyFromKeyFile(filepath.Join(standalone, "registry-signing.key"))
+	kf, err := sign.ReadKeyFile(filepath.Join(standalone, "registry-signing.key"))
 	if err != nil {
 		t.Fatalf("read the source key: %v", err)
 	}
-	if err := (sign.RegistryManagedKey{PublicKey: pub}).Verify(context.Background(), served.DeliveryHash, served.DeliverySignature); err != nil {
+	if err := (sign.RegistryManagedKey{PublicKey: kf.Public}).Verify(context.Background(), served.DeliveryHash, served.DeliverySignature); err != nil {
 		t.Fatalf("the target's delivery pair does not verify under the source key: %v\nlog:\n%s", err, target.log())
 	}
 }

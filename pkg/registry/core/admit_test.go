@@ -35,7 +35,7 @@ func admKey(t *testing.T) sign.RegistryManagedKey {
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
 	}
-	return sign.RegistryManagedKey{PrivateKey: priv, KeyID: "registry"}
+	return sign.RegistryManagedKey{PrivateKey: priv}
 }
 
 // admFixture is one isolated store and object store with the registry's key

@@ -10,6 +10,9 @@ package e2e
 // Spec: §4.7.9, §4.7.10, §6.2, §6.6 step 2.
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"strings"
 	"testing"
 )
@@ -203,24 +206,54 @@ func TestSignedArtifact_ResourcesReadVerifies(t *testing.T) {
 	}
 }
 
-// TestSignedArtifact_KeyPinningRejectsRotatedKey proves the §4.7.9 rotation
-// guard: when the consumer pins an expected key id via PODIUM_SIGNATURE_KEY_ID
-// but the envelope carries a different id, the signature is refused even though
-// the bytes are otherwise intact. The fixture signs with one key id; the
-// consumer is told to expect another.
-func TestSignedArtifact_KeyPinningRejectsRotatedKey(t *testing.T) {
+// TestSignedArtifact_UntrustedKeyRefused proves the §4.7.9 key-set rule: a
+// delivery signature made under a key absent from the consumer's
+// PODIUM_SIGNATURE_VERIFY_KEY list is refused, even though the envelope's
+// key_id names the key that signed it and the bytes are intact. The key_id
+// selects only the order in which the listed keys are tried.
+//
+// Spec: §4.7.9
+// Matrix: §6.10 (materialize.signature_invalid)
+func TestSignedArtifact_UntrustedKeyRefused(t *testing.T) {
 	t.Parallel()
-	f := newSignedArtifactFixture(t, signedArtifactSpec{KeyID: "key-v1"})
+	listed := make([]string, 2)
+	for i := range listed {
+		pub, _, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatalf("GenerateKey: %v", err)
+		}
+		listed[i] = base64.StdEncoding.EncodeToString(pub)
+	}
+	f := newSignedArtifactFixture(t, signedArtifactSpec{})
 	env := f.Env(t, "always")
-	// Override the pinned key id to a value the envelope does not carry.
 	for i, kv := range env {
-		if strings.HasPrefix(kv, "PODIUM_SIGNATURE_KEY_ID=") {
-			env[i] = "PODIUM_SIGNATURE_KEY_ID=key-v2"
+		if strings.HasPrefix(kv, "PODIUM_SIGNATURE_VERIFY_KEY=") {
+			env[i] = "PODIUM_SIGNATURE_VERIFY_KEY=" + strings.Join(listed, ",")
 		}
 	}
-
 	errStr, result := loadSignedArtifact(t, env, f.ID())
 	if !strings.Contains(errStr, "materialize.signature_invalid") {
-		t.Fatalf("a signature from a non-pinned key id must be refused, got: %q\nresult=%v", errStr, result)
+		t.Fatalf("a signature from a key outside the verification key set must be refused, got: %q\nresult=%v", errStr, result)
+	}
+}
+
+// TestSignedArtifact_VerifiesUnderListedKeySet proves a consumer whose
+// PODIUM_SIGNATURE_VERIFY_KEY lists several keys accepts a delivery signature
+// made under the last of them, the state a consumer is in across a rotation.
+//
+// Spec: §4.7.9, §6.2
+func TestSignedArtifact_VerifiesUnderListedKeySet(t *testing.T) {
+	t.Parallel()
+	other, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	f := newSignedArtifactFixture(t, signedArtifactSpec{ExtraTrustedKeys: []ed25519.PublicKey{other}})
+	if !strings.Contains(f.VerifyKeyList(), ",") {
+		t.Fatalf("VerifyKeyList = %q, want a comma-separated list", f.VerifyKeyList())
+	}
+	errStr, result := loadSignedArtifact(t, f.Env(t, "always"), f.ID())
+	if errStr != "" {
+		t.Fatalf("load under a listed key = %q, want success\nresult=%v", errStr, result)
 	}
 }

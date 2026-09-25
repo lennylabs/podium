@@ -99,12 +99,12 @@ func TestSignedArtifact_StaleLocalKeyRefusesTheLoad(t *testing.T) {
 		t.Fatalf("load under the stale local key = %q, want materialize.signature_invalid\nstderr: %s", errStr, res.Stderr)
 	}
 
-	remote, err := sign.PublicKeyFromKeyFile(homeKeyFile(srv.Home))
+	remote, err := sign.ReadKeyFile(homeKeyFile(srv.Home))
 	if err != nil {
 		t.Fatalf("read the remote registry's key: %v", err)
 	}
 	errStr, res = bridgeLoad(t, srv.BaseURL, "team/doc",
-		"PODIUM_SIGNATURE_VERIFY_KEY="+base64.StdEncoding.EncodeToString(remote))
+		"PODIUM_SIGNATURE_VERIFY_KEY="+base64.StdEncoding.EncodeToString(remote.Public))
 	if errStr != "" {
 		t.Fatalf("load under the remote key = %q, want success\nstderr: %s", errStr, res.Stderr)
 	}

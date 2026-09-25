@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -158,8 +159,8 @@ func TestLoadSignatureProvider(t *testing.T) {
 	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", "")
 	priv, pub := writeRegistryKeyFile(t)
 	verifier, err := loadSignatureProvider("registry-managed", keyForVerify)
-	if err != nil || !verifier.(sign.RegistryManagedKey).PublicKey.Equal(pub) {
-		t.Errorf("verify half with a key file = %v, %v; want the file's public key", verifier, err)
+	if err != nil || !reflect.DeepEqual(verifier.(sign.RegistryManagedKey).Trusted, []ed25519.PublicKey{pub}) {
+		t.Errorf("verify half with a key file = %v, %v; want the file's public key as the whole set", verifier, err)
 	}
 	signer, err := loadSignatureProvider("registry-managed", keyForSign)
 	if err != nil || !signer.(sign.RegistryManagedKey).PrivateKey.Equal(priv) {

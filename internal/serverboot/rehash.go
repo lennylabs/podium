@@ -469,11 +469,11 @@ func preFramingContentHash(artifactBytes, skillBytes []byte, resources map[strin
 
 // refuseGeneratedSigningKey refuses a start that would generate a signing key
 // while the §13.4 rewrite has not completed and a stored row carries a
-// signature. A key generated at this start signed no stored row, and
-// sign.RegistryManagedKey.Verify rejects a differing key_id, so every signed row
-// would classify signature_unverified and the pass would set the marker and
-// leave those rows at the previous digest even after the operator restored the
-// key that signed them.
+// signature. A key generated at this start signed no stored row and its file
+// carries no verify: line, so no stored envelope verifies under its §4.7.9
+// verification key set. Every signed row would classify signature_unverified,
+// and the pass would set the marker and leave those rows at the previous
+// digest even after the operator restored the key that signed them.
 //
 // It runs ahead of the signing-key loader whatever the bind outcome, so a
 // refused start generates and writes no key and the next start with the same
@@ -486,8 +486,8 @@ func refuseGeneratedSigningKey(ctx context.Context, st store.Store, signMode str
 	if err != nil {
 		return fmt.Errorf("registry signing key: %w", err)
 	}
-	// os.Stat follows a symbolic link, as readOrCreateEd25519's own stat
-	// does, so a link to an absent target counts as absent for both.
+	// os.Stat follows a symbolic link, as readOrCreateKeyFile's read does,
+	// so a link to an absent target counts as absent for both.
 	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
 		// A key file that exists, or a stat error other than absence:
 		// the loader generates nothing, and it reports a read error

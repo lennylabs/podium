@@ -1795,15 +1795,12 @@ func TestStandardDeploy_SigningKeyFileFromAStandaloneStart(t *testing.T) {
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("key file mode = %v, want 0600", info.Mode().Perm())
 	}
-	priv, err := sign.PrivateKeyFromKeyFile(keyFile)
+	kf, err := sign.ReadKeyFile(keyFile)
 	if err != nil {
-		t.Fatalf("PrivateKeyFromKeyFile: %v", err)
+		t.Fatalf("ReadKeyFile: %v", err)
 	}
-	pub, err := sign.PublicKeyFromKeyFile(keyFile)
-	if err != nil {
-		t.Fatalf("PublicKeyFromKeyFile: %v", err)
-	}
-	if !pub.Equal(priv.Public()) {
+	pub := kf.Public
+	if kf.Private == nil || !pub.Equal(kf.Private.Public()) {
 		t.Fatal("the key file's public and private lines are not one keypair")
 	}
 	verifyKey := strings.TrimSpace(lines[0])
