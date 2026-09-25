@@ -523,18 +523,13 @@ func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version 
 // compare-and-swap the Store interface documents. It carries no deleted_at
 // condition, because the §13.4 migration rewrites a soft-deleted row a
 // restore would bring back.
-func (s *SQLite) RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, newHash, signature string) error {
+func (s *SQLite) RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, oldSignature, newHash, signature string) error {
 	stmt := `
 		UPDATE manifests SET content_hash = ?, signature = ?
-		WHERE tenant_id = ? AND artifact_id = ? AND version = ? AND content_hash = ?`
-	if oldHash == newHash {
-		// A rewrite that only attaches a first envelope is a
-		// compare-and-swap on the signature instead, so two replicas
-		// running the same pass cannot both sign one row.
-		stmt += ` AND signature = ''`
-	}
+		WHERE tenant_id = ? AND artifact_id = ? AND version = ?
+		  AND content_hash = ? AND signature = ?`
 	res, err := s.db.ExecContext(ctx, stmt,
-		newHash, signature, tenantID, artifactID, version, oldHash)
+		newHash, signature, tenantID, artifactID, version, oldHash, oldSignature)
 	if err != nil {
 		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
 	}

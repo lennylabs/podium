@@ -244,7 +244,7 @@ func (c *countingStore) ListManifestsIncludingDeleted(ctx context.Context, tenan
 	return c.Store.ListManifestsIncludingDeleted(ctx, tenantID)
 }
 
-func (c *countingStore) RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, newHash, signature string) error {
+func (c *countingStore) RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, oldSignature, newHash, signature string) error {
 	c.mu.Lock()
 	c.rehashes++
 	first := c.rehashes == 1
@@ -255,7 +255,7 @@ func (c *countingStore) RehashManifest(ctx context.Context, tenantID, artifactID
 	if c.rehashErr != nil && (c.rehashFor == "" || c.rehashFor == artifactID) {
 		return c.rehashErr
 	}
-	return c.Store.RehashManifest(ctx, tenantID, artifactID, version, oldHash, newHash, signature)
+	return c.Store.RehashManifest(ctx, tenantID, artifactID, version, oldHash, oldSignature, newHash, signature)
 }
 
 // failingObjects wraps an object store and fails Get for one key, or for every
@@ -968,7 +968,7 @@ func TestRehashStoredHashes_ConflictsAreNotFailures(t *testing.T) {
 		// apply, so the backend's own compare-and-swap refuses it.
 		wrapper.beforeApply = func(*countingStore) {
 			rec := readRow(t, st, moved)
-			if err := st.RehashManifest(context.Background(), rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, framedHashOf(moved), "peer-envelope"); err != nil {
+			if err := st.RehashManifest(context.Background(), rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Signature, framedHashOf(moved), "peer-envelope"); err != nil {
 				t.Errorf("peer rewrite: %v", err)
 			}
 		}

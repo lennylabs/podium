@@ -39,6 +39,7 @@ func Suite(t *testing.T, factory Factory) {
 	})
 	t.Run("RehashManifest", func(t *testing.T) { rehashManifest(t, factory(t)) })
 	t.Run("RehashManifestSameHashSignsOnce", func(t *testing.T) { rehashManifestSameHashSignsOnce(t, factory(t)) })
+	t.Run("RehashManifestSignatureCAS", func(t *testing.T) { rehashManifestSignatureCAS(t, factory(t)) })
 	t.Run("DataMigrationMarker", func(t *testing.T) { dataMigrationMarker(t, factory(t)) })
 	t.Run("ListManifestsStableOrder", func(t *testing.T) { listManifestsStableOrder(t, factory(t)) })
 	t.Run("DependencyEdges", func(t *testing.T) { dependencyEdges(t, factory(t)) })
@@ -344,7 +345,7 @@ func rehashManifest(t *testing.T, s store.Store) {
 	mustPut(t, s, manifestRec("a", "x", "1.0.0", "sha:old"))
 	mustPut(t, s, manifestRec("b", "x", "1.0.0", "sha:old"))
 
-	must(t, s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:old", "sha:new", "sig-1"))
+	must(t, s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:old", "", "sha:new", "sig-1"))
 	got, err := s.GetManifest(ctx, "a", "x", "1.0.0")
 	must(t, err)
 	if got.ContentHash != "sha:new" || got.Signature != "sig-1" {
@@ -353,10 +354,10 @@ func rehashManifest(t *testing.T, s store.Store) {
 
 	// The same call again names a hash the row no longer carries, so it is
 	// the conflict rather than an idempotent repeat.
-	if err := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:old", "sha:new", "sig-1"); !errors.Is(err, store.ErrImmutableViolation) {
+	if err := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:old", "sig-1", "sha:new", "sig-1"); !errors.Is(err, store.ErrImmutableViolation) {
 		t.Errorf("repeat rehash = %v, want ErrImmutableViolation", err)
 	}
-	if err := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:stale", "sha:other", "sig-2"); !errors.Is(err, store.ErrImmutableViolation) {
+	if err := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:stale", "sig-1", "sha:other", "sig-2"); !errors.Is(err, store.ErrImmutableViolation) {
 		t.Errorf("stale rehash = %v, want ErrImmutableViolation", err)
 	}
 	got, err = s.GetManifest(ctx, "a", "x", "1.0.0")
@@ -365,7 +366,7 @@ func rehashManifest(t *testing.T, s store.Store) {
 		t.Errorf("refused rehash moved the row: hash %q signature %q", got.ContentHash, got.Signature)
 	}
 
-	if err := s.RehashManifest(ctx, "a", "absent", "1.0.0", "sha:old", "sha:new", ""); !errors.Is(err, store.ErrNotFound) {
+	if err := s.RehashManifest(ctx, "a", "absent", "1.0.0", "sha:old", "", "sha:new", ""); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("rehash of a missing key = %v, want ErrNotFound", err)
 	}
 	other, err := s.GetManifest(ctx, "b", "x", "1.0.0")
@@ -381,7 +382,7 @@ func rehashManifest(t *testing.T, s store.Store) {
 	deletedRec.Layer = "alice-personal"
 	mustPut(t, s, deletedRec)
 	must(t, s.DeleteLayerConfig(ctx, "a", "alice-personal"))
-	must(t, s.RehashManifest(ctx, "a", "y", "1.0.0", "sha:old", "sha:new-y", "sig-y"))
+	must(t, s.RehashManifest(ctx, "a", "y", "1.0.0", "sha:old", "", "sha:new-y", "sig-y"))
 	visible, err := s.ListManifests(ctx, "a")
 	must(t, err)
 	all, err := s.ListManifestsIncludingDeleted(ctx, "a")
@@ -433,15 +434,38 @@ func rehashManifestSameHashSignsOnce(t *testing.T, s store.Store) {
 	mustCreateTenant(t, s, "a")
 	mustPut(t, s, manifestRec("a", "x", "1.0.0", "sha:same"))
 
-	first := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:same", "sha:same", "sig-first")
+	first := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:same", "", "sha:same", "sig-first")
 	signed, err := s.GetManifest(ctx, "a", "x", "1.0.0")
 	must(t, err)
-	second := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:same", "sha:same", "sig-second")
+	second := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:same", "", "sha:same", "sig-second")
 	after, err := s.GetManifest(ctx, "a", "x", "1.0.0")
 	must(t, err)
 	if first != nil || signed.Signature != "sig-first" || !errors.Is(second, store.ErrImmutableViolation) || after.Signature != "sig-first" {
 		t.Errorf("same-hash rehash: first %v signature %q, second %v signature %q; want nil, sig-first, ErrImmutableViolation, sig-first",
 			first, signed.Signature, second, after.Signature)
+	}
+}
+
+// Spec: §4.7.6, §13.4 — the write also compares the stored signature, so
+// sign-stored-rows re-signs a row only over the envelope it read, and a
+// second run, or a peer that re-signed first, cannot be overwritten. A
+// backend whose UPDATE omits the signature clause fails this case.
+func rehashManifestSignatureCAS(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustPut(t, s, manifestRec("a", "x", "1.0.0", "sha:h"))
+	must(t, s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:h", "", "sha:h", "sig-1"))
+
+	resign := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:h", "sig-1", "sha:h", "sig-2")
+	repeat := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:h", "sig-1", "sha:h", "sig-2")
+	stale := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:h", "sig-stale", "sha:h2", "sig-3")
+	got, err := s.GetManifest(ctx, "a", "x", "1.0.0")
+	must(t, err)
+	if resign != nil || !errors.Is(repeat, store.ErrImmutableViolation) || !errors.Is(stale, store.ErrImmutableViolation) ||
+		got.ContentHash != "sha:h" || got.Signature != "sig-2" {
+		t.Errorf("signature compare-and-swap: re-sign %v, repeat %v, stale %v, row %q/%q; want nil, ErrImmutableViolation, ErrImmutableViolation, sha:h/sig-2",
+			resign, repeat, stale, got.ContentHash, got.Signature)
 	}
 }
 

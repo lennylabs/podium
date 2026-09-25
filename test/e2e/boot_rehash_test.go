@@ -74,7 +74,7 @@ func downgradeStoredRows(t testing.TB, sqlitePath string) int {
 			t.Fatalf("list manifests: %v", err)
 		}
 		for _, rec := range recs {
-			if err := st.RehashManifest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, preFramingDigest(rec), rec.Signature); err != nil {
+			if err := st.RehashManifest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Signature, preFramingDigest(rec), rec.Signature); err != nil {
 				t.Fatalf("downgrade %s: %v", rec.ArtifactID, err)
 			}
 			moved++

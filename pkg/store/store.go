@@ -392,18 +392,18 @@ type Store interface {
 	ListManifests(ctx context.Context, tenantID string) ([]ManifestRecord, error)
 	// RehashManifest replaces the content_hash and signature of one manifest
 	// row, including a soft-deleted one, only when the stored content_hash
-	// equals oldHash and, when oldHash equals newHash, only when the stored
-	// signature is empty. It returns ErrNotFound when no row exists for the
-	// key and ErrImmutableViolation when either condition fails. The second
-	// condition makes a call that only attaches a first signature a
-	// compare-and-swap as well, so two replicas cannot both sign one row. It
-	// is the only write to a stored content_hash after PutManifest, and it
-	// exists for the §4.7.6 migration: PutManifest is the immutability anchor
-	// and refuses a differing hash for an existing key, so no ingest path can
-	// repair a stored value. The compare-and-swap keeps a concurrent ingest,
-	// or the same pass on a peer replica, from overwriting a hash it did not
-	// read.
-	RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, newHash, signature string) error
+	// equals oldHash and the stored signature equals oldSignature. It returns
+	// ErrNotFound when no row exists for the key and ErrImmutableViolation
+	// when either condition fails. Its callers are the §13.4 stored-value
+	// rewrite and the sign-stored-rows command, and the compare-and-swap
+	// keeps a concurrent ingest, the same pass on a peer replica, or a second
+	// command run from overwriting a hash or an envelope it did not read. A
+	// call with oldSignature "" on an unchanged hash is the sign-once case: it
+	// attaches a first envelope, and two replicas cannot both sign one row.
+	// It is the only write to a stored content_hash after PutManifest, which
+	// is the immutability anchor and refuses a differing hash for an
+	// existing key, so no ingest path can repair a stored value.
+	RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, oldSignature, newHash, signature string) error
 	// ListManifestsIncludingDeleted is ListManifests without the deleted_at
 	// filter, so a migration reaches the rows a restored layer would serve.
 	ListManifestsIncludingDeleted(ctx context.Context, tenantID string) ([]ManifestRecord, error)

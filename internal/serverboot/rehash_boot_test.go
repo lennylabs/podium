@@ -173,7 +173,7 @@ func downgradeRows(t *testing.T, st store.Store, keyPath string) []store.Manifes
 					t.Fatalf("re-sign: %v", err)
 				}
 			}
-			if err := st.RehashManifest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, old, sig); err != nil {
+			if err := st.RehashManifest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Signature, old, sig); err != nil {
 				t.Fatalf("downgrade %s: %v", rec.ArtifactID, err)
 			}
 			rec.ContentHash, rec.Signature = old, sig

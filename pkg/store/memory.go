@@ -228,20 +228,14 @@ func (s *Memory) GetManifest(_ context.Context, tenantID, artifactID, version st
 // compare-and-swap the Store interface documents. It reaches a soft-deleted
 // row, because the §13.4 migration rewrites the rows a restore would bring
 // back.
-func (s *Memory) RehashManifest(_ context.Context, tenantID, artifactID, version, oldHash, newHash, signature string) error {
+func (s *Memory) RehashManifest(_ context.Context, tenantID, artifactID, version, oldHash, oldSignature, newHash, signature string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	rec, ok := s.manifests[mkey(tenantID, artifactID, version)]
 	if !ok {
 		return ErrNotFound
 	}
-	if rec.ContentHash != oldHash {
-		return ErrImmutableViolation
-	}
-	// A rewrite that only attaches a first envelope is a compare-and-swap on
-	// the signature instead, so two replicas running the same pass cannot
-	// both sign one row.
-	if oldHash == newHash && rec.Signature != "" {
+	if rec.ContentHash != oldHash || rec.Signature != oldSignature {
 		return ErrImmutableViolation
 	}
 	rec.ContentHash = newHash

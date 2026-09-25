@@ -913,7 +913,7 @@ func (p *Postgres) GetManifest(ctx context.Context, tenantID, artifactID, versio
 // compare-and-swap the Store interface documents. It carries no deleted_at
 // condition, because the §13.4 migration rewrites a soft-deleted row a
 // restore would bring back.
-func (p *Postgres) RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, newHash, signature string) error {
+func (p *Postgres) RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, oldSignature, newHash, signature string) error {
 	conn, release, err := p.org(ctx, tenantID)
 	if err != nil {
 		return err
@@ -921,15 +921,10 @@ func (p *Postgres) RehashManifest(ctx context.Context, tenantID, artifactID, ver
 	defer release()
 	stmt := `
 		UPDATE manifests SET content_hash = $1, signature = $2
-		WHERE tenant_id = $3 AND artifact_id = $4 AND version = $5 AND content_hash = $6`
-	if oldHash == newHash {
-		// A rewrite that only attaches a first envelope is a
-		// compare-and-swap on the signature instead, so two replicas
-		// running the same pass cannot both sign one row.
-		stmt += ` AND signature = ''`
-	}
+		WHERE tenant_id = $3 AND artifact_id = $4 AND version = $5
+		  AND content_hash = $6 AND signature = $7`
 	res, err := conn.ExecContext(ctx, stmt,
-		newHash, signature, tenantID, artifactID, version, oldHash)
+		newHash, signature, tenantID, artifactID, version, oldHash, oldSignature)
 	if err != nil {
 		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
 	}

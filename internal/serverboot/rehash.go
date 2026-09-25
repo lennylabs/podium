@@ -374,7 +374,7 @@ func applyRehash(ctx context.Context, d rehashDeps, plan []rehashRow) {
 			}
 			signature = env
 		}
-		err := d.Store.RehashManifest(ctx, row.rec.TenantID, row.rec.ArtifactID, row.rec.Version, row.rec.ContentHash, row.newHash, signature)
+		err := d.Store.RehashManifest(ctx, row.rec.TenantID, row.rec.ArtifactID, row.rec.Version, row.rec.ContentHash, row.rec.Signature, row.newHash, signature)
 		switch {
 		case err == nil:
 			c.rewritten++
