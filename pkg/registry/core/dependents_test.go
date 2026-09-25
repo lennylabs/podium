@@ -22,12 +22,18 @@ func TestDependentsOf_FiltersByVisibility(t *testing.T) {
 	}
 	// public-layer child extends the public parent.
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
+		TenantID: "t", ArtifactID: "parent", Version: "1.0.0",
+		ContentHash: "sha256:p", Type: "agent", Layer: "public-layer",
+	})
+	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: "t", ArtifactID: "child", Version: "1.0.0",
 		ContentHash: "sha256:c", Type: "agent", Layer: "public-layer",
+		ExtendsPin: "parent@1.0.0",
 	})
 	_ = st.PutManifest(context.Background(), store.ManifestRecord{
 		TenantID: "t", ArtifactID: "secret-child", Version: "1.0.0",
 		ContentHash: "sha256:s", Type: "agent", Layer: "secret-layer",
+		ExtendsPin: "parent@1.0.0",
 	})
 	_ = st.PutDependency(context.Background(), "t", store.DependencyEdge{
 		From: "child", To: "parent", Kind: "extends",
@@ -272,4 +278,178 @@ func TestPreviewScope_TenantGate(t *testing.T) {
 			t.Fatalf("PreviewScope: %v", err)
 		}
 	})
+}
+
+// depFixture seeds a Memory store with manifests and edges and returns a
+// registry over the given layers. Each manifest's TenantID is set to "t".
+func depFixture(t *testing.T, layers []layer.Layer, recs []store.ManifestRecord, edges []store.DependencyEdge) *core.Registry {
+	t.Helper()
+	ctx := context.Background()
+	st := store.NewMemory()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	for _, rec := range recs {
+		rec.TenantID = "t"
+		if rec.ContentHash == "" {
+			rec.ContentHash = "sha256:" + rec.ArtifactID + "@" + rec.Version
+		}
+		if rec.Type == "" {
+			rec.Type = "agent"
+		}
+		if err := st.PutManifest(ctx, rec); err != nil {
+			t.Fatalf("PutManifest(%s@%s): %v", rec.ArtifactID, rec.Version, err)
+		}
+	}
+	for _, e := range edges {
+		if err := st.PutDependency(ctx, "t", e); err != nil {
+			t.Fatalf("PutDependency(%s->%s): %v", e.From, e.To, err)
+		}
+	}
+	return core.New(st, "t", layers)
+}
+
+// depLayers is a public "open" layer and a "hidden" layer only bob reads.
+var depLayers = []layer.Layer{
+	{ID: "open", Visibility: layer.Visibility{Public: true}, Precedence: 2},
+	{ID: "hidden", Visibility: layer.Visibility{Users: []string{"bob"}}, Precedence: 1},
+}
+
+var (
+	depAlice = layer.Identity{Sub: "alice", IsAuthenticated: true}
+	depBob   = layer.Identity{Sub: "bob", IsAuthenticated: true}
+)
+
+func depQuery(t *testing.T, reg *core.Registry, id layer.Identity, target string) []core.DependentsEdge {
+	t.Helper()
+	edges, err := reg.DependentsOf(context.Background(), id, target)
+	if err != nil {
+		t.Fatalf("DependentsOf(%s): %v", target, err)
+	}
+	return edges
+}
+
+// Spec: §4.7.3 visibility — a query against a target the caller cannot see
+// returns no edges, even when the dependent itself is visible.
+func TestDependentsOf_InvisibleTargetYieldsNoEdges(t *testing.T) {
+	t.Parallel()
+	reg := depFixture(t, depLayers, []store.ManifestRecord{
+		{ArtifactID: "acme/hidden-parent", Version: "1.0.0", Layer: "hidden"},
+		{ArtifactID: "acme/child", Version: "1.0.0", Layer: "open", ExtendsPin: "acme/hidden-parent@1.0.0"},
+	}, []store.DependencyEdge{{From: "acme/child", To: "acme/hidden-parent", Kind: "extends"}})
+	if got := depQuery(t, reg, depAlice, "acme/hidden-parent"); len(got) != 0 {
+		t.Errorf("alice sees %v, want no edges for an invisible target", got)
+	}
+	if got := depQuery(t, reg, depBob, "acme/hidden-parent"); len(got) != 1 {
+		t.Errorf("bob sees %v, want the one edge", got)
+	}
+}
+
+// Spec: §4.7.3 visibility — an invisible target is indistinguishable from a
+// target that does not exist and from one nothing depends on.
+func TestDependentsOf_InvisibleTargetMatchesNonexistentTarget(t *testing.T) {
+	t.Parallel()
+	reg := depFixture(t, depLayers, []store.ManifestRecord{
+		{ArtifactID: "acme/hidden-parent", Version: "1.0.0", Layer: "hidden"},
+		{ArtifactID: "acme/child", Version: "1.0.0", Layer: "open", ExtendsPin: "acme/hidden-parent@1.0.0"},
+		{ArtifactID: "acme/lonely", Version: "1.0.0", Layer: "open"},
+	}, []store.DependencyEdge{{From: "acme/child", To: "acme/hidden-parent", Kind: "extends"}})
+	invisible := depQuery(t, reg, depAlice, "acme/hidden-parent")
+	missing := depQuery(t, reg, depAlice, "acme/does-not-exist")
+	lonely := depQuery(t, reg, depAlice, "acme/lonely")
+	if !reflect.DeepEqual(invisible, missing) || !reflect.DeepEqual(invisible, lonely) {
+		t.Errorf("invisible=%#v missing=%#v lonely=%#v, want identical results", invisible, missing, lonely)
+	}
+}
+
+// Spec: §4.7.3 visibility, §4.6 — a same-ID overlay records the self-edge
+// {X -> X}. Both endpoints are visible by ID to a caller who reads only the
+// overlaying layer, so the edge is dropped by the pinned-parent test.
+func TestDependentsOf_SameIDOverlayHidesLowerLayer(t *testing.T) {
+	t.Parallel()
+	reg := depFixture(t, depLayers, []store.ManifestRecord{
+		{ArtifactID: "team/overlay", Version: "1.0.0", Layer: "hidden"},
+		{ArtifactID: "team/overlay", Version: "2.0.0", Layer: "open", ExtendsPin: "team/overlay@1.0.0"},
+	}, []store.DependencyEdge{{From: "team/overlay", To: "team/overlay", Kind: "extends"}})
+	if got := depQuery(t, reg, depAlice, "team/overlay"); len(got) != 0 {
+		t.Errorf("alice sees %v, want no self-edge for an unreadable lower layer", got)
+	}
+}
+
+// Spec: §4.7.3 visibility, §4.6 — a caller who reads both layers of a
+// same-ID overlay sees the self-edge. The asymmetry with the single-layer
+// caller is the rule, and it requires the pin lookup.
+func TestDependentsOf_SameIDOverlayVisibleToBoth(t *testing.T) {
+	t.Parallel()
+	reg := depFixture(t, depLayers, []store.ManifestRecord{
+		{ArtifactID: "team/overlay", Version: "1.0.0", Layer: "hidden"},
+		{ArtifactID: "team/overlay", Version: "2.0.0", Layer: "open", ExtendsPin: "team/overlay@1.0.0"},
+	}, []store.DependencyEdge{{From: "team/overlay", To: "team/overlay", Kind: "extends"}})
+	got := depQuery(t, reg, depBob, "team/overlay")
+	want := []core.DependentsEdge{{From: "team/overlay", To: "team/overlay", Kind: "extends"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("bob sees %v, want %v", got, want)
+	}
+}
+
+// Spec: §4.7.3 visibility — the endpoint rule is edge-kind-agnostic: a
+// delegates_to edge to an invisible target is dropped, and one to a visible
+// target is kept without any pin.
+func TestDependentsOf_DelegatesToInvisibleTargetDropped(t *testing.T) {
+	t.Parallel()
+	reg := depFixture(t, depLayers, []store.ManifestRecord{
+		{ArtifactID: "acme/hidden-worker", Version: "1.0.0", Layer: "hidden"},
+		{ArtifactID: "acme/open-worker", Version: "1.0.0", Layer: "open"},
+		{ArtifactID: "acme/lead", Version: "1.0.0", Layer: "open"},
+	}, []store.DependencyEdge{
+		{From: "acme/lead", To: "acme/hidden-worker", Kind: "delegates_to"},
+		{From: "acme/lead", To: "acme/open-worker", Kind: "delegates_to"},
+	})
+	if got := depQuery(t, reg, depAlice, "acme/hidden-worker"); len(got) != 0 {
+		t.Errorf("alice sees %v, want no edge to an invisible delegate", got)
+	}
+	if got := depQuery(t, reg, depAlice, "acme/open-worker"); len(got) != 1 {
+		t.Errorf("alice sees %v, want the visible delegates_to edge", got)
+	}
+}
+
+// Spec: §4.7.3 visibility — an extends edge whose visible child records all
+// carry an empty ExtendsPin names no parent record to test, so it is
+// dropped rather than admitted by the ID test.
+func TestDependentsOf_UnpinnedExtendsEdgeDropped(t *testing.T) {
+	t.Parallel()
+	reg := depFixture(t, depLayers, []store.ManifestRecord{
+		{ArtifactID: "acme/hidden-parent", Version: "1.0.0", Layer: "open"},
+		{
+			ArtifactID: "acme/child", Version: "1.0.0", Layer: "open",
+			Frontmatter: []byte("type: agent\nextends: acme/hidden-parent\n"),
+		},
+	}, []store.DependencyEdge{{From: "acme/child", To: "acme/hidden-parent", Kind: "extends"}})
+	if got := depQuery(t, reg, depBob, "acme/hidden-parent"); len(got) != 0 {
+		t.Errorf("bob sees %v, want the unpinned extends edge dropped", got)
+	}
+}
+
+// Spec: §4.7.3 — a pin naming a different parent than the edge target does
+// not admit the edge.
+func TestDependentsOf_PinToOtherParentDropped(t *testing.T) {
+	t.Parallel()
+	reg := depFixture(t, depLayers, []store.ManifestRecord{
+		{ArtifactID: "acme/a", Version: "1.0.0", Layer: "open"},
+		{ArtifactID: "acme/b", Version: "1.0.0", Layer: "open"},
+		{ArtifactID: "acme/child", Version: "1.0.0", Layer: "open", ExtendsPin: "acme/a@1.0.0"},
+	}, []store.DependencyEdge{{From: "acme/child", To: "acme/b", Kind: "extends"}})
+	if got := depQuery(t, reg, depBob, "acme/b"); len(got) != 0 {
+		t.Errorf("got %v, want no edge when the pin names another parent", got)
+	}
+}
+
+// Spec: §4.7.3 — a store failure while resolving the caller's visible set
+// propagates rather than yielding an unfiltered or empty list.
+func TestDependentsOf_StoreErrorPropagates(t *testing.T) {
+	t.Parallel()
+	reg := core.New(failingStore{Store: store.NewMemory()}, "t", depLayers)
+	if _, err := reg.DependentsOf(context.Background(), depBob, "acme/x"); !errors.Is(err, core.ErrUnavailable) {
+		t.Errorf("err = %v, want ErrUnavailable", err)
+	}
 }
