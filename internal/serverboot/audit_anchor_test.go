@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -136,23 +137,27 @@ func TestReadOrCreateKeyFile_GenerateAndLoaderFailures(t *testing.T) {
 	if err := os.WriteFile(path, []byte("public: !!!\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := loadOrGenerateRegistrySigner(path); err == nil || !strings.Contains(err.Error(), path) {
-		t.Errorf("loadOrGenerateRegistrySigner(malformed) = %v, want an error naming %s", err, path)
+	_, err := loadRegistrySigner(path, true)
+	if err == nil || !strings.Contains(err.Error(), path) {
+		t.Errorf("loadRegistrySigner(malformed) = %v, want an error naming %s", err, path)
+	}
+	if !errors.Is(err, sign.ErrRegistryManagedUnavailable) || !strings.Contains(err.Error(), "config.signature_provider_unavailable") {
+		t.Errorf("loadRegistrySigner(malformed) = %v, want config.signature_provider_unavailable wrapping sign.ErrRegistryManagedUnavailable", err)
 	}
 }
 
 // Spec: §4.7.9 — the registry signer carries the key file's verify: lines as
 // its verification-only keys, so a row the retired key signed still verifies.
-func TestLoadOrGenerateRegistrySigner_ReadsVerifyLines(t *testing.T) {
+func TestLoadRegistrySigner_ReadsVerifyLines(t *testing.T) {
 	pub, priv, _ := ed25519.GenerateKey(rand.Reader)
 	retiredPub, retiredPriv, _ := ed25519.GenerateKey(rand.Reader)
 	path := filepath.Join(t.TempDir(), "registry-signing.key")
 	if err := sign.WriteKeyFile(path, sign.KeyFile{Private: priv, Public: pub, Verify: []ed25519.PublicKey{retiredPub}}); err != nil {
 		t.Fatal(err)
 	}
-	provider, err := loadOrGenerateRegistrySigner(path)
+	provider, err := loadRegistrySigner(path, true)
 	if err != nil {
-		t.Fatalf("loadOrGenerateRegistrySigner: %v", err)
+		t.Fatalf("loadRegistrySigner: %v", err)
 	}
 	hash := "sha256:" + strings.Repeat("ab", 32)
 	envelope, err := (sign.RegistryManagedKey{PrivateKey: retiredPriv}).Sign(context.Background(), hash)

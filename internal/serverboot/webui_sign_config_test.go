@@ -83,33 +83,34 @@ func TestValidate_SignModeAccepts(t *testing.T) {
 }
 
 // Spec: §13.10 / §4.7.9 — registrySignerFor returns a working
-// registry-managed signer for an empty mode and for "registry-key", because
-// the registry signs by default, and nil for "none".
+// registry-managed key and reports signing on for an empty mode and for
+// "registry-key", because the registry signs by default, and reports signing
+// off with the zero key for "none".
 func TestRegistrySignerFor(t *testing.T) {
 	t.Setenv("PODIUM_SIGN_KEY_PATH", t.TempDir()+"/registry-signing.key")
 
-	off, err := registrySignerFor("none")
+	off, on, err := registrySignerFor("none")
 	if err != nil {
 		t.Fatalf("registrySignerFor(none): %v", err)
 	}
-	if off != nil {
-		t.Errorf("registrySignerFor(none) = non-nil, want nil (signing off)")
+	if on || off.PrivateKey != nil {
+		t.Errorf("registrySignerFor(none) = (%v, %v), want the zero key and signing off", off, on)
 	}
 
-	def, err := registrySignerFor("")
+	def, on, err := registrySignerFor("")
 	if err != nil {
 		t.Fatalf("registrySignerFor(\"\"): %v", err)
 	}
-	if def == nil {
-		t.Fatal("registrySignerFor(\"\") = nil, want a signer (signing is on by default)")
+	if !on || def.PrivateKey == nil {
+		t.Fatal("registrySignerFor(\"\") reports no signer, want one (signing is on by default)")
 	}
 
-	signer, err := registrySignerFor("registry-key")
+	signer, on, err := registrySignerFor("registry-key")
 	if err != nil {
 		t.Fatalf("registrySignerFor(registry-key): %v", err)
 	}
-	if signer == nil {
-		t.Fatal("registrySignerFor(registry-key) = nil, want a signer")
+	if !on || signer.PrivateKey == nil {
+		t.Fatal("registrySignerFor(registry-key) reports no signer, want one")
 	}
 	// A registry-managed signature is a non-empty JSON envelope over the
 	// content hash, and the same provider verifies it. spec: §4.7.9. The

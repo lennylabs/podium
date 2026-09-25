@@ -17,11 +17,14 @@ package e2e
 // Spec: §4.7.9, §6.2, §6.4, §6.9, §7.5.2, §13.10.
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -267,5 +270,76 @@ func TestStandaloneCLI_SignAndVerifyWithTheGeneratedKey(t *testing.T) {
 	verifyRes := runPodium(t, "", nil, "verify", "--content-hash", hash, "--signature", strings.TrimSpace(signRes.Stdout))
 	if verifyRes.Exit != 0 || !strings.Contains(verifyRes.Stderr, "verify ok") {
 		t.Fatalf("verify exit=%d stderr=%s, want 0 with verify ok", verifyRes.Exit, verifyRes.Stderr)
+	}
+}
+
+// TestRegistryStart_RefusesMalformedSigningKeyFile drives the compiled
+// registry through a key file it cannot sign and verify under: a public-only
+// file, a valid pair with an undecodable verify: line, and a private: line
+// whose public: line does not match. Each start exits non-zero before it
+// binds, and the operator reads config.signature_provider_unavailable and the
+// key path on the process's output. The refused file is left as written.
+//
+// Spec: §13.12, §4.7.9.
+// Matrix: §6.10 (config.signature_provider_unavailable)
+func TestRegistryStart_RefusesMalformedSigningKeyFile(t *testing.T) {
+	t.Parallel()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherPub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b64 := base64.StdEncoding.EncodeToString
+	cases := []struct {
+		name         string
+		text         string
+		podiumServer bool
+	}{
+		{name: "public line only", text: "public: " + b64(pub) + "\n", podiumServer: true},
+		{name: "undecodable verify line", text: "private: " + b64(priv) + "\npublic: " + b64(pub) + "\nverify: !!!\n"},
+		{name: "public line does not match private", text: "private: " + b64(priv) + "\npublic: " + b64(otherPub) + "\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			keyPath := filepath.Join(dir, "registry-signing.key")
+			if err := os.WriteFile(keyPath, []byte(tc.text), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			env := []string{
+				"PODIUM_SIGN_KEY_PATH=" + keyPath,
+				"PODIUM_REGISTRY_STORE=sqlite",
+				"PODIUM_SQLITE_PATH=" + filepath.Join(dir, "podium.db"),
+			}
+			exit, out := serveExpectStartupError(t, env)
+			assertSigningKeyRefusal(t, "podium serve", exit, out, keyPath)
+			if tc.podiumServer {
+				res := runBin(t, cmdharness.Bin(t, "podium-server"), "", append(env, "PODIUM_BIND=127.0.0.1:0", "PODIUM_NO_AUTOSTANDALONE=1"), nil, 20*time.Second)
+				out := res.Stderr + res.Stdout
+				if strings.Contains(out, "listening on") {
+					t.Fatalf("podium-server bound a listener instead of refusing to start\noutput:\n%s", out)
+				}
+				assertSigningKeyRefusal(t, "podium-server", res.Exit, out, keyPath)
+			}
+			if got, err := os.ReadFile(keyPath); err != nil || string(got) != tc.text {
+				t.Errorf("the refused key file changed: %q, %v", got, err)
+			}
+		})
+	}
+}
+
+// assertSigningKeyRefusal checks a refused start: a non-zero exit and output
+// that carries the §6.10 code and names the key file.
+func assertSigningKeyRefusal(t *testing.T, bin string, exit int, out, keyPath string) {
+	t.Helper()
+	if exit == 0 {
+		t.Fatalf("%s exited 0; want a refusal\noutput:\n%s", bin, out)
+	}
+	if !strings.Contains(out, "config.signature_provider_unavailable") || !strings.Contains(out, keyPath) {
+		t.Errorf("%s output does not carry config.signature_provider_unavailable and %s:\n%s", bin, keyPath, out)
 	}
 }

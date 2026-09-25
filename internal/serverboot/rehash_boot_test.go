@@ -145,7 +145,7 @@ func downgradeRows(t *testing.T, st store.Store, keyPath string) []store.Manifes
 		Sign(context.Context, string) (string, error)
 	}
 	if keyPath != "" {
-		p, err := loadOrGenerateRegistrySigner(keyPath)
+		p, err := loadRegistrySigner(keyPath, true)
 		if err != nil {
 			t.Fatalf("load signing key: %v", err)
 		}
@@ -222,7 +222,7 @@ func TestRun_RehashesStoredRowsBeforeTheBootstrapIngest(t *testing.T) {
 	}
 	after := f.openStoreDirect(t)
 	ctx := context.Background()
-	signer, serr := loadOrGenerateRegistrySigner(f.keyPath)
+	signer, serr := loadRegistrySigner(f.keyPath, true)
 	if serr != nil {
 		t.Fatalf("load signing key: %v", serr)
 	}
@@ -465,7 +465,7 @@ func TestRun_WrongKeyPresentLeavesSignedRowsUnverified(t *testing.T) {
 	}
 
 	other := filepath.Join(f.home, "other-signing.key")
-	if _, err := loadOrGenerateRegistrySigner(other); err != nil {
+	if _, err := loadRegistrySigner(other, true); err != nil {
 		t.Fatalf("generate the other key: %v", err)
 	}
 	t.Setenv("PODIUM_SIGN_KEY_PATH", other)
@@ -568,7 +568,7 @@ func TestRun_StoreOutsideTheKeyDirectoryNeedsAKeyPath(t *testing.T) {
 	}
 	final := f.openStoreDirect(t)
 	row := onlyRow(t, final)
-	signer, err := loadOrGenerateRegistrySigner(keyA)
+	signer, err := loadRegistrySigner(keyA, true)
 	if err != nil {
 		t.Fatalf("load A's key: %v", err)
 	}

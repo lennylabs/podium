@@ -43,6 +43,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/scim"
+	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/tracing"
 	"github.com/lennylabs/podium/pkg/vector"
@@ -905,13 +906,19 @@ func run(ctx context.Context, stop func()) error {
 	// accepted manifest's content hash is signed with the registry-managed
 	// key. --sign none (PODIUM_SIGN=none) turns it off, and the bootstrap and
 	// reingest paths then leave the signature envelope empty.
-	signProvider, err := registrySignerFor(cfg.signMode)
+	// The loader's error names the key file and carries the §6.10 code, so it
+	// is returned unwrapped and reaches stderr as written. The provider is
+	// built only when signing is on, because the zero key in an interface is
+	// never nil and would read as a signer to every consumer below.
+	signKey, signingOn, err := registrySignerFor(cfg.signMode)
 	if err != nil {
-		return fmt.Errorf("registry signing key: %w", err)
+		return err
 	}
+	var signProvider sign.Provider
 	var ingestSigner ingest.SignerFunc
-	if signProvider != nil {
-		ingestSigner = signProvider.Sign
+	if signingOn {
+		signProvider = signKey
+		ingestSigner = signKey.Sign
 		log.Printf("ingest signing: registry-managed key (§4.7.9)")
 	}
 
