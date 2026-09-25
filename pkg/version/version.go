@@ -1,6 +1,6 @@
 // Package version implements semver pinning and content-hash derivation
 // for spec §4.7.6 (Version Resolution and Consistency) and §4.7
-// (immutability invariant).
+// (immutability invariant), and the §4.7.10 delivery-hash derivation.
 package version
 
 import (
@@ -298,4 +298,79 @@ func writeFramed(w io.Writer, v []byte) {
 	binary.BigEndian.PutUint64(n[:], uint64(len(v)))
 	_, _ = w.Write(n[:])
 	_, _ = w.Write(v)
+}
+
+// deliveryRecordTag is the framed leading value of every §4.7.10 delivery
+// stream.
+const deliveryRecordTag = "podium/delivery-record/1"
+
+// DeliveryRecord is the §4.7.10 delivery record: the values one load response
+// serves, as the registry composes them and as the consumer receives them.
+// Every field is the served value, so for a child declaring extends: the
+// Frontmatter is the merged ARTIFACT.md document, whatever the type.
+type DeliveryRecord struct {
+	// ID is the canonical artifact ID the response carries.
+	ID string
+	// Version is the resolved semver the response carries.
+	Version string
+	// Type is the served artifact type.
+	Type string
+	// ContentHash is the §4.7.6 content hash of the stored artifact the
+	// response was composed from, as served.
+	ContentHash string
+	// Sensitivity is the served sensitivity value.
+	Sensitivity string
+	// Frontmatter is the served ARTIFACT.md document.
+	Frontmatter string
+	// ManifestBody is the served manifest body.
+	ManifestBody string
+	// SkillRaw is the served SKILL.md, empty when the artifact has none.
+	SkillRaw string
+	// Resources maps each bundled resource's path to its content hash.
+	Resources map[string]string
+}
+
+// DeliveryHash returns the §4.7.10 delivery hash of rec as "sha256:<hex>":
+// the SHA-256 digest over the framed tag "podium/delivery-record/1", the
+// framed ID, version, type, content hash, and sensitivity, the framed
+// ARTIFACT.md document, manifest body, and SKILL.md, and then each bundled
+// resource's framed path and framed content hash in ascending path order. An
+// absent SKILL.md frames a zero-length value.
+//
+// The leading tag separates this digest's domain from the §4.7.6 content
+// hash. Both use the same framing, the same hex encoding, and are signed under
+// the same registry-managed key, so without the tag a stream that parses as
+// both a delivery record and a stored package would give one digest two
+// meanings, and a signature over either would be accepted as a signature over
+// the other.
+//
+// Resources contribute their content hash rather than their body so that
+// composing the digest reads nothing from object storage on each load. The
+// consumer checks every resource body it fetches or decodes against the hash
+// the verified record carries, which binds the body to the attestation.
+//
+// The per-caller extends_pin and the lifecycle fields are absent from the
+// record: the digest must not depend on who reads the record or when, so the
+// single-load path, the batch path, and every consumer agree on it.
+//
+// Spec: §4.7.10
+func DeliveryHash(rec DeliveryRecord) string {
+	h := sha256.New()
+	for _, v := range []string{
+		deliveryRecordTag,
+		rec.ID, rec.Version, rec.Type, rec.ContentHash, rec.Sensitivity,
+		rec.Frontmatter, rec.ManifestBody, rec.SkillRaw,
+	} {
+		writeFramed(h, []byte(v))
+	}
+	paths := make([]string, 0, len(rec.Resources))
+	for p := range rec.Resources {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		writeFramed(h, []byte(p))
+		writeFramed(h, []byte(rec.Resources[p]))
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }

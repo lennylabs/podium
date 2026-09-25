@@ -414,3 +414,153 @@ func TestCanonicalContentHash_BodyBytesAreNotNormalized(t *testing.T) {
 		}
 	}
 }
+
+// deliveryStream frames the §4.7.10 fields in the order the spec text lists
+// them, starting with the given leading values. The tests build expectations
+// with it and never call DeliveryHash to derive one.
+func deliveryStream(parts ...string) []byte {
+	var out []byte
+	for _, p := range parts {
+		out = append(out, frame([]byte(p))...)
+	}
+	return out
+}
+
+// Spec: §4.7.10 — the delivery serialization is the framed tag
+// "podium/delivery-record/1", the framed identity, version, type, content
+// hash, and sensitivity, the framed ARTIFACT.md document, manifest body, and
+// SKILL.md, then each bundled resource's framed path and framed content hash in
+// ascending byte-wise path order, served as sha256:<hex>. This vector is built
+// from the spec text and not from DeliveryHash.
+func TestDeliveryHash_MatchesTheSpecSerialization(t *testing.T) {
+	t.Parallel()
+
+	// Two resources, inserted in reverse of the order the stream frames them
+	// in, so the ascending-path order is what the digest depends on.
+	stream := deliveryStream(
+		"podium/delivery-record/1",
+		"team/review", "1.2.0", "skill", "sha256:abc", "internal",
+		"---\nname: review\n---\n", "body\n", "---\nname: review\n---\nskill\n",
+		"a.md", "sha256:aaa",
+		"ref.md", "sha256:rrr",
+	)
+	resources := map[string]string{}
+	resources["ref.md"] = "sha256:rrr"
+	resources["a.md"] = "sha256:aaa"
+	got := DeliveryHash(DeliveryRecord{
+		ID: "team/review", Version: "1.2.0", Type: "skill",
+		ContentHash: "sha256:abc", Sensitivity: "internal",
+		Frontmatter:  "---\nname: review\n---\n",
+		ManifestBody: "body\n",
+		SkillRaw:     "---\nname: review\n---\nskill\n",
+		Resources:    resources,
+	})
+	if want := "sha256:" + sha256Hex(stream); got != want {
+		t.Errorf("DeliveryHash = %q, want %q", got, want)
+	}
+
+	// No SKILL.md and one resource: the SKILL.md slot frames a zero-length
+	// value rather than being omitted.
+	noSkill := deliveryStream(
+		"podium/delivery-record/1",
+		"team/rule", "0.1.0", "rule", "sha256:def", "public",
+		"---\nname: rule\n---\n", "", "",
+		"data/a.txt", "sha256:aaa",
+	)
+	got = DeliveryHash(DeliveryRecord{
+		ID: "team/rule", Version: "0.1.0", Type: "rule",
+		ContentHash: "sha256:def", Sensitivity: "public",
+		Frontmatter: "---\nname: rule\n---\n",
+		Resources:   map[string]string{"data/a.txt": "sha256:aaa"},
+	})
+	if want := "sha256:" + sha256Hex(noSkill); got != want {
+		t.Errorf("DeliveryHash (no SKILL.md) = %q, want %q", got, want)
+	}
+}
+
+// Spec: §4.7.10 — the framing makes the delivery serialization injective, so
+// moving a byte across a field boundary changes the digest.
+func TestDeliveryHash_RepartitioningChangesTheDigest(t *testing.T) {
+	t.Parallel()
+	base := DeliveryRecord{ID: "a/b", Version: "1.0.0", Type: "skill", Frontmatter: "FM", ManifestBody: "BODY"}
+	with := func(f func(*DeliveryRecord)) string {
+		r := base
+		f(&r)
+		return DeliveryHash(r)
+	}
+	// The tag/ID boundary: a stream whose tag absorbed the ID's first byte
+	// would frame "podium/delivery-record/1a" then "/b". Hash that stream
+	// directly, since the tag is not a field a caller sets.
+	shifted := "sha256:" + sha256Hex(deliveryStream(
+		"podium/delivery-record/1a", "/b", "1.0.0", "skill", "", "", "FM", "BODY", ""))
+	cases := []struct {
+		name string
+		a, b string
+	}{
+		{name: "tag/ID", a: DeliveryHash(base), b: shifted},
+		{
+			name: "ID/version",
+			a:    with(func(r *DeliveryRecord) { r.ID, r.Version = "a/b1", ".0.0" }),
+			b:    DeliveryHash(base),
+		},
+		{
+			name: "frontmatter/body",
+			a:    with(func(r *DeliveryRecord) { r.Frontmatter, r.ManifestBody = "FMB", "ODY" }),
+			b:    DeliveryHash(base),
+		},
+		{
+			name: "resource path/resource hash",
+			a:    with(func(r *DeliveryRecord) { r.Resources = map[string]string{"ab": "c"} }),
+			b:    with(func(r *DeliveryRecord) { r.Resources = map[string]string{"a": "bc"} }),
+		},
+	}
+	for _, c := range cases {
+		if c.a == c.b {
+			t.Errorf("%s: repartitioned records share the digest %q", c.name, c.a)
+		}
+	}
+}
+
+// Spec: §4.7.10 — resources are framed in ascending path order, so the digest
+// does not depend on the order the caller's map was built in.
+func TestDeliveryHash_IgnoresMapInsertionOrder(t *testing.T) {
+	t.Parallel()
+	first := map[string]string{}
+	first["a.md"] = "sha256:aaa"
+	first["ref.md"] = "sha256:rrr"
+	second := map[string]string{}
+	second["ref.md"] = "sha256:rrr"
+	second["a.md"] = "sha256:aaa"
+
+	a := DeliveryHash(DeliveryRecord{ID: "x/y", Resources: first})
+	b := DeliveryHash(DeliveryRecord{ID: "x/y", Resources: second})
+	if a != b {
+		t.Errorf("insertion order changed the digest: %q != %q", a, b)
+	}
+}
+
+// Spec: §4.7.10 — the leading tag separates the delivery digest from the
+// §4.7.6 content hash. The record below is chosen so that its untagged stream
+// is byte-identical to a §4.7.6 stream: the ID and version fill the manifest
+// and SKILL.md slots, and the remaining fields pair up as ascending resource
+// paths and bodies. Without the tag the two digests would coincide.
+func TestDeliveryHash_DiffersFromContentHashForTheSameBytes(t *testing.T) {
+	t.Parallel()
+	rec := DeliveryRecord{
+		ID: "a", Version: "b",
+		Type: "c", ContentHash: "C",
+		Sensitivity: "d", Frontmatter: "D",
+		ManifestBody: "e", SkillRaw: "E",
+		Resources: map[string]string{"f": "F"},
+	}
+	content := CanonicalContentHash([]byte("a"), []byte("b"), map[string][]byte{
+		"c": []byte("C"), "d": []byte("D"), "e": []byte("E"), "f": []byte("F"),
+	})
+	untagged := sha256Hex(deliveryStream("a", "b", "c", "C", "d", "D", "e", "E", "f", "F"))
+	if untagged != content {
+		t.Fatalf("fixture does not reproduce the §4.7.6 stream: %q != %q", untagged, content)
+	}
+	if got := DeliveryHash(rec); got == "sha256:"+content {
+		t.Errorf("DeliveryHash equals the content hash of the same bytes: %q", got)
+	}
+}
