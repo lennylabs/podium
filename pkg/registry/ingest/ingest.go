@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -745,12 +746,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				}
 			}
 			if !overlay {
-				res.Rejected = append(res.Rejected, RejectedArtifact{
-					ArtifactID: mr.ArtifactID,
-					Reason: fmt.Sprintf("cross-layer collision: %q already contributed by layer %q; declare extends: %s to overlay it",
-						mr.ArtifactID, crossLayer[0].Layer, mr.ArtifactID),
-					Code: "ingest.collision",
-				})
+				res.Rejected = append(res.Rejected, collisionRejection(req.TenantID, req.LayerID, mr.ArtifactID, crossLayer[0].Layer))
 				continue
 			}
 		}
@@ -1434,6 +1430,23 @@ func indexedArtifact(mr store.ManifestRecord) manifest.Artifact {
 		Tags:             mr.Tags,
 		Sensitivity:      manifest.Sensitivity(mr.Sensitivity),
 		SearchVisibility: manifest.SearchVisibility(mr.SearchVisibility),
+	}
+}
+
+// collisionRejection builds the §4.6 cross-layer collision rejection for id.
+// The reason names the artifact and the extends: remedy and never the
+// contributing layer: the reingest response reaches a non-admin layer owner,
+// and the layer that already contributes id is a §4.7.2 configuration fact
+// about a part of the tenant that caller may not be able to read. The layer is
+// logged server-side so an operator can still trace the collision.
+//
+// Spec: §4.6 hidden parents (observable)
+func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArtifact {
+	log.Printf("ingest: tenant %s layer %s: cross-layer collision on %q with layer %q", tenantID, layerID, id, existingLayer)
+	return RejectedArtifact{
+		ArtifactID: id,
+		Reason:     fmt.Sprintf("cross-layer collision: %q is already contributed by another layer; declare extends: %s to overlay it", id, id),
+		Code:       "ingest.collision",
 	}
 }
 

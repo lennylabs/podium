@@ -111,11 +111,11 @@ func TestWriteIngestReport_Classification(t *testing.T) {
 			name: "rejected only",
 			body: `{"layer":"finance","accepted":0,"idempotent":0,"artifacts":[],
 				"rejected":[{"artifact_id":"finance/ap/pay-invoice","code":"ingest.collision",
-				"reason":"artifact id already contributed by layer core"}]}`,
+				"reason":"artifact id already contributed by another layer"}]}`,
 			wantDropped: 1,
 			wantOK:      true,
 			wantStderr: []string{
-				"rejected: finance/ap/pay-invoice (ingest.collision): artifact id already contributed by layer core\n",
+				"rejected: finance/ap/pay-invoice (ingest.collision): artifact id already contributed by another layer\n",
 			},
 			emptyOut: true,
 		},
