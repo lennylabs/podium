@@ -1,7 +1,7 @@
 # Proposal 0027: Attest the served record and close the hidden-parent disclosures
 
 - Issue: (to be filed)
-- Status: Approved (2026-09-24). Verified 2026-09-23 after 16 adversarial review rounds (43 findings fixed). OQ-2 and OQ-5 resolved by the owner; the response field was renamed to extends_pin after verification.
+- Status: Applied to spec (2026-09-24). Verified 2026-09-23 after 16 adversarial review rounds (43 findings fixed). OQ-2 and OQ-5 resolved by the owner; the response field was renamed to extends_pin after verification.
 - Date: 2026-09-15
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
