@@ -30,14 +30,21 @@ const runtimeFM = "---\ntype: context\nversion: 1.0.0\nruntime_requirements:\n  
 // event was emitted.
 func orderServer(t *testing.T, cfg *config) (*mcpServer, string) {
 	t.Helper()
+	s := newTestServer(t, cfg)
+	return s, attachAuditFile(t, s)
+}
+
+// attachAuditFile points s's local audit sink at a fresh file and returns its
+// path.
+func attachAuditFile(t *testing.T, s *mcpServer) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "audit.log")
 	sink, err := audit.NewFileSink(path)
 	if err != nil {
 		t.Fatalf("NewFileSink: %v", err)
 	}
-	s := newTestServer(t, cfg)
 	s.audit = sink
-	return s, path
+	return path
 }
 
 // loadedEventCount returns how many artifact.loaded events the local sink at
@@ -51,8 +58,8 @@ func loadedEventCount(t *testing.T, path string) int {
 	return strings.Count(string(data), string(audit.EventArtifactLoaded))
 }
 
-// tamperedHash returns resp with a content_hash the served bytes do not
-// reproduce, so the §6.6 step-2 recomputation refuses it.
+// tamperedHash returns resp with a content_hash other than the one its
+// delivery hash frames, so the §6.6 step-2 delivery comparison refuses it.
 func tamperedHash(resp loadArtifactResponse) loadArtifactResponse {
 	resp.ContentHash = "sha256:" + strings.Repeat("0", 64)
 	return resp
@@ -79,7 +86,7 @@ func TestDeliverLoadArtifact_ManifestGatesRunAfterVerification(t *testing.T) {
 		t.Fatalf("generate key: %v", err)
 	}
 	resp := fixtureResp("team/x", sandboxedFM)
-	resp.Signature, err = sign.RegistryManagedKey{PrivateKey: otherPriv}.Sign(context.Background(), resp.ContentHash)
+	resp.DeliverySignature, err = sign.RegistryManagedKey{PrivateKey: otherPriv}.Sign(context.Background(), resp.DeliveryHash)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
@@ -161,7 +168,7 @@ func TestDeliverLoadArtifact_NoAuditEventOnResourceFetchFailure(t *testing.T) {
 	resp.LargeResources = map[string]largeResourceLink{
 		"data/big.bin": {URL: ts.URL, ContentHash: "sha256:" + strings.Repeat("a", 64)},
 	}
-	out := s.deliverLoadArtifact(resp)
+	out := s.deliverLoadArtifact(sealDelivery(resp))
 	if got := errorMessageText(out); !strings.HasPrefix(got, "materialize.fetch_failed") {
 		t.Fatalf("error = %q, want materialize.fetch_failed", got)
 	}

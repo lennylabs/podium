@@ -221,3 +221,42 @@ func TestLoadArtifactFromOverlay_ServesTheCanonicalContentHash(t *testing.T) {
 		t.Errorf("os.Stat(%s) err = %v, want not-exist (the overlay wrote a §6.5 bucket)", bucket, err)
 	}
 }
+
+// Spec: §4.7.6, §11 — a §6.4 overlay resolves no extends: chain, so a child
+// that declares extends: with no parent in the overlay is served the §4.7.6
+// digest over its own authored ARTIFACT.md, the value ingest computes for
+// the same bytes.
+func TestLoadArtifactFromOverlay_ExtendsChildServesTheAuthoredContentHash(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	authored := []byte("---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: acme/base@1.0.0\n---\n\nchild body\n")
+	path := filepath.Join(dir, "team", "child", "ARTIFACT.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, authored, 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	records, _, err := resolveOverlayAll(dir)
+	if err != nil {
+		t.Fatalf("resolveOverlayAll: %v", err)
+	}
+	var rec *filesystem.ArtifactRecord
+	for i := range records {
+		if records[i].ID == "team/child" {
+			rec = &records[i]
+		}
+	}
+	if rec == nil {
+		t.Fatalf("overlay did not resolve team/child: %+v", records)
+	}
+	cache, _ := newContentCache(t.TempDir())
+	s := &mcpServer{cfg: &config{harness: "none", verifyPolicy: sign.PolicyNever}, cache: cache, adapters: adapter.DefaultRegistry()}
+	m, ok := s.loadArtifactFromOverlay(rec, map[string]any{}).(map[string]any)
+	if !ok {
+		t.Fatal("overlay load returned no result map")
+	}
+	if want := "sha256:" + version.CanonicalContentHash(authored, nil, nil); m["content_hash"] != want {
+		t.Errorf("content_hash = %v, want %v", m["content_hash"], want)
+	}
+}

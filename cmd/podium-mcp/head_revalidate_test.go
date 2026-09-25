@@ -17,7 +17,7 @@ import (
 // unchanged, the bridge serves the cached content and issues no full GET.
 func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: context\n---\n"
+	const fm = "---\ntype: context\nversion: 1.0.0\n---\n"
 	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil)
 	var gets, heads int32
 
@@ -36,9 +36,7 @@ func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
 
 	dir := t.TempDir()
 	cache, _ := newContentCache(dir)
-	if err := cache.put(hash, fm, "cached-body", nil); err != nil {
-		t.Fatalf("put: %v", err)
-	}
+	primeCachedRecord(t, cache, "team/x", fm, "cached-body")
 	resolutions := newResolutionCache(dir)
 	defer resolutions.Close()
 	resolutions.PutVersion("team/x", "1.0.0", hash, time.Now())

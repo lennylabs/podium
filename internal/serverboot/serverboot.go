@@ -1169,6 +1169,11 @@ func run(ctx context.Context, stop func()) error {
 
 	bootOpts := bootstrapOptions(cfg, objStore)
 	bootOpts = append(bootOpts, server.WithWebhooks(webhookWorker), server.WithMode(mode))
+	// §4.7.10: the read path signs every served delivery hash with the one
+	// registry-managed key ingest, the §13.4 rewrite, and admission already
+	// hold, so every envelope the registry mints carries one key_id. A nil
+	// provider (signing mode none) serves an empty delivery signature.
+	bootOpts = append(bootOpts, server.WithDeliverySigner(signProvider))
 
 	// §13.9 /readyz reachability probes, run at request time and
 	// bounded by the handler's deadline. The metadata-store probe

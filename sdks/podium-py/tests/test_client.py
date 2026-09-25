@@ -178,6 +178,88 @@ def test_load_artifact_resolves_manifest_body_url_skill(stub_server, tmp_path):
     assert str(root / "SKILL.md") in written
 
 
+class _ObjectHandler(http.server.BaseHTTPRequestHandler):
+    """A stub object route: records each request's Authorization header and,
+    when ``required_auth`` is set, answers 404 to a request without it, as the
+    filesystem backend's /objects route does for a caller it cannot see."""
+
+    def log_message(self, format, *args):  # noqa: A002 - signature inherited
+        pass
+
+    def do_GET(self):  # noqa: N802 - signature inherited
+        auth = self.headers.get("Authorization")
+        self.server.auths.append(auth)  # type: ignore[attr-defined]
+        required = self.server.required_auth  # type: ignore[attr-defined]
+        if required and auth != required:
+            self.send_response(404)
+            self.end_headers()
+            return
+        body = self.server.doc  # type: ignore[attr-defined]
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+@pytest.fixture()
+def object_server():
+    server = http.server.HTTPServer(("127.0.0.1", 0), _ObjectHandler)
+    server.auths = []
+    server.required_auth = ""
+    server.doc = b"---\ntype: context\n---\n\nThe big body.\n"
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield server
+    server.shutdown()
+    thread.join()
+
+
+def _serve_manifest_body_url(stub_server, object_server, query=""):
+    url = f"http://127.0.0.1:{object_server.server_port}/objects/abc{query}"
+    stub_server.next_response = {
+        "id": "big/ctx",
+        "type": "context",
+        "version": "1.0.0",
+        "manifest_body": "",
+        "frontmatter": "",
+        "manifest_body_url": {"presigned_url": url, "content_hash": "sha256:abc"},
+    }
+
+
+# Spec: §13.12 — the default manifest-body follower sends the client's token to
+# a URL that is not SigV4 presigned, which the filesystem backend's /objects
+# route requires to authorize the read.
+def test_load_artifact_manifest_body_url_sends_token_to_objects_route(stub_server, object_server):
+    object_server.required_auth = "Bearer tok-9"
+    _serve_manifest_body_url(stub_server, object_server)
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}", token="tok-9")
+    art = client.load_artifact("big/ctx")
+
+    assert art.frontmatter == object_server.doc.decode()
+    assert art.manifest_body == "The big body.\n"
+
+
+# Spec: §13.12 — the follower sends no credential to a SigV4 presigned URL.
+def test_load_artifact_manifest_body_url_sigv4_sends_no_credential(stub_server, object_server):
+    _serve_manifest_body_url(stub_server, object_server, "?X-Amz-Signature=deadbeef")
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}", token="tok-9")
+    art = client.load_artifact("big/ctx")
+
+    assert object_server.auths == [None]
+    assert art.frontmatter == object_server.doc.decode()
+
+
+# Spec: §13.12 — a client with no token sends no Authorization header to the
+# non-SigV4 URL either.
+def test_load_artifact_manifest_body_url_without_token_sends_no_header(stub_server, object_server):
+    _serve_manifest_body_url(stub_server, object_server)
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    art = client.load_artifact("big/ctx")
+
+    assert object_server.auths == [None]
+    assert art.manifest_body == "The big body.\n"
+
+
 # Spec: §7.2 — a single-load large resource arrives with its URL under
 # presigned_url; materialize resolves it (the SDK reads url or presigned_url)
 # and writes the fetched bytes.

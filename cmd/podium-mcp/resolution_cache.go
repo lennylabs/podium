@@ -228,68 +228,50 @@ func (r *resolutionCache) Len() int {
 	return n
 }
 
-// loadArtifactFromCache reconstructs a loadArtifactResponse from the bytes the
-// content cache holds at contentHash. Used by the offline-first / offline-only
-// cache modes and the always-revalidate HEAD-revalidated hit.
+// loadArtifactFromCache reconstructs a loadArtifactResponse from the content
+// cache at contentHash for the artifact idHint. Used by the offline-first /
+// offline-only cache modes, the always-revalidate HEAD-revalidated hit, the 304
+// path, and the degraded-network fallback. Each caller passes the result
+// through deliverLoadArtifact, which re-runs the §6.6 delivery check and the
+// §4.7.9 policy, so no cache mode serves an unverified record.
+//
+// The served document, body, delivery pair, and sensitivity come from the
+// per-ID delivery files putDelivery wrote. A bucket without them for idHint,
+// including one written before the delivery record existed, is a miss, and so
+// is a per-ID directory whose id file names another artifact.
+//
+// Spec: §6.5, §6.6 step 2, §4.7.10
 func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArtifactResponse, error) {
 	bucket := filepath.Join(s.cfg.cacheDir, sanitizeHash(contentHash))
-	frontmatter, err := os.ReadFile(filepath.Join(bucket, "frontmatter"))
+	d, err := readDeliveryFiles(filepath.Join(bucket, "delivery", deliverySegment(idHint)), idHint)
 	if err != nil {
 		return nil, fmt.Errorf("cache miss for %s: %w", contentHash, err)
 	}
-	body, err := os.ReadFile(filepath.Join(bucket, "body"))
-	if err != nil {
-		return nil, fmt.Errorf("cache body missing for %s: %w", contentHash, err)
-	}
 	resp := &loadArtifactResponse{
-		ID:           idHint,
-		ContentHash:  contentHash,
-		Frontmatter:  string(frontmatter),
-		ManifestBody: string(body),
-		Resources:    map[string]string{},
+		ID:                idHint,
+		ContentHash:       contentHash,
+		Frontmatter:       d.Frontmatter,
+		ManifestBody:      d.Body,
+		Sensitivity:       d.Sensitivity,
+		DeliveryHash:      d.DeliveryHash,
+		DeliverySignature: d.DeliverySignature,
+		Resources:         map[string]string{},
 	}
-	// Restore the auxiliary content putExtras persisted so the cache-served
-	// response drives the §6.6 gates exactly as a live fetch does. Without
-	// skill_raw a cache-served skill recomputes its §6.6 step 2 hash over
-	// ARTIFACT.md only (slot 1 empty) and fails content_hash_mismatch, and
-	// materializes a synthesized SKILL.md rather than the authored bytes. A
-	// present raw_frontmatter marks an extends-merged manifest so
-	// verifyContentHash hashes the pre-merge frontmatter. The signature is what
-	// enforceSignaturePolicy verifies, so dropping it would fail the §4.7.9
-	// always policy on a cache hit that a live fetch passes. sensitivity is
-	// restored because the response serves it; no check reads it. Each file is
-	// absent when its field was empty at ingest.
+	// A skill's verbatim SKILL.md is bucket-level, because the authored
+	// package the content hash names carries it.
 	if sr, err := os.ReadFile(filepath.Join(bucket, "skill_raw")); err == nil {
 		resp.SkillRaw = string(sr)
 	}
-	if rf, err := os.ReadFile(filepath.Join(bucket, "raw_frontmatter")); err == nil {
-		resp.RawFrontmatter = string(rf)
-		resp.ManifestMerged = true
-	}
-	if sv, err := os.ReadFile(filepath.Join(bucket, "sensitivity")); err == nil {
-		resp.Sensitivity = string(sv)
-	}
-	if sig, err := os.ReadFile(filepath.Join(bucket, "signature")); err == nil {
-		resp.Signature = string(sig)
-	}
-	// Recover the resolved version and type from the cached frontmatter so a
-	// cache-served load reports the same version/type as a live fetch (the
-	// content bucket is keyed by hash, which is 1:1 with a version because the
-	// frontmatter carries the version line). Recover sensitivity from the
-	// frontmatter too when the side file is absent (a prefetch-warmed entry does
-	// not write one), so a cache-served response reports the sensitivity a live
-	// fetch does.
-	if ctx := manifestContext(string(frontmatter)); ctx != nil {
+	// Recover the resolved version and type from the cached served document so
+	// a cache-served load reports the version and type a live fetch does. The
+	// delivery record frames both, so a recovered value that differs from the
+	// served one fails the delivery check.
+	if ctx := manifestContext(d.Frontmatter); ctx != nil {
 		if v, ok := ctx["version"].(string); ok {
 			resp.Version = v
 		}
 		if tp, ok := ctx["type"].(string); ok {
 			resp.Type = tp
-		}
-		if resp.Sensitivity == "" {
-			if sv, ok := ctx["sensitivity"].(string); ok {
-				resp.Sensitivity = sv
-			}
 		}
 	}
 	resourcesDir := filepath.Join(bucket, "resources")
@@ -311,6 +293,38 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 	// every cache hit so a read counts as access.
 	touchBucket(bucket)
 	return resp, nil
+}
+
+// readDeliveryFiles reads the per-ID delivery files putDelivery wrote in dir.
+// The id file, the served document, the body, and the delivery hash are
+// required, and the id file must hold id verbatim; the signature and
+// sensitivity files read as empty when absent.
+func readDeliveryFiles(dir, id string) (deliveryFiles, error) {
+	required := map[string]string{}
+	for _, name := range []string{"id", "frontmatter", "body", "delivery_hash"} {
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return deliveryFiles{}, fmt.Errorf("delivery %s: %w", name, err)
+		}
+		required[name] = string(b)
+	}
+	if required["id"] != id {
+		return deliveryFiles{}, fmt.Errorf("delivery record belongs to %q, not %q", required["id"], id)
+	}
+	if required["delivery_hash"] == "" {
+		return deliveryFiles{}, errors.New("delivery record carries no delivery hash")
+	}
+	optional := func(name string) string {
+		b, _ := os.ReadFile(filepath.Join(dir, name))
+		return string(b)
+	}
+	return deliveryFiles{
+		Frontmatter:       required["frontmatter"],
+		Body:              required["body"],
+		DeliveryHash:      required["delivery_hash"],
+		DeliverySignature: optional("delivery_signature"),
+		Sensitivity:       optional("sensitivity"),
+	}, nil
 }
 
 // touchBucket updates the bucket's file mtimes to now so a cache read refreshes

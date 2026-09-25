@@ -34,7 +34,7 @@ import { PropertyTable } from '../components/PropertyTable';
 import { parseFrontmatter, splitDocument } from '../frontmatter';
 import { splitHash } from '../hash';
 import type { DependencyEdge, LargeResourceLink, LayerRecord, LoadArtifactResponse } from '../api';
-import { catalogArtifactIDs, dependentsOf, listLayers, loadArtifact } from '../api';
+import { dependentsOf, listLayers, loadArtifact } from '../api';
 import { artifactHref } from '../route';
 import { since } from '../time';
 import { useAsync, useErrorReport } from '../useAsync';
@@ -714,7 +714,7 @@ function ArtifactRail({
           <PropertyTable raw={frontmatter} testID="rail-frontmatter-table" clampValues />
         </section>
       )}
-      <Relations artifact={artifact} frontmatter={frontmatter} />
+      <Relations artifact={artifact} />
       <section aria-label="Bundled resources">
         {/* The count stands on the header's far edge, so the extent of the
             section is read off the header rather than by counting rows. */}
@@ -974,60 +974,22 @@ function RailRelationGroup({
   );
 }
 
-/** referenceID strips the version constraint from an `extends:` reference
- * (§4.4). The constraint can be a range rather than a stored version, so the
- * link opens the artifact the reference names and the chip keeps the
- * reference the author wrote. */
+/** referenceID strips the version from an `<id>@<version>` pin (§4.4), so the
+ * link opens the artifact the pin names and the chip keeps the pin. */
 function referenceID(reference: string): string {
   const at = reference.indexOf('@');
   return at === -1 ? reference : reference.slice(0, at);
 }
 
-/** declaredExtends reads the reference the artifact's author wrote, which is
- * a candidate for the rail rather than something the rail may draw. The
- * dependents endpoint serves the reverse index alone (§4.7.3), so this
- * direction reaches the rail only from the manifest, and the registry
- * re-serializes every extends manifest with the parent stripped (§4.6) and
- * carries the pre-merge document beside it for the content-hash check, so
- * the authored reference survives only there. Whether the reader may be told
- * the parent exists is settled by visibleExtends. */
-function declaredExtends(artifact: LoadArtifactResponse, frontmatter: string): string {
-  const raw = artifact.raw_frontmatter ?? '';
-  const source = raw === '' ? frontmatter : raw;
-  const found = parseFrontmatter(source).properties.find((property) => property.key === 'extends');
-  return found === undefined ? '' : found.value.trim();
-}
-
-/** parentScope is the domain a parent artifact ID sits in, which is the scope
- * the catalog read is taken over. A top-level ID sits at the root, whose
- * scope is the empty string. */
-function parentScope(id: string): string {
-  const cut = id.lastIndexOf('/');
-  return cut === -1 ? '' : id.slice(0, cut);
-}
-
-/** visibleExtends resolves the authored reference into the chips the rail may
- * draw. §4.6 merges a parent whose layer the caller cannot see and holds that
- * "the parent's existence and ID are not surfaced to the requester", so a
- * concealed parent has to read on this surface exactly as an artifact that
- * extends nothing does. The served frontmatter cannot settle it either way,
- * because the registry strips the parent from every extends response whether
- * or not the caller can see it, and the pre-merge document beside it is a
- * disclosure that does not license the rail to republish the ID.
- *
- * The §4.5.2 catalog read answers with the IDs the caller can see under a
- * scope, so a parent it lists is one the caller could have opened on its own
- * and naming it discloses nothing, and a parent it omits leaves the group
- * indistinguishable from one nobody declared. A catalog read that fails
- * resolves to no chip, because a concealment rule that cannot be evaluated
- * denies. */
-async function visibleExtends(declared: string): Promise<RelationChip[]> {
-  if (declared === '') {
-    return [];
-  }
-  const id = referenceID(declared);
-  const visible = await catalogArtifactIDs(parentScope(id));
-  return visible.includes(id) ? [{ href: artifactHref(id), text: declared }] : [];
+/** servedExtends turns the registry's extends_pin into the rail's outbound
+ * chip. Whether the reader may be told the parent exists is the registry's
+ * decision (§4.6): it serves the pinned `<id>@<version>` only to a caller who
+ * can see the parent record, and its absence reads exactly as an artifact that
+ * extends nothing. The chip shows the pin verbatim and links the artifact it
+ * names. */
+function servedExtends(artifact: LoadArtifactResponse): RelationChip[] {
+  const pin = artifact.extends_pin ?? '';
+  return pin === '' ? [] : [{ href: artifactHref(referenceID(pin)), text: pin }];
 }
 
 /** inboundGroups splits the reverse-index edges into one group per relation,
@@ -1055,27 +1017,18 @@ function inboundGroups(edges: DependencyEdge[]): { label: string; chips: Relatio
 /** Relations lists the artifacts this one extends and the artifacts that
  * extend or otherwise depend on it. The reverse-index edges arrive on their
  * own request, so an artifact with no edges is a state of that group rather
- * than of the page. The outbound direction takes a read of its own as well,
- * because the reference the manifest carries names a parent the caller may
- * not be allowed to know exists (§4.6). An artifact that declares no parent
- * settles without waiting on anything. */
-function Relations({ artifact, frontmatter }: { artifact: LoadArtifactResponse; frontmatter: string }) {
+ * than of the page. The outbound direction comes from the load response. */
+function Relations({ artifact }: { artifact: LoadArtifactResponse }) {
   const edges = useAsync(() => dependentsOf(artifact.id), [artifact.id]);
-  const declared = declaredExtends(artifact, frontmatter);
-  const parent = useAsync(() => visibleExtends(declared), [artifact.id, declared]);
   return (
     <section aria-label="Relations">
       <p className="label">Relations</p>
-      {declared !== '' && parent.loading ? (
-        <Loading label="Loading relations." />
-      ) : (
-        <RailRelationGroup
-          label="extends"
-          chips={parent.value ?? []}
-          absent="This artifact extends nothing."
-          direction="outbound"
-        />
-      )}
+      <RailRelationGroup
+        label="extends"
+        chips={servedExtends(artifact)}
+        absent="This artifact extends nothing."
+        direction="outbound"
+      />
       {edges.loading && <Loading label="Loading relations." />}
       {/* A failed reverse-index read keeps the group heading the served
           groups would have carried, for the same reason inboundGroups always

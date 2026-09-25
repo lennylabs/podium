@@ -88,10 +88,8 @@ type MergedBlock struct {
 // decide whether it is checked. §4.6's guarantee is a property of what the
 // requester is served, and a leaf-authored literal names the hidden parent to
 // that requester on the same terms as an inherited value or one an alias
-// produced. That the same text also reaches the requester through
-// raw_frontmatter is a separate disclosure recorded elsewhere, and it does not
-// license the merged block to repeat it. The materialized bytes have no such
-// second route at all: pkg/sync feeds this block into the harness adapters.
+// produced. The materialized bytes are this block: pkg/sync feeds it into the
+// harness adapters.
 //
 // The test is bounded to a value that stands as an artifact reference: a scalar
 // equal to a chain parent's ID once its version pin and the whitespace and

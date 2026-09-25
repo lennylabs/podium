@@ -74,14 +74,19 @@ func readMirror(t *testing.T, registry string, policy sign.VerificationPolicy, i
 }
 
 // Spec: §4.7.9 — under always, the mirror refuses an artifact the registry
-// served with no signature, with the missing-signature code and no text.
+// served with a valid delivery hash and no delivery signature, with the
+// missing-signature code and no text.
 func TestResources_ReadRefusesAnUnsignedArtifactUnderAlways(t *testing.T) {
 	t.Parallel()
 	fm := "---\ntype: context\nversion: 1.0.0\n---\n"
+	rec := sealDelivery(loadArtifactResponse{
+		ID: "docs/x", Type: "context", Frontmatter: fm, ManifestBody: "secret",
+		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
+	})
 	reg := newMirrorRegistry(t, func(string) (map[string]any, map[string][]byte) {
 		return map[string]any{
-			"id": "docs/x", "type": "context", "frontmatter": fm, "manifest_body": "secret",
-			"content_hash": "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
+			"id": rec.ID, "type": rec.Type, "frontmatter": rec.Frontmatter, "manifest_body": rec.ManifestBody,
+			"content_hash": rec.ContentHash, "delivery_hash": rec.DeliveryHash,
 		}, nil
 	})
 	text, errMsg := readMirror(t, reg.ts.URL, sign.PolicyAlways, "docs/x")
@@ -91,7 +96,7 @@ func TestResources_ReadRefusesAnUnsignedArtifactUnderAlways(t *testing.T) {
 }
 
 // Spec: §6.6 — the mirror refuses a served record whose bytes do not
-// reproduce its content_hash, with the verification's code and no text.
+// reproduce its delivery_hash, with the verification's code and no text.
 func TestResources_ReadRefusesAFailedVerification(t *testing.T) {
 	t.Parallel()
 	reg := newMirrorRegistry(t, func(string) (map[string]any, map[string][]byte) {
@@ -115,6 +120,13 @@ func TestResources_ReadReconstitutesAPresignedBody(t *testing.T) {
 		return map[string]any{
 				"id": "docs/big", "type": "context",
 				"content_hash": "sha256:" + version.CanonicalContentHash(doc, nil, nil),
+				// The delivery hash frames the document and the body the fetch
+				// reconstitutes, not the cleared inline fields.
+				"delivery_hash": deliveryHashOf(loadArtifactResponse{
+					ID: "docs/big", Type: "context", Frontmatter: string(doc),
+					ManifestBody: "Presigned body text.\n",
+					ContentHash:  "sha256:" + version.CanonicalContentHash(doc, nil, nil),
+				}),
 				"manifest_body_url": map[string]any{
 					"presigned_url": base + "/blob/body", "content_hash": sha256Hex(doc),
 				},
@@ -132,7 +144,7 @@ func TestResources_ReadReconstitutesAPresignedBody(t *testing.T) {
 }
 
 // Spec: §5.0, §6.6 — the mirror decodes inline resources and fetches large
-// resources before it recomputes the content hash, because the hash covers
+// resources before it recomputes the delivery hash, because the record frames
 // every bundled resource. A linked body whose bytes were altered is refused
 // with materialize.fetch_failed.
 func TestResources_ReadVerifiesOverBundledResources(t *testing.T) {
@@ -143,11 +155,17 @@ func TestResources_ReadVerifiesOverBundledResources(t *testing.T) {
 	hash := "sha256:" + version.CanonicalContentHash(fm, nil, map[string][]byte{
 		"inline.txt": inline, "data/big.bin": large,
 	})
+	delivery := deliveryHashOf(loadArtifactResponse{
+		ID: "docs/res", Type: "context", Frontmatter: string(fm), ManifestBody: "body\n",
+		ContentHash: hash, Resources: map[string]string{"inline.txt": string(inline)},
+		LargeResources: map[string]largeResourceLink{"data/big.bin": {ContentHash: sha256Hex(large)}},
+	})
 	build := func(served []byte) func(string) (map[string]any, map[string][]byte) {
 		return func(base string) (map[string]any, map[string][]byte) {
 			return map[string]any{
 					"id": "docs/res", "type": "context", "frontmatter": string(fm), "manifest_body": "body\n",
 					"content_hash":     hash,
+					"delivery_hash":    delivery,
 					"resources":        map[string]string{"inline.txt": base64.StdEncoding.EncodeToString(inline)},
 					"resources_base64": true,
 					"large_resources": map[string]any{
@@ -172,5 +190,34 @@ func TestResources_ReadVerifiesOverBundledResources(t *testing.T) {
 	text, errMsg = readMirror(t, tampered.ts.URL, sign.PolicyNever, "docs/res")
 	if !strings.HasPrefix(errMsg, "materialize.fetch_failed") {
 		t.Errorf("error = %q (text %q), want materialize.fetch_failed", errMsg, text)
+	}
+}
+
+// Spec: §5.0, §4.7.10 — the mirror returns the served frontmatter and manifest
+// body, and the delivery record covers both. A stub that serves a valid record
+// and then changes only the top-level manifest_body is refused with
+// materialize.content_hash_mismatch and returns no text.
+func TestResources_ReadRefusesAForgedManifestBody(t *testing.T) {
+	t.Parallel()
+	fm := "---\ntype: context\nversion: 1.0.0\n---\nreal body\n"
+	rec := sealDelivery(loadArtifactResponse{
+		ID: "docs/x", Type: "context", Version: "1.0.0", Frontmatter: fm, ManifestBody: "real body\n",
+		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
+	})
+	serve := func(body string) *mirrorRegistry {
+		return newMirrorRegistry(t, func(string) (map[string]any, map[string][]byte) {
+			return map[string]any{
+				"id": rec.ID, "type": rec.Type, "version": rec.Version, "frontmatter": rec.Frontmatter,
+				"manifest_body": body, "content_hash": rec.ContentHash, "delivery_hash": rec.DeliveryHash,
+			}, nil
+		})
+	}
+	text, errMsg := readMirror(t, serve(rec.ManifestBody).ts.URL, sign.PolicyNever, "docs/x")
+	if errMsg != "" || !strings.Contains(text, "real body") {
+		t.Fatalf("untampered read = %q / %q, want the served text", text, errMsg)
+	}
+	text, errMsg = readMirror(t, serve("forged instructions\n").ts.URL, sign.PolicyNever, "docs/x")
+	if !strings.HasPrefix(errMsg, "materialize.content_hash_mismatch") || text != "" {
+		t.Errorf("forged read = %q / %q, want materialize.content_hash_mismatch and no text", text, errMsg)
 	}
 }

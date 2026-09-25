@@ -28,8 +28,7 @@ type ArtifactRecord struct {
 	// child. Materialization reads ArtifactBytes; the §4.7.6 digest reads
 	// AuthoredBytes, because the digest is defined over the bytes as ingested
 	// and a merged serialization does not reproduce it. The store's
-	// ManifestRecord.Frontmatter and the wire's raw_frontmatter carry the same
-	// bytes on the registry side.
+	// ManifestRecord.Frontmatter carries the same bytes on the registry side.
 	AuthoredBytes []byte
 }
 

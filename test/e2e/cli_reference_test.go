@@ -1833,10 +1833,10 @@ func TestCLI_AdminEraseAudited(t *testing.T) {
 }
 
 // ===== Signing ======================================
-// `podium sign <artifact>` / `podium verify <artifact>` resolve the
-// artifact's canonical content hash (and stored signature) via the
-// registry; the lower-level `--content-hash` / `--signature` form
-// operates on a raw hash. The registry-managed provider is the default: sign
+// `podium sign <artifact>` resolves the artifact's content hash via the
+// registry, and `podium verify <artifact>` resolves the §4.7.10 delivery pair;
+// the lower-level `--content-hash` / `--signature` form operates on a raw
+// hash. The registry-managed provider is the default: sign
 // reads the private half of the registry key file, and verify reads
 // PODIUM_SIGNATURE_VERIFY_KEY when set and otherwise the key file's public
 // half.
@@ -1861,15 +1861,30 @@ func TestCLI_SignPositionalArtifact(t *testing.T) {
 	cliContains(t, res.Stdout, "noop:sha256:", "sign envelope over resolved hash")
 }
 
-// spec: §4.7.9 — `podium verify <artifact>` resolves the stored
-// signature. The registry signs at ingest by default (§13.10), so the server
-// starts with signing off, and an unsigned artifact reports the missing
-// envelope rather than passing.
+// spec: §4.7.9 — `podium verify <artifact>` resolves the delivery pair. The
+// registry signs by default (§13.10), so the server starts with signing off,
+// serves no delivery signature, and the command reports the missing envelope
+// rather than passing.
 func TestCLI_VerifyPositionalArtifactUnsigned(t *testing.T) {
 	srv := startServerUnsigned(t, cliReg(t))
 	res := runPodium(t, "", brEnv(srv.BaseURL), "verify", "finance/invoice")
 	cliWantNonZero(t, res, "verify <artifact> unsigned")
-	cliContains(t, res.Stderr, "no stored signature", "missing-signature message")
+	cliContains(t, res.Stderr, "no delivery signature", "missing-signature message")
+}
+
+// spec: §4.7.9 — the compiled `podium verify <artifact>` verifies the served
+// delivery_signature over the served delivery_hash: it exits 0 against a
+// registry serving a valid registry-managed delivery pair and 1 once the
+// served envelope is replaced by one over another value.
+func TestCLI_VerifyPositionalArtifactDeliverySignature(t *testing.T) {
+	t.Parallel()
+	f := newSignedArtifactFixture(t, signedArtifactSpec{ID: "finance/invoice"})
+	env := append(brEnv(f.ts.URL), "PODIUM_SIGNATURE_VERIFY_KEY="+f.PublicKeyB64())
+	cliWantExit(t, runPodium(t, "", env, "verify", "finance/invoice"), 0, "verify <artifact> with a valid delivery signature")
+	f.TamperDeliverySignature()
+	res := runPodium(t, "", env, "verify", "finance/invoice")
+	cliWantExit(t, res, 1, "verify <artifact> with an altered delivery signature")
+	cliContains(t, res.Stderr, "verify failed", "failed verification message")
 }
 
 // spec: doc "Signing — podium verify" (valid signature). §4.7.9: on a home

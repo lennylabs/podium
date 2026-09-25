@@ -177,6 +177,74 @@ describe("Client", () => {
     expect(out.manifest_body).toBe("The big body.\n");
   });
 
+  // manifestBodyRegistry answers load_artifact with a manifest_body_url that
+  // points at url, with the inline fields cleared.
+  const manifestBodyRegistry: (url: string) => typeof fetch = (url) => async () =>
+    new Response(
+      JSON.stringify({
+        id: "big/ctx",
+        type: "context",
+        version: "1.0.0",
+        manifest_body: "",
+        frontmatter: "",
+        manifest_body_url: { presigned_url: url, content_hash: "sha256:abc" },
+      }),
+      { status: 200 },
+    );
+
+  // objectRoute records the Authorization header of each request and, when
+  // required is set, answers 404 without it, as the filesystem backend's
+  // /objects route does for a caller it cannot see.
+  const objectRoute = (doc: string, required = "") => {
+    const auths: (string | null)[] = [];
+    const fetcher: typeof fetch = async (_input, init) => {
+      const auth = new Headers(init?.headers).get("Authorization");
+      auths.push(auth);
+      if (required && auth !== required) return new Response("", { status: 404 });
+      return new Response(doc, { status: 200 });
+    };
+    return { auths, fetcher };
+  };
+
+  // Spec: §13.12 — the manifest-body follower sends the client's token to a URL
+  // that is not SigV4 presigned, which the /objects route requires.
+  it("loadArtifact sends the token to a non-SigV4 manifest_body_url", async () => {
+    const doc = "---\ntype: context\n---\n\nThe big body.\n";
+    const route = objectRoute(doc, "Bearer tok-9");
+    const c = new Client({
+      registry: "http://reg",
+      token: "tok-9",
+      fetcher: manifestBodyRegistry("http://reg/objects/abc"),
+    });
+    const out = await c.loadArtifact("big/ctx", undefined, { fetcher: route.fetcher });
+    expect(out.frontmatter).toBe(doc);
+    expect(out.manifest_body).toBe("The big body.\n");
+  });
+
+  // Spec: §13.12 — the follower sends no credential to a SigV4 presigned URL.
+  it("loadArtifact sends no credential to a SigV4 manifest_body_url", async () => {
+    const doc = "---\ntype: context\n---\n\nThe big body.\n";
+    const route = objectRoute(doc);
+    const c = new Client({
+      registry: "http://reg",
+      token: "tok-9",
+      fetcher: manifestBodyRegistry("https://s3.example/abc?X-Amz-Signature=deadbeef"),
+    });
+    const out = await c.loadArtifact("big/ctx", undefined, { fetcher: route.fetcher });
+    expect(route.auths).toEqual([null]);
+    expect(out.frontmatter).toBe(doc);
+  });
+
+  // Spec: §13.12 — a client with no token sends no Authorization header to the
+  // non-SigV4 URL either.
+  it("loadArtifact sends no Authorization without a token", async () => {
+    const route = objectRoute("---\ntype: context\n---\n\nbody\n");
+    const c = new Client({ registry: "http://reg", fetcher: manifestBodyRegistry("http://reg/objects/abc") });
+    const out = await c.loadArtifact("big/ctx", undefined, { fetcher: route.fetcher });
+    expect(route.auths).toEqual([null]);
+    expect(out.manifest_body).toBe("body\n");
+  });
+
   // Spec: §6.6 — for a skill the manifest_body_url delivers the verbatim SKILL.md
   // (skill_raw); the small inline ARTIFACT.md frontmatter is preserved.
   it("loadArtifact resolves manifest_body_url for a skill", async () => {

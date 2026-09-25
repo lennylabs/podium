@@ -614,8 +614,8 @@ func TestAdmit_ChainRefusesTamperedPinsAndRows(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadArtifact: %v", err)
 		}
-		if !res.Merged || res.Sensitivity != "high" {
-			t.Errorf("Merged = %v, Sensitivity = %q; want the merge over base/p@1.0.0 (high)", res.Merged, res.Sensitivity)
+		if res.Sensitivity != "high" {
+			t.Errorf("Sensitivity = %q; want the merge over base/p@1.0.0 (high)", res.Sensitivity)
 		}
 	})
 }

@@ -65,9 +65,10 @@ func hermeticNoKeyHome(t *testing.T) {
 	t.Setenv("PODIUM_SIGNATURE_PROVIDER", "")
 }
 
-// loadArtifactStub serves /v1/load_artifact with the given content hash
-// and signature, mirroring the registry's LoadArtifactResponse shape.
-func loadArtifactStub(t *testing.T, contentHash, signature string) (*httptest.Server, *int) {
+// loadArtifactStub serves /v1/load_artifact with the given content hash and
+// the §4.7.10 delivery pair, mirroring the registry's LoadArtifactResponse
+// fields. An empty value is left out of the response.
+func loadArtifactStub(t *testing.T, contentHash, deliveryHash, deliverySignature string) (*httptest.Server, *int) {
 	t.Helper()
 	hits := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -75,12 +76,15 @@ func loadArtifactStub(t *testing.T, contentHash, signature string) (*httptest.Se
 			t.Errorf("path = %q, want /v1/load_artifact", r.URL.Path)
 		}
 		hits++
+		body := map[string]any{"id": r.URL.Query().Get("id"), "content_hash": contentHash}
+		if deliveryHash != "" {
+			body["delivery_hash"] = deliveryHash
+		}
+		if deliverySignature != "" {
+			body["delivery_signature"] = deliverySignature
+		}
 		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":           r.URL.Query().Get("id"),
-			"content_hash": contentHash,
-			"signature":    signature,
-		})
+		_ = json.NewEncoder(w).Encode(body)
 	}))
 	t.Cleanup(srv.Close)
 	return srv, &hits
@@ -91,7 +95,7 @@ func loadArtifactStub(t *testing.T, contentHash, signature string) (*httptest.Se
 // `podium sign finance/ap/pay-invoice` must not be a usage error.
 func TestSignCmd_PositionalArtifactResolvesAndSigns(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("a", 64)
-	srv, hits := loadArtifactStub(t, hash, "")
+	srv, hits := loadArtifactStub(t, hash, "sha256:"+strings.Repeat("9", 64), "")
 	t.Setenv("PODIUM_REGISTRY", srv.URL)
 	var code int
 	withStderr(t, func() {
@@ -109,13 +113,16 @@ func TestSignCmd_PositionalArtifactResolvesAndSigns(t *testing.T) {
 // verify through the noop provider exits 1 and prints it.
 const noopRefusal = "the noop provider does not verify"
 
-// spec: §4.7.9 — `podium verify <artifact>` resolves the stored
-// signature and verifies it under the registry-managed default, whose public
-// half resolves from the registry key file with no flags.
-func TestVerifyCmd_PositionalArtifactVerifiesStoredSignature(t *testing.T) {
+// spec: §4.7.9 — `podium verify <artifact>` resolves the delivery pair and
+// verifies the delivery signature over the delivery hash under the
+// registry-managed default, whose public half resolves from the registry key
+// file with no flags. The stub's content hash differs from its delivery hash,
+// so a form that verifies over the content hash fails.
+func TestVerifyCmd_PositionalArtifactVerifiesDeliverySignature(t *testing.T) {
 	priv, _ := writeRegistryKeyFile(t)
 	hash := "sha256:" + strings.Repeat("b", 64)
-	srv, hits := loadArtifactStub(t, hash, signWith(t, priv, hash))
+	delivery := "sha256:" + strings.Repeat("8", 64)
+	srv, hits := loadArtifactStub(t, hash, delivery, signWith(t, priv, delivery))
 	t.Setenv("PODIUM_REGISTRY", srv.URL)
 	var code int
 	stderr := captureStderr(t, func() {
@@ -129,13 +136,14 @@ func TestVerifyCmd_PositionalArtifactVerifiesStoredSignature(t *testing.T) {
 	}
 }
 
-// spec: §4.7.9 — a stored signature the resolved key made over a different
-// hash fails verification (exit 1, not a usage error), with the provider
+// spec: §4.7.9 — a delivery signature the resolved key made over a different
+// value fails verification (exit 1, not a usage error), with the provider
 // resolved so only the mismatch fails.
 func TestVerifyCmd_PositionalArtifactRejectsTamperedSignature(t *testing.T) {
 	priv, _ := writeRegistryKeyFile(t)
 	hash := "sha256:" + strings.Repeat("c", 64)
-	srv, _ := loadArtifactStub(t, hash, signWith(t, priv, "sha256:"+strings.Repeat("d", 64)))
+	delivery := "sha256:" + strings.Repeat("7", 64)
+	srv, _ := loadArtifactStub(t, hash, delivery, signWith(t, priv, "sha256:"+strings.Repeat("d", 64)))
 	t.Setenv("PODIUM_REGISTRY", srv.URL)
 	var code int
 	stderr := captureStderr(t, func() {
@@ -149,18 +157,57 @@ func TestVerifyCmd_PositionalArtifactRejectsTamperedSignature(t *testing.T) {
 	}
 }
 
-// spec: §4.7.9 — verifying an artifact the registry stored without a
-// signature reports the missing envelope (exit 1) rather than passing.
-func TestVerifyCmd_PositionalArtifactNoStoredSignature(t *testing.T) {
+// spec: §4.7.9, §4.7.10 — verifying an artifact a registry without a signing
+// key served reports the missing delivery signature (exit 1) rather than
+// passing.
+func TestVerifyCmd_PositionalArtifactNoDeliverySignature(t *testing.T) {
 	hash := "sha256:" + strings.Repeat("e", 64)
-	srv, _ := loadArtifactStub(t, hash, "")
+	srv, _ := loadArtifactStub(t, hash, "sha256:"+strings.Repeat("6", 64), "")
 	t.Setenv("PODIUM_REGISTRY", srv.URL)
 	var code int
-	withStderr(t, func() {
+	stderr := captureStderr(t, func() {
 		code = verifyCmd([]string{"unsigned-artifact"})
 	})
-	if code != 1 {
-		t.Errorf("verifyCmd = %d, want 1 when no signature is stored", code)
+	if code != 1 || !strings.Contains(stderr, "has no delivery signature") {
+		t.Errorf("verifyCmd = %d, stderr %q; want 1 naming the missing delivery signature", code, stderr)
+	}
+}
+
+// spec: §4.7.9 — `podium verify <artifact> --signature "$(podium sign
+// <artifact>)"` round-trips: the explicit envelope is verified over the
+// content hash `podium sign` signed, never over the delivery hash, and the
+// explicit form reads neither delivery field.
+func TestSignVerifyCmd_PositionalArtifactExplicitSignatureRoundTrips(t *testing.T) {
+	priv, _ := writeRegistryKeyFile(t)
+	hash := "sha256:" + strings.Repeat("a", 64)
+	delivery := "sha256:" + strings.Repeat("5", 64)
+	srv, _ := loadArtifactStub(t, hash, delivery, signWith(t, priv, delivery))
+	t.Setenv("PODIUM_REGISTRY", srv.URL)
+	sigOut := captureStdout(t, func() {
+		withStderr(t, func() {
+			if code := signCmd([]string{"finance/ap/pay-invoice"}); code != 0 {
+				t.Fatalf("signCmd = %d", code)
+			}
+		})
+	})
+	signed := strings.TrimSpace(sigOut)
+	verify := func(sig string) (int, string) {
+		var code int
+		stderr := captureStderr(t, func() {
+			code = verifyCmd([]string{"finance/ap/pay-invoice", "--signature", sig})
+		})
+		return code, stderr
+	}
+	if code, stderr := verify(signed); code != 0 {
+		t.Errorf("explicit envelope over the content hash = %d, want 0; stderr %q", code, stderr)
+	}
+	if code, _ := verify(signWith(t, priv, delivery)); code != 1 {
+		t.Errorf("explicit envelope over the delivery hash = %d, want 1", code)
+	}
+	bare, _ := loadArtifactStub(t, hash, "", "")
+	t.Setenv("PODIUM_REGISTRY", bare.URL)
+	if code, stderr := verify(signed); code != 0 {
+		t.Errorf("explicit envelope against a stub with no delivery fields = %d, want 0; stderr %q", code, stderr)
 	}
 }
 
@@ -312,5 +359,25 @@ func TestVerifyCmd_PositionalWithoutRegistryExits2(t *testing.T) {
 	})
 	if code != 2 {
 		t.Errorf("verifyCmd = %d, want 2 (missing registry)", code)
+	}
+}
+
+// spec: §4.7.9 — a registry that refuses the load, answers a body that does
+// not decode, or serves no content hash stops the <artifact> form of verify
+// with exit 1 before any delivery field is read.
+func TestVerifyCmd_PositionalArtifactResolutionFailures(t *testing.T) {
+	for name, handler := range map[string]http.HandlerFunc{
+		"refused":         func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNotFound) },
+		"undecodable":     func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("not json")) },
+		"no content hash": func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"delivery_hash":"sha256:d"}`)) },
+	} {
+		srv := httptest.NewServer(handler)
+		t.Setenv("PODIUM_REGISTRY", srv.URL)
+		var code int
+		withStderr(t, func() { code = verifyCmd([]string{"team/x"}) })
+		srv.Close()
+		if code != 1 {
+			t.Errorf("%s: verifyCmd = %d, want 1", name, code)
+		}
 	}
 }

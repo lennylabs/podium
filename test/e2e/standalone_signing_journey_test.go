@@ -127,12 +127,13 @@ func TestStandaloneBootstrap_WritesNoPolicyLine(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.9, §6.9, §13.10 — under PODIUM_SIGN=none the registry mints no
-// envelope and generates no key file. With no earlier key file the bridge on
-// that home refuses to start, and PODIUM_VERIFY_SIGNATURES=never lets it load.
-// With a key file an earlier signing start generated, the bridge starts on
-// that stale key and refuses a row stored unsigned with
-// materialize.signature_missing, while a row the earlier start signed loads.
+// Spec: §4.7.9, §4.7.10, §6.9, §13.10 — under PODIUM_SIGN=none the registry
+// mints no envelope, serves no delivery signature for any row, and generates
+// no key file. With no earlier key file the bridge on that home refuses to
+// start, and PODIUM_VERIFY_SIGNATURES=never lets it load. With a key file an
+// earlier signing start generated, the bridge starts on that stale key and
+// refuses every row under always with materialize.signature_missing, a row the
+// earlier start signed included, and the same row loads under never.
 func TestStandaloneBootstrap_SignNoneRefusesTheBridge(t *testing.T) {
 	t.Parallel()
 	t.Run("no key file", func(t *testing.T) {
@@ -162,8 +163,11 @@ func TestStandaloneBootstrap_SignNoneRefusesTheBridge(t *testing.T) {
 		if errStr, res := bridgeLoad(t, srv.BaseURL, "team/unsigned"); !strings.HasPrefix(errStr, "materialize.signature_missing") {
 			t.Errorf("unsigned row = %q, want materialize.signature_missing\nstderr: %s", errStr, res.Stderr)
 		}
-		if errStr, res := bridgeLoad(t, srv.BaseURL, "team/signed"); errStr != "" {
-			t.Errorf("row the first start signed = %q, want success\nstderr: %s", errStr, res.Stderr)
+		if errStr, res := bridgeLoad(t, srv.BaseURL, "team/signed"); !strings.HasPrefix(errStr, "materialize.signature_missing") {
+			t.Errorf("row the first start signed = %q, want materialize.signature_missing\nstderr: %s", errStr, res.Stderr)
+		}
+		if errStr, res := bridgeLoad(t, srv.BaseURL, "team/signed", "PODIUM_VERIFY_SIGNATURES=never"); errStr != "" {
+			t.Errorf("row the first start signed under never = %q, want success\nstderr: %s", errStr, res.Stderr)
 		}
 	})
 }

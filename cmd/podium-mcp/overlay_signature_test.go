@@ -8,6 +8,7 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // overlayTestServer constructs an mcpServer with a configured
@@ -70,30 +71,25 @@ func TestLoadArtifactFromOverlay_PolicyAlwaysStillAllowsOverlay(t *testing.T) {
 }
 
 // Spec: §4.7.9 — the registry-fetched path DOES enforce signature
-// policy. A response with no signature under PolicyAlways must
-// return an error result. This contrasts with the overlay path
+// policy. A response whose bytes reproduce its delivery hash and that carries
+// no delivery signature fails the policy under PolicyAlways with the leading
+// code materialize.signature_missing. This contrasts with the overlay path
 // above and pins the asymmetry.
 func TestDeliverLoadArtifact_PolicyAlwaysRejectsUnsigned(t *testing.T) {
 	t.Parallel()
 	s := overlayTestServer(t, sign.PolicyAlways)
-	resp := loadArtifactResponse{
+	fm := "---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"
+	resp := sealDelivery(loadArtifactResponse{
 		ID:          "team/x",
 		Type:        "context",
 		Version:     "1.0.0",
-		ContentHash: "sha256:" + strings.Repeat("a", 64),
-		Frontmatter: "---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n",
+		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
+		Frontmatter: fm,
 		Sensitivity: "low",
-		Signature:   "", // missing
-	}
+	})
 	got := s.deliverLoadArtifact(resp)
-	m, ok := got.(map[string]any)
-	if !ok {
-		t.Fatalf("type = %T (%v)", got, got)
-	}
-	errStr, _ := m["error"].(string)
-	if !strings.Contains(errStr, "materialize.signature_invalid") &&
-		!strings.Contains(errStr, "signature_missing") {
-		t.Errorf("error = %q, want materialize.signature_invalid or signature_missing", errStr)
+	if errStr := errorMessageText(got); !strings.HasPrefix(errStr, "materialize.signature_missing") {
+		t.Errorf("error = %q, want a leading materialize.signature_missing", errStr)
 	}
 }
 

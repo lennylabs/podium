@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/tracing"
 )
 
@@ -160,15 +160,15 @@ func (s *mcpServer) fetchOneLargeResource(path string, link largeResourceLink, r
 //     alongside the SigV4 query makes S3 reject the request as "multiple
 //     authentication types" (HTTP 400), so the credential MUST be withheld.
 //
-// presignedSigV4 distinguishes the two by the SigV4 query parameters only the
-// S3 URL carries, so the credential is attached to the registry /objects route
-// and withheld from a presigned S3 URL.
+// objectstore.PresignedSigV4 distinguishes the two by the SigV4 query
+// parameters only the S3 URL carries, so the credential is attached to the
+// registry /objects route and withheld from a presigned S3 URL.
 func (s *mcpServer) getLargeResource(rawURL string) ([]byte, int, error) {
 	req, err := http.NewRequest("GET", rawURL, nil)
 	if err != nil {
 		return nil, 0, err
 	}
-	if !presignedSigV4(rawURL) {
+	if !objectstore.PresignedSigV4(rawURL) {
 		tok, terr := s.bearerToken()
 		if terr != nil {
 			return nil, 0, terr
@@ -193,20 +193,4 @@ func (s *mcpServer) getLargeResource(rawURL string) ([]byte, int, error) {
 		return nil, httpResp.StatusCode, err
 	}
 	return body, httpResp.StatusCode, nil
-}
-
-// presignedSigV4 reports whether rawURL is an AWS Signature V4 presigned URL,
-// identified by the X-Amz-Signature query parameter the S3 backend appends
-// (X-Amz-Algorithm/X-Amz-Credential accompany it). The filesystem backend's
-// /objects/{content_hash} route carries none of these, so this cleanly
-// separates a self-validating S3 URL (no caller credential) from the
-// token-bound registry route (§13.11). A URL that fails to parse is treated as
-// not presigned so the caller credential is attached, which is the safe default
-// for the registry route.
-func presignedSigV4(rawURL string) bool {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return false
-	}
-	return u.Query().Get("X-Amz-Signature") != ""
 }

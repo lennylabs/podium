@@ -19,8 +19,12 @@ import (
 // conditional GET is the revalidation round-trip.
 func TestLoadArtifact_SendsIfNoneMatchAndServes304FromCache(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: context\n---\n"
+	const fm = "---\ntype: context\nversion: 1.0.0\n---\n"
 	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil)
+	cached := sealDelivery(loadArtifactResponse{
+		ID: "team/x", Type: "context", Version: "1.0.0", ContentHash: hash,
+		Frontmatter: fm, ManifestBody: "cached-body",
+	})
 
 	var sawIfNoneMatch atomic.Value
 	sawIfNoneMatch.Store("")
@@ -40,9 +44,6 @@ func TestLoadArtifact_SendsIfNoneMatchAndServes304FromCache(t *testing.T) {
 
 	dir := t.TempDir()
 	cache, _ := newContentCache(dir)
-	if err := cache.put(hash, fm, "cached-body", nil); err != nil {
-		t.Fatalf("put: %v", err)
-	}
 	resolutions := newResolutionCache(dir)
 	t.Cleanup(func() { resolutions.Close() })
 	resolutions.PutVersion("team/x", "1.0.0", hash, time.Now())
@@ -53,6 +54,10 @@ func TestLoadArtifact_SendsIfNoneMatchAndServes304FromCache(t *testing.T) {
 		resolutions: resolutions,
 		adapters:    adapter.DefaultRegistry(),
 		http:        &http.Client{},
+	}
+	// The 304 serves the cached body from the per-ID delivery files.
+	if err := srv.cacheVerifiedRecord(cached); err != nil {
+		t.Fatalf("cacheVerifiedRecord: %v", err)
 	}
 	out := srv.loadArtifact(map[string]any{"id": "team/x", "version": "1.0.0"})
 	m, ok := out.(map[string]any)

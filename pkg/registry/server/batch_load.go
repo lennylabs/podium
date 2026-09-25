@@ -51,7 +51,12 @@ type BatchLoadEnvelope struct {
 	Deprecated         bool            `json:"deprecated,omitempty"`
 	ReplacedBy         string          `json:"replaced_by,omitempty"`
 	DeprecationWarning string          `json:"deprecation_warning,omitempty"`
-	Error              *ErrorResponse  `json:"error,omitempty"`
+	// DeliveryHash and DeliverySignature are the §4.7.10 attestation of the
+	// record this envelope delivers, composed and signed by the same code as
+	// the single-load response, so both paths serve one digest per artifact.
+	DeliveryHash      string         `json:"delivery_hash,omitempty"`
+	DeliverySignature string         `json:"delivery_signature,omitempty"`
+	Error             *ErrorResponse `json:"error,omitempty"`
 }
 
 // BatchResource is one §7.6.2 bundled-resource reference in a batch
@@ -126,6 +131,17 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
 	}
+	// Spec: §4.7.10 — the batch entry carries the attestation the single-load
+	// response carries for the same admitted result.
+	deliveryHash, deliverySig, err := s.attestDelivery(ctx, res)
+	if err != nil {
+		return BatchLoadEnvelope{
+			ID:     artifactID,
+			Status: "error",
+			Error:  errorEnvelopeFor(err),
+		}
+	}
+	env.DeliveryHash, env.DeliverySignature = deliveryHash, deliverySig
 	// Spec: §7.6.2, §13.4 — a resource the admitted row holds inline travels
 	// inline from the bytes admission hashed, and is never presigned, because
 	// admission read no object under its key. Every other resource travels as

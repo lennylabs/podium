@@ -13,9 +13,10 @@ import (
 )
 
 // loadArtifactJSON builds a /v1/load_artifact response body whose content_hash
-// is the canonical hash of frontmatter plus resources, so the §6.6 step 2
-// consumer-side check (verifyContentHash) accepts it. Compute it in
-// the test goroutine and write the returned string from the stub handler.
+// is the §4.7.6 hash of frontmatter plus resources and whose delivery_hash is
+// the §4.7.10 hash of the record, so the §6.6 step 2 consumer-side check
+// (verifyDeliveryHash) accepts it. A field the caller sets is kept. Compute it
+// in the test goroutine and write the returned string from the stub handler.
 func loadArtifactJSON(t *testing.T, fields map[string]any) string {
 	t.Helper()
 	fm, _ := fields["frontmatter"].(string)
@@ -28,6 +29,17 @@ func loadArtifactJSON(t *testing.T, fields map[string]any) string {
 	}
 	if _, set := fields["content_hash"]; !set {
 		fields["content_hash"] = "sha256:" + version.CanonicalContentHash([]byte(fm), nil, resources)
+	}
+	if _, set := fields["delivery_hash"]; !set {
+		b, err := json.Marshal(fields)
+		if err != nil {
+			t.Fatalf("marshal stub response: %v", err)
+		}
+		var resp loadArtifactResponse
+		if err := json.Unmarshal(b, &resp); err != nil {
+			t.Fatalf("decode stub response: %v", err)
+		}
+		fields["delivery_hash"] = deliveryHashOf(resp)
 	}
 	b, err := json.Marshal(fields)
 	if err != nil {

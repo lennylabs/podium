@@ -1081,45 +1081,49 @@ func TestExtends_ChildHiddenWithoutLayerAccess(t *testing.T) {
 	assertHas(t, carolIDs, "shared/parent", "carol search still includes the public parent")
 }
 
-// Spec: §6.6 step 2 / §4.7.6 — a real extends-merged artifact's served
+// Spec: §6.6 step 2 / §4.7.10 — a real extends-merged artifact's served
 // frontmatter is a re-serialization (parent folded in, extends stripped) that
-// cannot reproduce the stored content_hash, but the registry delivers the leaf
-// child's pre-merge bytes in raw_frontmatter and those reproduce it. This pins
-// the registry's real ingest canonicalization to what the MCP bridge recomputes
-// in §6.6 step 2, so the two cannot drift and silently disable the consumer's
-// content-hash check for merged manifests.
-func TestExtends_MergedDeliversRawFrontmatterForHash(t *testing.T) {
+// cannot reproduce the stored content_hash, and the registry serves a
+// delivery_hash that the served bytes do reproduce, with no pre-merge document
+// and no merge flag. This pins the registry's composition of the served record
+// to what the MCP bridge recomputes in §6.6 step 2, so the two cannot drift.
+func TestExtends_MergedDeliveryHashReproducesFromServedBytes(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: org parent\ntags: [from-parent]\n---\n\nparent body\n"
 	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: " + exParentID + "@1.x\n---\n\nchild body\n"
 	srv := extendsBoot(t, parent, child, nil)
 
 	var r struct {
-		ContentHash    string `json:"content_hash"`
-		Frontmatter    string `json:"frontmatter"`
-		RawFrontmatter string `json:"raw_frontmatter"`
-		ManifestMerged bool   `json:"manifest_merged"`
+		ID           string `json:"id"`
+		Type         string `json:"type"`
+		Version      string `json:"version"`
+		ContentHash  string `json:"content_hash"`
+		Sensitivity  string `json:"sensitivity"`
+		Frontmatter  string `json:"frontmatter"`
+		ManifestBody string `json:"manifest_body"`
+		SkillRaw     string `json:"skill_raw"`
+		DeliveryHash string `json:"delivery_hash"`
 	}
+	var raw map[string]any
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+exParentID, &r)
-
-	if !r.ManifestMerged {
-		t.Fatal("manifest_merged = false for an extends child, want true")
-	}
-	if r.RawFrontmatter == "" {
-		t.Fatal("raw_frontmatter empty; the consumer cannot reproduce the content hash for a merged manifest")
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+exParentID, &raw)
+	for _, key := range []string{"raw_frontmatter", "manifest_merged", "signature"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("response carries the removed %s field", key)
+		}
 	}
 	// The served (merged) frontmatter strips extends and folds in the parent, so
-	// it must not reproduce the stored hash...
+	// it does not reproduce the stored hash...
 	if "sha256:"+version.CanonicalContentHash([]byte(r.Frontmatter), nil, nil) == r.ContentHash {
 		t.Error("served merged frontmatter unexpectedly reproduced the content hash")
 	}
-	// ...but the pre-merge raw_frontmatter (the child's authored ARTIFACT.md, no
-	// skill and no resources here) reproduces it exactly.
-	if got := "sha256:" + version.CanonicalContentHash([]byte(r.RawFrontmatter), nil, nil); got != r.ContentHash {
-		t.Errorf("raw_frontmatter does not reproduce content hash: got %s, want %s", got, r.ContentHash)
-	}
-	if !strings.Contains(r.RawFrontmatter, "extends: "+exParentID) {
-		t.Errorf("raw_frontmatter is not the pre-merge child bytes:\n%s", r.RawFrontmatter)
+	// ...and the delivery hash recomputed from the served record matches.
+	got := version.DeliveryHash(version.DeliveryRecord{
+		ID: r.ID, Version: r.Version, Type: r.Type, ContentHash: r.ContentHash, Sensitivity: r.Sensitivity,
+		Frontmatter: r.Frontmatter, ManifestBody: r.ManifestBody, SkillRaw: r.SkillRaw,
+	})
+	if r.DeliveryHash == "" || got != r.DeliveryHash {
+		t.Errorf("recomputed delivery hash %s, served %q", got, r.DeliveryHash)
 	}
 }
 

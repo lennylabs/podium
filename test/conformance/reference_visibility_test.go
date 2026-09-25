@@ -191,8 +191,8 @@ func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 			t.Errorf("artifact %q has no signature; the configured signer must sign every accepted manifest", rec.ArtifactID)
 			continue
 		}
-		// PolicyAlways verifies every served signature, exercising the
-		// §4.7.9 materialization-time check against the fixture's data.
+		// PolicyAlways verifies every stored signature, exercising the
+		// §4.7.9 envelope check against the fixture's data.
 		if err := sign.EnforceVerification(context.Background(), sign.PolicyAlways, provider, rec.ContentHash, rec.Signature); err != nil {
 			t.Errorf("verify %q (sensitivity %q): %v", rec.ArtifactID, rec.Sensitivity, err)
 		}

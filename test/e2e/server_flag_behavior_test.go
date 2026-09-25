@@ -152,9 +152,9 @@ func TestServerFlags_SignRegistryKey(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 / §4.7.9 — the registry signs at ingest by default. A
+// Spec: §13.10 / §4.7.9 / §4.7.10 — the registry signs by default. A
 // standalone server started with no --sign flag and no PODIUM_SIGN serves a
-// non-empty §4.7.9 signature on load_artifact.
+// non-empty §4.7.10 delivery signature on load_artifact.
 func TestServerFlags_SignsByDefault(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -163,11 +163,11 @@ func TestServerFlags_SignsByDefault(t *testing.T) {
 	srv := startServer(t, reg)
 
 	var r struct {
-		Signature string `json:"signature"`
+		DeliverySignature string `json:"delivery_signature"`
 	}
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=my-skill", &r)
-	if r.Signature == "" {
-		t.Errorf("load_artifact signature is empty, want a registry-managed envelope\nlog:\n%s", srv.log())
+	if r.DeliverySignature == "" {
+		t.Errorf("load_artifact delivery_signature is empty, want a registry-managed envelope\nlog:\n%s", srv.log())
 	}
 	if !strings.Contains(srv.log(), "ingest signing: registry-managed key") {
 		t.Errorf("startup log missing the registry-managed signing line:\n%s", srv.log())

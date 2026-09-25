@@ -1206,7 +1206,8 @@ func TestStandaloneServer_MigrateToStandardSQLite(t *testing.T) {
 // PODIUM_SIGN_KEY_PATH and writes no key, whether the key path is unset (the
 // persistence refusal) or names a missing file (the generated-key refusal).
 // After the page's copy step runs verbatim, the target starts, and the
-// migrated artifact's served signature verifies under the source's public key.
+// delivery signature the target serves for the migrated artifact verifies
+// under the source's public key.
 func TestStandaloneServer_MigrateToStandardWithTheSourceKey(t *testing.T) {
 	t.Parallel()
 	copyStep := docBashBlock(t, "docs/deployment/single-node.md", "TARGET_SIGN_KEY_PATH")
@@ -1250,16 +1251,16 @@ func TestStandaloneServer_MigrateToStandardWithTheSourceKey(t *testing.T) {
 	target := startServerArgs(t, append(targetEnv, "PODIUM_SIGN_KEY_PATH="+targetKey), "serve", "--standalone")
 
 	var served struct {
-		ContentHash string `json:"content_hash"`
-		Signature   string `json:"signature"`
+		DeliveryHash      string `json:"delivery_hash"`
+		DeliverySignature string `json:"delivery_signature"`
 	}
 	getJSON(t, target.BaseURL+"/v1/load_artifact?id=mig", &served)
 	pub, err := sign.PublicKeyFromKeyFile(filepath.Join(standalone, "registry-signing.key"))
 	if err != nil {
 		t.Fatalf("read the source key: %v", err)
 	}
-	if err := (sign.RegistryManagedKey{PublicKey: pub}).Verify(context.Background(), served.ContentHash, served.Signature); err != nil {
-		t.Fatalf("migrated signature does not verify under the source key: %v\nlog:\n%s", err, target.log())
+	if err := (sign.RegistryManagedKey{PublicKey: pub}).Verify(context.Background(), served.DeliveryHash, served.DeliverySignature); err != nil {
+		t.Fatalf("the target's delivery pair does not verify under the source key: %v\nlog:\n%s", err, target.log())
 	}
 }
 

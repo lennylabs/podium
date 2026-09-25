@@ -180,9 +180,26 @@ def _open_browser(url: str) -> None:
         pass
 
 
-def _fetch_bytes(url: str) -> bytes:
-    with urllib.request.urlopen(url) as resp:  # noqa: S310 - registry-issued presigned URL
+def _fetch_bytes(url: str, headers: dict[str, str] | None = None) -> bytes:
+    req = urllib.request.Request(url, headers=headers or {})
+    with urllib.request.urlopen(req) as resp:  # noqa: S310 - registry-issued presigned URL
         return resp.read()
+
+
+def _presigned_sigv4(url: str) -> bool:
+    """Report whether ``url`` is an AWS Signature V4 presigned URL.
+
+    spec §13.12: a consumer sends no credential when following an S3
+    presigned URL, which carries a non-empty ``X-Amz-Signature`` query
+    parameter, and sends its token to the filesystem backend's ``/objects``
+    route, which authorizes the read against the caller. A URL that fails to
+    parse is treated as not presigned, matching the Go consumers.
+    """
+    try:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+    except ValueError:
+        return False
+    return any(v for v in query.get("X-Amz-Signature", []))
 
 
 def _decode_inline_resources(
@@ -1292,6 +1309,8 @@ class Client:
         # as a presigned manifest_body_url with the inline fields cleared. Resolve
         # it here so the returned artifact carries the manifest fields regardless
         # of the manifest's size, matching the inline path and the MCP server.
+        # The default follower sends the client's token to a URL that is not
+        # SigV4 presigned (§13.12); a caller-supplied fetch owns its transport.
         mbu = body.get("manifest_body_url")
         if mbu:
             manifest_body, frontmatter, skill_raw = _apply_manifest_body_url(
@@ -1300,7 +1319,8 @@ class Client:
                 manifest_body,
                 frontmatter,
                 skill_raw,
-                fetch or _fetch_bytes,
+                fetch
+                or (lambda u: _fetch_bytes(u, {} if _presigned_sigv4(u) else self._headers())),
             )
         return LoadedArtifact(
             id=body.get("id", artifact_id),

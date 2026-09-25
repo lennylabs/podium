@@ -369,6 +369,20 @@ function manifestBodyFrom(doc: string): string {
   return m ? m[1].replace(/^[\r\n]+/, "") : "";
 }
 
+// presignedSigV4 reports whether raw is an AWS Signature V4 presigned URL, one
+// whose query carries a non-empty X-Amz-Signature parameter. spec §13.12: a
+// consumer sends no credential when following an S3 presigned URL, and sends
+// its token to the filesystem backend's /objects route, which authorizes the
+// read against the caller. A URL that fails to parse is treated as not
+// presigned, matching the Go consumers.
+function presignedSigV4(raw: string): boolean {
+  try {
+    return (new URL(raw).searchParams.get("X-Amz-Signature") ?? "") !== "";
+  } catch {
+    return false;
+  }
+}
+
 export interface MaterializeOptions {
   // Accepted per §2.2 ("The SDKs accept a harness parameter on
   // materialize()"). Harness-specific adaptation is the registry's shared
@@ -1259,7 +1273,10 @@ export class Client {
       if (!link.url) {
         throw new RegistryError("registry.unknown", "manifest_body_url has no presigned URL");
       }
-      const resp = await (opts.fetcher ?? fetch)(link.url);
+      // The client's token goes to a URL that is not SigV4 presigned (§13.12).
+      const resp = await (opts.fetcher ?? fetch)(link.url, {
+        headers: presignedSigV4(link.url) ? {} : this.headers(),
+      });
       if (!resp.ok) {
         throw new RegistryError("registry.unknown", `fetch manifest body: HTTP ${resp.status}`);
       }

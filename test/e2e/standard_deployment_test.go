@@ -1826,11 +1826,11 @@ func TestStandardDeploy_SigningKeyFileFromAStandaloneStart(t *testing.T) {
 		"serve", "--standalone", "--layer-path", orgLocalReg(t))
 
 	var served struct {
-		Signature string `json:"signature"`
+		DeliverySignature string `json:"delivery_signature"`
 	}
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=hello", &served)
-	if served.Signature == "" {
-		t.Fatalf("registry on the mounted key served no signature\nlog:\n%s", srv.log())
+	if served.DeliverySignature == "" {
+		t.Fatalf("registry on the mounted key served no delivery signature\nlog:\n%s", srv.log())
 	}
 	load := mcpExec(t, []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,

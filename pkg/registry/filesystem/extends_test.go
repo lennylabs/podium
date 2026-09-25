@@ -335,7 +335,7 @@ func TestWalk_ResolveExtendsFailsOnAnInheritedKeyNamingTheGrandparent(t *testing
 // of the merged block, whoever authored it, so a key the child wrote itself
 // naming its parent ends the walk with the sentinel the server mode reports as
 // registry.invalid_argument. These are the bytes pkg/sync materializes, where
-// neither the search descriptor nor raw_frontmatter exists. The server mode
+// no search descriptor exists. The server mode
 // refuses the same child, so neither deployment mode materializes a tree the
 // other refuses (§11, §2.2).
 func TestWalk_ResolveExtendsFailsClosedOnTheChildsOwnKeyNamingItsParent(t *testing.T) {

@@ -36,10 +36,10 @@ type mcpDomain struct {
 	MaterializedAt []string `json:"materialized_at"`
 }
 
-// Spec: §6.6 step 2 / §4.7.6 — end to end through the real bridge:
-// a registry response whose frontmatter does not reproduce the served
-// content_hash (a tamper or non-TLS MITM) is rejected with
-// materialize.content_hash_mismatch and nothing is written to disk.
+// Spec: §6.6 step 2 / §4.7.10 — end to end through the real bridge: a
+// registry response whose served bytes do not reproduce its delivery_hash (a
+// tamper or non-TLS MITM) is rejected with materialize.content_hash_mismatch
+// and nothing is written to disk.
 func TestPodiumMCP_ContentHashMismatchRejected(t *testing.T) {
 	t.Parallel()
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,10 +88,9 @@ func TestPodiumMCP_ContentHashMismatchRejected(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 2 / §4.7.6 — end to end: a skill's content_hash covers the
-// verbatim SKILL.md the registry ships in skill_raw, so the bridge reproduces
-// the hash over (ARTIFACT.md, SKILL.md) and a consistent skill materializes its
-// SKILL.md verbatim instead of skipping the check.
+// Spec: §6.6 step 2 / §4.7.10 — end to end: a skill's delivery record frames
+// the verbatim SKILL.md the registry ships in skill_raw, so a consistent skill
+// passes the delivery check and materializes its SKILL.md verbatim.
 func TestPodiumMCP_SkillContentHashVerifies(t *testing.T) {
 	t.Parallel()
 	fm := "---\ntype: skill\n---\n"
@@ -99,11 +98,11 @@ func TestPodiumMCP_SkillContentHashVerifies(t *testing.T) {
 	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(skillRaw), nil)
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/load_artifact" {
-			b, _ := json.Marshal(map[string]any{
+			b, _ := json.Marshal(testharness.SealDelivery(map[string]any{
 				"id": "team/demo", "version": "1.0.0", "type": "skill",
 				"content_hash": hash, "frontmatter": fm,
 				"skill_raw": skillRaw, "manifest_body": "skill prose\n",
-			})
+			}))
 			_, _ = w.Write(b)
 			return
 		}
@@ -121,9 +120,8 @@ func TestPodiumMCP_SkillContentHashVerifies(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 2 — end to end: a skill whose served SKILL.md was altered while
-// content_hash was kept is rejected before any write, closing the path where a
-// skill previously skipped the content-hash check entirely.
+// Spec: §6.6 step 2, §4.7.10 — end to end: a skill whose served SKILL.md was
+// altered while delivery_hash was kept is rejected before any write.
 func TestPodiumMCP_SkillTamperedSkillRawRejected(t *testing.T) {
 	t.Parallel()
 	fm := "---\ntype: skill\n---\n"
@@ -131,12 +129,14 @@ func TestPodiumMCP_SkillTamperedSkillRawRejected(t *testing.T) {
 	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(skillRaw), nil)
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/load_artifact" {
-			b, _ := json.Marshal(map[string]any{
+			fields := testharness.SealDelivery(map[string]any{
 				"id": "team/demo", "version": "1.0.0", "type": "skill",
 				"content_hash": hash, "frontmatter": fm,
-				// skill_raw altered after the hash was fixed.
-				"skill_raw": skillRaw + "\ninjected", "manifest_body": "skill prose\n",
+				"skill_raw": skillRaw, "manifest_body": "skill prose\n",
 			})
+			// skill_raw altered after the hash was fixed.
+			fields["skill_raw"] = skillRaw + "\ninjected"
+			b, _ := json.Marshal(fields)
 			_, _ = w.Write(b)
 			return
 		}
@@ -154,36 +154,53 @@ func TestPodiumMCP_SkillTamperedSkillRawRejected(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 2 / §4.6 — end to end: a merged manifest's served frontmatter
-// is a re-serialization with the hidden parent stripped, so the bridge
-// reproduces the hash from the leaf child's raw_frontmatter; a consistent merged
-// manifest materializes its (merged) ARTIFACT.md.
-func TestPodiumMCP_MergedManifestContentHashVerifies(t *testing.T) {
+// Spec: §6.6 step 2 / §4.7.10 — end to end: a merged manifest's delivery
+// record frames the served merged frontmatter, so a consistent merged manifest
+// materializes that ARTIFACT.md and the same record with one merged byte
+// altered is rejected before any write.
+func TestPodiumMCP_MergedManifestDeliveryHashVerifies(t *testing.T) {
 	t.Parallel()
 	raw := "---\ntype: context\nextends: shared/parent@1.x\n---\nbody"
 	served := "---\ntype: context\n---\nbody" // re-serialized, parent stripped
-	hash := "sha256:" + version.CanonicalContentHash([]byte(raw), nil, nil)
-	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/load_artifact" {
-			b, _ := json.Marshal(map[string]any{
-				"id": "team/x", "version": "1.0.0", "type": "context",
-				"content_hash": hash, "frontmatter": served,
-				"manifest_merged": true, "raw_frontmatter": raw,
-			})
-			_, _ = w.Write(b)
-			return
-		}
-		_, _ = w.Write([]byte(`{}`))
-	}))
-	t.Cleanup(reg.Close)
+	fields := testharness.SealDelivery(map[string]any{
+		"id": "team/x", "version": "1.0.0", "type": "context",
+		"content_hash": "sha256:" + version.CanonicalContentHash([]byte(raw), nil, nil),
+		"frontmatter":  served,
+	})
+	serve := func(frontmatter string) string {
+		reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v1/load_artifact" {
+				out := map[string]any{}
+				for k, v := range fields {
+					out[k] = v
+				}
+				out["frontmatter"] = frontmatter
+				b, _ := json.Marshal(out)
+				_, _ = w.Write(b)
+				return
+			}
+			_, _ = w.Write([]byte(`{}`))
+		}))
+		t.Cleanup(reg.Close)
+		return reg.URL
+	}
 
 	target := t.TempDir()
-	resp := runMCPLoad(t, reg.URL, target, "team/x")
+	resp := runMCPLoad(t, serve(served), target, "team/x")
 	if resp.Result.StructuredContent.Error != "" {
 		t.Fatalf("valid merged manifest load failed: %s", resp.Result.StructuredContent.Error)
 	}
 	if files := testharness.ReadTree(t, target); files["team/x/ARTIFACT.md"] != served {
 		t.Errorf("merged ARTIFACT.md not materialized; tree: %v", keysOf(files))
+	}
+
+	tamperedTarget := t.TempDir()
+	resp = runMCPLoad(t, serve(served+"\ninjected: true"), tamperedTarget, "team/x")
+	if !strings.Contains(resp.Result.StructuredContent.Error, "materialize.content_hash_mismatch") {
+		t.Errorf("error = %q, want materialize.content_hash_mismatch", resp.Result.StructuredContent.Error)
+	}
+	if files := testharness.ReadTree(t, tamperedTarget); len(files) != 0 {
+		t.Errorf("tampered merged manifest was materialized: %v", keysOf(files))
 	}
 }
 
@@ -220,7 +237,7 @@ func runMCPLoad(t *testing.T, regURL, target, id string) mcpResult {
 // Spec: §6.6 step 1 / §13.11 — end to end: the bridge fetches a
 // large_resource with the same session token it used for load_artifact, so an
 // authenticated object route serves it; the decoded bytes materialize and the
-// artifact-level content hash (which covers the fetched resource) verifies.
+// delivery hash (which frames the fetched resource's link digest) verifies.
 func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 	t.Parallel()
 	blob := []byte(strings.Repeat("X", 4096))
@@ -247,7 +264,7 @@ func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 	artHash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"data/big.bin": blob})
 	reg := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/v1/load_artifact" {
-			b, _ := json.Marshal(map[string]any{
+			b, _ := json.Marshal(testharness.SealDelivery(map[string]any{
 				"id": "finance/a", "version": "1.0.0", "type": "context",
 				"content_hash": artHash, "frontmatter": fm,
 				"large_resources": map[string]any{
@@ -255,7 +272,7 @@ func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 						"presigned_url": obj.URL, "content_hash": resourceHash, "size": len(blob),
 					},
 				},
-			})
+			}))
 			_, _ = w.Write(b)
 			return
 		}
@@ -307,11 +324,11 @@ func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 2 / §4.7.6 — end to end through the real bridge: the step-2
-// gate recomputes the digest with the shared version.CanonicalContentHash, so
-// a multi-resource bundle whose served bytes are intact materializes, and the
-// same bundle with one altered resource byte is rejected with
-// materialize.content_hash_mismatch before any write.
+// Spec: §6.6 step 2 / §4.7.10 — end to end through the real bridge: the
+// step-2 gate recomputes the delivery hash with the shared
+// version.DeliveryHash, so a multi-resource bundle whose served bytes are
+// intact materializes, and the same bundle with one altered resource byte is
+// rejected with materialize.content_hash_mismatch before any write.
 func TestPodiumMCP_MultiResourceContentHashRoundTrip(t *testing.T) {
 	t.Parallel()
 	fm := "---\ntype: context\n---\nbody\n"
@@ -326,6 +343,10 @@ func TestPodiumMCP_MultiResourceContentHashRoundTrip(t *testing.T) {
 		hashed[k] = []byte(v)
 	}
 	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, hashed)
+	delivery := testharness.SealDelivery(map[string]any{
+		"id": "team/bundle", "version": "1.0.0", "type": "context",
+		"content_hash": hash, "frontmatter": fm, "resources": resources,
+	})["delivery_hash"]
 
 	serve := func(served map[string]string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -333,6 +354,7 @@ func TestPodiumMCP_MultiResourceContentHashRoundTrip(t *testing.T) {
 				b, _ := json.Marshal(map[string]any{
 					"id": "team/bundle", "version": "1.0.0", "type": "context",
 					"content_hash": hash, "frontmatter": fm, "resources": served,
+					"delivery_hash": delivery,
 				})
 				_, _ = w.Write(b)
 				return

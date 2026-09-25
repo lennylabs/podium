@@ -86,6 +86,10 @@ func TestResources_ReadReturnsManifestBody(t *testing.T) {
 			"frontmatter":   fm,
 			"manifest_body": "Term definitions.",
 			"content_hash":  "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
+			"delivery_hash": deliveryHashOf(loadArtifactResponse{
+				ID: "docs/glossary", Type: "context", Frontmatter: fm, ManifestBody: "Term definitions.",
+				ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
+			}),
 		},
 	})
 	s := &mcpServer{cfg: &config{registry: ts.URL, verifyPolicy: sign.PolicyNever}, http: &http.Client{}}

@@ -6,7 +6,9 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +29,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/scim"
+	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/webhook"
 )
@@ -76,6 +79,10 @@ type Server struct {
 	objectStore   objectstore.Provider
 	objectBaseURL string
 	presignTTL    time.Duration
+	// deliverySigner is the registry-managed key that signs every served
+	// §4.7.10 delivery hash on the single-load and the batch paths. Nil
+	// serves an empty delivery signature.
+	deliverySigner sign.Provider
 	// webhooks is the §7.3.2 outbound delivery worker. When set,
 	// PublishEvent fans the event out to every matching receiver.
 	webhooks *webhook.Worker
@@ -604,16 +611,6 @@ type LoadArtifactResponse struct {
 	// §6.6 step 1 and reconstitutes them. Nil when the body is below the
 	// cutoff or no object store is configured (delivered inline).
 	ManifestBodyURL *LargeResourceLink `json:"manifest_body_url,omitempty"`
-	// ManifestMerged signals that Frontmatter is an extends-merged
-	// re-serialization with the hidden parent stripped (§4.6), so its bytes
-	// no longer reproduce ContentHash. The consumer recomputes the §6.6 step 2
-	// content hash over RawFrontmatter instead.
-	ManifestMerged bool `json:"manifest_merged,omitempty"`
-	// RawFrontmatter carries the leaf child's original pre-merge ARTIFACT.md
-	// bytes when ManifestMerged is set, so the consumer reproduces the §4.7.6
-	// content hash for the merged manifest rather than skipping the check.
-	// Empty for a non-merged response.
-	RawFrontmatter string `json:"raw_frontmatter,omitempty"`
 	// Deprecated, ReplacedBy, and DeprecationWarning surface the
 	// §4.7.4 lifecycle signal so consumers see the warning
 	// alongside the served bytes and can route callers to the
@@ -621,11 +618,16 @@ type LoadArtifactResponse struct {
 	Deprecated         bool   `json:"deprecated,omitempty"`
 	ReplacedBy         string `json:"replaced_by,omitempty"`
 	DeprecationWarning string `json:"deprecation_warning,omitempty"`
-	// Signature is the §4.7.9 envelope produced at ingest by the
-	// configured SignatureProvider. Empty when ingest had no
-	// signer wired. Consumers verify against
-	// PODIUM_VERIFY_SIGNATURES at materialize time.
-	Signature string `json:"signature,omitempty"`
+	// DeliveryHash is the §4.7.10 digest over the record this response
+	// delivers. It is present on every response.
+	DeliveryHash string `json:"delivery_hash"`
+	// DeliverySignature is the registry-managed signature over DeliveryHash,
+	// absent when the registry runs without a signing key (§4.7.10).
+	DeliverySignature string `json:"delivery_signature,omitempty"`
+	// ExtendsPin is the "<id>@<version>" parent pin the artifact resolved at
+	// ingest, present only when the caller can see the parent record (§4.6).
+	// Its absence does not mean the artifact extends nothing.
+	ExtendsPin string `json:"extends_pin,omitempty"`
 }
 
 // LargeResourceLink describes one resource whose payload exceeded
@@ -1095,10 +1097,17 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		Deprecated:         res.Deprecated,
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
-		Signature:          res.Signature,
-		ManifestMerged:     res.Merged,
-		RawFrontmatter:     string(res.RawFrontmatter),
+		ExtendsPin:         res.ExtendsPin,
 	}
+	// Spec: §4.7.10 — attest the record before the manifest-body channel
+	// clears the inline document, because the record frames the served
+	// document whichever channel carries it.
+	deliveryHash, deliverySig, err := s.attestDelivery(r.Context(), res)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
+	}
+	resp.DeliveryHash, resp.DeliverySignature = deliveryHash, deliverySig
 	// §7.2 data plane: each resource's source follows where admission read
 	// its bytes (see attachResources).
 	if err := s.attachResources(r.Context(), &resp, res.Resources); err != nil {
@@ -1120,7 +1129,22 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 // admission bypass is taken for a GET only when the ETag branch answers
 // 304. A change to the validator lands in both decisions at once.
 func validatorFor(res *core.LoadArtifactResult) string {
-	return contentHashETag(res.ContentHash)
+	return loadArtifactETag(res.ContentHash, res.ExtendsPin)
+}
+
+// loadArtifactETag is the strong ETag of a load_artifact response. With no
+// extends_pin served it is the content-hash ETag. With one it appends the hex
+// SHA-256 of the pin, so a body that carries one caller's extends_pin is never
+// revalidated for a caller who is served a different one, or none. The pin is
+// hashed rather than embedded so the validator repeats no parent ID.
+//
+// Spec: §7.2, §13.4.
+func loadArtifactETag(contentHash, extendsPin string) string {
+	if extendsPin == "" || contentHash == "" {
+		return contentHashETag(contentHash)
+	}
+	sum := sha256.Sum256([]byte(extendsPin))
+	return `"` + contentHash + "+" + hex.EncodeToString(sum[:]) + `"`
 }
 
 // contentHashETag formats a resolved content hash as a strong HTTP ETag
@@ -1228,11 +1252,12 @@ func encodeBinaryInlineResources(resp *LoadArtifactResponse) {
 // the canonical-document field. Below the cutoff, or without an object
 // store (the §13.11 standalone-without-storage mode), the body stays inline.
 //
-// An extends-merged manifest keeps its body inline: the served frontmatter
-// is a re-serialization distinct from the hash-bound raw bytes, so it is
-// excluded from the channel to avoid an ambiguous reconstitution.
+// A merged manifest takes the channel like any other. It was once kept inline
+// because the consumer hashed the pre-merge bytes the URL does not deliver;
+// the §4.7.10 delivery hash frames the served document itself, and a channel
+// that differed for a merged manifest would disclose the merge (§4.6).
 func (s *Server) attachManifestBody(ctx context.Context, resp *LoadArtifactResponse, res *core.LoadArtifactResult) error {
-	if s.objectStore == nil || res.Merged {
+	if s.objectStore == nil {
 		return nil
 	}
 	doc := core.CanonicalManifestDoc(res.Type, res.Frontmatter, res.SkillRaw)

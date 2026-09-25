@@ -145,14 +145,6 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	// §7.6.2 cache warm-up: when configured to prefetch, warm the §6.5 cache
-	// from the batch-load endpoint before serving. Best-effort — a failure
-	// logs and the bridge still starts, falling back to on-demand loads.
-	if len(cfg.prefetchIDs) > 0 {
-		if perr := srv.prefetch(cfg.prefetchIDs); perr != nil {
-			fmt.Fprintf(os.Stderr, "WARN: prefetch warm-up failed: %v\n", perr)
-		}
-	}
 	if err := srv.serve(os.Stdin, os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -169,12 +161,8 @@ type config struct {
 	// served before it is treated as a miss (§6.5 "TTL 30s by default").
 	// Pinned versions are immutable and ignore this. Sourced from
 	// PODIUM_CACHE_RESOLUTION_TTL_SECONDS; 0 disables expiry.
-	resolutionTTL   time.Duration
-	materializeRoot string
-	// prefetchIDs lists artifact IDs to warm into the §6.5 cache at startup
-	// via the §7.6.2 batch-load endpoint. Sourced from PODIUM_PREFETCH (CSV)
-	// or the `prefetch` config key. Empty disables warm-up.
-	prefetchIDs      []string
+	resolutionTTL    time.Duration
+	materializeRoot  string
 	sessionToken     string
 	sessionTokenFile string
 	overlayPath      string
@@ -266,8 +254,6 @@ func loadConfig() (*config, error) {
 		cacheDir: os.Getenv("PODIUM_CACHE_DIR"),
 		// §6.5: always-revalidate (default) | offline-first | offline-only.
 		cacheMode: envDefault("PODIUM_CACHE_MODE", "always-revalidate"),
-		// §7.6.2: optional cache warm-up ID list (CSV).
-		prefetchIDs: splitCSV(os.Getenv("PODIUM_PREFETCH")),
 		// §6.5: resolution-cache TTL for `latest`, default 30s.
 		resolutionTTL:          parseTTLSeconds(envDefault("PODIUM_CACHE_RESOLUTION_TTL_SECONDS", "30")),
 		materializeRoot:        os.Getenv("PODIUM_MATERIALIZE_ROOT"),
@@ -551,7 +537,7 @@ type mcpServer struct {
 	// dispatches one call at a time (§6.8 host-owned lifecycle, single-threaded
 	// stdio loop), so a single field needs no synchronization; it is set around
 	// dispatchTool and is nil otherwise. reqCtx reads it with a Background
-	// fallback for the off-call paths (prefetch, resource reads).
+	// fallback for the off-call paths (resource reads).
 	activeCtx context.Context
 }
 
@@ -1393,11 +1379,13 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok && s.cache.has(hash) {
 			if freshHash, herr := s.headContentHash("/v1/load_artifact", args); herr == nil && freshHash == hash {
 				if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
-					if version == "" {
-						// Revalidated: restart the `latest` TTL window.
-						s.resolutions.RefreshLatest(id, now)
-					}
-					return s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
+					// Revalidated: restart the `latest` TTL window once the
+					// cached record passes verification.
+					return s.deliverLoadArtifact(*cached, deliverOpts{
+						harness:     harnessFromArgs(s.cfg.harness, args),
+						destination: destFromArgs(args),
+						resolution:  &resolutionWrite{ID: id, Version: version, Now: now, RefreshOnly: true},
+					})
 				}
 			}
 		}
@@ -1418,11 +1406,13 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	body, notModified, err := s.fetchJSONConditional("/v1/load_artifact", args, contentHashETag(condHash))
 	if err == nil && notModified {
 		if cached, cerr := s.loadArtifactFromCache(condHash, id); cerr == nil {
-			if version == "" {
-				// Revalidated: restart the `latest` TTL window.
-				s.resolutions.RefreshLatest(id, now)
-			}
-			return s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
+			// Revalidated: restart the `latest` TTL window once the cached
+			// record passes verification.
+			return s.deliverLoadArtifact(*cached, deliverOpts{
+				harness:     harnessFromArgs(s.cfg.harness, args),
+				destination: destFromArgs(args),
+				resolution:  &resolutionWrite{ID: id, Version: version, Now: now, RefreshOnly: true},
+			})
 		}
 		// The cache entry disappeared between the conditional request and the
 		// read; refetch unconditionally so the host still gets the artifact.
@@ -1476,21 +1466,15 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		// Either an error envelope or an empty result; pass through.
 		return jsonAny(body)
 	}
-	// Update the resolution cache so future reads know the (id, version) →
-	// content_hash mapping. A `latest` request records (id, "latest") → semver
-	// and (id, semver) → content_hash (§6.5); a pinned request records the
-	// version directly.
-	if version == "" {
-		s.resolutions.PutLatest(id, resp.Version, resp.ContentHash, now)
-	} else {
-		s.resolutions.PutVersion(id, version, resp.ContentHash, now)
-	}
-
+	// §6.5: deliverLoadArtifact records the (id, version) → content_hash
+	// resolution only after the response passes verification, so a refused
+	// response leaves the index unchanged.
 	return s.deliverLoadArtifact(resp, deliverOpts{
 		harness:         harnessFromArgs(s.cfg.harness, args),
 		destination:     destFromArgs(args),
 		refresh:         s.largeResourceRefresher(args),
 		manifestRefresh: s.manifestBodyRefresher(args),
+		resolution:      &resolutionWrite{ID: id, Version: version, Now: now},
 	})
 }
 
@@ -1552,6 +1536,58 @@ type deliverOpts struct {
 	// 403/expired body URL is replaced rather than retried unchanged (§6.6
 	// step 1). Set only on the live-fetch path; nil on cache/overlay paths.
 	manifestRefresh resourceRefresher
+	// resolution is the §6.5 resolution-index write deliverLoadArtifact makes
+	// once the record passes verification and the gates. The live path, the
+	// always-revalidate HEAD match, and the 304 path set it; the offline
+	// modes, the degraded-network fallback, and the overlay leave it nil.
+	resolution *resolutionWrite
+}
+
+// resolutionWrite describes one §6.5 resolution-index update. Version is the
+// requested version, empty for `latest`. RefreshOnly restarts an existing
+// `latest` entry's TTL window rather than recording a new resolution, which is
+// what a revalidated cache-served load does.
+type resolutionWrite struct {
+	ID          string
+	Version     string
+	Now         time.Time
+	RefreshOnly bool
+}
+
+// writeResolution applies w against resp, the verified record. A `latest`
+// request records (id, "latest") → semver and (id, semver) → content_hash; a
+// pinned request records the version directly (§6.5). A nil w writes nothing.
+func (s *mcpServer) writeResolution(w *resolutionWrite, resp loadArtifactResponse) {
+	switch {
+	case w == nil:
+	case w.RefreshOnly:
+		if w.Version == "" {
+			s.resolutions.RefreshLatest(w.ID, w.Now)
+		}
+	case w.Version == "":
+		s.resolutions.PutLatest(w.ID, resp.Version, resp.ContentHash, w.Now)
+	default:
+		s.resolutions.PutVersion(w.ID, w.Version, resp.ContentHash, w.Now)
+	}
+}
+
+// cacheVerifiedRecord writes a verified record to the §6.5 content cache: the
+// bucket-level bytes and SKILL.md keyed on the content hash, and the per-ID
+// delivery files a cache-served load re-verifies.
+func (s *mcpServer) cacheVerifiedRecord(resp loadArtifactResponse) error {
+	if err := s.cache.put(resp.ContentHash, resp.Frontmatter, resp.ManifestBody, resp.Resources); err != nil {
+		return err
+	}
+	if err := s.cache.putExtras(resp.ContentHash, cacheExtras{SkillRaw: resp.SkillRaw}); err != nil {
+		return err
+	}
+	return s.cache.putDelivery(resp.ContentHash, resp.ID, deliveryFiles{
+		Frontmatter:       resp.Frontmatter,
+		Body:              resp.ManifestBody,
+		DeliveryHash:      resp.DeliveryHash,
+		DeliverySignature: resp.DeliverySignature,
+		Sensitivity:       resp.Sensitivity,
+	})
 }
 
 // destFromArgs returns the per-call materialization destination from a
@@ -1593,16 +1629,17 @@ func absMaterializeRoot(root string) string {
 // cache-served paths share it, so the verification and the §4.4.1 gates run
 // uniformly regardless of cache mode.
 //
-// The order is normative. verifyServedArtifact runs first, so the §4.7.9
-// signature policy and the §6.6 step-2 content-hash recomputation pass before
-// the §8.2 read event, the §4.4.1 sandbox and runtime gates, the cache, or the
-// §6.7 adapter read any manifest content. Those consumers read frontmatter
-// that nothing binds to the served digest until the verification has run, and
-// the read event applies the manifest's audit_redact directive from those
-// bytes. A load the verification refuses therefore records no local
-// artifact.loaded event, while a load a §4.4.1 gate refuses still records one.
+// The order is normative. verifyServedArtifact runs first, so the §6.6 step-2
+// delivery-hash recomputation and then the §4.7.9 signature policy pass before
+// the §8.2 read event, the §4.4.1 sandbox and runtime gates, the cache, the
+// §6.5 resolution index, or the §6.7 adapter read any manifest content. Those
+// consumers read frontmatter that nothing binds to the served digest until the
+// verification has run, and the read event applies the manifest's audit_redact
+// directive from those bytes. A load the verification refuses therefore
+// records no local artifact.loaded event and writes nothing, while a load a
+// §4.4.1 gate refuses still records one.
 //
-// Spec: §6.6 step 2, §4.7.9
+// Spec: §6.6 step 2, §4.7.9, §4.7.10, §6.5
 func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliverOpts) any {
 	var o deliverOpts
 	if len(opts) > 0 {
@@ -1627,21 +1664,14 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		return errorResult(err.Error())
 	}
 
-	// Cache the canonical bytes (content cache is forever-immutable
-	// per §6.5). Persist skill_raw / raw_frontmatter alongside so a
-	// cache-served skill or extends-merged manifest reproduces the exact
-	// bytes the §6.6 step 2 content hash was computed over.
-	if err := s.cache.put(resp.ContentHash, resp.Frontmatter, resp.ManifestBody, resp.Resources); err != nil {
+	// Cache the verified record (content cache is forever-immutable per
+	// §6.5), then record the resolution. Every write happens here, after the
+	// delivery check, the §4.7.9 policy, and the §4.4.1 gates, so no cache
+	// path persists a value the verification did not pass.
+	if err := s.cacheVerifiedRecord(resp); err != nil {
 		return errorResult("cache: " + err.Error())
 	}
-	if err := s.cache.putExtras(resp.ContentHash, cacheExtras{
-		SkillRaw:       resp.SkillRaw,
-		RawFrontmatter: resp.RawFrontmatter,
-		Sensitivity:    resp.Sensitivity,
-		Signature:      resp.Signature,
-	}); err != nil {
-		return errorResult("cache: " + err.Error())
-	}
+	s.writeResolution(o.resolution, resp)
 
 	// Materialize to host filesystem when a destination is configured,
 	// either per call (§6.2 / §6.6) or via PODIUM_MATERIALIZE_ROOT. The
@@ -1750,15 +1780,17 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 // deliverLoadArtifact and the §5.0 resources mirror both call it, so neither
 // path can serve bytes the other would refuse.
 //
-// Reconstitution comes first because the recomputation hashes every bundled
-// resource: a presigned manifest body and each large resource reach resp only
-// through their fetch, and a recomputation without them refuses every
-// artifact that carries one. The signature policy runs before the
-// recomputation, so a record whose signature fails reports the signature code
-// whatever its bytes, and the recomputation runs only over a record the
-// policy passed.
+// Reconstitution comes first because the delivery record frames the served
+// manifest document and every bundled resource: a presigned manifest body and
+// each large resource reach resp only through their fetch. The delivery-hash
+// comparison then runs before the signature policy. The delivery signature
+// attests delivery_hash, so verifying it says nothing about bytes that do not
+// reproduce that hash, and running the comparison first makes a record whose
+// bytes were altered report materialize.content_hash_mismatch whatever its
+// signature, under every policy. A record whose bytes reproduce its hash then
+// reports the signature outcome.
 //
-// Spec: §6.6 step 2, §4.7.9, §5.0
+// Spec: §6.6 step 2, §4.7.9, §4.7.10, §5.0
 func (s *mcpServer) verifyServedArtifact(resp *loadArtifactResponse, o deliverOpts) error {
 	if err := s.fetchManifestBody(resp, o.manifestRefresh); err != nil {
 		return fmt.Errorf("materialize.fetch_failed: %w", err)
@@ -1768,6 +1800,9 @@ func (s *mcpServer) verifyServedArtifact(resp *loadArtifactResponse, o deliverOp
 	}
 	if err := s.fetchLargeResources(resp, o.refresh); err != nil {
 		return fmt.Errorf("materialize.fetch_failed: %w", err)
+	}
+	if err := verifyDeliveryHash(*resp); err != nil {
+		return err
 	}
 	if err := s.enforceSignaturePolicy(*resp); err != nil {
 		// §6.10: a missing required signature and a signature that does not
@@ -1779,7 +1814,7 @@ func (s *mcpServer) verifyServedArtifact(resp *loadArtifactResponse, o deliverOp
 		}
 		return fmt.Errorf("materialize.signature_invalid: %w", err)
 	}
-	return s.verifyContentHash(*resp)
+	return nil
 }
 
 // decodeInlineResources decodes base64-encoded inline resources in place when
@@ -1803,44 +1838,43 @@ func decodeInlineResources(resp *loadArtifactResponse) error {
 	return nil
 }
 
-// verifyContentHash recomputes the canonical content hash over the served
-// manifest bytes and bundled resources and compares it to resp.ContentHash
-// (§4.7.6 / §6.6 step 2). It binds the delivered artifact bytes, the verbatim
-// SKILL.md, and the inline resources to the content_hash so a registry response
-// (or a non-TLS hop) that tampered with the bytes while keeping a consistent
-// (content_hash, signature) pair is rejected before materialization. For
-// sub-threshold artifacts that carry no signature this is the only integrity
-// gate the spec defines, so step 2 runs the match for every artifact type.
+// verifyDeliveryHash recomputes the §4.7.10 delivery hash over the record the
+// consumer received and compares it to resp.DeliveryHash. The record is built
+// from the served fields themselves: the served frontmatter (the merged
+// document for a child declaring extends:), the served manifest body, the
+// served SKILL.md, and the top-level sensitivity field rather than any value
+// parsed from the frontmatter, so every byte the consumer returns or
+// materializes is covered. A large resource contributes the content hash its
+// link carries, which fetchLargeResources already checked the fetched bytes
+// against; an inline resource contributes the digest of its body. A response
+// that carries no delivery hash fails, whatever the signature policy.
 //
-// The recomputation reproduces the registry's ingest canonicalization through
-// the shared version.CanonicalContentHash, which composes the original
-// ARTIFACT.md bytes, the SKILL.md slot, and each bundled resource in
-// sorted-path order.
-//   - For a skill the SKILL.md slot carries the verbatim SKILL.md the registry
-//     ships in skill_raw; the content_hash covers those bytes, which the prose
-//     body alone could not reproduce.
-//   - For an extends-merged manifest (resp.ManifestMerged) the served
-//     frontmatter is a re-serialization with the hidden parent stripped (§4.6),
-//     so the recomputation reads the leaf child's original ARTIFACT.md bytes
-//     from raw_frontmatter, which is what the hash was computed over.
-func (s *mcpServer) verifyContentHash(resp loadArtifactResponse) error {
-	if resp.ContentHash == "" {
-		return nil
+// Spec: §4.7.10, §6.6 step 2
+func verifyDeliveryHash(resp loadArtifactResponse) error {
+	if resp.DeliveryHash == "" {
+		return errors.New("materialize.content_hash_mismatch: the response carries no delivery_hash")
 	}
-	// Slot 0: the original ARTIFACT.md bytes the hash was computed over. For a
-	// merged manifest that is the pre-merge raw_frontmatter, not the served
-	// (re-serialized) frontmatter.
-	artifactBytes := []byte(resp.Frontmatter)
-	if resp.ManifestMerged {
-		artifactBytes = []byte(resp.RawFrontmatter)
+	rec := version.DeliveryRecord{
+		ID:           resp.ID,
+		Version:      resp.Version,
+		Type:         resp.Type,
+		ContentHash:  resp.ContentHash,
+		Sensitivity:  resp.Sensitivity,
+		Frontmatter:  resp.Frontmatter,
+		ManifestBody: resp.ManifestBody,
+		SkillRaw:     resp.SkillRaw,
+		Resources:    make(map[string]string, len(resp.Resources)),
 	}
-	resources := make(map[string][]byte, len(resp.Resources))
-	for k, v := range resp.Resources {
-		resources[k] = []byte(v)
+	for path, body := range resp.Resources {
+		if link, ok := resp.LargeResources[path]; ok {
+			rec.Resources[path] = link.ContentHash
+			continue
+		}
+		sum := sha256.Sum256([]byte(body))
+		rec.Resources[path] = "sha256:" + hex.EncodeToString(sum[:])
 	}
-	got := "sha256:" + version.CanonicalContentHash(artifactBytes, []byte(resp.SkillRaw), resources)
-	if got != resp.ContentHash {
-		return fmt.Errorf("materialize.content_hash_mismatch: recomputed %s does not match served %s", got, resp.ContentHash)
+	if got := version.DeliveryHash(rec); got != resp.DeliveryHash {
+		return fmt.Errorf("materialize.content_hash_mismatch: recomputed delivery hash %s does not match served %s", got, resp.DeliveryHash)
 	}
 	return nil
 }
@@ -2022,7 +2056,7 @@ type loadArtifactResponse struct {
 	Resources   map[string]string `json:"resources,omitempty"`
 	// ResourcesB64 mirrors the registry's resources_base64 flag: when true,
 	// the inline Resources values are base64-encoded and must be decoded to
-	// raw bytes before the content-hash check and materialization.
+	// raw bytes before the delivery-hash check and materialization.
 	ResourcesB64   bool                         `json:"resources_base64,omitempty"`
 	LargeResources map[string]largeResourceLink `json:"large_resources,omitempty"`
 	// ManifestBodyURL delivers the canonical manifest document via a
@@ -2030,20 +2064,14 @@ type loadArtifactResponse struct {
 	// (§6.6). When set, the inline ManifestBody and the canonical-document
 	// field (Frontmatter, or SkillRaw for a skill) arrive empty;
 	// deliverLoadArtifact fetches the URL in §6.6 step 1 and reconstitutes
-	// them before any policy gate or the content-hash check. Nil for a
+	// them before any policy gate or the delivery-hash check. Nil for a
 	// below-cutoff body delivered inline.
 	ManifestBodyURL *largeResourceLink `json:"manifest_body_url,omitempty"`
-	Signature       string             `json:"signature,omitempty"`
-	// ManifestMerged signals that the served frontmatter is an extends-merged
-	// re-serialization with the hidden parent stripped (§4.6) rather than the
-	// original bytes the content_hash was computed over. The consumer
-	// recomputes the §6.6 step 2 content hash over RawFrontmatter for such
-	// manifests instead of over the served (merged) frontmatter.
-	ManifestMerged bool `json:"manifest_merged,omitempty"`
-	// RawFrontmatter is the leaf child's original pre-merge ARTIFACT.md bytes,
-	// delivered when ManifestMerged is set so the bridge reproduces the §4.7.6
-	// content hash for a merged manifest. Empty for a non-merged response.
-	RawFrontmatter string `json:"raw_frontmatter,omitempty"`
+	// DeliveryHash is the registry's §4.7.10 digest over the record this
+	// response delivers, which verifyDeliveryHash recomputes. DeliverySignature
+	// is the registry's signature over it, which the §4.7.9 policy governs.
+	DeliveryHash      string `json:"delivery_hash"`
+	DeliverySignature string `json:"delivery_signature,omitempty"`
 }
 
 // largeResourceLink mirrors the registry's per-resource link. The
@@ -2059,15 +2087,16 @@ type largeResourceLink struct {
 }
 
 // enforceSignaturePolicy applies the configured §4.7.9 verification
-// policy against the response with the verifier loadConfig resolved. It
+// policy to the response's §4.7.10 delivery pair with the verifier loadConfig
+// resolved. It
 // constructs nothing: the material was resolved once at startup. Returns nil
 // when the policy is satisfied and the verification error otherwise.
 func (s *mcpServer) enforceSignaturePolicy(resp loadArtifactResponse) error {
 	return sign.EnforceVerification(context.Background(),
 		s.cfg.verifyPolicy,
 		s.cfg.verifier,
-		resp.ContentHash,
-		resp.Signature,
+		resp.DeliveryHash,
+		resp.DeliverySignature,
 	)
 }
 
@@ -2499,108 +2528,6 @@ func (s *mcpServer) headContentHash(path string, args map[string]any) (string, e
 	return resp.Header.Get("X-Podium-Content-Hash"), nil
 }
 
-// batchLoadEnvelope mirrors the registry's §7.6.2 per-item batch response,
-// decoding only the fields prefetch needs to warm the cache. A bundled
-// resource travels inline when the registry holds it inline on the manifest
-// record and as a presigned reference otherwise; prefetch decodes neither and
-// warms the manifest body and resolution rather than resource bytes.
-type batchLoadEnvelope struct {
-	ID           string `json:"id"`
-	Status       string `json:"status"`
-	Version      string `json:"version"`
-	ContentHash  string `json:"content_hash"`
-	ManifestBody string `json:"manifest_body"`
-	Frontmatter  string `json:"frontmatter"`
-	// SkillRaw is the verbatim SKILL.md for a type: skill artifact. The
-	// §7.6.2 batch endpoint emits it (§4.3.4); prefetch persists it so a
-	// later cache-served load of a warmed skill reproduces the bytes its
-	// content hash covers rather than failing content_hash_mismatch.
-	SkillRaw string `json:"skill_raw"`
-}
-
-// prefetch warms the §6.5 content and resolution caches from the §7.6.2
-// batch-load endpoint. spec: §7.6.2 — "The MCP server uses this endpoint
-// internally for cache warm-up when configured to prefetch." It POSTs the
-// configured IDs in batches of the §7.6.2 cap; for each ok item it stores the
-// manifest in the content cache and records the (id, "latest") -> version ->
-// content_hash resolution so a later load_artifact HEAD-revalidates and serves
-// from cache instead of re-downloading the manifest.
-func (s *mcpServer) prefetch(ids []string) error {
-	const batchCap = 50 // §7.6.2 hard cap
-	for start := 0; start < len(ids); start += batchCap {
-		end := start + batchCap
-		if end > len(ids) {
-			end = len(ids)
-		}
-		if err := s.prefetchChunk(ids[start:end]); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// prefetchChunk warms one ≤50-ID batch. The request is bounded by a context
-// deadline so an unreachable registry cannot block bridge startup.
-func (s *mcpServer) prefetchChunk(chunk []string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	reqBody, err := json.Marshal(map[string]any{"ids": chunk, "session_id": s.sessionID})
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		s.cfg.registry+"/v1/artifacts:batchLoad", bytes.NewReader(reqBody))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	// §6.3: warm-up runs as the bridge's own identity, like every other call.
-	if tok, terr := s.bearerToken(); terr == nil && tok != "" {
-		req.Header.Set("Authorization", "Bearer "+tok)
-	}
-	if s.cfg.tenantID != "" {
-		req.Header.Set("X-Podium-Tenant", s.cfg.tenantID)
-	}
-	client := s.http
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("batchLoad: status %d", resp.StatusCode)
-	}
-	var envs []batchLoadEnvelope
-	if err := json.Unmarshal(raw, &envs); err != nil {
-		return err
-	}
-	now := time.Now()
-	for _, e := range envs {
-		if e.Status != "ok" || e.ContentHash == "" {
-			continue
-		}
-		_ = s.cache.put(e.ContentHash, e.Frontmatter, e.ManifestBody, nil)
-		// The §7.6.2 batch envelope carries skill_raw (so a warmed skill keeps
-		// its content hash) but not sensitivity/signature, so a prefetched entry
-		// records neither. A later cache-served load of such an entry that needs
-		// signature verification re-fetches rather than serving the unverified
-		// warmed bytes (see loadArtifactFromCache + always-revalidate).
-		_ = s.cache.putExtras(e.ContentHash, cacheExtras{SkillRaw: e.SkillRaw})
-		// (id, "latest") -> version -> content_hash so always-revalidate finds
-		// the cached content on the next load.
-		s.resolutions.PutLatest(e.ID, e.Version, e.ContentHash, now)
-	}
-	s.recordSuccess(now)
-	return nil
-}
-
 // proxyGet forwards a GET meta-tool call to the registry. spec: §12 — the
 // "Registry as a single point of failure for hosts" mitigation states that a
 // fresh load_domain / search_domains / search_artifacts "returns an explicit
@@ -2762,51 +2689,78 @@ func (c *contentCache) put(hash, frontmatter, body string, resources map[string]
 	return nil
 }
 
-// cacheExtras is the auxiliary per-artifact content a cache-served load must
-// reproduce so the §6.6 verification + content-hash gates behave identically to
-// a live fetch. The plain frontmatter/body the base put writes is not enough.
+// cacheExtras is the bucket-level content beside the base frontmatter and
+// body that a cache-served load needs. It is keyed on the content hash, which
+// the authored package determines, so two IDs sharing a bucket share it.
 type cacheExtras struct {
-	// SkillRaw is the verbatim SKILL.md for a skill, whose bytes the registry
-	// folds into the canonical content hash (§4.3.4). Without it the §6.6 step 2
-	// recompute hashes ARTIFACT.md with an empty slot 1 and fails.
+	// SkillRaw is the verbatim SKILL.md for a skill. The delivery record frames
+	// it, and materialization writes it rather than a synthesized SKILL.md.
 	SkillRaw string
-	// RawFrontmatter is the leaf child's pre-merge ARTIFACT.md for an
-	// extends-merged manifest (§4.7.6), which the content hash covers in place
-	// of the re-serialized frontmatter.
-	RawFrontmatter string
-	// Signature is what the §4.7.9 policy verifies. It is not an input to the
-	// content hash, but a cache-served artifact that dropped its envelope would
-	// fail the always policy a live fetch passes, so persisting it makes
-	// verification run uniformly whether the bytes came from the registry or
-	// the cache. Sensitivity is persisted because the response serves it; the
-	// policy reads no sensitivity.
-	Sensitivity string
-	Signature   string
 }
 
 // putExtras persists the cacheExtras side files next to the base
-// frontmatter/body. Each file is written only when its field is non-empty, so a
-// non-skill, non-merged, low-sensitivity, unsigned artifact leaves the bucket
-// exactly as the base put left it. Call after put, which created the bucket.
+// frontmatter/body. Each file is written only when its field is non-empty.
+// Call after put, which created the bucket.
 func (c *contentCache) putExtras(hash string, ex cacheExtras) error {
-	if c.dir == "" || hash == "" {
+	if c.dir == "" || hash == "" || ex.SkillRaw == "" {
 		return nil
 	}
 	bucket := filepath.Join(c.dir, sanitizeHash(hash))
+	return os.WriteFile(filepath.Join(bucket, "skill_raw"), []byte(ex.SkillRaw), 0o644)
+}
+
+// deliveryFiles is the per-ID part of a verified §4.7.10 delivery record: the
+// served document and body, the delivery pair, and the served sensitivity.
+// Two IDs whose authored packages are byte-identical share one content-hash
+// bucket, and their served documents differ in the framed ID and, when they
+// pinned different parents, in the merged document itself, so these files
+// live under a per-ID directory rather than beside the bucket-level bytes.
+type deliveryFiles struct {
+	Frontmatter       string
+	Body              string
+	DeliveryHash      string
+	DeliverySignature string
+	Sensitivity       string
+}
+
+// putDelivery writes d under delivery/<deliverySegment(id)>/ in the bucket
+// for hash, with an id file holding the canonical ID verbatim so a reader can
+// refuse a directory another ID's record occupies. The signature and
+// sensitivity files are written even when empty. Call only with a record that
+// passed verification.
+func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
+	if c.dir == "" || hash == "" {
+		return nil
+	}
+	dir := filepath.Join(c.dir, sanitizeHash(hash), "delivery", deliverySegment(id))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
 	for name, content := range map[string]string{
-		"skill_raw":       ex.SkillRaw,
-		"raw_frontmatter": ex.RawFrontmatter,
-		"sensitivity":     ex.Sensitivity,
-		"signature":       ex.Signature,
+		"id":                 id,
+		"frontmatter":        d.Frontmatter,
+		"body":               d.Body,
+		"delivery_hash":      d.DeliveryHash,
+		"delivery_signature": d.DeliverySignature,
+		"sensitivity":        d.Sensitivity,
 	} {
-		if content == "" {
-			continue
-		}
-		if err := os.WriteFile(filepath.Join(bucket, name), []byte(content), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// deliverySegment maps a canonical artifact ID to the directory name its
+// delivery files live under: the lowercase hex SHA-256 of the ID's bytes. A
+// canonical ID contains "/" and may contain "_", so a separator-replacing
+// mapping is not injective, and an encoding that keeps the ID's bytes in one
+// path component exceeds the 255-byte component limit for a long ID. The
+// digest is one fixed-length component for every input, and the id file
+// putDelivery writes resolves the residual collision.
+func deliverySegment(id string) string {
+	sum := sha256.Sum256([]byte(id))
+	return hex.EncodeToString(sum[:])
 }
 
 // has reports whether the cache already holds the content_hash. Used

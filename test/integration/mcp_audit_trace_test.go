@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/version"
 )
 
@@ -36,16 +37,16 @@ func TestPodiumMCP_LocalAuditSharesTraceID(t *testing.T) {
 			mu.Unlock()
 			// A non-empty id drives the bridge into its delivery path. The
 			// bridge emits the artifact.loaded event only after the §6.6
-			// step-2 verification passes, so the stub serves a content_hash
-			// the frontmatter reproduces and the load reaches the event this
-			// test inspects.
+			// step-2 delivery verification passes, so the stub serves a valid
+			// §4.7.10 delivery record and the load reaches the event this test
+			// inspects.
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(testharness.SealDelivery(map[string]any{
 				"id":           "finance/x",
 				"version":      "1.0.0",
 				"content_hash": "sha256:" + version.CanonicalContentHash([]byte(traceFM), nil, nil),
 				"frontmatter":  traceFM,
-			})
+			}))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)

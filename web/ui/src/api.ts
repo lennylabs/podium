@@ -291,11 +291,15 @@ export interface LoadArtifactResponse {
   resources_base64?: boolean;
   large_resources?: Record<string, LargeResourceLink>;
   manifest_body_url?: LargeResourceLink;
-  /** raw_frontmatter carries the pre-merge manifest document on a response
-   * whose frontmatter was re-serialized with a hidden parent stripped
-   * (§4.6). It is the only place the artifact's own `extends:` reference
-   * survives such a response. */
-  raw_frontmatter?: string;
+  /** extends_pin is the `<id>@<version>` parent pin the artifact resolved at
+   * ingest. The registry serves it only to a caller who can see the parent
+   * record (§4.6), so its absence does not mean the artifact extends
+   * nothing. */
+  extends_pin?: string;
+  /** delivery_hash and delivery_signature are the §4.7.10 attestation of the
+   * record this response delivers. */
+  delivery_hash?: string;
+  delivery_signature?: string;
   /** deprecated, replaced_by, and deprecation_warning carry the §4.7.4
    * lifecycle signal. The registry keeps serving a retired artifact and
    * reports the state alongside the bytes, and it resolves the state through

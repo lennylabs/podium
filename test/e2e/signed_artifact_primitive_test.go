@@ -1,12 +1,13 @@
 package e2e
 
-// Proof that the signed-artifact ingest and tamper fixture
-// drives the real podium-mcp verifier path: a validly-signed medium-sensitivity
-// artifact materializes, a signed-then-tampered blob is refused with the
-// signature error, the content-hash integrity gate still fires for a tampered
-// body, and key pinning rejects a signature from a rotated key.
+// Proof that the signed-artifact fixture drives the real podium-mcp verifier
+// path: a validly-signed medium-sensitivity artifact materializes, a record
+// whose served bytes were altered is refused by the delivery-hash comparison
+// whatever its signature, a delivery signature over another value is refused
+// with the signature error, and key pinning rejects a signature from a rotated
+// key.
 //
-// Spec: §4.7.9, §6.2, §6.6 step 2.
+// Spec: §4.7.9, §4.7.10, §6.2, §6.6 step 2.
 
 import (
 	"strings"
@@ -23,11 +24,11 @@ func loadSignedArtifact(t *testing.T, env []string, id string) (string, map[stri
 	return errStr, result
 }
 
-// TestSignedArtifact_ValidSignatureLoads proves the happy path: an artifact
-// signed by the offline keypair, served with its matching content hash, loads
-// under the enforcing always policy with no verification error. The
-// signature envelope is the real registry-managed envelope, and the consumer
-// verifies it with the offline public key wired through
+// TestSignedArtifact_ValidSignatureLoads proves the happy path: a record whose
+// delivery hash the offline keypair signed, served with that delivery pair and
+// no signature field, loads under the enforcing always policy with no
+// verification error. The envelope is the real registry-managed envelope, and
+// the consumer verifies it with the offline public key wired through
 // PODIUM_SIGNATURE_VERIFY_KEY.
 func TestSignedArtifact_ValidSignatureLoads(t *testing.T) {
 	t.Parallel()
@@ -47,34 +48,60 @@ func TestSignedArtifact_ValidSignatureLoads(t *testing.T) {
 }
 
 // TestSignedArtifact_TamperedBlobRefused proves the signed-then-tampered case:
-// after a valid signature is established, rewriting the served content hash to a
-// value the signature does not cover makes the default-on verifier block the
-// load with materialize.signature_invalid. The signature gate runs before the
-// content-hash recompute, so the failure surfaces as the signature error.
+// after a valid record is established, rewriting the served content hash, a
+// framed field, makes the default-on verifier block the load with
+// materialize.content_hash_mismatch. The delivery-hash comparison runs before
+// the signature policy, so an altered record reports the comparison's code
+// whatever its signature. A delivery signature over another value, on a record
+// that is otherwise intact, is refused with materialize.signature_invalid.
 func TestSignedArtifact_TamperedBlobRefused(t *testing.T) {
 	t.Parallel()
-	f := newSignedArtifactFixture(t, signedArtifactSpec{})
-	env := f.Env(t, "always")
+	for name, tc := range map[string]struct {
+		tamper func(*signedArtifactFixture)
+		want   string
+	}{
+		"content hash":       {(*signedArtifactFixture).TamperContentHash, "materialize.content_hash_mismatch"},
+		"delivery signature": {(*signedArtifactFixture).TamperDeliverySignature, "materialize.signature_invalid"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			f := newSignedArtifactFixture(t, signedArtifactSpec{})
+			env := f.Env(t, "always")
 
-	// Untampered load verifies first, establishing the valid baseline.
-	if errStr, result := loadSignedArtifact(t, env, f.ID()); errStr != "" {
-		t.Fatalf("baseline signed load should pass, got error: %s\nresult=%v", errStr, result)
+			// Untampered load verifies first, establishing the valid baseline.
+			if errStr, result := loadSignedArtifact(t, env, f.ID()); errStr != "" {
+				t.Fatalf("baseline signed load should pass, got error: %s\nresult=%v", errStr, result)
+			}
+
+			tc.tamper(f)
+			errStr, result := loadSignedArtifact(t, env, f.ID())
+			if !strings.Contains(errStr, tc.want) {
+				t.Fatalf("tampered record must be refused with %s, got: %q\nresult=%v", tc.want, errStr, result)
+			}
+		})
 	}
+}
 
-	// Tamper the stored bytes (the served content hash) and load again.
-	f.TamperContentHash()
-	errStr, result := loadSignedArtifact(t, env, f.ID())
-	if !strings.Contains(errStr, "materialize.signature_invalid") {
-		t.Fatalf("tampered blob must be refused with materialize.signature_invalid, got: %q\nresult=%v", errStr, result)
+// TestSignedArtifact_ForgedManifestBodyRefused proves the delivery record
+// covers the manifest body the consumer returns to the agent: changing only
+// the served manifest_body, with the frontmatter and the delivery pair intact,
+// is refused with materialize.content_hash_mismatch under always.
+//
+// Spec: §6.6
+func TestSignedArtifact_ForgedManifestBodyRefused(t *testing.T) {
+	t.Parallel()
+	f := newSignedArtifactFixture(t, signedArtifactSpec{})
+	f.ForgeManifestBody()
+	errStr, result := loadSignedArtifact(t, f.Env(t, "always"), f.ID())
+	if !strings.Contains(errStr, "materialize.content_hash_mismatch") {
+		t.Fatalf("a forged manifest body must be refused with materialize.content_hash_mismatch, got: %q\nresult=%v", errStr, result)
 	}
 }
 
 // TestSignedArtifact_TamperedBodyHitsContentHashGate is the integrity-gate
-// complement: tampering the served body while leaving the signed content hash
-// and envelope intact passes the signature gate (the envelope still matches the
-// unchanged hash) but trips the §6.6 step 2 recompute with
-// materialize.content_hash_mismatch. This confirms the fixture exercises both
-// halves of the verifier path.
+// complement: tampering the served body while leaving the delivery pair intact
+// trips the §6.6 step 2 delivery-hash comparison with
+// materialize.content_hash_mismatch.
 func TestSignedArtifact_TamperedBodyHitsContentHashGate(t *testing.T) {
 	t.Parallel()
 	f := newSignedArtifactFixture(t, signedArtifactSpec{})
@@ -92,10 +119,10 @@ func TestSignedArtifact_TamperedBodyHitsContentHashGate(t *testing.T) {
 }
 
 // TestSignedArtifact_LowSensitivityStillVerifiesAPresentSignature proves that
-// a served signature is verified under any policy above never, whatever the
-// artifact's sensitivity: an untampered low-sensitivity artifact loads, and one
-// whose served attestation no longer matches its signature is refused with
-// materialize.signature_invalid.
+// a served delivery signature is verified under any policy above never,
+// whatever the artifact's sensitivity: an untampered low-sensitivity artifact
+// loads, and one whose delivery signature was made over another value is
+// refused with materialize.signature_invalid.
 //
 // Spec: §4.7.9
 func TestSignedArtifact_LowSensitivityStillVerifiesAPresentSignature(t *testing.T) {
@@ -107,7 +134,7 @@ func TestSignedArtifact_LowSensitivityStillVerifiesAPresentSignature(t *testing.
 		t.Fatalf("untampered low-sensitivity artifact should load, got error: %s\nresult=%v", errStr, result)
 	}
 
-	f.TamperContentHash()
+	f.TamperDeliverySignature()
 	errStr, result := loadSignedArtifact(t, env, f.ID())
 	if !strings.Contains(errStr, "materialize.signature_invalid") {
 		t.Fatalf("a low-sensitivity artifact whose signature does not validate must be refused, got: %q\nresult=%v", errStr, result)
@@ -148,7 +175,7 @@ func TestSignedArtifact_ResourcesReadVerifies(t *testing.T) {
 		want   string
 	}{
 		{name: "untouched"},
-		{name: "signature invalid", tamper: (*signedArtifactFixture).TamperContentHash, want: "materialize.signature_invalid"},
+		{name: "signature invalid", tamper: (*signedArtifactFixture).TamperDeliverySignature, want: "materialize.signature_invalid"},
 		{name: "body tampered", tamper: (*signedArtifactFixture).TamperBody, want: "materialize.content_hash_mismatch"},
 		{name: "signature stripped", tamper: (*signedArtifactFixture).StripSignature, want: "materialize.signature_missing"},
 	}

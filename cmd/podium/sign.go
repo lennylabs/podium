@@ -42,11 +42,11 @@ func signCmd(args []string) int {
 			fmt.Fprintln(os.Stderr, "error: --registry is required to resolve <artifact>")
 			return 2
 		}
-		h, _, code := resolveArtifactSignature(*registry, artifact)
+		served, code := resolveArtifactSignature(*registry, artifact)
 		if code != 0 {
 			return code
 		}
-		hash = h
+		hash = served.ContentHash
 	}
 	if hash == "" {
 		fmt.Fprintln(os.Stderr, "error: provide <artifact> or --content-hash sha256:<hex>")
@@ -67,20 +67,23 @@ func signCmd(args []string) int {
 	return 0
 }
 
-// verifyCmd verifies an artifact's stored signature against its
-// canonical content hash. spec §4.7.9: `podium verify <artifact>` for
-// ad-hoc verification. The lower-level `--content-hash` + `--signature`
-// form verifies an explicit pair without resolving an artifact. Exits 0
-// on a valid signature, 1 on mismatch or other error.
+// verifyCmd verifies a signature envelope. spec §4.7.9: `podium verify
+// <artifact>` performs ad-hoc verification of the §4.7.10 delivery signature
+// the registry serves for the artifact over the delivery hash it serves. With
+// an explicit --signature, the <artifact> form verifies that envelope over the
+// artifact's content hash instead, so `podium verify <artifact> --signature
+// "$(podium sign <artifact>)"` round-trips. The lower-level `--content-hash` +
+// `--signature` form verifies an explicit pair without resolving an artifact.
+// Exits 0 on a valid signature, 1 on mismatch or other error.
 //
-//	podium verify <artifact> [--registry URL] [--provider ...]
+//	podium verify <artifact> [--signature <envelope>] [--registry URL] [--provider ...]
 //	podium verify --content-hash sha256:... --signature <envelope> [--provider ...]
 func verifyCmd(args []string) int {
 	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
-	setUsage(fs, "Verify an artifact's stored signature (or an explicit content hash + signature).")
+	setUsage(fs, "Verify an artifact's delivery signature (or an explicit content hash + signature).")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL (resolves the <artifact> form)")
 	contentHash := fs.String("content-hash", "", "sha256:<hex> content hash (lower-level alternative to <artifact>)")
-	signature := fs.String("signature", "", "signature envelope (lower-level; pairs with --content-hash)")
+	signature := fs.String("signature", "", "signature envelope; with <artifact>, verified over its content hash in place of the delivery signature")
 	providerName := fs.String("provider", envDefault("PODIUM_SIGNATURE_PROVIDER", "registry-managed"), "noop|registry-managed|sigstore-keyless")
 	fs.SetOutput(os.Stderr)
 	artifact, _, err := parsePositional(fs, args)
@@ -99,19 +102,12 @@ func verifyCmd(args []string) int {
 			fmt.Fprintln(os.Stderr, "error: --registry is required to resolve <artifact>")
 			return 2
 		}
-		h, storedSig, code := resolveArtifactSignature(*registry, artifact)
+		served, code := resolveArtifactSignature(*registry, artifact)
 		if code != 0 {
 			return code
 		}
-		hash = h
-		// An explicit --signature overrides; otherwise verify the envelope
-		// the registry stored at ingest.
-		if sig == "" {
-			sig = storedSig
-		}
-		if sig == "" {
-			fmt.Fprintf(os.Stderr, "verify failed: artifact %s has no stored signature; ingest with a signer or pass --signature\n", artifact)
-			return 1
+		if hash, sig, code = verifiedPair(artifact, served, sig); code != 0 {
+			return code
 		}
 	}
 	if hash == "" || sig == "" {
@@ -132,31 +128,60 @@ func verifyCmd(args []string) int {
 	return 0
 }
 
-// resolveArtifactSignature fetches an artifact's canonical content hash
-// and stored signature envelope via the registry's load_artifact path.
-// spec: §4.7.9 — the `<artifact>` form of `podium sign` / `podium verify`
-// resolves the artifact rather than operating on a raw hash. A non-zero
-// code is the process exit to return; the caller stops on a non-zero.
-func resolveArtifactSignature(registry, artifactID string) (hash, signature string, code int) {
+// verifiedPair selects the (hash, signature) pair the <artifact> form of
+// verifyCmd checks. An explicit envelope is checked over the content hash,
+// which is what `podium sign <artifact>` signs; only the registry mints a
+// signature over a per-response delivery hash. Without one, the served
+// delivery pair is checked, and a response missing either half is refused
+// here rather than in resolveArtifactSignature, because `podium sign` reads
+// only the content hash.
+//
+// Spec: §4.7.9, §4.7.10.
+func verifiedPair(artifact string, served servedAttestation, explicitSig string) (hash, sig string, code int) {
+	if explicitSig != "" {
+		return served.ContentHash, explicitSig, 0
+	}
+	if served.DeliveryHash == "" {
+		fmt.Fprintf(os.Stderr, "verify failed: resolve %s: registry returned no delivery hash\n", artifact)
+		return "", "", 1
+	}
+	if served.DeliverySignature == "" {
+		fmt.Fprintf(os.Stderr, "verify failed: artifact %s has no delivery signature; the registry runs without a signing key\n", artifact)
+		return "", "", 1
+	}
+	return served.DeliveryHash, served.DeliverySignature, 0
+}
+
+// servedAttestation is the integrity material a load_artifact response
+// carries: the §4.7.6 content hash and the §4.7.10 delivery pair.
+type servedAttestation struct {
+	ContentHash       string `json:"content_hash"`
+	DeliveryHash      string `json:"delivery_hash"`
+	DeliverySignature string `json:"delivery_signature"`
+}
+
+// resolveArtifactSignature fetches an artifact's content hash and delivery
+// pair via the registry's load_artifact path. spec: §4.7.9 — the `<artifact>`
+// form of `podium sign` / `podium verify` resolves the artifact rather than
+// operating on a raw hash. A non-zero code is the process exit to return; the
+// caller stops on a non-zero.
+func resolveArtifactSignature(registry, artifactID string) (servedAttestation, int) {
 	endpoint := registry + "/v1/load_artifact?id=" + url.QueryEscape(artifactID)
 	out, status := doJSON(endpoint, "GET", nil)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "resolve %s failed: HTTP %d\n%s\n", artifactID, status, out)
-		return "", "", 1
+		return servedAttestation{}, 1
 	}
-	var resp struct {
-		ContentHash string `json:"content_hash"`
-		Signature   string `json:"signature"`
-	}
+	var resp servedAttestation
 	if err := json.Unmarshal(out, &resp); err != nil {
 		fmt.Fprintf(os.Stderr, "resolve %s: decode response: %v\n", artifactID, err)
-		return "", "", 1
+		return servedAttestation{}, 1
 	}
 	if resp.ContentHash == "" {
 		fmt.Fprintf(os.Stderr, "resolve %s: registry returned no content hash\n", artifactID)
-		return "", "", 1
+		return servedAttestation{}, 1
 	}
-	return resp.ContentHash, resp.Signature, 0
+	return resp, 0
 }
 
 // keyUse names the half of the registry-managed keypair a command needs.

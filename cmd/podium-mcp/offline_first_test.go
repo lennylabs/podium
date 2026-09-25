@@ -9,7 +9,6 @@ import (
 
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/sign"
-	"github.com/lennylabs/podium/pkg/version"
 )
 
 // spec: §6.5 — offline-first is "use cached resolution and content if present;
@@ -20,8 +19,7 @@ import (
 // force a registry call in offline-first.
 func TestLoadArtifact_OfflineFirst_StaleLatestServedFromCache(t *testing.T) {
 	t.Parallel()
-	const fm = "---\ntype: context\n---\n"
-	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil)
+	const fm = "---\ntype: context\nversion: 1.0.0\n---\n"
 	var calls int32
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -32,9 +30,7 @@ func TestLoadArtifact_OfflineFirst_StaleLatestServedFromCache(t *testing.T) {
 
 	dir := t.TempDir()
 	cache, _ := newContentCache(dir)
-	if err := cache.put(hash, fm, "cached-body", nil); err != nil {
-		t.Fatalf("put: %v", err)
-	}
+	hash := primeCachedRecord(t, cache, "team/x", fm, "cached-body").ContentHash
 	resolutions := newResolutionCache(dir)
 	defer resolutions.Close()
 	// Prime (team/x, "latest") -> 1.0.0 -> hash, fetched an hour ago (well past
