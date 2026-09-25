@@ -14,6 +14,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
@@ -1316,17 +1317,38 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		// so the stored value is the resolved one and the search path runs
 		// no read-time fold per result.
 		d.Sensitivity = sc.rec.Sensitivity
-		// spec: §4.6 hidden parents — an extends child's descriptor names
-		// no parent, so the authored block travels with its extends: key
-		// removed. A record with no pin keeps the block descriptorOf built,
-		// which leaves the common path free of a YAML decode.
+		// A record with no pin keeps the block descriptorOf built, which
+		// leaves the common path free of a chain walk and a YAML decode.
 		if sc.rec.ExtendsPin != "" {
-			d.Frontmatter = manifest.FrontmatterHidingParent(sc.rec.Frontmatter)
+			d.Frontmatter = r.descriptorBlockHidingChain(ctx, sc.rec)
 		}
 		res.Results = append(res.Results, d)
 	}
 	ev.ResultSize = len(res.Results)
 	return res, nil
+}
+
+// descriptorBlockHidingChain returns a pinned child's authored frontmatter
+// block for its search descriptor, held to the parent-ID test load_artifact
+// applies over the same child's whole pinned chain. The walk is the unadmitted
+// one revalidationRedactKeys makes, because a search result serves no admitted
+// content (§13.4). A chain that cannot be resolved, whether an ancestor is
+// missing, the pins cycle, or the store fails, yields the empty block: the
+// search caller gets the descriptor without its frontmatter key and no error,
+// and the walk error, which can name an ancestor, stays in the server log.
+//
+// Spec: §4.6 hidden parents (withheld).
+func (r *Registry) descriptorBlockHidingChain(ctx context.Context, rec store.ManifestRecord) string {
+	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
+	if err != nil {
+		log.Printf("search: descriptor of %s/%s: %v", r.tenantFor(ctx), rec.ArtifactID, err)
+		return ""
+	}
+	pins := make([]string, 0, len(chain))
+	for _, member := range chain {
+		pins = append(pins, member.ExtendsPin)
+	}
+	return manifest.FrontmatterHidingParent(rec.Frontmatter, rec.ArtifactID, pins)
 }
 
 // vectorRanks embeds the query and returns the top-K nearest

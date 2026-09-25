@@ -374,11 +374,21 @@ type parentIDs map[string]bool
 // row, and it is dropped from the set rather than making an overlay that
 // inherits a self-referencing key permanently unloadable.
 func parentsOf(a *Artifact, id string, chain []MergedBlock) parentIDs {
-	p := parentIDs{}
+	pins := make([]string, 0, len(chain)+1)
 	for _, block := range chain {
-		p.add(block.Extends)
+		pins = append(pins, block.Extends)
 	}
-	p.add(a.Extends)
+	return pinnedParents(id, append(pins, a.Extends))
+}
+
+// pinnedParents builds the parent set of a chain known only by its members'
+// extends pins, by parentsOf's rule: every pin's canonical ID, less the
+// requested ID so a same-ID overlay is not refused for naming itself.
+func pinnedParents(id string, pins []string) parentIDs {
+	p := parentIDs{}
+	for _, pin := range pins {
+		p.add(pin)
+	}
 	delete(p, canonicalID(id))
 	return p
 }
@@ -444,22 +454,25 @@ func hidesParent(header []byte) bool {
 }
 
 // FrontmatterHidingParent returns src's frontmatter block with the extends
-// entry removed, or the empty string when the result would still name the
+// entry removed, or the empty string when the result would still name a
 // parent. It rewrites one authored block and merges nothing, which is what the
 // search descriptor needs: the descriptor serves the child's own frontmatter
 // and the merge has already been applied to the indexed columns.
 //
-// It shares hidesParent with SerializeMerged and applies no parent-ID test,
-// because proposal 0009 settled the search descriptor on the node-level strip
-// of the record's own block and this repair does not reopen it. Spec: §4.6.
+// id is the child's canonical ID and pins holds the extends pin of every member
+// of the child's resolved chain. The parent set is built by parentsOf's rule:
+// the canonical ID of each non-empty pin, less canonicalID(id), so a same-ID
+// overlay keeps its block. The rewritten block is then held to the parent-ID
+// test SerializeMerged applies on the load path, because a descriptor that
+// passed a narrower test would serve a key naming an ancestor that load_artifact
+// of the same child refuses to serve. Spec: §4.6 hidden parents (withheld).
 //
-// The guard is scoped to what the parser resolves rather than to the literal
-// top-level key. ParseArtifact resolves YAML merge keys, so a child can carry
-// an operative extends inside an anchored mapping it merges in, and deleting
-// an anchored extends value leaves a dangling alias behind. Both are caught by
-// re-reading the rewritten block. A value under a key the parser never
-// resolves is the child's authored text and survives with every sibling key.
-func FrontmatterHidingParent(src []byte) string {
+// The extends guard is scoped to what the parser resolves rather than to the
+// literal top-level key. ParseArtifact resolves YAML merge keys, so a child can
+// carry an operative extends inside an anchored mapping it merges in, and
+// deleting an anchored extends value leaves a dangling alias behind. Both are
+// caught by re-reading the rewritten block.
+func FrontmatterHidingParent(src []byte, id string, pins []string) string {
 	root, _, err := mappingOf(src)
 	if err != nil {
 		return ""
@@ -478,7 +491,7 @@ func FrontmatterHidingParent(src []byte) string {
 		// the alternative to failing closed here is emitting the parent.
 		return ""
 	}
-	if !hidesParent(out) {
+	if !hidesParent(out) || pinnedParents(id, pins).names(root) {
 		return ""
 	}
 	return "---\n" + strings.TrimRight(string(out), "\n") + "\n---\n"
