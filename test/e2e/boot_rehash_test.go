@@ -289,3 +289,35 @@ func TestE2E_MigratedTargetRewritesCopiedRows(t *testing.T) {
 		t.Fatalf("load of a copied artifact from the migrated target failed: %s", msg)
 	}
 }
+
+// Spec: §13.4, §4.7.9 — late signing. A store a registry filled with signing
+// off keeps its rows unsigned after a restart with signing on, because the
+// completion record is set and the rewrite does not run again, so a
+// verifying load is refused with materialize.signature_missing.
+// sign-stored-rows --include-unsigned attests those rows beside the serving
+// registry, and the same load succeeds with no restart.
+// Matrix: §6.10 (materialize.signature_missing)
+func TestE2E_LateSigningThroughSignStoredRows(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	keyPath := filepath.Join(home, "registry-signing.key")
+	env := rotationEnv(home, keyPath)
+	reg := rehashRegistry(t)
+
+	unsigned := startServerArgs(t, append(append([]string{}, env...), "PODIUM_SIGN=none"), "serve", "--standalone", "--layer-path", reg)
+	stopProc(unsigned.cmd)
+
+	verifyKey := "PODIUM_SIGNATURE_VERIFY_KEY=" + firstLine(generateKeyFile(t, keyPath).Stdout)
+	signing := startServerArgs(t, env, "serve", "--standalone")
+	if errStr, res := bridgeLoad(t, signing.BaseURL, rehashSkillID, verifyKey); !strings.HasPrefix(errStr, "materialize.signature_missing") {
+		t.Fatalf("load of a row stored with signing off = %q, want materialize.signature_missing\nstderr: %s", errStr, res.Stderr)
+	}
+
+	res := signStoredRows(t, env, "--include-unsigned")
+	if res.Exit != 0 || !strings.Contains(res.Stdout, "rehash: 0 unsigned left") {
+		t.Fatalf("sign-stored-rows --include-unsigned exit=%d, want 0 and no unsigned row left\nstdout:\n%s\nstderr:\n%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	if errStr, res := bridgeLoad(t, signing.BaseURL, rehashSkillID, verifyKey); errStr != "" {
+		t.Fatalf("load after sign-stored-rows = %q, want success\nstderr: %s\nlog:\n%s", errStr, res.Stderr, signing.log())
+	}
+}
