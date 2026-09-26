@@ -458,6 +458,31 @@ func TestSignStoredRows_HeldBackRowFails(t *testing.T) {
 	}
 }
 
+// Spec: §13.4 — a failed write of the completion record makes the command
+// fail, because its success status says the rewrite standing in for the first
+// start is recorded. The boot's rewrite logs the failure and returns nil, and
+// the next start runs the pass again.
+func TestSignStoredRows_CompletionRecordWriteFailureFails(t *testing.T) {
+	key := testSigner(t)
+	s := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", signWith: key}
+	newDeps := func() rehashDeps {
+		backing := store.NewMemory()
+		seedRow(t, backing, nil, s)
+		d := deps(&countingStore{Store: backing, setMarkErr: errors.New("record write refused")}, nil)
+		d.Signer = key
+		d.Summary = &bytes.Buffer{}
+		return d
+	}
+	captureLog(t)
+	err := signStoredRows(context.Background(), newDeps())
+	if err == nil || !strings.Contains(err.Error(), "record write refused") {
+		t.Errorf("command err = %v, want the record write's error", err)
+	}
+	if _, _, err := rehashStoredHashes(context.Background(), newDeps(), true); err != nil {
+		t.Errorf("the boot rewrite returned %v, want nil", err)
+	}
+}
+
 // Spec: §13.4 — with object storage turned off, an externally held body is
 // unreadable, which holds the record back and fails the command.
 func TestRunSignStoredRows_MissingObjectStoreFails(t *testing.T) {

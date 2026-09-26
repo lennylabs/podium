@@ -163,9 +163,10 @@ func openSignPassDeps(cfg *Config, opts signStoredRowsOptions) (rehashDeps, func
 }
 
 // signStoredRows runs the rewrite over every stored row whether or not the
-// completion record is present, and fails when a row held the record back or
-// a write failed, so a success status is what licenses removing a
-// verification-only key. Every write is a compare-and-swap on the stored hash
+// completion record is present, and fails when a row held the record back, a
+// write failed, or the completion record could not be written, so a success
+// status is what licenses removing a verification-only key and what tells the
+// operator that the rewrite standing in for the first start is recorded. Every write is a compare-and-swap on the stored hash
 // and signature, so a record-present run may overlap serving registries.
 //
 // Spec: §13.4, §4.7.9.
@@ -176,6 +177,9 @@ func signStoredRows(ctx context.Context, d rehashDeps) error {
 	}
 	if held || counts.errors > 0 {
 		return fmt.Errorf("sign-stored-rows: %d row(s) failed to sign or write, and %d body_unavailable row(s) could not be read; the log names each row, and a later run retries them", counts.errors, counts.bodyUnavailable)
+	}
+	if counts.recordErr != nil {
+		return fmt.Errorf("sign-stored-rows: %w; a later run records it", counts.recordErr)
 	}
 	return nil
 }

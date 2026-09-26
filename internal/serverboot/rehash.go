@@ -429,6 +429,11 @@ type rehashCounts struct {
 	// stillSigned counts, per verifying key_id, planned rows the pass did
 	// not rewrite.
 	stillSigned map[string]int
+	// recordErr is the failed write of the completion record. The boot logs
+	// it and runs the pass again on the next start; sign-stored-rows fails
+	// on it, because its success status tells the operator the rewrite's
+	// completion is recorded.
+	recordErr error
 }
 
 // rehashApplier carries the state one apply step accumulates.
@@ -462,6 +467,7 @@ func applyRehash(ctx context.Context, d rehashDeps, plan []rehashRow) (rehashCou
 	if !a.held {
 		if err := d.Store.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, true); err != nil {
 			log.Printf("rehash: recording the completed rewrite failed, the next start runs it again: %v", err)
+			a.counts.recordErr = fmt.Errorf("record the completed rewrite: %w", err)
 		}
 	}
 	c := a.counts
