@@ -776,25 +776,35 @@ func Run() error {
 	return run(ctx, stop)
 }
 
-// run is Run's body with the lifecycle context injected. ctx is cancelled on a
-// signal; stop restores the default signal handler so a second signal aborts a
-// stuck drain. A test drives a full boot and graceful shutdown by calling run
-// directly with a cancellable context.
-func run(ctx context.Context, stop func()) error {
+// loadBootConfig resolves and validates the configuration a registry start
+// reads. run and sign-stored-rows both call it, so the one-shot command opens
+// the store, object storage, and signing key the serving process would.
+func loadBootConfig() (*Config, error) {
 	// §13.10: an explicitly named --config / PODIUM_CONFIG_FILE that
 	// does not exist is a hard error — the operator named a config, so a missing
 	// one is not a cue to invent standalone defaults.
 	if cf := os.Getenv("PODIUM_CONFIG_FILE"); cf != "" {
 		if _, err := os.Stat(cf); err != nil {
 			if os.IsNotExist(err) {
-				return fmt.Errorf("config file %q does not exist", cf)
+				return nil, fmt.Errorf("config file %q does not exist", cf)
 			}
-			return fmt.Errorf("config file %q: %w", cf, err)
+			return nil, fmt.Errorf("config file %q: %w", cf, err)
 		}
 	}
-
 	cfg := LoadConfig()
 	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// run is Run's body with the lifecycle context injected. ctx is cancelled on a
+// signal; stop restores the default signal handler so a second signal aborts a
+// stuck drain. A test drives a full boot and graceful shutdown by calling run
+// directly with a cancellable context.
+func run(ctx context.Context, stop func()) error {
+	cfg, err := loadBootConfig()
+	if err != nil {
 		return err
 	}
 
@@ -1787,8 +1797,9 @@ type Config struct {
 	// http.Server carries ReadHeaderTimeout alone.
 	webUIOAuthExchangeTimeout time.Duration
 	// migrationObjectReadTimeout bounds each object-storage read the §13.4
-	// first-start stored-value rewrite makes and each one the §13.4 stored-row
-	// admission check makes before a load is served
+	// first-start stored-value rewrite makes, each one the sign-stored-rows
+	// command makes, and each one the §13.4 stored-row admission check makes
+	// before a load is served
 	// (PODIUM_MIGRATION_OBJECT_READ_TIMEOUT, §13.12). Environment only; there
 	// is no registry.yaml key. An unset, unparsable, or non-positive value
 	// takes the 30-second default, because run's context carries no deadline

@@ -6,8 +6,8 @@ import (
 )
 
 // DefaultReadTimeout is the §13.12 default deadline on each object-storage read
-// the §13.4 first-start stored-value rewrite and the §13.4 stored-row admission
-// check make. PODIUM_MIGRATION_OBJECT_READ_TIMEOUT overrides it. It lives here
+// the §13.4 first-start stored-value rewrite, the sign-stored-rows command, and
+// the §13.4 stored-row admission check make. PODIUM_MIGRATION_OBJECT_READ_TIMEOUT overrides it. It lives here
 // so the boot path, the registry core, and the filesystem-source server share
 // one default without importing one another.
 const DefaultReadTimeout = 30 * time.Second

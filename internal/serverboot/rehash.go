@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"os"
@@ -63,6 +64,19 @@ type rehashDeps struct {
 	// query-text scrubbing and tolerates a nil receiver.
 	Sink     audit.Sink
 	Scrubber *audit.PIIScrubber
+	// Summary receives the summary lines, or nil to log them. The boot logs
+	// them; sign-stored-rows writes them to stdout, where the operator reads
+	// the command's result, and keeps the per-row lines in the log.
+	Summary io.Writer
+}
+
+// summarize writes one summary line to d.Summary, or logs it when none is set.
+func (d rehashDeps) summarize(format string, args ...any) {
+	if d.Summary == nil {
+		log.Printf(format, args...)
+		return
+	}
+	_, _ = fmt.Fprintf(d.Summary, format+"\n", args...)
 }
 
 // rehashPolicy reads the completion record once and returns a copy of d whose
@@ -448,9 +462,9 @@ func applyRehash(ctx context.Context, d rehashDeps, plan []rehashRow) (rehashCou
 		}
 	}
 	c := a.counts
-	log.Printf("rehash: %d rewritten, %d already migrated, %d signature_unverified, %d unreproducible, %d body_missing, %d body_unavailable (%d unread), %d in conflict, %d in error, %d event(s) not appended",
+	d.summarize("rehash: %d rewritten, %d already migrated, %d signature_unverified, %d unreproducible, %d body_missing, %d body_unavailable (%d unread), %d in conflict, %d in error, %d event(s) not appended",
 		c.rewritten, c.migrated, c.signatureUnverified, c.unreproducible, c.bodyMissing, c.bodyUnavailable, c.unread, c.conflicts, c.errors, c.eventsNotAppended)
-	logSigningSummary(d.Signer, c)
+	logSigningSummary(d, c)
 	return c, a.held
 }
 
@@ -459,13 +473,13 @@ func applyRehash(ctx context.Context, d rehashDeps, plan []rehashRow) (rehashCou
 // verification-only key, with a line for a key that verifies no row so a
 // missing line never stands in for a zero. With no signer it logs nothing.
 // Spec: §13.4, §4.7.9.
-func logSigningSummary(signer keyedSigner, c rehashCounts) {
-	if signer == nil {
+func logSigningSummary(d rehashDeps, c rehashCounts) {
+	if d.Signer == nil {
 		return
 	}
-	log.Printf("rehash: %d unsigned left", c.unsignedLeft)
-	for _, id := range signer.VerifyKeyIDs() {
-		log.Printf("rehash: verify key %s: %d row(s) still signed under it", id, c.stillSigned[id])
+	d.summarize("rehash: %d unsigned left", c.unsignedLeft)
+	for _, id := range d.Signer.VerifyKeyIDs() {
+		d.summarize("rehash: verify key %s: %d row(s) still signed under it", id, c.stillSigned[id])
 	}
 }
 
