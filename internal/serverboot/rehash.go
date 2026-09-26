@@ -447,13 +447,7 @@ func applyRehash(ctx context.Context, d rehashDeps, plan []rehashRow) (rehashCou
 		appendEvents: d.Sink != nil,
 	}
 	for _, row := range plan {
-		written := a.apply(ctx, row)
-		if row.rec.Signature == "" && !(written && row.sign) {
-			a.counts.unsignedLeft++
-		}
-		if row.signedBy != "" && !written {
-			a.counts.stillSigned[row.signedBy]++
-		}
+		a.counts.countSigningState(row, a.apply(ctx, row))
 	}
 
 	if !a.held {
@@ -464,22 +458,35 @@ func applyRehash(ctx context.Context, d rehashDeps, plan []rehashRow) (rehashCou
 	c := a.counts
 	d.summarize("rehash: %d rewritten, %d already migrated, %d signature_unverified, %d unreproducible, %d body_missing, %d body_unavailable (%d unread), %d in conflict, %d in error, %d event(s) not appended",
 		c.rewritten, c.migrated, c.signatureUnverified, c.unreproducible, c.bodyMissing, c.bodyUnavailable, c.unread, c.conflicts, c.errors, c.eventsNotAppended)
-	logSigningSummary(d, c)
+	logSigningSummary(d, c, "rehash")
 	return c, a.held
+}
+
+// countSigningState adds one planned row to the unsigned-left and per-key
+// counts, given whether the pass wrote it. The dry run calls it with the write
+// it would make, so its totals are the ones a run reports.
+func (c *rehashCounts) countSigningState(row rehashRow, written bool) {
+	if row.rec.Signature == "" && !(written && row.sign) {
+		c.unsignedLeft++
+	}
+	if row.signedBy != "" && !written {
+		c.stillSigned[row.signedBy]++
+	}
 }
 
 // logSigningSummary reports, on lines of their own after the summary line, how
 // many rows were left unsigned and how many remain signed under each
 // verification-only key, with a line for a key that verifies no row so a
-// missing line never stands in for a zero. With no signer it logs nothing.
-// Spec: §13.4, §4.7.9.
-func logSigningSummary(d rehashDeps, c rehashCounts) {
+// missing line never stands in for a zero. Each line starts with prefix, so
+// the dry run's projected totals read apart from a run's. With no signer it
+// logs nothing. Spec: §13.4, §4.7.9.
+func logSigningSummary(d rehashDeps, c rehashCounts, prefix string) {
 	if d.Signer == nil {
 		return
 	}
-	d.summarize("rehash: %d unsigned left", c.unsignedLeft)
+	d.summarize("%s: %d unsigned left", prefix, c.unsignedLeft)
 	for _, id := range d.Signer.VerifyKeyIDs() {
-		d.summarize("rehash: verify key %s: %d row(s) still signed under it", id, c.stillSigned[id])
+		d.summarize("%s: verify key %s: %d row(s) still signed under it", prefix, id, c.stillSigned[id])
 	}
 }
 

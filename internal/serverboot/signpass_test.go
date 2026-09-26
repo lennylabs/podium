@@ -227,13 +227,14 @@ func TestRunSignStoredRows_DryRunWithTheRecordAbsent(t *testing.T) {
 	signed := rowSeed{tenant: "acme", id: "beta", version: "1.0.0", signWith: key}
 	f.seed(t, false, unsigned, signed)
 	before := map[string]store.ManifestRecord{"alpha": f.row(t, unsigned), "beta": f.row(t, signed)}
+	states := map[string]string{"alpha": "unsigned", "beta": key.CurrentKeyID()}
 
 	out, err := runCommand(t, "--dry-run", "--include-unsigned")
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
 	for _, s := range []rowSeed{unsigned, signed} {
-		want := fmt.Sprintf("dry-run: acme/%s@1.0.0 class=unmigrated target=%s write=true sign=true", s.id, framedHashOf(s))
+		want := fmt.Sprintf("dry-run: acme/%s@1.0.0 class=unmigrated target=%s write=true sign=true signed_by=%s", s.id, framedHashOf(s), states[s.id])
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
@@ -259,13 +260,20 @@ func TestRunSignStoredRows_DryRunWithTheRecordAbsent(t *testing.T) {
 	})
 }
 
-// Spec: §13.4 — a dry run with the record present changes nothing, and lists
-// an unsigned framed row as a write that signs only under --include-unsigned.
+// Spec: §13.4, §4.7.9 — a dry run with the record present changes nothing,
+// lists an unsigned framed row as a write that signs only under
+// --include-unsigned, and names each row's signature state, so the unsigned
+// rows the attestation covers read apart from the signed ones. It prints the
+// unsigned-left and per-verify-key totals a run would report.
 func TestRunSignStoredRows_DryRunWithTheRecordPresent(t *testing.T) {
-	key := testSigner(t)
-	f := newSignPassFixture(t, key)
+	current, retired := rotatedSigner(t)
+	outsider := testSigner(t)
+	f := newSignPassFixture(t, current)
 	s := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true}
-	f.seed(t, true, s)
+	byCurrent := rowSeed{tenant: "acme", id: "beta", version: "1.0.0", framed: true, signWith: current}
+	byRetired := rowSeed{tenant: "acme", id: "gamma", version: "1.0.0", framed: true, signWith: retired}
+	untrusted := rowSeed{tenant: "acme", id: "delta", version: "1.0.0", framed: true, signWith: outsider}
+	f.seed(t, true, s, byCurrent, byRetired, untrusted)
 
 	plain, err := runCommand(t, "--dry-run")
 	if err != nil {
@@ -275,14 +283,58 @@ func TestRunSignStoredRows_DryRunWithTheRecordPresent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dry run --include-unsigned: %v", err)
 	}
-	if !strings.Contains(plain, "acme/alpha@1.0.0 class=migrated") || !strings.Contains(plain, "write=false sign=false") {
-		t.Errorf("plain dry run output:\n%s", plain)
+	for _, want := range []string{
+		"acme/alpha@1.0.0 class=migrated target=" + framedHashOf(s) + " write=false sign=false signed_by=unsigned",
+		"acme/beta@1.0.0 class=migrated target=" + framedHashOf(byCurrent) + " write=false sign=false signed_by=" + current.CurrentKeyID(),
+		"acme/gamma@1.0.0 class=unmigrated target=" + framedHashOf(byRetired) + " write=true sign=true signed_by=" + retired.CurrentKeyID(),
+		"acme/delta@1.0.0 class=signature_unverified target=- write=false sign=false signed_by=unverified",
+		"dry-run: 1 unsigned left",
+		"dry-run: verify key " + retired.CurrentKeyID() + ": 0 row(s) still signed under it",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("plain dry run lacks %q:\n%s", want, plain)
+		}
 	}
-	if !strings.Contains(attested, "acme/alpha@1.0.0 class=unmigrated target="+framedHashOf(s)+" write=true sign=true") {
-		t.Errorf("attested dry run output:\n%s", attested)
+	for _, want := range []string{
+		"acme/alpha@1.0.0 class=unmigrated target=" + framedHashOf(s) + " write=true sign=true signed_by=unsigned",
+		"dry-run: 0 unsigned left",
+	} {
+		if !strings.Contains(attested, want) {
+			t.Errorf("attested dry run lacks %q:\n%s", want, attested)
+		}
 	}
 	if rec := f.row(t, s); rec.Signature != "" || rec.ContentHash != framedHashOf(s) {
 		t.Error("a dry run wrote the row")
+	}
+	if id := verifiedBy(t, current, f.row(t, byRetired)); id != retired.CurrentKeyID() {
+		t.Errorf("a dry run re-signed the retired-key row: verified by %s", id)
+	}
+}
+
+// Spec: §13.4, §4.7.9 — a dry run that would leave a row under a
+// verification-only key counts it on that key's line.
+func TestDryRunSignStoredRows_CountsRowsLeftUnderAVerifyKey(t *testing.T) {
+	captureLog(t)
+	current, retired := rotatedSigner(t)
+	st := store.NewMemory()
+	s := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true, signWith: retired, resource: &seedResource{path: "big.md", body: []byte("BIG"), external: true}}
+	seedRow(t, st, nil, s)
+	if err := st.SetDataMigrationApplied(context.Background(), store.DataMigrationContentHashFraming, true); err != nil {
+		t.Fatalf("set record: %v", err)
+	}
+	d := deps(st, nil)
+	d.Signer = current
+	var out bytes.Buffer
+	if err := dryRunSignStoredRows(context.Background(), d, &out); err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	for _, want := range []string{
+		"class=body_unavailable target=- write=false sign=false signed_by=" + retired.CurrentKeyID(),
+		"dry-run: verify key " + retired.CurrentKeyID() + ": 1 row(s) still signed under it",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("dry run lacks %q:\n%s", want, out.String())
+		}
 	}
 }
 

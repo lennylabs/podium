@@ -172,8 +172,11 @@ func signStoredRows(ctx context.Context, d rehashDeps) error {
 
 // dryRunSignStoredRows plans the run under the effective unsigned-row policy
 // and prints every planned row with its class, the hash a write would store,
-// and whether the write would sign. It writes nothing, the completion record
-// included. Spec: §13.4.
+// whether the write would sign, and the row's current signature state. It then
+// prints the unsigned-left and per-verify-key totals a run would report. The
+// signature state is what lets the operator list the unsigned rows that
+// --include-unsigned attests before attesting them. It writes nothing, the
+// completion record included. Spec: §13.4, §4.7.9.
 func dryRunSignStoredRows(ctx context.Context, d rehashDeps, out io.Writer) error {
 	d, _, err := rehashPolicy(ctx, d)
 	if err != nil {
@@ -183,6 +186,7 @@ func dryRunSignStoredRows(ctx context.Context, d rehashDeps, out io.Writer) erro
 	if err != nil {
 		return fmt.Errorf("sign-stored-rows: %w", err)
 	}
+	counts := rehashCounts{stillSigned: map[string]int{}}
 	var writes, signs int
 	for _, row := range plan {
 		write := row.class == classUnmigrated
@@ -192,12 +196,28 @@ func dryRunSignStoredRows(ctx context.Context, d rehashDeps, out io.Writer) erro
 		if write && row.sign {
 			signs++
 		}
+		counts.countSigningState(row, write)
 		target := row.newHash
 		if target == "" {
 			target = "-"
 		}
-		_, _ = fmt.Fprintf(out, "dry-run: %s class=%s target=%s write=%t sign=%t\n", row.key(), row.class, target, write, write && row.sign)
+		_, _ = fmt.Fprintf(out, "dry-run: %s class=%s target=%s write=%t sign=%t signed_by=%s\n", row.key(), row.class, target, write, write && row.sign, signatureState(row))
 	}
 	_, _ = fmt.Fprintf(out, "dry-run: %d row(s) planned, %d would be written, %d would be signed\n", len(plan), writes, signs)
+	d.Summary = out
+	logSigningSummary(d, counts, "dry-run")
 	return nil
+}
+
+// signatureState names a planned row's stored envelope for the dry-run line:
+// the key_id of the trusted key that verifies it, "unsigned" for a row with no
+// envelope, or "unverified" for an envelope no trusted key verifies.
+func signatureState(row rehashRow) string {
+	switch {
+	case row.rec.Signature == "":
+		return "unsigned"
+	case row.signedBy == "":
+		return "unverified"
+	}
+	return row.signedBy
 }
