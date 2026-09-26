@@ -1,7 +1,7 @@
 # Proposal 0029: Rotate the registry signing key with a verification key set, and sign stored rows on operator demand
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-09-25). Verified 2026-09-24 after 14 adversarial review rounds (50 findings fixed). OQ-1 and OQ-2 resolved by the owner.
+- Status: Implemented (2026-09-25). Verified 2026-09-24 after 14 adversarial review rounds (50 findings fixed). OQ-1 and OQ-2 resolved by the owner.
 - Date: 2026-09-24
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -48,37 +48,37 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1 (a) through (f). §4.7.9 defines the key file's `verify:` lines, the verification key set, `key_id`, the consumer's resolution of a set, the multi-process rule, and the rotation procedure.
+- [x] **S1 · spec** — SPEC-1 (a) through (f). §4.7.9 defines the key file's `verify:` lines, the verification key set, `key_id`, the consumer's resolution of a set, the multi-process rule, and the rotation procedure.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-3 and SPEC-1 (g). §4.7.9's cached-record exception to the `materialize.signature_invalid` abort, §6.2's list form and key-file lines, the `PODIUM_SIGNATURE_KEY_ID` row's removal, §6.5's cached-record rule with its §6.6 step-2 pointer, §6.9's list wording and its signature-failure and registry-offline rows, and §6.11's key-set wording.
+- [x] **S2 · spec** — SPEC-3 and SPEC-1 (g). §4.7.9's cached-record exception to the `materialize.signature_invalid` abort, §6.2's list form and key-file lines, the `PODIUM_SIGNATURE_KEY_ID` row's removal, §6.5's cached-record rule with its §6.6 step-2 pointer, §6.9's list wording and its signature-failure and registry-offline rows, and §6.11's key-set wording.
       Levels: —. Depends on: S1
-- [ ] **S3 · spec** — SPEC-2. §4.7.10's rotation sentence ties the delivery signature to the serving process's key and points a stale cached signature at the §6.5 cache-miss rule S2 lands, its consumer-verification sentence names the verification key set, and its attestation-scope sentence bounds the attestation by the holders of every key in the consumer's verification key set.
+- [x] **S3 · spec** — SPEC-2. §4.7.10's rotation sentence ties the delivery signature to the serving process's key and points a stale cached signature at the §6.5 cache-miss rule S2 lands, its consumer-verification sentence names the verification key set, and its attestation-scope sentence bounds the attestation by the holders of every key in the consumer's verification key set.
       Levels: —. Depends on: S1, S2
-- [ ] **S4 · spec** — SPEC-4a. §13.4's rewrite verifies under the key set and re-signs verification-only rows, the `sign-stored-rows` paragraph lands, and admission check (3) names the key set.
+- [x] **S4 · spec** — SPEC-4a. §13.4's rewrite verifies under the key set and re-signs verification-only rows, the `sign-stored-rows` paragraph lands, and admission check (3) names the key set.
       Levels: —. Depends on: S1
-- [ ] **S5 · spec** — SPEC-5. §13.3 and §13.12 follow the key file format and its coded refusal, the rotation cross-reference, the lost-key repair, the writers of a stored signature, turning signing on later, the consumer-side reading of `verify:` lines, and the object-read deadline row naming `sign-stored-rows`.
+- [x] **S5 · spec** — SPEC-5. §13.3 and §13.12 follow the key file format and its coded refusal, the rotation cross-reference, the lost-key repair, the writers of a stored signature, turning signing on later, the consumer-side reading of `verify:` lines, and the object-read deadline row naming `sign-stored-rows`.
       Levels: —. Depends on: S1, S4
-- [ ] **S6 · spec** — SPEC-6. §11's signing test gains the rotation clause.
+- [x] **S6 · spec** — SPEC-6. §11's signing test gains the rotation clause.
       Levels: —. Depends on: S1, S4
-- [ ] **S7 · spec** — SPEC-4b. §13.4 restricts the automatic rewrite's unsigned-row minting to the co-located SQLite store and narrows the metadata-store limit sentence, and §13.12 cross-references it.
+- [x] **S7 · spec** — SPEC-4b. §13.4 restricts the automatic rewrite's unsigned-row minting to the co-located SQLite store and narrows the metadata-store limit sentence, and §13.12 cross-references it.
       Levels: —. Depends on: S4, S5
-- [ ] **S8 · code** — CODE-1, TEST-1, TEST-8. `pkg/sign` gains the key-set provider, `KeyIDFor`, the key-file codec, and the consumer key-set resolver, which `podium-mcp` and `podium verify` adopt; `loadOrGenerateRegistrySigner` reads through the codec; `podium sign` refuses a key file with no `private:` line; the old key-file readers, the serverboot parser, the `KeyID` field, and the `PODIUM_SIGNATURE_KEY_ID` read go, and every production caller, fixture, and test that used them moves in the same commit because the build fails otherwise.
+- [x] **S8 · code** — CODE-1, TEST-1, TEST-8. `pkg/sign` gains the key-set provider, `KeyIDFor`, the key-file codec, and the consumer key-set resolver, which `podium-mcp` and `podium verify` adopt; `loadOrGenerateRegistrySigner` reads through the codec; `podium sign` refuses a key file with no `private:` line; the old key-file readers, the serverboot parser, the `KeyID` field, and the `PODIUM_SIGNATURE_KEY_ID` read go, and every production caller, fixture, and test that used them moves in the same commit because the build fails otherwise.
       Levels: unit, integration, e2e. Depends on: S1, S2, S3
-- [ ] **S9 · code** — CODE-2, TEST-2. `RehashManifest` compares the stored signature, on every backend.
+- [x] **S9 · code** — CODE-2, TEST-2. `RehashManifest` compares the stored signature, on every backend.
       Levels: unit, conformance. Depends on: S4
-- [ ] **S10 · code** — CODE-3, TEST-9. The registry loader reads `verify:` lines into `Trusted`, refuses a file with no `private:` line, writes `config.signature_provider_unavailable` into every error it returns, takes a `generate` flag, returns the concrete key, and logs each `key_id`; `registrySignerFor` reports whether signing is on and the boot wires the key only then; `keyCoLocatedWithStore` lands.
+- [x] **S10 · code** — CODE-3, TEST-9. The registry loader reads `verify:` lines into `Trusted`, refuses a file with no `private:` line, writes `config.signature_provider_unavailable` into every error it returns, takes a `generate` flag, returns the concrete key, and logs each `key_id`; `registrySignerFor` reports whether signing is on and the boot wires the key only then; `keyCoLocatedWithStore` lands.
       Levels: unit. Depends on: S5, S8
-- [ ] **S11 · code** — CODE-4, TEST-3. The rewrite verifies under the key set, re-signs verification-only rows, carries the per-row `sign` flag, the `MintUnsigned` and `AttestUnsigned` policy fields, `rehashPolicy`, and `mintUnsignedOnFirstRun`, has `rehashStoredHashes` take `skipIfMarked` and return the counts and the hold value, reports the unsigned-left count and the per-key remaining counts on lines of their own, and ports the test callers it breaks.
+- [x] **S11 · code** — CODE-4, TEST-3. The rewrite verifies under the key set, re-signs verification-only rows, carries the per-row `sign` flag, the `MintUnsigned` and `AttestUnsigned` policy fields, `rehashPolicy`, and `mintUnsignedOnFirstRun`, has `rehashStoredHashes` take `skipIfMarked` and return the counts and the hold value, reports the unsigned-left count and the per-key remaining counts on lines of their own, and ports the test callers it breaks.
       Levels: unit, integration. Depends on: S9, S10
-- [ ] **S12 · code** — CODE-5, TEST-4. `serverboot.RunSignStoredRows`, the `podium-server` and `podium admin` entries, and `podium admin signing-key generate|rotate`.
+- [x] **S12 · code** — CODE-5, TEST-4. `serverboot.RunSignStoredRows`, the `podium-server` and `podium admin` entries, and `podium admin signing-key generate|rotate`.
       Levels: unit, integration. Depends on: S11
-- [ ] **S13 · code** — CODE-6, TEST-5. `podium-mcp` recovers a cached record that fails the signature check on every cache-serving path, and returns the §7.4 cache-miss outcome when the refetch cannot reach the registry.
+- [x] **S13 · code** — CODE-6, TEST-5. `podium-mcp` recovers a cached record that fails the signature check on every cache-serving path, and returns the §7.4 cache-miss outcome when the refetch cannot reach the registry.
       Levels: unit, integration. Depends on: S2, S3, S8
-- [ ] **S14 · test** — TEST-6. The end-to-end rotation journey, the `podium-server` entry, and late signing through the compiled binaries.
+- [x] **S14 · test** — TEST-6. The end-to-end rotation journey, the `podium-server` entry, and late signing through the compiled binaries.
       Levels: e2e. Depends on: S12, S13
-- [ ] **S15 · code** — CODE-7, TEST-7. `mintUnsignedOnFirstRun` returns `keyCoLocatedWithStore(...)` for the boot and the record-absent command, and the marker-deletion tests pin the closure.
+- [x] **S15 · code** — CODE-7, TEST-7. `mintUnsignedOnFirstRun` returns `keyCoLocatedWithStore(...)` for the boot and the record-absent command, and the marker-deletion tests pin the closure.
       Levels: integration, e2e. Depends on: S7, S11, S12
-- [ ] **S16 · docs** — DOC-1. The operator guide, the clustered and single-node pages, the harness page, the CLI reference, the Helm values comment, the runbook, the progressive-adoption page, `CHANGELOG.md`, `test/manual-validation.md` (S73 through S75, the S66 rewrite, and S46 step 4), and the D-clustered documentation test's marker and line assertions follow the change.
+- [x] **S16 · docs** — DOC-1. The operator guide, the clustered and single-node pages, the harness page, the CLI reference, the Helm values comment, the runbook, the progressive-adoption page, `CHANGELOG.md`, `test/manual-validation.md` (S73 through S75, the S66 rewrite, and S46 step 4), and the D-clustered documentation test's marker and line assertions follow the change.
       Levels: e2e, manual. Depends on: S12, S13, S14, and S15
 
 **Ordering constraints.** Every spec step precedes the code that implements it, per `.claude/rules/spec-driven-development.md`. S2 lands SPEC-3 before S3 lands SPEC-2, because SPEC-2's last sentence cites the §6.5 cache-miss rule that SPEC-3 (b) creates; SPEC-3 cites §4.7.10 only as a section, which exists before S3. SPEC-1 (g) lands in S2 rather than S1 for the same reason: its clause cites the §6.5 cache-miss rule SPEC-3 (b) creates. S7 is the last spec step because it edits text S4 and S5 land. S8 carries TEST-8 because removing the `KeyID` field stops the fixtures that set it from compiling and removes the behavior `TestSignedArtifact_KeyPinningRejectsRotatedKey` and `TestRegistryManagedKey_RejectsRotatedKey` assert. S8 also carries the consumer resolver, because deleting `PublicKeyFromKeyFile` breaks both consumers' resolvers, and TEST-8's list-emitting fixture needs the list parsing it brings. S9 and S10 are independent of each other; S11 needs both, because the rewrite passes the old signature (CODE-2) and reads the verifying key through the concrete loader result (CODE-3). S12 needs S11 because the command reuses the rewrite's planner and apply step. S13 needs the key-set provider and the consumer resolver from S8. S14 drives the compiled binaries through the command and the consumer, so it follows S12 and S13. S16 follows the code so the documentation describes what the tested build does, including S15, because DOC-1's OQ-1 text describes CODE-7, and it carries the D-clustered documentation test because that test executes the page DOC-1 edits.
