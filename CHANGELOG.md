@@ -35,6 +35,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   row the store holds. `--dry-run` lists every write and makes none. The
   command never generates a key: signing off or an absent key file refuses it
   with `config.signature_provider_unavailable`.
+- **The Helm chart runs the §13.4 stored-row migration as a Job** (§13.4,
+  §13.12): with `migration.mode` set to `dry-run` or `run` and `replicaCount`
+  0, `helm upgrade` renders a `post-upgrade` hook Job that runs
+  `podium-server sign-stored-rows` with the Deployment's image, environment,
+  Secret references, and mounts, and with `--include-unsigned` when
+  `migration.includeUnsigned` is true, its default. Render-time checks built
+  on Helm `lookup` refuse a migration render while a registry pod of the
+  release is live or terminating, on the image the Deployment ran before the
+  migration, or, for `run`, without `migration.reviewedDryRun` naming a
+  succeeded dry-run Job of the preceding release revision against the live
+  Deployment, with the same image, `includeUnsigned` setting, and pod
+  configuration (the Secret reference, environment, mounts, and volumes, and
+  the `uid` and `resourceVersion` of each Secret the pod reads). The
+  Job records the live Deployment's UID, and the gates ignore a Job left by an
+  earlier instance of the release. A serving render over a store the migration
+  has not completed is refused, including one whose pod configuration differs
+  from the succeeded run's, and a passing render records the migration in the
+  Deployment annotation `podium.lennylabs.dev/stored-row-format`. The checks need `get` on
+  Deployments, Jobs, and Secrets and `list` on Pods in the release namespace, and
+  `migration.preflight=false` turns them off. `migration.unprobedStart` runs a
+  signing-off deployment's rewrite at boot without the startup and liveness
+  probes, and it requires `signing.mode=none`. New values: the `migration`
+  block (`mode`, `includeUnsigned`, `reviewedDryRun`, `storeReady`,
+  `previousImage`, `preflight`, `unprobedStart`, `backoffLimit`,
+  `activeDeadlineSeconds`, `resources`, `podAnnotations`, and `podLabels`),
+  `config.migrationObjectReadTimeout` for `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT`,
+  and `config.auditLogPath` for `PODIUM_AUDIT_LOG_PATH`. The release notes of a
+  zero-replica render print the stop step's wait command, and those of each
+  migration step print the next command. `make test-live-kind` runs
+  the procedure from v0.4.0 on a kind cluster.
 - **`podium admin signing-key generate|rotate`** (§4.7.9): writes the registry
   key file named by the required `--key-file` flag, and reads no environment
   variable and no default path. `rotate` keeps the previous keys as `verify:`
@@ -68,6 +98,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **The Helm chart's install acknowledgement and strategy rendering** (§13.4):
+  a `helm install` with `replicaCount` above 0 fails unless
+  `migration.storeReady=true` states that the store is empty or already
+  migrated, because the chart cannot see the store and both stores outlive
+  `helm uninstall`. An install over a v0.4.0 store installs at `replicaCount=0`
+  with `migration.previousImage` naming the image v0.4.0 ran, and follows the
+  upgrade procedure; a `helm install` at `replicaCount=0` requires that value
+  or `migration.storeReady=true`. A `helm upgrade` with `replicaCount` above 0
+  that finds no live Deployment also requires `migration.storeReady=true`. The Deployment renders
+  `strategy.rollingUpdate.maxSurge` and `strategy.rollingUpdate.maxUnavailable`
+  explicitly under `RollingUpdate`, 25% each by default, and omits
+  `rollingUpdate` under `Recreate`, so a release installed with server-side
+  apply can switch to `Recreate`. The registry pod's selector labels take
+  precedence over a `podLabels` entry with the same key, which previously
+  rendered a duplicate key.
 - **The §4.7.6 content hash length-frames its parts** (§4.7.6, §13.4, §6.4,
   §6.5): the canonical serialization now prefixes every part with its length
   before the SHA-256, so every content hash Podium computes moves. This reaches
@@ -79,7 +124,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   the previous digest. This entry is the release's upgrade note.
 
   **Upgrade order for the registry.** Stop every registry process that uses the
-  store. In a clustered deployment that means scaling the registry to zero
+  store. In a clustered deployment that means holding the registry at zero
   replicas, because the Helm chart's default rolling update would start the new
   version beside the previous one, and a registry still running the previous
   binary ingests under the previous digest: no automatic start rewrites a row
@@ -94,10 +139,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   the stored rows on demand. Install the new binary or image. A standard
   deployment that upgrades with signing on runs
   `podium-server sign-stored-rows --include-unsigned` once before its first
-  start, as a Kubernetes Job on a chart deployment, as
-  `docs/deployment/clustered.md` shows, because v0.4.0 stored every row
-  unsigned by default and the first start signs no unsigned row outside the
-  SQLite store in the key file's directory. Start the registry. The first
+  start, because v0.4.0 stored every row unsigned by default and the first
+  start signs no unsigned row outside the SQLite store in the key file's
+  directory. On a Helm chart deployment the chart runs that command as a Job:
+  `helm upgrade` with `replicaCount=0` stops the registry, a
+  `migration.mode=dry-run` upgrade lists the plan, a `migration.mode=run`
+  upgrade naming the reviewed dry run's Job UID in `migration.reviewedDryRun`
+  performs the rewrite and records it, and a final upgrade serves.
+  `docs/deployment/clustered.md` gives the procedure, including the
+  signing-off path and an install over an existing v0.4.0 store. Do not pass
+  `--rollback-on-failure` or `--atomic` to those upgrades, because a rollback
+  reinstalls the previous binary over rewritten rows. Start the registry. The first
   start rewrites every stored content hash before it ingests or serves
   anything, unless `sign-stored-rows` already did, and re-signs each row it
   rewrites where signing is configured, which it is by default from this
@@ -175,7 +227,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   runs the rewrite over those rows again. Where the summary reports every
   signed row as `signature_unverified` because the configured key is a
   different key from the one that signed those rows, restore the backup the
-  upgrade order takes and start again with the key that signed them. A
+  upgrade order takes and start again with the key that signed them. On a
+  Helm chart deployment with signing on, the rewrite runs in the migrate Job
+  rather than at a start: correct the values (`config.migrationObjectReadTimeout`
+  for a timed-out read) or the referenced Secrets, and rerun the dry-run and run
+  steps of docs/deployment/clustered.md. After a backup restore, hold the
+  Deployment at zero replicas, remove the `stored-row-format` annotation with
+  the `kubectl annotate` command from its Recovering from a failed run section,
+  and rerun steps 3 to 5. A
   registry with signing on and no `PODIUM_SIGN_KEY_PATH` refuses to start
   unless its store is the SQLite store beside the default key, so a Postgres
   deployment or a moved SQLite store sets `PODIUM_SIGN_KEY_PATH` on the store's
@@ -183,9 +242,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   deployment that starts more than one registry process with signing on
   provisions the key file at `PODIUM_SIGN_KEY_PATH` before the start, because
   processes that each generate a key at one path overwrite each other's key. A
-  registry on Kubernetes whose store is large raises the chart's
-  `startupProbe.failureThreshold` for the upgrade, because the process answers
-  no probe until the rewrite finishes.
+  Helm chart deployment with signing on runs the rewrite in the chart's
+  migrate Job, which has no probe, and its pods start after the rewrite is
+  recorded. A chart deployment with `signing.mode=none` cannot use the Job,
+  because `sign-stored-rows` refuses with signing off, so it runs the rewrite
+  at the first start with `migration.unprobedStart=true`, which removes the
+  startup and liveness probes for that start, because the process answers no
+  probe until the rewrite finishes.
 
   **Migrating with `podium admin migrate-to-standard`.** The command copies rows
   as the source stores them and clears the target store's record of the rewrite,
@@ -198,6 +261,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   when a run failed with the immutability error at a copied row, or when a
   registry started on the target store, or the source registry started on the
   new version, at any point after the command's first run against it began.
+  On a Helm chart deployment, run the command before the chart release writes
+  the `stored-row-format` annotation, install at zero replicas with
+  `migration.previousImage`, and run the target's rewrite in the migrate Job,
+  as the "Migration from single node" section of
+  `docs/deployment/clustered.md` states.
 
   **Rolling the consumers.** Roll consumers to the new binary after the registry
   has started on it, and clear each consumer's cache as the next paragraph

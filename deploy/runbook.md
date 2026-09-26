@@ -82,7 +82,10 @@ reads, so the registry refuses every object-held row with
 Point the object store at the right root or bucket and restart. The
 first start after an upgrade that met this condition runs the rewrite
 of stored content hashes again, because that condition held the
-rewrite's completion record back.
+rewrite's completion record back. On a Helm chart deployment with
+signing on, the migrate Job ran the rewrite; correct the object-store
+values in the values file and rerun steps 3 to 5 of the upgrade
+procedure in `docs/deployment/clustered.md` instead of restarting.
 
 **Mitigation.**
 1. Verify object-storage health at the provider.
@@ -187,11 +190,27 @@ unaffected. A `podium-mcp` that refuses to start serves nothing.
    record that the first-start rewrite completed, the command
    performs that rewrite, so it runs only while no registry process
    on the previous release serves the store; the command cannot
-   detect such a process.
+   detect such a process. On a Helm chart deployment whose store
+   holds no such record, the chart runs both commands as its migrate
+   Job. Run steps 2 to 5 of the upgrade procedure in
+   `docs/deployment/clustered.md`: hold the Deployment at
+   `replicaCount=0` on the new image and back up the store, run the
+   `migration.mode=dry-run` upgrade and review its log, run the
+   `migration.mode=run` upgrade with `migration.reviewedDryRun` set
+   to the dry-run Job's UID, and then run the serving upgrade without
+   migration values, which scales the Deployment back up. A run Job
+   that fails during an object-store outage reports each object-held
+   row as `body_unavailable`, leaves the record unset, and keeps the
+   Deployment at zero replicas; restore the object store, then rerun
+   steps 3 to 5.
 4. On a migration target whose rows the source signed under a key
    the target does not hold, place the source's key and restart, or
    recreate the target store empty and re-run
    `podium admin migrate-to-standard` with the source's key in place.
+   On a Helm chart deployment, hold the release at zero replicas
+   before the command runs and run the rewrite in the migrate Job, as
+   the Migration from single node section of
+   `docs/deployment/clustered.md` states.
 5. Where no copy of the signing key's public half survives, or the
    key was compromised, restore the rows from a backup or ingest a
    new version of each affected artifact.

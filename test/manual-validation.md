@@ -203,6 +203,7 @@ rm -rf "$WORK"
 | S73 | A key rotation keeps every stored row loadable | standalone | none | none | none |
 | S74 | A cached pre-rotation delivery signature recovers | standalone | none | none | none |
 | S75 | `podium-server sign-stored-rows` refuses without a key and never writes one | standalone | none | none | none |
+| S76 | Chart upgrade from v0.4.0 | standard (Kubernetes) | none | none | kind, helm, kubectl, Docker |
 
 ---
 
@@ -4779,9 +4780,10 @@ chart mounts its signing key from an operator-supplied Secret. A render
 carrying only `--set signing.secretName=<name>` renders `PODIUM_REGISTRY_STORE=postgres`,
 `PODIUM_OBJECT_STORE=s3`, and `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, and takes the
 DSN, the bucket, and the issuer from the secret named by `existingSecret`. There
-is no dependency-free configuration to fall back on: the chart declares no
-volumes, so `sqlite` and the `filesystem` object store have nowhere to write. A
-pod configured that way starts, fails to open its database under the distroless
+is no dependency-free configuration to fall back on: the chart mounts no volume
+for a SQLite database, so `sqlite` has nowhere to write, and the `filesystem`
+object store needs `objects.enabled` and a claim. A pod configured with
+`sqlite` starts, fails to open its database under the distroless
 image's read-only root, and crash-loops with `mkdir /nonexistent: read-only file
 system` followed by `open store: ping sqlite: unable to open database file`. The
 scenario therefore stands up Postgres and an S3-compatible store in the cluster
@@ -4880,6 +4882,7 @@ rather than trying to avoid them.
    ```bash
    helm template t deploy/helm/podium --set existingSecret="" \
      --set signing.secretName=podium-signing-key \
+     --set migration.storeReady=true \
      | kubectl apply --dry-run=server -f -
    ```
 
@@ -4894,11 +4897,14 @@ rather than trying to avoid them.
    helm install podium deploy/helm/podium \
      --set replicaCount=1 \
      --set signing.secretName=podium-signing-key \
-     --set config.identityProvider.type=""
+     --set config.identityProvider.type="" \
+     --set migration.storeReady=true
    kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=podium --timeout=180s
    kubectl get pods -l app.kubernetes.io/name=podium
    ```
 
+   `migration.storeReady=true` states that the store is empty, which it is in
+   this new cluster; a `helm install` with serving replicas fails without it.
    `config.identityProvider.type` is emptied because the chart's `oidc-jwt`
    default needs a reachable `https` issuer, which this cluster does not have.
    An empty provider selects none, and the registry serves every caller as
@@ -8665,3 +8671,382 @@ reach `~/.podium/standalone/registry-signing.key`.
    `HOME` does not exist.
 
 **Cleanup.** `rm -rf "$WORK"`.
+
+---
+
+## S76: Chart upgrade from v0.4.0
+
+**Goal.** Validate that the chart's upgrade procedure in
+`docs/deployment/clustered.md` moves a clustered v0.4.0 install onto this
+release with no registry pod serving an unmigrated store, and that each render
+check the procedure relies on refuses the step it guards.
+
+**Covers.** The §13.4 stop precondition and first-start rewrite as the chart's
+migrate Job runs them, the chart's stop gate, image gate, reviewed-dry-run
+gate, serving preflight, and install acknowledgement, the reinstall over a
+restored store with `migration.previousImage`, the signing-off
+`migration.unprobedStart` path, and the switch to the `Recreate` strategy on a
+release Helm v4 installed with server-side apply.
+
+**Why by hand.** `test/chart/migrate_render_test.go` covers what `helm template`
+renders and every refusal that needs no cluster. The gates read the cluster
+through `lookup`, which `helm template` skips, and the hook Job's lifecycle,
+the strategy switch, and the registry's behavior over rows v0.4.0 wrote appear
+only on a cluster. `TestChart_KindUpgradeFromV040` automates this scenario
+under `make test-live-kind`; run the scenario by hand to read each refusal and
+each log line as an operator does.
+
+**Prerequisites.** `helm` v4, `kubectl`, `kind`, `git`, and a working Docker
+daemon. When any is absent, skip and record the skip. The commands run from the
+repository, because the `helm` commands name the chart by its relative path.
+
+**Steps.**
+
+1. Build both images and the CLI, generate the signing key, and create the
+   cluster.
+
+   ```bash
+   cd "$REAL_HOME/projects/podium"
+   git worktree add --detach "$WORK/v040" v0.4.0
+   docker build -t podium-live:current .
+   docker build -t podium-live:v0.4.0 "$WORK/v040"
+   go build -o "$WORK/podium" ./cmd/podium
+   "$WORK/podium" admin signing-key generate --key-file "$WORK/registry-signing.key"
+   kind create cluster --name podium-s76 --wait 180s
+   kind load docker-image podium-live:current podium-live:v0.4.0 --name podium-s76
+   arch="$(docker version --format '{{.Server.Arch}}')"
+   for image in minio/minio:RELEASE.2024-10-29T16-01-48Z minio/mc:RELEASE.2024-10-29T15-34-59Z \
+       pgvector/pgvector:pg16 postgres:17-alpine busybox:1.36; do
+     docker image inspect "$image" >/dev/null 2>&1 || docker pull --platform "linux/$arch" "$image"
+     docker save --platform "linux/$arch" -o "$WORK/image.tar" "$image"
+     kind load image-archive "$WORK/image.tar" --name podium-s76
+   done
+   ```
+
+   The loop loads the third-party images as single-platform archives and pulls
+   only an image the host lacks, because Docker Hub refuses the pinned MinIO
+   tags. When a pull is refused, obtain the image another way and rerun the
+   loop. A pull from inside the kind node can be refused by Docker Hub, and
+   `kind load docker-image` fails on a multi-platform image under Docker's
+   containerd image store with `content digest ... not found`.
+
+   **Expect.** Both builds succeed, `generate` prints one key and a
+   `key_id=... role=signing` line, and the node reports `Ready`.
+
+2. Deploy Postgres and MinIO, create the bucket and the Secrets, and seed the
+   store with v0.4.0. MinIO keeps its data on a claim, because step 11 scales
+   it to zero. The seed runs `podium-live:v0.4.0` as a standalone pod with
+   `PODIUM_LAYER_PATH` on a ConfigMap layer that holds a small skill and a
+   skill with a bundled resource of about 350 KB, above the 256 KB inline
+   cutoff. The manifests are the constants `backingManifest`,
+   `seedPodManifest`, and `seedConfigMap` in
+   `test/chart/kind_upgrade_test.go`; apply them with the namespace
+   `default` and `kubectl apply --server-side`, because the ConfigMap exceeds
+   the 256 KiB limit of the annotation a client-side apply writes. Then create the Secrets as S46 steps 3 to 5 do, with the bucket
+   `podium`. Wait for the seed pod to report `Ready`, then delete it.
+
+   ```bash
+   kubectl exec -i deploy/pg -- psql -U podium -d podium -At <<'SQL'
+   SELECT format('SELECT count(*), count(*) FILTER (WHERE signature = %L) FROM %I.manifests', '', table_schema)
+     FROM information_schema.tables WHERE table_name = 'manifests' \gexec
+   SQL
+   ```
+
+   **Expect.** A line such as `2|2`: two rows, both unsigned. `mc ls
+   --recursive m/podium` lists at least one object, which is the large
+   resource's body.
+
+3. Install v0.4.0 from the worktree and prepare the values file.
+
+   ```bash
+   helm install podium "$WORK/v040/deploy/helm/podium" --set image.repository=podium-live \
+     --set image.tag=v0.4.0 --set replicaCount=2 --set config.identityProvider.type="" \
+     --wait --timeout 10m
+   helm get values podium -o yaml > podium-values.yaml
+   helm history podium --max 1
+   export HELM_MAX_HISTORY=0
+   ```
+
+   Edit `podium-values.yaml`: set `image.tag` to `current` and add
+   `signing.secretName: podium-signing-key`. Keep the shell that exported
+   `HELM_MAX_HISTORY` for the remaining steps, so no later upgrade prunes the
+   v0.4.0 revision that step 15 rolls back to.
+
+   **Expect.** Two pods report `1/1 Running`, and `helm history` lists
+   revision 1.
+
+4. Try a default upgrade, then a dry run while the pods run.
+
+   ```bash
+   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=2
+   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+     --set migration.mode=dry-run
+   kubectl get pods -l app.kubernetes.io/name=podium
+   ```
+
+   **Expect.** The first command fails with `the serving preflight refuses
+   replicaCount above zero`, the second with `registry pods of this release are
+   still live or terminating` and a direction to run the zero-replica step,
+   because the live Deployment runs 2 replicas. Both v0.4.0 pods still run. A new pod on
+   `podium-live:current` means the preflight let a rolling update through.
+
+5. Create a pod that carries the registry's labels and fails, then run step 2
+   of the procedure with the v0.4.0 tag kept.
+
+   ```bash
+   kubectl run evicted-look-alike --image=busybox:1.36 --restart=Never \
+     --labels=app.kubernetes.io/name=podium,app.kubernetes.io/instance=podium -- sh -c 'exit 1'
+   sed 's/tag: current/tag: v0.4.0/' podium-values.yaml > old-values.yaml
+   helm upgrade podium ./deploy/helm/podium -f old-values.yaml --set replicaCount=0
+   kubectl wait --for=delete pod --timeout=10m \
+     -l app.kubernetes.io/name=podium,app.kubernetes.io/instance=podium \
+     --field-selector=status.phase!=Succeeded,status.phase!=Failed
+   ```
+
+   **Expect.** `evicted-look-alike` reaches `Error` (phase `Failed`), and the
+   wait returns once the v0.4.0 pods are deleted. A wait that times out on the
+   failed pod means the field selector is missing.
+
+6. Run the dry run on the v0.4.0 tag, then repeat step 2 with the new tag.
+
+   ```bash
+   helm upgrade podium ./deploy/helm/podium -f old-values.yaml --set replicaCount=0 \
+     --set migration.mode=dry-run
+   kubectl get jobs
+   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0
+   kubectl get deployment podium-podium \
+     -o jsonpath='{.metadata.annotations.podium\.lennylabs\.dev/pre-migration-image}'
+   ```
+
+   **Expect.** The dry run fails naming `the image gate`, stating
+   `image.repository and image.tag must name this release`, naming the image
+   `podium-live:v0.4.0`, and stating that the zero-replica step kept the
+   previous image. `kubectl get jobs` reports no Job, and the annotation reads
+   `podium-live:v0.4.0`. Back up the
+   database with `kubectl exec deploy/pg -- pg_dump -U podium -d podium -Fc -f
+   /tmp/step2.dump` and the bucket with `mc mirror m/podium m/podium-backup`.
+
+7. Try a run with an invented UID.
+
+   ```bash
+   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+     --set migration.mode=run --set migration.reviewedDryRun=00000000-0000-0000-0000-000000000000
+   ```
+
+   **Expect.** A refusal naming `the reviewed-dry-run gate`.
+
+8. Run step 3 of the procedure exactly as `docs/deployment/clustered.md` gives
+   it, then run its completeness check and read the UID.
+
+   **Expect.** The `helm upgrade` notes name `podium-podium-migrate` and the
+   `kubectl get job ... jsonpath='{.metadata.uid}'` command. The count of
+   `class=` lines equals the planned count. Both seeded skills appear on lines
+   ending `write=true sign=true signed_by=unsigned`. The step 2 query of the
+   `data_migrations` table (`SELECT count(*) FROM public.data_migrations WHERE
+   name = 'content-hash-framing'`) returns `0`.
+
+9. Try a run with an invented UID while the dry-run Job exists, a run with the
+   UID under a changed pod configuration, and a run with the UID and a
+   different unsigned-row setting.
+
+   ```bash
+   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+     --set migration.mode=run --set migration.reviewedDryRun=00000000-0000-0000-0000-000000000000
+   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+     --set migration.mode=run --set migration.reviewedDryRun=<UID> \
+     --set config.migrationObjectReadTimeout=45s
+   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+     --set migration.mode=run --set migration.reviewedDryRun=<UID> \
+     --set migration.includeUnsigned=false
+   ```
+
+   **Expect.** Each command is refused naming `the reviewed-dry-run gate`: the
+   first with `uid is`, the second with `pod-config`, and the third with
+   `include-unsigned`. A refused render creates no release revision, so the
+   dry-run Job stays valid for the next command.
+
+   Then edit the configuration Secret and try the run again.
+
+   ```bash
+   kubectl patch secret podium-secrets --type=merge \
+     -p '{"stringData":{"PODIUM_SECRET_EDIT_MARKER":"1"}}'
+   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+     --set migration.mode=run --set migration.reviewedDryRun=<UID>
+   ```
+
+   **Expect.** A refusal naming `the reviewed-dry-run gate` and `pod-config`,
+   because the digest carries the Secret's `resourceVersion`. Rerun step 8 and
+   use its new UID from here on. A run that renders means an edit inside a
+   Secret, such as a changed DSN, would attest rows the dry run never listed.
+
+10. Try to serve after only the dry run.
+
+    ```bash
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml
+    ```
+
+    **Expect.** A refusal naming `the serving preflight`.
+
+11. Stop MinIO and run step 4.
+
+    ```bash
+    kubectl scale deployment/minio --replicas=0
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+      --set migration.mode=run --set migration.reviewedDryRun=<UID> --timeout 30m
+    kubectl logs job/podium-podium-migrate | grep body_unavailable
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml
+    ```
+
+    **Expect.** The run upgrade exits non-zero, the Job reports `Failed`, the
+    log names `body_unavailable`, the record query returns `0`, and the
+    Deployment shows `0/0` with no pod. The serving upgrade fails with `the last
+    migration Job did not succeed`.
+
+12. Restore MinIO, wait until it answers through its Service (`mc ls` against
+    the bucket succeeds), and rerun steps 3 and 4 of the procedure.
+
+    **Expect.** The run exits 0, its log carries `rehash: 0 unsigned left`, the
+    record query returns `1`, and the row query reports `2|0`.
+
+13. Run step 5 once under a changed pod configuration, then as documented, and
+    verify a seeded artifact.
+
+    ```bash
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml \
+      --set config.migrationObjectReadTimeout=45s
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --wait --timeout 10m
+    kubectl get pods -l app.kubernetes.io/name=podium
+    kubectl logs -l app.kubernetes.io/name=podium --tail=-1 | grep ' rewritten, '
+    kubectl port-forward svc/podium-podium 18180:8080 >/dev/null 2>&1 &
+    PF=$!; sleep 4
+    PODIUM_SIGNATURE_VERIFY_KEY="$(awk '$1=="public:"{print $2}' "$WORK/registry-signing.key")" \
+      "$WORK/podium" verify demo/hello/bigref --registry http://127.0.0.1:18180
+    kill $PF
+    ```
+
+    **Expect.** The first upgrade fails with the serving-preflight message
+    naming the pod configuration, and no registry pod starts. After the
+    second, two pods report `1/1 Running` with `0` restarts, `grep` finds no
+    rewrite summary, and `verify` prints `verify ok`.
+
+    Then try the migration after serving, and rerun it on a serving pod with a
+    dry run first.
+
+    ```bash
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+      --set migration.mode=dry-run
+    kubectl exec deployment/podium-podium -- /usr/local/bin/podium-server \
+      sign-stored-rows --include-unsigned --dry-run
+    kubectl exec deployment/podium-podium -- /usr/local/bin/podium-server \
+      sign-stored-rows --include-unsigned
+    ```
+
+    **Expect.** The upgrade fails naming `the migrated-store gate` and the
+    `kubectl exec` command with `--dry-run`, and both pods still run. The dry
+    run lists no `signed_by=unsigned` row. The second `kubectl exec` command
+    exits 0 and reports `0 rewritten` with every row already migrated.
+
+14. Upgrade to a second tag of the same image.
+
+    ```bash
+    docker tag podium-live:current podium-live:current2
+    kind load docker-image podium-live:current2 --name podium-s76
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set image.tag=current2 \
+      --wait --timeout 10m
+    helm get hooks podium
+    ```
+
+    **Expect.** The pods roll to `current2`, and `helm get hooks` prints
+    nothing.
+
+15. Roll back through the backup.
+
+    ```bash
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0
+    ```
+
+    Wait as step 5 does, recreate the `podium` database from
+    `/tmp/step2.dump` with `pg_restore`, mirror `m/podium-backup` back onto
+    `m/podium` with `--remove`, and run `helm rollback podium 1 --wait`, where 1
+    is the v0.4.0 revision step 3 printed. Then:
+
+    ```bash
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=2
+    kubectl delete job -l app.kubernetes.io/instance=podium,app.kubernetes.io/component=migrate
+    kubectl get job -l app.kubernetes.io/instance=podium,app.kubernetes.io/component=migrate
+    ```
+
+    **Expect.** Two v0.4.0 pods serve after the rollback, the upgrade fails
+    naming `the serving preflight` although the succeeded run Job still
+    exists, and the last command reports `No resources found`.
+
+    To check the reinstall path instead, skip the two `kubectl` commands above
+    and reinstall over the restored store, relabelling the leftover run Job
+    with the revision a reinstall's collision would give it.
+
+    ```bash
+    helm uninstall podium --wait
+    helm install podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0
+    helm install podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+      --set migration.previousImage=podium-live:v0.4.0
+    kubectl annotate --overwrite job/podium-podium-migrate podium.lennylabs.dev/release-revision=1
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=2
+    kubectl delete job -l app.kubernetes.io/instance=podium,app.kubernetes.io/component=migrate
+    ```
+
+    **Expect.** The first install fails naming `migration.previousImage`. The
+    second records `pre-migration-image: podium-live:v0.4.0` on the
+    Deployment. The upgrade fails naming `the serving preflight`, because the
+    leftover Job recorded the UID of the uninstalled Deployment, and no
+    registry pod starts.
+
+16. Repeat steps 2, 3, and 5 in a second namespace with `signing.mode: none` in the
+    values file in place of the signing Secret, then run the signing-off
+    procedure's boot step with a one-second startup budget.
+
+    ```bash
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=1 \
+      --set strategy.type=Recreate --set migration.unprobedStart=true \
+      --set startupProbe.failureThreshold=1 --set startupProbe.periodSeconds=1 \
+      --wait --timeout 10m
+    kubectl get deployment podium-podium -o jsonpath='{.spec.strategy}'
+    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml \
+      --set migration.preflight=false --wait --timeout 10m
+    kubectl get deployment podium-podium -o jsonpath='{.spec.strategy}'
+    ```
+
+    **Expect.** The first strategy reads `{"type":"Recreate"}`, and the API
+    server accepted the switch. The pod becomes `Ready` with `0` restarts and
+    logs the rewrite summary, and the record query returns `1`. The second
+    strategy reads `RollingUpdate` with `25%` for `maxSurge` and
+    `maxUnavailable`. A switch rejected with `spec.strategy.rollingUpdate:
+    Forbidden` means step 2 did not run on this chart first.
+
+17. In a third namespace with fresh Postgres and MinIO, install the chart
+    without and then with `migration.storeReady=true`, then uninstall it.
+
+    ```bash
+    helm install podium ./deploy/helm/podium --set image.repository=podium-live \
+      --set image.tag=current --set signing.secretName=podium-signing-key \
+      --set config.identityProvider.type="" --set replicaCount=1
+    helm install podium ./deploy/helm/podium --set image.repository=podium-live \
+      --set image.tag=current --set signing.secretName=podium-signing-key \
+      --set config.identityProvider.type="" --set replicaCount=1 \
+      --set migration.storeReady=true --wait --timeout 10m
+    kubectl get jobs
+    helm uninstall podium --wait
+    kubectl delete job -l app.kubernetes.io/instance=podium,app.kubernetes.io/component=migrate
+    ```
+
+    **Expect.** The first install fails naming `migration.storeReady=true`,
+    the second serves with no Job, and the delete reports `No resources found`
+    and exits 0.
+
+**Cleanup.**
+
+```bash
+kind delete cluster --name podium-s76
+docker rmi podium-live:current podium-live:current2 podium-live:v0.4.0
+git worktree remove --force "$WORK/v040"
+rm -rf "$WORK"
+```

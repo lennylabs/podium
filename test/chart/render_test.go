@@ -25,7 +25,10 @@ const withSigningKey = "signing.secretName=sk"
 
 // render runs `helm template` with the given overrides and returns the
 // manifests. It skips when helm is absent so the default `go test ./...` run
-// stays clean on a machine without it.
+// stays clean on a machine without it. It states migration.storeReady=true,
+// which a `helm install` with serving replicas requires, so a test whose
+// subject is not the install acknowledgement renders; those tests use
+// renderArgs.
 func render(t *testing.T, sets ...string) string {
 	t.Helper()
 	out, err := renderErr(t, sets...)
@@ -38,31 +41,235 @@ func render(t *testing.T, sets ...string) string {
 // renderErr is render without the failure, for the cases that assert a refusal.
 func renderErr(t *testing.T, sets ...string) (string, error) {
 	t.Helper()
-	if _, err := exec.LookPath("helm"); err != nil {
-		t.Skip("helm is not installed")
-	}
-	args := []string{"template", "t", chartDir}
+	args := []string{"--set", "migration.storeReady=true"}
 	for _, s := range sets {
 		args = append(args, "--set", s)
+	}
+	return renderArgs(t, args...)
+}
+
+// renderArgs runs `helm template t <chart>` with the given arguments passed
+// through unchanged, such as --set, -f, --namespace, and --is-upgrade. It adds
+// nothing, so a test of the install acknowledgement sees the chart's defaults.
+func renderArgs(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	return helmRun(t, append([]string{"template", "t", chartDir}, args...)...)
+}
+
+// helmRun runs helm with the given arguments and returns its combined output.
+// It skips when helm is absent.
+func helmRun(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm is not installed")
 	}
 	out, err := exec.Command("helm", args...).CombinedOutput()
 	return string(out), err
 }
 
-// envValue returns the value of the named container env entry, or "" when the
-// entry is absent. It reads the line after the name so a comment cannot decide
-// the assertion.
-func envValue(manifests, name string) string {
-	marker := "- name: " + name + "\n"
-	i := strings.Index(manifests, marker)
-	if i < 0 {
-		return ""
+// objectMeta is the metadata subset the render tests read.
+type objectMeta struct {
+	Name        string            `yaml:"name"`
+	Labels      map[string]string `yaml:"labels"`
+	Annotations map[string]string `yaml:"annotations"`
+}
+
+// probe is the subset of a container probe this file reads.
+type probe struct {
+	HTTPGet struct {
+		Path string `yaml:"path"`
+		Port string `yaml:"port"`
+	} `yaml:"httpGet"`
+	PeriodSeconds    int `yaml:"periodSeconds"`
+	FailureThreshold int `yaml:"failureThreshold"`
+}
+
+// container is a rendered container. The pod-spec pieces the Deployment and
+// the migrate Job share decode as generic values, so a parity assertion
+// compares everything the manifest carries rather than a chosen subset.
+type container struct {
+	Name            string           `yaml:"name"`
+	Image           string           `yaml:"image"`
+	ImagePullPolicy string           `yaml:"imagePullPolicy"`
+	SecurityContext map[string]any   `yaml:"securityContext"`
+	Args            []string         `yaml:"args"`
+	Ports           []any            `yaml:"ports"`
+	Env             []map[string]any `yaml:"env"`
+	EnvFrom         []any            `yaml:"envFrom"`
+	VolumeMounts    []any            `yaml:"volumeMounts"`
+	Resources       map[string]any   `yaml:"resources"`
+	StartupProbe    *probe           `yaml:"startupProbe"`
+	LivenessProbe   *probe           `yaml:"livenessProbe"`
+	ReadinessProbe  *probe           `yaml:"readinessProbe"`
+}
+
+// podSpec is a rendered pod spec.
+type podSpec struct {
+	RestartPolicy                string         `yaml:"restartPolicy"`
+	AutomountServiceAccountToken *bool          `yaml:"automountServiceAccountToken"`
+	SecurityContext              map[string]any `yaml:"securityContext"`
+	Containers                   []container    `yaml:"containers"`
+	Volumes                      []any          `yaml:"volumes"`
+	NodeSelector                 map[string]any `yaml:"nodeSelector"`
+	Tolerations                  []any          `yaml:"tolerations"`
+	Affinity                     map[string]any `yaml:"affinity"`
+}
+
+// workload is a rendered Deployment or Job, or any other document decoded
+// through the same fields.
+type workload struct {
+	Kind     string     `yaml:"kind"`
+	Metadata objectMeta `yaml:"metadata"`
+	Spec     struct {
+		Replicas *int           `yaml:"replicas"`
+		Strategy map[string]any `yaml:"strategy"`
+		// Selector is a Deployment's label selector; a Service's selector is
+		// a plain map and decodes as Service below.
+		Selector struct {
+			MatchLabels map[string]string `yaml:"matchLabels"`
+		} `yaml:"selector"`
+		BackoffLimit          *int `yaml:"backoffLimit"`
+		ActiveDeadlineSeconds *int `yaml:"activeDeadlineSeconds"`
+		Template              struct {
+			Metadata objectMeta `yaml:"metadata"`
+			Spec     podSpec    `yaml:"spec"`
+		} `yaml:"template"`
+	} `yaml:"spec"`
+}
+
+// docsOfKind decodes the multi-document output and returns the documents of
+// the given kind, each decoded into out's element type through a fresh node.
+func docsOfKind(t *testing.T, manifests, kind string) []yaml.Node {
+	t.Helper()
+	var docs []yaml.Node
+	dec := yaml.NewDecoder(strings.NewReader(manifests))
+	for {
+		var node yaml.Node
+		err := dec.Decode(&node)
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("decode manifests: %v", err)
+		}
+		var head struct {
+			Kind string `yaml:"kind"`
+		}
+		if err := node.Decode(&head); err != nil {
+			t.Fatalf("decode kind: %v", err)
+		}
+		if head.Kind == kind {
+			docs = append(docs, node)
+		}
 	}
-	rest := manifests[i+len(marker):]
-	line := rest[:strings.Index(rest, "\n")]
-	v := strings.TrimSpace(line)
-	v = strings.TrimPrefix(v, "value:")
-	return strings.Trim(strings.TrimSpace(v), `"`)
+	return docs
+}
+
+// workloads returns the documents of the given kind decoded as workloads.
+func workloads(t *testing.T, manifests, kind string) []workload {
+	t.Helper()
+	var out []workload
+	for _, n := range docsOfKind(t, manifests, kind) {
+		var w workload
+		if err := n.Decode(&w); err != nil {
+			t.Fatalf("decode %s: %v", kind, err)
+		}
+		out = append(out, w)
+	}
+	return out
+}
+
+// oneWorkload returns the single document of the given kind.
+func oneWorkload(t *testing.T, manifests, kind string) workload {
+	t.Helper()
+	ws := workloads(t, manifests, kind)
+	if len(ws) != 1 {
+		t.Fatalf("the manifests carry %d %s documents; want 1", len(ws), kind)
+	}
+	return ws[0]
+}
+
+// serviceSelector returns the registry Service's selector.
+func serviceSelector(t *testing.T, manifests string) map[string]string {
+	t.Helper()
+	for _, n := range docsOfKind(t, manifests, "Service") {
+		var svc struct {
+			Metadata objectMeta `yaml:"metadata"`
+			Spec     struct {
+				Selector map[string]string `yaml:"selector"`
+			} `yaml:"spec"`
+		}
+		if err := n.Decode(&svc); err != nil {
+			t.Fatalf("decode Service: %v", err)
+		}
+		if svc.Metadata.Labels["app.kubernetes.io/component"] == "" {
+			return svc.Spec.Selector
+		}
+	}
+	t.Fatal("the manifests carry no registry Service")
+	return nil
+}
+
+// containerOf returns the named container of a workload's pod.
+func containerOf(t *testing.T, w workload, name string) container {
+	t.Helper()
+	for _, c := range w.Spec.Template.Spec.Containers {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("the %s carries no %s container", w.Kind, name)
+	return container{}
+}
+
+// deploymentContainer decodes the manifests and returns the Deployment's
+// registry container.
+func deploymentContainer(t *testing.T, manifests string) container {
+	t.Helper()
+	return containerOf(t, oneWorkload(t, manifests, "Deployment"), "podium-server")
+}
+
+// envValue returns the value of the named env entry of one decoded container,
+// or "" when the entry is absent, so a Deployment assertion never reads a Job
+// value and a comment never decides the assertion.
+func envValue(c container, name string) string {
+	for _, e := range c.Env {
+		if e["name"] == name {
+			v, _ := e["value"].(string)
+			return v
+		}
+	}
+	return ""
+}
+
+// findMount returns the container's volume mount of the given name, or nil.
+func findMount(c container, name string) map[string]any {
+	return findNamed(c.VolumeMounts, name)
+}
+
+// findVolume returns the pod volume of the given name, or nil.
+func findVolume(w workload, name string) map[string]any {
+	return findNamed(w.Spec.Template.Spec.Volumes, name)
+}
+
+// findNamed returns the list entry whose name field equals name, or nil.
+func findNamed(list []any, name string) map[string]any {
+	for _, e := range list {
+		if m, ok := e.(map[string]any); ok && m["name"] == name {
+			return m
+		}
+	}
+	return nil
+}
+
+// envNames returns the container's env entry names in order.
+func envNames(c container) []string {
+	names := make([]string, 0, len(c.Env))
+	for _, e := range c.Env {
+		n, _ := e["name"].(string)
+		names = append(names, n)
+	}
+	return names
 }
 
 // The registry reads PODIUM_RUNTIME_KEYS_PATH as a JSON file and treats a read
@@ -74,9 +281,9 @@ func envValue(manifests, name string) string {
 // Spec: §13.12
 func TestChart_RuntimeKeysPathNamesAFileInsideTheMount(t *testing.T) {
 	t.Parallel()
-	m := render(t, withSigningKey, "runtimeKeys.enabled=true", "runtimeKeys.secretName=rk")
+	c := deploymentContainer(t, render(t, withSigningKey, "runtimeKeys.enabled=true", "runtimeKeys.secretName=rk"))
 
-	path := envValue(m, "PODIUM_RUNTIME_KEYS_PATH")
+	path := envValue(c, "PODIUM_RUNTIME_KEYS_PATH")
 	if path == "" {
 		t.Fatal("runtimeKeys.enabled renders no PODIUM_RUNTIME_KEYS_PATH")
 	}
@@ -105,10 +312,10 @@ func TestChart_FilesystemObjectStoreRequiresItsVolume(t *testing.T) {
 		t.Errorf("the refusal does not name the value that fixes it: %s", out)
 	}
 
-	m := render(t, withSigningKey, "config.objectStore.type=filesystem", "objects.enabled=true")
-	if root := envValue(m, "PODIUM_FILESYSTEM_ROOT"); root == "" {
+	c := deploymentContainer(t, render(t, withSigningKey, "config.objectStore.type=filesystem", "objects.enabled=true"))
+	if root := envValue(c, "PODIUM_FILESYSTEM_ROOT"); root == "" {
 		t.Error("objects.enabled renders no PODIUM_FILESYSTEM_ROOT")
-	} else if !strings.Contains(m, "mountPath: "+root) {
+	} else if findMount(c, "objects") == nil || findMount(c, "objects")["mountPath"] != root {
 		t.Errorf("PODIUM_FILESYSTEM_ROOT is %q but no volume mounts there", root)
 	}
 }
@@ -121,7 +328,7 @@ func TestChart_FilesystemObjectStoreRequiresItsVolume(t *testing.T) {
 // Spec: §13.12
 func TestChart_DefaultInstallOverridesNoSecretSuppliedKey(t *testing.T) {
 	t.Parallel()
-	m := render(t, withSigningKey)
+	c := deploymentContainer(t, render(t, withSigningKey))
 
 	// Each is named in the clustered-deployment secret recipe, so a default
 	// install must leave it to envFrom.
@@ -133,7 +340,7 @@ func TestChart_DefaultInstallOverridesNoSecretSuppliedKey(t *testing.T) {
 		"PODIUM_OAUTH_AUDIENCE",
 		"PODIUM_POSTGRES_DSN",
 	} {
-		if v := envValue(m, key); v != "" {
+		if v := envValue(c, key); v != "" {
 			t.Errorf("a default install renders %s=%q, which overrides the value existingSecret supplies", key, v)
 		}
 	}
@@ -197,7 +404,7 @@ func TestChart_BundledPostgresNameStaysDistinct(t *testing.T) {
 // Spec: §13.12
 func TestChart_ExternalDatabaseInstallKeepsItsEnvBlock(t *testing.T) {
 	t.Parallel()
-	m := render(t, withSigningKey)
+	c := deploymentContainer(t, render(t, withSigningKey))
 
 	for _, key := range []string{
 		"PODIUM_BIND",
@@ -207,65 +414,10 @@ func TestChart_ExternalDatabaseInstallKeepsItsEnvBlock(t *testing.T) {
 		"PODIUM_EMBEDDING_PROVIDER",
 		"PODIUM_IDENTITY_PROVIDER",
 	} {
-		if envValue(m, key) == "" {
+		if envValue(c, key) == "" {
 			t.Errorf("a default install renders no %s", key)
 		}
 	}
-}
-
-// probe is the subset of a container probe this file reads.
-type probe struct {
-	HTTPGet struct {
-		Path string `yaml:"path"`
-		Port string `yaml:"port"`
-	} `yaml:"httpGet"`
-	PeriodSeconds    int `yaml:"periodSeconds"`
-	FailureThreshold int `yaml:"failureThreshold"`
-}
-
-// renderedContainer is the registry container as the manifests carry it.
-type renderedContainer struct {
-	Name           string `yaml:"name"`
-	StartupProbe   *probe `yaml:"startupProbe"`
-	LivenessProbe  *probe `yaml:"livenessProbe"`
-	ReadinessProbe *probe `yaml:"readinessProbe"`
-}
-
-// registryContainer decodes the rendered manifests and returns the registry
-// container. Decoding rather than matching text is what lets the assertions
-// read a probe's own fields instead of a line that happens to sit nearby.
-func registryContainer(t *testing.T, manifests string) renderedContainer {
-	t.Helper()
-	dec := yaml.NewDecoder(strings.NewReader(manifests))
-	for {
-		var doc struct {
-			Kind string `yaml:"kind"`
-			Spec struct {
-				Template struct {
-					Spec struct {
-						Containers []renderedContainer `yaml:"containers"`
-					} `yaml:"spec"`
-				} `yaml:"template"`
-			} `yaml:"spec"`
-		}
-		err := dec.Decode(&doc)
-		if errors.Is(err, io.EOF) {
-			break
-		}
-		if err != nil {
-			t.Fatalf("decode manifests: %v", err)
-		}
-		if doc.Kind != "Deployment" {
-			continue
-		}
-		for _, c := range doc.Spec.Template.Spec.Containers {
-			if c.Name == "podium-server" {
-				return c
-			}
-		}
-	}
-	t.Fatal("the manifests carry no podium-server container")
-	return renderedContainer{}
 }
 
 // The registry answers no probe path until its boot work finishes, and a
@@ -277,7 +429,7 @@ func registryContainer(t *testing.T, manifests string) renderedContainer {
 // Spec: §13.4
 func TestChart_RegistryContainerCarriesAStartupProbe(t *testing.T) {
 	t.Parallel()
-	c := registryContainer(t, render(t, withSigningKey))
+	c := deploymentContainer(t, render(t, withSigningKey))
 
 	if c.StartupProbe == nil {
 		t.Fatal("the registry container carries no startupProbe, so the kubelet restarts a pod that is still migrating its stored values")
@@ -295,7 +447,7 @@ func TestChart_RegistryContainerCarriesAStartupProbe(t *testing.T) {
 
 	// An operator with a large store raises the threshold for the upgrade that
 	// migrates stored values, so the value has to reach the manifest.
-	c = registryContainer(t, render(t, withSigningKey, "startupProbe.failureThreshold=240"))
+	c = deploymentContainer(t, render(t, withSigningKey, "startupProbe.failureThreshold=240"))
 	if c.StartupProbe == nil || c.StartupProbe.FailureThreshold != 240 {
 		t.Errorf("startupProbe.failureThreshold=240 did not reach the manifest: %+v", c.StartupProbe)
 	}
@@ -313,22 +465,23 @@ const signingMountPath = "/signing"
 // Spec: §4.7.9, §13.12
 func TestChart_SigningKeyMountsTheSecret(t *testing.T) {
 	t.Parallel()
-	m := render(t, withSigningKey)
+	d := oneWorkload(t, render(t, withSigningKey), "Deployment")
+	c := containerOf(t, d, "podium-server")
 
-	if got := envValue(m, "PODIUM_SIGN"); got != "registry-key" {
+	if got := envValue(c, "PODIUM_SIGN"); got != "registry-key" {
 		t.Errorf("PODIUM_SIGN is %q; want registry-key", got)
 	}
-	path := envValue(m, "PODIUM_SIGN_KEY_PATH")
+	path := envValue(c, "PODIUM_SIGN_KEY_PATH")
 	if !strings.HasPrefix(path, signingMountPath+"/") {
 		t.Errorf("PODIUM_SIGN_KEY_PATH is %q, which is not a file inside the mount at %q", path, signingMountPath)
 	}
-	mount := "- name: signing\n              mountPath: " + signingMountPath + "\n              readOnly: true\n"
-	if !strings.Contains(m, mount) {
-		t.Errorf("no read-only signing mount at %s:\n%s", signingMountPath, m)
+	if m := findMount(c, "signing"); m == nil || m["mountPath"] != signingMountPath || m["readOnly"] != true {
+		t.Errorf("no read-only signing mount at %s: %v", signingMountPath, c.VolumeMounts)
 	}
-	volume := "- name: signing\n          secret:\n            secretName: sk\n"
-	if !strings.Contains(m, volume) {
-		t.Errorf("no signing volume from Secret sk:\n%s", m)
+	v := findVolume(d, "signing")
+	secret, _ := v["secret"].(map[string]any)
+	if secret == nil || secret["secretName"] != "sk" {
+		t.Errorf("no signing volume from Secret sk: %v", d.Spec.Template.Spec.Volumes)
 	}
 }
 
@@ -355,16 +508,17 @@ func TestChart_DefaultRenderRequiresTheSigningSecret(t *testing.T) {
 // Spec: §13.12
 func TestChart_SigningModeNoneMountsNoKey(t *testing.T) {
 	t.Parallel()
-	m := render(t, "signing.mode=none")
+	d := oneWorkload(t, render(t, "signing.mode=none"), "Deployment")
+	c := containerOf(t, d, "podium-server")
 
-	if got := envValue(m, "PODIUM_SIGN"); got != "none" {
+	if got := envValue(c, "PODIUM_SIGN"); got != "none" {
 		t.Errorf("PODIUM_SIGN is %q; want none", got)
 	}
-	if got := envValue(m, "PODIUM_SIGN_KEY_PATH"); got != "" {
+	if got := envValue(c, "PODIUM_SIGN_KEY_PATH"); got != "" {
 		t.Errorf("signing.mode=none renders PODIUM_SIGN_KEY_PATH=%q", got)
 	}
-	if strings.Contains(m, "- name: signing\n") {
-		t.Errorf("signing.mode=none renders a signing mount or volume:\n%s", m)
+	if findMount(c, "signing") != nil || findVolume(d, "signing") != nil {
+		t.Errorf("signing.mode=none renders a signing mount or volume: %v %v", c.VolumeMounts, d.Spec.Template.Spec.Volumes)
 	}
 }
 

@@ -1,0 +1,102 @@
+{{- /*
+The §13.4 migrate Job. It runs `podium-server sign-stored-rows` as a
+post-upgrade hook while the Deployment is held at zero replicas, so the
+store-wide rewrite runs in a pod with no probe to kill it. With the completion
+record absent, the command performs the whole rewrite in place of the first
+start and records its completion, and the registry pods that start afterwards
+skip it. The render guards in podium.validate refuse every render that would
+run it beside a live registry pod, on the previous image, or without a reviewed
+dry run.
+
+Spec: §13.4
+*/ -}}
+{{- $mode := toString .Values.migration.mode }}
+{{- if has $mode (list "dry-run" "run") }}
+{{- include "podium.validate" . }}
+{{- /* Each later source wins per key: podLabels, then migration.podLabels, then
+the migrate labels; podAnnotations, then migration.podAnnotations. A mesh reads
+its injection label ahead of its annotation, so an opt-out for a podLabels
+injection label is set in migration.podLabels. set is used rather than merge,
+which treats a false value as empty and lets a lower source replace it. */}}
+{{- $podLabels := dict }}
+{{- range $src := list (.Values.podLabels | default dict) (.Values.migration.podLabels | default dict) (include "podium.migrateLabels" . | fromYaml) }}
+{{- range $k, $v := $src }}{{ $_ := set $podLabels $k $v }}{{ end }}
+{{- end }}
+{{- $podAnnotations := dict }}
+{{- range $src := list (.Values.podAnnotations | default dict) (.Values.migration.podAnnotations | default dict) }}
+{{- range $k, $v := $src }}{{ $_ := set $podAnnotations $k $v }}{{ end }}
+{{- end }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "podium.migrateFullname" . }}
+  labels:
+    {{- include "podium.migrateLabels" . | nindent 4 }}
+  annotations:
+    # A post-upgrade hook runs after Helm applies the Deployment at zero
+    # replicas. before-hook-creation deletes the previous Job only after the
+    # render, so the gates read the Job this one replaces.
+    helm.sh/hook: post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+    # The record the gates read back on the next render.
+    podium.lennylabs.dev/migration-mode: {{ $mode }}
+    podium.lennylabs.dev/stored-row-format: {{ include "podium.storedRowFormat" . }}
+    podium.lennylabs.dev/image: {{ include "podium.image" . | quote }}
+    podium.lennylabs.dev/include-unsigned: {{ toString .Values.migration.includeUnsigned | quote }}
+    podium.lennylabs.dev/release-revision: {{ toString .Release.Revision | quote }}
+    # The live Deployment's UID ties the Job to this instance of the release,
+    # whose revision numbers a reinstall restarts; the pod-config digest ties a
+    # run to the configuration its reviewed dry run read.
+    podium.lennylabs.dev/deployment-uid: {{ include "podium.liveDeploymentUID" . | quote }}
+    podium.lennylabs.dev/pod-config: {{ include "podium.podConfigDigest" . | quote }}
+    {{- if eq $mode "run" }}
+    podium.lennylabs.dev/reviewed-dry-run: {{ toString .Values.migration.reviewedDryRun | quote }}
+    {{- end }}
+spec:
+  backoffLimit: {{ .Values.migration.backoffLimit }}
+  {{- if gt (int .Values.migration.activeDeadlineSeconds) 0 }}
+  activeDeadlineSeconds: {{ .Values.migration.activeDeadlineSeconds }}
+  {{- end }}
+  template:
+    metadata:
+      {{- with $podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- toYaml $podLabels | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      # The service-account token stays mounted as on the Deployment's pod,
+      # because an injector such as the Vault agent authenticates with it to
+      # supply the store and object-store credentials both pods read.
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: sign-stored-rows
+          image: {{ include "podium.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          # The dry run and the run apply the same unsigned-row policy, so the
+          # dry run lists with sign=true every unsigned row the run attests.
+          args:
+            - sign-stored-rows
+            {{- if .Values.migration.includeUnsigned }}
+            - --include-unsigned
+            {{- end }}
+            {{- if eq $mode "dry-run" }}
+            - --dry-run
+            {{- end }}
+          {{- with include "podium.envFrom" . | trim }}{{ . | nindent 10 }}{{- end }}
+          {{- with include "podium.env" . | trim }}{{ . | nindent 10 }}{{- end }}
+          # The plan holds every row in memory, so the Job starts from the
+          # registry's resources and migration.resources overrides them per
+          # key. A replacing override would drop the CPU settings and the
+          # memory request, which a namespace ResourceQuota on them refuses.
+          resources:
+            {{- toYaml (mergeOverwrite (deepCopy (.Values.resources | default dict)) (deepCopy (.Values.migration.resources | default dict))) | nindent 12 }}
+          {{- with include "podium.volumeMounts" . | trim }}{{ . | nindent 10 }}{{- end }}
+      {{- with include "podium.volumes" . | trim }}{{ . | nindent 6 }}{{- end }}
+      {{- with include "podium.scheduling" . | trim }}{{ . | nindent 6 }}{{- end }}
+{{- end }}

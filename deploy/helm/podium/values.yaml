@@ -88,6 +88,20 @@ config:
   bootstrapAdmins: ""         # comma-separated list of admin identities on first boot
   defaultLayerVisibility: ""  # public | organization | private; empty uses server default
 
+  # The deadline on each object-store read during the §13.4 rewrite of stored
+  # rows, as a Go duration (for example 2m). It reaches both the registry and
+  # the migrate Job as PODIUM_MIGRATION_OBJECT_READ_TIMEOUT. Empty keeps the
+  # registry's 30s default. A read that exceeds it holds the row back as
+  # body_unavailable, and the migration reports it.
+  migrationObjectReadTimeout: ""
+
+  # PODIUM_AUDIT_LOG_PATH for both the registry and the migrate Job. Empty
+  # keeps the default file under the home directory, which the read-only root
+  # filesystem cannot hold, so the audit events of a pod are dropped. An
+  # http(s) endpoint ships them, including the artifact.signed events the
+  # migration run appends for every row it signs.
+  auditLogPath: ""
+
   # The §13.12 / §4.5.5 discovery block is config-file-only: it has no
   # environment variable, and this chart configures the registry through env.
   # Setting it here did nothing, so it is not offered. Supply it in a
@@ -127,17 +141,27 @@ securityContext:
   capabilities:
     drop: ["ALL"]
 
+# The Deployment strategy. type is RollingUpdate or Recreate. Under
+# RollingUpdate the chart renders rollingUpdate.maxSurge and
+# rollingUpdate.maxUnavailable explicitly, each 25% when unset, so the release
+# owns the field and a later switch to Recreate is accepted under server-side
+# apply. Under Recreate it renders no rollingUpdate key and ignores the values
+# below.
 strategy:
   type: RollingUpdate
+  # rollingUpdate:
+  #   maxSurge: 25%
+  #   maxUnavailable: 25%
 
 # Startup budget for the registry container. The kubelet holds the liveness and
 # readiness probes off until the startup probe succeeds, and the registry
-# answers neither path until its boot work finishes. A release that migrates a
-# stored value runs a store-wide rewrite of every stored row on the first start
-# of the new version, before the first probe succeeds, so the budget has to
-# cover that rewrite. periodSeconds times failureThreshold is the budget: the
-# defaults below give fifteen minutes. An operator with a large store raises
-# failureThreshold for that upgrade.
+# answers neither path until its boot work finishes. periodSeconds times
+# failureThreshold is the budget: the defaults below give fifteen minutes. The
+# budget covers an ordinary start. A release that migrates a stored value
+# rewrites every stored row before it serves, and the chart runs that rewrite in
+# the migrate Job below, so a start after a successful Job finds the completion
+# record and skips it. A signing-off deployment cannot use the Job and runs the
+# rewrite at boot with migration.unprobedStart, which removes this probe.
 startupProbe:
   periodSeconds: 10
   failureThreshold: 90
@@ -200,6 +224,89 @@ runtimeKeys:
   # mountPath/key as a file; mountPath itself is the directory the volume
   # mounts at, and naming it instead fails the boot.
   key: runtime-keys.json
+
+# The §13.4 stored-value migration. The first start of a release that migrates
+# a stored value rewrites every stored row before it serves, and it requires
+# every registry process on the previous release stopped first. The chart runs
+# that rewrite as a Job, `podium-server sign-stored-rows`, rendered as a Helm
+# post-upgrade hook while the Deployment is held at replicaCount 0. The upgrade
+# procedure in docs/deployment/clustered.md sets mode and reviewedDryRun per
+# step with --set; keep those two at their defaults in a values file. A
+# controller that renders every revision as an install keeps storeReady: true
+# in its values.
+#
+# Every lookup-based gate below needs the Helm user to hold get on Deployments,
+# Jobs, and Secrets and list on Pods in the release namespace. A renderer that runs
+# without cluster access, such as `helm template`, skips lookup, so the image
+# and reviewed-dry-run gates fail closed there, and a serving upgrade render
+# requires storeReady.
+migration:
+  # disabled, dry-run, or run. A mode renders the Job and requires
+  # replicaCount 0, signing.mode registry-key, and a helm upgrade. dry-run
+  # lists every row the run would write and writes no row; run performs the
+  # rewrite and records its completion. The value is the string "disabled"
+  # because YAML reads an unquoted off as false.
+  mode: disabled
+  # Passes --include-unsigned in both dry-run and run, so the dry run lists
+  # with sign=true every unsigned row the run attests. The run must use the
+  # setting of the dry run it names. Set false for both steps to leave
+  # unsigned rows unsigned.
+  includeUnsigned: true
+  # The UID of the succeeded dry-run Job the operator reviewed, which
+  # `kubectl get job <release>-podium-migrate -o jsonpath='{.metadata.uid}'`
+  # prints. run requires it and refuses a Job from another image, another
+  # includeUnsigned setting, an earlier release revision, another pod
+  # configuration, or another Deployment.
+  reviewedDryRun: ""
+  # A helm install with replicaCount above 0 requires true, which states that
+  # the store is empty or already migrated, and so does a helm upgrade with
+  # replicaCount above 0 that finds no live Deployment. The chart cannot see the store, and
+  # a store outlives helm uninstall. An install over a store the previous
+  # release wrote installs at replicaCount 0 and follows the upgrade procedure.
+  # An install at replicaCount 0 with storeReady true records the migration as
+  # complete.
+  storeReady: false
+  # The image the store's previous registry ran, such as
+  # ghcr.io/lennylabs/podium-server:v0.4.0. A helm install at replicaCount 0
+  # requires it unless storeReady is true. The install has no live Deployment
+  # to read the previous image from, so it records this value, and the image
+  # gate refuses a migrate Job on that image.
+  previousImage: ""
+  # The lookup gates: the stop gate, the image gate, the reviewed-dry-run gate,
+  # and the serving preflight that refuses to scale the Deployment above zero
+  # over a store that has not been migrated. false is the operator's assertion
+  # that every registry process is stopped, the image is this release, the
+  # plan was reviewed, and the rewrite is complete. With false, only a render
+  # with replicaCount above 0 records the migration as complete.
+  preflight: true
+  # The signing-off path. sign-stored-rows refuses with signing off, so such a
+  # deployment runs the rewrite at boot. true removes the startup and liveness
+  # probes so the kubelet never restarts the pod mid-rewrite, and it requires
+  # signing.mode none, replicaCount 1, strategy.type Recreate, and mode
+  # disabled.
+  unprobedStart: false
+  backoffLimit: 0
+  # 0 renders no activeDeadlineSeconds. Helm waits on the hook only up to
+  # --timeout, so pass a --timeout larger than this value.
+  activeDeadlineSeconds: 0
+  # Merged per key over resources above, so a key set here replaces only that
+  # key and the Job keeps the rest. The plan holds every row in memory, so a
+  # large store raises limits.memory here.
+  resources: {}
+  # Merged over podAnnotations on the Job pod only, winning per key. On a
+  # service mesh without native sidecars an injected sidecar keeps running
+  # after the command exits and the Job never completes; set the mesh's
+  # opt-out here, such as sidecar.istio.io/inject: "false" or
+  # linkerd.io/inject: disabled, when the store is reachable without the mesh.
+  # The chart sets none by default, because a mesh that enforces mTLS to the
+  # store would then block the Job.
+  podAnnotations: {}
+  # Merged over podLabels on the Job pod only, winning per key; the Job's own
+  # name, instance, and component labels win over both. A mesh reads its
+  # injection label ahead of its annotation, so when podLabels enables
+  # injection, such as sidecar.istio.io/inject: "true", set the opt-out label
+  # here, such as sidecar.istio.io/inject: "false".
+  podLabels: {}
 
 ingress:
   enabled: false

@@ -152,6 +152,8 @@ Schema migrations are bundled in the registry binary and applied additively on s
 3. **Roll.** Roll the rest of the replicas. Because migrations are additive, an older replica ignores the new tables and columns, so old and new replicas coexist during the roll. The additive guarantee covers the database schema and does not cover the values stored under it, so a release whose changelog names a migration of those values does not permit mixed-version replicas.
 4. **Verify.** After the roll completes, confirm `/readyz` reports `ready` on every replica and that the audit-integrity pass logs no gap on its next run.
 
+A Helm chart deployment runs such a migration through the chart's migrate Job, which holds the Deployment at zero replicas while `sign-stored-rows` rewrites the store, and follows [Upgrading the chart from v0.4.0](clustered#upgrading-the-chart-from-v040). Pass neither `--rollback-on-failure` (Helm v4) nor `--atomic` (Helm v3) to those upgrades, because an automatic rollback reinstalls the previous binary over rows it cannot read.
+
 Roll back by reverting the binary. The additive schema stays forward-compatible with the previous version's binary, so an older binary continues to run against a schema-migrated database. A release whose changelog names a migration of the values stored under the schema is reverted differently: restore the store from the backup that changelog's upgrade order takes, revert the registry and its consumers together, and clear each reverted consumer's cache as that changelog entry states.
 
 ---

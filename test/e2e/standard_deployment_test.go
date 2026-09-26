@@ -26,9 +26,20 @@ package e2e
 //     cluster; TEST-8's chart render cases and manual scenario S46 cover
 //     them, and TestStandardDeploy_SigningKeyFileFromGenerate runs the
 //     key-generation and extraction blocks that precede them.
-//   - the v0.4.0-upgrade Job and the replica rotation roll under the page's
-//     Signing key operations section need a cluster; manual scenarios S73
-//     and S74 drive the same commands against a standalone registry.
+//   - the blocks under the page's Upgrading the chart from v0.4.0 section
+//     need a cluster; the render tests in test/chart/migrate_render_test.go
+//     pin every refusal a render can check, TestChart_KindUpgradeFromV040
+//     (`make test-live-kind`) runs the procedure on kind, and manual
+//     scenario S76 walks it by hand. Manual scenario S66 drives the
+//     `sign-stored-rows --include-unsigned` command the migrate Job runs
+//     against a standalone registry.
+//   - the `kubectl annotate` block under the page's Migration from single
+//     node section needs a cluster and a migrate-to-standard target; no test
+//     runs it. The migrated-store gate and the image gate that read the two
+//     annotations it edits run in TestChart_KindUpgradeFromV040.
+//   - the replica rotation roll under the page's Signing key operations
+//     section needs a cluster; manual scenarios S73 and S74 drive the same
+//     commands against a standalone registry.
 
 import (
 	"bytes"

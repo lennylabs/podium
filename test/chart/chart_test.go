@@ -201,14 +201,10 @@ func TestChart_EveryTopLevelBlockIsRendered(t *testing.T) {
 // Spec: §13.1
 func TestChart_EnvFromIsGuardedOnExistingSecret(t *testing.T) {
 	t.Parallel()
-	raw, err := os.ReadFile(filepath.Join(chartDir, "templates", "deployment.yaml"))
-	if err != nil {
-		t.Fatalf("read deployment.yaml: %v", err)
-	}
-	src := string(raw)
+	src := podSource(t)
 	idx := strings.Index(src, "envFrom:")
 	if idx < 0 {
-		t.Fatal("deployment.yaml renders no envFrom block")
+		t.Fatal("_pod.tpl renders no envFrom block")
 	}
 	// The guard opens before the block and closes after it.
 	before := src[:idx]
@@ -269,16 +265,17 @@ func TestChart_IdentityBlockNamesTheKeysItsProviderReads(t *testing.T) {
 	}
 }
 
-// deploymentSource is the deployment template read as text. The wiring below
-// is asserted on the source rather than on rendered output because the
-// properties that matter are orderings and guards, which survive into every
-// render and which `helm template` would only exercise for the value set the
-// test happened to pick.
-func deploymentSource(t *testing.T) string {
+// podSource is the shared pod-spec template read as text. It holds the
+// environment, envFrom, mounts, and volumes that the Deployment and the migrate
+// Job both include. The wiring below is asserted on the source rather than on
+// rendered output because the properties that matter are orderings and guards,
+// which survive into every render and which `helm template` would only
+// exercise for the value set the test happened to pick.
+func podSource(t *testing.T) string {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(chartDir, "templates", "deployment.yaml"))
+	raw, err := os.ReadFile(filepath.Join(chartDir, "templates", "_pod.tpl"))
 	if err != nil {
-		t.Fatalf("read deployment.yaml: %v", err)
+		t.Fatalf("read _pod.tpl: %v", err)
 	}
 	return string(raw)
 }
@@ -296,11 +293,11 @@ func deploymentSource(t *testing.T) string {
 // Spec: §13.12
 func TestChart_BundledPostgresIsWiredToTheRegistry(t *testing.T) {
 	t.Parallel()
-	src := deploymentSource(t)
+	src := podSource(t)
 
 	dsn := strings.Index(src, "- name: PODIUM_POSTGRES_DSN")
 	if dsn < 0 {
-		t.Fatal("deployment.yaml sets no PODIUM_POSTGRES_DSN; enabling the bundled Postgres starts a database the registry never connects to")
+		t.Fatal("_pod.tpl sets no PODIUM_POSTGRES_DSN; enabling the bundled Postgres starts a database the registry never connects to")
 	}
 	// The DSN names the bundled service through the chart's own helper rather
 	// than a literal, so renaming the release cannot leave it pointing at a
@@ -317,7 +314,7 @@ func TestChart_BundledPostgresIsWiredToTheRegistry(t *testing.T) {
 	// fails at connect time.
 	pw := strings.Index(src, "- name: PODIUM_PG_PASSWORD")
 	if pw < 0 {
-		t.Fatal("deployment.yaml binds no PODIUM_PG_PASSWORD for the DSN to expand")
+		t.Fatal("_pod.tpl binds no PODIUM_PG_PASSWORD for the DSN to expand")
 	}
 	if pw > dsn {
 		t.Error("PODIUM_PG_PASSWORD is defined after PODIUM_POSTGRES_DSN; $(VAR) expands only from an earlier entry, so the DSN would carry the literal variable name")
@@ -351,7 +348,7 @@ func valueLineAfter(t *testing.T, src, marker string) string {
 	t.Helper()
 	at := strings.Index(src, marker)
 	if at < 0 {
-		t.Fatalf("deployment.yaml has no %q entry", marker)
+		t.Fatalf("_pod.tpl has no %q entry", marker)
 	}
 	for _, line := range strings.Split(src[at:], "\n")[1:] {
 		if strings.Contains(line, "value:") {
@@ -374,7 +371,7 @@ func valueLineAfter(t *testing.T, src, marker string) string {
 // Spec: §13.12
 func TestChart_BundledPostgresWiringIsGuarded(t *testing.T) {
 	t.Parallel()
-	src := deploymentSource(t)
+	src := podSource(t)
 
 	guard := strings.Index(src, "if .Values.postgresql.enabled")
 	if guard < 0 {
