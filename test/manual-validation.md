@@ -8544,15 +8544,18 @@ by that count.
    ```bash
    stop
    podium admin signing-key rotate --key-file "$PODIUM_SIGN_KEY_PATH" > /dev/null
-   podium admin sign-stored-rows | grep 'still signed'
+   podium admin sign-stored-rows > "$WORK/sign.out"; echo "exit=$?"
+   grep 'still signed' "$WORK/sign.out"
    sed -i.bak '/^verify:/d' "$PODIUM_SIGN_KEY_PATH"
    NEW_KEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
    cp -R "$WORK/cache" "$WORK/cache-stale"
    serve 2
    ```
 
-   **Expect.** `rehash: verify key <old key_id>: 0 row(s) still signed under
-   it`.
+   **Expect.** `exit=0`, then `rehash: verify key <old key_id>: 0 row(s)
+   still signed under it`. Remove the `verify:` line only when both hold: a
+   run that exits non-zero leaves the count incomplete, so stop and repair
+   what its log names instead of continuing.
 
 4. Load with the new key alone against the stale cache, counting the
    registry's load requests before and after.
