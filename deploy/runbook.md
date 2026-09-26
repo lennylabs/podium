@@ -165,7 +165,10 @@ unaffected. A `podium-mcp` that refuses to start serves nothing.
 2. For a row signed under a key that is lost or rotated out of the
    registry's key file: restore the key file that holds that key,
    where it still exists, to `PODIUM_SIGN_KEY_PATH`, and restart the
-   registry, which loads its key only at start. Where only the key's
+   registry, which loads its key only at start. Restoring the file
+   leaves refused every row the key that replaced it signed; list that
+   key's public half on a `verify:` line of the restored file and
+   restart the registry to admit those rows. Where only the key's
    public half survives, for example in a consumer's
    `PODIUM_SIGNATURE_VERIFY_KEY`, list it on a `verify:` line of the
    key file the registry holds and restart the registry, which then

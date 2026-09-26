@@ -326,7 +326,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `podium verify` resolves the verification key set the same way, and
   `podium sign` takes the key file's `private:` line. Roll the registry before the consumers, in
   the window the upgrade note above states, because the consumer defaults hold
-  only once the registry's first start has signed the stored rows. A registry
+  only once the stored rows are signed. The first start signs them for the
+  SQLite store in the key file's directory, and the pre-start
+  `podium-server sign-stored-rows --include-unsigned` run signs them for every
+  other store, as the upgrade note states. A registry
   with signing on and no `PODIUM_SIGN_KEY_PATH` refuses to start unless its
   store is the SQLite store beside the default key. The Helm chart requires
   `signing.secretName` naming a Secret that holds the key file, unless

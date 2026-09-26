@@ -228,31 +228,45 @@ For each consumer:
 
 v0.4.0 stored every row unsigned by default. The first start of this release signs an unsigned row only when the store is the SQLite store in the key file's directory, so on a Postgres store it leaves those rows unsigned and the registry refuses each of them with `materialize.signature_missing`. Sign them once, before the first start, with `podium-server sign-stored-rows --include-unsigned` run as a Job. `--include-unsigned` attests every unsigned row the store holds when the Job runs, because an unsigned row carries no evidence of who stored it.
 
-The Job performs the one-shot rewrite of stored content hashes in place of the first start, so it runs only while no registry process on the previous version serves the store. The command binds no listen address and cannot detect another process, so scale the previous version to zero first. Back up the store after the stop, create the signing Secret as [Deploy the registry](#2-deploy-the-registry) shows, and render the Job from the new chart, so that its pod carries the same image, `envFrom` Secret, configuration environment, and signing Secret mount as the Deployment:
+The Job performs the one-shot rewrite of stored content hashes in place of the first start, so it runs only while no registry process on the previous version serves the store. The command binds no listen address and cannot detect another process, so scale the previous version to zero first. Back up the store after the stop, create the signing Secret as [Deploy the registry](#2-deploy-the-registry) shows, and render the Jobs from the new chart, so that each pod carries the same image, `envFrom` Secret, configuration environment, and signing Secret mount as the Deployment. The first Job adds `--dry-run`, lists every unsigned row the second Job attests, and writes nothing. Read its log and confirm every listed row is one the deployment stored before the second Job runs:
 
 ```bash
 kubectl scale deployment/podium-podium --replicas=0
 kubectl rollout status deployment/podium-podium
 helm get values podium -o yaml > podium-values.yaml
-helm template podium ./deploy/helm/podium -f podium-values.yaml \
-    --set signing.secretName=podium-signing-key \
-    --show-only templates/deployment.yaml \
-  | kubectl create --dry-run=client -o json -f - \
-  | jq '{apiVersion: "batch/v1", kind: "Job",
-         metadata: {name: "podium-sign-stored-rows"},
-         spec: {backoffLimit: 0, template: {spec: (.spec.template.spec
-           | .restartPolicy = "Never"
-           | .containers[0].args = ["sign-stored-rows", "--include-unsigned"]
-           | del(.containers[0].ports, .containers[0].startupProbe,
-                 .containers[0].livenessProbe, .containers[0].readinessProbe))}}}' \
-  | kubectl apply -f -
+sign_stored_rows_job() {
+  helm template podium ./deploy/helm/podium -f podium-values.yaml \
+      --set signing.secretName=podium-signing-key \
+      --show-only templates/deployment.yaml \
+    | kubectl create --dry-run=client -o json -f - \
+    | jq --arg name "$1" --argjson args "$2" \
+        '{apiVersion: "batch/v1", kind: "Job",
+          metadata: {name: $name},
+          spec: {backoffLimit: 0, template: {spec: (.spec.template.spec
+            | .restartPolicy = "Never"
+            | .containers[0].args = $args
+            | del(.containers[0].ports, .containers[0].startupProbe,
+                  .containers[0].livenessProbe, .containers[0].readinessProbe))}}}' \
+    | kubectl apply -f -
+}
+sign_stored_rows_job podium-sign-stored-rows-dry-run \
+  '["sign-stored-rows", "--include-unsigned", "--dry-run"]'
+kubectl wait --for=condition=complete job/podium-sign-stored-rows-dry-run --timeout=60m
+kubectl logs job/podium-sign-stored-rows-dry-run
+```
+
+After the dry-run log lists only rows the deployment stored, run the attesting Job and upgrade the release:
+
+```bash
+sign_stored_rows_job podium-sign-stored-rows \
+  '["sign-stored-rows", "--include-unsigned"]'
 kubectl wait --for=condition=complete job/podium-sign-stored-rows --timeout=60m
 kubectl logs job/podium-sign-stored-rows
 helm upgrade podium ./deploy/helm/podium -f podium-values.yaml \
   --set signing.secretName=podium-signing-key
 ```
 
-The Job removes the probes and the port, because the command serves no HTTP. Its log carries the rewrite's summary line and a `rehash: 0 unsigned left` line. A Job that fails, or a count above zero, leaves unsigned rows that the registry refuses; read the per-row lines in the log before the `helm upgrade`. A Job rendered the same way under another name, with `--dry-run` added to its `args`, lists every unsigned row the real run attests and writes nothing, so run it first and read its log.
+Both Jobs remove the probes and the port, because the command serves no HTTP. The attesting Job's log carries the rewrite's summary line and a `rehash: 0 unsigned left` line. A Job that fails, or a count above zero, leaves unsigned rows that the registry refuses; read the per-row lines in the log before the `helm upgrade`.
 
 ### Rotating the signing key across replicas
 
