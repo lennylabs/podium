@@ -167,7 +167,10 @@ objects:
   accessMode: ReadWriteOnce
 
 # Registry signing key (§4.7.9, §13.10). The registry signs every artifact at
-# ingest, and every replica has to sign under one key, so the chart mounts an
+# ingest, and every replica signs under a key that every other replica's
+# verification key set contains. In steady state every replica signs under the
+# one key the chart mounts from one Secret, and during a rotation every replica
+# trusts the new key before any replica signs under it. The chart mounts an
 # operator-supplied Secret rather than letting each pod generate its own on a
 # read-only root filesystem. The Secret holds the key file
 # `podium admin signing-key generate --key-file <path>` writes, with its
