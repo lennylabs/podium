@@ -6,6 +6,45 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **A verification key set for the registry signing key** (§4.7.9, §13.4,
+  §13.12): the key file at `PODIUM_SIGN_KEY_PATH` takes zero or more `verify:`
+  lines, each a base64 Ed25519 public key trusted for verification only. The
+  `public:` key and the `verify:` keys form the registry's verification key
+  set. The registry signs every new envelope under the `private:` key and
+  admits a stored row whose signature verifies under any key of the set, so a
+  rotation that keeps the retired public key on a `verify:` line leaves every
+  row the retired key signed loadable. A key file with no `private:` or
+  `public:` line, a line that does not decode, or a `public:` line that is not
+  the public half of the `private:` line refuses the registry start with
+  `config.signature_provider_unavailable`, naming the file.
+  `docs/deployment/operator-guide.md` gives the rotation procedure.
+- **`sign-stored-rows`** (§13.4): `podium-server sign-stored-rows` and
+  `podium admin sign-stored-rows` re-sign under the signing key every stored
+  row that a `verify:` key verifies and whose stored bytes reproduce its stored
+  hash or the previous release's digest, and report how many rows remain
+  signed under each verification-only key. When the store records that the
+  first-start rewrite has completed, the command may run while registries on
+  this release serve the store. When that record is absent, the command
+  performs the rewrite in place of the first start and records its completion,
+  so it runs only while no registry process on the previous release serves the
+  store; it binds no listen address and cannot detect such a process. It signs
+  each unsigned row that first start would sign, and beyond those it signs an
+  unsigned row only under `--include-unsigned`, which attests every unsigned
+  row the store holds. `--dry-run` lists every write and makes none. The
+  command never generates a key: signing off or an absent key file refuses it
+  with `config.signature_provider_unavailable`.
+- **`podium admin signing-key generate|rotate`** (§4.7.9): writes the registry
+  key file named by the required `--key-file` flag, and reads no environment
+  variable and no default path. `rotate` keeps the previous keys as `verify:`
+  lines, and `--staged-out` also writes the intermediate file a multi-replica
+  rotation deploys first. Both print the verification key set as the
+  comma-separated list `PODIUM_SIGNATURE_VERIFY_KEY` takes, followed by one
+  `key_id=<hex> role=signing|verify` line per key.
+  `docs/deployment/clustered.md` generates the chart's signing key with
+  `generate` in place of a standalone first start.
+
 ### Fixed
 
 - **Signature verification in `podium-mcp`** (§4.7.9, §6.6): a response that
@@ -43,27 +82,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   store. In a clustered deployment that means scaling the registry to zero
   replicas, because the Helm chart's default rolling update would start the new
   version beside the previous one, and a registry still running the previous
-  binary ingests under the previous digest: a row it writes after the new
-  version's first start has examined its tenant is never rewritten. Back up the
+  binary ingests under the previous digest: no automatic start rewrites a row
+  it writes after the new version's first start has examined its tenant. A
+  `sign-stored-rows` run moves such a row to the new digest, signing it when a
+  key of the registry's verification key set verifies its envelope, and, for an
+  unsigned row the operator attests, under `--include-unsigned`. Back up the
   registry store after the stop, so that the backup holds every write the
   previous binary made. Restoring that backup is the only route back to the
-  previous binary, and it is the only way to make the rewrite run again once it
-  has completed. Install the new binary or image. Start the registry. There is
-  no command to run: the first start rewrites every stored content hash before
-  it ingests or serves anything, re-signs each row it rewrites where signing is
-  configured, which it is by default from this release, attaches a first
-  envelope to each stored row already at the new digest that carries none, and
-  appends one `artifact.signed` event per re-signed row to the
-  audit sink, with the manifest-declared §8.2 redaction ingest applies. It
+  previous binary, and it is the only way to make the whole rewrite run again
+  once it has completed; `sign-stored-rows` re-applies the rewrite's rules to
+  the stored rows on demand. Install the new binary or image. A standard
+  deployment that upgrades with signing on runs
+  `podium-server sign-stored-rows --include-unsigned` once before its first
+  start, as a Kubernetes Job on a chart deployment, as
+  `docs/deployment/clustered.md` shows, because v0.4.0 stored every row
+  unsigned by default and the first start signs no unsigned row outside the
+  SQLite store in the key file's directory. Start the registry. The first
+  start rewrites every stored content hash before it ingests or serves
+  anything, unless `sign-stored-rows` already did, and re-signs each row it
+  rewrites where signing is configured, which it is by default from this
+  release. Where the store is the SQLite store in the key file's directory, it
+  also attaches a first envelope to each stored row that carries none; for
+  every other store it leaves such a row unsigned and logs how many it left
+  with `sign-stored-rows --include-unsigned` on a line of its own. It appends
+  one `artifact.signed` event per signed row to the audit sink, with the
+  manifest-declared §8.2 redaction ingest applies. It
   leaves the tenant's dependency rows, layer configs, admin grants, and tenants
   untouched, and it re-ingests nothing. A `podium layer reingest` is neither
   required nor sufficient, because a reingest reaches only the version each
-  artifact directory currently declares. This first start is the one path that
-  attaches envelopes to stored rows. A registry that turns signing on after
-  that start signs no row it already stores: an artifact gains an envelope only
-  when a new version of it is ingested, and a signing registry refuses each row
-  stored unsigned to every reader with `materialize.signature_missing` until
-  then.
+  artifact directory currently declares. A registry that turns signing on
+  after that start signs no row it already stores on any later start, and a
+  signing registry refuses each row stored unsigned to every reader with
+  `materialize.signature_missing` until `sign-stored-rows --include-unsigned`
+  signs it or a new version of the artifact is ingested.
 
   **Read the summary line the start logs.** It carries the counts of rows
   rewritten, rows already migrated, and rows left untouched by class, and the
@@ -106,13 +157,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   rewrite back and the start runs the rewrite again. On a signing registry, a
   `signature_unverified` row at the framed digest is refused with
   `materialize.signature_invalid`, and a row stored unsigned with
-  `materialize.signature_missing`. A `body_unavailable` row is repaired by
+  `materialize.signature_missing`, which `sign-stored-rows --include-unsigned`
+  repairs. A `body_unavailable` row is repaired by
   making the object readable, raising `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT`
   where the read timed out, and starting the registry again: the start left the
   record of the rewrite unset, so the rewrite runs again. An `unreproducible`
-  row and a `signature_unverified` row whose signing key is gone are repaired
-  by publishing a new version of the artifact, because the record of the
-  rewrite is set and no later start examines those rows again. A `body_missing`
+  row is repaired by publishing a new version of the artifact, because the
+  record of the rewrite is set and no later start examines it again. A
+  `signature_unverified` row whose signing key is gone is repaired by listing
+  that key's public half on a `verify:` line of the key file, restarting the
+  registry, and running `sign-stored-rows`, which moves the row to the new
+  digest and re-signs it; where no copy of that public half survives, publish a
+  new version of the artifact. A `body_missing`
   row is repaired by publishing a new version as well, and where the summary
   reports that no object-store read returned a body, or reports rows that hold
   the record of the rewrite back, that record stays unset and the next start
@@ -215,10 +271,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   registry-managed envelope whatever key model signed the artifact at ingest,
   and a consumer configured for `sigstore-keyless` refuses it with
   `materialize.signature_invalid`. A registry running with `PODIUM_SIGN=none`
-  serves each delivery record unsigned. A rotation of the registry key takes
-  effect on the next response, so roll each consumer's
-  `PODIUM_SIGNATURE_VERIFY_KEY` with the rotation and clear each consumer's
-  cache directory.
+  serves each delivery record unsigned. A registry process signs under a
+  rotated key from its next response onward; rotate the key as the
+  "Rotating the signing key" procedure in `docs/deployment/operator-guide.md`
+  states, which adds the new key to each consumer's set before the registry
+  signs under it.
+- **`PODIUM_SIGNATURE_VERIFY_KEY` takes a verification key set** (§4.7.9,
+  §6.2): the variable takes one base64 Ed25519 public key or a comma-separated
+  list of them, and `podium-mcp` and `podium verify` accept a delivery
+  signature that verifies under any key of the set. When the variable is unset
+  they read the key file's `public:` line and every `verify:` line. An entry
+  that is empty or does not decode refuses the start with
+  `config.signature_provider_unavailable`, naming the variable.
+- **Every registry-managed envelope carries a `key_id`** (§4.7.9): the
+  lowercase hex of the first 8 bytes of the SHA-256 digest of the signing
+  public key, including an envelope `podium sign` mints. A verifier tries the
+  named key first and then every other key of its set, and the `key_id` never
+  on its own refuses an envelope a trusted key verifies.
+- **`podium-mcp` recovers a cached delivery signature a rotation retired**
+  (§4.7.10, §6.5, §7.4): a cached record whose delivery signature fails under
+  the consumer's current key set is a cache miss in `always-revalidate` and
+  `offline-first`, on the revalidation match, the 304 response, the
+  `offline-first` cache hit, and the degraded-network fallback. The bridge
+  refetches the artifact and replaces the cached record, and when the registry
+  is unreachable the load returns the cache-miss outcome for the mode and never
+  delivers the failing record. An `offline-only` consumer refuses such a record
+  with `materialize.signature_invalid`, so it keeps the retired key in its set,
+  or clears and refills its cache in another mode, before the key leaves the
+  set.
 - **Hidden parents are withheld on more read surfaces** (§4.6, §4.7.3):
   `GET /v1/dependents` returns an edge only when the caller can see both of its
   endpoints, testing the parent record an `extends` edge pinned, and answers
@@ -233,8 +313,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `registry-key`, and `PODIUM_SIGN=none` or `--sign none` turns ingest signing
   off. `PODIUM_SIGNATURE_PROVIDER` defaults to `registry-managed` and
   `PODIUM_VERIFY_SIGNATURES` to `always`. `podium-mcp` resolves its
-  verification key once at start, from `PODIUM_SIGNATURE_VERIFY_KEY` or, when
-  that variable is unset, from the `public:` line of the registry key file at
+  verification key set once at start, from `PODIUM_SIGNATURE_VERIFY_KEY`, one
+  key or a comma-separated list, or, when that variable is unset, from the
+  `public:` line and every `verify:` line of the registry key file at
   `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`),
   and refuses to start with `config.signature_provider_unavailable` when a
   policy above `never` resolves none. A standalone consumer on the registry's
@@ -242,8 +323,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   deployment sets `PODIUM_SIGNATURE_VERIFY_KEY` to the registry's public key,
   which `docs/deployment/clustered.md` shows how to extract, and a consumer of
   a registry with `PODIUM_SIGN=none` sets `PODIUM_VERIFY_SIGNATURES=never`.
-  `podium verify` resolves the public key the same way, and `podium sign` takes
-  the key file's `private:` line. Roll the registry before the consumers, in
+  `podium verify` resolves the verification key set the same way, and
+  `podium sign` takes the key file's `private:` line. Roll the registry before the consumers, in
   the window the upgrade note above states, because the consumer defaults hold
   only once the registry's first start has signed the stored rows. A registry
   with signing on and no `PODIUM_SIGN_KEY_PATH` refuses to start unless its
@@ -266,8 +347,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `materialize.content_hash_mismatch`, `materialize.signature_invalid`, or
   `materialize.signature_missing`, so on a signing registry a row altered in
   the store is refused whatever the consumer's policy. Turning signing on
-  after the upgrade makes every row stored unsigned unloadable until a new
-  version of it is ingested. During an object-storage outage a full load is
+  after the upgrade makes every row stored unsigned unloadable until
+  `sign-stored-rows --include-unsigned` signs it or a new version of it is
+  ingested. During an object-storage outage a full load is
   refused with `registry.unavailable` when any row of the artifact's
   `extends:` chain, parents included, holds an object-held body, while a HEAD
   revalidation and a matching conditional GET still answer from the stored
@@ -329,6 +411,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   restores the previous behavior.
 
 ### Removed
+
+- **`PODIUM_SIGNATURE_KEY_ID`** (§4.7.9, §6.2): `podium-mcp` and
+  `podium verify` no longer read the variable, because the consumer's
+  verification key set decides which envelopes it accepts. Remove it from a
+  consumer's configuration; a value left in place is ignored.
 
 - **`PODIUM_VERIFY_SIGNATURES=medium-and-above`** (§4.7.9): the policy takes
   `never` or `always`, and no value reads an artifact's `sensitivity`. A

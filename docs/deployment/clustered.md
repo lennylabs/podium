@@ -100,19 +100,14 @@ For a quick stand-up, the repo ships a `docker-compose.yml` that brings up the e
 
 The chart lives at `deploy/helm/podium`. Its templates render the backend selectors from the `config.*.type` values and read every credential and per-backend setting from the Kubernetes secret named by `existingSecret`.
 
-The registry signs at ingest by default, and every replica serving one store signs under the same key, so the chart mounts an operator-supplied signing key from a Secret rather than letting each pod generate its own. Generate the key file with one standalone first start on a scratch home:
+The registry signs at ingest by default, and every replica serving one store signs under the same key, so the chart mounts an operator-supplied signing key from a Secret rather than letting each pod generate its own. Generate the key file in a scratch directory:
 
 ```bash
 KEY_DIR="$(mktemp -d)"
-env -i PATH="$PATH" HOME="$KEY_DIR" PODIUM_SIGN_KEY_PATH="$KEY_DIR/registry-signing.key" \
-  podium serve --standalone --no-embeddings --bind 127.0.0.1:0 >"$KEY_DIR/serve.log" 2>&1 &
-SERVE_PID=$!
-while kill -0 "$SERVE_PID" 2>/dev/null && ! grep -q 'listening on' "$KEY_DIR/serve.log"; do sleep 1; done
-kill "$SERVE_PID"
-wait "$SERVE_PID" || true
+podium admin signing-key generate --key-file "$KEY_DIR/registry-signing.key"
 ```
 
-The start runs under `env -i` with only `PATH`, a fresh `HOME`, and `PODIUM_SIGN_KEY_PATH`. The first start of this release runs the one-shot rewrite of stored content hashes on whatever store it opens, signing each row under the configured key, so a start on the operator's own home would sign the operator's personal standalone store under the cluster key and spend that store's one rewrite. Clearing the environment also keeps an inherited `PODIUM_SQLITE_PATH`, `PODIUM_FILESYSTEM_ROOT`, `PODIUM_CONFIG_FILE`, or `PODIUM_REGISTRY_STORE` from pointing the start at a store in use. The key file, `$KEY_DIR/registry-signing.key`, is written with mode `0600` and carries a `private:` line and a `public:` line. Copy it into the deployment's backup, because the registry refuses every row the key signed once the key is lost, and delete `$KEY_DIR` after the Secret below is created.
+`podium admin signing-key generate` writes only the file `--key-file` names, reads no environment variable and no default path, opens no store, and refuses to replace an existing file. It prints the registry's verification key set, which is one key for a new file, on its first line, and a `key_id=<hex> role=signing` line after it. The key file, `$KEY_DIR/registry-signing.key`, is written with mode `0600` and carries a `private:` line and a `public:` line. Copy it into the deployment's backup, because the registry refuses every row the key signed once the key is lost and no `verify:` line lists its public half, and delete `$KEY_DIR` after the Secret below is created.
 
 Every consumer of the deployment verifies under the public half. Extract it:
 
@@ -120,7 +115,7 @@ Every consumer of the deployment verifies under the public half. Extract it:
 awk '/^public:/{print $2}' "$KEY_DIR/registry-signing.key"
 ```
 
-The output is the base64 text after the `public:` prefix, without the prefix, which is the form `PODIUM_SIGNATURE_VERIFY_KEY` requires. Every consumer sets it in `PODIUM_SIGNATURE_VERIFY_KEY` (see [Configure your harness](../consuming/configure-your-harness)).
+The output is the base64 text after the `public:` prefix, without the prefix, which is the form `PODIUM_SIGNATURE_VERIFY_KEY` requires and the same key as the first line `generate` printed. Every consumer sets it in `PODIUM_SIGNATURE_VERIFY_KEY` (see [Configure your harness](../consuming/configure-your-harness)).
 
 Create the Secrets and install the chart:
 
@@ -146,7 +141,7 @@ helm install podium ./deploy/helm/podium \
   --set signing.secretName=podium-signing-key
 ```
 
-A render that names no signing Secret fails with a message naming `signing.secretName`. The chart installs with its other defaults once `signing.secretName` names a Secret, or once `signing.mode=none` turns signing off; a consumer of a registry with signing off sets `PODIUM_VERIFY_SIGNATURES=never`. An upgrade of a store that already holds signed rows creates the Secret from the key that signed them, because the registry refuses every row whose envelope does not verify under its key. Every registry process serving one store resolves `PODIUM_SIGN_KEY_PATH` to the same key file. The chart's Secret mount satisfies that, a hand-rolled deployment arranges it, and a hand-rolled deployment with signing on, a Postgres store, and no `PODIUM_SIGN_KEY_PATH` is refused at start.
+A render that names no signing Secret fails with a message naming `signing.secretName`. The chart installs with its other defaults once `signing.secretName` names a Secret, or once `signing.mode=none` turns signing off; a consumer of a registry with signing off sets `PODIUM_VERIFY_SIGNATURES=never`. An upgrade of a store that already holds signed rows creates the Secret from the key that signed them, because the registry refuses every row whose envelope does not verify under a key of its verification key set: the key file's `public:` key and every `verify:` key. An upgrade from v0.4.0 with signing on runs `sign-stored-rows` once before the first start, as [Signing key operations](#signing-key-operations) shows. Every registry process serving one store resolves `PODIUM_SIGN_KEY_PATH` to the same key file. The chart's Secret mount satisfies that, a hand-rolled deployment arranges it, and a hand-rolled deployment with signing on, a Postgres store, and no `PODIUM_SIGN_KEY_PATH` is refused at start.
 
 Among those defaults, `config.identityProvider.type` is `oidc-jwt`, which the registry verifies at request time; supply its issuer and audience through the secret named in `existingSecret`, which reaches the pod via `envFrom`. Hybrid search is off by default (`config.vectorBackend.type` and `config.embeddingProvider.type` are both `none`) so the registry starts without an embedding-provider credential; set both and supply the key in the same secret to turn it on. The container `env:` block takes precedence over `envFrom:`, so any value the chart renders as `env:` is set through `--set` rather than through the secret.
 
@@ -226,6 +221,52 @@ For each consumer:
 - Effective view composes admin layers (visibility-filtered) + user-defined layers + workspace local overlay.
 
 ---
+
+## Signing key operations
+
+### Upgrading from v0.4.0 with signing on
+
+v0.4.0 stored every row unsigned by default. The first start of this release signs an unsigned row only when the store is the SQLite store in the key file's directory, so on a Postgres store it leaves those rows unsigned and the registry refuses each of them with `materialize.signature_missing`. Sign them once, before the first start, with `podium-server sign-stored-rows --include-unsigned` run as a Job. `--include-unsigned` attests every unsigned row the store holds when the Job runs, because an unsigned row carries no evidence of who stored it.
+
+The Job performs the one-shot rewrite of stored content hashes in place of the first start, so it runs only while no registry process on the previous version serves the store. The command binds no listen address and cannot detect another process, so scale the previous version to zero first. Back up the store after the stop, create the signing Secret as [Deploy the registry](#2-deploy-the-registry) shows, and render the Job from the new chart, so that its pod carries the same image, `envFrom` Secret, configuration environment, and signing Secret mount as the Deployment:
+
+```bash
+kubectl scale deployment/podium-podium --replicas=0
+kubectl rollout status deployment/podium-podium
+helm get values podium -o yaml > podium-values.yaml
+helm template podium ./deploy/helm/podium -f podium-values.yaml \
+    --set signing.secretName=podium-signing-key \
+    --show-only templates/deployment.yaml \
+  | kubectl create --dry-run=client -o json -f - \
+  | jq '{apiVersion: "batch/v1", kind: "Job",
+         metadata: {name: "podium-sign-stored-rows"},
+         spec: {backoffLimit: 0, template: {spec: (.spec.template.spec
+           | .restartPolicy = "Never"
+           | .containers[0].args = ["sign-stored-rows", "--include-unsigned"]
+           | del(.containers[0].ports, .containers[0].startupProbe,
+                 .containers[0].livenessProbe, .containers[0].readinessProbe))}}}' \
+  | kubectl apply -f -
+kubectl wait --for=condition=complete job/podium-sign-stored-rows --timeout=60m
+kubectl logs job/podium-sign-stored-rows
+helm upgrade podium ./deploy/helm/podium -f podium-values.yaml \
+  --set signing.secretName=podium-signing-key
+```
+
+The Job removes the probes and the port, because the command serves no HTTP. Its log carries the rewrite's summary line and a `rehash: 0 unsigned left` line. A Job that fails, or a count above zero, leaves unsigned rows that the registry refuses; read the per-row lines in the log before the `helm upgrade`. A Job rendered the same way under another name, with `--dry-run` added to its `args`, lists every unsigned row the real run attests and writes nothing, so run it first and read its log.
+
+### Rotating the signing key across replicas
+
+The [Operator guide](operator-guide#rotating-the-signing-key) gives the rotation procedure. Across replicas, every replica trusts the new key before any replica signs under it, so the chart's Secret changes twice:
+
+1. Copy the current key file out of the Secret into a scratch directory, with `kubectl get secret podium-signing-key -o jsonpath='{.data.registry-signing\.key}' | base64 -d`, and write it with mode `0600`.
+2. Run `podium admin signing-key rotate --key-file <copy> --staged-out <staged>`. The staged file is the previous key file plus a `verify:` line for the new key, and the copy becomes the rotated file: the new signing key plus a `verify:` line for each previous key. Add the new key to every consumer's `PODIUM_SIGNATURE_VERIFY_KEY`, for example as the comma-separated list the command prints on its first line.
+3. Replace the Secret's content with the staged file, with `kubectl create secret generic podium-signing-key --from-file=registry-signing.key=<staged> --dry-run=client -o yaml | kubectl apply -f -`, and restart the Deployment with `kubectl rollout restart deployment/podium-podium`. Every replica still signs under the previous key and now trusts the new one.
+4. Replace the Secret's content with the rotated file and restart the Deployment again. Every replica now signs under the new key and trusts the previous one.
+5. Run `kubectl exec deployment/podium-podium -- /usr/local/bin/podium-server sign-stored-rows`, which re-signs the stored rows under the new key while the replicas serve.
+6. For each consumer that runs with `PODIUM_CACHE_MODE=offline-only`, keep the previous key in its set, or clear its cache directory and refill it in `always-revalidate` or `offline-first`, before the previous key leaves that consumer's set, because an `offline-only` consumer refuses a cached delivery signature made under a key it no longer trusts.
+7. Remove the previous key only after a run of step 5 that exits 0 reports `0 row(s) still signed under it` for its `key_id`: delete its `verify:` line from the key file, replace the Secret's content, restart the Deployment, and remove the key from every consumer's set.
+
+Back up the rotated file, and delete the scratch copies once the Secret holds it.
 
 ## Migration from single node
 

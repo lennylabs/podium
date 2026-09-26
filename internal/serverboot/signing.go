@@ -24,11 +24,12 @@ func registrySigningEnabled(mode string) bool {
 // be generated on storage with a different fate from the store it signs. The
 // default key path resolves under the process's home, and a store need not
 // live there, so a key the loader generates could be lost while the rows it
-// signed survive, and no path re-signs a stored row. A memory store persists
-// nothing and so strands no signature; the zero-configuration standalone
-// SQLite store sits in the directory the default key resolves to, so the two
-// share a fate. The error names the backend and PODIUM_SIGN_KEY_PATH and never
-// a DSN. Spec: §13.12, §4.7.9.
+// signed survive. Those rows are then refused until a surviving copy of the
+// lost key's public half is listed on a verify: line and sign-stored-rows
+// re-signs them. A memory store persists nothing and so strands no signature;
+// the zero-configuration standalone SQLite store sits in the directory the
+// default key resolves to, so the two share a fate. The error names the
+// backend and PODIUM_SIGN_KEY_PATH and never a DSN. Spec: §13.12, §4.7.9.
 func refuseUnpersistedSigningKey(cfg *Config) error {
 	if !registrySigningEnabled(cfg.signMode) || os.Getenv("PODIUM_SIGN_KEY_PATH") != "" {
 		return nil

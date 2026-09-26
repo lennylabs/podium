@@ -157,23 +157,38 @@ unaffected. A `podium-mcp` that refuses to start serves nothing.
 **Mitigation.**
 1. Verify the artifact signatures are correct via `podium verify
    <id>`, with `PODIUM_SIGNATURE_VERIFY_KEY` set to the registry's
-   public key. For a consumer-side refusal, confirm the consumer's
-   `PODIUM_SIGNATURE_PROVIDER`, its verification key, and that the
+   verification key set. For a consumer-side refusal, confirm the
+   consumer's `PODIUM_SIGNATURE_PROVIDER`, that its verification key
+   set contains the key the registry signs under, and that the
    registry does not run with `PODIUM_SIGN=none` under an `always`
    policy.
-2. For a row whose stored content hash is already the rewritten
-   digest, which covers a key lost or rotated after the first start of
-   the release and a migrated row the source had already rewritten:
-   restore the key that signed the rows, where it still exists, to
-   `PODIUM_SIGN_KEY_PATH`, and restart the registry, which loads its
-   key only at start.
-3. For a row the first-start rewrite left at the previous content hash
-   as `signature_unverified`, restoring the key alone does not repair
-   it. Restore the backup the upgrade order takes and start with the
-   key that signed the rows, or, on a migration target, recreate the
-   target store empty and re-run `podium admin migrate-to-standard`
-   with the source's key in place. Either route runs the rewrite again
-   and re-signs the rows.
-4. Where neither route is available, or the key that signed the rows
-   no longer exists, ingest a new version of each affected artifact.
-   No other path re-signs a stored row.
+2. For a row signed under a key that is lost or rotated out of the
+   registry's key file: restore the key file that holds that key,
+   where it still exists, to `PODIUM_SIGN_KEY_PATH`, and restart the
+   registry, which loads its key only at start. Where only the key's
+   public half survives, for example in a consumer's
+   `PODIUM_SIGNATURE_VERIFY_KEY`, list it on a `verify:` line of the
+   key file the registry holds and restart the registry, which then
+   admits those rows. Then run `podium-server sign-stored-rows`, or
+   `podium admin sign-stored-rows` on a standalone host, which
+   re-signs them under the current key, including a row the
+   first-start rewrite left at the previous content hash as
+   `signature_unverified`. Remove the `verify:` line only after a
+   run that exits 0 reports `0 row(s) still signed under it` for that
+   key's `key_id`. Do not list a compromised key.
+3. For a row stored unsigned before signing was turned on
+   (`materialize.signature_missing`): run `sign-stored-rows
+   --dry-run --include-unsigned`, read the rows it lists, and then
+   run `sign-stored-rows --include-unsigned`, which attests and
+   signs every unsigned row the store holds. When the store holds no
+   record that the first-start rewrite completed, the command
+   performs that rewrite, so it runs only while no registry process
+   on the previous release serves the store; the command cannot
+   detect such a process.
+4. On a migration target whose rows the source signed under a key
+   the target does not hold, place the source's key and restart, or
+   recreate the target store empty and re-run
+   `podium admin migrate-to-standard` with the source's key in place.
+5. Where no copy of the signing key's public half survives, or the
+   key was compromised, restore the rows from a backup or ingest a
+   new version of each affected artifact.

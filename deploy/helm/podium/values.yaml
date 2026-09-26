@@ -169,9 +169,12 @@ objects:
 # Registry signing key (§4.7.9, §13.10). The registry signs every artifact at
 # ingest, and every replica has to sign under one key, so the chart mounts an
 # operator-supplied Secret rather than letting each pod generate its own on a
-# read-only root filesystem. The Secret holds the key file the registry writes
-# on a standalone first start, with its private: and public: lines, under the
-# key named below. A render with no secretName fails unless mode is none.
+# read-only root filesystem. The Secret holds the key file
+# `podium admin signing-key generate --key-file <path>` writes, with its
+# private: and public: lines, under the key named below. The file may also
+# carry verify: lines, each a public key the registry trusts for verification
+# only, which `podium admin signing-key rotate` writes for a key rotation. A
+# render with no secretName fails unless mode is none.
 #
 # mode is registry-key or none. none turns ingest signing off; a consumer of
 # such a registry then sets PODIUM_VERIFY_SIGNATURES=never, because under its

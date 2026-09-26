@@ -193,13 +193,16 @@ rm -rf "$WORK"
 | S63 | The two sync modes compose a shared merge target identically | solo then standalone | none | none | none |
 | S64 | A registry migrates its stored hashes on the first start | standalone | none | none | none |
 | S65 | First run verifies with no configuration | standalone | none | none | none |
-| S66 | Signing on an existing registry signs no stored row | standalone | none | none | none |
+| S66 | Signing on an existing registry signs no stored row until an operator asks | standalone | none | none | none |
 | S67 | `podium verify --provider noop` refuses | none | none | none | none |
 | S68 | A stale `never` is announced | standalone | none | none | none |
 | S69 | The registry refuses a row edited in its store | standalone | none | none | none |
 | S70 | The hidden parent does not appear in any response body | standalone | none | none | none |
 | S71 | An `extends:` child verifies through the MCP bridge and materializes | standalone | none | none | none |
 | S72 | The artifact viewer's extends rail matches the caller's view | standalone | none | none | a desktop browser |
+| S73 | A key rotation keeps every stored row loadable | standalone | none | none | none |
+| S74 | A cached pre-rotation delivery signature recovers | standalone | none | none | none |
+| S75 | `podium-server sign-stored-rows` refuses without a key and never writes one | standalone | none | none | none |
 
 ---
 
@@ -4836,27 +4839,23 @@ rather than trying to avoid them.
 
    **Expect.** `Bucket created successfully`.
 
-4. Generate the registry signing key with the commands
+4. Generate the registry signing key with the command
    `docs/deployment/clustered.md` gives, with the scratch directory under
-   `$WORK`, and create the Secret the chart's `signing.secretName` names. The
-   start runs under `env -i` with its own scratch `HOME`, so it opens no store
-   the operator uses.
+   `$WORK`, and create the Secret the chart's `signing.secretName` names.
+   `podium admin signing-key generate` writes only the file `--key-file` names
+   and opens no store.
 
    ```bash
    KEY_DIR="$(mktemp -d "$WORK/signing-key.XXXXXX")"
-   env -i PATH="$PATH" HOME="$KEY_DIR" PODIUM_SIGN_KEY_PATH="$KEY_DIR/registry-signing.key" \
-     podium serve --standalone --no-embeddings --bind 127.0.0.1:0 >"$KEY_DIR/serve.log" 2>&1 &
-   SERVE_PID=$!
-   while kill -0 "$SERVE_PID" 2>/dev/null && ! grep -q 'listening on' "$KEY_DIR/serve.log"; do sleep 1; done
-   kill "$SERVE_PID"
-   wait "$SERVE_PID" || true
+   podium admin signing-key generate --key-file "$KEY_DIR/registry-signing.key"
    ls -l "$KEY_DIR/registry-signing.key"
    kubectl create secret generic podium-signing-key \
      --from-file=registry-signing.key="$KEY_DIR/registry-signing.key"
    ```
 
-   **Expect.** `ls -l` reads `-rw-------` for the key file, and `kubectl`
-   reports `secret/podium-signing-key created`.
+   **Expect.** `generate` prints one base64 key and a
+   `key_id=<16 hex digits> role=signing` line, `ls -l` reads `-rw-------` for
+   the key file, and `kubectl` reports `secret/podium-signing-key created`.
 
 5. Create the secret the chart's `existingSecret` names. The chart injects it
    with `envFrom`, so every key becomes an environment variable in the pod, and
@@ -7695,19 +7694,21 @@ producer default or without the shared key resolution.
 
 ---
 
-## S66: Signing on an existing registry signs no stored row
+## S66: Signing on an existing registry signs no stored row until an operator asks
 
 **Goal.** Validate that turning signing on over a store whose rows were
 ingested unsigned leaves those rows unsigned, that the registry refuses them to
-every reader, and that only a new version of the artifact carries an envelope.
+every reader, that no automatic path attaches an envelope to them, and that
+`sign-stored-rows --include-unsigned` signs them while the registry serves.
 
 **Covers.** §13.4 stored-row admission, the §13.4 first-start rewrite's
-completion record, and §4.7.9 ingest signing.
+completion record, the §13.4 `sign-stored-rows` command, and §4.7.9 ingest
+signing.
 
-**Why by hand.** The claim under test is that no path re-signs a stored row,
-including `podium layer reingest`, which reads as the obvious repair. Reading
-the stored `signature` column confirms what the registry holds rather than what
-a load reports.
+**Why by hand.** The claim under test is that no automatic path re-signs a
+stored row, including `podium layer reingest`, which reads as the obvious
+repair, and that the operator command does. Reading the stored `signature`
+column confirms what the registry holds rather than what a load reports.
 
 **Steps.**
 
@@ -7775,6 +7776,27 @@ a load reports.
    **Expect.** The new version loads with a non-empty `delivery_signature`
    through `curl` and loads through the bridge. The earlier version still prints
    `materialize.signature_missing`.
+
+6. With the registry from step 3 still serving, list and then sign the
+   unsigned rows, load the earlier version again, and read the stored
+   `signature` column. The isolation block's `PODIUM_SQLITE_PATH` and
+   `PODIUM_SIGN_KEY_PATH` are the ones that registry uses.
+
+   ```bash
+   podium admin sign-stored-rows --dry-run --include-unsigned
+   podium admin sign-stored-rows --include-unsigned
+   load_http 0.1.0
+   load_mcp 0.1.0
+   sqlite3 "$PODIUM_SQLITE_PATH" "select quote(signature) from manifests where artifact_id='early' and version='0.1.0';"
+   ```
+
+   **Expect.** The dry run prints a `dry-run:` line for the `early@0.1.0` row
+   with `sign=true signed_by=unsigned` and changes nothing. The second run's
+   summary reports at least one row rewritten and prints `rehash: 0 unsigned
+   left`. With no restart, `load_http` prints `loaded` with a non-empty
+   `delivery_signature` and `load_mcp` prints `loaded`, and the `sqlite3` query
+   prints a non-empty signature. A command that signs nothing, or a load that
+   succeeds only after a restart, is the failure this step catches.
 
 **Cleanup.** `kill "$SRV"; wait "$SRV"` then `rm -rf "$WORK"`.
 
@@ -8369,3 +8391,274 @@ requests the browser sends, and no Go test observes either.
 
 **Cleanup.** Close both browser profiles, `kill "$GWA" "$GWB" "$SRV"; wait "$SRV"`,
 then `rm -rf "$WORK"`.
+
+
+---
+
+## S73: A key rotation keeps every stored row loadable
+
+**Goal.** Validate that `podium admin signing-key rotate` keeps the previous
+key on a `verify:` line, that a rotated registry admits every row the previous
+key signed, that a consumer holding the printed list verifies across the
+rotation, and that `sign-stored-rows` re-signs the stored rows so the retired
+key can be removed.
+
+**Covers.** §4.7.9 verification key set, `key_id`, and rotation, the §13.4
+`sign-stored-rows` command, and the §6.2 list form of
+`PODIUM_SIGNATURE_VERIFY_KEY`.
+
+**Why by hand.** The surfaces under test are the rotate output an operator
+copies into consumer configuration, the key file, and the summary line that
+decides when a key is removed. The automated suites assert on parsed values
+rather than on the text an operator reads.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Generate the key file, serve one skill on it, and load it through the
+   bridge under the original key.
+
+   ```bash
+   podium admin signing-key generate --key-file "$PODIUM_SIGN_KEY_PATH"
+   OLD_KEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
+   podium artifact scaffold --type skill --description "Rotation skill" "$WORK/reg/rotated" > /dev/null
+   serve() { podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+       --bind 127.0.0.1:8177 > "$WORK/srv$1.log" 2>&1 & SRV=$!
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8177/healthz; }
+   stop() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
+   serve 1
+   export PODIUM_REGISTRY=http://127.0.0.1:8177
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"rotated"}}}'
+   load_mcp() { printf '%s\n%s\n' "$INIT" "$LOAD" \
+     | PODIUM_SIGNATURE_VERIFY_KEY="$1" PODIUM_CACHE_DIR="$(mktemp -d "$WORK/cache.XXXXXX")" podium-mcp 2>/dev/null | tail -1 \
+     | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["structuredContent"]; print(r.get("error") or "loaded")'; }
+   load_mcp "$OLD_KEY"
+   ```
+
+   **Expect.** `generate` prints one base64 key and a
+   `key_id=<16 hex digits> role=signing` line, and the load prints `loaded`.
+
+3. Stop the registry, rotate the key file, and restart.
+
+   ```bash
+   stop
+   podium admin signing-key rotate --key-file "$PODIUM_SIGN_KEY_PATH" | tee "$WORK/rotate.out"
+   grep -c '^verify:' "$PODIUM_SIGN_KEY_PATH"
+   KEY_SET="$(head -1 "$WORK/rotate.out")"
+   NEW_KEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
+   serve 2
+   ```
+
+   **Expect.** The rotate output's first line holds two comma-separated base64
+   keys, the second of which is `$OLD_KEY`, followed by a `role=signing` line
+   and a `role=verify` line whose `key_id` matches step 2's. `grep -c` prints
+   `1`.
+
+4. Load through the bridge with the printed list, then with the old key alone.
+
+   ```bash
+   load_mcp "$KEY_SET"
+   load_mcp "$OLD_KEY"
+   ```
+
+   **Expect.** The list-configured load prints `loaded`, and the old-key-only
+   load prints an error beginning with `materialize.signature_invalid`,
+   because the registry now signs every response under the new key. A
+   `materialize.signature_invalid` on the first load means the rotated
+   registry refused its own pre-rotation row.
+
+5. Re-sign the stored rows while the registry serves.
+
+   ```bash
+   podium admin sign-stored-rows; echo "exit=$?"
+   ```
+
+   **Expect.** The summary prints `rehash: 1 rewritten, ...`, `rehash: 0
+   unsigned left`, and `rehash: verify key <old key_id>: 0 row(s) still signed
+   under it`, followed by `exit=0`.
+
+6. Remove the `verify:` line, restart, and load with the new key alone.
+
+   ```bash
+   stop
+   sed -i.bak '/^verify:/d' "$PODIUM_SIGN_KEY_PATH"
+   serve 3
+   load_mcp "$NEW_KEY"
+   ```
+
+   **Expect.** The load prints `loaded`. A `materialize.signature_invalid`
+   means the row was still signed under the removed key, which step 5's zero
+   count should have ruled out.
+
+**Cleanup.** `stop` then `rm -rf "$WORK"`.
+
+---
+
+## S74: A cached pre-rotation delivery signature recovers
+
+**Goal.** Validate that a `podium-mcp` cache holding a delivery signature made
+under a key the consumer no longer trusts recovers through a refetch in the
+default cache mode and in `offline-first`, and that `offline-only` refuses the
+record until its cache is refilled.
+
+**Covers.** The §6.5 cache-miss rule for a failing cached record, §4.7.10
+rotation and cached delivery signatures, and the §7.4 cache modes.
+
+**Why by hand.** The access log is the only place that shows how many requests
+a load made, and the recovery path is only distinguishable from a stuck cache
+by that count.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Generate the key file, serve one skill, and load it once in the default
+   cache mode so the cache holds a delivery pair signed under the old key.
+
+   ```bash
+   podium admin signing-key generate --key-file "$PODIUM_SIGN_KEY_PATH" > /dev/null
+   OLD_KEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
+   podium artifact scaffold --type skill --description "Cached skill" "$WORK/reg/cached" > /dev/null
+   serve() { podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+       --bind 127.0.0.1:8178 > "$WORK/srv$1.log" 2>&1 & SRV=$!
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8178/healthz; }
+   stop() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
+   serve 1
+   export PODIUM_REGISTRY=http://127.0.0.1:8178
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"cached"}}}'
+   load_mcp() { printf '%s\n%s\n' "$INIT" "$LOAD" \
+     | PODIUM_SIGNATURE_VERIFY_KEY="$1" PODIUM_CACHE_DIR="$2" podium-mcp 2>/dev/null | tail -1 \
+     | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["structuredContent"]; print(r.get("error") or "loaded")'; }
+   loads() { grep -c 'access op=load_artifact status=200' "$WORK/srv2.log"; }
+   load_mcp "$OLD_KEY" "$WORK/cache"
+   ```
+
+   **Expect.** `loaded`.
+
+3. Rotate, re-sign the stored rows, drop the old key from the key file,
+   keep a copy of the stale cache, and restart.
+
+   ```bash
+   stop
+   podium admin signing-key rotate --key-file "$PODIUM_SIGN_KEY_PATH" > /dev/null
+   podium admin sign-stored-rows | grep 'still signed'
+   sed -i.bak '/^verify:/d' "$PODIUM_SIGN_KEY_PATH"
+   NEW_KEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
+   cp -R "$WORK/cache" "$WORK/cache-stale"
+   serve 2
+   ```
+
+   **Expect.** `rehash: verify key <old key_id>: 0 row(s) still signed under
+   it`.
+
+4. Load with the new key alone against the stale cache, counting the
+   registry's load requests before and after.
+
+   ```bash
+   loads
+   load_mcp "$NEW_KEY" "$WORK/cache"
+   loads
+   ```
+
+   **Expect.** The counts read `0` and then `2`, and the load prints
+   `loaded`. The two requests are the revalidation and the unconditional
+   refetch, which the access log does not tell apart by method. A
+   `materialize.signature_invalid` means the bridge served the stale pair
+   instead of treating it as a cache miss.
+
+5. Load again against the refreshed cache.
+
+   ```bash
+   load_mcp "$NEW_KEY" "$WORK/cache"
+   loads
+   ```
+
+   **Expect.** `loaded`, and the count reads `3`: the revalidation alone.
+
+6. Load in `offline-only` against the copy of the stale cache.
+
+   ```bash
+   PODIUM_CACHE_MODE=offline-only load_mcp "$NEW_KEY" "$WORK/cache-stale"
+   loads
+   ```
+
+   **Expect.** An error beginning with `materialize.signature_invalid`, and
+   the count still reads `3`.
+
+7. Refill the stale copy in `offline-first`, then load it in `offline-only`
+   again.
+
+   ```bash
+   PODIUM_CACHE_MODE=offline-first load_mcp "$NEW_KEY" "$WORK/cache-stale"
+   loads
+   PODIUM_CACHE_MODE=offline-only load_mcp "$NEW_KEY" "$WORK/cache-stale"
+   loads
+   ```
+
+   **Expect.** Both loads print `loaded`. The `offline-first` load raises the
+   count to `4`, and the `offline-only` load leaves it at `4`. An
+   `offline-only` load that still fails means the refill step the rotation
+   procedure gives does not recover an `offline-only` consumer.
+
+**Cleanup.** `stop` then `rm -rf "$WORK"`.
+
+---
+
+## S75: `podium-server sign-stored-rows` refuses without a key and never writes one
+
+**Goal.** Validate that `sign-stored-rows` refuses when signing is off or the
+key file is absent, writes no key file, and that `podium admin signing-key`
+refuses to run without `--key-file` instead of resolving the operator's
+personal key.
+
+**Covers.** The §13.4 `sign-stored-rows` refusals, §13.12
+`PODIUM_SIGN_KEY_PATH`, and the `--key-file` requirement of
+`podium admin signing-key`.
+
+**Why by hand.** The claim is about what the command leaves on disk and what
+an operator reads on stderr, and a bare `rotate` on an operator's shell would
+reach `~/.podium/standalone/registry-signing.key`.
+
+**Steps.**
+
+1. Run the isolation block. It names `$WORK/registry-signing.key`, which does
+   not exist yet.
+
+2. Run the command with signing off.
+
+   ```bash
+   PODIUM_SIGN=none podium-server sign-stored-rows; echo "exit=$?"
+   ls "$PODIUM_SIGN_KEY_PATH"
+   ```
+
+   **Expect.** The message begins with
+   `config.signature_provider_unavailable: sign-stored-rows: signing is off`,
+   the status is `exit=1`, and `ls` reports that the key file does not exist.
+
+3. Run it with signing on and the key file absent.
+
+   ```bash
+   podium-server sign-stored-rows; echo "exit=$?"
+   ls "$PODIUM_SIGN_KEY_PATH"
+   ```
+
+   **Expect.** The message begins with `config.signature_provider_unavailable`
+   and names the key path, the status is `exit=1`, and `ls` still reports that
+   the key file does not exist. A key file here means the command generated a
+   key.
+
+4. Run `rotate` with no `--key-file`.
+
+   ```bash
+   podium admin signing-key rotate; echo "exit=$?"
+   ls "$HOME/.podium/standalone/registry-signing.key"
+   ```
+
+   **Expect.** `error: --key-file is required` followed by the usage text, the
+   status is `exit=2`, and `ls` reports that the file under the scenario's
+   `HOME` does not exist.
+
+**Cleanup.** `rm -rf "$WORK"`.

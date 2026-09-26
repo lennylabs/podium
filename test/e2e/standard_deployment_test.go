@@ -24,8 +24,11 @@ package e2e
 //     (skipped with honest reason).
 //   - the page's `kubectl create secret` and `helm install` lines need a
 //     cluster; TEST-8's chart render cases and manual scenario S46 cover
-//     them, and TestStandardDeploy_SigningKeyFileFromAStandaloneStart runs
-//     the key-generation and extraction blocks that precede them.
+//     them, and TestStandardDeploy_SigningKeyFileFromGenerate runs the
+//     key-generation and extraction blocks that precede them.
+//   - the v0.4.0-upgrade Job and the replica rotation roll under the page's
+//     Signing key operations section need a cluster; manual scenarios S73
+//     and S74 drive the same commands against a standalone registry.
 
 import (
 	"bytes"
@@ -1751,16 +1754,17 @@ func TestStandardDeploy_AdminNoSubcommand(t *testing.T) {
 
 // Spec: §4.7.9, §13.12 — the key-generation procedure docs/deployment/clustered.md
 // publishes for the chart's signing Secret. The page's commands run verbatim
-// on a test HOME that already holds an unsigned standalone store. The start
-// they make runs under env -i with a scratch HOME, so it writes a 0600 key file
-// both key-file readers accept, leaves the test HOME's store byte-for-byte as
-// it was, and creates no file there. The page's extraction command yields the
-// value a bridge's PODIUM_SIGNATURE_VERIFY_KEY takes, and a registry reading
-// the key from a read-only directory (the chart's Secret mount) signs what it
-// serves, so the bridge loads under the always default.
-func TestStandardDeploy_SigningKeyFileFromAStandaloneStart(t *testing.T) {
+// on a test HOME that already holds an unsigned standalone store.
+// `podium admin signing-key generate` writes a 0600 key file the key-file
+// reader accepts into the scratch directory alone, so the test HOME's store
+// stays byte-for-byte as it was and gains no file. The key set generate prints
+// equals the page's extraction output, which is the value a bridge's
+// PODIUM_SIGNATURE_VERIFY_KEY takes, and a registry reading the key from a
+// read-only directory (the chart's Secret mount) signs what it serves, so the
+// bridge loads under the always default.
+func TestStandardDeploy_SigningKeyFileFromGenerate(t *testing.T) {
 	t.Parallel()
-	keygen := docBashBlock(t, "docs/deployment/clustered.md", "env -i")
+	keygen := docBashBlock(t, "docs/deployment/clustered.md", "signing-key generate")
 	extract := docBashBlock(t, "docs/deployment/clustered.md", "awk '/^public:/")
 
 	// A pre-existing unsigned standalone store in the operator's home.
@@ -1770,18 +1774,19 @@ func TestStandardDeploy_SigningKeyFileFromAStandaloneStart(t *testing.T) {
 	stopProc(unsigned.cmd)
 	before := snapshotTree(t, home)
 
-	// The page's blocks run in one shell, and the trailing line reports the
-	// scratch directory mktemp chose, which BSD mktemp places outside TMPDIR.
+	// The page's blocks run in one shell and print four lines: generate's key
+	// set and key_id lines, the extracted key, and the scratch directory
+	// mktemp chose, which BSD mktemp places outside TMPDIR.
 	binDir := filepath.Dir(cmdharness.Bin(t, "podium"))
 	res := runDocBlock(t, []string{
 		"HOME=" + home,
 		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
 	}, keygen+extract+`printf '%s\n' "$KEY_DIR"`+"\n")
 	lines := strings.Split(strings.TrimSpace(res.Stdout), "\n")
-	if res.Exit != 0 || len(lines) != 2 {
+	if res.Exit != 0 || len(lines) != 4 {
 		t.Fatalf("documented key generation exit=%d\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
 	}
-	keyDir := strings.TrimSpace(lines[1])
+	keyDir := strings.TrimSpace(lines[3])
 	t.Cleanup(func() { _ = os.RemoveAll(keyDir) })
 	if after := snapshotTree(t, home); after != before {
 		t.Errorf("the key-generation start changed the operator's home:\nbefore:\n%s\nafter:\n%s", before, after)
@@ -1803,9 +1808,15 @@ func TestStandardDeploy_SigningKeyFileFromAStandaloneStart(t *testing.T) {
 	if kf.Private == nil || !pub.Equal(kf.Private.Public()) {
 		t.Fatal("the key file's public and private lines are not one keypair")
 	}
-	verifyKey := strings.TrimSpace(lines[0])
+	verifyKey := strings.TrimSpace(lines[2])
 	if got, err := sign.PublicKeyFromBase64(verifyKey); err != nil || !got.Equal(pub) {
 		t.Fatalf("extraction output %q is not the key file's public key (err=%v)", verifyKey, err)
+	}
+	if keySet := strings.TrimSpace(lines[0]); keySet != verifyKey {
+		t.Errorf("generate printed key set %q, want the extracted key %q", keySet, verifyKey)
+	}
+	if idLine := strings.TrimSpace(lines[1]); !strings.HasPrefix(idLine, "key_id=") || !strings.HasSuffix(idLine, "role=signing") {
+		t.Errorf("generate's second line = %q, want key_id=<hex> role=signing", idLine)
 	}
 
 	// The chart mounts the Secret read-only; the registry reads the key and
