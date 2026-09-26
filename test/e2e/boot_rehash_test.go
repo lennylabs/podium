@@ -57,6 +57,26 @@ func preFramingDigest(rec store.ManifestRecord) string {
 // rows it moved.
 func downgradeStoredRows(t testing.TB, sqlitePath string) int {
 	t.Helper()
+	return rewriteStoredRows(t, sqlitePath, func(rec store.ManifestRecord) (string, string) {
+		return preFramingDigest(rec), rec.Signature
+	})
+}
+
+// clearStoredSignatures removes the envelope from every stored row and keeps
+// its content hash, which is the state of a store a registry filled with
+// signing off. It runs while no server process holds the store.
+func clearStoredSignatures(t testing.TB, sqlitePath string) int {
+	t.Helper()
+	return rewriteStoredRows(t, sqlitePath, func(rec store.ManifestRecord) (string, string) {
+		return rec.ContentHash, ""
+	})
+}
+
+// rewriteStoredRows writes every stored row's content hash and signature as
+// next returns them, through RehashManifest with the stored pair as the
+// compare values, and returns the number of rows it wrote.
+func rewriteStoredRows(t testing.TB, sqlitePath string, next func(store.ManifestRecord) (hash, signature string)) int {
+	t.Helper()
 	st, err := store.OpenSQLite(sqlitePath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -74,14 +94,15 @@ func downgradeStoredRows(t testing.TB, sqlitePath string) int {
 			t.Fatalf("list manifests: %v", err)
 		}
 		for _, rec := range recs {
-			if err := st.RehashManifest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Signature, preFramingDigest(rec), rec.Signature); err != nil {
-				t.Fatalf("downgrade %s: %v", rec.ArtifactID, err)
+			hash, signature := next(rec)
+			if err := st.RehashManifest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Signature, hash, signature); err != nil {
+				t.Fatalf("rewrite %s: %v", rec.ArtifactID, err)
 			}
 			moved++
 		}
 	}
 	if moved == 0 {
-		t.Fatal("the first start stored no row to downgrade")
+		t.Fatal("the first start stored no row to rewrite")
 	}
 	return moved
 }
@@ -319,5 +340,35 @@ func TestE2E_LateSigningThroughSignStoredRows(t *testing.T) {
 	}
 	if errStr, res := bridgeLoad(t, signing.BaseURL, rehashSkillID, verifyKey); errStr != "" {
 		t.Fatalf("load after sign-stored-rows = %q, want success\nstderr: %s\nlog:\n%s", errStr, res.Stderr, signing.log())
+	}
+}
+
+// Spec: §13.4, §13.12 — the first-start rewrite mints no envelope for an
+// unsigned row when the key file sits outside the SQLite store's directory.
+// A restart over a store whose signatures were cleared and whose completion
+// record is absent leaves the row unsigned, so a verifying load is still
+// refused with materialize.signature_missing, and the server log names
+// sign-stored-rows as the command that attests the row.
+// Matrix: §6.10 (materialize.signature_missing)
+func TestE2E_FirstStartLeavesUnsignedRowsWhenTheKeyIsElsewhere(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	keyPath := filepath.Join(t.TempDir(), "registry-signing.key")
+	env := rotationEnv(home, keyPath)
+	sqlitePath := filepath.Join(home, "podium.db")
+	reg := rehashRegistry(t)
+	verifyKey := "PODIUM_SIGNATURE_VERIFY_KEY=" + firstLine(generateKeyFile(t, keyPath).Stdout)
+
+	first := startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
+	stopProc(first.cmd)
+	clearStoredSignatures(t, sqlitePath)
+	clearRehashMarker(t, sqlitePath)
+
+	restarted := startServerArgs(t, env, "serve", "--standalone")
+	if errStr, res := bridgeLoad(t, restarted.BaseURL, rehashSkillID, verifyKey); !strings.HasPrefix(errStr, "materialize.signature_missing") {
+		t.Fatalf("load after the restart = %q, want materialize.signature_missing\nstderr: %s", errStr, res.Stderr)
+	}
+	if log := restarted.log(); !strings.Contains(log, "unsigned left; run sign-stored-rows --include-unsigned to sign them") {
+		t.Errorf("server log does not name sign-stored-rows:\n%s", log)
 	}
 }

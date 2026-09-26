@@ -745,3 +745,116 @@ func TestRun_RotationAdmitsRetiredKeyRowsUntilTheVerifyLineGoes(t *testing.T) {
 		t.Errorf("load after the verify: line left = %d %s, want materialize.signature_invalid", status, body)
 	}
 }
+
+// clearSignatures removes the envelope from every stored row, leaving each at
+// its framed digest, and clears the completion record, which is the state of a
+// store the previous release wrote with signing off. It runs while no server
+// process holds the store.
+func clearSignatures(t *testing.T, st store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	for _, rec := range allRows(t, st) {
+		if err := st.RehashManifest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Signature, rec.ContentHash, ""); err != nil {
+			t.Fatalf("clear %s signature: %v", rec.ArtifactID, err)
+		}
+	}
+	if err := st.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, false); err != nil {
+		t.Fatalf("clear marker: %v", err)
+	}
+}
+
+// Spec: §13.4, §13.12 — the first-start rewrite mints a first envelope for an
+// unsigned framed row only when the store is the SQLite store in the key
+// file's directory. With the key file elsewhere the row stays unsigned, the
+// completion record is set anyway, and the unsigned-left line names
+// sign-stored-rows.
+func TestRun_FirstStartMintsUnsignedRowsOnlyBesideTheKey(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		coLocated  bool
+		wantSigned bool
+	}{
+		{name: "key in the store directory", coLocated: true, wantSigned: true},
+		{name: "key outside the store directory", coLocated: false, wantSigned: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newBootFixture(t)
+			t.Setenv("PODIUM_SIGN", "registry-key")
+			t.Setenv("PODIUM_SIGN_KEY_PATH", f.keyPath)
+			if _, err := f.boot(t); err != nil {
+				t.Fatalf("first start: %v", err)
+			}
+			st := f.openStoreDirect(t)
+			clearSignatures(t, st)
+			if err := st.Close(); err != nil {
+				t.Fatalf("close store: %v", err)
+			}
+			keyPath := f.keyPath
+			if !tc.coLocated {
+				keyPath = filepath.Join(t.TempDir(), "registry-signing.key")
+				if err := os.Rename(f.keyPath, keyPath); err != nil {
+					t.Fatalf("move key file: %v", err)
+				}
+				t.Setenv("PODIUM_SIGN_KEY_PATH", keyPath)
+			}
+
+			logs, err := f.boot(t)
+			if err != nil {
+				t.Fatalf("second start: %v", err)
+			}
+			after := f.openStoreDirect(t)
+			rec := onlyRow(t, after)
+			if signed := rec.Signature != ""; signed != tc.wantSigned {
+				t.Errorf("row signed = %v, want %v", signed, tc.wantSigned)
+			}
+			if tc.wantSigned {
+				key, lerr := loadRegistrySigner(keyPath, false)
+				if lerr != nil {
+					t.Fatalf("load signing key: %v", lerr)
+				}
+				if verr := key.Verify(context.Background(), rec.ContentHash, rec.Signature); verr != nil {
+					t.Errorf("minted envelope does not verify: %v", verr)
+				}
+			}
+			if applied, aerr := after.DataMigrationApplied(context.Background(), store.DataMigrationContentHashFraming); aerr != nil || !applied {
+				t.Errorf("marker applied = %v (err %v), want true", applied, aerr)
+			}
+			hint := "rehash: 1 unsigned left; run sign-stored-rows --include-unsigned to sign them"
+			if got := strings.Contains(logs, hint); got == tc.wantSigned {
+				t.Errorf("log names sign-stored-rows = %v, want %v; logs:\n%s", got, !tc.wantSigned, logs)
+			}
+			if tc.wantSigned && !strings.Contains(logs, "rehash: 0 unsigned left\n") {
+				t.Errorf("log lacks the bare unsigned-left line; logs:\n%s", logs)
+			}
+		})
+	}
+}
+
+// Spec: §13.4, §13.12 — a key path that does not resolve is an error rather
+// than a key outside the store's directory: mintUnsignedOnFirstRun returns it,
+// and a signing start with PODIUM_SIGN_KEY_PATH and HOME both unset refuses to
+// start and writes no row.
+func TestRun_UnresolvedKeyPathRefusesTheStart(t *testing.T) {
+	f := newBootFixture(t)
+	t.Setenv("PODIUM_SIGN", "registry-key")
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	if _, err := sign.KeyFilePath(""); err == nil {
+		t.Skip("the platform resolves a home directory without HOME")
+	}
+
+	cfg := &Config{storeType: "sqlite", sqlitePath: f.sqlitePath}
+	mint, err := mintUnsignedOnFirstRun(cfg, "")
+	if err == nil || mint || !strings.Contains(err.Error(), "serverboot: resolve signing key path") {
+		t.Fatalf("mintUnsignedOnFirstRun = (%v, %v), want false and the resolve error", mint, err)
+	}
+	if _, err := f.boot(t); err == nil {
+		t.Fatal("a signing start with no resolvable key path was not refused")
+	}
+	if _, statErr := os.Stat(f.sqlitePath); statErr == nil {
+		st := f.openStoreDirect(t)
+		if rows := allRows(t, st); len(rows) != 0 {
+			t.Errorf("a refused start stored %d row(s)", len(rows))
+		}
+	}
+}

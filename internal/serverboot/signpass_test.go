@@ -661,3 +661,39 @@ func TestSignStoredRows_StoreErrorsFailTheCommand(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §13.4, §13.12 — with the record absent and the key file outside the
+// store's directory, the command standing in for the first start follows the
+// first start's policy: it leaves an unsigned framed row unsigned, names
+// --include-unsigned on the unsigned-left line, and records completion.
+// --include-unsigned then signs the row.
+func TestRunSignStoredRows_RecordAbsentMintsUnsignedRowsOnlyBesideTheKey(t *testing.T) {
+	key := testSigner(t)
+	f := newSignPassFixture(t, key)
+	elsewhere := filepath.Join(t.TempDir(), "registry-signing.key")
+	writeRegistryKeyFile(t, elsewhere, key)
+	t.Setenv("PODIUM_SIGN_KEY_PATH", elsewhere)
+	s := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true}
+	f.seed(t, false, s)
+
+	out, err := runCommand(t)
+	if err != nil {
+		t.Fatalf("sign-stored-rows: %v", err)
+	}
+	if rec := f.row(t, s); rec.Signature != "" {
+		t.Error("the row was signed without --include-unsigned outside the key's directory")
+	}
+	if want := "rehash: 1 unsigned left; run sign-stored-rows --include-unsigned to sign them"; !strings.Contains(out, want) {
+		t.Errorf("stdout lacks %q:\n%s", want, out)
+	}
+	if !f.recordSet(t) {
+		t.Error("completion not recorded")
+	}
+
+	if _, err := runCommand(t, "--include-unsigned"); err != nil {
+		t.Fatalf("sign-stored-rows --include-unsigned: %v", err)
+	}
+	if id := verifiedBy(t, key, f.row(t, s)); id != key.CurrentKeyID() {
+		t.Errorf("row signed by %s, want the signing key", id)
+	}
+}

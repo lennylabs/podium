@@ -94,11 +94,20 @@ func rehashPolicy(ctx context.Context, d rehashDeps) (rehashDeps, bool, error) {
 }
 
 // mintUnsignedOnFirstRun is the first-start rewrite's unsigned-row policy for
-// the configured store and key path. It signs every unsigned row the first
-// start rewrites, which is the §13.4 behavior this release starts from.
-// Spec: §13.4.
-func mintUnsignedOnFirstRun(_ *Config, _ string) (bool, error) {
-	return true, nil
+// the configured store and key path. The rewrite mints a first envelope for an
+// unsigned row only when the store is the SQLite store in the key file's
+// directory: there the key and the rows share one fate on disk, so an unsigned
+// row was written by a process that could reach the key. A standard deployment
+// attests its unsigned rows with sign-stored-rows --include-unsigned instead.
+// A path that does not resolve returns an error rather than false, so the
+// caller refuses before the rewrite instead of treating the key as absent.
+// Spec: §13.4, §13.12.
+func mintUnsignedOnFirstRun(cfg *Config, keyPathEnv string) (bool, error) {
+	keyPath, err := sign.KeyFilePath(keyPathEnv)
+	if err != nil {
+		return false, fmt.Errorf("serverboot: resolve signing key path: %w", err)
+	}
+	return keyCoLocatedWithStore(cfg, keyPath), nil
 }
 
 // rehashClass is what the plan decided about one stored row.
@@ -478,13 +487,19 @@ func (c *rehashCounts) countSigningState(row rehashRow, written bool) {
 // many rows were left unsigned and how many remain signed under each
 // verification-only key, with a line for a key that verifies no row so a
 // missing line never stands in for a zero. Each line starts with prefix, so
-// the dry run's projected totals read apart from a run's. With no signer it
-// logs nothing. Spec: §13.4, §4.7.9.
+// the dry run's projected totals read apart from a run's. A nonzero
+// unsigned-left count names the command that attests those rows, because
+// outside the co-located SQLite store the rewrite leaves them unsigned. With
+// no signer it logs nothing. Spec: §13.4, §4.7.9.
 func logSigningSummary(d rehashDeps, c rehashCounts, prefix string) {
 	if d.Signer == nil {
 		return
 	}
-	d.summarize("%s: %d unsigned left", prefix, c.unsignedLeft)
+	hint := ""
+	if c.unsignedLeft > 0 {
+		hint = "; run sign-stored-rows --include-unsigned to sign them"
+	}
+	d.summarize("%s: %d unsigned left%s", prefix, c.unsignedLeft, hint)
 	for _, id := range d.Signer.VerifyKeyIDs() {
 		d.summarize("%s: verify key %s: %d row(s) still signed under it", prefix, id, c.stillSigned[id])
 	}

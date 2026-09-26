@@ -178,9 +178,9 @@ func ruStageLegacyDatabase(t *testing.T, dsn string) (id, version, contentHash s
 	id = "ops/runbooks/restart-gateway"
 	version = "1.4.2"
 	// Spec: §13.4 — the legacy row stores the §4.7.6 digest of its own bytes
-	// (an empty manifest, no SKILL.md, and no resources), so the first-start
-	// rewrite reproduces it and mints its first envelope, and the stored-row
-	// admission check admits it.
+	// (an empty manifest, no SKILL.md, and no resources), so the rewrite
+	// reproduces it, sign-stored-rows --include-unsigned mints its first
+	// envelope, and the stored-row admission check admits it.
 	contentHash = legacyEmptyRowHash
 
 	db, err := sql.Open("postgres", dsn)
@@ -213,9 +213,9 @@ func ruStageLegacyDatabase(t *testing.T, dsn string) (id, version, contentHash s
 		t.Fatalf("seed legacy layer_config row: %v", err)
 	}
 	// Spec: §13.4 — a database an earlier binary left carries no record that
-	// the first-start stored-value rewrite completed, so the upgraded binary's
-	// first start runs it and mints the seeded row's first envelope. A prior
-	// run on this shared Postgres may have set the record, so it is cleared.
+	// the first-start stored-value rewrite completed, so sign-stored-rows
+	// performs the rewrite in place of the first start. A prior run on this
+	// shared Postgres may have set the record, so it is cleared.
 	pg, err := store.OpenPostgres(dsn)
 	if err != nil {
 		t.Fatalf("open postgres store: %v", err)
@@ -290,7 +290,27 @@ func ruSeededManifestRow(t *testing.T, dsn, id, version string) (hash string, ok
 // two replicas of a roll share one path so one key verifies against both.
 func ruStartUpgradedServer(t *testing.T, dsn, keysPath string) *serverProc {
 	t.Helper()
-	return startServerArgs(t, []string{
+	return startServerArgs(t, ruUpgradedEnv(t, dsn, keysPath), "serve")
+}
+
+// ruSignLegacyRows runs `podium admin sign-stored-rows --include-unsigned`
+// against the staged database before the upgraded binary's first start, which
+// is the upgrade step a standard deployment with signing on takes: the store is
+// Postgres, so the first-start rewrite mints no envelope for the legacy row and
+// the operator attests it instead. Spec: §13.4.
+func ruSignLegacyRows(t *testing.T, dsn, keysPath string) {
+	t.Helper()
+	res := signStoredRows(t, ruUpgradedEnv(t, dsn, keysPath), "--include-unsigned")
+	if res.Exit != 0 || !strings.Contains(res.Stdout, "rehash: 0 unsigned left") {
+		t.Fatalf("sign-stored-rows --include-unsigned exit=%d, want 0 and no unsigned row left\nstdout:\n%s\nstderr:\n%s", res.Exit, res.Stdout, res.Stderr)
+	}
+}
+
+// ruUpgradedEnv is the environment ruStartUpgradedServer boots with, with a
+// fresh HOME and object-store root on each call.
+func ruUpgradedEnv(t *testing.T, dsn, keysPath string) []string {
+	t.Helper()
+	return []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_REGISTRY_STORE=postgres",
 		"PODIUM_POSTGRES_DSN=" + dsn,
@@ -309,7 +329,7 @@ func ruStartUpgradedServer(t *testing.T, dsn, keysPath string) *serverProc {
 		// (§13.12), so none generates its own under its fresh HOME.
 		"PODIUM_SIGN_KEY_PATH=" + msSigningKeyPath(t),
 		"PODIUM_DEFAULT_LAYER_VISIBILITY=public",
-	}, "serve")
+	}
 }
 
 // ruLoad GETs load_artifact for an explicit version with the bearer token and
@@ -380,6 +400,7 @@ func TestServerOps_RollingUpgradeCoexistence(t *testing.T) {
 	// runs the §13.4 additive migration on the legacy schema at boot.
 	priv, pemPath := injKeyPair(t)
 	keysPath := injSeedRuntimeKeys(t, pemPath)
+	ruSignLegacyRows(t, dsn, keysPath)
 	srvNew := ruStartUpgradedServer(t, dsn, keysPath)
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))
 
@@ -500,6 +521,7 @@ func TestServerOps_RollbackBeforeFinalize(t *testing.T) {
 	id, version, contentHash := ruStageLegacyDatabase(t, dsn)
 	priv, pemPath := injKeyPair(t)
 	keysPath := injSeedRuntimeKeys(t, pemPath)
+	ruSignLegacyRows(t, dsn, keysPath)
 	srvNew := ruStartUpgradedServer(t, dsn, keysPath)
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))
 

@@ -954,22 +954,22 @@ func run(ctx context.Context, stop func()) error {
 	// rewriting and re-signing the store another process is still serving,
 	// only to exit on the bind error, is the one failure the guard prevents.
 	if bindErr == nil {
-		mintUnsigned, err := mintUnsignedOnFirstRun(cfg, os.Getenv("PODIUM_SIGN_KEY_PATH"))
-		if err != nil {
-			return err
-		}
 		deps := rehashDeps{
-			Store:        st,
-			Objects:      objStore,
-			ReadTimeout:  cfg.migrationObjectReadTimeout,
-			MintUnsigned: mintUnsigned,
-			Sink:         auditSink,
-			Scrubber:     scrubber,
+			Store:       st,
+			Objects:     objStore,
+			ReadTimeout: cfg.migrationObjectReadTimeout,
+			Sink:        auditSink,
+			Scrubber:    scrubber,
 		}
 		// Assigned only when signing is on: the zero key in the interface
-		// field would never be nil and would send unsigned rows to Sign.
+		// field would never be nil and would send unsigned rows to Sign. The
+		// unsigned-row policy matters only with a signer, so a signing-off
+		// start never resolves a key path it does not use.
 		if signingOn {
 			deps.Signer = signKey
+			if deps.MintUnsigned, err = mintUnsignedOnFirstRun(cfg, os.Getenv("PODIUM_SIGN_KEY_PATH")); err != nil {
+				return err
+			}
 		}
 		// The boot logs the counts and the hold value through the summary
 		// lines and acts on neither; a held row is retried next start.
