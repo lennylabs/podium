@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -214,6 +215,23 @@ func TestRunSignStoredRows_UsageErrors(t *testing.T) {
 	}
 	if code := SignStoredRowsExitCode(&stderr, nil); code != 0 {
 		t.Errorf("success exit = %d, want 0", code)
+	}
+}
+
+// Spec: §13.4 — -h and --help are help requests rather than usage errors:
+// the error carries flag.ErrHelp without ErrSignStoredRowsUsage, and the
+// dispatchers print the usage text and exit 0.
+func TestRunSignStoredRows_HelpExitsZero(t *testing.T) {
+	for _, arg := range []string{"-h", "--help"} {
+		_, err := runCommand(t, arg)
+		if !errors.Is(err, flag.ErrHelp) || errors.Is(err, ErrSignStoredRowsUsage) {
+			t.Errorf("%s: err = %v, want flag.ErrHelp without the usage sentinel", arg, err)
+		}
+		var stderr bytes.Buffer
+		code := SignStoredRowsExitCode(&stderr, err)
+		if code != 0 || stderr.String() != SignStoredRowsUsage {
+			t.Errorf("%s: exit %d, stderr %q; want 0 with the usage text alone", arg, code, stderr.String())
+		}
 	}
 }
 

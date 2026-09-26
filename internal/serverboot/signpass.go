@@ -46,11 +46,16 @@ func RunSignStoredRows(ctx context.Context, args []string) error {
 }
 
 // SignStoredRowsExitCode writes err to stderr and returns the command's exit
-// status: 0 on success, 2 with the usage text on a usage error, and 1 on any
-// other error. Both dispatchers call it, so the binaries cannot map the same
-// failure to different statuses.
+// status: 0 on success, 0 with the usage text on a help request, 2 with the
+// usage text on a usage error, and 1 on any other error. Both dispatchers call
+// it, so the binaries cannot map the same failure to different statuses. A
+// help request exits 0 as every other podium subcommand's does.
 func SignStoredRowsExitCode(stderr io.Writer, err error) int {
 	if err == nil {
+		return 0
+	}
+	if errors.Is(err, flag.ErrHelp) {
+		_, _ = fmt.Fprint(stderr, SignStoredRowsUsage)
 		return 0
 	}
 	_, _ = fmt.Fprintln(stderr, err)
@@ -85,7 +90,9 @@ func runSignStoredRows(ctx context.Context, args []string, stdout io.Writer) err
 
 // parseSignStoredRowsArgs parses the flags and refuses a positional argument.
 // The flag package's own message is discarded because the dispatcher prints
-// the usage text once, from the returned error.
+// the usage text once, from the returned error. A help request returns
+// flag.ErrHelp unwrapped, because it is not a usage error and must not carry
+// ErrSignStoredRowsUsage.
 func parseSignStoredRowsArgs(args []string) (signStoredRowsOptions, error) {
 	var opts signStoredRowsOptions
 	fs := flag.NewFlagSet("sign-stored-rows", flag.ContinueOnError)
@@ -93,6 +100,9 @@ func parseSignStoredRowsArgs(args []string) (signStoredRowsOptions, error) {
 	fs.BoolVar(&opts.includeUnsigned, "include-unsigned", false, "also sign every stored row that carries no signature")
 	fs.BoolVar(&opts.dryRun, "dry-run", false, "report every write and make none")
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return opts, err
+		}
 		return opts, fmt.Errorf("%w: %w", ErrSignStoredRowsUsage, err)
 	}
 	if fs.NArg() > 0 {
