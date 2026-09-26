@@ -57,12 +57,12 @@ func signingKeyFlags(name, description string, args []string, stderr io.Writer, 
 		return "", parseExit(err), false
 	}
 	if flags.NArg() > 0 {
-		fmt.Fprintf(stderr, "error: unexpected argument %q\n", flags.Arg(0))
+		_, _ = fmt.Fprintf(stderr, "error: unexpected argument %q\n", flags.Arg(0))
 		flags.Usage()
 		return "", 2, false
 	}
 	if *keyFile == "" {
-		fmt.Fprintln(stderr, "error: --key-file is required")
+		_, _ = fmt.Fprintln(stderr, "error: --key-file is required")
 		flags.Usage()
 		return "", 2, false
 	}
@@ -82,20 +82,20 @@ func signingKeyGenerate(args []string, stdout, stderr io.Writer) int {
 	}
 	_, err := os.Lstat(path)
 	if err == nil {
-		fmt.Fprintf(stderr, "error: %s already exists; use `podium admin signing-key rotate` to replace its signing key\n", path)
+		_, _ = fmt.Fprintf(stderr, "error: %s already exists; use `podium admin signing-key rotate` to replace its signing key\n", path)
 		return 1
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	kf, err := newSigningKeyFile(nil)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	if err := sign.WriteKeyFile(path, kf); err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	printKeySet(stdout, kf)
@@ -118,29 +118,29 @@ func signingKeyRotate(args []string, stdout, stderr io.Writer) int {
 		return code
 	}
 	if staged != "" && filepath.Clean(staged) == filepath.Clean(path) {
-		fmt.Fprintln(stderr, "error: --staged-out must name a file other than --key-file")
+		_, _ = fmt.Fprintln(stderr, "error: --staged-out must name a file other than --key-file")
 		return 1
 	}
 	prev, err := sign.ReadKeyFile(path)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	next, err := newSigningKeyFile(append([]ed25519.PublicKey{prev.Public}, prev.Verify...))
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	if staged != "" {
 		stagedFile := prev
 		stagedFile.Verify = append(append([]ed25519.PublicKey(nil), prev.Verify...), next.Public)
 		if err := sign.WriteKeyFile(staged, stagedFile); err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
+			_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 			return 1
 		}
 	}
 	if err := sign.WriteKeyFile(path, next); err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	printKeySet(stdout, next)
@@ -169,12 +169,12 @@ func printKeySet(w io.Writer, kf sign.KeyFile) {
 	for i, k := range keys {
 		encoded[i] = base64.StdEncoding.EncodeToString(k)
 	}
-	fmt.Fprintln(w, strings.Join(encoded, ","))
+	_, _ = fmt.Fprintln(w, strings.Join(encoded, ","))
 	for i, k := range keys {
 		role := "verify"
 		if i == 0 {
 			role = "signing"
 		}
-		fmt.Fprintf(w, "key_id=%s role=%s\n", sign.KeyIDFor(k), role)
+		_, _ = fmt.Fprintf(w, "key_id=%s role=%s\n", sign.KeyIDFor(k), role)
 	}
 }
