@@ -21,6 +21,18 @@ import (
 	"github.com/lennylabs/podium/pkg/version"
 )
 
+// keyedSigner is what the §13.4 rewrite needs from the §4.7.9 registry-managed
+// provider: Sign and Verify, plus the key_id of the key that verified a stored
+// envelope, the key_id Sign embeds, and the key_ids of the verification-only
+// keys. The §9.1 SignatureProvider stays unchanged, so the interface lives here
+// at its one consumer; sign.RegistryManagedKey satisfies it.
+type keyedSigner interface {
+	sign.Provider
+	VerifiedKeyID(ctx context.Context, contentHash, signature string) (string, error)
+	CurrentKeyID() string
+	VerifyKeyIDs() []string
+}
+
 // rehashDeps carries the serving process's own collaborators into the §13.4
 // stored-value rewrite. Every field is a value so a test can drive the pass
 // against an in-memory store, an in-process object store, a generated key, and
@@ -36,13 +48,43 @@ type rehashDeps struct {
 	// (PODIUM_MIGRATION_OBJECT_READ_TIMEOUT, §13.12).
 	ReadTimeout time.Duration
 	// Signer is the §4.7.9 registry-managed provider, or nil when signing
-	// is off. The pass needs Verify as well as Sign, so it takes the whole
-	// provider rather than ingest's SignerFunc.
-	Signer sign.Provider
+	// is off. The caller assigns it only when signing is on, because the
+	// zero sign.RegistryManagedKey in this field would never be nil.
+	Signer keyedSigner
+	// MintUnsigned is the first-start rewrite's policy for a row that
+	// carries no signature: true signs it when a signer is configured.
+	// rehashPolicy replaces it with the effective value once the
+	// completion record is read.
+	MintUnsigned bool
+	// AttestUnsigned is the operator's --include-unsigned: every unsigned
+	// row is signed whether or not the rewrite has completed.
+	AttestUnsigned bool
 	// Sink is the §8.3 audit sink, or nil. Scrubber applies the §8.2
 	// query-text scrubbing and tolerates a nil receiver.
 	Sink     audit.Sink
 	Scrubber *audit.PIIScrubber
+}
+
+// rehashPolicy reads the completion record once and returns a copy of d whose
+// MintUnsigned is the effective unsigned-row policy, together with whether the
+// record is present. Past the first run only the operator's attestation signs
+// an unsigned row, because an unsigned row carries no evidence of who stored
+// it. Spec: §13.4.
+func rehashPolicy(ctx context.Context, d rehashDeps) (rehashDeps, bool, error) {
+	applied, err := d.Store.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+	if err != nil {
+		return d, false, fmt.Errorf("rehash: read data-migration marker: %w", err)
+	}
+	d.MintUnsigned = d.AttestUnsigned || (!applied && d.MintUnsigned)
+	return d, applied, nil
+}
+
+// mintUnsignedOnFirstRun is the first-start rewrite's unsigned-row policy for
+// the configured store and key path. It signs every unsigned row the first
+// start rewrites, which is the §13.4 behavior this release starts from.
+// Spec: §13.4.
+func mintUnsignedOnFirstRun(_ *Config, _ string) (bool, error) {
+	return true, nil
 }
 
 // rehashClass is what the plan decided about one stored row.
@@ -53,13 +95,15 @@ const (
 	// write.
 	classMigrated rehashClass = iota
 	// classUnmigrated: the row's stored bytes reproduce the pre-framing
-	// digest, or the row is at the framed digest and needs its first
-	// envelope. The apply step rewrites it.
+	// digest, or the row is at the framed digest and needs an envelope
+	// under the signing key (its first one, or one replacing an envelope a
+	// verification-only key made). The apply step rewrites it, signing it
+	// when the row's sign flag is set.
 	classUnmigrated
 	// classUnreproducible: the stored bytes reproduce neither digest.
 	classUnreproducible
 	// classSignatureUnverified: a signed row whose envelope does not verify
-	// over its stored hash under the configured key.
+	// over its stored hash under any key of the verification key set.
 	classSignatureUnverified
 	// classBodyMissing: object storage answered, and a bundled resource's
 	// object is not there.
@@ -97,6 +141,14 @@ type rehashRow struct {
 	// unread marks a row classified body_unavailable without an
 	// object-store read, after an earlier read exceeded its deadline.
 	unread bool
+	// sign marks a classUnmigrated row the apply step signs under the
+	// signing key; without it the row is written with an empty signature.
+	sign bool
+	// signedBy is the key_id of the key that verified the stored envelope,
+	// or empty for an unsigned row, a failed verification, or no signer.
+	// It is recorded before the bodies are read, so the per-key count
+	// includes a row whose bytes could not be read.
+	signedBy string
 }
 
 func (r rehashRow) key() string {
@@ -124,24 +176,29 @@ func (r rehashRow) key() string {
 // whose bytes or whose signature fail their checks is logged and does not,
 // because no later pass could clear it and an unset marker would make every
 // later start re-read every resource body in the store.
-func rehashStoredHashes(ctx context.Context, d rehashDeps) error {
-	applied, err := d.Store.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+//
+// skipIfMarked returns at once when the completion record is present, which is
+// the boot's behavior; sign-stored-rows passes false to plan every row again.
+// It returns the counts the summary reports and whether a row held the record
+// back.
+func rehashStoredHashes(ctx context.Context, d rehashDeps, skipIfMarked bool) (rehashCounts, bool, error) {
+	d, applied, err := rehashPolicy(ctx, d)
 	if err != nil {
-		return fmt.Errorf("rehash: read data-migration marker: %w", err)
+		return rehashCounts{}, false, err
 	}
-	if applied {
-		return nil
+	if applied && skipIfMarked {
+		return rehashCounts{}, false, nil
 	}
 
 	plan, err := planRehash(ctx, d)
 	if err != nil {
-		return err
+		return rehashCounts{}, false, err
 	}
 	if err := refuseStrandedSignature(plan, d.Signer); err != nil {
-		return err
+		return rehashCounts{}, false, err
 	}
-	applyRehash(ctx, d, plan)
-	return nil
+	counts, held := applyRehash(ctx, d, plan)
+	return counts, held, nil
 }
 
 // planRehash enumerates every tenant's rows, including the soft-deleted ones a
@@ -182,45 +239,69 @@ type rehashPlanner struct {
 	bodiesRead int
 }
 
+// classify decides one row. With a signer, the stored envelope is verified
+// before the bodies are read, because the check needs no body bytes and the
+// per-key count must include a row whose bytes could not be read; the class
+// order is otherwise unchanged, so a body failure is reported first.
+// Spec: §13.4, §4.7.9.
 func (p *rehashPlanner) classify(ctx context.Context, rec store.ManifestRecord) rehashRow {
 	row := rehashRow{rec: rec}
+	var verifyErr error
+	if p.deps.Signer != nil && rec.Signature != "" {
+		row.signedBy, verifyErr = p.deps.Signer.VerifiedKeyID(ctx, rec.ContentHash, rec.Signature)
+	}
 	resources, fail := p.assemble(ctx, rec)
 	if fail != nil {
 		row.class, row.note, row.unread = fail.class, fail.note, fail.unread
 		return row
 	}
 
-	row.newHash = "sha256:" + version.CanonicalContentHash(rec.Frontmatter, rec.SkillRaw, resources)
-
 	// The envelope is the only evidence that the stored bytes are the bytes
 	// the registry signed: an actor with store write access can alter a
 	// row's bytes and recompute either digest over them, and cannot mint an
 	// envelope. Re-signing such a row would turn a consumer's
 	// materialize.signature_invalid into an accepted load. Spec: §4.7.9.
-	if p.deps.Signer != nil && rec.Signature != "" {
-		if err := p.deps.Signer.Verify(ctx, rec.ContentHash, rec.Signature); err != nil {
-			row.class = classSignatureUnverified
-			row.note = err.Error()
-			return row
-		}
+	if verifyErr != nil {
+		row.class = classSignatureUnverified
+		row.note = verifyErr.Error()
+		return row
 	}
 
-	if rec.ContentHash == row.newHash {
-		if rec.Signature != "" || p.deps.Signer == nil {
-			row.class = classMigrated
-			return row
-		}
-		// A row at the framed digest carrying no envelope, with a
-		// signer configured: the apply step mints its first one.
-		row.class = classUnmigrated
-		return row
-	}
-	if rec.ContentHash == "sha256:"+preFramingContentHash(rec.Frontmatter, rec.SkillRaw, resources) {
-		row.class = classUnmigrated
-		return row
-	}
-	row.class = classUnreproducible
+	row.newHash = "sha256:" + version.CanonicalContentHash(rec.Frontmatter, rec.SkillRaw, resources)
+	row.class, row.sign = p.decide(row, resources)
 	return row
+}
+
+// decide classifies a row whose bodies are in hand and whose envelope, if any,
+// verified. Reproduction is checked before signing, so a row whose bytes were
+// altered in the store is never re-signed, whichever key verified it.
+func (p *rehashPlanner) decide(row rehashRow, resources map[string][]byte) (rehashClass, bool) {
+	rec := row.rec
+	atNew := rec.ContentHash == row.newHash
+	if !atNew && rec.ContentHash != "sha256:"+preFramingContentHash(rec.Frontmatter, rec.SkillRaw, resources) {
+		return classUnreproducible, false
+	}
+	sign := p.signs(row, atNew)
+	if atNew && !sign {
+		return classMigrated, false
+	}
+	return classUnmigrated, sign
+}
+
+// signs reports whether the apply step signs a reproducible row: an unsigned
+// row under the effective unsigned-row policy, and a verified row unless the
+// signing key already signed it at the new digest. A row signed under a
+// verification-only key is re-signed under the signing key. With no signer
+// nothing is signed, so a signing-off rewrite never reaches Sign.
+// Spec: §13.4, §4.7.9.
+func (p *rehashPlanner) signs(row rehashRow, atNew bool) bool {
+	if p.deps.Signer == nil {
+		return false
+	}
+	if row.rec.Signature == "" {
+		return p.deps.MintUnsigned
+	}
+	return !atNew || row.signedBy != p.deps.Signer.CurrentKeyID()
 }
 
 // bodyFailure is why one row's bundled-resource bytes could not be assembled.
@@ -292,7 +373,7 @@ func (p *rehashPlanner) applyWrongRootGuard() {
 // no signer is configured would be left with an envelope over a hash the row no
 // longer stores. The plan completes before any write, so the refusal leaves the
 // store as it was and the marker unset. Spec: §13.4.
-func refuseStrandedSignature(plan []rehashRow, signer sign.Provider) error {
+func refuseStrandedSignature(plan []rehashRow, signer keyedSigner) error {
 	if signer != nil {
 		return nil
 	}
@@ -308,7 +389,7 @@ func refuseStrandedSignature(plan []rehashRow, signer sign.Provider) error {
 	return fmt.Errorf("rehash: %d stored row(s) carry a §4.7.9 signature and need their content hash rewritten while no signer is configured: %s; remove PODIUM_SIGN=none and point PODIUM_SIGN_KEY_PATH at the key that signed them", len(stranded), strings.Join(stranded, ", "))
 }
 
-// rehashCounts is what the summary line reports.
+// rehashCounts is what the summary lines report.
 type rehashCounts struct {
 	rewritten           int
 	migrated            int
@@ -320,98 +401,163 @@ type rehashCounts struct {
 	conflicts           int
 	errors              int
 	eventsNotAppended   int
+	// unsignedLeft counts planned rows the pass left without a signature.
+	unsignedLeft int
+	// stillSigned counts, per verifying key_id, planned rows the pass did
+	// not rewrite.
+	stillSigned map[string]int
 }
 
-// applyRehash writes every unmigrated row through the store's compare-and-swap,
-// so two replicas running the pass together never overwrite each other, signs
-// each row it rewrites when a signer is configured, and appends one
-// artifact.signed event (§8.1) per re-signed row.
-func applyRehash(ctx context.Context, d rehashDeps, plan []rehashRow) {
-	var c rehashCounts
+// rehashApplier carries the state one apply step accumulates.
+type rehashApplier struct {
+	deps   rehashDeps
+	counts rehashCounts
 	// appendEvents goes false after the first sink failure: an http(s)
 	// audit destination is a synchronous POST with a ten-second timeout, so
 	// retrying per row would cost that timeout for every re-signed row
 	// while nothing answers the health probes.
-	appendEvents := d.Sink != nil
-	// holdMarker records a row the next start must try again.
-	holdMarker := false
+	appendEvents bool
+	// held records a row the next start must try again.
+	held bool
+}
 
+// applyRehash writes every unmigrated row through the store's compare-and-swap
+// on its stored hash and signature, so two replicas running the pass together
+// never overwrite each other, signs each row the plan marks for signing, and
+// appends one artifact.signed event (§8.1) per signed write. It returns the
+// counts and whether a row held the completion record back.
+func applyRehash(ctx context.Context, d rehashDeps, plan []rehashRow) (rehashCounts, bool) {
+	a := &rehashApplier{
+		deps:         d,
+		counts:       rehashCounts{stillSigned: map[string]int{}},
+		appendEvents: d.Sink != nil,
+	}
 	for _, row := range plan {
-		switch row.class {
-		case classMigrated:
-			c.migrated++
-			continue
-		case classSignatureUnverified:
-			c.signatureUnverified++
-			log.Printf("rehash: %s left at its stored content hash: %s (%s)", row.key(), row.class, row.note)
-			continue
-		case classUnreproducible:
-			c.unreproducible++
-			log.Printf("rehash: %s left at its stored content hash: %s", row.key(), row.class)
-			continue
-		case classBodyMissing:
-			c.bodyMissing++
-			log.Printf("rehash: %s left at its stored content hash: %s (%s)", row.key(), row.class, row.note)
-			continue
-		case classBodyUnavailable:
-			c.bodyUnavailable++
-			if row.unread {
-				c.unread++
-			}
-			holdMarker = true
-			log.Printf("rehash: %s left at its stored content hash: %s (%s)", row.key(), row.class, row.note)
-			continue
+		written := a.apply(ctx, row)
+		if row.rec.Signature == "" && !(written && row.sign) {
+			a.counts.unsignedLeft++
 		}
-
-		signature := ""
-		if d.Signer != nil {
-			env, err := d.Signer.Sign(ctx, row.newHash)
-			if err != nil {
-				c.errors++
-				holdMarker = true
-				log.Printf("rehash: %s left at its stored content hash: sign: %v", row.key(), err)
-				continue
-			}
-			signature = env
-		}
-		err := d.Store.RehashManifest(ctx, row.rec.TenantID, row.rec.ArtifactID, row.rec.Version, row.rec.ContentHash, row.rec.Signature, row.newHash, signature)
-		switch {
-		case err == nil:
-			c.rewritten++
-		case errors.Is(err, store.ErrImmutableViolation), errors.Is(err, store.ErrNotFound):
-			// A peer replica rewrote the row, a concurrent ingest
-			// moved it, or a §8.4 purge removed it. None of those is
-			// a failed write, so none holds the marker back.
-			c.conflicts++
-			log.Printf("rehash: %s left as another writer holds it: %v", row.key(), err)
-			continue
-		default:
-			c.errors++
-			holdMarker = true
-			log.Printf("rehash: %s left at its stored content hash: rehash: %v", row.key(), err)
-			continue
-		}
-
-		if signature == "" || !appendEvents {
-			if signature != "" && d.Sink != nil {
-				c.eventsNotAppended++
-			}
-			continue
-		}
-		if err := appendSignedEvent(ctx, d, row); err != nil {
-			appendEvents = false
-			c.eventsNotAppended++
-			log.Printf("rehash: audit sink refused an artifact.signed event, appending no more in this run: %v", err)
+		if row.signedBy != "" && !written {
+			a.counts.stillSigned[row.signedBy]++
 		}
 	}
 
-	if !holdMarker {
+	if !a.held {
 		if err := d.Store.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, true); err != nil {
 			log.Printf("rehash: recording the completed rewrite failed, the next start runs it again: %v", err)
 		}
 	}
+	c := a.counts
 	log.Printf("rehash: %d rewritten, %d already migrated, %d signature_unverified, %d unreproducible, %d body_missing, %d body_unavailable (%d unread), %d in conflict, %d in error, %d event(s) not appended",
 		c.rewritten, c.migrated, c.signatureUnverified, c.unreproducible, c.bodyMissing, c.bodyUnavailable, c.unread, c.conflicts, c.errors, c.eventsNotAppended)
+	logSigningSummary(d.Signer, c)
+	return c, a.held
+}
+
+// logSigningSummary reports, on lines of their own after the summary line, how
+// many rows were left unsigned and how many remain signed under each
+// verification-only key, with a line for a key that verifies no row so a
+// missing line never stands in for a zero. With no signer it logs nothing.
+// Spec: §13.4, §4.7.9.
+func logSigningSummary(signer keyedSigner, c rehashCounts) {
+	if signer == nil {
+		return
+	}
+	log.Printf("rehash: %d unsigned left", c.unsignedLeft)
+	for _, id := range signer.VerifyKeyIDs() {
+		log.Printf("rehash: verify key %s: %d row(s) still signed under it", id, c.stillSigned[id])
+	}
+}
+
+// apply handles one planned row and reports whether the pass wrote it.
+func (a *rehashApplier) apply(ctx context.Context, row rehashRow) bool {
+	if !a.tally(row) {
+		return false
+	}
+	signature := ""
+	if row.sign {
+		env, err := a.deps.Signer.Sign(ctx, row.newHash)
+		if err != nil {
+			a.counts.errors++
+			a.held = true
+			log.Printf("rehash: %s left at its stored content hash: sign: %v", row.key(), err)
+			return false
+		}
+		signature = env
+	}
+	if !a.write(ctx, row, signature) {
+		return false
+	}
+	a.recordSigned(ctx, row, signature)
+	return true
+}
+
+// tally counts and logs a row the pass does not write, and reports whether the
+// row is one to write.
+func (a *rehashApplier) tally(row rehashRow) bool {
+	switch row.class {
+	case classUnmigrated:
+		return true
+	case classMigrated:
+		a.counts.migrated++
+		return false
+	case classSignatureUnverified:
+		a.counts.signatureUnverified++
+		log.Printf("rehash: %s left at its stored content hash: %s (%s)", row.key(), row.class, row.note)
+	case classUnreproducible:
+		a.counts.unreproducible++
+		log.Printf("rehash: %s left at its stored content hash: %s", row.key(), row.class)
+	case classBodyMissing:
+		a.counts.bodyMissing++
+		log.Printf("rehash: %s left at its stored content hash: %s (%s)", row.key(), row.class, row.note)
+	case classBodyUnavailable:
+		a.counts.bodyUnavailable++
+		if row.unread {
+			a.counts.unread++
+		}
+		a.held = true
+		log.Printf("rehash: %s left at its stored content hash: %s (%s)", row.key(), row.class, row.note)
+	}
+	return false
+}
+
+// write replaces the row through the store's compare-and-swap on the stored
+// hash and signature the plan read, and reports whether it landed.
+func (a *rehashApplier) write(ctx context.Context, row rehashRow, signature string) bool {
+	err := a.deps.Store.RehashManifest(ctx, row.rec.TenantID, row.rec.ArtifactID, row.rec.Version, row.rec.ContentHash, row.rec.Signature, row.newHash, signature)
+	switch {
+	case err == nil:
+		a.counts.rewritten++
+		return true
+	case errors.Is(err, store.ErrImmutableViolation), errors.Is(err, store.ErrNotFound):
+		// A peer replica rewrote the row, a concurrent ingest moved it,
+		// or a §8.4 purge removed it. None of those is a failed write, so
+		// none holds the marker back.
+		a.counts.conflicts++
+		log.Printf("rehash: %s left as another writer holds it: %v", row.key(), err)
+	default:
+		a.counts.errors++
+		a.held = true
+		log.Printf("rehash: %s left at its stored content hash: rehash: %v", row.key(), err)
+	}
+	return false
+}
+
+// recordSigned appends the artifact.signed event for a signed write while the
+// sink accepts events, and counts the events it could not append.
+func (a *rehashApplier) recordSigned(ctx context.Context, row rehashRow, signature string) {
+	if signature == "" || a.deps.Sink == nil {
+		return
+	}
+	if !a.appendEvents {
+		a.counts.eventsNotAppended++
+		return
+	}
+	if err := appendSignedEvent(ctx, a.deps, row); err != nil {
+		a.appendEvents = false
+		a.counts.eventsNotAppended++
+		log.Printf("rehash: audit sink refused an artifact.signed event, appending no more in this run: %v", err)
+	}
 }
 
 // appendSignedEvent emits the §8.1 artifact.signed event for one re-signed row,

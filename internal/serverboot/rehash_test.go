@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -342,9 +343,11 @@ func (r *recordingSink) all() []audit.Event {
 	return append([]audit.Event(nil), r.events...)
 }
 
-// deps is the dependency set every case starts from.
+// deps is the dependency set every case starts from. MintUnsigned is the
+// boot's value, so a case that sets a signer signs the unsigned rows the first
+// start would sign; a case about the other policy sets it false explicitly.
 func deps(st store.Store, objs objectstore.Provider) rehashDeps {
-	return rehashDeps{Store: st, Objects: objs, ReadTimeout: 5 * time.Second}
+	return rehashDeps{Store: st, Objects: objs, ReadTimeout: 5 * time.Second, MintUnsigned: true}
 }
 
 // --- case 1: the happy path and the gate ----------------------------------
@@ -368,7 +371,7 @@ func TestRehashStoredHashes_MigratesEveryTenantsRows(t *testing.T) {
 	seedRow(t, st, nil, child)
 	seeds = append(seeds, child)
 
-	if err := rehashStoredHashes(context.Background(), deps(st, nil)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, nil), true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	for _, s := range seeds {
@@ -382,7 +385,7 @@ func TestRehashStoredHashes_MigratesEveryTenantsRows(t *testing.T) {
 
 	// The gate: a second pass reads no tenant and no row.
 	counting := &countingStore{Store: st}
-	if err := rehashStoredHashes(context.Background(), deps(counting, nil)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(counting, nil), true); err != nil {
 		t.Fatalf("second pass: %v", err)
 	}
 	if counting.listTenants != 0 || counting.listRows != 0 {
@@ -395,7 +398,7 @@ func TestRehashStoredHashes_MigratesEveryTenantsRows(t *testing.T) {
 // look.
 func TestRehashStoredHashes_EmptyStoreSetsTheMarker(t *testing.T) {
 	st := store.NewMemory()
-	if err := rehashStoredHashes(context.Background(), deps(st, nil)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, nil), true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	if !markerSet(t, st) {
@@ -415,7 +418,7 @@ func TestRehashStoredHashes_FetchesExternallyHeldBodies(t *testing.T) {
 	s := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", resource: &seedResource{path: "big.md", body: big, external: true}}
 	seedRow(t, st, objs, s)
 
-	if err := rehashStoredHashes(context.Background(), deps(st, objs)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, objs), true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	if got, want := readRow(t, st, s).ContentHash, framedHashOf(s); got != want {
@@ -439,7 +442,7 @@ func TestRehashStoredHashes_RefusesToStrandASignature(t *testing.T) {
 	seedRow(t, st, nil, signed)
 	before := seedRow(t, st, nil, unsigned)
 
-	err := rehashStoredHashes(context.Background(), deps(st, nil))
+	_, _, err := rehashStoredHashes(context.Background(), deps(st, nil), true)
 	if err == nil {
 		t.Fatal("rehashStoredHashes = nil, want a refusal over the signed row")
 	}
@@ -458,7 +461,7 @@ func TestRehashStoredHashes_RefusesToStrandASignature(t *testing.T) {
 	// verifies over the new hash.
 	d := deps(st, nil)
 	d.Signer = signer
-	if err := rehashStoredHashes(context.Background(), d); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
 		t.Fatalf("rehashStoredHashes with a signer: %v", err)
 	}
 	rec := readRow(t, st, signed)
@@ -507,7 +510,7 @@ func TestRehashStoredHashes_LeavesATamperedRowAlone(t *testing.T) {
 	d := deps(st, nil)
 	d.Signer, d.Sink = signer, sink
 
-	if err := rehashStoredHashes(ctx, d); err != nil {
+	if _, _, err := rehashStoredHashes(ctx, d, true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	after := readRow(t, st, rowSeed{tenant: "acme", id: "gamma", version: "1.0.0"})
@@ -537,7 +540,7 @@ func TestRehashStoredHashes_SignsTheRowsItRewrites(t *testing.T) {
 	seedRow(t, st, nil, s)
 	d := deps(st, nil)
 	d.Signer = signer
-	if err := rehashStoredHashes(context.Background(), d); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	rec := readRow(t, st, s)
@@ -554,7 +557,7 @@ func TestRehashStoredHashes_SignsTheRowsItRewrites(t *testing.T) {
 	already := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true, signWith: signer}
 	seedRow(t, done, nil, already)
 	before := readRow(t, done, already)
-	if err := rehashStoredHashes(context.Background(), deps(done, nil)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(done, nil), true); err != nil {
 		t.Fatalf("rehashStoredHashes over migrated rows: %v", err)
 	}
 	after := readRow(t, done, already)
@@ -578,7 +581,7 @@ func TestRehashStoredHashes_LeavesAnUnreproducibleRowAlone(t *testing.T) {
 	seedRow(t, st, nil, bad)
 	seedRow(t, st, nil, good)
 
-	if err := rehashStoredHashes(context.Background(), deps(st, nil)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, nil), true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	if got := readRow(t, st, bad).ContentHash; got != bad.hashOverride {
@@ -609,7 +612,7 @@ func TestRehashStoredHashes_RepairsOnlyWhatItCanVerify(t *testing.T) {
 	before := readRow(t, st, foreign)
 
 	// With no signer, nothing is rewritten and nothing is refused.
-	if err := rehashStoredHashes(context.Background(), deps(st, nil)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, nil), true); err != nil {
 		t.Fatalf("rehashStoredHashes with no signer: %v", err)
 	}
 	if got := readRow(t, st, bare); got.Signature != "" {
@@ -622,7 +625,7 @@ func TestRehashStoredHashes_RepairsOnlyWhatItCanVerify(t *testing.T) {
 	}
 	d := deps(st, nil)
 	d.Signer = signer
-	if err := rehashStoredHashes(context.Background(), d); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
 		t.Fatalf("rehashStoredHashes with a signer: %v", err)
 	}
 	if after := readRow(t, st, foreign); after.Signature != before.Signature || after.ContentHash != before.ContentHash {
@@ -649,7 +652,7 @@ func TestRehashStoredHashes_RetryArmsHoldTheMarkerBack(t *testing.T) {
 		objs := objectstore.NewMemory()
 		s := external()
 		before := seedRow(t, st, objs, s)
-		if err := rehashStoredHashes(context.Background(), deps(st, nil)); err != nil {
+		if _, _, err := rehashStoredHashes(context.Background(), deps(st, nil), true); err != nil {
 			t.Fatalf("rehashStoredHashes: %v", err)
 		}
 		if got := readRow(t, st, s).ContentHash; got != before.ContentHash {
@@ -660,7 +663,7 @@ func TestRehashStoredHashes_RetryArmsHoldTheMarkerBack(t *testing.T) {
 		}
 		// The repair: the next start with the object store passed
 		// migrates the row and sets the marker.
-		if err := rehashStoredHashes(context.Background(), deps(st, objs)); err != nil {
+		if _, _, err := rehashStoredHashes(context.Background(), deps(st, objs), true); err != nil {
 			t.Fatalf("second pass: %v", err)
 		}
 		if got, want := readRow(t, st, s).ContentHash, framedHashOf(s); got != want {
@@ -677,7 +680,7 @@ func TestRehashStoredHashes_RetryArmsHoldTheMarkerBack(t *testing.T) {
 		s := external()
 		before := seedRow(t, st, objs, s)
 		failing := &failingObjects{Provider: objs, err: errors.New("AccessDenied")}
-		if err := rehashStoredHashes(context.Background(), deps(st, failing)); err != nil {
+		if _, _, err := rehashStoredHashes(context.Background(), deps(st, failing), true); err != nil {
 			t.Fatalf("rehashStoredHashes: %v", err)
 		}
 		if got := readRow(t, st, s).ContentHash; got != before.ContentHash {
@@ -696,7 +699,7 @@ func TestRehashStoredHashes_RetryArmsHoldTheMarkerBack(t *testing.T) {
 		seedRow(t, st, nil, b)
 		d := deps(st, nil)
 		d.Signer = failingSigner{inner: testSigner(t), failFor: framedHashOf(a)}
-		if err := rehashStoredHashes(context.Background(), d); err != nil {
+		if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
 			t.Fatalf("rehashStoredHashes: %v", err)
 		}
 		if got := readRow(t, st, a).ContentHash; got == framedHashOf(a) {
@@ -715,7 +718,7 @@ func TestRehashStoredHashes_RetryArmsHoldTheMarkerBack(t *testing.T) {
 		a := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0"}
 		seedRow(t, st, nil, a)
 		wrapper := &countingStore{Store: st, rehashErr: errors.New("disk full")}
-		if err := rehashStoredHashes(context.Background(), deps(wrapper, nil)); err != nil {
+		if _, _, err := rehashStoredHashes(context.Background(), deps(wrapper, nil), true); err != nil {
 			t.Fatalf("rehashStoredHashes: %v", err)
 		}
 		if got := readRow(t, st, a).ContentHash; got == framedHashOf(a) {
@@ -731,7 +734,7 @@ func TestRehashStoredHashes_RetryArmsHoldTheMarkerBack(t *testing.T) {
 		a := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0"}
 		seedRow(t, st, nil, a)
 		wrapper := &countingStore{Store: st, setMarkErr: errors.New("disk full")}
-		if err := rehashStoredHashes(context.Background(), deps(wrapper, nil)); err != nil {
+		if _, _, err := rehashStoredHashes(context.Background(), deps(wrapper, nil), true); err != nil {
 			t.Fatalf("rehashStoredHashes: %v", err)
 		}
 		if got, want := readRow(t, st, a).ContentHash, framedHashOf(a); got != want {
@@ -743,7 +746,8 @@ func TestRehashStoredHashes_RetryArmsHoldTheMarkerBack(t *testing.T) {
 	})
 }
 
-// failingSigner fails Sign for one hash and delegates everything else.
+// failingSigner fails Sign for one hash and delegates everything else, which
+// includes the keyedSigner methods the rewrite reads.
 type failingSigner struct {
 	inner   sign.RegistryManagedKey
 	failFor string
@@ -762,6 +766,14 @@ func (f failingSigner) Verify(ctx context.Context, contentHash, signature string
 	return f.inner.Verify(ctx, contentHash, signature)
 }
 
+func (f failingSigner) VerifiedKeyID(ctx context.Context, contentHash, signature string) (string, error) {
+	return f.inner.VerifiedKeyID(ctx, contentHash, signature)
+}
+
+func (f failingSigner) CurrentKeyID() string { return f.inner.CurrentKeyID() }
+
+func (f failingSigner) VerifyKeyIDs() []string { return f.inner.VerifyKeyIDs() }
+
 // Spec: §4.7.6, §13.4 — an object the store reports as absent is terminal while
 // another read in the same pass returned a body, so the row is logged and the
 // completion record is set; it does not hold every later start to a full
@@ -774,7 +786,7 @@ func TestRehashStoredHashes_BodyMissingIsTerminal(t *testing.T) {
 	before := seedRow(t, st, objs, gone)
 	seedRow(t, st, objs, kept)
 
-	if err := rehashStoredHashes(context.Background(), deps(st, objs)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, objs), true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	if got := readRow(t, st, gone).ContentHash; got != before.ContentHash {
@@ -798,7 +810,7 @@ func TestRehashStoredHashes_WrongRootHoldsTheMarkerBack(t *testing.T) {
 	before := seedRow(t, st, real, s)
 
 	empty := objectstore.NewMemory()
-	if err := rehashStoredHashes(context.Background(), deps(st, empty)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, empty), true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	if got := readRow(t, st, s).ContentHash; got != before.ContentHash {
@@ -808,7 +820,7 @@ func TestRehashStoredHashes_WrongRootHoldsTheMarkerBack(t *testing.T) {
 		t.Error("marker set when no object-store read returned a body")
 	}
 
-	if err := rehashStoredHashes(context.Background(), deps(st, real)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, real), true); err != nil {
 		t.Fatalf("second pass: %v", err)
 	}
 	if got, want := readRow(t, st, s).ContentHash, framedHashOf(s); got != want {
@@ -852,7 +864,7 @@ func TestRehashStoredHashes_StopsReadingAfterOneExpiredDeadline(t *testing.T) {
 			d.ReadTimeout = 50 * time.Millisecond
 
 			start := time.Now()
-			if err := rehashStoredHashes(context.Background(), d); err != nil {
+			if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
 				t.Fatalf("rehashStoredHashes: %v", err)
 			}
 			if elapsed := time.Since(start); elapsed > 2*time.Second {
@@ -888,7 +900,7 @@ func TestRehashStoredHashes_PromptErrorStopsNothingElse(t *testing.T) {
 	seedRow(t, st, backing, second)
 
 	failing := &failingObjects{Provider: backing, failBody: []byte("A"), err: errors.New("AccessDenied")}
-	if err := rehashStoredHashes(context.Background(), deps(st, failing)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, failing), true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	if got := failing.count(); got != 2 {
@@ -910,7 +922,7 @@ func TestRehashStoredHashes_PromptErrorStopsNothingElse(t *testing.T) {
 	if err := backing.Delete(context.Background(), key); err != nil {
 		t.Fatalf("delete object: %v", err)
 	}
-	if err := rehashStoredHashes(context.Background(), deps(st, backing)); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, backing), true); err != nil {
 		t.Fatalf("second pass: %v", err)
 	}
 	if got := readRow(t, st, first).ContentHash; got != before.ContentHash {
@@ -942,7 +954,7 @@ func TestRehashStoredHashes_ConflictsAreNotFailures(t *testing.T) {
 			before := seedRow(t, st, nil, held)
 			seedRow(t, st, nil, other)
 			wrapper := &countingStore{Store: st, rehashErr: tc.err, rehashFor: "alpha"}
-			if err := rehashStoredHashes(context.Background(), deps(wrapper, nil)); err != nil {
+			if _, _, err := rehashStoredHashes(context.Background(), deps(wrapper, nil), true); err != nil {
 				t.Fatalf("rehashStoredHashes: %v", err)
 			}
 			if got := readRow(t, st, held).ContentHash; got != before.ContentHash {
@@ -972,7 +984,7 @@ func TestRehashStoredHashes_ConflictsAreNotFailures(t *testing.T) {
 				t.Errorf("peer rewrite: %v", err)
 			}
 		}
-		if err := rehashStoredHashes(context.Background(), deps(wrapper, nil)); err != nil {
+		if _, _, err := rehashStoredHashes(context.Background(), deps(wrapper, nil), true); err != nil {
 			t.Fatalf("rehashStoredHashes: %v", err)
 		}
 		if got := readRow(t, st, moved).Signature; got != "peer-envelope" {
@@ -1004,7 +1016,7 @@ func TestRehashStoredHashes_StoreErrorsFailTheStart(t *testing.T) {
 			seedRow(t, st, nil, rowSeed{tenant: "acme", id: "alpha", version: "1.0.0"})
 			wrapper := &countingStore{Store: st}
 			tc.with(wrapper)
-			err := rehashStoredHashes(context.Background(), deps(wrapper, nil))
+			_, _, err := rehashStoredHashes(context.Background(), deps(wrapper, nil), true)
 			if !errors.Is(err, boom) {
 				t.Fatalf("rehashStoredHashes = %v, want the store error", err)
 			}
@@ -1040,7 +1052,7 @@ func TestRehashStoredHashes_AppendsOneSignedEventPerRewrittenRow(t *testing.T) {
 	sink := &recordingSink{}
 	d := deps(st, nil)
 	d.Signer, d.Sink = signer, sink
-	if err := rehashStoredHashes(context.Background(), d); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 
@@ -1089,7 +1101,7 @@ func TestRehashStoredHashes_AppendsNothingWithoutASignedWrite(t *testing.T) {
 	sink := &recordingSink{}
 	d := deps(st, nil)
 	d.Sink = sink
-	if err := rehashStoredHashes(context.Background(), d); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
 		t.Fatalf("rehashStoredHashes with no signer: %v", err)
 	}
 	if n := len(sink.all()); n != 0 {
@@ -1102,7 +1114,7 @@ func TestRehashStoredHashes_AppendsNothingWithoutASignedWrite(t *testing.T) {
 	refusedSink := &recordingSink{}
 	rd := deps(wrapper, nil)
 	rd.Signer, rd.Sink = testSigner(t), refusedSink
-	if err := rehashStoredHashes(context.Background(), rd); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), rd, true); err != nil {
 		t.Fatalf("rehashStoredHashes over a refused write: %v", err)
 	}
 	if n := len(refusedSink.all()); n != 0 {
@@ -1113,7 +1125,7 @@ func TestRehashStoredHashes_AppendsNothingWithoutASignedWrite(t *testing.T) {
 	seedRow(t, nilSink, nil, s)
 	nd := deps(nilSink, nil)
 	nd.Signer = testSigner(t)
-	if err := rehashStoredHashes(context.Background(), nd); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), nd, true); err != nil {
 		t.Fatalf("rehashStoredHashes with a nil sink: %v", err)
 	}
 	if got, want := readRow(t, nilSink, s).ContentHash, framedHashOf(s); got != want {
@@ -1137,7 +1149,7 @@ func TestRehashStoredHashes_StopsAppendingAfterASinkFailure(t *testing.T) {
 	sink := &recordingSink{err: errors.New("sink unreachable")}
 	d := deps(st, nil)
 	d.Signer, d.Sink = signer, sink
-	if err := rehashStoredHashes(context.Background(), d); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	if n := len(sink.all()); n != 1 {
@@ -1264,7 +1276,9 @@ func TestRefuseGeneratedSigningKey_RefusesBeforeTheLoaderRuns(t *testing.T) {
 
 // Spec: §4.7.9, §13.4 — the different-key case the generated-key refusal does
 // not cover: a key file that exists and holds another key leaves every row it
-// signed at its stored hash while the rows beside it are rewritten.
+// signed at its stored hash while the rows beside it are rewritten. The other
+// key is outside the verification key set: it is neither the signing key nor
+// on a verify: line, so no key of the set verifies its envelopes.
 func TestRehashStoredHashes_LeavesRowsSignedUnderAnotherKey(t *testing.T) {
 	signer := testSigner(t)
 	lost := testSigner(t)
@@ -1276,7 +1290,7 @@ func TestRehashStoredHashes_LeavesRowsSignedUnderAnotherKey(t *testing.T) {
 
 	d := deps(st, nil)
 	d.Signer = signer
-	if err := rehashStoredHashes(context.Background(), d); err != nil {
+	if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
 		t.Fatalf("rehashStoredHashes: %v", err)
 	}
 	if got := readRow(t, st, stranded).ContentHash; got != before.ContentHash {
@@ -1321,7 +1335,7 @@ func TestRehashStoredHashes_ConcurrentPassesSignEachRowOnce(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			errs[i] = rehashStoredHashes(context.Background(), d)
+			_, _, errs[i] = rehashStoredHashes(context.Background(), d, true)
 		}()
 	}
 	wg.Wait()
@@ -1409,5 +1423,262 @@ func TestRegistrySigningKeyPath_DefaultsUnderHome(t *testing.T) {
 	}
 	if got, err := registrySigningKeyPath("/custom/key"); err != nil || got != "/custom/key" {
 		t.Errorf("registrySigningKeyPath(\"/custom/key\") = %q, %v, want the value unchanged", got, err)
+	}
+}
+
+// --- case 12: the verification key set -----------------------------------
+
+// rotatedSigner returns the provider after a rotation, which signs under a new
+// key and lists the retired key on a verify: line, together with the retired
+// key's own provider for seeding rows it signed.
+func rotatedSigner(t *testing.T) (current, retired sign.RegistryManagedKey) {
+	t.Helper()
+	retired = testSigner(t)
+	current = testSigner(t)
+	current.Trusted = []ed25519.PublicKey{retired.PublicKey}
+	return current, retired
+}
+
+// captureLog routes the standard logger into a buffer for the rest of the
+// test, so a case can assert the rewrite's summary lines.
+func captureLog(t *testing.T) *syncBuffer {
+	t.Helper()
+	logs := &syncBuffer{}
+	prev := log.Writer()
+	log.SetOutput(logs)
+	t.Cleanup(func() { log.SetOutput(prev) })
+	return logs
+}
+
+// Spec: §13.4, §4.7.9 — a row signed under a verification-only key is re-signed
+// under the signing key, whether it is at the framed digest or moves to it from
+// the pre-framing digest, and the per-key line reports none left under it.
+func TestRehashStoredHashes_ResignsRowsSignedUnderAVerifyKey(t *testing.T) {
+	current, retired := rotatedSigner(t)
+	st := store.NewMemory()
+	framed := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true, signWith: retired}
+	pre := rowSeed{tenant: "acme", id: "beta", version: "1.0.0", signWith: retired}
+	seedRow(t, st, nil, framed)
+	seedRow(t, st, nil, pre)
+	logs := captureLog(t)
+
+	d := deps(st, nil)
+	d.Signer = current
+	counts, held, err := rehashStoredHashes(context.Background(), d, true)
+	if err != nil {
+		t.Fatalf("rehashStoredHashes: %v", err)
+	}
+	if held || counts.rewritten != 2 {
+		t.Errorf("held = %v, rewritten = %d, want false and 2", held, counts.rewritten)
+	}
+	for _, s := range []rowSeed{framed, pre} {
+		rec := readRow(t, st, s)
+		if rec.ContentHash != framedHashOf(s) {
+			t.Errorf("%s content_hash = %s, want %s", s.id, rec.ContentHash, framedHashOf(s))
+		}
+		id, verr := current.VerifiedKeyID(context.Background(), rec.ContentHash, rec.Signature)
+		if verr != nil || id != current.CurrentKeyID() {
+			t.Errorf("%s verified by %q (err %v), want the signing key %s", s.id, id, verr, current.CurrentKeyID())
+		}
+	}
+	want := fmt.Sprintf("rehash: verify key %s: 0 row(s) still signed under it", retired.CurrentKeyID())
+	if !strings.Contains(logs.String(), want) || !strings.Contains(logs.String(), "rehash: 0 unsigned left") {
+		t.Errorf("logs lack %q and the unsigned-left line:\n%s", want, logs.String())
+	}
+	if !markerSet(t, st) {
+		t.Error("marker not set")
+	}
+}
+
+// Spec: §13.4, §4.7.9 — a re-sign that loses its compare-and-swap to a peer is a
+// conflict rather than a failed write, so it does not hold the record back, and
+// the row stays counted under the key that signed it.
+func TestRehashStoredHashes_ResignConflictDoesNotHoldTheRecord(t *testing.T) {
+	current, retired := rotatedSigner(t)
+	backing := store.NewMemory()
+	s := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true, signWith: retired}
+	seedRow(t, backing, nil, s)
+	wrapper := &countingStore{Store: backing, rehashErr: store.ErrImmutableViolation}
+	d := deps(wrapper, nil)
+	d.Signer = current
+
+	counts, held, err := rehashStoredHashes(context.Background(), d, true)
+	if err != nil {
+		t.Fatalf("rehashStoredHashes: %v", err)
+	}
+	if held || counts.conflicts != 1 || counts.errors != 0 {
+		t.Errorf("held = %v, conflicts = %d, errors = %d, want false, 1, 0", held, counts.conflicts, counts.errors)
+	}
+	if n := counts.stillSigned[retired.CurrentKeyID()]; n != 1 {
+		t.Errorf("still signed under the retired key = %d, want 1", n)
+	}
+	if !markerSet(t, backing) {
+		t.Error("a conflict held the marker back")
+	}
+}
+
+// Spec: §8.1, §13.4 — with MintUnsigned false an unsigned framed row is left
+// unsigned and counted, an unsigned pre-framing row moves to the framed digest
+// with an empty signature and appends no artifact.signed event, and the
+// record is set.
+func TestRehashStoredHashes_LeavesUnsignedRowsWithoutMintUnsigned(t *testing.T) {
+	st := store.NewMemory()
+	framed := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true}
+	pre := rowSeed{tenant: "acme", id: "beta", version: "1.0.0"}
+	seedRow(t, st, nil, framed)
+	seedRow(t, st, nil, pre)
+	logs := captureLog(t)
+	sink := &recordingSink{}
+	d := deps(st, nil)
+	d.Signer, d.Sink, d.MintUnsigned = testSigner(t), sink, false
+
+	counts, _, err := rehashStoredHashes(context.Background(), d, true)
+	if err != nil {
+		t.Fatalf("rehashStoredHashes: %v", err)
+	}
+	for _, s := range []rowSeed{framed, pre} {
+		rec := readRow(t, st, s)
+		if rec.ContentHash != framedHashOf(s) || rec.Signature != "" {
+			t.Errorf("%s = (%s, signed %v), want the framed hash and no signature", s.id, rec.ContentHash, rec.Signature != "")
+		}
+	}
+	if counts.unsignedLeft != 2 || !strings.Contains(logs.String(), "rehash: 2 unsigned left") {
+		t.Errorf("unsigned left = %d, want 2 and its line; logs:\n%s", counts.unsignedLeft, logs.String())
+	}
+	if n := len(sink.all()); n != 0 {
+		t.Errorf("recorded %d artifact.signed events for unsigned moves, want 0", n)
+	}
+	if !markerSet(t, st) {
+		t.Error("unsigned rows held the marker back")
+	}
+}
+
+// Spec: §13.4, §4.7.9 — a row signed under a verification-only key whose stored
+// bytes reproduce neither digest keeps its hash and signature, is classed
+// unreproducible, and is counted under that key; reproduction is checked
+// before signing, so its bytes are never laundered under the signing key.
+func TestRehashStoredHashes_LeavesAnUnreproducibleVerifyKeyRow(t *testing.T) {
+	current, retired := rotatedSigner(t)
+	backing := store.NewMemory()
+	altered := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", signWith: retired, hashOverride: "sha256:" + strings.Repeat("cd", 32)}
+	before := seedRow(t, backing, nil, altered)
+	wrapper := &countingStore{Store: backing}
+	logs := captureLog(t)
+	d := deps(wrapper, nil)
+	d.Signer = current
+
+	counts, _, err := rehashStoredHashes(context.Background(), d, true)
+	if err != nil {
+		t.Fatalf("rehashStoredHashes: %v", err)
+	}
+	after := readRow(t, backing, altered)
+	if after.ContentHash != before.ContentHash || after.Signature != before.Signature {
+		t.Error("an unreproducible row signed under a verify key was written")
+	}
+	if counts.unreproducible != 1 || wrapper.rehashes != 0 {
+		t.Errorf("unreproducible = %d, writes = %d, want 1 and 0", counts.unreproducible, wrapper.rehashes)
+	}
+	want := fmt.Sprintf("rehash: verify key %s: 1 row(s) still signed under it", retired.CurrentKeyID())
+	if !strings.Contains(logs.String(), want) {
+		t.Errorf("logs lack %q:\n%s", want, logs.String())
+	}
+}
+
+// Spec: §13.4 — with no signer the pass classifies as it always has: an
+// unsigned framed row keeps its hash, an unsigned pre-framing row moves with
+// an empty signature, the record is set, Sign is never reached on the nil
+// signer, and no signing summary line is logged.
+func TestRehashStoredHashes_SignerlessPassMintsNothing(t *testing.T) {
+	st := store.NewMemory()
+	framed := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true}
+	pre := rowSeed{tenant: "acme", id: "beta", version: "1.0.0"}
+	seedRow(t, st, nil, framed)
+	seedRow(t, st, nil, pre)
+	logs := captureLog(t)
+
+	if _, _, err := rehashStoredHashes(context.Background(), deps(st, nil), true); err != nil {
+		t.Fatalf("rehashStoredHashes: %v", err)
+	}
+	for _, s := range []rowSeed{framed, pre} {
+		rec := readRow(t, st, s)
+		if rec.ContentHash != framedHashOf(s) || rec.Signature != "" {
+			t.Errorf("%s = (%s, signed %v), want the framed hash and no signature", s.id, rec.ContentHash, rec.Signature != "")
+		}
+	}
+	if !markerSet(t, st) {
+		t.Error("marker not set")
+	}
+	if out := logs.String(); strings.Contains(out, "unsigned left") || strings.Contains(out, "verify key") {
+		t.Errorf("a signer-less pass logged a signing summary line:\n%s", out)
+	}
+}
+
+// Spec: §8.1, §13.4 — a verification-only re-sign appends exactly one
+// artifact.signed event carrying the new hash.
+func TestRehashStoredHashes_AuditsAVerifyKeyResign(t *testing.T) {
+	current, retired := rotatedSigner(t)
+	st := store.NewMemory()
+	s := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true, signWith: retired}
+	seedRow(t, st, nil, s)
+	sink := &recordingSink{}
+	d := deps(st, nil)
+	d.Signer, d.Sink = current, sink
+
+	if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
+		t.Fatalf("rehashStoredHashes: %v", err)
+	}
+	events := sink.all()
+	if len(events) != 1 {
+		t.Fatalf("recorded %d events, want 1", len(events))
+	}
+	if ev := events[0]; ev.Type != audit.EventArtifactSigned || ev.Target != s.id || ev.Context["content_hash"] != framedHashOf(s) {
+		t.Errorf("event = %+v, want artifact.signed for %s carrying %s", ev, s.id, framedHashOf(s))
+	}
+}
+
+// Spec: §13.4 — the effective unsigned-row policy: the first-start policy
+// applies only while the completion record is absent, and the operator's
+// attestation applies either way. With skipIfMarked false a marked store is
+// planned again, and without attestation its unsigned row stays unsigned.
+func TestRehashPolicy_AppliesTheFirstStartPolicyOnce(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	cases := []struct {
+		name                  string
+		applied, mint, attest bool
+		wantMint              bool
+	}{
+		{"first run mints", false, true, false, true},
+		{"first run without policy", false, false, false, false},
+		{"marked without attestation", true, true, false, false},
+		{"marked with attestation", true, false, true, true},
+	}
+	for _, tc := range cases {
+		if err := st.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, tc.applied); err != nil {
+			t.Fatalf("set marker: %v", err)
+		}
+		d := deps(st, nil)
+		d.MintUnsigned, d.AttestUnsigned = tc.mint, tc.attest
+		got, applied, err := rehashPolicy(ctx, d)
+		if err != nil || applied != tc.applied || got.MintUnsigned != tc.wantMint {
+			t.Errorf("%s: MintUnsigned = %v, applied = %v (err %v), want %v, %v", tc.name, got.MintUnsigned, applied, err, tc.wantMint, tc.applied)
+		}
+	}
+
+	bare := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true}
+	seedRow(t, st, nil, bare)
+	d := deps(st, nil)
+	d.Signer = testSigner(t)
+	counts, _, err := rehashStoredHashes(ctx, d, false)
+	if err != nil {
+		t.Fatalf("rehashStoredHashes over a marked store: %v", err)
+	}
+	if counts.migrated != 1 || readRow(t, st, bare).Signature != "" {
+		t.Errorf("migrated = %d, signed %v, want the unsigned row planned and left unsigned", counts.migrated, readRow(t, st, bare).Signature != "")
+	}
+
+	failing := &countingStore{Store: st, markerErr: errors.New("marker read failed")}
+	if _, _, err := rehashPolicy(ctx, deps(failing, nil)); err == nil || !strings.Contains(err.Error(), "marker read failed") {
+		t.Errorf("rehashPolicy = %v, want the marker read error", err)
 	}
 }

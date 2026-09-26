@@ -3,8 +3,12 @@ package serverboot
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -14,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/version"
 )
@@ -86,6 +91,14 @@ func (s *syncBuffer) String() string {
 // error without waiting for a listener that never answers.
 func (f *bootFixture) boot(t *testing.T) (string, error) {
 	t.Helper()
+	return f.bootWith(t, nil)
+}
+
+// bootWith is boot with a callback that runs once the registry answers
+// /healthz and before the context is cancelled, so a case can make requests
+// against the serving process.
+func (f *bootFixture) bootWith(t *testing.T, serving func()) (string, error) {
+	t.Helper()
 	logs := &syncBuffer{}
 	prev := log.Writer()
 	log.SetOutput(logs)
@@ -107,6 +120,9 @@ func (f *bootFixture) boot(t *testing.T) (string, error) {
 		// before the boot finishes, so readiness is /healthz answering
 		// rather than a dial succeeding.
 		if healthOK(f.addr, 200*time.Millisecond) {
+			if serving != nil {
+				serving()
+			}
 			cancel()
 			select {
 			case err := <-errc:
@@ -574,5 +590,158 @@ func TestRun_StoreOutsideTheKeyDirectoryNeedsAKeyPath(t *testing.T) {
 	}
 	if err := signer.Verify(ctx, row.ContentHash, row.Signature); err != nil {
 		t.Errorf("the row's signature does not verify under A's key: %v", err)
+	}
+}
+
+// downgradeOneRow moves one stored row back to the digest the previous release
+// computed over its bytes, leaving it unsigned, and clears the completion
+// record. It runs while no server process holds the store.
+func downgradeOneRow(t *testing.T, st store.Store, rec store.ManifestRecord) store.ManifestRecord {
+	t.Helper()
+	ctx := context.Background()
+	resources := map[string][]byte{}
+	for _, ref := range rec.Resources {
+		resources[ref.Path] = ref.Inline
+	}
+	old := "sha256:" + preFramingContentHash(rec.Frontmatter, rec.SkillRaw, resources)
+	if err := st.RehashManifest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Signature, old, ""); err != nil {
+		t.Fatalf("downgrade %s: %v", rec.ArtifactID, err)
+	}
+	if err := st.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, false); err != nil {
+		t.Fatalf("clear marker: %v", err)
+	}
+	rec.ContentHash, rec.Signature = old, ""
+	return rec
+}
+
+// allRows returns every stored manifest row across every tenant.
+func allRows(t *testing.T, st store.Store) []store.ManifestRecord {
+	t.Helper()
+	ctx := context.Background()
+	tenants, err := st.ListTenants(ctx)
+	if err != nil {
+		t.Fatalf("list tenants: %v", err)
+	}
+	var out []store.ManifestRecord
+	for _, tenant := range tenants {
+		recs, err := st.ListManifestsIncludingDeleted(ctx, tenant.ID)
+		if err != nil {
+			t.Fatalf("list manifests: %v", err)
+		}
+		out = append(out, recs...)
+	}
+	return out
+}
+
+// Spec: §13.4 — a signing-off start leaves the rewrite's signer nil, so over a
+// store holding only unsigned rows it completes the rewrite, moves the
+// pre-framing row to the framed digest with no signature, sets the record,
+// and logs neither signing summary line. A boot that stored the zero key in
+// the signer field would send the unsigned rows to Sign and log both.
+func TestRun_SigningOffRewritesUnsignedRowsWithoutSigning(t *testing.T) {
+	f := newBootFixture(t)
+	testharness.WriteTree(t, f.layerPath, testharness.WriteTreeOption{
+		Path:    "beta/ARTIFACT.md",
+		Content: artifactBody,
+	})
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	st := f.openStoreDirect(t)
+	rows := allRows(t, st)
+	if len(rows) != 2 {
+		t.Fatalf("the first start stored %d row(s), want 2", len(rows))
+	}
+	downgraded := downgradeOneRow(t, st, rows[0])
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+
+	logs, err := f.boot(t)
+	if err != nil {
+		t.Fatalf("second start: %v", err)
+	}
+	after := f.openStoreDirect(t)
+	ctx := context.Background()
+	for _, seeded := range rows {
+		rec, gerr := after.GetManifest(ctx, seeded.TenantID, seeded.ArtifactID, seeded.Version)
+		if gerr != nil {
+			t.Fatalf("get manifest: %v", gerr)
+		}
+		if rec.ContentHash != framedHashOfRecord(seeded) || rec.Signature != "" {
+			t.Errorf("%s = (%s, signed %v), want the framed hash and no signature", rec.ArtifactID, rec.ContentHash, rec.Signature != "")
+		}
+	}
+	if downgraded.ContentHash == framedHashOfRecord(downgraded) {
+		t.Fatal("the downgraded row was already at the framed digest")
+	}
+	applied, aerr := after.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+	if aerr != nil || !applied {
+		t.Errorf("marker applied = %v (err %v), want true", applied, aerr)
+	}
+	if strings.Contains(logs, "unsigned left") || strings.Contains(logs, "verify key") {
+		t.Errorf("a signing-off start logged a signing summary line:\n%s", logs)
+	}
+}
+
+// loadStatus fetches the fixture's one artifact from the serving registry and
+// returns the HTTP status and the response body.
+func (f *bootFixture) loadStatus(t *testing.T) (int, string) {
+	t.Helper()
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get("http://" + f.addr + "/v1/load_artifact?id=alpha")
+	if err != nil {
+		t.Fatalf("load_artifact: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read load_artifact body: %v", err)
+	}
+	return resp.StatusCode, string(body)
+}
+
+// Spec: §4.7.9, §13.4 — a rotation keeps the retired key's rows admitted while
+// its public key is on a verify: line, and a restart after that line is removed
+// refuses the same row with materialize.signature_invalid.
+// Matrix: §6.10 (materialize.signature_invalid)
+func TestRun_RotationAdmitsRetiredKeyRowsUntilTheVerifyLineGoes(t *testing.T) {
+	f := newBootFixture(t)
+	t.Setenv("PODIUM_SIGN", "registry-key")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", f.keyPath)
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	retired, err := sign.ReadKeyFile(f.keyPath)
+	if err != nil {
+		t.Fatalf("read key file: %v", err)
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	rotated := sign.KeyFile{Private: priv, Public: pub, Verify: []ed25519.PublicKey{retired.Public}}
+	if err := sign.WriteKeyFile(f.keyPath, rotated); err != nil {
+		t.Fatalf("write rotated key file: %v", err)
+	}
+
+	var status int
+	var body string
+	if _, err := f.bootWith(t, func() { status, body = f.loadStatus(t) }); err != nil {
+		t.Fatalf("start with the retired key on a verify: line: %v", err)
+	}
+	if status != http.StatusOK {
+		t.Errorf("load with the retired key on a verify: line = %d, want 200: %s", status, body)
+	}
+
+	rotated.Verify = nil
+	if err := sign.WriteKeyFile(f.keyPath, rotated); err != nil {
+		t.Fatalf("drop the verify: line: %v", err)
+	}
+	if _, err := f.bootWith(t, func() { status, body = f.loadStatus(t) }); err != nil {
+		t.Fatalf("start without the verify: line: %v", err)
+	}
+	if status == http.StatusOK || !strings.Contains(body, "materialize.signature_invalid") {
+		t.Errorf("load after the verify: line left = %d %s, want materialize.signature_invalid", status, body)
 	}
 }
