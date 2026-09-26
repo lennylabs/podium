@@ -176,3 +176,23 @@ func errorMessageText(out any) string {
 	}
 	return ""
 }
+
+// Spec: §4.7.9, §6.5, §7.4 — the degraded-network fallback checks the cached
+// record before it serves it. With the registry unreachable before the HEAD, a
+// cached delivery pair that fails under the current key set is a cache miss:
+// the load returns network.registry_unreachable, not the offline status with
+// served_from_cache.
+// Matrix: §6.10 (network.registry_unreachable)
+func TestLoadArtifact_AlwaysRevalidateFallbackRetiredKeySignatureIsUnreachable(t *testing.T) {
+	t.Parallel()
+	f, _, ts := rotationSetup(t, "always-revalidate", http.StatusOK)
+	ts.Close()
+
+	out := f.srv.loadArtifact(rotationArgs)
+	wantRefused(t, out, "network.registry_unreachable")
+	wantNotDelivered(t, out)
+	m := out.(map[string]any)
+	if m["status"] == "offline" || m["served_from_cache"] == true {
+		t.Errorf("fallback served the failing record as offline: %v", m)
+	}
+}

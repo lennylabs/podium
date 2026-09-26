@@ -1362,8 +1362,16 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		// A genuine miss (no entry at all) still falls through to the registry
 		// in offline-first. Pinned versions are immutable and never expire.
 		if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok {
-			if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
-				return s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
+			opts := deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)}
+			if s.cfg.cacheMode == "offline-first" {
+				if out, served := s.cachedOrRefetch(hash, id, args, opts); served {
+					return out
+				}
+			} else if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
+				// §6.5: offline-only never calls the registry, so a cached
+				// record that fails the §4.7.9 policy is refused with
+				// materialize.signature_invalid rather than refetched.
+				return s.deliverLoadArtifact(*cached, opts)
 			}
 		}
 		if s.cfg.cacheMode == "offline-only" {
@@ -1378,14 +1386,14 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	if s.cfg.cacheMode == "always-revalidate" && id != "" {
 		if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok && s.cache.has(hash) {
 			if freshHash, herr := s.headContentHash("/v1/load_artifact", args); herr == nil && freshHash == hash {
-				if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
-					// Revalidated: restart the `latest` TTL window once the
-					// cached record passes verification.
-					return s.deliverLoadArtifact(*cached, deliverOpts{
-						harness:     harnessFromArgs(s.cfg.harness, args),
-						destination: destFromArgs(args),
-						resolution:  &resolutionWrite{ID: id, Version: version, Now: now, RefreshOnly: true},
-					})
+				// Revalidated: restart the `latest` TTL window once the
+				// cached record passes verification.
+				if out, served := s.cachedOrRefetch(hash, id, args, deliverOpts{
+					harness:     harnessFromArgs(s.cfg.harness, args),
+					destination: destFromArgs(args),
+					resolution:  &resolutionWrite{ID: id, Version: version, Now: now, RefreshOnly: true},
+				}); served {
+					return out
 				}
 			}
 		}
@@ -1405,14 +1413,14 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 	}
 	body, notModified, err := s.fetchJSONConditional("/v1/load_artifact", args, contentHashETag(condHash))
 	if err == nil && notModified {
-		if cached, cerr := s.loadArtifactFromCache(condHash, id); cerr == nil {
-			// Revalidated: restart the `latest` TTL window once the cached
-			// record passes verification.
-			return s.deliverLoadArtifact(*cached, deliverOpts{
-				harness:     harnessFromArgs(s.cfg.harness, args),
-				destination: destFromArgs(args),
-				resolution:  &resolutionWrite{ID: id, Version: version, Now: now, RefreshOnly: true},
-			})
+		// Revalidated: restart the `latest` TTL window once the cached
+		// record passes verification.
+		if out, served := s.cachedOrRefetch(condHash, id, args, deliverOpts{
+			harness:     harnessFromArgs(s.cfg.harness, args),
+			destination: destFromArgs(args),
+			resolution:  &resolutionWrite{ID: id, Version: version, Now: now, RefreshOnly: true},
+		}); served {
+			return out
 		}
 		// The cache entry disappeared between the conditional request and the
 		// read; refetch unconditionally so the host still gets the artifact.
@@ -1428,36 +1436,20 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		// carries the registry's structured §6.10 envelope, which must pass
 		// through unchanged rather than being relabeled retryable.
 		if isRegistryUnreachable(err) {
-			// §7.4 degraded-network fallback: in always-revalidate mode, if a
-			// fresh fetch fails, try to serve from cache before surfacing the
-			// registry-unreachable error. Cache misses surface as
-			// network.registry_unreachable.
-			if s.cfg.cacheMode == "always-revalidate" && id != "" {
-				if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok {
-					if cached, cerr := s.loadArtifactFromCache(hash, id); cerr == nil {
-						out := s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
-						if m, ok := out.(map[string]any); ok {
-							m["status"] = "offline"
-							m["served_from_cache"] = true
-						}
-						return out
-					}
-				}
+			if out, served := s.degradedCacheFallback(id, version, now, args); served {
+				return out
 			}
-			// §7.4 offline-first: "no error; serve cached results silently."
-			// The content cache was already consulted above and missed, so
-			// there is nothing to serve. Return a silent offline status with no
-			// artifact rather than the registry-unreachable error, matching the
-			// "no error" contract for this mode. offline-only never
-			// reaches here: it short-circuits to errOfflineCacheMiss on the
-			// earlier cache miss without calling the registry.
-			if s.cfg.cacheMode == "offline-first" {
-				return offlineResult(nil)
-			}
-			return errorResult("network.registry_unreachable: " + err.Error())
+			return s.unreachableCacheMiss(err)
 		}
 		return errorResultFrom(err)
 	}
+	return s.deliverFreshLoad(body, args, now)
+}
+
+// deliverFreshLoad decodes a registry /v1/load_artifact response and delivers
+// it through the live-fetch path, which verifies it, caches it, and records
+// its resolution.
+func (s *mcpServer) deliverFreshLoad(body []byte, args map[string]any, now time.Time) any {
 	var resp loadArtifactResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return errorResult("decode load_artifact: " + err.Error())
@@ -1466,6 +1458,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		// Either an error envelope or an empty result; pass through.
 		return jsonAny(body)
 	}
+	id, version := argsIDAndVersion(args)
 	// §6.5: deliverLoadArtifact records the (id, version) → content_hash
 	// resolution only after the response passes verification, so a refused
 	// response leaves the index unchanged.
@@ -1476,6 +1469,90 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		manifestRefresh: s.manifestBodyRefresher(args),
 		resolution:      &resolutionWrite{ID: id, Version: version, Now: now},
 	})
+}
+
+// cachedOrRefetch serves the cached record for (hash, id) when it passes the
+// §6.6 step-2 checks. A record whose delivery signature fails under the
+// current verification key set is a §6.5 cache miss: the artifact is fetched
+// without a validator and delivered through the live-fetch path, which
+// verifies the response again and replaces the cached record. The failing
+// record is never delivered, including when the refetch fails, so a delivery
+// signature cached before a key rotation cannot outlive the retired key. Any
+// other verification failure is returned as the refusal it is. The bool is
+// false only when the cache holds no record, and the caller then continues as
+// on any cache miss.
+//
+// Spec: §6.5, §4.7.9, §4.7.10, §7.4
+func (s *mcpServer) cachedOrRefetch(hash, id string, args map[string]any, opts deliverOpts) (any, bool) {
+	cached, err := s.loadArtifactFromCache(hash, id)
+	if err != nil {
+		return nil, false
+	}
+	verr := s.verifyCachedRecord(*cached)
+	if verr == nil {
+		return s.deliverLoadArtifact(*cached, opts), true
+	}
+	if !errors.Is(verr, sign.ErrSignatureInvalid) {
+		return errorResult(verr.Error()), true
+	}
+	body, _, ferr := s.fetchJSONConditional("/v1/load_artifact", args, "")
+	if ferr != nil {
+		if isRegistryUnreachable(ferr) {
+			return s.unreachableCacheMiss(ferr), true
+		}
+		return errorResultFrom(ferr), true
+	}
+	return s.deliverFreshLoad(body, args, time.Now()), true
+}
+
+// verifyCachedRecord runs the §6.6 step-2 checks on a copy of a cached record,
+// so the caller can decide how to serve it before deliverLoadArtifact runs.
+func (s *mcpServer) verifyCachedRecord(rec loadArtifactResponse) error {
+	return s.verifyServedArtifact(&rec, deliverOpts{})
+}
+
+// degradedCacheFallback is the §7.4 degraded-network fallback: in
+// always-revalidate, when the registry proved unreachable, it serves the
+// cached record with the offline markers. A record whose delivery signature
+// fails the current key set is a cache miss here, as in cachedOrRefetch, and
+// the bool is false so the caller returns network.registry_unreachable.
+//
+// Spec: §7.4, §6.5, §4.7.9
+func (s *mcpServer) degradedCacheFallback(id, version string, now time.Time, args map[string]any) (any, bool) {
+	if s.cfg.cacheMode != "always-revalidate" || id == "" {
+		return nil, false
+	}
+	hash, ok := s.resolutions.Resolve(id, version, now, s.cfg.resolutionTTL, true)
+	if !ok {
+		return nil, false
+	}
+	cached, err := s.loadArtifactFromCache(hash, id)
+	if err != nil {
+		return nil, false
+	}
+	if verr := s.verifyCachedRecord(*cached); errors.Is(verr, sign.ErrSignatureInvalid) {
+		return nil, false
+	}
+	out := s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
+	if m, ok := out.(map[string]any); ok {
+		m["status"] = "offline"
+		m["served_from_cache"] = true
+	}
+	return out, true
+}
+
+// unreachableCacheMiss returns the §7.4 cache-miss outcome for a registry that
+// could not be reached. offline-first answers "no error; serve cached results
+// silently" with an offline status and no artifact, and always-revalidate
+// returns network.registry_unreachable. offline-only never reaches here: it
+// answers a cache miss with errOfflineCacheMiss without calling the registry.
+//
+// Spec: §7.4
+func (s *mcpServer) unreachableCacheMiss(err error) any {
+	if s.cfg.cacheMode == "offline-first" {
+		return offlineResult(nil)
+	}
+	return errorResult("network.registry_unreachable: " + err.Error())
 }
 
 // manifestBodyRefresher returns a closure that re-requests /v1/load_artifact

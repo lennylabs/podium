@@ -94,3 +94,54 @@ func TestLoadArtifact_OfflineFirst_TrueMissCallsRegistry(t *testing.T) {
 		t.Error("registry call count = 0, want >=1 (a true cache miss must call the registry in offline-first)")
 	}
 }
+
+// Spec: §4.7.9, §6.5 — in offline-first, a present resolution whose cached
+// delivery pair fails under the current key set is a cache miss: the bridge
+// fetches once without a validator and serves the verified response.
+func TestLoadArtifact_OfflineFirst_RetiredKeySignatureRefetches(t *testing.T) {
+	t.Parallel()
+	f, stub, _ := rotationSetup(t, "offline-first", http.StatusOK)
+
+	wantServed(t, f.srv.loadArtifact(rotationArgs), "cached-body")
+	if got := stub.uncondGets.Load(); got != 1 {
+		t.Errorf("unconditional GETs = %d, want 1", got)
+	}
+	if got := stub.heads.Load() + stub.condGets.Load(); got != 0 {
+		t.Errorf("HEAD and conditional requests = %d, want 0", got)
+	}
+}
+
+// Spec: §4.7.9, §6.5, §7.4 — in offline-first with the registry unreachable,
+// the failing cached record is a cache miss answered with the offline status
+// and no artifact.
+func TestLoadArtifact_OfflineFirst_RetiredKeySignatureUnreachableIsOffline(t *testing.T) {
+	t.Parallel()
+	f, _, ts := rotationSetup(t, "offline-first", http.StatusOK)
+	ts.Close()
+
+	out := f.srv.loadArtifact(rotationArgs)
+	wantNotDelivered(t, out)
+	m := out.(map[string]any)
+	if _, isErr := m["error"]; isErr {
+		t.Errorf("offline-first cache miss carried an error: %v", m)
+	}
+	if m["status"] != "offline" {
+		t.Errorf("status = %v, want offline", m["status"])
+	}
+}
+
+// Spec: §4.7.9, §6.5 — offline-only never calls the registry, so a cached
+// delivery pair that fails under the current key set is refused rather than
+// answered as a cache miss.
+// Matrix: §6.10 (materialize.signature_invalid)
+func TestLoadArtifact_OfflineOnly_RetiredKeySignatureRefused(t *testing.T) {
+	t.Parallel()
+	f, stub, _ := rotationSetup(t, "offline-only", http.StatusOK)
+
+	out := f.srv.loadArtifact(rotationArgs)
+	wantRefused(t, out, "materialize.signature_invalid")
+	wantNotDelivered(t, out)
+	if got := stub.requests(); got != 0 {
+		t.Errorf("registry requests = %d, want 0", got)
+	}
+}
