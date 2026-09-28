@@ -179,8 +179,8 @@ func ruStageLegacyDatabase(t *testing.T, dsn string) (id, version, contentHash s
 	version = "1.4.2"
 	// Spec: §13.4 — the legacy row stores the §4.7.6 digest of its own bytes
 	// (an empty manifest, no SKILL.md, and no resources), so the rewrite
-	// reproduces it, sign-stored-rows --include-unsigned mints its first
-	// envelope, and the stored-row admission check admits it.
+	// reproduces it, a reviewed sign-stored-rows --include-unsigned run mints
+	// its first envelope, and the stored-row admission check admits it.
 	contentHash = legacyEmptyRowHash
 
 	db, err := sql.Open("postgres", dsn)
@@ -293,14 +293,19 @@ func ruStartUpgradedServer(t *testing.T, dsn, keysPath string) *serverProc {
 	return startServerArgs(t, ruUpgradedEnv(t, dsn, keysPath), "serve")
 }
 
-// ruSignLegacyRows runs `podium admin sign-stored-rows --include-unsigned`
-// against the staged database before the upgraded binary's first start, which
-// is the upgrade step a standard deployment with signing on takes: the store is
-// Postgres, so the first-start rewrite mints no envelope for the legacy row and
-// the operator attests it instead. Spec: §13.4.
+// ruSignLegacyRows runs `podium admin sign-stored-rows --include-unsigned
+// --dry-run` against the staged database before the upgraded binary's first
+// start, then the run with the dry run's plan digest, which is the upgrade step
+// a standard deployment with signing on takes: the store is Postgres, so the
+// first-start rewrite mints no envelope for the legacy row and the operator
+// attests it instead. Spec: §13.4.
 func ruSignLegacyRows(t *testing.T, dsn, keysPath string) {
 	t.Helper()
-	res := signStoredRows(t, ruUpgradedEnv(t, dsn, keysPath), "--include-unsigned")
+	dry := signStoredRows(t, ruUpgradedEnv(t, dsn, keysPath), "--include-unsigned", "--dry-run")
+	if dry.Exit != 0 {
+		t.Fatalf("sign-stored-rows --include-unsigned --dry-run exit=%d\nstdout:\n%s\nstderr:\n%s", dry.Exit, dry.Stdout, dry.Stderr)
+	}
+	res := signStoredRows(t, ruUpgradedEnv(t, dsn, keysPath), "--include-unsigned", "--plan-digest="+planDigestOf(t, dry.Stdout))
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "rehash: 0 unsigned left") {
 		t.Fatalf("sign-stored-rows --include-unsigned exit=%d, want 0 and no unsigned row left\nstdout:\n%s\nstderr:\n%s", res.Exit, res.Stdout, res.Stderr)
 	}

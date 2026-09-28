@@ -819,7 +819,7 @@ func TestRun_FirstStartMintsUnsignedRowsOnlyBesideTheKey(t *testing.T) {
 			if applied, aerr := after.DataMigrationApplied(context.Background(), store.DataMigrationContentHashFraming); aerr != nil || !applied {
 				t.Errorf("marker applied = %v (err %v), want true", applied, aerr)
 			}
-			hint := "rehash: 1 unsigned left; run sign-stored-rows --include-unsigned to sign them"
+			hint := "rehash: 1 unsigned left; run sign-stored-rows --include-unsigned --dry-run, review it, and pass its plan digest to sign them"
 			if got := strings.Contains(logs, hint); got == tc.wantSigned {
 				t.Errorf("log names sign-stored-rows = %v, want %v; logs:\n%s", got, !tc.wantSigned, logs)
 			}

@@ -216,6 +216,51 @@ func TestE2E_BootRehashesStoredContentHashes(t *testing.T) {
 	}
 }
 
+// Spec: §13.4 — with signing off, podium-server sign-stored-rows performs the
+// content-hash rewrite without a signer: its dry run reports no signing key and
+// a plan digest, the run given that digest moves every downgraded row back to
+// the current digest and records completion, and the next start runs no
+// rewrite and serves the artifact.
+func TestE2E_SigningOffRewriteThroughSignStoredRows(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	sqlitePath := filepath.Join(home, "podium.db")
+	env := []string{"HOME=" + home, "PODIUM_REGISTRY_STORE=sqlite", "PODIUM_SQLITE_PATH=" + sqlitePath, "PODIUM_SIGN=none"}
+	reg := rehashRegistry(t)
+
+	first := startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
+	stopProc(first.cmd)
+	current := storedHashes(t, sqlitePath)
+	downgradeStoredRows(t, sqlitePath)
+	clearRehashMarker(t, sqlitePath)
+
+	dry := runServerBin(t, env, "sign-stored-rows", "--dry-run")
+	if dry.Exit != 0 || !strings.Contains(dry.Stdout, "signing_key=- verify_keys=-") {
+		t.Fatalf("dry run exit=%d, want 0 and a header with no signing key\nstdout:\n%s\nstderr:\n%s", dry.Exit, dry.Stdout, dry.Stderr)
+	}
+	run := runServerBin(t, env, "sign-stored-rows", "--plan-digest="+planDigestOf(t, dry.Stdout))
+	if run.Exit != 0 {
+		t.Fatalf("run exit=%d, want 0\nstdout:\n%s\nstderr:\n%s", run.Exit, run.Stdout, run.Stderr)
+	}
+	after := storedHashes(t, sqlitePath)
+	if len(after) != len(current) {
+		t.Fatalf("the run changed the row count: %d, want %d", len(after), len(current))
+	}
+	for key, hash := range current {
+		if after[key] != hash {
+			t.Errorf("%s = %s after the run, want the current digest %s", key, after[key], hash)
+		}
+	}
+
+	next := startServerArgs(t, env, "serve", "--standalone")
+	if strings.Contains(next.log(), "rehash:") {
+		t.Errorf("the start after the run ran the rewrite again:\n%s", next.log())
+	}
+	if msg := loadRehashSkill(t, next.BaseURL); msg != "" {
+		t.Fatalf("load after the signing-off run failed: %s", msg)
+	}
+}
+
 // Spec: §4.7.9, §13.4 — a start configured to sign whose key file is absent is
 // refused while the rewrite has not completed and a stored row carries a
 // signature, and it generates no key, so the operator's next start with the key
@@ -315,8 +360,9 @@ func TestE2E_MigratedTargetRewritesCopiedRows(t *testing.T) {
 // off keeps its rows unsigned after a restart with signing on, because the
 // completion record is set and the rewrite does not run again, so a
 // verifying load is refused with materialize.signature_missing.
-// sign-stored-rows --include-unsigned attests those rows beside the serving
-// registry, and the same load succeeds with no restart.
+// A reviewed sign-stored-rows --include-unsigned run, given the plan digest of
+// its dry run, attests those rows beside the serving registry, and the same
+// load succeeds with no restart.
 // Matrix: §6.10 (materialize.signature_missing)
 func TestE2E_LateSigningThroughSignStoredRows(t *testing.T) {
 	t.Parallel()
@@ -334,7 +380,11 @@ func TestE2E_LateSigningThroughSignStoredRows(t *testing.T) {
 		t.Fatalf("load of a row stored with signing off = %q, want materialize.signature_missing\nstderr: %s", errStr, res.Stderr)
 	}
 
-	res := signStoredRows(t, env, "--include-unsigned")
+	dry := signStoredRows(t, env, "--include-unsigned", "--dry-run")
+	if dry.Exit != 0 {
+		t.Fatalf("sign-stored-rows --include-unsigned --dry-run exit=%d\nstdout:\n%s\nstderr:\n%s", dry.Exit, dry.Stdout, dry.Stderr)
+	}
+	res := signStoredRows(t, env, "--include-unsigned", "--plan-digest="+planDigestOf(t, dry.Stdout))
 	if res.Exit != 0 || !strings.Contains(res.Stdout, "rehash: 0 unsigned left") {
 		t.Fatalf("sign-stored-rows --include-unsigned exit=%d, want 0 and no unsigned row left\nstdout:\n%s\nstderr:\n%s", res.Exit, res.Stdout, res.Stderr)
 	}
@@ -347,8 +397,8 @@ func TestE2E_LateSigningThroughSignStoredRows(t *testing.T) {
 // unsigned row when the key file sits outside the SQLite store's directory.
 // A restart over a store whose signatures were cleared and whose completion
 // record is absent leaves the row unsigned, so a verifying load is still
-// refused with materialize.signature_missing, and the server log names
-// sign-stored-rows as the command that attests the row.
+// refused with materialize.signature_missing, and the server log names the
+// reviewed sign-stored-rows procedure that attests the row.
 // Matrix: §6.10 (materialize.signature_missing)
 func TestE2E_FirstStartLeavesUnsignedRowsWhenTheKeyIsElsewhere(t *testing.T) {
 	t.Parallel()
@@ -368,7 +418,7 @@ func TestE2E_FirstStartLeavesUnsignedRowsWhenTheKeyIsElsewhere(t *testing.T) {
 	if errStr, res := bridgeLoad(t, restarted.BaseURL, rehashSkillID, verifyKey); !strings.HasPrefix(errStr, "materialize.signature_missing") {
 		t.Fatalf("load after the restart = %q, want materialize.signature_missing\nstderr: %s", errStr, res.Stderr)
 	}
-	if log := restarted.log(); !strings.Contains(log, "unsigned left; run sign-stored-rows --include-unsigned to sign them") {
+	if log := restarted.log(); !strings.Contains(log, "unsigned left; run sign-stored-rows --include-unsigned --dry-run, review it, and pass its plan digest to sign them") {
 		t.Errorf("server log does not name sign-stored-rows:\n%s", log)
 	}
 }

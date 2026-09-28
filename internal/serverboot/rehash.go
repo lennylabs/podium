@@ -60,6 +60,10 @@ type rehashDeps struct {
 	// AttestUnsigned is the operator's --include-unsigned: every unsigned
 	// row is signed whether or not the rewrite has completed.
 	AttestUnsigned bool
+	// ReviewedPlan is the §13.4 plan digest the operator passed with
+	// --plan-digest, or empty. The boot leaves it empty, and no comparison
+	// runs then.
+	ReviewedPlan string
 	// Sink is the §8.3 audit sink, or nil. Scrubber applies the §8.2
 	// query-text scrubbing and tolerates a nil receiver.
 	Sink     audit.Sink
@@ -98,7 +102,8 @@ func rehashPolicy(ctx context.Context, d rehashDeps) (rehashDeps, bool, error) {
 // unsigned row only when the store is the SQLite store in the key file's
 // directory: there the key and the rows share one fate on disk, so an unsigned
 // row was written by a process that could reach the key. A standard deployment
-// attests its unsigned rows with sign-stored-rows --include-unsigned instead.
+// attests its unsigned rows with a reviewed sign-stored-rows --include-unsigned
+// run instead.
 // A path that does not resolve returns an error rather than false, so the
 // caller refuses before the rewrite instead of treating the key as absent.
 // Spec: §13.4, §13.12.
@@ -192,6 +197,11 @@ func (r rehashRow) key() string {
 // ingests or serves, and records that the rewrite completed so that later
 // starts skip it."
 //
+// Given d.ReviewedPlan, which sign-stored-rows sets from --plan-digest, it
+// compares the plan digest of the plan it builds with that value before any
+// check or write, and refuses with ErrSignStoredRowsPlanChanged on a mismatch,
+// so the run writes only the plan the operator reviewed. Spec: §13.4.
+//
 // It plans every row before it writes any, so the refusal that protects a
 // stored signature (step 5 below) leaves the store as it was. The failure
 // policy is: a row whose bytes could not be read, or whose signing or write
@@ -215,6 +225,9 @@ func rehashStoredHashes(ctx context.Context, d rehashDeps, skipIfMarked bool) (r
 
 	plan, err := planRehash(ctx, d)
 	if err != nil {
+		return rehashCounts{}, false, err
+	}
+	if err := checkReviewedPlan(d, applied, plan); err != nil {
 		return rehashCounts{}, false, err
 	}
 	if err := refuseStrandedSignature(plan, d.Signer); err != nil {
@@ -494,16 +507,17 @@ func (c *rehashCounts) countSigningState(row rehashRow, written bool) {
 // verification-only key, with a line for a key that verifies no row so a
 // missing line never stands in for a zero. Each line starts with prefix, so
 // the dry run's projected totals read apart from a run's. A nonzero
-// unsigned-left count names the command that attests those rows, because
-// outside the co-located SQLite store the rewrite leaves them unsigned. With
-// no signer it logs nothing. Spec: §13.4, §4.7.9.
+// unsigned-left count names the reviewed procedure that attests those rows,
+// a --include-unsigned dry run and a run with its plan digest, because outside
+// the co-located SQLite store the rewrite leaves them unsigned. With no signer
+// it logs nothing. Spec: §13.4, §4.7.9.
 func logSigningSummary(d rehashDeps, c rehashCounts, prefix string) {
 	if d.Signer == nil {
 		return
 	}
 	hint := ""
 	if c.unsignedLeft > 0 {
-		hint = "; run sign-stored-rows --include-unsigned to sign them"
+		hint = "; run sign-stored-rows --include-unsigned --dry-run, review it, and pass its plan digest to sign them"
 	}
 	d.summarize("%s: %d unsigned left%s", prefix, c.unsignedLeft, hint)
 	for _, id := range d.Signer.VerifyKeyIDs() {

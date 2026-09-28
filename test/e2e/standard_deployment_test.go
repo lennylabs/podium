@@ -31,8 +31,9 @@ package e2e
 //     pin every refusal a render can check, TestChart_KindUpgradeFromV040
 //     (`make test-live-kind`) runs the procedure on kind, and manual
 //     scenario S76 walks it by hand. Manual scenario S66 drives the
-//     `sign-stored-rows --include-unsigned` command the migrate Job runs
-//     against a standalone registry.
+//     `sign-stored-rows --include-unsigned --dry-run` the migrate Job runs,
+//     then the run with the dry run's plan digest, against a standalone
+//     registry.
 //   - the `kubectl annotate` block under the page's Migration from single
 //     node section needs a cluster and a migrate-to-standard target; no test
 //     runs it. The migrated-store gate and the image gate that read the two

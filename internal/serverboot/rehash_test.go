@@ -1682,3 +1682,48 @@ func TestRehashPolicy_AppliesTheFirstStartPolicyOnce(t *testing.T) {
 		t.Errorf("rehashPolicy = %v, want the marker read error", err)
 	}
 }
+
+// Spec: §13.4 — rehashStoredHashes compares the plan it builds with
+// ReviewedPlan before any write. An empty ReviewedPlan, the boot's value, runs
+// no comparison. With no signer, a matching digest moves an unsigned
+// pre-framing row to the new hash unsigned and records completion, and a
+// different digest returns ErrSignStoredRowsPlanChanged and writes nothing.
+func TestRehashStoredHashes_ComparesTheReviewedPlan(t *testing.T) {
+	captureLog(t)
+	s := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0"}
+	newDeps := func() (rehashDeps, store.Store) {
+		st := store.NewMemory()
+		seedRow(t, st, nil, s)
+		return deps(st, nil), st
+	}
+
+	d, st := newDeps()
+	d.ReviewedPlan = "sha256:" + strings.Repeat("0", 64)
+	if _, _, err := rehashStoredHashes(context.Background(), d, false); !errors.Is(err, ErrSignStoredRowsPlanChanged) {
+		t.Fatalf("mismatched digest: err = %v, want ErrSignStoredRowsPlanChanged", err)
+	}
+	if rec := readRow(t, st, s); rec.ContentHash == framedHashOf(s) || markerSet(t, st) {
+		t.Error("a refused pass wrote the store")
+	}
+
+	d, st = newDeps()
+	plan, err := planRehash(context.Background(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.ReviewedPlan, _ = planDigest(newPlanHeader(false, d), canonicalPlan(plan))
+	if _, _, err := rehashStoredHashes(context.Background(), d, false); err != nil {
+		t.Fatalf("matching digest: %v", err)
+	}
+	if rec := readRow(t, st, s); rec.ContentHash != framedHashOf(s) || rec.Signature != "" || !markerSet(t, st) {
+		t.Errorf("row = %s / %q, marker %t; want the framed hash unsigned and the marker set", rec.ContentHash, rec.Signature, markerSet(t, st))
+	}
+
+	d, st = newDeps()
+	if _, _, err := rehashStoredHashes(context.Background(), d, true); err != nil {
+		t.Fatalf("no reviewed digest: %v", err)
+	}
+	if rec := readRow(t, st, s); rec.ContentHash != framedHashOf(s) {
+		t.Error("the boot pass did not rewrite the row")
+	}
+}

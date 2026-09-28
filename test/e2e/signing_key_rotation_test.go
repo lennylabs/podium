@@ -99,6 +99,19 @@ func signStoredRows(t *testing.T, env []string, args ...string) cliResult {
 	return runPodium(t, "", env, append([]string{"admin", "sign-stored-rows"}, args...)...)
 }
 
+// planDigestOf returns the digest on the dry-run: plan digest line that ends a
+// sign-stored-rows dry run's stdout, and fails the test when it is absent.
+func planDigestOf(t *testing.T, stdout string) string {
+	t.Helper()
+	const prefix = "dry-run: plan digest "
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(last, prefix) {
+		t.Fatalf("dry-run stdout does not end with a plan digest line:\n%s", stdout)
+	}
+	return strings.Fields(strings.TrimPrefix(last, prefix))[0]
+}
+
 // verifyKeyLine is the per-key summary line sign-stored-rows prints.
 func verifyKeyLine(prefix, keyID string, n int) string {
 	return fmt.Sprintf("%s: verify key %s: %d row(s) still signed under it", prefix, keyID, n)
@@ -164,7 +177,7 @@ func TestSigningKeyRotation_Journey(t *testing.T) {
 	if dry.Exit != 0 || !strings.Contains(dry.Stdout, "sign=true signed_by="+oldID) {
 		t.Fatalf("dry run exit=%d, want 0 and a signing write for a row under %s\nstdout:\n%s\nstderr:\n%s", dry.Exit, oldID, dry.Stdout, dry.Stderr)
 	}
-	run := signStoredRows(t, env)
+	run := signStoredRows(t, env, "--plan-digest="+planDigestOf(t, dry.Stdout))
 	if run.Exit != 0 || !strings.Contains(run.Stdout, verifyKeyLine("rehash", oldID, 0)) {
 		t.Fatalf("sign-stored-rows exit=%d, want 0 and no row left under %s\nstdout:\n%s\nstderr:\n%s", run.Exit, oldID, run.Stdout, run.Stderr)
 	}
@@ -302,10 +315,11 @@ func runServerBin(t *testing.T, env []string, args ...string) cliResult {
 	return runBin(t, cmdharness.Bin(t, "podium-server"), "", env, nil, 90*time.Second, args...)
 }
 
-// Spec: §13.4, §13.12 — podium-server sign-stored-rows refuses with
-// config.signature_provider_unavailable when signing is off or the key file is
-// absent, exits without serving, and generates no key. With a key file it
-// exits 0 and prints the summary.
+// Spec: §13.4, §13.12 — podium-server sign-stored-rows with signing off runs
+// the rewrite without a signer and refuses --include-unsigned with
+// config.signature_provider_unavailable. With signing on it refuses with that
+// code when the key file is absent. It exits without serving and generates no
+// key. With a key file it exits 0 and prints the summary.
 // Matrix: §6.10 (config.signature_provider_unavailable)
 func TestSignStoredRows_PodiumServerEntry(t *testing.T) {
 	t.Parallel()
@@ -315,8 +329,23 @@ func TestSignStoredRows_PodiumServerEntry(t *testing.T) {
 		keyPath := filepath.Join(home, "registry-signing.key")
 		env := append(rotationEnv(home, keyPath), "PODIUM_SIGN=none")
 		res := runServerBin(t, env, "sign-stored-rows")
-		if res.Exit != 1 || !strings.Contains(res.Stderr, "config.signature_provider_unavailable") {
-			t.Fatalf("exit=%d stderr=%q, want exit 1 naming config.signature_provider_unavailable", res.Exit, res.Stderr)
+		if res.Exit != 0 || !strings.Contains(res.Stdout, "rehash: ") {
+			t.Fatalf("exit=%d, want 0 and a rehash: summary line\nstdout:\n%s\nstderr:\n%s", res.Exit, res.Stdout, res.Stderr)
+		}
+		if listeningAddr.MatchString(res.Stdout + res.Stderr) {
+			t.Errorf("the command bound a listener:\n%s%s", res.Stdout, res.Stderr)
+		}
+		mustNotExist(t, keyPath)
+		mustNotExist(t, homeKeyFile(home))
+	})
+	t.Run("signing off with include-unsigned", func(t *testing.T) {
+		t.Parallel()
+		home := t.TempDir()
+		keyPath := filepath.Join(home, "registry-signing.key")
+		env := append(rotationEnv(home, keyPath), "PODIUM_SIGN=none")
+		res := runServerBin(t, env, "sign-stored-rows", "--include-unsigned", "--dry-run")
+		if res.Exit != 1 || !strings.Contains(res.Stderr, "config.signature_provider_unavailable") || !strings.Contains(res.Stderr, "--include-unsigned") {
+			t.Fatalf("exit=%d stderr=%q, want exit 1 naming config.signature_provider_unavailable and --include-unsigned", res.Exit, res.Stderr)
 		}
 		if listeningAddr.MatchString(res.Stdout + res.Stderr) {
 			t.Errorf("the command bound a listener:\n%s%s", res.Stdout, res.Stderr)
@@ -352,15 +381,20 @@ func TestSignStoredRows_PodiumServerEntry(t *testing.T) {
 	})
 }
 
-// Spec: §13.4 — an unknown flag and a positional argument are usage errors on
-// both binaries: each exits 2 with the usage text on stderr.
+// Spec: §13.4 — an unknown flag, a positional argument, --include-unsigned
+// alone, --plan-digest with --dry-run, and a malformed digest are usage errors
+// on both binaries: each exits 2 with the usage text on stderr.
 func TestSignStoredRows_UsageErrors(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	env := rotationEnv(home, filepath.Join(home, "registry-signing.key"))
+	zeros := "--plan-digest=sha256:" + strings.Repeat("0", 64)
 	for name, res := range map[string]cliResult{
-		"podium-server --bogus":  runServerBin(t, env, "sign-stored-rows", "--bogus"),
-		"podium admin extra-arg": signStoredRows(t, env, "extra-arg"),
+		"podium-server --bogus":                  runServerBin(t, env, "sign-stored-rows", "--bogus"),
+		"podium admin extra-arg":                 signStoredRows(t, env, "extra-arg"),
+		"podium-server --include-unsigned":       runServerBin(t, env, "sign-stored-rows", "--include-unsigned"),
+		"podium admin --dry-run --plan-digest":   signStoredRows(t, env, "--dry-run", zeros),
+		"podium-server --plan-digest=sha256:XYZ": runServerBin(t, env, "sign-stored-rows", "--plan-digest=sha256:XYZ"),
 	} {
 		if res.Exit != 2 || !strings.Contains(res.Stderr, "usage: sign-stored-rows") {
 			t.Errorf("%s: exit=%d stderr=%q, want exit 2 with the usage text", name, res.Exit, res.Stderr)

@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // signPassFixture is the configuration a sign-stored-rows run reads: the boot
@@ -103,6 +106,30 @@ func runCommand(t *testing.T, args ...string) (string, error) {
 	return out.String(), err
 }
 
+// planDigestOf returns the digest on the last dry-run: plan digest line of a
+// dry run's stdout and fails the test when the line is absent.
+func planDigestOf(t *testing.T, stdout string) string {
+	t.Helper()
+	const prefix = "dry-run: plan digest "
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	last := lines[len(lines)-1]
+	if !strings.HasPrefix(last, prefix) {
+		t.Fatalf("dry-run output does not end with a plan digest line:\n%s", stdout)
+	}
+	return strings.Fields(strings.TrimPrefix(last, prefix))[0]
+}
+
+// reviewedRun runs a dry run with args, then a run with args and the dry run's
+// plan digest, and returns the run's stdout and error.
+func reviewedRun(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	dry, err := runCommand(t, append([]string{"--dry-run"}, args...)...)
+	if err != nil {
+		t.Fatalf("dry run %v: %v", args, err)
+	}
+	return runCommand(t, append(args, "--plan-digest="+planDigestOf(t, dry))...)
+}
+
 func stillSignedLine(keyID string, n int) string {
 	return fmt.Sprintf("rehash: verify key %s: %d row(s) still signed under it", keyID, n)
 }
@@ -119,7 +146,8 @@ func verifiedBy(t *testing.T, key sign.RegistryManagedKey, rec store.ManifestRec
 }
 
 // Spec: §13.4, §4.7.9 — the command refuses with
-// config.signature_provider_unavailable when signing is off, when the key
+// config.signature_provider_unavailable when it is invoked with
+// --include-unsigned and signing is off, and, with signing on, when the key
 // file is absent, when it carries no private: line, and when a verify: line
 // does not decode. It generates no key and writes no row.
 func TestRunSignStoredRows_RefusesWithoutAUsableKey(t *testing.T) {
@@ -152,12 +180,19 @@ func TestRunSignStoredRows_RefusesWithoutAUsableKey(t *testing.T) {
 			f.seed(t, false, s)
 			before := f.row(t, s)
 
-			_, err := runCommand(t)
+			var args []string
+			if tc.signMode == "none" {
+				args = []string{"--include-unsigned", "--dry-run"}
+			}
+			_, err := runCommand(t, args...)
 			if !errors.Is(err, sign.ErrRegistryManagedUnavailable) || !strings.Contains(err.Error(), "config.signature_provider_unavailable") {
 				t.Fatalf("err = %v, want config.signature_provider_unavailable wrapping the sentinel", err)
 			}
 			if errors.Is(err, ErrSignStoredRowsUsage) {
 				t.Error("a refusal wraps the usage sentinel")
+			}
+			if tc.signMode == "none" && !strings.Contains(err.Error(), "--include-unsigned") {
+				t.Errorf("err = %v, want it to name --include-unsigned", err)
 			}
 			if tc.namesPath && !strings.Contains(err.Error(), f.keyPath) {
 				t.Errorf("err = %v, want it to name %s", err, f.keyPath)
@@ -194,11 +229,21 @@ func TestRunSignStoredRows_RefusesAnUnpersistedKey(t *testing.T) {
 	}
 }
 
-// Spec: §13.4 — an unknown flag or a positional argument is a usage error
-// wrapping ErrSignStoredRowsUsage, which the dispatchers map to exit status
-// 2; every other error maps to 1 and success to 0.
+// Spec: §13.4 — an unknown flag, a positional argument, --include-unsigned
+// alone, --plan-digest with --dry-run, and a malformed digest are usage errors
+// wrapping ErrSignStoredRowsUsage, refused before the store opens, which the
+// dispatchers map to exit status 2; a changed plan maps to 3, every other
+// error to 1, and success to 0.
 func TestRunSignStoredRows_UsageErrors(t *testing.T) {
-	for _, args := range [][]string{{"--bogus"}, {"extra-arg"}, {"--dry-run", "extra-arg"}} {
+	f := newBootFixture(t)
+	zeros := "sha256:" + strings.Repeat("0", 64)
+	for _, args := range [][]string{
+		{"--bogus"}, {"extra-arg"}, {"--dry-run", "extra-arg"},
+		{"--include-unsigned"},
+		{"--dry-run", "--plan-digest=" + zeros},
+		{"--plan-digest=sha256:XYZ"},
+		{"--plan-digest=sha256:" + strings.Repeat("A", 64)},
+	} {
 		_, err := runCommand(t, args...)
 		if !errors.Is(err, ErrSignStoredRowsUsage) {
 			t.Errorf("%v: err = %v, want the usage sentinel", args, err)
@@ -207,6 +252,13 @@ func TestRunSignStoredRows_UsageErrors(t *testing.T) {
 		if code := SignStoredRowsExitCode(&stderr, err); code != 2 || !strings.Contains(stderr.String(), SignStoredRowsUsage) {
 			t.Errorf("%v: exit %d, stderr %q; want 2 with the usage text", args, code, stderr.String())
 		}
+		if _, statErr := os.Stat(f.sqlitePath); statErr == nil {
+			t.Errorf("%v: a usage error created the store", args)
+		}
+	}
+	var changed bytes.Buffer
+	if code := SignStoredRowsExitCode(&changed, fmt.Errorf("sign-stored-rows: %w", ErrSignStoredRowsPlanChanged)); code != 3 || strings.Contains(changed.String(), "usage:") {
+		t.Errorf("changed plan: exit %d, stderr %q; want 3 without the usage text", code, changed.String())
 	}
 	var stderr bytes.Buffer
 	refusal := fmt.Errorf("config.signature_provider_unavailable: %w", sign.ErrRegistryManagedUnavailable)
@@ -237,13 +289,16 @@ func TestRunSignStoredRows_HelpExitsZero(t *testing.T) {
 
 // Spec: §13.4 — a dry run with the completion record absent prints every
 // planned write and makes none, the record included, so the boot's rewrite
-// still runs afterwards and moves both rows to the framed digest.
+// still runs afterwards and moves both rows to the framed digest. It lists the
+// rows in canonical order with their stored hashes, then the plan header, and
+// ends with the plan digest.
 func TestRunSignStoredRows_DryRunWithTheRecordAbsent(t *testing.T) {
 	key := testSigner(t)
 	f := newSignPassFixture(t, key)
 	unsigned := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0"}
 	signed := rowSeed{tenant: "acme", id: "beta", version: "1.0.0", signWith: key}
-	f.seed(t, false, unsigned, signed)
+	f.seed(t, false, signed)
+	f.seed(t, false, unsigned)
 	before := map[string]store.ManifestRecord{"alpha": f.row(t, unsigned), "beta": f.row(t, signed)}
 	states := map[string]string{"alpha": "unsigned", "beta": key.CurrentKeyID()}
 
@@ -252,13 +307,27 @@ func TestRunSignStoredRows_DryRunWithTheRecordAbsent(t *testing.T) {
 		t.Fatalf("dry run: %v", err)
 	}
 	for _, s := range []rowSeed{unsigned, signed} {
-		want := fmt.Sprintf("dry-run: acme/%s@1.0.0 class=unmigrated target=%s write=true sign=true signed_by=%s", s.id, framedHashOf(s), states[s.id])
+		want := fmt.Sprintf("dry-run: acme/%s@1.0.0 class=unmigrated target=%s write=true sign=true signed_by=%s stored=%s\n", s.id, framedHashOf(s), states[s.id], before[s.id].ContentHash)
 		if !strings.Contains(out, want) {
 			t.Errorf("output lacks %q:\n%s", want, out)
 		}
 		if after := f.row(t, s); after.ContentHash != before[s.id].ContentHash || after.Signature != before[s.id].Signature {
 			t.Errorf("%s changed under a dry run", s.id)
 		}
+	}
+	if strings.Index(out, "acme/alpha@") > strings.Index(out, "acme/beta@") {
+		t.Errorf("rows are not in canonical order:\n%s", out)
+	}
+	for _, want := range []string{
+		"dry-run: plan mode=record-absent include_unsigned=true signing_key=" + key.CurrentKeyID() + " verify_keys=-\n",
+		"dry-run: 2 row(s) planned, 2 would be written, 2 would be signed\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output lacks %q:\n%s", want, out)
+		}
+	}
+	if digest := planDigestOf(t, out); !strings.HasSuffix(out, "dry-run: plan digest "+digest+" over 2 row(s)\n") {
+		t.Errorf("output does not end with the digest over 2 rows:\n%s", out)
 	}
 	if f.recordSet(t) {
 		t.Fatal("a dry run recorded completion")
@@ -302,10 +371,11 @@ func TestRunSignStoredRows_DryRunWithTheRecordPresent(t *testing.T) {
 		t.Fatalf("dry run --include-unsigned: %v", err)
 	}
 	for _, want := range []string{
-		"acme/alpha@1.0.0 class=migrated target=" + framedHashOf(s) + " write=false sign=false signed_by=unsigned",
-		"acme/beta@1.0.0 class=migrated target=" + framedHashOf(byCurrent) + " write=false sign=false signed_by=" + current.CurrentKeyID(),
-		"acme/gamma@1.0.0 class=unmigrated target=" + framedHashOf(byRetired) + " write=true sign=true signed_by=" + retired.CurrentKeyID(),
-		"acme/delta@1.0.0 class=signature_unverified target=- write=false sign=false signed_by=unverified",
+		"acme/alpha@1.0.0 class=migrated target=" + framedHashOf(s) + " write=false sign=false signed_by=unsigned stored=" + framedHashOf(s) + "\n",
+		"acme/beta@1.0.0 class=migrated target=" + framedHashOf(byCurrent) + " write=false sign=false signed_by=" + current.CurrentKeyID() + " stored=" + framedHashOf(byCurrent) + "\n",
+		"acme/gamma@1.0.0 class=unmigrated target=" + framedHashOf(byRetired) + " write=true sign=true signed_by=" + retired.CurrentKeyID() + " stored=" + framedHashOf(byRetired) + "\n",
+		"acme/delta@1.0.0 class=signature_unverified target=- write=false sign=false signed_by=unverified stored=" + framedHashOf(untrusted) + "\n",
+		"dry-run: plan mode=record-present include_unsigned=false signing_key=" + current.CurrentKeyID() + " verify_keys=" + retired.CurrentKeyID() + "\n",
 		"dry-run: 1 unsigned left",
 		"dry-run: verify key " + retired.CurrentKeyID() + ": 0 row(s) still signed under it",
 	} {
@@ -314,12 +384,21 @@ func TestRunSignStoredRows_DryRunWithTheRecordPresent(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"acme/alpha@1.0.0 class=unmigrated target=" + framedHashOf(s) + " write=true sign=true signed_by=unsigned",
+		"acme/alpha@1.0.0 class=unmigrated target=" + framedHashOf(s) + " write=true sign=true signed_by=unsigned stored=" + framedHashOf(s) + "\n",
+		"dry-run: plan mode=record-present include_unsigned=true",
 		"dry-run: 0 unsigned left",
 	} {
 		if !strings.Contains(attested, want) {
 			t.Errorf("attested dry run lacks %q:\n%s", want, attested)
 		}
+	}
+	// Migrated rows leave the digest: the plain plan covers gamma and delta,
+	// and the attestation adds alpha.
+	if !strings.HasSuffix(plain, " over 2 row(s)\n") || !strings.HasSuffix(attested, " over 3 row(s)\n") {
+		t.Errorf("covered counts: plain ends %q, attested ends %q; want 2 and 3", lastLine(plain), lastLine(attested))
+	}
+	if planDigestOf(t, plain) == planDigestOf(t, attested) {
+		t.Error("the --include-unsigned setting does not change the digest")
 	}
 	if rec := f.row(t, s); rec.Signature != "" || rec.ContentHash != framedHashOf(s) {
 		t.Error("a dry run wrote the row")
@@ -395,7 +474,7 @@ func TestRunSignStoredRows_ResignsVerifyKeyRows(t *testing.T) {
 		}
 	}
 
-	if _, err := runCommand(t, "--include-unsigned"); err != nil {
+	if _, err := reviewedRun(t, "--include-unsigned"); err != nil {
 		t.Fatalf("sign-stored-rows --include-unsigned: %v", err)
 	}
 	if id := verifiedBy(t, current, f.row(t, unsigned)); id != current.CurrentKeyID() {
@@ -574,7 +653,7 @@ func TestRunSignStoredRows_AuditsEachSignedRow(t *testing.T) {
 	if _, err := runCommand(t); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	if _, err := runCommand(t, "--include-unsigned"); err != nil {
+	if _, err := reviewedRun(t, "--include-unsigned"); err != nil {
 		t.Fatalf("run --include-unsigned: %v", err)
 	}
 	events := signedEvents(t, f.auditPath)
@@ -689,9 +768,9 @@ func TestSignStoredRows_StoreErrorsFailTheCommand(t *testing.T) {
 
 // Spec: §13.4, §13.12 — with the record absent and the key file outside the
 // store's directory, the command standing in for the first start follows the
-// first start's policy: it leaves an unsigned framed row unsigned, names
-// --include-unsigned on the unsigned-left line, and records completion.
-// --include-unsigned then signs the row.
+// first start's policy: it leaves an unsigned framed row unsigned, names the
+// reviewed --include-unsigned procedure on the unsigned-left line, and records
+// completion. A reviewed --include-unsigned run then signs the row.
 func TestRunSignStoredRows_RecordAbsentMintsUnsignedRowsOnlyBesideTheKey(t *testing.T) {
 	key := testSigner(t)
 	f := newSignPassFixture(t, key)
@@ -708,17 +787,255 @@ func TestRunSignStoredRows_RecordAbsentMintsUnsignedRowsOnlyBesideTheKey(t *test
 	if rec := f.row(t, s); rec.Signature != "" {
 		t.Error("the row was signed without --include-unsigned outside the key's directory")
 	}
-	if want := "rehash: 1 unsigned left; run sign-stored-rows --include-unsigned to sign them"; !strings.Contains(out, want) {
+	if want := "rehash: 1 unsigned left; run sign-stored-rows --include-unsigned --dry-run, review it, and pass its plan digest to sign them"; !strings.Contains(out, want) {
 		t.Errorf("stdout lacks %q:\n%s", want, out)
 	}
 	if !f.recordSet(t) {
 		t.Error("completion not recorded")
 	}
 
-	if _, err := runCommand(t, "--include-unsigned"); err != nil {
+	if _, err := reviewedRun(t, "--include-unsigned"); err != nil {
 		t.Fatalf("sign-stored-rows --include-unsigned: %v", err)
 	}
 	if id := verifiedBy(t, key, f.row(t, s)); id != key.CurrentKeyID() {
 		t.Errorf("row signed by %s, want the signing key", id)
+	}
+}
+
+// lastLine returns the last non-empty line of out.
+func lastLine(out string) string {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	return lines[len(lines)-1]
+}
+
+// rowLines returns the row lines of a dry-run or plan listing with the prefix
+// stripped, so a refused run's listing compares with the reviewed dry run's.
+func rowLines(out, prefix string) []string {
+	var rows []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, prefix+": ") && strings.Contains(line, " class=") {
+			rows = append(rows, strings.TrimPrefix(line, prefix+": "))
+		}
+	}
+	return rows
+}
+
+// Spec: §13.4 — a reviewed --include-unsigned run signs the unsigned rows
+// its dry run listed. An unsigned row stored between the dry run and the run
+// changes the plan: the run writes no row, no audit event, and no completion
+// record, prints its own plan as plan: lines, and exits 3.
+func TestRunSignStoredRows_RefusesARowStoredAfterTheDryRun(t *testing.T) {
+	key := testSigner(t)
+	f := newSignPassFixture(t, key)
+	alpha := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true}
+	planted := rowSeed{tenant: "acme", id: "beta", version: "1.0.0", framed: true}
+	f.seed(t, true, alpha)
+	dry, err := runCommand(t, "--dry-run", "--include-unsigned")
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	f.seed(t, true, planted)
+	before := map[string]store.ManifestRecord{"alpha": f.row(t, alpha), "beta": f.row(t, planted)}
+
+	out, err := runCommand(t, "--include-unsigned", "--plan-digest="+planDigestOf(t, dry))
+	if !errors.Is(err, ErrSignStoredRowsPlanChanged) {
+		t.Fatalf("err = %v, want ErrSignStoredRowsPlanChanged", err)
+	}
+	var stderr bytes.Buffer
+	if code := SignStoredRowsExitCode(&stderr, fmt.Errorf("sign-stored-rows: %w", err)); code != 3 {
+		t.Errorf("exit = %d, want 3", code)
+	}
+	if n := strings.Count(stderr.String(), "sign-stored-rows: plan changed"); n != 1 {
+		t.Errorf("stderr names the command prefix %d times, want once: %s", n, stderr.String())
+	}
+	for _, s := range []rowSeed{alpha, planted} {
+		if after := f.row(t, s); after.ContentHash != before[s.id].ContentHash || after.Signature != before[s.id].Signature {
+			t.Errorf("%s was written by a refused run", s.id)
+		}
+	}
+	if !f.recordSet(t) {
+		t.Error("a refused run changed the completion record")
+	}
+	if n := len(signedEvents(t, f.auditPath)); n != 0 {
+		t.Errorf("a refused run appended %d artifact.signed event(s)", n)
+	}
+	reviewed, got := rowLines(dry, "dry-run"), rowLines(out, "plan")
+	plantedLine := "acme/beta@1.0.0 class=unmigrated target=" + framedHashOf(planted) + " write=true sign=true signed_by=unsigned stored=" + framedHashOf(planted)
+	if want := append(slices.Clone(reviewed), plantedLine); !reflect.DeepEqual(got, want) {
+		t.Errorf("plan: rows = %q, want the reviewed rows plus the planted row %q", got, want)
+	}
+	if !strings.Contains(out, "plan: plan mode=record-present include_unsigned=true") || !strings.Contains(out, " over 2 row(s)") {
+		t.Errorf("plan listing lacks its header or digest line:\n%s", out)
+	}
+
+	if _, err := reviewedRun(t, "--include-unsigned"); err != nil {
+		t.Fatalf("a fresh reviewed run: %v", err)
+	}
+	for _, s := range []rowSeed{alpha, planted} {
+		if id := verifiedBy(t, key, f.row(t, s)); id != key.CurrentKeyID() {
+			t.Errorf("%s signed by %s, want the signing key", s.id, id)
+		}
+	}
+}
+
+// Spec: §13.4 — the run refuses with exit 3 when the plan's state changes
+// between the dry run and the run: the completion record is set, a verify:
+// line is added to the key file, or an object body is deleted. A row a signing
+// registry stores at the current hash under the current key is migrated,
+// outside the digest, and causes no refusal.
+func TestRunSignStoredRows_ComparesThePlanItBuilds(t *testing.T) {
+	cases := []struct {
+		name    string
+		record  bool
+		between func(t *testing.T, f *signPassFixture, key sign.RegistryManagedKey)
+		refused bool
+	}{
+		{name: "record set", between: func(t *testing.T, f *signPassFixture, _ sign.RegistryManagedKey) {
+			f.seed(t, true)
+		}, refused: true},
+		{name: "verify key added", record: true, between: func(t *testing.T, f *signPassFixture, key sign.RegistryManagedKey) {
+			key.Trusted = append(key.Trusted, testSigner(t).PublicKey)
+			writeRegistryKeyFile(t, f.keyPath, key)
+		}, refused: true},
+		{name: "body deleted", record: true, between: func(t *testing.T, f *signPassFixture, _ sign.RegistryManagedKey) {
+			f.withStore(t, func(_ store.Store, objs objectstore.Provider) {
+				body := strings.TrimPrefix("sha256:"+version.CanonicalContentHash([]byte("reference"), nil, nil), "sha256:")
+				if err := objs.Delete(context.Background(), body); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}, refused: true},
+		{name: "signed ingest", record: true, between: func(t *testing.T, f *signPassFixture, key sign.RegistryManagedKey) {
+			f.seed(t, true, rowSeed{tenant: "acme", id: "beta", version: "1.0.0", framed: true, signWith: key})
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			key := testSigner(t)
+			f := newSignPassFixture(t, key)
+			s := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: tc.record, signWith: key,
+				resource: &seedResource{path: "ref.md", body: []byte("reference"), external: true}}
+			f.seed(t, tc.record, s)
+			dry, err := runCommand(t, "--dry-run")
+			if err != nil {
+				t.Fatalf("dry run: %v", err)
+			}
+			tc.between(t, f, key)
+			before := f.row(t, s)
+
+			_, err = runCommand(t, "--plan-digest="+planDigestOf(t, dry))
+			if got := errors.Is(err, ErrSignStoredRowsPlanChanged); got != tc.refused {
+				t.Fatalf("err = %v, want refused=%t", err, tc.refused)
+			}
+			if after := f.row(t, s); tc.refused && (after.ContentHash != before.ContentHash || after.Signature != before.Signature) {
+				t.Error("a refused run wrote the row")
+			}
+		})
+	}
+}
+
+// Spec: §13.4, §4.7.9 — a rotation run takes --plan-digest without
+// --include-unsigned, the invocation a chart run Job with includeUnsigned=false
+// makes: a wrong digest refuses with exit 3 and writes nothing, and the dry
+// run's own digest re-signs the verify-key row.
+func TestRunSignStoredRows_RotationRunWithADigest(t *testing.T) {
+	current, retired := rotatedSigner(t)
+	f := newSignPassFixture(t, current)
+	byRetired := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", framed: true, signWith: retired}
+	f.seed(t, true, byRetired)
+	before := f.row(t, byRetired)
+
+	_, err := runCommand(t, "--plan-digest=sha256:"+strings.Repeat("0", 64))
+	if !errors.Is(err, ErrSignStoredRowsPlanChanged) || SignStoredRowsExitCode(&bytes.Buffer{}, err) != 3 {
+		t.Fatalf("err = %v, want ErrSignStoredRowsPlanChanged and exit 3", err)
+	}
+	if after := f.row(t, byRetired); after.ContentHash != before.ContentHash || after.Signature != before.Signature {
+		t.Error("a refused rotation run wrote the row")
+	}
+
+	if _, err := reviewedRun(t); err != nil {
+		t.Fatalf("reviewed rotation run: %v", err)
+	}
+	if id := verifiedBy(t, current, f.row(t, byRetired)); id != current.CurrentKeyID() {
+		t.Errorf("row verified by %s, want the signing key", id)
+	}
+	if !f.recordSet(t) {
+		t.Error("the completion record was cleared")
+	}
+}
+
+// Spec: §13.4 — with signing off the command runs the rewrite with no signer:
+// the dry run reports a signed row as unchecked, a header with no keys, no
+// unsigned-left line, and a digest over the one row it writes, and the run
+// moves the unsigned pre-framing row to the new digest unsigned, records
+// completion, appends no artifact.signed event, and generates no key.
+func TestRunSignStoredRows_SigningOffRewritesWithoutSigning(t *testing.T) {
+	key := testSigner(t)
+	f := newSignPassFixture(t, key)
+	if err := os.Remove(f.keyPath); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODIUM_SIGN", "none")
+	pre := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0"}
+	signed := rowSeed{tenant: "acme", id: "beta", version: "1.0.0", framed: true, signWith: key}
+	framed := rowSeed{tenant: "acme", id: "gamma", version: "1.0.0", framed: true}
+	f.seed(t, false, pre, signed, framed)
+
+	dry, err := runCommand(t, "--dry-run")
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	for _, want := range []string{
+		"dry-run: acme/alpha@1.0.0 class=unmigrated target=" + framedHashOf(pre) + " write=true sign=false signed_by=unsigned",
+		"dry-run: acme/beta@1.0.0 class=migrated target=" + framedHashOf(signed) + " write=false sign=false signed_by=unchecked",
+		"dry-run: plan mode=record-absent include_unsigned=false signing_key=- verify_keys=-\n",
+		" over 1 row(s)\n",
+	} {
+		if !strings.Contains(dry, want) {
+			t.Errorf("dry run lacks %q:\n%s", want, dry)
+		}
+	}
+	if strings.Contains(dry, "unsigned left") {
+		t.Errorf("a signing-off dry run printed an unsigned-left line:\n%s", dry)
+	}
+	if _, err := runCommand(t, "--plan-digest="+planDigestOf(t, dry)); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if rec := f.row(t, pre); rec.ContentHash != framedHashOf(pre) || rec.Signature != "" {
+		t.Errorf("pre-framing row = %s / %q, want the framed hash unsigned", rec.ContentHash, rec.Signature)
+	}
+	if !f.recordSet(t) {
+		t.Error("completion not recorded")
+	}
+	if n := len(signedEvents(t, f.auditPath)); n != 0 {
+		t.Errorf("a signing-off run appended %d artifact.signed event(s)", n)
+	}
+	if _, err := os.Stat(f.keyPath); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a signing-off run left a key file: %v", err)
+	}
+}
+
+// Spec: §13.4 — with signing off the dry run and the run both refuse a plan
+// that would strand a stored signature, writing nothing, and the dry run
+// prints no digest for it.
+func TestRunSignStoredRows_SigningOffRefusesAStrandedSignature(t *testing.T) {
+	key := testSigner(t)
+	f := newSignPassFixture(t, key)
+	t.Setenv("PODIUM_SIGN", "none")
+	s := rowSeed{tenant: "acme", id: "alpha", version: "1.0.0", signWith: key}
+	f.seed(t, false, s)
+	before := f.row(t, s)
+
+	for _, args := range [][]string{{"--dry-run"}, nil} {
+		out, err := runCommand(t, args...)
+		if err == nil || !strings.Contains(err.Error(), "acme/alpha@1.0.0") || !strings.Contains(err.Error(), "PODIUM_SIGN=none") {
+			t.Errorf("%v: err = %v, want a refusal naming the row and PODIUM_SIGN=none", args, err)
+		}
+		if strings.Contains(out, "plan digest") {
+			t.Errorf("%v: printed a plan digest for a refused plan:\n%s", args, out)
+		}
+	}
+	if after := f.row(t, s); after.ContentHash != before.ContentHash || after.Signature != before.Signature || f.recordSet(t) {
+		t.Error("a refused command wrote the store")
 	}
 }

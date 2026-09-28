@@ -35,7 +35,7 @@ func adminCmd(args []string) int {
 			{"runtime", "Manage trusted runtime signing keys."},
 			{"tenant", "Manage tenants (operator role)."},
 			{"migrate-to-standard", "Pump standalone state into a standard deployment."},
-			{"sign-stored-rows", "Re-sign stored rows under the registry signing key."},
+			{"sign-stored-rows", "Rewrite stored rows under the §13.4 rules, signing under the registry signing key when signing is on."},
 			{"signing-key", "Generate or rotate the registry signing key file."},
 		})
 		if len(args) == 0 {

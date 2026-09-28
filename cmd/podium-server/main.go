@@ -9,7 +9,7 @@
 // flags, SQLite + filesystem object store + no auth bound on
 // 127.0.0.1:8080.
 //
-// `podium-server sign-stored-rows [--include-unsigned] [--dry-run]` runs the
+// `podium-server sign-stored-rows [--include-unsigned] [--dry-run | --plan-digest=<digest>]` runs the
 // §13.4 sign-stored-rows command and exits without binding a listener.
 package main
 
