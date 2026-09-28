@@ -79,13 +79,19 @@ An object store opened at the wrong root or bucket is a different
 condition. That store reports every body absent rather than failing its
 reads, so the registry refuses every object-held row with
 `materialize.content_hash_mismatch` rather than `registry.unavailable`.
-Point the object store at the right root or bucket and restart. The
-first start after an upgrade that met this condition runs the rewrite
-of stored content hashes again, because that condition held the
-rewrite's completion record back. On a Helm chart deployment with
-signing on, the migrate Job ran the rewrite; correct the object-store
-values in the values file and rerun steps 3 to 5 of the upgrade
-procedure in `docs/deployment/clustered.md` instead of restarting.
+Point the object store at the right root or bucket. Where the store
+is the SQLite store in the key file's directory, restart: the first
+start after an upgrade that met this condition runs the rewrite of
+stored content hashes again, because that condition held the rewrite's
+completion record back. Outside that store, in either signing mode, a
+restart while no completion is recorded is refused, rewriting no
+manifest row, signing no row, and recording no completion; rerun
+`sign-stored-rows` instead, as a `--dry-run`, a review of its report,
+and a run with its `--plan-digest`, and then start the registry. On a
+Helm chart deployment, the migrate Job ran the rewrite; correct the
+object-store values in the values file and rerun steps 3 to 5 of the
+upgrade procedure in `docs/deployment/clustered.md` instead of
+restarting.
 
 **Mitigation.**
 1. Verify object-storage health at the provider.
@@ -185,28 +191,45 @@ unaffected. A `podium-mcp` that refuses to start serves nothing.
 3. For a row stored unsigned before signing was turned on
    (`materialize.signature_missing`): run `sign-stored-rows
    --dry-run --include-unsigned`, read the rows it lists, and then
-   run `sign-stored-rows --include-unsigned`, which attests and
-   signs every unsigned row the store holds. When the store holds no
-   record that the first-start rewrite completed, the command
-   performs that rewrite, so it runs only while no registry process
-   on the previous release serves the store; the command cannot
-   detect such a process. On a Helm chart deployment whose store
-   holds no such record, the chart runs both commands as its migrate
-   Job. Run steps 2 to 5 of the upgrade procedure in
+   run `sign-stored-rows --include-unsigned --plan-digest=<digest>`
+   with the `sha256:` value on the dry run's last line, which attests
+   and signs every unsigned row the reviewed dry run lists. The run
+   refuses with exit status 3, writing nothing, when its plan differs
+   from the reviewed one. When the store holds no record that the
+   first-start rewrite completed, the command performs that rewrite,
+   so it runs only while no registry process on the previous release
+   serves the store; the command cannot detect such a process. Outside
+   the SQLite store in the key file's directory, the command is
+   required before a registry start over such a store that holds
+   rows, because that start is refused in either signing mode. On a
+   Helm chart deployment whose store holds no such record, the chart
+   runs both commands as its migrate Job, and a `signing.mode=none`
+   release runs the same Job with `migration.includeUnsigned=false`.
+   Run steps 2 to 5 of the upgrade procedure in
    `docs/deployment/clustered.md`: hold the Deployment at
    `replicaCount=0` on the new image and back up the store, run the
    `migration.mode=dry-run` upgrade and review its log, run the
-   `migration.mode=run` upgrade with `migration.reviewedDryRun` set
-   to the dry-run Job's UID, and then run the serving upgrade without
-   migration values, which scales the Deployment back up. A run Job
-   that fails during an object-store outage reports each object-held
-   row as `body_unavailable`, leaves the record unset, and keeps the
-   Deployment at zero replicas; restore the object store, then rerun
-   steps 3 to 5.
+   `migration.mode=run` upgrade with `migration.planDigest` set to the
+   `sha256:` value on the dry-run log's last `dry-run: plan digest`
+   line, streaming the run Job's log to `run.log` as step 4 shows,
+   and then run the serving upgrade without migration values, which
+   scales the Deployment back up. An object-store outage that begins
+   after a clean dry run changes the plan, so the run Job exits with
+   status 3 before any write, leaves the record unset, and prints
+   `plan:` lines, which can carry `class=body_unavailable`, with no
+   `rehash:` summary. The Deployment stays at zero replicas; restore
+   the object store, then rerun steps 3 to 5.
 4. On a migration target whose rows the source signed under a key
    the target does not hold, place the source's key and restart, or
    recreate the target store empty and re-run
    `podium admin migrate-to-standard` with the source's key in place.
+   Where the target is the SQLite store in the key file's directory,
+   the restart after the re-run runs the rewrite. For any other
+   target, in either signing mode, `migrate-to-standard` clears the
+   target's record, so the target's start is refused until a
+   `sign-stored-rows` dry run and a run with its `--plan-digest`
+   record completion; run that pair before the start, with signing
+   off with `PODIUM_SIGN=none` in its environment.
    On a Helm chart deployment, hold the release at zero replicas
    before the command runs and run the rewrite in the migrate Job, as
    the Migration from single node section of

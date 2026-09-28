@@ -34,10 +34,17 @@ package e2e
 //     `sign-stored-rows --include-unsigned --dry-run` the migrate Job runs,
 //     then the run with the dry run's plan digest, against a standalone
 //     registry.
-//   - the `kubectl annotate` block under the page's Migration from single
-//     node section needs a cluster and a migrate-to-standard target; no test
-//     runs it. The migrated-store gate and the image gate that read the two
-//     annotations it edits run in TestChart_KindUpgradeFromV040.
+//   - the blocks under the page's GitOps controllers section need a cluster
+//     and Argo CD; no test runs them. The render tests in
+//     test/chart/migrate_render_test.go pin that the chart reads nothing from
+//     the cluster, so a helm template render matches the helm upgrade render
+//     those blocks rely on.
+//   - the docker-compose upgrade block under the page's Provision
+//     dependencies section needs Docker and a v0.4.0 volume; no test runs it.
+//     TestE2E_FirstStartRefusesAnUnmigratedStoreWhenTheKeyIsElsewhere and
+//     TestE2E_SigningOffRewriteThroughSignStoredRows in boot_rehash_test.go
+//     drive the same signing-off refusal and sign-stored-rows run against a
+//     standalone registry.
 //   - the replica rotation roll under the page's Signing key operations
 //     section needs a cluster; manual scenarios S73 and S74 drive the same
 //     commands against a standalone registry.
