@@ -4819,11 +4819,22 @@ rather than trying to avoid them.
    kind create cluster --name podium-s46
    kubectl wait --for=condition=Ready node --all --timeout=180s
    kind load docker-image ghcr.io/lennylabs/podium:0.0.0-dev --name podium-s46
+   arch="$(docker version --format '{{.Server.Arch}}')"
+   for image in minio/minio:RELEASE.2024-10-29T16-01-48Z minio/mc:RELEASE.2024-10-29T15-34-59Z \
+       pgvector/pgvector:pg16; do
+     docker image inspect "$image" >/dev/null 2>&1 || docker pull --platform "linux/$arch" "$image"
+     docker save --platform "linux/$arch" -o "$WORK/image.tar" "$image"
+     kind load image-archive "$WORK/image.tar" --name podium-s46
+   done
    ```
 
    **Expect.** The build succeeds, the node reports `Ready`, and `kind load`
-   reports the image loading onto the node. Skipping the load leaves the pod in
-   `ErrImagePull`, because `0.0.0-dev` resolves to nothing in any registry.
+   reports each image loading onto the node. Skipping the load of the Podium
+   image leaves the pod in `ErrImagePull`, because `0.0.0-dev` resolves to
+   nothing in any registry. The loop loads the third-party images for the same
+   reason S76 step 1 does: a pull from inside the kind node can be refused by
+   Docker Hub for the pinned MinIO tags, which leaves `deployment/minio`
+   unavailable in step 2.
    The remaining steps run from the repository, because the `helm` commands
    name the chart by its relative path. The scenario starts no `podium-mcp` and
    no `podium` CLI command that reads `sync.yaml`, so the workspace walk from
@@ -4856,8 +4867,13 @@ rather than trying to avoid them.
    ```bash
    kubectl run mc --image=minio/mc:RELEASE.2024-10-29T15-34-59Z --restart=Never --rm -i \
      --quiet --command -- sh -c \
-     "mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null && mc mb -p m/podium"
+     'for i in $(seq 1 30); do mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null 2>&1 && break; sleep 2; done && mc mb -p m/podium'
    ```
+
+   The loop retries the alias until MinIO answers. `kubectl create deployment`
+   adds no readiness probe, so the Deployment reports `available` before MinIO
+   listens on port 9000, and a single attempt can fail with `connection
+   refused`.
 
    **Expect.** `Bucket created successfully`.
 
@@ -4961,9 +4977,10 @@ rather than trying to avoid them.
    kill $PF
    ```
 
-   **Expect.** `/healthz` reports `{"mode": "ready"}`, `/readyz` reports
+   **Expect.** `/healthz` reports `{"mode": "public"}`, because step 6 ends on
+   the public-mode upgrade, `/readyz` reports
    `{"mode": "ready", "replication_lag_seconds": 0}`, and `load_domain` answers
-   `200`. These are the two paths the chart's liveness and readiness probes use,
+   `200`. Public mode is a `/healthz` signal and is absent from `/readyz`. These are the two paths the chart's liveness and readiness probes use,
    so a pod that is `Ready` and a `/healthz` that does not answer would mean the
    probes are pointed somewhere else.
 
@@ -8799,16 +8816,25 @@ repository, because the `helm` commands name the chart by its relative path.
    the 256 KiB limit of the annotation a client-side apply writes. Then create the Secrets as S46 steps 3 to 5 do, with the bucket
    `podium`. Wait for the seed pod to report `Ready`, then delete it.
 
+   The host needs no `mc`. The function `mc_run` runs an `mc` script in a
+   throwaway pod inside the cluster, as S46 step 3 and the kind test's `mc`
+   helper do, with the alias `m` retried until MinIO answers. The later steps
+   read the bucket through it.
+
    ```bash
+   mc_run() { kubectl run "mc-$$-$RANDOM" --image=minio/mc:RELEASE.2024-10-29T15-34-59Z \
+     --restart=Never --rm -i --quiet --command -- sh -c \
+     "for i in \$(seq 1 30); do mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null 2>&1 && break; sleep 2; done && $1"; }
+   mc_run 'mc ls --recursive m/podium'
    kubectl exec -i deploy/pg -- psql -U podium -d podium -At <<'SQL'
    SELECT format('SELECT count(*), count(*) FILTER (WHERE signature = %L) FROM %I.manifests', '', table_schema)
      FROM information_schema.tables WHERE table_name = 'manifests' \gexec
    SQL
    ```
 
-   **Expect.** A line such as `2|2`: two rows, both unsigned. `mc ls
-   --recursive m/podium` lists at least one object, which is the large
-   resource's body.
+   **Expect.** `mc_run` lists at least one object, which is the large
+   resource's body, and the query prints a line such as `2|2`: two rows, both
+   unsigned.
 
 3. Install v0.4.0 from the worktree and prepare the values file.
 
@@ -8872,12 +8898,12 @@ repository, because the `helm` commands name the chart by its relative path.
    ```bash
    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0
    kubectl exec deploy/pg -- pg_dump -U podium -d podium -Fc -f /tmp/step2.dump
-   mc mirror m/podium m/podium-backup
+   mc_run 'mc mb -p m/podium-backup && mc mirror --overwrite m/podium m/podium-backup'
    ```
 
    **Expect.** The Deployment shows `0/0`, `kubectl exec deploy/pg -- ls -l
-   /tmp/step2.dump` lists the dump, and `mc ls m/podium-backup` lists the
-   bucket's objects. Step 14 restores from this dump and this mirror.
+   /tmp/step2.dump` lists the dump, and `mc_run 'mc ls --recursive
+   m/podium-backup'` lists the bucket's objects. Step 14 restores from this dump and this mirror.
 
 7. Run step 3 of the procedure exactly as `docs/deployment/clustered.md` gives
    it, then run its completeness check and read the digest from the last line.
@@ -8989,9 +9015,10 @@ repository, because the `helm` commands name the chart by its relative path.
     `plan:` lines with `class=body_unavailable`, `record` prints `0`, and the
     Deployment shows `0/0` with no pod. The refused run wrote nothing.
 
-11. Restore MinIO, wait until it answers through its Service (`mc ls` against
-    the bucket succeeds), rerun step 3 of the procedure, and run step 4 with
-    its fresh digest.
+11. Restore MinIO with `kubectl scale deployment/minio --replicas=1`, wait
+    until it answers through its Service (`mc_run 'mc ls m/podium'`
+    succeeds), rerun step 3 of the procedure, and run step 4 with its fresh
+    digest.
 
     **Expect.** The run exits 0, its log carries `rehash: 0 unsigned left`,
     `record` prints `1`, and the row query reports `2|0`.
@@ -9047,9 +9074,10 @@ repository, because the `helm` commands name the chart by its relative path.
     ```
 
     Wait as step 5 does, recreate the `podium` database from
-    `/tmp/step2.dump` with `pg_restore`, mirror `m/podium-backup` back onto
-    `m/podium` with `--remove`, and run `helm rollback podium 1 --wait`, where 1
-    is the v0.4.0 revision step 3 printed. Then try to serve this release over
+    `/tmp/step2.dump` with `pg_restore`, mirror the backup bucket back with
+    `mc_run 'mc mirror --overwrite --remove m/podium-backup m/podium'`, and
+    run `helm rollback podium 1 --wait`, where 1 is the v0.4.0 revision step 3
+    printed. Then try to serve this release over
     the restored store.
 
     ```bash
