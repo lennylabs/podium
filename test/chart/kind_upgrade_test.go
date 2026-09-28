@@ -705,6 +705,10 @@ func (k *cluster) dryRun(t *testing.T, values string) (log, notes, digest string
 // planDigestLine matches the dry run's digest line.
 var planDigestLine = regexp.MustCompile(`(?m)^dry-run: plan digest (sha256:[0-9a-f]{64}) over (\d+) row\(s\)$`)
 
+// dryRunRowClass matches a dry-run row line and captures its class token, so
+// a comparison reads the whole token wherever it sits on the line.
+var dryRunRowClass = regexp.MustCompile(`(?m)^dry-run: .* class=(\S+)`)
+
 // planDigestOf returns the plan digest of a dry-run log, and fails when the
 // digest line is absent or its row count differs from the row lines the
 // digest covers, which are those without class=migrated.
@@ -715,8 +719,8 @@ func planDigestOf(t *testing.T, log string) string {
 		t.Fatalf("the dry-run log carries no plan digest line:\n%s", log)
 	}
 	covered := 0
-	for _, line := range regexp.MustCompile(`(?m)^dry-run: .* class=\S+`).FindAllString(log, -1) {
-		if !strings.Contains(line, " class=migrated ") {
+	for _, row := range dryRunRowClass.FindAllStringSubmatch(log, -1) {
+		if row[1] != "migrated" {
 			covered++
 		}
 	}
