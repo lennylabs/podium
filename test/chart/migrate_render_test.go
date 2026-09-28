@@ -2,49 +2,53 @@
 //
 // The first start of a release that migrates a stored value rewrites every
 // stored row before it serves, and the rewrite requires every registry process
-// on the previous release stopped. The chart runs the rewrite as a post-upgrade
-// hook Job while the Deployment is held at zero replicas, so no probe kills the
-// pass and no previous-version pod runs beside it. These tests pin what a
-// `helm template` render can check: the Job's arguments and record, its parity
-// with the Deployment's pod, and every pure-value refusal. The lookup-based
-// gates read a live cluster, so their pass and fail branches run in the kind
-// test (kind_upgrade_test.go); TestChart_LiveGatesFailClosedOffline pins the
-// offline branch.
+// on the previous release stopped. The chart runs the rewrite as a
+// post-install and post-upgrade hook Job while the Deployment is held at zero
+// replicas, so no probe kills the pass and no previous-version pod runs beside
+// it. The chart reads nothing from the cluster, so every refusal is
+// values-only and pinned here: the Job's arguments, its parity with the
+// Deployment's pod, and every guard. The kind test (kind_upgrade_test.go) pins
+// the hook lifecycle and the registry's boot refusal over an unmigrated store
+// on a cluster.
 package chart
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
-// Keys of the record the migrate Job carries and the gates read back.
 const (
-	annMode            = "podium.lennylabs.dev/migration-mode"
-	annFormat          = "podium.lennylabs.dev/stored-row-format"
-	annImage           = "podium.lennylabs.dev/image"
-	annIncludeUnsigned = "podium.lennylabs.dev/include-unsigned"
-	annRevision        = "podium.lennylabs.dev/release-revision"
-	annReviewed        = "podium.lennylabs.dev/reviewed-dry-run"
-	annPreImage        = "podium.lennylabs.dev/pre-migration-image"
-	annDeploymentUID   = "podium.lennylabs.dev/deployment-uid"
-	annPodConfig       = "podium.lennylabs.dev/pod-config"
-	storedRowFormat    = "content_hash_framing"
-	migrateContainer   = "sign-stored-rows"
+	// annPrefix is the prefix of the record annotations the chart no longer
+	// writes. No rendered object may carry a key under it.
+	annPrefix        = "podium.lennylabs.dev/"
+	migrateContainer = "sign-stored-rows"
+	// previousImage is the migration.previousImage every migration render in
+	// these tests names. It differs from the chart's default image.
+	previousImage = "old:0.4.0"
 )
+
+// zeroDigest is a well-formed plan digest for a run render.
+var zeroDigest = "sha256:" + strings.Repeat("0", 64)
 
 // upgradeArgs builds `helm template` arguments for a migration render: an
-// upgrade, the signing Secret, zero replicas, and the lookup gates off, so the
-// render reaches the Job body. A test that asserts a gate builds its own.
+// upgrade, the signing Secret, zero replicas, the previous image, and for a
+// run a well-formed plan digest, so the render reaches the Job body. A test
+// that asserts a guard builds its own.
 func upgradeArgs(mode string, sets ...string) []string {
 	args := []string{"--is-upgrade",
 		"--set", withSigningKey,
 		"--set", "replicaCount=0",
-		"--set", "migration.preflight=false",
+		"--set", "migration.previousImage=" + previousImage,
 		"--set", "migration.mode=" + mode,
 	}
 	if mode == "run" {
-		args = append(args, "--set", "migration.reviewedDryRun=u1")
+		args = append(args, "--set", "migration.planDigest="+zeroDigest)
 	}
 	for _, s := range sets {
 		args = append(args, "--set", s)
@@ -78,10 +82,60 @@ func mustFail(t *testing.T, what string, args []string, want ...string) {
 	}
 }
 
-// The default render serves and runs no Job, and it records on the
-// Deployment's own metadata that the store carries this release's stored-row
-// format, so the next upgrade's preflight reads it. On the pod template the
-// annotation would cause a rollout.
+// assertNoRecordAnnotations fails when an annotation map carries a key under
+// annPrefix.
+func assertNoRecordAnnotations(t *testing.T, what string, ann map[string]string) {
+	t.Helper()
+	for k := range ann {
+		if strings.HasPrefix(k, annPrefix) {
+			t.Errorf("%s carries the record annotation %s", what, k)
+		}
+	}
+}
+
+// helmTemplateGuards matches every template construct that reads cluster or
+// release state. A template that matched would render differently under
+// helm template, helm install, helm upgrade, and a GitOps controller.
+var helmTemplateGuards = regexp.MustCompile(`\blookup\b|\.Release\.IsInstall|\.Release\.IsUpgrade|\.Release\.Revision`)
+
+// GitOps support and a render that needs no cluster permission rest on the
+// chart reading nothing but its values: no template calls lookup or reads the
+// release's install, upgrade, or revision state, and a migration render is
+// byte-equal with and without --is-upgrade.
+//
+// Spec: §13.4
+func TestChart_ReadsNothingFromTheCluster(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(chartDir, "templates")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read templates: %v", err)
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatalf("read %s: %v", e.Name(), err)
+		}
+		if m := helmTemplateGuards.Find(raw); m != nil {
+			t.Errorf("%s reads cluster or release state through %q", e.Name(), m)
+		}
+	}
+
+	upgrade := renderMigration(t, "dry-run")
+	install, err := renderArgs(t, upgradeArgs("dry-run")[1:]...)
+	if err != nil {
+		t.Fatalf("a dry-run install render refused: %v\n%s", err, install)
+	}
+	if upgrade != install {
+		t.Errorf("a dry-run render differs between install and upgrade:\nupgrade:\n%s\ninstall:\n%s", upgrade, install)
+	}
+}
+
+// The default render serves and runs no Job, and neither the Deployment nor
+// its pod template carries a record annotation.
 //
 // Spec: §13.4
 func TestChart_NoMigrateJobByDefault(t *testing.T) {
@@ -91,18 +145,14 @@ func TestChart_NoMigrateJobByDefault(t *testing.T) {
 		t.Fatalf("the default render carries %d Job(s); want none", len(jobs))
 	}
 	d := oneWorkload(t, m, "Deployment")
-	if got := d.Metadata.Annotations[annFormat]; got != storedRowFormat {
-		t.Errorf("the Deployment's %s is %q; want %q", annFormat, got, storedRowFormat)
-	}
-	if _, ok := d.Spec.Template.Metadata.Annotations[annFormat]; ok {
-		t.Errorf("the pod template carries %s, so recording the migration rolls the pods", annFormat)
-	}
+	assertNoRecordAnnotations(t, "the Deployment", d.Metadata.Annotations)
+	assertNoRecordAnnotations(t, "the Deployment's pod template", d.Spec.Template.Metadata.Annotations)
 }
 
-// A dry run renders one post-upgrade hook Job that lists the plan and writes
-// nothing. The Job carries the record the reviewed-dry-run gate reads back,
-// runs once with no probe or port, and the Deployment stays at zero replicas
-// and does not claim the migration.
+// A dry run renders one post-install and post-upgrade hook Job that lists the
+// plan and writes nothing. It runs once with no probe or port, carries no
+// record annotation and no plan digest, and the Deployment stays at zero
+// replicas.
 //
 // Spec: §13.4
 func TestChart_MigrateJobDryRun(t *testing.T) {
@@ -116,30 +166,18 @@ func TestChart_MigrateJobDryRun(t *testing.T) {
 	}
 	ann := job.Metadata.Annotations
 	for k, want := range map[string]string{
-		"helm.sh/hook":               "post-upgrade",
+		"helm.sh/hook":               "post-install,post-upgrade",
 		"helm.sh/hook-delete-policy": "before-hook-creation",
-		annMode:                      "dry-run",
-		annFormat:                    storedRowFormat,
-		annImage:                     c.Image,
-		annIncludeUnsigned:           "true",
 	} {
 		if ann[k] != want {
 			t.Errorf("Job annotation %s is %q; want %q", k, ann[k], want)
 		}
 	}
-	if ann[annRevision] == "" {
-		t.Errorf("the Job carries no %s", annRevision)
-	}
-	if _, ok := ann[annReviewed]; ok {
-		t.Errorf("a dry-run Job carries %s", annReviewed)
-	}
-	// Offline there is no live Deployment, so the UID is empty; the key must
-	// still render for the gates to compare.
-	if uid, ok := ann[annDeploymentUID]; !ok || uid != "" {
-		t.Errorf("the Job's %s is %q (present %t); want an empty value offline", annDeploymentUID, uid, ok)
-	}
-	if len(ann[annPodConfig]) != 64 {
-		t.Errorf("the Job's %s is %q; want a sha256 digest", annPodConfig, ann[annPodConfig])
+	assertNoRecordAnnotations(t, "the dry-run Job", ann)
+	for _, a := range c.Args {
+		if strings.HasPrefix(a, "--plan-digest") {
+			t.Errorf("a dry-run Job passes %s", a)
+		}
 	}
 	ps := job.Spec.Template.Spec
 	if ps.RestartPolicy != "Never" {
@@ -159,40 +197,26 @@ func TestChart_MigrateJobDryRun(t *testing.T) {
 	if d.Spec.Replicas == nil || *d.Spec.Replicas != 0 {
 		t.Errorf("the Deployment renders replicas %v beside the Job; want 0", d.Spec.Replicas)
 	}
-	if _, ok := d.Metadata.Annotations[annFormat]; ok {
-		t.Errorf("a migration render claims %s before the run", annFormat)
-	}
+	assertNoRecordAnnotations(t, "the Deployment", d.Metadata.Annotations)
 
-	job = oneWorkload(t, renderMigration(t, "dry-run", "migration.includeUnsigned=false"), "Job")
-	c = containerOf(t, job, migrateContainer)
+	c = containerOf(t, oneWorkload(t, renderMigration(t, "dry-run", "migration.includeUnsigned=false"), "Job"), migrateContainer)
 	if want := []string{"sign-stored-rows", "--dry-run"}; !reflect.DeepEqual(c.Args, want) {
 		t.Errorf("dry-run args with includeUnsigned=false are %v; want %v", c.Args, want)
 	}
-	if got := job.Metadata.Annotations[annIncludeUnsigned]; got != "false" {
-		t.Errorf("%s is %q; want false", annIncludeUnsigned, got)
-	}
 }
 
-// The run applies the unsigned-row policy of the dry run it names, and records
-// that dry run's UID.
+// The run applies the unsigned-row policy of its dry run and passes the
+// reviewed plan digest, whatever includeUnsigned is.
 //
 // Spec: §13.4
 func TestChart_MigrateJobRunArgs(t *testing.T) {
 	t.Parallel()
-	job := oneWorkload(t, renderMigration(t, "run"), "Job")
-	c := containerOf(t, job, migrateContainer)
-	if want := []string{"sign-stored-rows", "--include-unsigned"}; !reflect.DeepEqual(c.Args, want) {
+	c := containerOf(t, oneWorkload(t, renderMigration(t, "run"), "Job"), migrateContainer)
+	if want := []string{"sign-stored-rows", "--include-unsigned", "--plan-digest=" + zeroDigest}; !reflect.DeepEqual(c.Args, want) {
 		t.Errorf("run args are %v; want %v", c.Args, want)
 	}
-	if got := job.Metadata.Annotations[annReviewed]; got != "u1" {
-		t.Errorf("%s is %q; want u1", annReviewed, got)
-	}
-	if got := job.Metadata.Annotations[annMode]; got != "run" {
-		t.Errorf("%s is %q; want run", annMode, got)
-	}
-
 	c = containerOf(t, oneWorkload(t, renderMigration(t, "run", "migration.includeUnsigned=false"), "Job"), migrateContainer)
-	if want := []string{"sign-stored-rows"}; !reflect.DeepEqual(c.Args, want) {
+	if want := []string{"sign-stored-rows", "--plan-digest=" + zeroDigest}; !reflect.DeepEqual(c.Args, want) {
 		t.Errorf("run args with includeUnsigned=false are %v; want %v", c.Args, want)
 	}
 }
@@ -285,8 +309,8 @@ func TestChart_MigrateJobMirrorsTheDeployment(t *testing.T) {
 }
 
 // The Service and the Deployment select by the registry's name and instance
-// labels. A Job pod that matched them would receive traffic, count as a
-// Deployment pod, and trip the stop gate the Job itself runs behind.
+// labels. A Job pod that matched them would receive traffic and count as a
+// Deployment pod.
 //
 // Spec: §13.4
 func TestChart_MigrateJobIsNotSelected(t *testing.T) {
@@ -396,93 +420,95 @@ func TestChart_MigrateJobResourcesAndAnnotations(t *testing.T) {
 	}
 }
 
-// Each pure-value guard refuses the render and names the value that fixes it.
+// chartAppVersion reads appVersion from Chart.yaml, the tag podium.image
+// defaults to.
+func chartAppVersion(t *testing.T) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(chartDir, "Chart.yaml"))
+	if err != nil {
+		t.Fatalf("read Chart.yaml: %v", err)
+	}
+	var chart struct {
+		AppVersion string `yaml:"appVersion"`
+	}
+	if err := yaml.Unmarshal(raw, &chart); err != nil || chart.AppVersion == "" {
+		t.Fatalf("Chart.yaml appVersion: %q, %v", chart.AppVersion, err)
+	}
+	return chart.AppVersion
+}
+
+// Each values-only guard refuses the render and names the value that fixes it.
+// podium.validate stops at the first fail, so the cases also pin the order:
+// the previousImage guards fire ahead of the plan-digest guard.
 //
 // Spec: §13.4
 func TestChart_MigrationGuards(t *testing.T) {
 	t.Parallel()
-	base := []string{"--is-upgrade", "--set", withSigningKey, "--set", "migration.preflight=false"}
+	base := []string{"--is-upgrade", "--set", withSigningKey, "--set", "migration.previousImage=" + previousImage}
 	with := func(args ...string) []string { return append(append([]string{}, base...), args...) }
+	zero := []string{"--set", "replicaCount=0"}
 
 	mustFail(t, "an unknown mode", with("--set", "replicaCount=0", "--set", "migration.mode=off"),
 		"migration.mode", "disabled", "dry-run", "run")
 	mustFail(t, "a mode with serving replicas", with("--set", "replicaCount=3", "--set", "migration.mode=dry-run"),
 		"replicaCount=0", "stopped", "docs/deployment/clustered.md")
-	mustFail(t, "a mode with signing off", with("--set", "replicaCount=0", "--set", "migration.mode=dry-run", "--set", "signing.mode=none"),
-		"signing.mode=registry-key", "config.signature_provider_unavailable", "migration.unprobedStart")
-	mustFail(t, "run without a reviewed dry run", with("--set", "replicaCount=0", "--set", "migration.mode=run"),
-		"migration.reviewedDryRun", "dry-run", "jsonpath='{.metadata.uid}'")
-	mustFail(t, "a mode on an install", []string{"--set", withSigningKey, "--set", "migration.preflight=false",
-		"--set", "replicaCount=0", "--set", "migration.mode=dry-run"},
-		"helm upgrade", "replicaCount=0", "docs/deployment/clustered.md")
 
-	unprobed := []string{"--set", "signing.mode=none", "--set", "migration.unprobedStart=true",
-		"--set", "replicaCount=1", "--set", "strategy.type=Recreate"}
-	if out, err := renderArgs(t, with(unprobed...)...); err != nil {
-		t.Errorf("the signing-off unprobedStart render refused: %v\n%s", err, out)
+	// With signing off the command refuses --include-unsigned, so the chart
+	// refuses the default includeUnsigned=true and renders false.
+	mustFail(t, "a signing-off mode with includeUnsigned=true",
+		with(append(zero, "--set", "migration.mode=dry-run", "--set", "signing.mode=none")...),
+		"migration.includeUnsigned=false", "config.signature_provider_unavailable")
+	out, err := renderArgs(t, with(append(zero, "--set", "migration.mode=dry-run", "--set", "signing.mode=none",
+		"--set", "migration.includeUnsigned=false")...)...)
+	if err != nil {
+		t.Fatalf("a signing-off dry run with includeUnsigned=false refused: %v\n%s", err, out)
 	}
-	mustFail(t, "unprobedStart with three replicas", with(append(unprobed, "--set", "replicaCount=3")...),
-		"migration.unprobedStart", "replicaCount=1")
-	mustFail(t, "unprobedStart with RollingUpdate", with(append(unprobed, "--set", "strategy.type=RollingUpdate")...),
-		"migration.unprobedStart", "strategy.type=Recreate")
-	mustFail(t, "unprobedStart with a mode", with(append(unprobed, "--set", "migration.mode=dry-run", "--set", "replicaCount=0")...),
-		"migration.unprobedStart")
-	// With signing on, the boot rewrite of a Postgres store leaves every
-	// unsigned row unsigned and runs no reviewed dry run, so the Job path
-	// applies.
-	mustFail(t, "unprobedStart with signing on", with(append(unprobed, "--set", "signing.mode=registry-key")...),
-		"migration.unprobedStart", "signing.mode=none", "migration.mode=dry-run")
+	job := oneWorkload(t, out, "Job")
+	jc := containerOf(t, job, migrateContainer)
+	if want := []string{"sign-stored-rows", "--dry-run"}; !reflect.DeepEqual(jc.Args, want) {
+		t.Errorf("a signing-off dry run passes %v; want %v", jc.Args, want)
+	}
+	if got := envValue(jc, "PODIUM_SIGN"); got != "none" {
+		t.Errorf("a signing-off Job's PODIUM_SIGN is %q; want none", got)
+	}
+	if findMount(jc, "signing") != nil || findVolume(job, "signing") != nil {
+		t.Errorf("a signing-off Job mounts a signing volume: %v", jc.VolumeMounts)
+	}
 
-	// The install acknowledgement: the chart cannot see the store, so a serving
-	// install states that the store is empty or migrated.
-	mustFail(t, "an install with serving replicas and no storeReady", []string{"--set", withSigningKey},
-		"migration.storeReady=true", "content-hash-framing completion record in data_migrations", "replicaCount=0",
-		"migration.previousImage")
-	// An install has no live Deployment to read the previous image from, so an
-	// install over an existing store names it for the image gate.
-	mustFail(t, "a zero-replica install with no previousImage", []string{"--set", withSigningKey, "--set", "replicaCount=0"},
-		"migration.previousImage", "migration.storeReady=true", "image gate")
+	// The chart requires the digest for every run, including one without
+	// --include-unsigned, for which the command itself would accept none.
+	for what, sets := range map[string][]string{
+		"a run without a plan digest":                         nil,
+		"a run with a malformed plan digest":                  {"--set", "migration.planDigest=sha256:XYZ"},
+		"a run with an uppercase plan digest":                 {"--set", "migration.planDigest=sha256:" + strings.Repeat("A", 64)},
+		"a run with includeUnsigned=false and no plan digest": {"--set", "migration.includeUnsigned=false"},
+	} {
+		mustFail(t, what, with(append(append(zero, "--set", "migration.mode=run"), sets...)...),
+			"migration.planDigest", "dry-run: plan digest")
+	}
+
+	for _, mode := range []string{"dry-run", "run"} {
+		mustFail(t, mode+" without migration.previousImage",
+			with(append(zero, "--set", "migration.mode="+mode, "--set", "migration.previousImage=")...),
+			"migration.previousImage", "v0.4.0")
+	}
+	mustFail(t, "a migration on the previous image",
+		with(append(zero, "--set", "migration.mode=dry-run", "--set", "image.repository=r", "--set", "image.tag=t",
+			"--set", "migration.previousImage=r:t")...),
+		"migration.previousImage", "r:t")
+	appImage := "ghcr.io/lennylabs/podium:" + chartAppVersion(t)
+	mustFail(t, "a migration on the AppVersion default image",
+		with(append(zero, "--set", "migration.mode=dry-run", "--set", "migration.previousImage="+appImage)...),
+		"migration.previousImage", appImage)
+
 	for what, args := range map[string][]string{
-		"storeReady=true":                   {"--set", withSigningKey, "--set", "migration.storeReady=true"},
-		"replicaCount=0 with previousImage": {"--set", withSigningKey, "--set", "replicaCount=0", "--set", "migration.previousImage=old:0.4.0"},
-		"replicaCount=0 with storeReady":    {"--set", withSigningKey, "--set", "replicaCount=0", "--set", "migration.storeReady=true"},
-		"an upgrade with storeReady":        {"--set", withSigningKey, "--is-upgrade", "--set", "migration.storeReady=true"},
-		"a zero-replica upgrade":            {"--set", withSigningKey, "--is-upgrade", "--set", "replicaCount=0"},
+		"a serving install":      {"--set", withSigningKey, "--set", "replicaCount=3"},
+		"a zero-replica install": {"--set", withSigningKey, "--set", "replicaCount=0"},
+		"a serving upgrade":      {"--is-upgrade", "--set", withSigningKey},
 	} {
 		if out, err := renderArgs(t, args...); err != nil {
-			t.Errorf("an install acknowledgement case (%s) refused: %v\n%s", what, err, out)
+			t.Errorf("%s refused: %v\n%s", what, err, out)
 		}
-	}
-}
-
-// With no cluster to read, the lookup gates cannot confirm that the release's
-// pods are stopped, that the image is new, or that a dry run was reviewed, so
-// a migration render with the gates on fails closed. A serving upgrade render
-// sees no live Deployment, which is also what a helm upgrade after the
-// Deployment was deleted by hand sees: it cannot tell whether the store is
-// migrated, so it requires the storeReady acknowledgement an install requires.
-//
-// Spec: §13.4
-func TestChart_LiveGatesFailClosedOffline(t *testing.T) {
-	t.Parallel()
-	gated := []string{"--is-upgrade", "--set", withSigningKey, "--set", "replicaCount=0"}
-	mustFail(t, "an offline dry-run render", append(gated, "--set", "migration.mode=dry-run"), "image gate")
-	out, err := renderArgs(t, append(gated, "--set", "migration.mode=run", "--set", "migration.reviewedDryRun=u1")...)
-	if err == nil {
-		t.Error("an offline run render passed the lookup gates")
-	} else if !strings.Contains(out, "image gate") && !strings.Contains(out, "reviewed-dry-run gate") {
-		t.Errorf("an offline run render failed without naming a gate: %s", out)
-	}
-	mustFail(t, "a serving upgrade with no live Deployment and no storeReady",
-		[]string{"--is-upgrade", "--set", withSigningKey, "--set", "replicaCount=3"},
-		"serving preflight", "no live Deployment", "migration.storeReady=true",
-		"content-hash-framing completion record in data_migrations", "migration.previousImage")
-	out, err = renderArgs(t, "--is-upgrade", "--set", withSigningKey, "--set", "replicaCount=3", "--set", "migration.storeReady=true")
-	if err != nil {
-		t.Fatalf("a serving upgrade with no live Deployment and storeReady refused: %v\n%s", err, out)
-	}
-	if got := oneWorkload(t, out, "Deployment").Metadata.Annotations[annFormat]; got != storedRowFormat {
-		t.Errorf("a serving upgrade with storeReady records %s=%q; want %s", annFormat, got, storedRowFormat)
 	}
 }
 
@@ -509,121 +535,6 @@ func TestChart_StrategyRendering(t *testing.T) {
 	s = strategy("strategy.type=Recreate", "strategy.rollingUpdate.maxSurge=1")
 	if _, ok := s["rollingUpdate"]; ok || s["type"] != "Recreate" {
 		t.Errorf("a Recreate strategy renders %v; want type Recreate and no rollingUpdate key", s)
-	}
-}
-
-// A signing-off first start runs the rewrite at boot, so the kubelet must not
-// restart it: the startup and liveness probes go, and readiness stays so the
-// pod receives no traffic mid-pass. The render claims no migration, because
-// the boot pass may still hold rows back.
-//
-// Spec: §13.4
-func TestChart_UnprobedStartOmitsKillingProbes(t *testing.T) {
-	t.Parallel()
-	d := oneWorkload(t, render(t, "signing.mode=none", "migration.unprobedStart=true",
-		"replicaCount=1", "strategy.type=Recreate"), "Deployment")
-	c := containerOf(t, d, "podium-server")
-	if c.StartupProbe != nil || c.LivenessProbe != nil {
-		t.Errorf("unprobedStart keeps a killing probe: startup %v, liveness %v", c.StartupProbe, c.LivenessProbe)
-	}
-	if c.ReadinessProbe == nil {
-		t.Error("unprobedStart drops the readiness probe, so the pod receives traffic mid-pass")
-	}
-	if _, ok := d.Metadata.Annotations[annFormat]; ok {
-		t.Errorf("an unprobedStart render claims %s", annFormat)
-	}
-}
-
-// migration.preflight=false is the operator's assertion that the rewrite is
-// complete, so a serving render records it; a migration render never does.
-//
-// Spec: §13.4
-func TestChart_PreflightOffWritesAnnotationOnlyWhenServing(t *testing.T) {
-	t.Parallel()
-	// An upgrade, so neither the install acknowledgement nor a passing serving
-	// preflight can write the annotation, and only the preflight=false branch
-	// does.
-	out, err := renderArgs(t, "--is-upgrade", "--set", withSigningKey, "--set", "migration.preflight=false")
-	if err != nil {
-		t.Fatalf("a serving upgrade with preflight=false refused: %v\n%s", err, out)
-	}
-	d := oneWorkload(t, out, "Deployment")
-	if got := d.Metadata.Annotations[annFormat]; got != storedRowFormat {
-		t.Errorf("a serving upgrade with preflight=false records %s=%q; want %s", annFormat, got, storedRowFormat)
-	}
-	// The zero-replica step precedes the migrate Job, so preflight=false there
-	// must not mark the store migrated, which would let the next serving render
-	// pass on the annotation alone.
-	out, err = renderArgs(t, "--is-upgrade", "--set", withSigningKey, "--set", "replicaCount=0", "--set", "migration.preflight=false")
-	if err != nil {
-		t.Fatalf("a zero-replica upgrade with preflight=false refused: %v\n%s", err, out)
-	}
-	if _, ok := oneWorkload(t, out, "Deployment").Metadata.Annotations[annFormat]; ok {
-		t.Errorf("a zero-replica upgrade with preflight=false records %s", annFormat)
-	}
-	d = oneWorkload(t, renderMigration(t, "dry-run"), "Deployment")
-	if _, ok := d.Metadata.Annotations[annFormat]; ok {
-		t.Errorf("a migration render with preflight=false records %s", annFormat)
-	}
-}
-
-// An install has no live Deployment to read, so an install over an existing
-// store records the previous image the operator names, and the image gate
-// refuses a migrate Job on it. An install that states the store is ready
-// records the migration as complete, so its first serving upgrade passes the
-// preflight.
-//
-// Spec: §13.4
-func TestChart_InstallRecordsTheStoreState(t *testing.T) {
-	t.Parallel()
-	out, err := renderArgs(t, "--set", withSigningKey, "--set", "replicaCount=0", "--set", "migration.previousImage=old:0.4.0")
-	if err != nil {
-		t.Fatalf("a zero-replica install with previousImage refused: %v\n%s", err, out)
-	}
-	d := oneWorkload(t, out, "Deployment")
-	if got := d.Metadata.Annotations[annPreImage]; got != "old:0.4.0" {
-		t.Errorf("an install over an existing store records %s=%q; want old:0.4.0", annPreImage, got)
-	}
-	if _, ok := d.Metadata.Annotations[annFormat]; ok {
-		t.Errorf("an install over an existing store records %s", annFormat)
-	}
-	d = oneWorkload(t, render(t, withSigningKey, "replicaCount=0"), "Deployment")
-	if got := d.Metadata.Annotations[annFormat]; got != storedRowFormat {
-		t.Errorf("a zero-replica install with storeReady records %s=%q; want %s", annFormat, got, storedRowFormat)
-	}
-	if _, ok := d.Metadata.Annotations[annPreImage]; ok {
-		t.Errorf("a zero-replica install with storeReady records %s", annPreImage)
-	}
-}
-
-// A run must read the store, the object store, and the signing key through the
-// configuration its reviewed dry run read, or it attests rows nobody reviewed.
-// The digest the gate compares is equal across the two modes and changes with
-// each piece of that configuration.
-//
-// Spec: §13.4
-func TestChart_MigrateJobRecordsItsPodConfig(t *testing.T) {
-	t.Parallel()
-	digest := func(mode string, sets ...string) string {
-		return oneWorkload(t, renderMigration(t, mode, sets...), "Job").Metadata.Annotations[annPodConfig]
-	}
-	base := digest("dry-run")
-	if got := digest("run"); got != base {
-		t.Errorf("the run's pod-config %s differs from the dry run's %s under the same values", got, base)
-	}
-	if got := digest("run", "migration.includeUnsigned=false", "migration.reviewedDryRun=u2"); got != base {
-		t.Errorf("a migration value changed the pod-config digest: %s, want %s", got, base)
-	}
-	for what, set := range map[string]string{
-		"config.objectStore.endpoint": "config.objectStore.endpoint=http://other:9000",
-		"signing.secretName":          "signing.secretName=other",
-		"signing.key":                 "signing.key=other.key",
-		"existingSecret":              "existingSecret=other",
-		"migrationObjectReadTimeout":  "config.migrationObjectReadTimeout=5m",
-	} {
-		if got := digest("run", set); got == base {
-			t.Errorf("changing %s leaves the pod-config digest at %s", what, got)
-		}
 	}
 }
 
@@ -665,6 +576,70 @@ func TestChart_MigrationConfigReachesBothPods(t *testing.T) {
 	}
 }
 
+// renderNotes renders the chart's NOTES through a client-side install dry run,
+// which needs no cluster. `helm template` does not render NOTES.
+func renderNotes(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := helmRun(t, append([]string{"install", "t", chartDir, "--dry-run=client"}, args...)...)
+	if err != nil {
+		t.Fatalf("helm install --dry-run=client %v: %v\n%s", args, err, out)
+	}
+	i := strings.Index(out, "NOTES:")
+	if i < 0 {
+		t.Fatalf("rendered output carries no NOTES section:\n%s", out)
+	}
+	return out[i:]
+}
+
+// The dry-run and run NOTES follow the signing mode. With signing off the
+// command signs no row and checks no signature, so the notes tell the
+// operator neither to review signing nor to fix the signing Secret.
+//
+// Spec: §13.4
+func TestChart_NotesFollowTheSigningMode(t *testing.T) {
+	t.Parallel()
+	check := func(t *testing.T, notes string, want, absent []string) {
+		t.Helper()
+		for _, w := range want {
+			if !strings.Contains(notes, w) {
+				t.Errorf("the NOTES do not carry %q:\n%s", w, notes)
+			}
+		}
+		for _, a := range absent {
+			if strings.Contains(notes, a) {
+				t.Errorf("the NOTES carry %q:\n%s", a, notes)
+			}
+		}
+	}
+	off := []string{"--set", "signing.mode=none", "--set", "migration.includeUnsigned=false"}
+	on := []string{"--set", withSigningKey}
+	migration := func(mode string, signing []string, extra ...string) []string {
+		args := append([]string{"--set", "replicaCount=0", "--set", "migration.previousImage=" + previousImage,
+			"--set", "migration.mode=" + mode}, signing...)
+		return append(args, extra...)
+	}
+
+	t.Run("dry-run", func(t *testing.T) {
+		t.Parallel()
+		check(t, renderNotes(t, migration("dry-run", off)...),
+			[]string{"signed_by=unchecked", "grep -E '^dry-run: plan digest ' dry-run.log", "migration.planDigest=<digest>"},
+			[]string{"signature_unverified", "signing Secret"})
+		check(t, renderNotes(t, migration("dry-run", on)...),
+			[]string{"signed_by=unsigned and sign=true", "signature_unverified", "grep -E '^dry-run: plan digest ' dry-run.log"},
+			[]string{"signed_by=unchecked"})
+	})
+	t.Run("run", func(t *testing.T) {
+		t.Parallel()
+		digest := []string{"--set", "migration.planDigest=" + zeroDigest}
+		check(t, renderNotes(t, migration("run", off, digest...)...),
+			[]string{"the Job signs no row", "--plan-digest=" + zeroDigest, "Exit status 3", "run.log", "exits at start"},
+			[]string{"unsigned left", "materialize.signature_missing"})
+		check(t, renderNotes(t, migration("run", on, append(digest, "--set", "migration.includeUnsigned=false")...)...),
+			[]string{"rehash: N unsigned left", "materialize.signature_missing"},
+			[]string{"the Job signs no row"})
+	})
+}
+
 // A zero-replica render prints the stop step's wait command, including the
 // phase selector that lets it return past an evicted pod. `helm template` does
 // not render NOTES, and a client-side install dry run needs no cluster.
@@ -672,16 +647,7 @@ func TestChart_MigrationConfigReachesBothPods(t *testing.T) {
 // Spec: §13.4
 func TestChart_NotesStopStep(t *testing.T) {
 	t.Parallel()
-	out, err := helmRun(t, "install", "t", chartDir, "--dry-run=client",
-		"--set", withSigningKey, "--set", "replicaCount=0", "--set", "migration.previousImage=old:0.4.0")
-	if err != nil {
-		t.Fatalf("helm install --dry-run=client: %v\n%s", err, out)
-	}
-	i := strings.Index(out, "NOTES:")
-	if i < 0 {
-		t.Fatalf("rendered output carries no NOTES section:\n%s", out)
-	}
-	notes := out[i:]
+	notes := renderNotes(t, "--set", withSigningKey, "--set", "replicaCount=0")
 	for _, want := range []string{
 		"kubectl wait --for=delete pod",
 		"app.kubernetes.io/name=podium,app.kubernetes.io/instance=t",

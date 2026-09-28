@@ -25,10 +25,7 @@ const withSigningKey = "signing.secretName=sk"
 
 // render runs `helm template` with the given overrides and returns the
 // manifests. It skips when helm is absent so the default `go test ./...` run
-// stays clean on a machine without it. It states migration.storeReady=true,
-// which a `helm install` with serving replicas requires, so a test whose
-// subject is not the install acknowledgement renders; those tests use
-// renderArgs.
+// stays clean on a machine without it.
 func render(t *testing.T, sets ...string) string {
 	t.Helper()
 	out, err := renderErr(t, sets...)
@@ -41,7 +38,7 @@ func render(t *testing.T, sets ...string) string {
 // renderErr is render without the failure, for the cases that assert a refusal.
 func renderErr(t *testing.T, sets ...string) (string, error) {
 	t.Helper()
-	args := []string{"--set", "migration.storeReady=true"}
+	var args []string
 	for _, s := range sets {
 		args = append(args, "--set", s)
 	}
@@ -49,8 +46,7 @@ func renderErr(t *testing.T, sets ...string) (string, error) {
 }
 
 // renderArgs runs `helm template t <chart>` with the given arguments passed
-// through unchanged, such as --set, -f, --namespace, and --is-upgrade. It adds
-// nothing, so a test of the install acknowledgement sees the chart's defaults.
+// through unchanged, such as --set, -f, --namespace, and --is-upgrade.
 func renderArgs(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	return helmRun(t, append([]string{"template", "t", chartDir}, args...)...)
@@ -519,6 +515,23 @@ func TestChart_SigningModeNoneMountsNoKey(t *testing.T) {
 	}
 	if findMount(c, "signing") != nil || findVolume(d, "signing") != nil {
 		t.Errorf("signing.mode=none renders a signing mount or volume: %v %v", c.VolumeMounts, d.Spec.Template.Spec.Volumes)
+	}
+}
+
+// A signing-off start over a store that has completed the §13.4 rewrite skips
+// it, and one over an unmigrated store with manifest rows exits at start, so
+// no signing-off start runs the rewrite under the probes. The startup and
+// liveness probes therefore render in both signing modes.
+//
+// Spec: §13.4
+func TestChart_SigningModeNoneKeepsTheProbes(t *testing.T) {
+	t.Parallel()
+	c := deploymentContainer(t, render(t, "signing.mode=none"))
+	if c.StartupProbe == nil || c.LivenessProbe == nil || c.ReadinessProbe == nil {
+		t.Errorf("signing.mode=none drops a probe: startup %v, liveness %v, readiness %v", c.StartupProbe, c.LivenessProbe, c.ReadinessProbe)
+	}
+	if c.StartupProbe != nil && c.StartupProbe.HTTPGet.Path != "/healthz" {
+		t.Errorf("signing.mode=none startupProbe path is %q; want /healthz", c.StartupProbe.HTTPGet.Path)
 	}
 }
 

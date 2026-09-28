@@ -1,15 +1,10 @@
 {{- include "podium.validate" . }}
-{{- $migrationAnnotations := include "podium.migrationAnnotations" . | trim }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "podium.fullname" . }}
   labels:
     {{- include "podium.labels" . | nindent 4 }}
-  {{- with $migrationAnnotations }}
-  annotations:
-    {{- . | nindent 4 }}
-  {{- end }}
 spec:
   replicas: {{ .Values.replicaCount }}
   # The strategy renders rollingUpdate explicitly under RollingUpdate, so the
@@ -54,14 +49,10 @@ spec:
               name: http
           {{- with include "podium.envFrom" . | trim }}{{ . | nindent 10 }}{{- end }}
           {{- with include "podium.env" . | trim }}{{ . | nindent 10 }}{{- end }}
-          {{- if not .Values.migration.unprobedStart }}
           # The registry answers no probe path until its boot work finishes.
           # A start after a successful migrate Job finds the §13.4 completion
           # record and skips the rewrite, so the startup budget covers an
-          # ordinary start. A signing-off first start, which cannot use the
-          # Job, runs the rewrite at boot with migration.unprobedStart, which
-          # omits this probe and the liveness probe so the kubelet never
-          # restarts the pod mid-rewrite.
+          # ordinary start.
           startupProbe:
             httpGet:
               path: /healthz
@@ -73,7 +64,6 @@ spec:
               path: /healthz
               port: http
             initialDelaySeconds: 5
-          {{- end }}
           readinessProbe:
             httpGet:
               path: /readyz

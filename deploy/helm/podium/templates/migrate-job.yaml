@@ -1,12 +1,13 @@
 {{- /*
 The §13.4 migrate Job. It runs `podium-server sign-stored-rows` as a
-post-upgrade hook while the Deployment is held at zero replicas, so the
-store-wide rewrite runs in a pod with no probe to kill it. With the completion
-record absent, the command performs the whole rewrite in place of the first
-start and records its completion, and the registry pods that start afterwards
-skip it. The render guards in podium.validate refuse every render that would
-run it beside a live registry pod, on the previous image, or without a reviewed
-dry run.
+post-install and post-upgrade hook while the Deployment is held at zero
+replicas, so the store-wide rewrite runs in a pod with no probe to kill it.
+With the completion record absent, the command performs the whole rewrite in
+place of the first start and records its completion, and the registry pods
+that start afterwards skip it. podium.validate refuses a render with serving
+replicas, without migration.previousImage or on that image, or a run without a
+plan digest. The command refuses a run whose plan differs from the reviewed
+dry run's.
 
 Spec: §13.4
 */ -}}
@@ -33,25 +34,11 @@ metadata:
   labels:
     {{- include "podium.migrateLabels" . | nindent 4 }}
   annotations:
-    # A post-upgrade hook runs after Helm applies the Deployment at zero
-    # replicas. before-hook-creation deletes the previous Job only after the
-    # render, so the gates read the Job this one replaces.
-    helm.sh/hook: post-upgrade
+    # Helm runs the hook after it applies the Deployment at zero replicas, on
+    # an install over an existing store as on an upgrade. Argo CD runs it in
+    # PostSync and applies before-hook-creation as BeforeHookCreation.
+    helm.sh/hook: post-install,post-upgrade
     helm.sh/hook-delete-policy: before-hook-creation
-    # The record the gates read back on the next render.
-    podium.lennylabs.dev/migration-mode: {{ $mode }}
-    podium.lennylabs.dev/stored-row-format: {{ include "podium.storedRowFormat" . }}
-    podium.lennylabs.dev/image: {{ include "podium.image" . | quote }}
-    podium.lennylabs.dev/include-unsigned: {{ toString .Values.migration.includeUnsigned | quote }}
-    podium.lennylabs.dev/release-revision: {{ toString .Release.Revision | quote }}
-    # The live Deployment's UID ties the Job to this instance of the release,
-    # whose revision numbers a reinstall restarts; the pod-config digest ties a
-    # run to the configuration its reviewed dry run read.
-    podium.lennylabs.dev/deployment-uid: {{ include "podium.liveDeploymentUID" . | quote }}
-    podium.lennylabs.dev/pod-config: {{ include "podium.podConfigDigest" . | quote }}
-    {{- if eq $mode "run" }}
-    podium.lennylabs.dev/reviewed-dry-run: {{ toString .Values.migration.reviewedDryRun | quote }}
-    {{- end }}
 spec:
   backoffLimit: {{ .Values.migration.backoffLimit }}
   {{- if gt (int .Values.migration.activeDeadlineSeconds) 0 }}
@@ -87,6 +74,9 @@ spec:
             {{- end }}
             {{- if eq $mode "dry-run" }}
             - --dry-run
+            {{- end }}
+            {{- if eq $mode "run" }}
+            - --plan-digest={{ .Values.migration.planDigest }}
             {{- end }}
           {{- with include "podium.envFrom" . | trim }}{{ . | nindent 10 }}{{- end }}
           {{- with include "podium.env" . | trim }}{{ . | nindent 10 }}{{- end }}

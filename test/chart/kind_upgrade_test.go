@@ -1,11 +1,11 @@
 // Live test of the chart's §13.4 upgrade procedure on a kind cluster.
 //
-// The render tests pin what `helm template` can see. The lookup gates, the
-// hook Job's lifecycle, the server-side-apply strategy switch, and the
-// registry's behavior over a store that v0.4.0 wrote appear only when Helm
-// talks to a cluster, so this test installs v0.4.0, seeds its store, and walks
-// the upgrade procedure docs/deployment/clustered.md states, step by step,
-// including every refusal the procedure relies on.
+// The render tests pin every values-only refusal, because the chart reads
+// nothing from the cluster. The hook Job's lifecycle, the plan-digest
+// binding of the run, and the registry's boot refusal over a store that
+// v0.4.0 wrote appear only on a cluster, so this test installs v0.4.0, seeds
+// its store, and walks the upgrade procedure docs/deployment/clustered.md
+// states, step by step, including every refusal the procedure relies on.
 //
 // It is opt-in: it runs only with PODIUM_LIVE_KIND=1 and with docker, kind,
 // kubectl, helm, and git on PATH, and it skips otherwise, so `go test ./...`
@@ -22,7 +22,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -170,66 +169,41 @@ func signingOnUpgrade(t *testing.T, env *liveEnv, ns string) {
 	v040Revision := k.lastRevision(t)
 
 	newValues := k.valuesFile("new", map[string]any{
-		"image":   map[string]any{"repository": liveRepo, "tag": liveCurrent},
-		"signing": map[string]any{"secretName": "podium-signing-key"},
+		"image":     map[string]any{"repository": liveRepo, "tag": liveCurrent},
+		"signing":   map[string]any{"secretName": "podium-signing-key"},
+		"migration": map[string]any{"previousImage": liveRepo + ":" + liveOld},
 	})
-	oldValues := k.valuesFile("old", map[string]any{
-		"signing": map[string]any{"secretName": "podium-signing-key"},
-	})
-	watch := k.watchRegistryImages(liveRepo + ":" + liveCurrent)
 
 	step := func(name string, f func(t *testing.T)) {
 		if !t.Run(name, f) {
 			t.FailNow()
 		}
 	}
-	step("a-default-upgrade-refused", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=2")
-		wantIn(t, out, "serving preflight")
-		k.assertRegistryPods(t, 2, liveRepo+":"+liveOld)
-	})
-	step("b-stop-gate", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues,
-			"--set", "replicaCount=0", "--set", "migration.mode=dry-run")
-		wantIn(t, out, "still live or terminating", "runs 2 replica(s)", "zero-replica step")
+	// The chart renders a serving upgrade over the unmigrated store, and the
+	// registry refuses it at start: the new pods exit, the rolling update
+	// keeps the v0.4.0 pods, and the store is unchanged.
+	step("a-default-upgrade-refused-at-boot", func(t *testing.T) {
+		before := k.storeSnapshot(t)
+		k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=2",
+			"--wait", "--timeout", "5m")
+		k.assertBootRefused(t, before)
+		k.assertReadyOn(t, 2, liveRepo+":"+liveOld)
 	})
 	step("c-stop-with-a-failed-pod", func(t *testing.T) {
 		k.apply(t, fmt.Sprintf(failedPodManifest, ns, busyboxImage))
 		k.waitFor(t, 3*time.Minute, "pod/evicted-look-alike to reach Failed", func() bool {
 			return k.kubectlOut("get", "pod", "evicted-look-alike", "-o", "jsonpath={.status.phase}") == "Failed"
 		})
-		k.helmOK(t, "upgrade", liveRelease, k.chart(), "-f", oldValues, "--set", "replicaCount=0")
-		k.stopWait(t)
-		k.assertRegistryPods(t, 0, "")
-	})
-	step("d-image-gate", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", oldValues,
-			"--set", "replicaCount=0", "--set", "migration.mode=dry-run")
-		// Step 2 kept the v0.4.0 tag, so no pre-migration-image was recorded
-		// and the refusal must diagnose the kept tag.
-		wantIn(t, out, "image gate", "image.repository and image.tag must name this release",
-			liveRepo+":"+liveOld, "zero-replica step kept the previous image")
-		if got := k.kubectlOut("get", "job", "-o", "name"); got != "" {
-			t.Fatalf("a Job exists after the image gate refused: %s", got)
-		}
 		k.helmOK(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0")
 		k.stopWait(t)
-		got := k.kubectlOut("get", "deployment", liveFullname, "-o",
-			`jsonpath={.metadata.annotations.podium\.lennylabs\.dev/pre-migration-image}`)
-		if got != liveRepo+":"+liveOld {
-			t.Fatalf("pre-migration-image is %q; want %s", got, liveRepo+":"+liveOld)
-		}
+		k.assertRegistryPods(t, 0, "")
 		k.backup(t)
 	})
-	step("e-run-without-a-reviewed-dry-run", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0",
-			"--set", "migration.mode=run", "--set", "migration.reviewedDryRun=00000000-0000-0000-0000-000000000000")
-		wantIn(t, out, "reviewed-dry-run gate")
-	})
-	var uid string
+	var digest string
 	step("f-dry-run", func(t *testing.T) {
-		log, notes := k.dryRun(t, newValues)
-		wantIn(t, notes, liveJob, "jsonpath='{.metadata.uid}'")
+		var log, notes string
+		log, notes, digest = k.dryRun(t, newValues)
+		wantIn(t, notes, liveJob, "grep -E '^dry-run: plan digest ' dry-run.log", "migration.planDigest=<digest>")
 		for _, id := range []string{"/demo/hello/greet@", "/demo/hello/bigref@"} {
 			if !regexp.MustCompile(regexp.QuoteMeta(id) + `\S* class=\S+ target=\S+ write=true sign=true signed_by=unsigned`).MatchString(log) {
 				t.Errorf("the dry run lists no sign=true signed_by=unsigned line for %s:\n%s", id, log)
@@ -238,72 +212,46 @@ func signingOnUpgrade(t *testing.T, env *liveEnv, ns string) {
 		if k.recordPresent(t) {
 			t.Fatal("the dry run wrote the completion record")
 		}
-		uid = k.kubectlOut("get", "job", liveJob, "-o", "jsonpath={.metadata.uid}")
-		if uid == "" {
-			t.Fatal("the dry-run Job has no UID")
+	})
+	// An unsigned row stored after the dry run changes the plan the run
+	// attests, so the run refuses before any write and prints its own plan.
+	step("g3-run-after-a-planted-row", func(t *testing.T) {
+		k.plantUnsignedRow(t)
+		log, _, err := k.runJob(t, newValues, digest)
+		if err == nil {
+			t.Fatalf("the run succeeded over a planted row:\n%s", log)
 		}
-	})
-	// A failed render creates no release revision, so the refusals below leave
-	// the dry-run Job valid for the later steps.
-	step("e2-run-naming-another-uid", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0",
-			"--set", "migration.mode=run", "--set", "migration.reviewedDryRun=00000000-0000-0000-0000-000000000000")
-		wantIn(t, out, "reviewed-dry-run gate", "uid is")
-	})
-	step("g2-run-under-a-changed-pod-config", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0",
-			"--set", "migration.mode=run", "--set", "migration.reviewedDryRun="+uid,
-			"--set", "config.migrationObjectReadTimeout=45s")
-		wantIn(t, out, "reviewed-dry-run gate", "pod-config")
-	})
-	step("g-run-with-a-mismatched-setting", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0",
-			"--set", "migration.mode=run", "--set", "migration.reviewedDryRun="+uid,
-			"--set", "migration.includeUnsigned=false")
-		wantIn(t, out, "reviewed-dry-run gate", "include-unsigned")
-	})
-	// The rendered pod configuration names Secrets without their contents, and
-	// with an external database the DSN lives inside existingSecret, so an edit
-	// there can point the run at a store the dry run never read. The digest
-	// carries each referenced Secret's resourceVersion, so the run is refused
-	// after the edit and a new dry run is required.
-	step("g3-run-after-a-secret-edit", func(t *testing.T) {
-		k.kubectlMust(t, "patch", "secret", "podium-secrets", "--type=merge",
-			"-p", `{"stringData":{"PODIUM_SECRET_EDIT_MARKER":"1"}}`)
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0",
-			"--set", "migration.mode=run", "--set", "migration.reviewedDryRun="+uid)
-		wantIn(t, out, "reviewed-dry-run gate", "pod-config")
-		k.dryRun(t, newValues)
-		uid = k.kubectlOut("get", "job", liveJob, "-o", "jsonpath={.metadata.uid}")
-		if uid == "" {
-			t.Fatal("the dry-run Job after the Secret edit has no UID")
+		k.assertRunRefused(t, log)
+		if !regexp.MustCompile(`(?m)^plan: \S*/demo/hello/greet@` + regexp.QuoteMeta(plantedVersion) + ` class=`).MatchString(log) {
+			t.Errorf("the refused run prints no plan: line for the planted row:\n%s", log)
 		}
+		k.psql(t, fmt.Sprintf(`SELECT format('DELETE FROM %%I.manifests WHERE version = %%L', table_schema, '%s')
+  FROM information_schema.tables WHERE table_name = 'manifests' \gexec
+`, plantedVersion))
+		_, _, digest = k.dryRun(t, newValues)
 	})
 	step("h-serve-after-only-a-dry-run", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues)
-		wantIn(t, out, "serving preflight")
+		before := k.storeSnapshot(t)
+		k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--wait", "--timeout", "5m")
+		k.assertBootRefused(t, before)
+		k.helmOK(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0")
+		k.stopWait(t)
 	})
 	step("i-run-during-an-object-store-outage", func(t *testing.T) {
 		k.kubectlMust(t, "scale", "deployment/minio", "--replicas=0")
 		k.kubectlMust(t, "wait", "--for=delete", "pod", "-l", "app=minio", "--timeout=3m")
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0",
-			"--set", "migration.mode=run", "--set", "migration.reviewedDryRun="+uid, "--timeout", "30m")
-		t.Logf("helm upgrade during the outage:\n%s", out)
-		if got := k.kubectlOut("get", "job", liveJob, "-o", "jsonpath={.status.failed}"); got == "" || got == "0" {
-			t.Fatalf("the run Job did not fail during the outage (status.failed=%q)", got)
+		log, out, err := k.runJob(t, newValues, digest)
+		if err == nil {
+			t.Fatalf("the run succeeded during the outage:\n%s\n%s", out, log)
 		}
-		wantIn(t, k.kubectlOut("logs", "job/"+liveJob), "body_unavailable")
-		if k.recordPresent(t) {
-			t.Fatal("a failed run wrote the completion record")
+		k.assertRunRefused(t, log)
+		if !regexp.MustCompile(`(?m)^plan: .* class=body_unavailable`).MatchString(log) {
+			t.Errorf("the refused run prints no body_unavailable plan: line:\n%s", log)
 		}
 		if got := k.kubectlOut("get", "deployment", liveFullname, "-o", "jsonpath={.spec.replicas}"); got != "0" {
 			t.Fatalf("the Deployment has %s replicas after a failed run; want 0", got)
 		}
 		k.assertRegistryPods(t, 0, "")
-	})
-	step("j-serve-after-a-failed-run", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues)
-		wantIn(t, out, "did not succeed")
 	})
 	step("k-rerun-after-the-outage", func(t *testing.T) {
 		k.kubectlMust(t, "scale", "deployment/minio", "--replicas=1")
@@ -312,31 +260,19 @@ func signingOnUpgrade(t *testing.T, env *liveEnv, ns string) {
 		// and a dry run started then holds the object-held row back as
 		// body_unavailable. mc retries until MinIO answers through the Service.
 		k.mc(t, "mc ls m/podium >/dev/null")
-		k.dryRun(t, newValues)
-		uid = k.kubectlOut("get", "job", liveJob, "-o", "jsonpath={.metadata.uid}")
-		out := k.helmOK(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0",
-			"--set", "migration.mode=run", "--set", "migration.reviewedDryRun="+uid, "--timeout", "30m")
-		wantIn(t, out, "kubectl logs job/"+liveJob)
-		wantIn(t, k.kubectlOut("logs", "job/"+liveJob), "rehash: 0 unsigned left")
+		_, _, digest = k.dryRun(t, newValues)
+		log, out, err := k.runJob(t, newValues, digest)
+		if err != nil {
+			t.Fatalf("the reviewed run failed: %v\n%s\n%s", err, out, log)
+		}
+		wantIn(t, out, "--plan-digest="+digest, "run.log")
+		wantIn(t, log, "rehash: 0 unsigned left")
 		if !k.recordPresent(t) {
 			t.Fatal("the run left the completion record unset")
 		}
 		if total, unsigned := k.rowCounts(t); total == 0 || unsigned != 0 {
 			t.Fatalf("after the run the store holds %d row(s), %d unsigned; want every row signed", total, unsigned)
 		}
-		if bad := watch.stop(); len(bad) > 0 {
-			t.Fatalf("registry pods ran %s before the run Job succeeded: %v", liveRepo+":"+liveCurrent, bad)
-		}
-	})
-	// The serving render writes the permanent stored-row-format annotation, so
-	// it must serve the store the run migrated. A changed pod configuration
-	// could point it at another store, and the preflight refuses it; a failed
-	// render creates no revision, so the run Job stays valid for step l.
-	step("k2-serve-under-a-changed-pod-config", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues,
-			"--set", "config.migrationObjectReadTimeout=45s")
-		wantIn(t, out, "serving preflight", "pod configuration")
-		k.assertRegistryPods(t, 0, "")
 	})
 	step("l-serve", func(t *testing.T) {
 		k.helmOK(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--wait", "--timeout", "10m")
@@ -354,18 +290,16 @@ func signingOnUpgrade(t *testing.T, env *liveEnv, ns string) {
 		}
 		k.verifyArtifacts(t, "demo/hello/greet", "demo/hello/bigref")
 	})
+	// A rerun over the migrated store rewrites no content hash, so it runs on
+	// a serving pod: a dry run, then a run bound to its plan digest.
 	step("l2-migration-after-serving", func(t *testing.T) {
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues,
-			"--set", "replicaCount=0", "--set", "migration.mode=dry-run")
-		wantIn(t, out, "migrated-store gate", "kubectl exec deployment/"+liveFullname, "--dry-run")
-		k.assertRegistryPods(t, 2, liveRepo+":"+liveCurrent)
 		plan := k.kubectlMust(t, "exec", "deployment/"+liveFullname, "--",
 			"/usr/local/bin/podium-server", "sign-stored-rows", "--include-unsigned", "--dry-run")
 		if strings.Contains(plan, "signed_by=unsigned") {
 			t.Fatalf("the rerun's dry run lists an unsigned row over the migrated store:\n%s", plan)
 		}
 		rerun := k.kubectlMust(t, "exec", "deployment/"+liveFullname, "--",
-			"/usr/local/bin/podium-server", "sign-stored-rows", "--include-unsigned")
+			"/usr/local/bin/podium-server", "sign-stored-rows", "--include-unsigned", "--plan-digest="+planDigestOf(t, plan))
 		wantIn(t, rerun, "rehash: 0 rewritten, ")
 		if total, unsigned := k.rowCounts(t); total == 0 || unsigned != 0 {
 			t.Fatalf("after the rerun the store holds %d row(s), %d unsigned; want every row signed", total, unsigned)
@@ -384,30 +318,25 @@ func signingOnUpgrade(t *testing.T, env *liveEnv, ns string) {
 		k.restore(t)
 		k.helmOK(t, "rollback", liveRelease, v040Revision, "--wait", "--timeout", "10m")
 		k.assertRegistryPods(t, 2, liveRepo+":"+liveOld)
-		out := k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=2")
-		wantIn(t, out, "serving preflight")
+		before := k.storeSnapshot(t)
+		k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=2",
+			"--wait", "--timeout", "5m")
+		k.assertBootRefused(t, before)
+		k.assertReadyOn(t, 2, liveRepo+":"+liveOld)
 	})
-	// A reinstall restarts the release revision at 1, and the succeeded run
-	// Job of the earlier instance survives helm uninstall. The Job is
-	// relabelled with the revision a collision would give it, so only the
-	// recorded Deployment UID keeps the preflight from accepting it over the
-	// restored, unmigrated store.
+	// An install over an existing store runs the migrate Job as a
+	// post-install hook, so the procedure needs no install-specific step.
 	step("n2-reinstall-over-the-restored-store", func(t *testing.T) {
 		k.helmOK(t, "uninstall", liveRelease, "--wait", "--timeout", "10m")
 		k.stopWait(t)
-		out := k.helmFail(t, "install", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0")
-		wantIn(t, out, "migration.previousImage")
-		k.helmOK(t, "install", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=0",
-			"--set", "migration.previousImage="+liveRepo+":"+liveOld)
-		got := k.kubectlOut("get", "deployment", liveFullname, "-o",
-			`jsonpath={.metadata.annotations.podium\.lennylabs\.dev/pre-migration-image}`)
-		if got != liveRepo+":"+liveOld {
-			t.Fatalf("the reinstall records pre-migration-image %q; want %s", got, liveRepo+":"+liveOld)
+		log, out, err := k.migrationJob(t, "install", newValues, "--set", "migration.mode=dry-run")
+		if err != nil {
+			t.Fatalf("the dry-run install failed: %v\n%s\n%s", err, out, log)
 		}
-		k.kubectlMust(t, "annotate", "--overwrite", "job/"+liveJob, "podium.lennylabs.dev/release-revision=1")
-		out = k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", newValues, "--set", "replicaCount=2")
-		wantIn(t, out, "serving preflight")
-		k.assertRegistryPods(t, 0, "")
+		planDigestOf(t, log)
+		if k.recordPresent(t) {
+			t.Fatal("the post-install dry run wrote the completion record")
+		}
 		k.kubectlMust(t, "delete", "job", "-l", liveCleanup)
 		if got := k.kubectlOut("get", "job", "-l", liveCleanup, "-o", "name"); got != "" {
 			t.Fatalf("the cleanup selector left %s", got)
@@ -415,8 +344,9 @@ func signingOnUpgrade(t *testing.T, env *liveEnv, ns string) {
 	})
 }
 
-// signingOffUpgrade walks the signing-off procedure, case (o), on a release
-// v0.4.0 installed with Helm's server-side apply.
+// signingOffUpgrade walks the signing-off procedure, case (o): the same Job
+// path as signing on, with includeUnsigned false. A serving render before the
+// run is refused at boot, which is the backstop for a skipped run step.
 func signingOffUpgrade(t *testing.T, env *liveEnv, ns string) {
 	k := newCluster(t, env, ns)
 	k.backingServices()
@@ -426,64 +356,68 @@ func signingOffUpgrade(t *testing.T, env *liveEnv, ns string) {
 	values := k.valuesFile("off", map[string]any{
 		"image":   map[string]any{"repository": liveRepo, "tag": liveCurrent},
 		"signing": map[string]any{"mode": "none"},
+		"migration": map[string]any{
+			"includeUnsigned": false,
+			"previousImage":   liveRepo + ":" + liveOld,
+		},
 	})
 
 	k.helmOK(t, "upgrade", liveRelease, k.chart(), "-f", values, "--set", "replicaCount=0")
 	k.stopWait(t)
+	log, notes, digest := k.dryRun(t, values)
+	wantIn(t, log, "signing_key=-")
+	if strings.Contains(log, "sign=true") {
+		t.Errorf("a signing-off dry run plans a signed write:\n%s", log)
+	}
+	wantIn(t, notes, "signed_by=unchecked")
+	if strings.Contains(notes, "signature_unverified") {
+		t.Errorf("the signing-off dry-run NOTES name signature_unverified:\n%s", notes)
+	}
 
-	// The shrunken budget is one second; the boot pass over the seeded store
-	// takes longer, so a pod that kept its startup probe would be killed.
-	k.helmOK(t, "upgrade", liveRelease, k.chart(), "-f", values, "--set", "replicaCount=1",
-		"--set", "strategy.type=Recreate", "--set", "migration.unprobedStart=true",
-		"--set", "startupProbe.failureThreshold=1", "--set", "startupProbe.periodSeconds=1",
-		"--wait", "--timeout", "10m")
-	if got := k.kubectlOut("get", "deployment", liveFullname, "-o", "jsonpath={.spec.strategy}"); got != `{"type":"Recreate"}` {
-		t.Fatalf("the live strategy is %s; want {\"type\":\"Recreate\"}", got)
+	before := k.storeSnapshot(t)
+	k.helmFail(t, "upgrade", liveRelease, k.chart(), "-f", values, "--wait", "--timeout", "5m")
+	k.assertBootRefused(t, before)
+	k.helmOK(t, "upgrade", liveRelease, k.chart(), "-f", values, "--set", "replicaCount=0")
+	k.stopWait(t)
+
+	if log, out, err := k.runJob(t, values, digest); err != nil {
+		t.Fatalf("the signing-off run failed: %v\n%s\n%s", err, out, log)
 	}
-	pods := k.registryPods(t)
-	if len(pods) != 1 || !pods[0].ready || pods[0].restarts != 0 {
-		t.Fatalf("the unprobed pod is %+v; want one Ready pod with 0 restarts", pods)
-	}
-	wantIn(t, k.kubectlOut("logs", "pod/"+pods[0].name), " rewritten, ")
 	if !k.recordPresent(t) {
-		t.Fatal("the boot pass left the completion record unset")
+		t.Fatal("the signing-off run left the completion record unset")
 	}
 
-	k.helmOK(t, "upgrade", liveRelease, k.chart(), "-f", values, "--set", "migration.preflight=false",
-		"--wait", "--timeout", "10m")
-	var strategy struct {
-		Type          string `json:"type"`
-		RollingUpdate struct {
-			MaxSurge       string `json:"maxSurge"`
-			MaxUnavailable string `json:"maxUnavailable"`
-		} `json:"rollingUpdate"`
+	k.helmOK(t, "upgrade", liveRelease, k.chart(), "-f", values, "--wait", "--timeout", "10m")
+	pods := k.registryPods(t)
+	if len(pods) != 2 {
+		t.Fatalf("%d registry pods after the signing-off serving step; want 2", len(pods))
 	}
-	if err := json.Unmarshal([]byte(k.kubectlOut("get", "deployment", liveFullname, "-o", "jsonpath={.spec.strategy}")), &strategy); err != nil {
-		t.Fatalf("decode the live strategy: %v", err)
-	}
-	if strategy.Type != "RollingUpdate" || strategy.RollingUpdate.MaxSurge != "25%" || strategy.RollingUpdate.MaxUnavailable != "25%" {
-		t.Fatalf("the reset strategy is %+v; want RollingUpdate with 25%% values", strategy)
+	for _, p := range pods {
+		if !p.ready || p.restarts != 0 {
+			t.Errorf("pod %s ready=%t restarts=%d; want Ready with 0 restarts", p.name, p.ready, p.restarts)
+		}
+		if log := k.kubectlOut("logs", "pod/"+p.name); strings.Contains(log, " rewritten, ") {
+			t.Errorf("pod %s ran the rewrite at boot:\n%s", p.name, log)
+		}
 	}
 	probes := k.kubectlOut("get", "deployment", liveFullname, "-o",
 		"jsonpath={.spec.template.spec.containers[0].startupProbe.httpGet.path} {.spec.template.spec.containers[0].livenessProbe.httpGet.path}")
 	if probes != "/healthz /healthz" {
-		t.Fatalf("the reset did not restore the startup and liveness probes: %q", probes)
+		t.Fatalf("the signing-off Deployment's startup and liveness probes are %q; want /healthz /healthz", probes)
 	}
 }
 
-// freshInstall covers case (p): the install acknowledgement and the cleanup
-// selector after an uninstall.
+// freshInstall covers case (p): a serving install over an empty store, whose
+// first start records completion, and the cleanup selector after an
+// uninstall.
 func freshInstall(t *testing.T, env *liveEnv, ns string) {
 	k := newCluster(t, env, ns)
 	k.backingServices()
 	k.secrets(true)
-	args := []string{"install", liveRelease, k.chart(),
-		"--set", "image.repository=" + liveRepo, "--set", "image.tag=" + liveCurrent,
+	k.helmOK(t, "install", liveRelease, k.chart(),
+		"--set", "image.repository="+liveRepo, "--set", "image.tag="+liveCurrent,
 		"--set", "signing.secretName=podium-signing-key", "--set", "config.identityProvider.type=",
-		"--set", "replicaCount=1"}
-	out := k.helmFail(t, args...)
-	wantIn(t, out, "migration.storeReady=true")
-	k.helmOK(t, append(args, "--set", "migration.storeReady=true", "--wait", "--timeout", "10m")...)
+		"--set", "replicaCount=1", "--wait", "--timeout", "10m")
 	if got := k.kubectlOut("get", "job", "-o", "name"); got != "" {
 		t.Fatalf("a fresh install rendered a Job: %s", got)
 	}
@@ -718,26 +652,40 @@ func (k *cluster) stopWait(t *testing.T) {
 		"--field-selector=status.phase!=Succeeded,status.phase!=Failed")
 }
 
-// dryRun runs step 3: it starts the dry-run upgrade, streams the Job's log to
-// a file while the Job runs, and checks that the capture is complete.
-func (k *cluster) dryRun(t *testing.T, values string) (log, notes string) {
+// migrationJob runs a helm install or upgrade that renders the migrate Job at
+// zero replicas and streams the Job's log to the caller while the Job runs,
+// as steps 3 and 4 of the procedure stream it to dry-run.log and run.log. A
+// `kubectl logs` read after the Job ends is truncated on a large store. It
+// returns the log, Helm's output, and Helm's error.
+func (k *cluster) migrationJob(t *testing.T, verb, values string, sets ...string) (log, helmOut string, err error) {
 	t.Helper()
 	k.kubectlMust(t, "delete", "job", liveJob, "--ignore-not-found", "--wait=true")
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 	defer cancel()
-	helm := exec.CommandContext(ctx, "helm", k.helmArgs("upgrade", liveRelease, k.chart(), "-f", values,
-		"--set", "replicaCount=0", "--set", "migration.mode=dry-run", "--timeout", "30m")...)
-	var helmOut strings.Builder
-	helm.Stdout, helm.Stderr = &helmOut, &helmOut
+	args := append([]string{verb, liveRelease, k.chart(), "-f", values, "--set", "replicaCount=0"}, sets...)
+	helm := exec.CommandContext(ctx, "helm", k.helmArgs(append(args, "--timeout", "30m")...)...)
+	var out strings.Builder
+	helm.Stdout, helm.Stderr = &out, &out
 	if err := helm.Start(); err != nil {
 		t.Fatal(err)
 	}
-	k.waitFor(t, 10*time.Minute, "the dry-run Job", func() bool {
+	k.waitFor(t, 10*time.Minute, "the migrate Job", func() bool {
 		return k.kubectlOut("get", "job", liveJob, "-o", "name") != ""
 	})
 	log = k.kubectlMust(t, "logs", "-f", "job/"+liveJob, "--pod-running-timeout=10m")
-	if err := helm.Wait(); err != nil {
-		t.Fatalf("the dry-run upgrade failed: %v\n%s\n%s", err, helmOut.String(), log)
+	err = helm.Wait()
+	return log, out.String(), err
+}
+
+// dryRun runs step 3 and checks that the capture is complete: the row lines
+// match the planned count, the rows the digest covers match the digest line's
+// count, and the log ends with the digest line. It returns the log, the
+// NOTES, and the plan digest.
+func (k *cluster) dryRun(t *testing.T, values string) (log, notes, digest string) {
+	t.Helper()
+	log, notes, err := k.migrationJob(t, "upgrade", values, "--set", "migration.mode=dry-run")
+	if err != nil {
+		t.Fatalf("the dry-run upgrade failed: %v\n%s\n%s", err, notes, log)
 	}
 	planned := regexp.MustCompile(`(?m)^dry-run: (\d+) row\(s\) planned`).FindStringSubmatch(log)
 	rows := len(regexp.MustCompile(`(?m)^dry-run: .* class=`).FindAllString(log, -1))
@@ -747,7 +695,144 @@ func (k *cluster) dryRun(t *testing.T, values string) (log, notes string) {
 	if strings.Contains(log, "class=body_unavailable") {
 		t.Fatalf("the dry run reports a body_unavailable row:\n%s", log)
 	}
-	return log, helmOut.String()
+	lines := strings.Split(strings.TrimSpace(log), "\n")
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "dry-run: plan digest ") {
+		t.Fatalf("the dry-run log ends with %q; want the plan digest line\n%s", last, log)
+	}
+	return log, notes, planDigestOf(t, log)
+}
+
+// planDigestLine matches the dry run's digest line.
+var planDigestLine = regexp.MustCompile(`(?m)^dry-run: plan digest (sha256:[0-9a-f]{64}) over (\d+) row\(s\)$`)
+
+// planDigestOf returns the plan digest of a dry-run log, and fails when the
+// digest line is absent or its row count differs from the row lines the
+// digest covers, which are those without class=migrated.
+func planDigestOf(t *testing.T, log string) string {
+	t.Helper()
+	m := planDigestLine.FindStringSubmatch(log)
+	if m == nil {
+		t.Fatalf("the dry-run log carries no plan digest line:\n%s", log)
+	}
+	covered := 0
+	for _, line := range regexp.MustCompile(`(?m)^dry-run: .* class=\S+`).FindAllString(log, -1) {
+		if !strings.Contains(line, " class=migrated ") {
+			covered++
+		}
+	}
+	if m[2] != fmt.Sprint(covered) {
+		t.Fatalf("the digest covers %s row(s), and the log lists %d row(s) outside class=migrated\n%s", m[2], covered, log)
+	}
+	return m[1]
+}
+
+// runJob runs step 4, the run bound to the reviewed plan digest.
+func (k *cluster) runJob(t *testing.T, values, digest string) (log, helmOut string, err error) {
+	t.Helper()
+	return k.migrationJob(t, "upgrade", values, "--set", "migration.mode=run", "--set", "migration.planDigest="+digest)
+}
+
+// assertRunRefused requires a failed run Job whose container exited with the
+// changed-plan status 3, a log naming the changed plan, and no completion
+// record.
+func (k *cluster) assertRunRefused(t *testing.T, log string) {
+	t.Helper()
+	if got := k.kubectlOut("get", "job", liveJob, "-o", "jsonpath={.status.failed}"); got == "" || got == "0" {
+		t.Fatalf("the run Job did not fail (status.failed=%q)", got)
+	}
+	code := k.kubectlOut("get", "pods", "-l", "job-name="+liveJob, "-o",
+		"jsonpath={.items[0].status.containerStatuses[0].state.terminated.exitCode}")
+	if code != "3" {
+		t.Errorf("the run Job's container exited with %q; want 3", code)
+	}
+	wantIn(t, log, "plan changed")
+	if k.recordPresent(t) {
+		t.Fatal("a refused run wrote the completion record")
+	}
+}
+
+// plantedVersion is the version of the unsigned row step g3 plants.
+const plantedVersion = "9.9.9-planted"
+
+// plantUnsignedRow copies the greet row under plantedVersion with no
+// signature, as an unsigned ingest between the dry run and the run would.
+func (k *cluster) plantUnsignedRow(t *testing.T) {
+	t.Helper()
+	before, _ := k.rowCounts(t)
+	k.psql(t, fmt.Sprintf(`DO $$
+DECLARE s text;
+BEGIN
+  FOR s IN SELECT table_schema FROM information_schema.tables WHERE table_name = 'manifests' LOOP
+    EXECUTE format('CREATE TEMP TABLE planted AS SELECT * FROM %%I.manifests WHERE artifact_id = %%L LIMIT 1', s, 'demo/hello/greet');
+    EXECUTE format('UPDATE planted SET version = %%L, signature = %%L', '%s', '');
+    EXECUTE format('INSERT INTO %%I.manifests SELECT * FROM planted', s);
+    DROP TABLE planted;
+  END LOOP;
+END $$;
+`, plantedVersion))
+	if after, _ := k.rowCounts(t); after != before+1 {
+		t.Fatalf("planting a row moved the row count from %d to %d; want one more", before, after)
+	}
+}
+
+// storeSnapshot returns an md5 over every manifest row's key, content hash,
+// and signature in key order, across every schema that holds a manifests
+// table.
+func (k *cluster) storeSnapshot(t *testing.T) string {
+	t.Helper()
+	return k.psql(t, `SELECT 'SELECT md5(coalesce(string_agg(concat_ws(''|'', tenant_id, artifact_id, version, content_hash, signature), E''\n'' ORDER BY tenant_id, artifact_id, version), '''')) FROM ('
+  || string_agg(format('SELECT tenant_id, artifact_id, version, content_hash, signature FROM %I.manifests', table_schema), ' UNION ALL ')
+  || ') rows'
+  FROM information_schema.tables WHERE table_name = 'manifests' \gexec
+`)
+}
+
+// assertBootRefused requires a registry pod on this release's image that has
+// restarted or terminated with a non-zero status, whose previous container
+// log names sign-stored-rows, with the completion record still absent and the
+// manifest rows unchanged from before.
+func (k *cluster) assertBootRefused(t *testing.T, before string) {
+	t.Helper()
+	image := liveRepo + ":" + liveCurrent
+	var refused string
+	k.waitFor(t, 5*time.Minute, "a refused registry pod on "+image, func() bool {
+		out := k.kubectlOut("get", "pods", "-l", liveSelector, "-o",
+			`jsonpath={range .items[*]}{.metadata.name}={.spec.containers[0].image}={.status.containerStatuses[0].lastState.terminated.exitCode}{.status.containerStatuses[0].state.terminated.exitCode}{"\n"}{end}`)
+		for _, line := range strings.Split(out, "\n") {
+			parts := strings.Split(line, "=")
+			if len(parts) != 3 || parts[1] != image || parts[2] == "" || parts[2] == "0" {
+				continue
+			}
+			if strings.Contains(k.kubectlOut("logs", "--previous", "pod/"+parts[0]), "sign-stored-rows") ||
+				strings.Contains(k.kubectlOut("logs", "pod/"+parts[0]), "sign-stored-rows") {
+				refused = parts[0]
+				return true
+			}
+		}
+		return false
+	})
+	t.Logf("pod %s refused to start over the unmigrated store", refused)
+	if k.recordPresent(t) {
+		t.Fatal("a refused start wrote the completion record")
+	}
+	if after := k.storeSnapshot(t); after != before {
+		t.Fatalf("a refused start changed the manifest rows: snapshot %s, want %s", after, before)
+	}
+}
+
+// assertReadyOn requires n Ready registry pods on image, whatever other pods
+// the release runs.
+func (k *cluster) assertReadyOn(t *testing.T, n int, image string) {
+	t.Helper()
+	k.waitFor(t, 10*time.Minute, fmt.Sprintf("%d Ready registry pod(s) on %q", n, image), func() bool {
+		ready := 0
+		for _, p := range k.registryPods(t) {
+			if p.image == image && p.ready {
+				ready++
+			}
+		}
+		return ready == n
+	})
 }
 
 // livePod is the subset of a registry pod the assertions read.
@@ -819,60 +904,6 @@ func (k *cluster) assertRegistryPods(t *testing.T, n int, image string) {
 		}
 		return true
 	})
-}
-
-// imageWatch records every registry pod seen running a given image.
-type imageWatch struct {
-	done chan struct{}
-	wg   sync.WaitGroup
-	mu   sync.Mutex // guards seen
-	seen map[string]bool
-}
-
-// watchRegistryImages polls the registry pods until stop and records any that
-// runs image, so an assertion covers every moment in between rather than the
-// moments a case happens to look.
-func (k *cluster) watchRegistryImages(image string) *imageWatch {
-	w := &imageWatch{done: make(chan struct{}), seen: map[string]bool{}}
-	w.wg.Add(1)
-	go func() {
-		defer w.wg.Done()
-		for {
-			select {
-			case <-w.done:
-				return
-			case <-time.After(2 * time.Second):
-			}
-			out := k.kubectlOut("get", "pods", "-l", liveSelector, "-o",
-				`jsonpath={range .items[*]}{.metadata.name}={.spec.containers[0].image}{"\n"}{end}`)
-			for _, line := range strings.Split(out, "\n") {
-				if name, img, ok := strings.Cut(line, "="); ok && img == image {
-					w.mu.Lock()
-					w.seen[name] = true
-					w.mu.Unlock()
-				}
-			}
-		}
-	}()
-	k.t.Cleanup(func() { w.stop() })
-	return w
-}
-
-// stop ends the watch and returns the pods it saw.
-func (w *imageWatch) stop() []string {
-	select {
-	case <-w.done:
-	default:
-		close(w.done)
-	}
-	w.wg.Wait()
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	var names []string
-	for n := range w.seen {
-		names = append(names, n)
-	}
-	return names
 }
 
 // psql runs a script against the namespace's database and returns its

@@ -160,8 +160,7 @@ strategy:
 # budget covers an ordinary start. A release that migrates a stored value
 # rewrites every stored row before it serves, and the chart runs that rewrite in
 # the migrate Job below, so a start after a successful Job finds the completion
-# record and skips it. A signing-off deployment cannot use the Job and runs the
-# rewrite at boot with migration.unprobedStart, which removes this probe.
+# record and skips it.
 startupProbe:
   periodSeconds: 10
   failureThreshold: 90
@@ -229,62 +228,44 @@ runtimeKeys:
 # a stored value rewrites every stored row before it serves, and it requires
 # every registry process on the previous release stopped first. The chart runs
 # that rewrite as a Job, `podium-server sign-stored-rows`, rendered as a Helm
-# post-upgrade hook while the Deployment is held at replicaCount 0. The upgrade
-# procedure in docs/deployment/clustered.md sets mode and reviewedDryRun per
-# step with --set; keep those two at their defaults in a values file. A
-# controller that renders every revision as an install keeps storeReady: true
-# in its values.
+# post-install and post-upgrade hook while the Deployment is held at
+# replicaCount 0.
 #
-# Every lookup-based gate below needs the Helm user to hold get on Deployments,
-# Jobs, and Secrets and list on Pods in the release namespace. A renderer that runs
-# without cluster access, such as `helm template`, skips lookup, so the image
-# and reviewed-dry-run gates fail closed there, and a serving upgrade render
-# requires storeReady.
+# In either signing mode, a registry pod over a store that holds manifest rows
+# and has not completed the rewrite exits at start: it rewrites no manifest
+# row, signs no row, and records no completion, and its log names
+# sign-stored-rows. The chart therefore needs no check between a serving render
+# and the store.
+#
+# The upgrade procedure in docs/deployment/clustered.md sets mode and
+# planDigest per step, with --set or as value commits to a GitOps repository;
+# keep those two at their defaults in a shared values file. The chart reads
+# nothing from the cluster, so helm template, helm install, helm upgrade, and a
+# GitOps controller render the same manifests from the same values.
 migration:
   # disabled, dry-run, or run. A mode renders the Job and requires
-  # replicaCount 0, signing.mode registry-key, and a helm upgrade. dry-run
-  # lists every row the run would write and writes no row; run performs the
-  # rewrite and records its completion. The value is the string "disabled"
-  # because YAML reads an unquoted off as false.
+  # replicaCount 0 and migration.previousImage. dry-run lists every row the
+  # run would write, writes no row, and ends its log with the plan digest; run
+  # performs the rewrite and records its completion. The value is the string
+  # "disabled" because YAML reads an unquoted off as false.
   mode: disabled
   # Passes --include-unsigned in both dry-run and run, so the dry run lists
   # with sign=true every unsigned row the run attests. The run must use the
-  # setting of the dry run it names. Set false for both steps to leave
-  # unsigned rows unsigned.
+  # setting of the dry run whose digest it passes. Set false for both steps to
+  # leave unsigned rows unsigned. signing.mode none requires false, because the
+  # command signs no row with signing off.
   includeUnsigned: true
-  # The UID of the succeeded dry-run Job the operator reviewed, which
-  # `kubectl get job <release>-podium-migrate -o jsonpath='{.metadata.uid}'`
-  # prints. run requires it and refuses a Job from another image, another
-  # includeUnsigned setting, an earlier release revision, another pod
-  # configuration, or another Deployment.
-  reviewedDryRun: ""
-  # A helm install with replicaCount above 0 requires true, which states that
-  # the store is empty or already migrated, and so does a helm upgrade with
-  # replicaCount above 0 that finds no live Deployment. The chart cannot see the store, and
-  # a store outlives helm uninstall. An install over a store the previous
-  # release wrote installs at replicaCount 0 and follows the upgrade procedure.
-  # An install at replicaCount 0 with storeReady true records the migration as
-  # complete.
-  storeReady: false
+  # The sha256: value on the `dry-run: plan digest` line that ends the
+  # reviewed dry run's log. run requires it and passes it as --plan-digest,
+  # and the command refuses, writing nothing and exiting with status 3, when
+  # its own plan has a different digest.
+  planDigest: ""
   # The image the store's previous registry ran, such as
-  # ghcr.io/lennylabs/podium-server:v0.4.0. A helm install at replicaCount 0
-  # requires it unless storeReady is true. The install has no live Deployment
-  # to read the previous image from, so it records this value, and the image
-  # gate refuses a migrate Job on that image.
+  # ghcr.io/lennylabs/podium-server:v0.4.0. A dry-run or run render requires
+  # it and refuses to render the migrate Job on that image, because the
+  # v0.4.0 podium-server ignores its arguments and would start a registry that
+  # never exits.
   previousImage: ""
-  # The lookup gates: the stop gate, the image gate, the reviewed-dry-run gate,
-  # and the serving preflight that refuses to scale the Deployment above zero
-  # over a store that has not been migrated. false is the operator's assertion
-  # that every registry process is stopped, the image is this release, the
-  # plan was reviewed, and the rewrite is complete. With false, only a render
-  # with replicaCount above 0 records the migration as complete.
-  preflight: true
-  # The signing-off path. sign-stored-rows refuses with signing off, so such a
-  # deployment runs the rewrite at boot. true removes the startup and liveness
-  # probes so the kubelet never restarts the pod mid-rewrite, and it requires
-  # signing.mode none, replicaCount 1, strategy.type Recreate, and mode
-  # disabled.
-  unprobedStart: false
   backoffLimit: 0
   # 0 renders no activeDeadlineSeconds. Helm waits on the hook only up to
   # --timeout, so pass a --timeout larger than this value.
