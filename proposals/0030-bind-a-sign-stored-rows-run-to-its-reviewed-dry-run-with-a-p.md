@@ -1,7 +1,7 @@
 # Proposal 0030: Bind a sign-stored-rows run to its reviewed dry run with a plan digest, refuse an unreviewed boot rewrite, and drop the chart's cluster lookups
 
 - Issue: (to be filed)
-- Status: Verified (2026-09-27). Converged after 6 adversarial review rounds (2 findings fixed); awaiting sign-off. The owner's decision of 2026-09-26 folds in the boot refusal on an unmigrated store (SPEC-2, CODE-4), `sign-stored-rows` with signing off (SPEC-3, CODE-5, CHART-2), and a chart that reads nothing from the cluster (CHART-1). The owner's decision of 2026-09-27 resolves OD-1 with option B, which extends the boot refusal to signing off.
+- Status: Approved (2026-09-27). Verified 2026-09-27 after 6 adversarial review rounds (2 findings fixed); OD-1 (option B) and OD-2 (option A) resolved by the owner.
 - Date: 2026-09-26
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
