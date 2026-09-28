@@ -1,7 +1,7 @@
 # Proposal 0030: Bind a sign-stored-rows run to its reviewed dry run with a plan digest, refuse an unreviewed boot rewrite, and drop the chart's cluster lookups
 
 - Issue: (to be filed)
-- Status: Approved (2026-09-27). Verified 2026-09-27 after 6 adversarial review rounds (2 findings fixed); OD-1 (option B) and OD-2 (option A) resolved by the owner.
+- Status: Applied to spec (2026-09-27). Verified 2026-09-27 after 6 adversarial review rounds (2 findings fixed); OD-1 (option B) and OD-2 (option A) resolved by the owner.
 - Date: 2026-09-26
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
