@@ -87,7 +87,12 @@ completion record back. Outside that store, in either signing mode, a
 restart while no completion is recorded is refused, rewriting no
 manifest row, signing no row, and recording no completion; rerun
 `sign-stored-rows` instead, as a `--dry-run`, a review of its report,
-and a run with its `--plan-digest`, and then start the registry. On a
+and a run with its `--plan-digest`, and then start the registry. With
+signing on, the run repeats the dry run's `--include-unsigned`
+setting, because the plan digest covers it and a run with a different
+setting exits with status 3. With signing off, run both commands with
+`PODIUM_SIGN=none` in their environment, because
+`podium serve --sign none` sets the mode only for its own process. On a
 Helm chart deployment, the migrate Job ran the rewrite; correct the
 object-store values in the values file and rerun steps 3 to 5 of the
 upgrade procedure in `docs/deployment/clustered.md` instead of
@@ -228,8 +233,11 @@ unaffected. A `podium-mcp` that refuses to start serves nothing.
    target, in either signing mode, `migrate-to-standard` clears the
    target's record, so the target's start is refused until a
    `sign-stored-rows` dry run and a run with its `--plan-digest`
-   record completion; run that pair before the start, with signing
-   off with `PODIUM_SIGN=none` in its environment.
+   record completion; run that pair before the start. With signing
+   on, the run repeats the dry run's `--include-unsigned` setting,
+   because the plan digest covers it and a run with a different
+   setting exits with status 3. With signing off, run both commands
+   with `PODIUM_SIGN=none` in their environment.
    On a Helm chart deployment, hold the release at zero replicas
    before the command runs and run the rewrite in the migrate Job, as
    the Migration from single node section of
