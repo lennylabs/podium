@@ -277,23 +277,26 @@ func less(a, b Pin) bool {
 // frontmatter, so no stored artifact carries a zero-byte SKILL.md.
 func CanonicalContentHash(artifactBytes, skillBytes []byte, resources map[string][]byte) string {
 	h := sha256.New()
-	writeFramed(h, artifactBytes)
-	writeFramed(h, skillBytes)
+	WriteFramed(h, artifactBytes)
+	WriteFramed(h, skillBytes)
 	keys := make([]string, 0, len(resources))
 	for k := range resources {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		writeFramed(h, []byte(k))
-		writeFramed(h, resources[k])
+		WriteFramed(h, []byte(k))
+		WriteFramed(h, resources[k])
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// writeFramed writes v's length as an unsigned 64-bit big-endian integer
-// followed by v itself (§4.7.6). A hash never fails a write.
-func writeFramed(w io.Writer, v []byte) {
+// WriteFramed writes v's length as an unsigned 64-bit big-endian integer
+// followed by v itself, the §4.7.6 length framing. Every digest the registry
+// frames uses it, so a domain-tagged digest outside this package frames its
+// values the same way. A hash never fails a write.
+// Spec: §4.7.6
+func WriteFramed(w io.Writer, v []byte) {
 	var n [8]byte
 	binary.BigEndian.PutUint64(n[:], uint64(len(v)))
 	_, _ = w.Write(n[:])
@@ -361,7 +364,7 @@ func DeliveryHash(rec DeliveryRecord) string {
 		rec.ID, rec.Version, rec.Type, rec.ContentHash, rec.Sensitivity,
 		rec.Frontmatter, rec.ManifestBody, rec.SkillRaw,
 	} {
-		writeFramed(h, []byte(v))
+		WriteFramed(h, []byte(v))
 	}
 	paths := make([]string, 0, len(rec.Resources))
 	for p := range rec.Resources {
@@ -369,8 +372,8 @@ func DeliveryHash(rec DeliveryRecord) string {
 	}
 	sort.Strings(paths)
 	for _, p := range paths {
-		writeFramed(h, []byte(p))
-		writeFramed(h, []byte(rec.Resources[p]))
+		WriteFramed(h, []byte(p))
+		WriteFramed(h, []byte(rec.Resources[p]))
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }
