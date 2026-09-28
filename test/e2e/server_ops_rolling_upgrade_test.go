@@ -297,8 +297,8 @@ func ruStartUpgradedServer(t *testing.T, dsn, keysPath string) *serverProc {
 // --dry-run` against the staged database before the upgraded binary's first
 // start, then the run with the dry run's plan digest, which is the upgrade step
 // a standard deployment with signing on takes: the store is Postgres, so the
-// first-start rewrite mints no envelope for the legacy row and the operator
-// attests it instead. Spec: §13.4.
+// first start on this store is refused until the command records completion,
+// and the run attests the legacy row the dry run listed. Spec: §13.4.
 func ruSignLegacyRows(t *testing.T, dsn, keysPath string) {
 	t.Helper()
 	dry := signStoredRows(t, ruUpgradedEnv(t, dsn, keysPath), "--include-unsigned", "--dry-run")
@@ -405,6 +405,16 @@ func TestServerOps_RollingUpgradeCoexistence(t *testing.T) {
 	// runs the §13.4 additive migration on the legacy schema at boot.
 	priv, pemPath := injKeyPair(t)
 	keysPath := injSeedRuntimeKeys(t, pemPath)
+	// Spec: §13.4 — a start over the staged store, which holds a manifest row
+	// and no completion record, is refused before sign-stored-rows runs and
+	// leaves the seeded row at its stored hash.
+	refused := runPodium(t, "", ruUpgradedEnv(t, dsn, keysPath), "serve", "--bind", "127.0.0.1:0")
+	if refused.Exit == 0 || !strings.Contains(refused.Stdout+refused.Stderr, "sign-stored-rows") {
+		t.Fatalf("start before sign-stored-rows exit=%d, want a refusal naming sign-stored-rows\nstdout:\n%s\nstderr:\n%s", refused.Exit, refused.Stdout, refused.Stderr)
+	}
+	if hash, ok := ruSeededManifestRow(t, dsn, id, version); !ok || hash != contentHash {
+		t.Errorf("seeded row after the refused start = (%q, %v), want (%q, true)", hash, ok, contentHash)
+	}
 	ruSignLegacyRows(t, dsn, keysPath)
 	srvNew := ruStartUpgradedServer(t, dsn, keysPath)
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))

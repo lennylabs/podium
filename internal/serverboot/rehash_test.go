@@ -1727,3 +1727,204 @@ func TestRehashStoredHashes_ComparesTheReviewedPlan(t *testing.T) {
 		t.Error("the boot pass did not rewrite the row")
 	}
 }
+
+// --- the unmigrated-store refusal and the pre-ingest record check -----------
+
+// recordSeqStore answers DataMigrationApplied from a fixed sequence, one entry
+// per call and the last entry once the sequence runs out, so a test can change
+// the record between the refusal's first read and its re-read.
+type recordSeqStore struct {
+	store.Store
+	mu    sync.Mutex
+	calls int
+	seq   []recordRead
+}
+
+type recordRead struct {
+	applied bool
+	err     error
+}
+
+func (r *recordSeqStore) DataMigrationApplied(context.Context, string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	i := r.calls
+	if i >= len(r.seq) {
+		i = len(r.seq) - 1
+	}
+	r.calls++
+	return r.seq[i].applied, r.seq[i].err
+}
+
+// Spec: §13.4 — on a governed start, the record check before the bootstrap
+// ingest fails a start whose record write failed and returns the bind error
+// over an absent record, and a present record lets the start proceed whatever
+// the bind outcome, because the record is read before the bind error is
+// checked. A co-located SQLite store is outside the check in both signing
+// modes, and a failed record read fails the start.
+func TestRefuseUnrecordedIngest(t *testing.T) {
+	ctx := context.Background()
+	keyDir := t.TempDir()
+	t.Setenv("PODIUM_SIGN_KEY_PATH", filepath.Join(keyDir, "registry-signing.key"))
+	bindErr := errors.New("address already in use")
+	boom := errors.New("connection refused")
+
+	for _, mode := range []string{"registry-key", "none"} {
+		t.Run(mode, func(t *testing.T) {
+			cfg := &Config{storeType: "memory", signMode: mode}
+			wrapper := &countingStore{Store: store.NewMemory(), setMarkErr: boom}
+			counts, _, err := rehashStoredHashes(ctx, deps(wrapper, nil), true)
+			if err != nil || counts.recordErr == nil {
+				t.Fatalf("rehashStoredHashes = (recordErr %v, %v), want a record-write failure", counts.recordErr, err)
+			}
+			if err := refuseUnrecordedIngest(ctx, wrapper, cfg, nil, "127.0.0.1:8080"); err == nil || !strings.Contains(err.Error(), "did not record its completion") {
+				t.Errorf("refuseUnrecordedIngest after a failed record write = %v, want the unrecorded-rewrite error", err)
+			}
+			if err := refuseUnrecordedIngest(ctx, wrapper, cfg, bindErr, "127.0.0.1:8080"); !errors.Is(err, bindErr) || !strings.HasPrefix(err.Error(), "serve: bind 127.0.0.1:8080:") {
+				t.Errorf("refuseUnrecordedIngest with a bind error = %v, want serve: bind", err)
+			}
+
+			wrapper.setMarkErr = nil
+			if _, _, err := rehashStoredHashes(ctx, deps(wrapper, nil), true); err != nil {
+				t.Fatalf("second rehashStoredHashes: %v", err)
+			}
+			if err := refuseUnrecordedIngest(ctx, wrapper, cfg, nil, "127.0.0.1:8080"); err != nil {
+				t.Errorf("refuseUnrecordedIngest with the record present = %v, want nil", err)
+			}
+			if err := refuseUnrecordedIngest(ctx, wrapper, cfg, bindErr, "127.0.0.1:8080"); err != nil {
+				t.Errorf("refuseUnrecordedIngest with the record present and a bind error = %v, want nil", err)
+			}
+
+			coLocated := &Config{storeType: "sqlite", sqlitePath: filepath.Join(keyDir, "podium.db"), signMode: mode}
+			if err := refuseUnrecordedIngest(ctx, store.NewMemory(), coLocated, bindErr, "127.0.0.1:8080"); err != nil {
+				t.Errorf("refuseUnrecordedIngest over the co-located store = %v, want nil", err)
+			}
+
+			failing := &countingStore{Store: store.NewMemory(), markerErr: boom}
+			if err := refuseUnrecordedIngest(ctx, failing, cfg, nil, "127.0.0.1:8080"); !errors.Is(err, boom) || !strings.HasPrefix(err.Error(), "registry start:") {
+				t.Errorf("refuseUnrecordedIngest with a failed record read = %v, want the read error wrapped as registry start:", err)
+			}
+		})
+	}
+}
+
+// Spec: §13.4 — a start that finds a row reads the record again and refuses
+// only when it is still absent, so a replica beside a peer's first start
+// proceeds. An empty store is exempt, and every store read error fails the
+// start rather than reading as a present record or an empty store.
+func TestRefuseUnmigratedStore_RereadsTheRecord(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("PODIUM_SIGN_KEY_PATH", filepath.Join(t.TempDir(), "registry-signing.key"))
+	cfg := &Config{storeType: "memory", signMode: "registry-key"}
+	withRow := func(t *testing.T) *store.Memory {
+		st := store.NewMemory()
+		seedRow(t, st, nil, rowSeed{tenant: "acme", id: "alpha", version: "1.0.0"})
+		return st
+	}
+	boom := errors.New("connection refused")
+
+	t.Run("record set by a peer between the reads", func(t *testing.T) {
+		st := &recordSeqStore{Store: withRow(t), seq: []recordRead{{applied: false}, {applied: true}}}
+		if err := refuseUnmigratedStore(ctx, st, cfg); err != nil {
+			t.Errorf("refuseUnmigratedStore = %v, want nil", err)
+		}
+		if st.calls != 2 {
+			t.Errorf("record read %d time(s), want 2", st.calls)
+		}
+	})
+
+	t.Run("record still absent", func(t *testing.T) {
+		st := &recordSeqStore{Store: withRow(t), seq: []recordRead{{applied: false}}}
+		err := refuseUnmigratedStore(ctx, st, cfg)
+		if err == nil || !strings.Contains(err.Error(), "acme/alpha@1.0.0") || !strings.Contains(err.Error(), "--plan-digest") {
+			t.Errorf("refuseUnmigratedStore = %v, want the refusal naming the row and --plan-digest", err)
+		}
+	})
+
+	t.Run("record present", func(t *testing.T) {
+		st := &recordSeqStore{Store: withRow(t), seq: []recordRead{{applied: true}}}
+		if err := refuseUnmigratedStore(ctx, st, cfg); err != nil {
+			t.Errorf("refuseUnmigratedStore = %v, want nil", err)
+		}
+	})
+
+	t.Run("empty store", func(t *testing.T) {
+		if err := refuseUnmigratedStore(ctx, store.NewMemory(), cfg); err != nil {
+			t.Errorf("refuseUnmigratedStore over an empty store = %v, want nil", err)
+		}
+	})
+
+	for name, st := range map[string]func(t *testing.T) store.Store{
+		"first record read fails": func(t *testing.T) store.Store {
+			return &recordSeqStore{Store: withRow(t), seq: []recordRead{{err: boom}}}
+		},
+		"tenant listing fails": func(t *testing.T) store.Store {
+			return &countingStore{Store: withRow(t), tenantsErr: boom}
+		},
+		"row listing fails": func(t *testing.T) store.Store {
+			return &countingStore{Store: withRow(t), rowsErr: boom}
+		},
+		"record re-read fails": func(t *testing.T) store.Store {
+			return &recordSeqStore{Store: withRow(t), seq: []recordRead{{applied: false}, {err: boom}}}
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := refuseUnmigratedStore(ctx, st(t), cfg)
+			if !errors.Is(err, boom) || !strings.HasPrefix(err.Error(), "registry start:") {
+				t.Errorf("refuseUnmigratedStore = %v, want the store error wrapped as registry start:", err)
+			}
+		})
+	}
+}
+
+// Spec: §13.4 — with signing off and no resolvable home, the default key
+// location cannot show co-location, so the store is governed and both errors
+// name PODIUM_SIGN_KEY_PATH in place of an empty path. The signing-off
+// refusal names PODIUM_SIGN=none and neither --include-unsigned nor
+// --plan-digest. A signing start returns the resolution error instead.
+func TestRefuseUnmigratedStore_UnresolvedKeyLocation(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
+	if _, err := sign.KeyFilePath(""); err == nil {
+		t.Skip("the platform resolves a home directory without HOME")
+	}
+	cfg := &Config{storeType: "memory", signMode: "none"}
+
+	st := store.NewMemory()
+	seedRow(t, st, nil, rowSeed{tenant: "acme", id: "alpha", version: "1.0.0"})
+	err := refuseUnmigratedStore(ctx, st, cfg)
+	if err == nil || !strings.HasPrefix(err.Error(), "registry start:") {
+		t.Fatalf("refuseUnmigratedStore = %v, want the refusal", err)
+	}
+	for _, want := range []string{"PODIUM_SIGN_KEY_PATH", "PODIUM_SIGN=none", "sign-stored-rows", "--dry-run"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %s", err, want)
+		}
+	}
+	for _, unwanted := range []string{"--include-unsigned", "--plan-digest"} {
+		if strings.Contains(err.Error(), unwanted) {
+			t.Errorf("refusal %q names %s", err, unwanted)
+		}
+	}
+
+	failing := &countingStore{Store: store.NewMemory(), setMarkErr: errors.New("read-only")}
+	if _, _, err := rehashStoredHashes(ctx, deps(failing, nil), true); err != nil {
+		t.Fatalf("rehashStoredHashes: %v", err)
+	}
+	err = refuseUnrecordedIngest(ctx, failing, cfg, nil, "127.0.0.1:8080")
+	if err == nil || !strings.Contains(err.Error(), "did not record its completion") || !strings.Contains(err.Error(), "PODIUM_SIGN_KEY_PATH") {
+		t.Errorf("refuseUnrecordedIngest = %v, want the unrecorded-rewrite error naming PODIUM_SIGN_KEY_PATH", err)
+	}
+
+	on := &Config{storeType: "memory", signMode: "registry-key"}
+	for name, check := range map[string]func() error{
+		"refuseUnmigratedStore":  func() error { return refuseUnmigratedStore(ctx, st, on) },
+		"refuseUnrecordedIngest": func() error { return refuseUnrecordedIngest(ctx, failing, on, nil, "127.0.0.1:8080") },
+	} {
+		if err := check(); err == nil || !strings.HasPrefix(err.Error(), "registry signing key:") {
+			t.Errorf("%s with signing on = %v, want the resolution error", name, err)
+		}
+	}
+}

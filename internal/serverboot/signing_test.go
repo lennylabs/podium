@@ -250,3 +250,73 @@ func TestKeyCoLocatedWithStore(t *testing.T) {
 		})
 	}
 }
+
+// Spec: §13.4, §13.12 — the unmigrated-store refusal and the pre-ingest record
+// check govern every start except one over the SQLite store in the directory
+// of the registry signing key location, in both signing modes, and the key
+// file need not exist. With PODIUM_SIGN_KEY_PATH set, only its directory
+// exempts a store, and the default directory does not. With no resolvable
+// home, a signing-off start is governed with an empty key path and a signing
+// start returns the resolution error.
+func TestUnmigratedStoreGoverned(t *testing.T) {
+	home := t.TempDir()
+	defaultDB := filepath.Join(home, ".podium", "standalone", "podium.db")
+	defaultKey := filepath.Join(home, ".podium", "standalone", "registry-signing.key")
+	homeDB := filepath.Join(home, "podium.db")
+	keyDir := t.TempDir()
+	setKey := filepath.Join(keyDir, "registry-signing.key")
+	cases := []struct {
+		name         string
+		keyEnv       string
+		cfg          Config
+		wantGoverned bool
+		wantKeyPath  string
+	}{
+		{name: "memory", keyEnv: setKey, cfg: Config{storeType: "memory"}, wantGoverned: true, wantKeyPath: setKey},
+		{name: "postgres", keyEnv: setKey, cfg: Config{storeType: "postgres", sqlitePath: filepath.Join(keyDir, "podium.db")}, wantGoverned: true, wantKeyPath: setKey},
+		{name: "sqlite beside the set key", keyEnv: setKey, cfg: Config{storeType: "sqlite", sqlitePath: filepath.Join(keyDir, "podium.db")}, wantKeyPath: setKey},
+		{name: "sqlite away from the set key", keyEnv: setKey, cfg: Config{storeType: "sqlite", sqlitePath: homeDB}, wantGoverned: true, wantKeyPath: setKey},
+		{name: "sqlite in the default directory with the key set elsewhere", keyEnv: setKey, cfg: Config{storeType: "sqlite", sqlitePath: defaultDB}, wantGoverned: true, wantKeyPath: setKey},
+		{name: "sqlite in the default directory", cfg: Config{storeType: "sqlite", sqlitePath: defaultDB}, wantKeyPath: defaultKey},
+		{name: "sqlite under home", cfg: Config{storeType: "sqlite", sqlitePath: homeDB}, wantGoverned: true, wantKeyPath: defaultKey},
+	}
+	for _, mode := range []string{"registry-key", "none"} {
+		for _, tc := range cases {
+			t.Run(mode+"/"+tc.name, func(t *testing.T) {
+				t.Setenv("HOME", home)
+				t.Setenv("USERPROFILE", home)
+				t.Setenv("PODIUM_SIGN_KEY_PATH", tc.keyEnv)
+				cfg := tc.cfg
+				cfg.signMode = mode
+				keyPath, governed, err := unmigratedStoreGoverned(&cfg)
+				if err != nil {
+					t.Fatalf("unmigratedStoreGoverned: %v", err)
+				}
+				if governed != tc.wantGoverned || keyPath != tc.wantKeyPath {
+					t.Errorf("unmigratedStoreGoverned = (%q, %v), want (%q, %v)", keyPath, governed, tc.wantKeyPath, tc.wantGoverned)
+				}
+				if _, serr := os.Stat(keyPath); serr == nil {
+					t.Error("the predicate created a key file")
+				}
+			})
+		}
+	}
+
+	t.Run("unresolvable home", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		t.Setenv("PODIUM_SIGN_KEY_PATH", "")
+		if _, err := sign.KeyFilePath(""); err == nil {
+			t.Skip("the platform resolves a home directory without HOME")
+		}
+		off := Config{storeType: "sqlite", sqlitePath: homeDB, signMode: "none"}
+		keyPath, governed, err := unmigratedStoreGoverned(&off)
+		if err != nil || !governed || keyPath != "" {
+			t.Errorf("signing off = (%q, %v, %v), want (\"\", true, nil)", keyPath, governed, err)
+		}
+		on := Config{storeType: "sqlite", sqlitePath: homeDB, signMode: "registry-key"}
+		if _, _, err := unmigratedStoreGoverned(&on); err == nil || !strings.HasPrefix(err.Error(), "registry signing key:") {
+			t.Errorf("signing on = %v, want an error wrapped as registry signing key:", err)
+		}
+	})
+}

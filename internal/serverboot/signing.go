@@ -46,11 +46,17 @@ func refuseUnpersistedSigningKey(cfg *Config) error {
 	if keyCoLocatedWithStore(cfg, keyPath) {
 		return nil
 	}
-	backend := cfg.storeType
+	return fmt.Errorf("registry signing key: the store is %s and PODIUM_SIGN_KEY_PATH is unset, so the registry signing key would be generated under the process's home, outside the directory that holds the store; set PODIUM_SIGN_KEY_PATH to a file on the store's persistent storage, or set PODIUM_SIGN=none", storeLabel(cfg))
+}
+
+// storeLabel names the configured store in a startup refusal: the backend
+// with its file path for SQLite, and the backend alone otherwise, so a
+// refusal never prints a DSN.
+func storeLabel(cfg *Config) string {
 	if cfg.storeType == "sqlite" {
-		backend = fmt.Sprintf("sqlite (%s)", cfg.sqlitePath)
+		return fmt.Sprintf("sqlite (%s)", cfg.sqlitePath)
 	}
-	return fmt.Errorf("registry signing key: the store is %s and PODIUM_SIGN_KEY_PATH is unset, so the registry signing key would be generated under the process's home, outside the directory that holds the store; set PODIUM_SIGN_KEY_PATH to a file on the store's persistent storage, or set PODIUM_SIGN=none", backend)
+	return cfg.storeType
 }
 
 // registrySigningKeyPath resolves the registry-managed signing key's location
@@ -144,4 +150,31 @@ func signingKeyUnavailable(path string, cause error) error {
 func keyCoLocatedWithStore(cfg *Config, keyPath string) bool {
 	return cfg.storeType == "sqlite" &&
 		filepath.Dir(filepath.Clean(cfg.sqlitePath)) == filepath.Dir(filepath.Clean(keyPath))
+}
+
+// unmigratedStoreGoverned reports whether the §13.4 unmigrated-store refusal
+// and the pre-ingest record check govern this start, and returns the key
+// location the co-location test used. Every store other than the SQLite store
+// in the directory of the registry signing key location is governed, in both
+// signing modes: a signing-off rewrite signs nothing, but it still moves every
+// stored row to a new digest with no review. The key file need not exist, so a
+// signing start over the zero-configuration standalone store that has no key
+// yet keeps the automatic rewrite and generates the key.
+//
+// A key location that cannot be resolved, because the process has no home
+// directory, cannot show co-location. A signing start returns that error,
+// because it cannot load a key without the path; a signing-off start treats
+// the store as outside the directory and returns an empty keyPath, which the
+// refusal messages name as PODIUM_SIGN_KEY_PATH. refuseUnmigratedStore and
+// refuseUnrecordedIngest are its only callers, so the two apply one
+// predicate. Spec: §13.4, §13.12.
+func unmigratedStoreGoverned(cfg *Config) (keyPath string, governed bool, err error) {
+	keyPath, err = registrySigningKeyPath(os.Getenv("PODIUM_SIGN_KEY_PATH"))
+	if err != nil {
+		if registrySigningEnabled(cfg.signMode) {
+			return "", false, fmt.Errorf("registry signing key: %w", err)
+		}
+		return "", true, nil
+	}
+	return keyPath, !keyCoLocatedWithStore(cfg, keyPath), nil
 }

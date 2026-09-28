@@ -316,9 +316,13 @@ func TestRun_RefusesToStrandAStoredSignature(t *testing.T) {
 
 // Spec: §4.7.6, §13.4 — a start whose listener could not bind does not run the
 // pass. Rewriting and re-signing the store another process is still serving,
-// only to exit on the bind error, is the one failure the guard prevents.
+// only to exit on the bind error, is the one failure the guard prevents. The
+// key location shares the store's directory, so the unmigrated-store refusal
+// and the pre-ingest record check leave the start alone and the error is the
+// bind failure.
 func TestRun_BindFailureDoesNotRewriteTheStore(t *testing.T) {
 	f := newBootFixture(t)
+	t.Setenv("PODIUM_SIGN_KEY_PATH", f.keyPath)
 	if _, err := f.boot(t); err != nil {
 		t.Fatalf("first start: %v", err)
 	}
@@ -335,8 +339,8 @@ func TestRun_BindFailureDoesNotRewriteTheStore(t *testing.T) {
 	defer func() { _ = held.Close() }()
 
 	_, runErr := f.boot(t)
-	if runErr == nil {
-		t.Fatal("run = nil, want the bind error")
+	if runErr == nil || !strings.Contains(runErr.Error(), "serve: bind") || strings.Contains(runErr.Error(), "sign-stored-rows") {
+		t.Fatalf("run = %v, want the bind error", runErr)
 	}
 	after := f.openStoreDirect(t)
 	ctx := context.Background()
@@ -419,6 +423,9 @@ func TestRun_BindFailureStillRefusesAGeneratedKey(t *testing.T) {
 func (f *bootFixture) defaultKeyDirStore(t *testing.T) {
 	t.Helper()
 	f.sqlitePath = filepath.Join(f.home, ".podium", "standalone", "podium.db")
+	if err := os.MkdirAll(filepath.Dir(f.sqlitePath), 0o700); err != nil {
+		t.Fatalf("create the default key directory: %v", err)
+	}
 	t.Setenv("PODIUM_SQLITE_PATH", f.sqlitePath)
 }
 
@@ -637,9 +644,13 @@ func allRows(t *testing.T, st store.Store) []store.ManifestRecord {
 // store holding only unsigned rows it completes the rewrite, moves the
 // pre-framing row to the framed digest with no signature, sets the record,
 // and logs neither signing summary line. A boot that stored the zero key in
-// the signer field would send the unsigned rows to Sign and log both.
+// the signer field would send the unsigned rows to Sign and log both. The
+// store sits in the directory of the default key location, as the
+// zero-configuration standalone store does, so the case pins the boot rewrite
+// of a signing-off store in that directory.
 func TestRun_SigningOffRewritesUnsignedRowsWithoutSigning(t *testing.T) {
 	f := newBootFixture(t)
+	f.defaultKeyDirStore(t)
 	testharness.WriteTree(t, f.layerPath, testharness.WriteTreeOption{
 		Path:    "beta/ARTIFACT.md",
 		Content: artifactBody,
@@ -763,70 +774,44 @@ func clearSignatures(t *testing.T, st store.Store) {
 	}
 }
 
-// Spec: §13.4, §13.12 — the first-start rewrite mints a first envelope for an
-// unsigned framed row only when the store is the SQLite store in the key
-// file's directory. With the key file elsewhere the row stays unsigned, the
-// completion record is set anyway, and the unsigned-left line names
-// sign-stored-rows.
-func TestRun_FirstStartMintsUnsignedRowsOnlyBesideTheKey(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		coLocated  bool
-		wantSigned bool
-	}{
-		{name: "key in the store directory", coLocated: true, wantSigned: true},
-		{name: "key outside the store directory", coLocated: false, wantSigned: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			f := newBootFixture(t)
-			t.Setenv("PODIUM_SIGN", "registry-key")
-			t.Setenv("PODIUM_SIGN_KEY_PATH", f.keyPath)
-			if _, err := f.boot(t); err != nil {
-				t.Fatalf("first start: %v", err)
-			}
-			st := f.openStoreDirect(t)
-			clearSignatures(t, st)
-			if err := st.Close(); err != nil {
-				t.Fatalf("close store: %v", err)
-			}
-			keyPath := f.keyPath
-			if !tc.coLocated {
-				keyPath = filepath.Join(t.TempDir(), "registry-signing.key")
-				if err := os.Rename(f.keyPath, keyPath); err != nil {
-					t.Fatalf("move key file: %v", err)
-				}
-				t.Setenv("PODIUM_SIGN_KEY_PATH", keyPath)
-			}
+// Spec: §13.4, §13.12 — the first-start rewrite over the SQLite store in the
+// key file's directory mints a first envelope for an unsigned framed row, sets
+// the completion record, and logs the bare unsigned-left line with no
+// sign-stored-rows hint.
+func TestRun_FirstStartMintsUnsignedRowsBesideTheKey(t *testing.T) {
+	f := newBootFixture(t)
+	t.Setenv("PODIUM_SIGN", "registry-key")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", f.keyPath)
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	st := f.openStoreDirect(t)
+	clearSignatures(t, st)
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
 
-			logs, err := f.boot(t)
-			if err != nil {
-				t.Fatalf("second start: %v", err)
-			}
-			after := f.openStoreDirect(t)
-			rec := onlyRow(t, after)
-			if signed := rec.Signature != ""; signed != tc.wantSigned {
-				t.Errorf("row signed = %v, want %v", signed, tc.wantSigned)
-			}
-			if tc.wantSigned {
-				key, lerr := loadRegistrySigner(keyPath, false)
-				if lerr != nil {
-					t.Fatalf("load signing key: %v", lerr)
-				}
-				if verr := key.Verify(context.Background(), rec.ContentHash, rec.Signature); verr != nil {
-					t.Errorf("minted envelope does not verify: %v", verr)
-				}
-			}
-			if applied, aerr := after.DataMigrationApplied(context.Background(), store.DataMigrationContentHashFraming); aerr != nil || !applied {
-				t.Errorf("marker applied = %v (err %v), want true", applied, aerr)
-			}
-			hint := "rehash: 1 unsigned left; run sign-stored-rows --include-unsigned --dry-run, review it, and pass its plan digest to sign them"
-			if got := strings.Contains(logs, hint); got == tc.wantSigned {
-				t.Errorf("log names sign-stored-rows = %v, want %v; logs:\n%s", got, !tc.wantSigned, logs)
-			}
-			if tc.wantSigned && !strings.Contains(logs, "rehash: 0 unsigned left\n") {
-				t.Errorf("log lacks the bare unsigned-left line; logs:\n%s", logs)
-			}
-		})
+	logs, err := f.boot(t)
+	if err != nil {
+		t.Fatalf("second start: %v", err)
+	}
+	after := f.openStoreDirect(t)
+	rec := onlyRow(t, after)
+	key, lerr := loadRegistrySigner(f.keyPath, false)
+	if lerr != nil {
+		t.Fatalf("load signing key: %v", lerr)
+	}
+	if verr := key.Verify(context.Background(), rec.ContentHash, rec.Signature); verr != nil {
+		t.Errorf("minted envelope does not verify: %v", verr)
+	}
+	if applied, aerr := after.DataMigrationApplied(context.Background(), store.DataMigrationContentHashFraming); aerr != nil || !applied {
+		t.Errorf("marker applied = %v (err %v), want true", applied, aerr)
+	}
+	if !strings.Contains(logs, "rehash: 0 unsigned left\n") {
+		t.Errorf("log lacks the bare unsigned-left line; logs:\n%s", logs)
+	}
+	if strings.Contains(logs, "run sign-stored-rows") {
+		t.Errorf("log names sign-stored-rows; logs:\n%s", logs)
 	}
 }
 
@@ -856,5 +841,327 @@ func TestRun_UnresolvedKeyPathRefusesTheStart(t *testing.T) {
 		if rows := allRows(t, st); len(rows) != 0 {
 			t.Errorf("a refused start stored %d row(s)", len(rows))
 		}
+	}
+}
+
+// signedAuditLines counts the artifact.signed lines in the fixture's audit log.
+func (f *bootFixture) signedAuditLines(t *testing.T) int {
+	t.Helper()
+	data, err := os.ReadFile(f.auditPath)
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read audit log: %v", err)
+	}
+	return strings.Count(string(data), "artifact.signed")
+}
+
+// unmigratedSigningStore boots the fixture once with signing on and the key
+// beside the store, then clears every signature and the completion record, so
+// the store holds one unsigned row at the framed digest and no record. It
+// returns that row.
+func unmigratedSigningStore(t *testing.T, f *bootFixture) store.ManifestRecord {
+	t.Helper()
+	t.Setenv("PODIUM_SIGN", "registry-key")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", f.keyPath)
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	st := f.openStoreDirect(t)
+	clearSignatures(t, st)
+	rec := onlyRow(t, st)
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	return rec
+}
+
+// assertStoreUnchanged checks that a refused start wrote no stored row and
+// recorded no completion.
+func (f *bootFixture) assertStoreUnchanged(t *testing.T, want []store.ManifestRecord) {
+	t.Helper()
+	st := f.openStoreDirect(t)
+	ctx := context.Background()
+	for _, seeded := range want {
+		rec, err := st.GetManifest(ctx, seeded.TenantID, seeded.ArtifactID, seeded.Version)
+		if err != nil {
+			t.Fatalf("get manifest: %v", err)
+		}
+		if rec.ContentHash != seeded.ContentHash || rec.Signature != seeded.Signature {
+			t.Errorf("%s was written by a refused start", rec.ArtifactID)
+		}
+	}
+	if applied, err := st.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming); err != nil || applied {
+		t.Errorf("marker applied = %v (err %v), want false", applied, err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+}
+
+// Spec: §13.4, §13.12 — while no completion is recorded, a start over a store
+// that holds a manifest row and is not the SQLite store in the directory of the
+// key location refuses in either signing mode, whatever the bind outcome and
+// before the signing-key loader, and names sign-stored-rows. The §13.12
+// persistence refusal and the generated-key refusal take precedence.
+func TestRun_RefusesAnUnmigratedStoreOutsideTheKeyDirectory(t *testing.T) {
+	requireAll := func(t *testing.T, err error, wants ...string) {
+		t.Helper()
+		if err == nil {
+			t.Fatalf("run = nil, want a refusal naming %v", wants)
+		}
+		for _, want := range wants {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("run = %v, want it to name %q", err, want)
+			}
+		}
+	}
+	requireNone := func(t *testing.T, err error, unwanted ...string) {
+		t.Helper()
+		for _, u := range unwanted {
+			if strings.Contains(err.Error(), u) {
+				t.Errorf("run = %v, want it not to name %q", err, u)
+			}
+		}
+	}
+	moveKey := func(t *testing.T, f *bootFixture) string {
+		t.Helper()
+		keyPath := filepath.Join(t.TempDir(), "registry-signing.key")
+		if err := os.Rename(f.keyPath, keyPath); err != nil {
+			t.Fatalf("move key file: %v", err)
+		}
+		t.Setenv("PODIUM_SIGN_KEY_PATH", keyPath)
+		return keyPath
+	}
+
+	t.Run("a key file in another directory", func(t *testing.T) {
+		f := newBootFixture(t)
+		rec := unmigratedSigningStore(t, f)
+		moveKey(t, f)
+		signedBefore := f.signedAuditLines(t)
+		logs, err := f.boot(t)
+		requireAll(t, err, "sign-stored-rows", "--dry-run", "the same --include-unsigned setting", "--plan-digest",
+			rec.TenantID+"/"+rec.ArtifactID+"@"+rec.Version)
+		requireNone(t, err, "signing-key generate")
+		f.assertStoreUnchanged(t, []store.ManifestRecord{rec})
+		if got := f.signedAuditLines(t); got != signedBefore {
+			t.Errorf("audit log gained %d artifact.signed line(s)", got-signedBefore)
+		}
+		if strings.Contains(logs, "rehash:") {
+			t.Errorf("a refused start logged a rehash: line:\n%s", logs)
+		}
+	})
+
+	t.Run("an absent key file in another directory", func(t *testing.T) {
+		f := newBootFixture(t)
+		rec := unmigratedSigningStore(t, f)
+		absent := filepath.Join(t.TempDir(), "registry-signing.key")
+		t.Setenv("PODIUM_SIGN_KEY_PATH", absent)
+		_, err := f.boot(t)
+		generate := "podium admin signing-key generate --key-file " + absent
+		requireAll(t, err, "registry start:", generate, "--dry-run")
+		if err != nil && strings.Index(err.Error(), generate) > strings.Index(err.Error(), "--dry-run") {
+			t.Errorf("run = %v, want signing-key generate named before --dry-run", err)
+		}
+		if _, serr := os.Stat(absent); !os.IsNotExist(serr) {
+			t.Errorf("stat %s = %v, want absence", absent, serr)
+		}
+		f.assertStoreUnchanged(t, []store.ManifestRecord{rec})
+	})
+
+	t.Run("a held bind address", func(t *testing.T) {
+		f := newBootFixture(t)
+		rec := unmigratedSigningStore(t, f)
+		moveKey(t, f)
+		held, err := net.Listen("tcp", f.addr)
+		if err != nil {
+			t.Fatalf("hold the bind address: %v", err)
+		}
+		defer func() { _ = held.Close() }()
+		_, runErr := f.boot(t)
+		requireAll(t, runErr, "registry start:", "sign-stored-rows")
+		requireNone(t, runErr, "serve: bind")
+		f.assertStoreUnchanged(t, []store.ManifestRecord{rec})
+	})
+
+	t.Run("a signed row and an absent key file", func(t *testing.T) {
+		f := newBootFixture(t)
+		rec := unmigratedSigningStore(t, f)
+		throwaway, err := loadRegistrySigner(filepath.Join(t.TempDir(), "throwaway.key"), true)
+		if err != nil {
+			t.Fatalf("generate a throwaway key: %v", err)
+		}
+		ctx := context.Background()
+		sig, err := throwaway.Sign(ctx, rec.ContentHash)
+		if err != nil {
+			t.Fatalf("sign: %v", err)
+		}
+		st := f.openStoreDirect(t)
+		if err := st.RehashManifest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, "", rec.ContentHash, sig); err != nil {
+			t.Fatalf("re-sign the row: %v", err)
+		}
+		if err := st.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+		t.Setenv("PODIUM_SIGN_KEY_PATH", filepath.Join(t.TempDir(), "registry-signing.key"))
+		_, runErr := f.boot(t)
+		requireAll(t, runErr, "PODIUM_SIGN_KEY_PATH names no file")
+		requireNone(t, runErr, "registry start:")
+	})
+
+	t.Run("the record present", func(t *testing.T) {
+		f := newBootFixture(t)
+		unmigratedSigningStore(t, f)
+		moveKey(t, f)
+		st := f.openStoreDirect(t)
+		if err := st.SetDataMigrationApplied(context.Background(), store.DataMigrationContentHashFraming, true); err != nil {
+			t.Fatalf("set marker: %v", err)
+		}
+		if err := st.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+		if _, err := f.boot(t); err != nil {
+			t.Fatalf("start over a recorded store = %v, want it to serve", err)
+		}
+	})
+
+	t.Run("signing off with the default key location", func(t *testing.T) {
+		f := newBootFixture(t)
+		if _, err := f.boot(t); err != nil {
+			t.Fatalf("first start: %v", err)
+		}
+		st := f.openStoreDirect(t)
+		rows := downgradeRows(t, st, "")
+		if err := st.Close(); err != nil {
+			t.Fatalf("close store: %v", err)
+		}
+		logs, err := f.boot(t)
+		requireAll(t, err, "sign-stored-rows", "--dry-run", "PODIUM_SIGN=none")
+		requireNone(t, err, "--include-unsigned", "--plan-digest")
+		f.assertStoreUnchanged(t, rows)
+		if strings.Contains(logs, "rehash:") {
+			t.Errorf("a refused start logged a rehash: line:\n%s", logs)
+		}
+	})
+
+	t.Run("the persistence refusal first", func(t *testing.T) {
+		f := newBootFixture(t)
+		rec := unmigratedSigningStore(t, f)
+		t.Setenv("PODIUM_SIGN_KEY_PATH", "")
+		_, err := f.boot(t)
+		requireAll(t, err, "PODIUM_SIGN_KEY_PATH", "PODIUM_SIGN=none")
+		requireNone(t, err, "sign-stored-rows", "--dry-run")
+		if _, serr := os.Stat(filepath.Join(f.home, ".podium", "standalone", "registry-signing.key")); !os.IsNotExist(serr) {
+			t.Errorf("stat of the default key = %v, want absence", serr)
+		}
+		f.assertStoreUnchanged(t, []store.ManifestRecord{rec})
+	})
+}
+
+// verifyOnlyRow checks that the store holds one row, that its envelope
+// verifies under the key at keyPath, and that the completion record is set.
+func (f *bootFixture) verifyOnlyRow(t *testing.T, keyPath string) {
+	t.Helper()
+	st := f.openStoreDirect(t)
+	ctx := context.Background()
+	rec := onlyRow(t, st)
+	key, err := loadRegistrySigner(keyPath, false)
+	if err != nil {
+		t.Fatalf("load signing key: %v", err)
+	}
+	if err := key.Verify(ctx, rec.ContentHash, rec.Signature); err != nil {
+		t.Errorf("the row's envelope does not verify: %v", err)
+	}
+	if applied, err := st.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming); err != nil || !applied {
+		t.Errorf("marker applied = %v (err %v), want true", applied, err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+}
+
+// Spec: §13.4 — a store with no manifest row is exempt from the refusal: the
+// first start outside the key directory records completion before it ingests,
+// so the second start finds the record and serves.
+func TestRun_EmptyStoreOutsideTheKeyDirectoryStarts(t *testing.T) {
+	f := newBootFixture(t)
+	keyPath := filepath.Join(t.TempDir(), "registry-signing.key")
+	t.Setenv("PODIUM_SIGN", "registry-key")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", keyPath)
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	f.verifyOnlyRow(t, keyPath)
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("second start: %v", err)
+	}
+}
+
+// Spec: §13.4 — a governed start whose listener did not bind runs no rewrite,
+// so it records no completion and fails before the bootstrap ingest, storing
+// no row. The next start finds the store empty, records completion, and
+// ingests.
+func TestRun_EmptyStoreOutsideTheKeyDirectoryIngestsNothingOnABindFailure(t *testing.T) {
+	f := newBootFixture(t)
+	keyPath := filepath.Join(t.TempDir(), "registry-signing.key")
+	t.Setenv("PODIUM_SIGN", "registry-key")
+	t.Setenv("PODIUM_SIGN_KEY_PATH", keyPath)
+	held, err := net.Listen("tcp", f.addr)
+	if err != nil {
+		t.Fatalf("hold the bind address: %v", err)
+	}
+	_, runErr := f.boot(t)
+	if runErr == nil || !strings.Contains(runErr.Error(), "serve: bind") {
+		t.Fatalf("run = %v, want the bind error", runErr)
+	}
+	st := f.openStoreDirect(t)
+	if rows := allRows(t, st); len(rows) != 0 {
+		t.Errorf("a start that did not bind stored %d row(s)", len(rows))
+	}
+	if applied, aerr := st.DataMigrationApplied(context.Background(), store.DataMigrationContentHashFraming); aerr != nil || applied {
+		t.Errorf("marker applied = %v (err %v), want false", applied, aerr)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	if err := held.Close(); err != nil {
+		t.Fatalf("release the bind address: %v", err)
+	}
+
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("second start: %v", err)
+	}
+	f.verifyOnlyRow(t, keyPath)
+}
+
+// Spec: §13.4, §4.7.9 — the zero-configuration standalone store sits in the
+// directory of the default key location, so a signing start over its v0.4.0
+// unsigned rows with no key file yet is exempt from the refusal: it generates
+// the key, rewrites the row, mints its envelope, and records completion.
+func TestRun_ZeroConfigurationUpgradeGeneratesTheKey(t *testing.T) {
+	f := newBootFixture(t)
+	f.defaultKeyDirStore(t)
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	st := f.openStoreDirect(t)
+	rows := downgradeRows(t, st, "")
+	if err := st.Close(); err != nil {
+		t.Fatalf("close store: %v", err)
+	}
+	defaultKey := filepath.Join(f.home, ".podium", "standalone", "registry-signing.key")
+	if _, err := os.Stat(defaultKey); !os.IsNotExist(err) {
+		t.Fatalf("stat of the default key before the upgrade = %v, want absence", err)
+	}
+
+	t.Setenv("PODIUM_SIGN", "registry-key")
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("upgrade start: %v", err)
+	}
+	if _, err := os.Stat(defaultKey); err != nil {
+		t.Fatalf("the upgrade start generated no key: %v", err)
+	}
+	f.verifyOnlyRow(t, defaultKey)
+	after := f.openStoreDirect(t)
+	if got := onlyRow(t, after); got.ContentHash != framedHashOfRecord(rows[0]) {
+		t.Errorf("content_hash = %s, want the framed digest %s", got.ContentHash, framedHashOfRecord(rows[0]))
 	}
 }

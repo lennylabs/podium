@@ -47,6 +47,7 @@ package e2e
 // runtime trust model).
 
 import (
+	"context"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -57,6 +58,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/store"
 )
 
 // msSigningKeySeed is the fixed 32-byte seed of the standard-stack signing
@@ -146,8 +149,43 @@ func msStartStandardServer(t *testing.T, dsn, bucket, region, pemPath string) *s
 // data plane (§6.2 / §6.6).
 func msStartStandardServerEnv(t *testing.T, dsn, bucket, region, pemPath string, extraEnv ...string) *serverProc {
 	t.Helper()
+	env := append(msStandardEnv(t, dsn, bucket, region, pemPath), extraEnv...)
+	msRecordStoreMigrated(t, dsn)
+	return startServerArgs(t, env, "serve")
+}
+
+// msRecordStoreMigrated sets the §13.4 completion record on the shared
+// Postgres store before a standard-stack start. §13.4 refuses a start over a
+// store that holds manifest rows and no record, and Postgres is never the
+// co-located SQLite store. The test/e2e binary runs on the base
+// PODIUM_POSTGRES_DSN with no internal/testpg isolation, and within it
+// ruStageLegacyDatabase, which the rolling-upgrade and rollback-before-finalize
+// tests call, and the lifecycle chain's migrate-to-standard clear the record
+// and leave manifest rows without it, so a later standard-stack start would be
+// refused. pkg/store and test/integration, whose ResetForTest truncates
+// public.data_migrations, run in private databases and do not reach it. The
+// tests that start through this helper are not about the §13.4 migration,
+// which TestE2E_MigratedTargetOutsideTheKeyDirectoryRefusesUntilSignStoredRows
+// and the rolling-upgrade test pin.
+func msRecordStoreMigrated(t *testing.T, dsn string) {
+	t.Helper()
+	st, err := store.OpenPostgres(dsn)
+	if err != nil {
+		t.Fatalf("open postgres to record the §13.4 rewrite: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.SetDataMigrationApplied(context.Background(), store.DataMigrationContentHashFraming, true); err != nil {
+		t.Fatalf("record the §13.4 rewrite: %v", err)
+	}
+}
+
+// msStandardEnv is the standard-mode environment msStartStandardServerEnv
+// boots with: Postgres metadata, an S3 object store, a mock embedder, the
+// injected-session-token identity provider, and the shared signing key.
+func msStandardEnv(t *testing.T, dsn, bucket, region, pemPath string) []string {
+	t.Helper()
 	emb := semanticMockEmbedder(t)
-	env := []string{
+	return []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_REGISTRY_STORE=postgres",
 		"PODIUM_POSTGRES_DSN=" + dsn,
@@ -184,8 +222,6 @@ func msStartStandardServerEnv(t *testing.T, dsn, bucket, region, pemPath string,
 		// (§13.12), so none generates its own under its fresh HOME.
 		"PODIUM_SIGN_KEY_PATH=" + msSigningKeyPath(t),
 	}
-	env = append(env, extraEnv...)
-	return startServerArgs(t, env, "serve")
 }
 
 // msS3PathStyle resolves the path-style flag for the object store. MinIO needs

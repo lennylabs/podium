@@ -820,7 +820,12 @@ func run(ctx context.Context, stop func()) error {
 	// performs was reported before a bind was attempted. Returning here instead
 	// would put a bind failure ahead of them, and an operator whose
 	// configuration is refused would read "address already in use" rather than
-	// the §6.10 code naming what is wrong with their configuration.
+	// the §6.10 code naming what is wrong with their configuration. The one
+	// exception is a start unmigratedStoreGoverned covers with no §13.4
+	// completion record: refuseUnrecordedIngest returns the bind failure
+	// before the bootstrap ingest and ahead of the later startup refusals,
+	// because ingesting without the record would leave rows that refuse every
+	// later start.
 	configuredBind := cfg.bind
 	ln, bindErr := net.Listen("tcp", configuredBind)
 	if bindErr == nil {
@@ -912,6 +917,16 @@ func run(ctx context.Context, stop func()) error {
 		return err
 	}
 
+	// §13.4: outside the SQLite store in the key file's directory, refuse a
+	// start over a store that holds a manifest row and no record that the
+	// content-hash rewrite completed; sign-stored-rows runs that rewrite
+	// behind a reviewed dry run. It runs whatever the bind outcome and before
+	// the loader, so a refused start writes no key file, no manifest row, and
+	// no completion record.
+	if err := refuseUnmigratedStore(ctx, st, cfg); err != nil {
+		return err
+	}
+
 	// §13.10 / §4.7.9 ingest signing: signing is on by default, so every
 	// accepted manifest's content hash is signed with the registry-managed
 	// key. --sign none (PODIUM_SIGN=none) turns it off, and the bootstrap and
@@ -972,10 +987,22 @@ func run(ctx context.Context, stop func()) error {
 			}
 		}
 		// The boot logs the counts and the hold value through the summary
-		// lines and acts on neither; a held row is retried next start.
+		// lines and acts on neither; a held row is retried next start only
+		// over the co-located store; outside it, refuseUnrecordedIngest fails
+		// this start before it ingests, the held row stays in the store, and
+		// the next start is refused until sign-stored-rows records
+		// completion.
 		if _, _, err := rehashStoredHashes(ctx, deps, true); err != nil {
 			return err
 		}
+	}
+
+	// §13.4: on a start refuseUnmigratedStore governs, ingest only once the
+	// completion record exists. It closes a listener that did not bind, a
+	// row the rewrite held back, and a failed record write, each of which
+	// would otherwise store rows that refuse every later start.
+	if err := refuseUnrecordedIngest(ctx, st, cfg, bindErr, configuredBind); err != nil {
+		return err
 	}
 
 	// §4.7.2: route ingest embedding through the transactional outbox when the
@@ -1703,7 +1730,10 @@ func run(ctx context.Context, stop func()) error {
 	emitStartupBanner(os.Stderr, cfg.publicMode)
 	// Every startup refusal above has had its chance, so a bind that could not
 	// be satisfied is reported here, which is where it surfaced when the
-	// listener was opened by http.Server.ListenAndServe.
+	// listener was opened by http.Server.ListenAndServe. The exception is a
+	// start unmigratedStoreGoverned covers with no §13.4 completion record,
+	// whose bind failure refuseUnrecordedIngest returns before the bootstrap
+	// ingest.
 	if bindErr != nil {
 		return fmt.Errorf("serve: bind %s: %w", configuredBind, bindErr)
 	}

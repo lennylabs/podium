@@ -379,10 +379,15 @@ func TestLifecycle_InPlaceSQLiteUpgradePreservesArtifactsAndAudit(t *testing.T) 
 	// PODIUM_SQLITE_PATH selects the seeded legacy file; OpenSQLite runs the
 	// additive migration in place before serving. No --layer-path: the server must
 	// serve the pre-seeded manifest, not re-ingest a fresh registry over it.
+	// The in-place schema upgrade is the subject, so PODIUM_SIGN_KEY_PATH
+	// names a location in legacy.db's directory: a co-located signing-off
+	// store keeps the §13.4 boot rewrite, where a store elsewhere with a row
+	// and no completion record is refused until sign-stored-rows runs.
 	bootEnv := []string{
 		"HOME=" + home,
 		"PODIUM_SQLITE_PATH=" + dbPath,
 		"PODIUM_SIGN=none",
+		"PODIUM_SIGN_KEY_PATH=" + filepath.Join(home, "registry-signing.key"),
 		"PODIUM_AUDIT_LOG_PATH=" + auditPath,
 	}
 	srv := startServerArgs(t, bootEnv, "serve", "--standalone")

@@ -445,8 +445,9 @@ func TestAdminMigrateToStandard_AuditWarnsWithoutTarget(t *testing.T) {
 }
 
 // Spec: §13.4 — the command clears the target store's record of the
-// content-hash rewrite before it copies the first manifest row, so the target's
-// next start rewrites the rows it copied. A run that copies no manifest row,
+// content-hash rewrite before it copies the first manifest row, so the rewrite
+// runs again over the copied rows, at the target's next start or through
+// sign-stored-rows. A run that copies no manifest row,
 // and a --dry-run, leave the record as it was.
 func TestAdminMigrateToStandard_ClearsTheTargetMarker(t *testing.T) {
 	ctx := context.Background()
@@ -569,7 +570,8 @@ func (m *markerRecorder) PutManifest(ctx context.Context, rec store.ManifestReco
 
 // Spec: §13.4 — pumpStore clears the target's record of the content-hash
 // rewrite before its first PutManifest, so a pump that fails partway leaves the
-// target unmarked and its next start rewrites whatever was copied.
+// target unmarked and the rewrite runs again over whatever was copied, at the
+// target's next start or through sign-stored-rows.
 func TestPumpStore_ClearsTheMarkerBeforeTheFirstWrite(t *testing.T) {
 	ctx := context.Background()
 	newPlan := func() *migrationPlan {

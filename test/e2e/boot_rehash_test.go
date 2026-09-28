@@ -121,6 +121,17 @@ func clearRehashMarker(t testing.TB, sqlitePath string) {
 
 func storedHashes(t testing.TB, sqlitePath string) map[string]string {
 	t.Helper()
+	out := map[string]string{}
+	for _, rec := range storedRows(t, sqlitePath) {
+		out[rec.TenantID+"/"+rec.ArtifactID+"@"+rec.Version] = rec.ContentHash
+	}
+	return out
+}
+
+// storedRows returns every stored manifest row, soft-deleted ones included,
+// across every tenant.
+func storedRows(t testing.TB, sqlitePath string) []store.ManifestRecord {
+	t.Helper()
 	st, err := store.OpenSQLite(sqlitePath)
 	if err != nil {
 		t.Fatalf("open store: %v", err)
@@ -131,14 +142,43 @@ func storedHashes(t testing.TB, sqlitePath string) map[string]string {
 	if err != nil {
 		t.Fatalf("list tenants: %v", err)
 	}
-	out := map[string]string{}
+	var out []store.ManifestRecord
 	for _, tenant := range tenants {
 		recs, err := st.ListManifestsIncludingDeleted(ctx, tenant.ID)
 		if err != nil {
 			t.Fatalf("list manifests: %v", err)
 		}
-		for _, rec := range recs {
-			out[rec.TenantID+"/"+rec.ArtifactID+"@"+rec.Version] = rec.ContentHash
+		out = append(out, recs...)
+	}
+	return out
+}
+
+// requireSameHashes fails the test when a stored hash moved from want.
+func requireSameHashes(t testing.TB, sqlitePath string, want map[string]string) {
+	t.Helper()
+	got := storedHashes(t, sqlitePath)
+	if len(got) != len(want) {
+		t.Fatalf("the store holds %d row(s), want %d", len(got), len(want))
+	}
+	for key, hash := range want {
+		if got[key] != hash {
+			t.Errorf("%s = %s, want the unchanged %s", key, got[key], hash)
+		}
+	}
+}
+
+// refusedStart runs one start that must be refused and returns its combined
+// output after checking that it names each of wants.
+func refusedStart(t *testing.T, env []string, wants ...string) string {
+	t.Helper()
+	res := runPodium(t, "", env, "serve", "--standalone", "--bind", "127.0.0.1:0")
+	out := res.Stdout + res.Stderr
+	if res.Exit == 0 {
+		t.Fatalf("a start over an unmigrated store exited 0\n%s", out)
+	}
+	for _, want := range wants {
+		if !strings.Contains(out, want) {
+			t.Errorf("refused start output does not name %q:\n%s", want, out)
 		}
 	}
 	return out
@@ -164,13 +204,16 @@ func loadRehashSkill(t testing.TB, baseURL string) string {
 // admission check with materialize.content_hash_mismatch, which is what makes
 // the completion record observable: with it set the second start skips the
 // pass and the load is refused, and with it cleared the next start rewrites the
-// row and the same load succeeds.
+// row and the same load succeeds. It pins, through the compiled binary, the
+// boot rewrite of the zero-configuration signing-off standalone store, which
+// sits in the directory of the default key location.
 func TestE2E_BootRehashesStoredContentHashes(t *testing.T) {
 	home := t.TempDir()
-	sqlitePath := filepath.Join(home, "podium.db")
+	sqlitePath := filepath.Join(home, ".podium", "standalone", "podium.db")
 	// The subject is the content-hash rewrite, so signing is off (§13.10
-	// signs by default).
-	env := []string{"HOME=" + home, "PODIUM_REGISTRY_STORE=sqlite", "PODIUM_SQLITE_PATH=" + sqlitePath, "PODIUM_SIGN=none"}
+	// signs by default). Neither PODIUM_SQLITE_PATH nor PODIUM_SIGN_KEY_PATH
+	// is set, so the store takes its default path beside the default key.
+	env := []string{"HOME=" + home, "PODIUM_REGISTRY_STORE=sqlite", "PODIUM_SIGN=none"}
 	reg := rehashRegistry(t)
 
 	first := startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
@@ -216,11 +259,13 @@ func TestE2E_BootRehashesStoredContentHashes(t *testing.T) {
 	}
 }
 
-// Spec: §13.4 — with signing off, podium-server sign-stored-rows performs the
-// content-hash rewrite without a signer: its dry run reports no signing key and
-// a plan digest, the run given that digest moves every downgraded row back to
-// the current digest and records completion, and the next start runs no
-// rewrite and serves the artifact.
+// Spec: §13.4, §13.12 — with signing off, a start over a store outside the
+// directory of the default key location is refused while no completion is
+// recorded, and podium-server sign-stored-rows performs the content-hash
+// rewrite without a signer: its dry run reports no signing key and a plan
+// digest, the run given that digest moves every downgraded row back to the
+// current digest and records completion, and the next start runs no rewrite
+// and serves the artifact.
 func TestE2E_SigningOffRewriteThroughSignStoredRows(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
@@ -233,6 +278,13 @@ func TestE2E_SigningOffRewriteThroughSignStoredRows(t *testing.T) {
 	current := storedHashes(t, sqlitePath)
 	downgradeStoredRows(t, sqlitePath)
 	clearRehashMarker(t, sqlitePath)
+	downgraded := storedHashes(t, sqlitePath)
+
+	out := refusedStart(t, env, "sign-stored-rows", "--dry-run", "PODIUM_SIGN=none")
+	if strings.Contains(out, "--plan-digest") {
+		t.Errorf("the signing-off refusal names --plan-digest:\n%s", out)
+	}
+	requireSameHashes(t, sqlitePath, downgraded)
 
 	dry := runServerBin(t, env, "sign-stored-rows", "--dry-run")
 	if dry.Exit != 0 || !strings.Contains(dry.Stdout, "signing_key=- verify_keys=-") {
@@ -300,7 +352,9 @@ func TestE2E_BootRefusesAGeneratedSigningKey(t *testing.T) {
 // Spec: §13.4, §13.10 — podium admin migrate-to-standard clears the target
 // store's record of the rewrite before it copies the first manifest row, so the
 // target registry's next start rewrites the rows it copied and a consumer's
-// load of a copied artifact succeeds.
+// load of a copied artifact succeeds. The target's key location shares the
+// target store's directory: a signing-off target there keeps the boot rewrite,
+// where a target elsewhere is refused until sign-stored-rows runs.
 func TestE2E_MigratedTargetRewritesCopiedRows(t *testing.T) {
 	srcHome := t.TempDir()
 	srcDB := filepath.Join(srcHome, "podium.db")
@@ -328,6 +382,7 @@ func TestE2E_MigratedTargetRewritesCopiedRows(t *testing.T) {
 		"PODIUM_SQLITE_PATH=" + tgtDB,
 		"PODIUM_FILESYSTEM_ROOT=" + tgtObjs,
 		"PODIUM_SIGN=none",
+		"PODIUM_SIGN_KEY_PATH=" + filepath.Join(tgtHome, "registry-signing.key"),
 	}
 	otherReg := writeRegistry(t, map[string]string{
 		"ops/acme/other/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\nsensitivity: low\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
@@ -393,14 +448,13 @@ func TestE2E_LateSigningThroughSignStoredRows(t *testing.T) {
 	}
 }
 
-// Spec: §13.4, §13.12 — the first-start rewrite mints no envelope for an
-// unsigned row when the key file sits outside the SQLite store's directory.
-// A restart over a store whose signatures were cleared and whose completion
-// record is absent leaves the row unsigned, so a verifying load is still
-// refused with materialize.signature_missing, and the server log names the
-// reviewed sign-stored-rows procedure that attests the row.
-// Matrix: §6.10 (materialize.signature_missing)
-func TestE2E_FirstStartLeavesUnsignedRowsWhenTheKeyIsElsewhere(t *testing.T) {
+// Spec: §13.4, §13.12 — while no completion is recorded, a start over a
+// SQLite store outside the directory of the signing key file is refused and
+// rewrites nothing. The reviewed sign-stored-rows procedure, a
+// --include-unsigned dry run and a run with its plan digest, attests the
+// unsigned row and records completion, and the next start serves it to a
+// verifying consumer.
+func TestE2E_FirstStartRefusesAnUnmigratedStoreWhenTheKeyIsElsewhere(t *testing.T) {
 	t.Parallel()
 	home := t.TempDir()
 	keyPath := filepath.Join(t.TempDir(), "registry-signing.key")
@@ -413,12 +467,124 @@ func TestE2E_FirstStartLeavesUnsignedRowsWhenTheKeyIsElsewhere(t *testing.T) {
 	stopProc(first.cmd)
 	clearStoredSignatures(t, sqlitePath)
 	clearRehashMarker(t, sqlitePath)
+	before := storedHashes(t, sqlitePath)
 
-	restarted := startServerArgs(t, env, "serve", "--standalone")
-	if errStr, res := bridgeLoad(t, restarted.BaseURL, rehashSkillID, verifyKey); !strings.HasPrefix(errStr, "materialize.signature_missing") {
-		t.Fatalf("load after the restart = %q, want materialize.signature_missing\nstderr: %s", errStr, res.Stderr)
+	refusedStart(t, env, "sign-stored-rows", "--plan-digest")
+	requireSameHashes(t, sqlitePath, before)
+	for _, rec := range storedRows(t, sqlitePath) {
+		if rec.Signature != "" {
+			t.Errorf("%s was signed by a refused start", rec.ArtifactID)
+		}
 	}
-	if log := restarted.log(); !strings.Contains(log, "unsigned left; run sign-stored-rows --include-unsigned --dry-run, review it, and pass its plan digest to sign them") {
-		t.Errorf("server log does not name sign-stored-rows:\n%s", log)
+
+	attestUnsigned(t, env)
+	restarted := startServerArgs(t, env, "serve", "--standalone")
+	if errStr, res := bridgeLoad(t, restarted.BaseURL, rehashSkillID, verifyKey); errStr != "" {
+		t.Fatalf("load after sign-stored-rows = %q, want success\nstderr: %s\nlog:\n%s", errStr, res.Stderr, restarted.log())
+	}
+}
+
+// attestUnsigned runs the reviewed procedure that attests unsigned rows: a
+// --include-unsigned dry run, then a run given its plan digest, which must
+// leave no row unsigned.
+func attestUnsigned(t *testing.T, env []string) {
+	t.Helper()
+	dry := signStoredRows(t, env, "--dry-run", "--include-unsigned")
+	if dry.Exit != 0 {
+		t.Fatalf("sign-stored-rows --dry-run --include-unsigned exit=%d\nstdout:\n%s\nstderr:\n%s", dry.Exit, dry.Stdout, dry.Stderr)
+	}
+	res := signStoredRows(t, env, "--include-unsigned", "--plan-digest="+planDigestOf(t, dry.Stdout))
+	if res.Exit != 0 || !strings.Contains(res.Stdout, "rehash: 0 unsigned left") {
+		t.Fatalf("sign-stored-rows --include-unsigned exit=%d, want 0 and no unsigned row left\nstdout:\n%s\nstderr:\n%s", res.Exit, res.Stdout, res.Stderr)
+	}
+}
+
+// Spec: §13.4, §4.7.9 — a v0.4.0 store upgraded with signing on and
+// PODIUM_SIGN_KEY_PATH naming a new path outside the store's directory holds
+// unsigned rows and no key file. The start is refused, names podium admin
+// signing-key generate with that path ahead of the dry run, and creates no
+// key, because sign-stored-rows never generates one. After the key is
+// generated, the reviewed procedure records completion and the next start
+// serves the row to a verifying consumer.
+func TestE2E_UnmigratedStoreWithoutAKeyFileMigratesAfterSigningKeyGenerate(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	keyPath := filepath.Join(t.TempDir(), "registry-signing.key")
+	env := rotationEnv(home, keyPath)
+	sqlitePath := filepath.Join(home, "podium.db")
+
+	first := startServerArgs(t, append(append([]string{}, env...), "PODIUM_SIGN=none"), "serve", "--standalone", "--layer-path", rehashRegistry(t))
+	stopProc(first.cmd)
+	downgradeStoredRows(t, sqlitePath)
+	clearRehashMarker(t, sqlitePath)
+	before := storedHashes(t, sqlitePath)
+
+	generate := "podium admin signing-key generate --key-file " + keyPath
+	out := refusedStart(t, env, generate, "--dry-run")
+	if strings.Index(out, generate) > strings.Index(out, "--dry-run") {
+		t.Errorf("the refusal names the dry run before signing-key generate:\n%s", out)
+	}
+	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
+		t.Errorf("stat %s after a refused start = %v, want absence", keyPath, err)
+	}
+	requireSameHashes(t, sqlitePath, before)
+
+	verifyKey := "PODIUM_SIGNATURE_VERIFY_KEY=" + firstLine(generateKeyFile(t, keyPath).Stdout)
+	attestUnsigned(t, env)
+	restarted := startServerArgs(t, env, "serve", "--standalone")
+	if errStr, res := bridgeLoad(t, restarted.BaseURL, rehashSkillID, verifyKey); errStr != "" {
+		t.Fatalf("load after sign-stored-rows = %q, want success\nstderr: %s\nlog:\n%s", errStr, res.Stderr, restarted.log())
+	}
+}
+
+// Spec: §13.4, §13.10 — migrate-to-standard clears the record on a target
+// SQLite store outside the directory of the signing key file, so the target's
+// start is refused and leaves the copied row unchanged. The copied row was
+// signed under the shared key, so sign-stored-rows without flags records
+// completion, and the target then serves it to a verifying consumer.
+func TestE2E_MigratedTargetOutsideTheKeyDirectoryRefusesUntilSignStoredRows(t *testing.T) {
+	t.Parallel()
+	srcHome := t.TempDir()
+	srcDB := filepath.Join(srcHome, "podium.db")
+	srcObjs := filepath.Join(srcHome, "objects")
+	keyPath := filepath.Join(srcHome, "registry-signing.key")
+	verifyKey := "PODIUM_SIGNATURE_VERIFY_KEY=" + firstLine(generateKeyFile(t, keyPath).Stdout)
+	source := startServerArgs(t, rotationEnv(srcHome, keyPath), "serve", "--standalone", "--layer-path", rehashRegistry(t))
+	stopProc(source.cmd)
+
+	tgtHome := t.TempDir()
+	tgtDB := filepath.Join(tgtHome, "podium.db")
+	tgtObjs := filepath.Join(tgtHome, "objects")
+	tgtEnv := []string{
+		"HOME=" + tgtHome,
+		"PODIUM_REGISTRY_STORE=sqlite",
+		"PODIUM_SQLITE_PATH=" + tgtDB,
+		"PODIUM_FILESYSTEM_ROOT=" + tgtObjs,
+		"PODIUM_SIGN=registry-key",
+		"PODIUM_SIGN_KEY_PATH=" + keyPath,
+	}
+	res := runPodium(t, "", []string{"HOME=" + srcHome},
+		"admin", "migrate-to-standard",
+		"--source-sqlite", srcDB,
+		"--source-objects", srcObjs,
+		"--target-store", "sqlite",
+		"--target-sqlite", tgtDB,
+		"--target-objects-type", "filesystem",
+		"--target-objects", tgtObjs,
+	)
+	if res.Exit != 0 {
+		t.Fatalf("migrate-to-standard exited %d\nstdout:\n%s\nstderr:\n%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	copied := storedHashes(t, tgtDB)
+
+	refusedStart(t, tgtEnv, "sign-stored-rows")
+	requireSameHashes(t, tgtDB, copied)
+
+	if run := signStoredRows(t, tgtEnv); run.Exit != 0 {
+		t.Fatalf("sign-stored-rows on the target exit=%d\nstdout:\n%s\nstderr:\n%s", run.Exit, run.Stdout, run.Stderr)
+	}
+	target := startServerArgs(t, tgtEnv, "serve", "--standalone")
+	if errStr, res := bridgeLoad(t, target.BaseURL, rehashSkillID, verifyKey); errStr != "" {
+		t.Fatalf("load from the migrated target = %q, want success\nstderr: %s\nlog:\n%s", errStr, res.Stderr, target.log())
 	}
 }

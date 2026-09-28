@@ -184,8 +184,11 @@ func (r rehashRow) key() string {
 }
 
 // rehashStoredHashes rewrites every stored §4.7.6 content hash from the bytes
-// the registry holds, once per store, on the first start of this version that
-// binds its listen address. It runs before the bootstrap ingest and before
+// the registry holds, once per store. The first start of this version that
+// binds its listen address runs it only where refuseUnmigratedStore does not
+// refuse that start, which is the SQLite store in the key file's directory or
+// a store with no manifest row; otherwise, in either signing mode,
+// sign-stored-rows runs it. It runs before the bootstrap ingest and before
 // anything is served, because an ingest that meets a row still at the previous
 // digest reports a conflict for it, and the registry's §13.4 stored-row
 // admission check refuses a load of a row still at the previous digest with
@@ -194,8 +197,9 @@ func (r rehashRow) key() string {
 // Spec: §13.4 — "A release that changes how a stored value is computed rewrites
 // the affected rows in place, from the bytes the registry holds, on the first
 // start of the new version that binds its listen address, before that start
-// ingests or serves, and records that the rewrite completed so that later
-// starts skip it."
+// ingests or serves, or, where the paragraph that begins "While no completion
+// is recorded" has that start refuse, through `sign-stored-rows` run before
+// it, and records that the rewrite completed so that later starts skip it."
 //
 // Given d.ReviewedPlan, which sign-stored-rows sets from --plan-digest, it
 // compares the plan digest of the plan it builds with that value before any
@@ -205,7 +209,10 @@ func (r rehashRow) key() string {
 // It plans every row before it writes any, so the refusal that protects a
 // stored signature (step 5 below) leaves the store as it was. The failure
 // policy is: a row whose bytes could not be read, or whose signing or write
-// failed, holds the marker back and is tried again on the next start; a row
+// failed, holds the marker back and is tried again on the next start only
+// where the store is the SQLite store in the key file's directory (otherwise,
+// in either signing mode, the next start is refused and the next
+// sign-stored-rows run tries the row again); a row
 // whose bytes or whose signature fail their checks is logged and does not,
 // because no later pass could clear it and an unset marker would make every
 // later start re-read every resource body in the store.
@@ -386,8 +393,10 @@ func (p *rehashPlanner) assemble(ctx context.Context, rec store.ManifestRecord) 
 
 // applyWrongRootGuard treats every body_missing row as body_unavailable when
 // no object-store read in this pass returned a body, so an object store opened
-// at the wrong root or bucket holds the marker back and the next start retries
-// rather than the pass writing the store off as permanently short of bodies.
+// at the wrong root or bucket holds the marker back and the rewrite runs again,
+// by the next start only over the SQLite store in the key file's directory and
+// otherwise by the next sign-stored-rows run, rather than the pass writing the
+// store off as permanently short of bodies.
 func (p *rehashPlanner) applyWrongRootGuard() {
 	if p.bodiesRead > 0 {
 		return
@@ -443,9 +452,11 @@ type rehashCounts struct {
 	// not rewrite.
 	stillSigned map[string]int
 	// recordErr is the failed write of the completion record. The boot logs
-	// it and runs the pass again on the next start; sign-stored-rows fails
-	// on it, because its success status tells the operator the rewrite's
-	// completion is recorded.
+	// it and runs the pass again on the next start; outside the co-located
+	// SQLite store, the boot also fails this start before its bootstrap
+	// ingest through refuseUnrecordedIngest. sign-stored-rows fails on it,
+	// because its success status tells the operator the rewrite's completion
+	// is recorded.
 	recordErr error
 }
 
@@ -458,7 +469,9 @@ type rehashApplier struct {
 	// retrying per row would cost that timeout for every re-signed row
 	// while nothing answers the health probes.
 	appendEvents bool
-	// held records a row the next start must try again.
+	// held records a row the next start must try again. Outside the
+	// co-located SQLite store, the held row stays in the store, and the next
+	// start is refused until sign-stored-rows records completion.
 	held bool
 }
 
@@ -479,7 +492,7 @@ func applyRehash(ctx context.Context, d rehashDeps, plan []rehashRow) (rehashCou
 
 	if !a.held {
 		if err := d.Store.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, true); err != nil {
-			log.Printf("rehash: recording the completed rewrite failed, the next start runs it again: %v", err)
+			log.Printf("rehash: recording the completed rewrite failed: %v", err)
 			a.counts.recordErr = fmt.Errorf("record the completed rewrite: %w", err)
 		}
 	}
@@ -703,22 +716,161 @@ func refuseGeneratedSigningKey(ctx context.Context, st store.Store, signMode str
 	if applied {
 		return nil
 	}
-	tenants, err := st.ListTenants(ctx)
+	rec, found, err := firstStoredRow(ctx, st, func(rec store.ManifestRecord) bool { return rec.Signature != "" })
 	if err != nil {
 		return fmt.Errorf("registry signing key: %w", err)
+	}
+	if !found {
+		return nil
+	}
+	return fmt.Errorf("PODIUM_SIGN_KEY_PATH names no file (%s) and generating a key now would strand the §4.7.9 signature on %s/%s@%s, because the §13.4 content-hash rewrite has not completed: point PODIUM_SIGN_KEY_PATH at the key that signed the stored rows",
+		path, rec.TenantID, rec.ArtifactID, rec.Version)
+}
+
+// firstStoredRow returns the first manifest row, soft-deleted ones included,
+// that match accepts, walking every tenant. It returns a listing error
+// unwrapped, so each caller prefixes it with the refusal it belongs to.
+func firstStoredRow(ctx context.Context, st store.Store, match func(store.ManifestRecord) bool) (store.ManifestRecord, bool, error) {
+	tenants, err := st.ListTenants(ctx)
+	if err != nil {
+		return store.ManifestRecord{}, false, err
 	}
 	for _, t := range tenants {
 		recs, err := st.ListManifestsIncludingDeleted(ctx, t.ID)
 		if err != nil {
-			return fmt.Errorf("registry signing key: %w", err)
+			return store.ManifestRecord{}, false, err
 		}
 		for _, rec := range recs {
-			if rec.Signature == "" {
-				continue
+			if match(rec) {
+				return rec, true, nil
 			}
-			return fmt.Errorf("PODIUM_SIGN_KEY_PATH names no file (%s) and generating a key now would strand the §4.7.9 signature on %s/%s@%s, because the §13.4 content-hash rewrite has not completed: point PODIUM_SIGN_KEY_PATH at the key that signed the stored rows",
-				path, rec.TenantID, rec.ArtifactID, rec.Version)
 		}
 	}
-	return nil
+	return store.ManifestRecord{}, false, nil
+}
+
+// refuseUnmigratedStore refuses a start over a store the §13.4 rewrite has not
+// completed on, outside the SQLite store in the directory of the registry
+// signing key location, when the store holds a manifest row. sign-stored-rows
+// performs the rewrite in place of such a start, behind its dry run and, with
+// signing on, its plan digest, so the rows a start would rewrite are the rows
+// an operator reviewed.
+//
+// Two stores are exempt. The co-located SQLite store keeps the automatic
+// rewrite, because the key and the rows it signs share one fate on disk. A
+// store with no manifest row has nothing to review, and its first start
+// records completion before it ingests (refuseUnrecordedIngest), so the rows
+// it then stores do not refuse the next start. The refusal applies in both
+// signing modes: a signing-off rewrite signs nothing but still moves every
+// stored row to a new digest without review.
+//
+// It runs after refuseUnpersistedSigningKey and refuseGeneratedSigningKey,
+// whose refusals take precedence, and before the signing-key loader whatever
+// the bind outcome, so a refused start generates no key, rewrites no row, and
+// records no completion. A start that finds a row reads the record again and
+// refuses only when it is still absent, so a replica that starts beside a
+// peer's first start over an empty store proceeds once the peer has recorded
+// completion. Every store read error fails the start, so a start that cannot
+// confirm the record or tell whether the store holds a row runs no rewrite.
+// Spec: §13.4.
+func refuseUnmigratedStore(ctx context.Context, st store.Store, cfg *Config) error {
+	keyPath, governed, err := unmigratedStoreGoverned(cfg)
+	if err != nil || !governed {
+		return err
+	}
+	applied, err := st.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+	if err != nil {
+		return fmt.Errorf("registry start: %w", err)
+	}
+	if applied {
+		return nil
+	}
+	rec, found, err := firstStoredRow(ctx, st, func(store.ManifestRecord) bool { return true })
+	if err != nil {
+		return fmt.Errorf("registry start: %w", err)
+	}
+	if !found {
+		return nil
+	}
+	if applied, err = st.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming); err != nil {
+		return fmt.Errorf("registry start: %w", err)
+	}
+	if applied {
+		return nil
+	}
+	return unmigratedStoreError(cfg, rec, keyPath)
+}
+
+// unmigratedStoreError is refuseUnmigratedStore's refusal. With signing on it
+// names the dry run, the --include-unsigned setting the run repeats because
+// the plan header frames it, and --plan-digest; when no key file exists it
+// first names podium admin signing-key generate, because sign-stored-rows
+// never generates a key. With signing off it names PODIUM_SIGN=none for the
+// command's environment, because podium serve --sign none sets the mode only
+// inside its own process, and names neither --include-unsigned, which the
+// command refuses with signing off, nor --plan-digest, which is optional
+// without it.
+func unmigratedStoreError(cfg *Config, rec store.ManifestRecord, keyPath string) error {
+	row := fmt.Sprintf("%s/%s@%s", rec.TenantID, rec.ArtifactID, rec.Version)
+	if !registrySigningEnabled(cfg.signMode) {
+		return fmt.Errorf("registry start: the store is %s and holds manifest rows, such as %s, with no record that the §13.4 content-hash rewrite completed, and outside the SQLite store in the directory of the registry signing key location %s a start does not run that rewrite, with signing off as with signing on; with no registry process on the previous release serving the store, and with PODIUM_SIGN=none in the command's environment, run sign-stored-rows --dry-run, review its report, run sign-stored-rows, and start the registry again",
+			storeLabel(cfg), row, keyLocationLabel(keyPath))
+	}
+	steps := "run sign-stored-rows --dry-run"
+	// A stat error other than absence keeps the first message, because the
+	// command's key loader reports that error itself.
+	if _, err := os.Stat(keyPath); errors.Is(err, fs.ErrNotExist) {
+		steps = fmt.Sprintf("create the signing key file, which sign-stored-rows never generates, with podium admin signing-key generate --key-file %s and keep it in the deployment's backup, then run sign-stored-rows --dry-run", keyPath)
+	}
+	return fmt.Errorf("registry start: the store is %s and holds manifest rows, such as %s, with no record that the §13.4 content-hash rewrite completed, and outside the SQLite store in the directory of the signing key file %s a start does not run that rewrite; with no registry process on the previous release serving the store, %s, adding --include-unsigned to attest unsigned rows, review its report, run sign-stored-rows with the same --include-unsigned setting and --plan-digest set to the digest on the report's last line, and start the registry again",
+		storeLabel(cfg), row, keyPath, steps)
+}
+
+// keyLocationLabel names the key location in a refusal. An empty keyPath,
+// which only a signing-off start whose default key location cannot be
+// resolved returns, is named by the variable that sets it.
+func keyLocationLabel(keyPath string) string {
+	if keyPath == "" {
+		return "PODIUM_SIGN_KEY_PATH (unset, and the default location cannot be resolved)"
+	}
+	return keyPath
+}
+
+// refuseUnrecordedIngest fails a start that unmigratedStoreGoverned covers
+// when the §13.4 completion record is absent once the rewrite would have run,
+// before the bootstrap ingest. It closes three paths: a listener that did not
+// bind, so the rewrite never ran; a row the rewrite held back; and a failed
+// write of the record. Ingesting without the record would store rows that
+// refuseUnmigratedStore then refuses at every later start of every replica.
+//
+// A failed governed start therefore stores no manifest row. Over a store that
+// was empty, the next start after a failed bind or a failed record write finds
+// no row and runs the empty rewrite, which records completion. A row the
+// rewrite held back stays in the store, so the next start is refused until
+// sign-stored-rows records completion.
+//
+// It reads the completion record, which only applyRehash sets,
+// migrate-to-standard clears, and Postgres.ResetForTest truncates in tests.
+// A present record, whether this start's rewrite, an earlier start, or a peer
+// set it, lets the start proceed whatever the bind outcome, and a read error
+// fails the start. A bind failure over an absent record is returned as the
+// error run() reports for it, so the operator reads the address in use.
+// Spec: §13.4.
+func refuseUnrecordedIngest(ctx context.Context, st store.Store, cfg *Config, bindErr error, configuredBind string) error {
+	keyPath, governed, err := unmigratedStoreGoverned(cfg)
+	if err != nil || !governed {
+		return err
+	}
+	applied, err := st.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+	if err != nil {
+		return fmt.Errorf("registry start: %w", err)
+	}
+	if applied {
+		return nil
+	}
+	if bindErr != nil {
+		return fmt.Errorf("serve: bind %s: %w", configuredBind, bindErr)
+	}
+	return fmt.Errorf("registry start: the §13.4 content-hash rewrite did not record its completion on the store %s, and outside the SQLite store in the directory of the signing key file %s a start does not ingest before that record exists; the rehash: lines above name the row that held it back or the failed record write; fix that cause and start the registry again",
+		storeLabel(cfg), keyLocationLabel(keyPath))
 }

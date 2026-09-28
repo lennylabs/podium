@@ -474,16 +474,21 @@ type Store interface {
 	// false) the named marker. Both directions are idempotent, so replicas
 	// that finish the same pass together both succeed. The pass sets it.
 	// podium admin migrate-to-standard, which copies rows another store
-	// computed, removes it on the target so the target's next start
-	// rewrites what it copied.
+	// computed, removes it on the target so the rewrite runs again over the
+	// copied rows: at the target's next start only when the target is the
+	// SQLite store in the signing key file's directory, and otherwise
+	// through sign-stored-rows.
 	SetDataMigrationApplied(ctx context.Context, name string, applied bool) error
 }
 
 // DataMigrationContentHashFraming names the one-time rewrite of every stored
 // content hash onto the §4.7.6 framed canonical serialization. The registry's
-// first start on the new binary runs the pass and sets the marker, and
-// podium admin migrate-to-standard clears it on its target so the target's
-// next start rewrites the rows it copied.
+// first start on the new binary runs the pass and sets the marker when the
+// store is the SQLite store in the signing key file's directory or holds no
+// manifest row; for every other store, sign-stored-rows runs the pass and
+// sets the marker, and a start refuses until it has. podium admin
+// migrate-to-standard clears the marker on its target so the rewrite runs
+// again over the rows it copied, by the same rule.
 const DataMigrationContentHashFraming = "content-hash-framing"
 
 // SuiteName is the canonical name of the conformance suite (§9.3).
