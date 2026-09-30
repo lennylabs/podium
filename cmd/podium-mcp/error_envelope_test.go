@@ -177,3 +177,27 @@ func TestProxyGet_DecodesRegistryEnvelopeEndToEnd(t *testing.T) {
 		t.Errorf("error summary missing/!string: %v", m["error"])
 	}
 }
+
+// spec: SS 6.10 — the registry prefixes its message with the code, and the
+// bridge prints "code: message", so the decoded message drops the repeated
+// prefix and a refusal reads the code once.
+func TestParseRegistryError_DropsTheRepeatedCodePrefix(t *testing.T) {
+	t.Parallel()
+	body := []byte(`{"code":"materialize.content_hash_mismatch","message":"materialize.content_hash_mismatch: close-reporting/variance"}`)
+	err := parseRegistryError(http.StatusInternalServerError, body)
+	if got, want := err.Error(), "materialize.content_hash_mismatch: close-reporting/variance"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+	m := errorResultFrom(err)
+	if got, want := m["error"], "materialize.content_hash_mismatch: close-reporting/variance"; got != want {
+		t.Errorf("envelope error = %v, want %q", got, want)
+	}
+	if got, want := m["message"], "close-reporting/variance"; got != want {
+		t.Errorf("envelope message = %v, want %q", got, want)
+	}
+	// A message that does not repeat the code is kept whole.
+	plain := parseRegistryError(http.StatusNotFound, []byte(`{"code":"registry.not_found","message":"no such artifact"}`))
+	if got, want := plain.Error(), "registry.not_found: no such artifact"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+}
