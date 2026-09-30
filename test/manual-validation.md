@@ -8560,7 +8560,7 @@ requests the browser sends, and no Go test observes either.
    GWA=$!
    UPSTREAM=http://127.0.0.1:8174 AS_USER=bob@acme.com python3 "$WORK/gateway.py" 8176 &
    GWB=$!
-   curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8175/app/
+   curl -s --retry 20 --retry-delay 1 --retry-all-errors -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8175/app/
    ```
 
    **Expect.** `200`.
