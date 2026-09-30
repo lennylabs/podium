@@ -568,7 +568,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   to every reader, `podium sync` and the SDKs included, with
   `materialize.content_hash_mismatch`, `materialize.signature_invalid`, or
   `materialize.signature_missing`, so on a signing registry a row altered in
-  the store is refused whatever the consumer's policy. Turning signing on
+  the store is refused whatever the consumer's policy. Each refusal is
+  returned as HTTP 500, is not retryable, and carries a `suggested_action`
+  naming the operator's repair. Turning signing on
   after the upgrade makes every row stored unsigned unloadable until a
   `sign-stored-rows --include-unsigned --dry-run` review and a run with its
   plan digest sign it or a new version of it is ingested. During an object-storage outage a full load is

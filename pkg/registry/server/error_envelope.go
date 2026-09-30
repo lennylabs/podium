@@ -49,6 +49,19 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 		retryable:       true,
 		suggestedAction: "Retry the write once the registry leaves read-only mode; reads continue to serve from the replica.",
 	},
+	// spec §13.4: stored-row admission refuses a row that fails its
+	// integrity check before the registry serves it. The condition is in the
+	// stored row, so a retry fails the same way until an operator repairs
+	// the row, and each hint names that repair.
+	"materialize.content_hash_mismatch": {
+		suggestedAction: "The registry refused a stored row whose bytes do not reproduce its stored content hash; retrying does not help. An operator reads the registry log for the row, then restores it from backup, reruns the reviewed sign-stored-rows pass where the rewrite held it back, or publishes a new version of the artifact.",
+	},
+	"materialize.signature_invalid": {
+		suggestedAction: "The registry refused a stored row whose signature does not verify under any key of its verification key set; retrying does not help. An operator restores the signing key or lists its public half on a verify: line of the key file and runs sign-stored-rows, or publishes a new version of the artifact.",
+	},
+	"materialize.signature_missing": {
+		suggestedAction: "The signing registry refused a stored row that carries no signature; retrying does not help. An operator signs it with a reviewed sign-stored-rows --include-unsigned dry run and a run with its --plan-digest, or publishes a new version of the artifact.",
+	},
 	// spec §7.3.1 ingest-cases: "Same version, different content_hash |
 	// Rejected as ingest.immutable_violation. The author bumps the version."
 	// A stored (artifact_id, version) is immutable (§4.7), so retrying the

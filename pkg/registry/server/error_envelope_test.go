@@ -185,3 +185,23 @@ func TestWriteCoreError_DefaultBranchRetryable(t *testing.T) {
 		t.Errorf("suggested_action empty, want a remediation hint")
 	}
 }
+
+// spec: §13.4 — a stored-row admission refusal carries a remediation hint
+// and is not retryable, on the single-load path and on each batch item.
+func TestAdmissionRefusal_EnvelopeCarriesTheRepair(t *testing.T) {
+	t.Parallel()
+	for _, sentinel := range []error{core.ErrContentHashMismatch, core.ErrStoredSignatureMissing, core.ErrStoredSignatureInvalid} {
+		code := sentinel.Error()
+		t.Run(code, func(t *testing.T) {
+			e := &ErrorResponse{Code: code, Message: "x"}
+			enrichEnvelope(e)
+			if e.Retryable || e.SuggestedAction == "" {
+				t.Errorf("single-load envelope = %+v, want retryable=false and a suggested_action", e)
+			}
+			env := errorEnvelopeFor(&wrapErr{err: sentinel})
+			if env == nil || env.Code != code || env.Retryable || env.SuggestedAction == "" {
+				t.Errorf("batch envelope = %+v, want code %s, retryable=false, and a suggested_action", env, code)
+			}
+		})
+	}
+}
