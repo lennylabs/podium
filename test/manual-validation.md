@@ -9494,9 +9494,10 @@ The isolation block's `HOME` also keeps the kind cluster's kubeconfig under
     and read the probes:
 
     ```bash
+    kubectl rollout status deployment/podium-podium --timeout=5m
     kubectl get pods -l app.kubernetes.io/name=podium
     kubectl get deployment podium-podium \
-      -o jsonpath='{.spec.template.spec.containers[0].startupProbe.httpGet.path}'
+      -o jsonpath='{.spec.template.spec.containers[0].startupProbe.httpGet.path}'; echo
     helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --set replicaCount=0 \
       --set migration.mode=dry-run --set migration.includeUnsigned=true
     ```
