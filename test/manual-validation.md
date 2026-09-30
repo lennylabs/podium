@@ -61,6 +61,10 @@ export DOCKER_CONFIG="${DOCKER_CONFIG:-$HOME/.docker}"
 export HOME="$WORK/home"; mkdir -p "$HOME"
 cd "$WORK"
 unset PODIUM_REGISTRY PODIUM_HARNESS PODIUM_SESSION_TOKEN
+server_alive() {
+  until grep -q 'podium-server listening on ' "$2" 2>/dev/null || ! kill -0 "$1" 2>/dev/null; do sleep 1; done
+  kill -0 "$1" 2>/dev/null || { echo "FAIL: server pid $1 exited; read $2" >&2; tail -n 5 "$2" >&2; return 1; }
+}
 which podium    # must print $PODIUM_BIN/podium
 ```
 
@@ -95,6 +99,23 @@ repeat.
   "$URL" "query"` works; `podium search "query" --registry "$URL"` does not.
 - Server scenarios start `podium serve` in the background and bind a loopback
   port. The cleanup step stops the server and removes `$WORK`.
+- Each scenario binds loopback ports that no other scenario binds. The
+  exceptions are the scenarios that run against another scenario's running
+  stack: S45 runs on S21's registry, S47 to S50, S55 to S57, S59, and S60 run
+  on S44's, and S52 to S54 run on S51's. The Postgres and MinIO ports that
+  `make services-up` publishes are shared infrastructure rather than a
+  scenario's own bind.
+- After a step's `/healthz` poll, run `server_alive "$SRV" <log>`, which the
+  isolation block defines, with the PID variable and the log file the step
+  recorded. The poll alone cannot tell the scenario's server from another
+  process on the same port: a `podium serve` that fails to bind exits, and
+  every later command then reads whatever else answers there. The function
+  waits for the server's own `podium-server listening on` log line, which the
+  server prints only after a successful bind, and then confirms the process
+  is alive with `kill -0`. When the process has exited, it prints `FAIL:
+  server pid <pid> exited` and the last lines of the log, and returns 1. Stop
+  the scenario there and read the log. A step that starts a server by
+  reference to another scenario runs the same check.
 - A registry directory is a tree of artifact directories. `podium artifact
   scaffold --type <type> <path>` writes one artifact at `<path>`; the artifact
   name is the last path element.
@@ -452,6 +473,7 @@ collision-rejection rule.
    podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8101 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8101/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8101
    ```
 
@@ -511,6 +533,7 @@ show`, `artifact show`, and the HTTP endpoints.
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8102 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8102/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8102
    podium search --registry "$PODIUM_REGISTRY" "close the books"
    podium domain show --registry "$PODIUM_REGISTRY"
@@ -568,6 +591,7 @@ the reason.
    podium serve --standalone --layer-path "$WORK/reg" --bind 127.0.0.1:8103 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8103/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8103
    podium search --registry "$PODIUM_REGISTRY" "close the books for the month"
    ```
@@ -614,6 +638,7 @@ $REAL_HOME/projects/podium/test.env; set +a`.
    podium serve --standalone --layer-path "$WORK/reg" --bind 127.0.0.1:8104 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8104/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8104
    podium search --registry "$PODIUM_REGISTRY" "close the books for the month"
    ```
@@ -658,6 +683,7 @@ reingest`, source updates.
    podium serve --standalone --no-embeddings --bind 127.0.0.1:8105 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8105/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8105
    podium layer register --registry "$PODIUM_REGISTRY" --id team --repo "$WORK/repo" --ref main --public
    podium layer reingest --registry "$PODIUM_REGISTRY" team
@@ -739,6 +765,7 @@ from a lower-precedence layer.
    podium serve --standalone --no-embeddings --bind 127.0.0.1:8106 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8106/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8106
    podium layer register --registry "$PODIUM_REGISTRY" --id base --repo "$WORK/base" --ref main --public
    podium layer register --registry "$PODIUM_REGISTRY" --id team --repo "$WORK/team" --ref main --public
@@ -785,6 +812,7 @@ reaches a running registry and the meta-tools return live results.
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8107 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8107/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8107
    ```
 
@@ -866,6 +894,7 @@ visibility, the mint helper in `tools/minttoken`.
    podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8108 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8108/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8108
    ```
 
@@ -988,6 +1017,7 @@ absent.
    podium serve --strict --layer-path "$WORK/reg" --bind 127.0.0.1:8110 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8110/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8110
    podium config show --server | grep -E 'store|object_store|vector'
    podium search --registry "$PODIUM_REGISTRY" "quarterly report"
@@ -1077,6 +1107,7 @@ selection.
    podium serve --strict --layer-path "$WORK/reg" --bind 127.0.0.1:8111 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8111/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8111
    podium config show --server | grep -E 'store|object_store|vector|embedding'
    sleep 8   # let the vector outbox drain worker upsert the two vectors
@@ -1155,6 +1186,7 @@ if absent.
    podium serve --strict --layer-path "$WORK/reg" --bind 127.0.0.1:8112 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8112/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8112
    podium config show --server | grep -E 'store|object_store|vector|inference'
    sleep 8   # let the vector outbox drain worker send the two artifacts' text to the backend
@@ -1203,6 +1235,7 @@ ingest-time sensitivity ceiling.
    podium serve --standalone --no-embeddings --public-mode --layer-path "$WORK/reg" --bind 127.0.0.1:8113 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8113/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8113
    podium status
    podium search --registry "$PODIUM_REGISTRY" ""
@@ -1254,6 +1287,7 @@ that loading a deprecated artifact surfaces the replacement.
    podium serve --standalone --no-embeddings --bind 127.0.0.1:8114 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8114/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8114
    podium layer register --registry "$PODIUM_REGISTRY" --id team --repo "$WORK/repo" --ref main --public
    podium layer reingest --registry "$PODIUM_REGISTRY" team
@@ -1327,6 +1361,7 @@ is refused.
    podium serve --standalone --no-embeddings --sign registry-key --layer-path "$WORK/reg" --bind 127.0.0.1:8115 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8115/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8115
    grep "ingest signing" "$WORK/srv.log"
    ```
@@ -1374,6 +1409,7 @@ is refused.
      --bind 127.0.0.1:8116 > "$WORK/srv-unsigned.log" 2>&1 &
    SRV2=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8116/healthz
+   server_alive "$SRV2" "$WORK/srv-unsigned.log"
    echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"unsigned-runbook"}}}' \
      | PODIUM_REGISTRY=http://127.0.0.1:8116 \
        PODIUM_HARNESS=none \
@@ -1406,10 +1442,9 @@ is refused.
   artifact through the MCP bridge recomputes the delivery hash, verifies the
   delivery signature, and materializes the artifact under `$WORK/out`.
 - The unsigned artifact loaded under the same policy fails with
-  `materialize.signature_missing` and writes nothing. A signature that does not
-  validate against the configured public key fails with
-  `materialize.signature_invalid` (`signature_invalid: signature does not
-  verify`).
+  `materialize.signature_missing` and writes nothing. No step here presents a
+  signature that fails to verify. S69 step 6 covers that refusal,
+  `materialize.signature_invalid`.
 - `PODIUM_VERIFY_SIGNATURES` accepts `never` or `always`. Any other value exits
   the bridge with a nonzero status and the message `PODIUM_VERIFY_SIGNATURES
   must be never | always`.
@@ -1435,8 +1470,8 @@ scenario's data is needed.
 
 1. Run the isolation block.
 2. Build standalone state: author a registry, serve standalone, register a
-   Git layer, and confirm a search returns results (as in S09, on
-   `127.0.0.1:8116`). Stop the standalone server.
+   Git layer, and confirm a search returns results (as in S09, including its
+   liveness check, on `127.0.0.1:8129`). Stop the standalone server.
 3. Recreate the target stores empty. The migration refuses a copied row that
    the target already holds at a different content hash, so a Postgres volume
    carrying a row an earlier run wrote fails the command. `make services-down`
@@ -1455,7 +1490,8 @@ scenario's data is needed.
 
    **Expect.** Both loops return, so Postgres reports `healthy` and the bucket
    bootstrap has completed. `docker compose ps -a` then reports `postgres` and
-   `minio` as `running` and `bootstrap` as `exited (0)`. No registry is started
+   `minio` with a status that begins `Up`, and `bootstrap` with a status that
+   begins `Exited (0)`, such as `Exited (0) 12 seconds ago`. No registry is started
    against these stores before step 4.
 
 4. Load the standard-store environment and run the migration. The migration
@@ -1506,6 +1542,7 @@ scenario's data is needed.
    podium serve --strict --bind 127.0.0.1:8117 > "$WORK/srv2.log" 2>&1 &
    SRV=$!
    curl -s --retry 60 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8117/healthz
+   server_alive "$SRV" "$WORK/srv2.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8117
    podium layer list --registry "$PODIUM_REGISTRY"
    podium search --registry "$PODIUM_REGISTRY" "deploy"
@@ -1647,6 +1684,7 @@ the single-Postgres stack.
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8119 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8119/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8119
    podium domain show --registry "$PODIUM_REGISTRY"
    podium domain search --registry "$PODIUM_REGISTRY" "accounting close"
@@ -1886,6 +1924,7 @@ given artifact through `extends` and `delegates_to` edges.
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8120 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8120/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8120
    podium impact --registry "$PODIUM_REGISTRY" deploy-base
    ```
@@ -1925,6 +1964,7 @@ endpoint, HMAC verification.
    podium serve --standalone --no-embeddings --bind 127.0.0.1:8121 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8121/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8121
    podium layer register --registry "$PODIUM_REGISTRY" --id team --repo "$WORK/repo" --ref main --public > "$WORK/reg.out" 2> "$WORK/reg.err"
    SECRET=$(grep -hoiE 'webhook_secret"?[: =]+"?[A-Za-z0-9._-]{16,}' "$WORK/reg.out" "$WORK/reg.err" | grep -oE '[A-Za-z0-9._-]{16,}$' | head -1)
@@ -1989,6 +2029,7 @@ log, `admin erase`, `admin retention`.
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8122 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8122/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8122
    ```
 
@@ -2042,6 +2083,7 @@ registry.
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8123 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8123/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8123
    ```
 
@@ -2098,6 +2140,7 @@ cache mode.
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8124 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8124/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8124
    LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"runbook"}}}'
    INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
@@ -2161,6 +2204,7 @@ imported layer.
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8125 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8125/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8125
    podium search --registry "$PODIUM_REGISTRY" "greet"
    ```
@@ -2218,6 +2262,7 @@ the matching proxy secret.
    podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8132 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8132/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export URL=http://127.0.0.1:8132
    ```
 
@@ -2801,6 +2846,7 @@ with `curl`.
    podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8136 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8136/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export URL=http://127.0.0.1:8136
    grep "identity provider:" "$WORK/srv.log"
    ```
@@ -2843,6 +2889,7 @@ with `curl`.
    podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8136 > "$WORK/srv2.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8136/healthz
+   server_alive "$SRV" "$WORK/srv2.log"
    for T in "$TOKEN" "$TOKEN2"; do
      echo "handbook: $(code -H "Authorization: Bearer $T" "$URL/v1/load_artifact?id=handbook")"
      echo "deploy:   $(code -H "Authorization: Bearer $T" "$URL/v1/load_artifact?id=deploy")"
@@ -2976,6 +3023,7 @@ FS farm is available.
    podium serve --standalone --no-embeddings --config "$WORK/adfs.yaml" --bind 127.0.0.1:8137 > "$WORK/adfs.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8137/healthz
+   server_alive "$SRV" "$WORK/adfs.log"
    export URL=http://127.0.0.1:8137
    grep "identity provider:" "$WORK/adfs.log"
    ```
@@ -3007,6 +3055,7 @@ FS farm is available.
    podium serve --standalone --no-embeddings --config "$WORK/adfs.yaml" --bind 127.0.0.1:8138 > "$WORK/adfs-nosub.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8138/healthz
+   server_alive "$SRV" "$WORK/adfs-nosub.log"
    echo "nosub handbook: $(code -H "$AUTH" "http://127.0.0.1:8138/v1/load_artifact?id=handbook")"
    curl -s -H "$AUTH" "http://127.0.0.1:8138/v1/load_artifact?id=handbook"
    ```
@@ -3095,10 +3144,11 @@ bytes directly is what these steps are for.
 
    ```bash
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8137 > "$WORK/srv.log" 2>&1 &
+     --bind 127.0.0.1:8144 > "$WORK/srv.log" 2>&1 &
    SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8137/healthz
-   export PODIUM_REGISTRY=http://127.0.0.1:8137
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8144/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export PODIUM_REGISTRY=http://127.0.0.1:8144
    curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" | tee "$WORK/child.json" | python3 -m json.tool
    ```
 
@@ -3193,11 +3243,12 @@ bytes directly is what these steps are for.
    EOF
    kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
-     --bind 127.0.0.1:8138 > "$WORK/srv2.log" 2>&1 &
+     --bind 127.0.0.1:8145 > "$WORK/srv2.log" 2>&1 &
    SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8138/healthz
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8145/healthz
+   server_alive "$SRV" "$WORK/srv2.log"
    curl -s -o "$WORK/aliased.json" -w '%{http_code}\n' \
-     "http://127.0.0.1:8138/v1/load_artifact?id=team/aliased"
+     "http://127.0.0.1:8145/v1/load_artifact?id=team/aliased"
    cat "$WORK/aliased.json"
    ```
 
@@ -3277,6 +3328,7 @@ podium serve --standalone --no-embeddings --sign registry-key \
   --layer-path "$WORK/reg" --bind 127.0.0.1:8139 > "$WORK/srv.log" 2>&1 &
 SRV=$!
 curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8139/healthz
+server_alive "$SRV" "$WORK/srv.log"
 export PODIUM_REGISTRY=http://127.0.0.1:8139
 curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=team/derived" > "$WORK/child.json"
 curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=shared/base" > "$WORK/parent.json"
@@ -3418,6 +3470,7 @@ EOF
 podium serve --standalone --no-embeddings --bind 127.0.0.1:8140 > "$WORK/srv.log" 2>&1 &
 SRV=$!
 curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8140/healthz
+server_alive "$SRV" "$WORK/srv.log"
 export PODIUM_REGISTRY=http://127.0.0.1:8140
 podium layer register --registry "$PODIUM_REGISTRY" --id base --local "$WORK/base" --public
 podium layer register --registry "$PODIUM_REGISTRY" --id team --local "$WORK/team" --public
@@ -3609,6 +3662,7 @@ podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
   --bind 127.0.0.1:8141 > "$WORK/srv.log" 2>&1 &
 SRV=$!
 curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8141/healthz
+server_alive "$SRV" "$WORK/srv.log"
 mkdir -p "$WORK/srv-target"
 podium sync --registry http://127.0.0.1:8141 --target "$WORK/srv-target" --harness none
 find "$WORK/fs-target" -name ARTIFACT.md | wc -l   # must be 2, not 0
@@ -3714,6 +3768,7 @@ podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
   --bind 127.0.0.1:8142 > "$WORK/srv.log" 2>&1 &
 SRV=$!
 curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8142/healthz
+server_alive "$SRV" "$WORK/srv.log"
 curl -s -o /dev/null "http://127.0.0.1:8142/v1/load_artifact?id=team/derived"
 sleep 2
 wc -l < "$WORK/forwarded.jsonl"
@@ -3822,6 +3877,7 @@ mkdir -p "$WORK/reg"
 podium serve --standalone --no-embeddings --bind 127.0.0.1:8143 > "$WORK/srv.log" 2>&1 &
 SRV=$!
 curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8143/healthz
+server_alive "$SRV" "$WORK/srv.log"
 export PODIUM_REGISTRY=http://127.0.0.1:8143
 podium layer register --registry "$PODIUM_REGISTRY" --id reg --local "$WORK/reg" --public
 ```
@@ -4055,6 +4111,7 @@ names, which is what the defect was about; the placeholder hostname is not.
    export SRV=$!
    sleep 3
    curl -fsS http://127.0.0.1:8150/healthz && echo && cat "$WORK/srv.log"
+   server_alive "$SRV" "$WORK/srv.log"
    ```
 
    **Expect.** `/healthz` answers and the log carries no
@@ -4115,6 +4172,7 @@ names, which is what the defect was about; the placeholder hostname is not.
    SRV_LIST=$!
    sleep 3
    curl -fsS http://127.0.0.1:8152/healthz && echo && cat "$WORK/srv-list.log"
+   server_alive "$SRV_LIST" "$WORK/srv-list.log"
    kill "$SRV_LIST" 2>/dev/null; wait "$SRV_LIST" 2>/dev/null
    ```
 
@@ -4509,6 +4567,7 @@ misconfigured:
 
    ```bash
    curl -fsS http://127.0.0.1:8153/healthz; echo
+   server_alive "$SRV" "$WORK/srv.log"
    grep 'identity provider' "$WORK/srv.log"
    grep 'browser sign-in' "$WORK/srv.log"
    PODIUM_CONFIG_FILE="$WORK/registry.yaml" podium config show --server | grep '^identity_provider '
@@ -4826,10 +4885,15 @@ rather than trying to avoid them.
      docker save --platform "linux/$arch" -o "$WORK/image.tar" "$image"
      kind load image-archive "$WORK/image.tar" --name podium-s46
    done
+   docker exec podium-s46-control-plane crictl images
    ```
 
-   **Expect.** The build succeeds, the node reports `Ready`, and `kind load`
-   reports each image loading onto the node. Skipping the load of the Podium
+   **Expect.** The build succeeds, the node reports `Ready`, and `kind load
+   docker-image` reports the Podium image loading onto the node. `kind load
+   image-archive` prints nothing when it succeeds, so read the loads from
+   `crictl images`, which lists `ghcr.io/lennylabs/podium` at `0.0.0-dev`,
+   `docker.io/minio/minio`, `docker.io/minio/mc`, and
+   `docker.io/pgvector/pgvector` at their pinned tags. Skipping the load of the Podium
    image leaves the pod in `ErrImagePull`, because `0.0.0-dev` resolves to
    nothing in any registry. The loop loads the third-party images for the same
    reason S76 step 1 does: a pull from inside the kind node can be refused by
@@ -4935,6 +4999,7 @@ rather than trying to avoid them.
      --set config.identityProvider.type=""
    kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=podium --timeout=180s
    kubectl get pods -l app.kubernetes.io/name=podium
+   kubectl logs deployment/podium-podium | grep 'podium-server listening on '
    ```
 
    `config.identityProvider.type` is emptied because the chart's `oidc-jwt`
@@ -4954,14 +5019,20 @@ rather than trying to avoid them.
      --set signing.secretName=podium-signing-key \
      --set config.identityProvider.type="" \
      --set config.publicMode=true --set config.allowPublicBind=true
+   kubectl rollout status deployment/podium-podium --timeout=180s
+   kubectl logs deployment/podium-podium | grep 'podium-server listening on '
    ```
 
    Public mode and an identity provider are mutually exclusive; setting both
    fails with `config.public_mode_with_idp`.
 
    **Expect.** The pod reports `1/1 Running` with `0` restarts within roughly
-   twenty seconds, and its log ends `podium-server listening on 0.0.0.0:8080`. A
-   pod stuck at `0/1` with a rising restart count is the failure this scenario
+   twenty seconds, and the first `grep` prints a timestamped `podium-server
+   listening on [::]:8080 (mode=standalone)` line. The address reads `[::]`
+   because Go reports a listener on the `0.0.0.0` wildcard as the dual-stack
+   `[::]`. After the public-mode upgrade, the rollout completes and the second
+   `grep` prints `podium-server listening on [::]:8080 (mode=public)`. A pod
+   stuck at `0/1` with a rising restart count is the failure this scenario
    exists to catch; read `kubectl logs` for the reason rather than the pod
    status.
 
@@ -4994,19 +5065,33 @@ rather than trying to avoid them.
      --set replicaCount=1 \
      --set signing.secretName=podium-signing-key \
      --set config.identityProvider.type=oauth-device-code
-   sleep 20
+   for i in $(seq 1 90); do
+     NEW_POD="$(kubectl get pods -l app.kubernetes.io/name=podium \
+       -o jsonpath='{range .items[*]}{.metadata.name} {.status.containerStatuses[0].state.waiting.reason}{"\n"}{end}' \
+       | awk '$2 == "CrashLoopBackOff" {print $1}')"
+     [ -n "$NEW_POD" ] && break
+     sleep 2
+   done
    kubectl get pods -l app.kubernetes.io/name=podium
-   kubectl logs -l app.kubernetes.io/name=podium --tail=3
+   kubectl logs --previous "$NEW_POD" --tail=3
    ```
 
-   **Expect.** The new pod reaches `CrashLoopBackOff` and its log carries
+   The loop waits up to three minutes for a pod whose container is waiting in
+   `CrashLoopBackOff` and records its name, so the log read names that pod
+   alone. A label-selector log read would mix in the lines of the public-mode
+   pod, which the rolling update keeps serving while the new pod fails.
+
+   **Expect.** `NEW_POD` names the new pod, `kubectl get pods` lists it in
+   `CrashLoopBackOff` beside the public-mode pod at `1/1 Running`, and its
+   previous log carries
    `config.identity_provider_unverified`, naming `injected-session-token`,
    `oidc-jwt`, and `trusted-headers` as the providers the registry verifies. This
    is the defect that made a default `helm install` unable to start before the
    chart's `values.yaml` was corrected, reproduced at the deployment level rather
    than asserted against a file. A run where this pod becomes `Ready` means the
    startup guard is not doing its job, and step 6's success then establishes
-   nothing.
+   nothing. Such a run leaves `NEW_POD` empty after the loop, and the log read
+   then fails for want of a pod name.
 
 **Cleanup.**
 
@@ -5666,6 +5751,7 @@ podium serve --standalone --web-ui --no-embeddings \
   --layer-path "$WORK/reg" --bind 127.0.0.1:8462 > "$WORK/srv.log" 2>&1 &
 export SRV=$!
 for i in $(seq 1 40); do curl -sf http://127.0.0.1:8462/healthz >/dev/null && break; sleep 0.5; done
+server_alive "$SRV" "$WORK/srv.log"
 grep 'ingested layer' "$WORK/srv.log"
 ```
 
@@ -6279,6 +6365,7 @@ podium serve --standalone --web-ui --no-embeddings \
   --layer-path "$WORK/reg" --bind 127.0.0.1:8464 > "$WORK/srv.log" 2>&1 &
 export SRV=$!
 for i in $(seq 1 40); do curl -sf http://127.0.0.1:8464/healthz >/dev/null && break; sleep 0.5; done
+server_alive "$SRV" "$WORK/srv.log"
 export PODIUM_REGISTRY=http://127.0.0.1:8464
 grep 'ingested layer' "$WORK/srv.log"
 ```
@@ -7047,10 +7134,11 @@ certificate is needed.
    export PODIUM_IDENTITY_PROVIDER=trusted-headers
    export PODIUM_TRUSTED_PROXY_SECRET=gateway-secret
    export PODIUM_SCIM_TOKENS=scim-bearer
-   podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8134 > "$WORK/srv.log" 2>&1 &
+   podium serve --standalone --no-embeddings --config "$WORK/registry.yaml" --bind 127.0.0.1:8130 > "$WORK/srv.log" 2>&1 &
    SRV=$!
-   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8134/healthz
-   export URL=http://127.0.0.1:8134
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8130/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   export URL=http://127.0.0.1:8130
    grep -E "identity provider|SCIM" "$WORK/srv.log"
    ```
 
@@ -7196,12 +7284,16 @@ container, or certificate is required.
      > "$WORK/server.log" 2>&1 &
    echo "$!" > "$WORK/server.pid"
    sleep 2
+   grep 'podium-server listening on ' "$WORK/server.log"
+   kill -0 "$(cat "$WORK/server.pid")" || echo "FAIL: the server exited; read $WORK/server.log" >&2
    ```
 
-   **Expect.** The server is listening on `$REG` and `$WORK/server.log`
-   reports the registry started in public mode. No `--layer-path` is passed,
+   **Expect.** `grep` prints a timestamped `podium-server listening on
+   127.0.0.1:8080 (mode=public)` line, `kill -0` prints nothing, and `$WORK/server.log` reports
+   the registry started in public mode. No `--layer-path` is passed,
    so the registry ingests nothing at boot and the only ingests are the ones
-   the steps below trigger. A refusal to start means the address is in use;
+   the steps below trigger. A `FAIL:` line or a missing `listening` line is a
+   refusal to start. A refusal naming the address means the address is in use;
    restart with `PODIUM_BIND=127.0.0.1:8099`, set
    `export REG="http://127.0.0.1:8099"`, and repeat.
 
@@ -7352,6 +7444,7 @@ podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
   --bind 127.0.0.1:8126 > "$WORK/srv.log" 2>&1 &
 SRV=$!
 curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8126/healthz
+server_alive "$SRV" "$WORK/srv.log"
 mkdir -p "$WORK/srv-cc" "$WORK/srv-codex"
 podium sync --registry http://127.0.0.1:8126 --target "$WORK/srv-cc" --harness claude-code
 podium sync --registry http://127.0.0.1:8126 --target "$WORK/srv-codex" --harness codex
@@ -7523,15 +7616,20 @@ one algorithm and read by another, which no in-process test constructs.
      --bind 127.0.0.1:8127 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8127/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8127
    INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
    LOAD='{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"load_artifact","arguments":{"id":"close-reporting/variance"}}}'
    printf '%s\n%s\n' "$INIT" "$LOAD" | podium-mcp 2>/dev/null \
      | tail -1 | grep -o '"content_hash":"[^"]*"' | tail -1
+   head -n 3 "$WORK/srv.log"
    ```
 
-   **Expect.** The server log's first line reports the rewrite over an empty
-   store, `rehash: 0 rewritten, 0 already migrated, ...`, and the load prints
+   **Expect.** The first two lines of the server log are the standalone
+   bootstrap's `standalone: wrote .../sync.yaml (defaults.registry: ...)` and
+   `standalone: wrote .../registry.yaml`, and the third reports the rewrite
+   over an empty store, `rehash: 0 rewritten, 0 already migrated, ...`. Each
+   line carries a timestamp prefix. The load prints
    one `content_hash`, of the form
    `"content_hash":"sha256:cb81ac9dcecf8a644e8614e93f90851f1801151c00c64a4e90d12daacc2379b8"`.
    Record the value as the served hash; the digest covers the scaffolded
@@ -7583,6 +7681,7 @@ one algorithm and read by another, which no in-process test constructs.
      --bind 127.0.0.1:8127 > "$WORK/srv2.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8127/healthz
+   server_alive "$SRV" "$WORK/srv2.log"
    grep -c rehash "$WORK/srv2.log"
    rm -rf "$PODIUM_CACHE_DIR"
    printf '%s\n%s\n' "$INIT" "$LOAD" | podium-mcp 2>/dev/null | tail -1 \
@@ -7612,6 +7711,7 @@ one algorithm and read by another, which no in-process test constructs.
      --bind 127.0.0.1:8128 > "$WORK/target1.log" 2>&1 &
    T=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8128/healthz
+   server_alive "$T" "$WORK/target1.log"
    kill "$T" 2>/dev/null; wait "$T" 2>/dev/null
    podium admin migrate-to-standard --target-store=sqlite \
      --target-sqlite "$WORK/target.db" --target-objects "$WORK/target-objects" \
@@ -7622,6 +7722,7 @@ one algorithm and read by another, which no in-process test constructs.
      --bind 127.0.0.1:8128 > "$WORK/target2.log" 2>&1 &
    T=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8128/healthz
+   server_alive "$T" "$WORK/target2.log"
    grep rehash "$WORK/target2.log"
    rm -rf "$PODIUM_CACHE_DIR"
    printf '%s\n%s\n' "$INIT" "$LOAD" | PODIUM_REGISTRY=http://127.0.0.1:8128 podium-mcp 2>/dev/null \
@@ -7650,6 +7751,7 @@ one algorithm and read by another, which no in-process test constructs.
      --bind 127.0.0.1:8127 > "$WORK/srv3.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8127/healthz
+   server_alive "$SRV" "$WORK/srv3.log"
    grep rehash "$WORK/srv3.log"
    rm -rf "$PODIUM_CACHE_DIR"
    printf '%s\n%s\n' "$INIT" "$LOAD" | podium-mcp 2>/dev/null \
@@ -7659,6 +7761,7 @@ one algorithm and read by another, which no in-process test constructs.
      --bind 127.0.0.1:8127 > "$WORK/srv4.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8127/healthz
+   server_alive "$SRV" "$WORK/srv4.log"
    grep -c rehash "$WORK/srv4.log"
    ```
 
@@ -7704,6 +7807,7 @@ producer default or without the shared key resolution.
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8165 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8165/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    cat "$HOME/.podium/sync.yaml"
    ls -l "$HOME/.podium/standalone/registry-signing.key"
    ```
@@ -7754,8 +7858,8 @@ column confirms what the registry holds rather than what a load reports.
 
 1. Run the isolation block.
 
-2. Ingest one artifact with signing off, then stop the registry. The first
-   start records the §13.4 rewrite as complete.
+2. Ingest one artifact with signing off, then stop the registry and read the
+   store's record of the §13.4 rewrite.
 
    ```bash
    podium artifact scaffold --type skill --description "Early skill" "$WORK/reg/early" > /dev/null
@@ -7763,8 +7867,13 @@ column confirms what the registry holds rather than what a load reports.
      --bind 127.0.0.1:8166 > "$WORK/srv1.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8166/healthz
+   server_alive "$SRV" "$WORK/srv1.log"
    kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null
+   sqlite3 "$PODIUM_SQLITE_PATH" "select count(*) from data_migrations where name='content-hash-framing';"
    ```
+
+   **Expect.** The `sqlite3` query prints `1`: the first start recorded the
+   §13.4 rewrite as complete. A `0` is a defect in the first-start record.
 
 3. Restart with the default signing mode and load the earlier version through
    `curl` and through `podium-mcp`.
@@ -7774,6 +7883,7 @@ column confirms what the registry holds rather than what a load reports.
      --bind 127.0.0.1:8166 > "$WORK/srv2.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8166/healthz
+   server_alive "$SRV" "$WORK/srv2.log"
    export PODIUM_REGISTRY=http://127.0.0.1:8166
    INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
    load_http() { curl -s "$PODIUM_REGISTRY/v1/load_artifact?id=early&version=$1" \
@@ -7841,6 +7951,7 @@ column confirms what the registry holds rather than what a load reports.
      --bind 127.0.0.1:8167 > "$WORK/srv3.log" 2>&1 &
    SRV3=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8167/healthz
+   server_alive "$SRV3" "$WORK/srv3.log"
    kill "$SRV3" 2>/dev/null; wait "$SRV3" 2>/dev/null
    podium admin sign-stored-rows --include-unsigned --plan-digest="$digest"; echo "exit=$?"
    sqlite3 "$PODIUM_SQLITE_PATH" "select quote(signature) from manifests where artifact_id='early' and version='0.1.0';"
@@ -7860,7 +7971,8 @@ column confirms what the registry holds rather than what a load reports.
 
    **Expect.** The first dry run prints a `dry-run:` line for the
    `early@0.1.0` row with `sign=true signed_by=unsigned stored=sha256:...`, a
-   `dry-run: plan mode=` line, and a last line `dry-run: plan digest
+   `dry-run: plan mode=` line, a `dry-run: 0 unsigned left` line, which
+   counts the rows the run would leave unsigned, and a last line `dry-run: plan digest
    sha256:... over K row(s)` whose `K` equals the number of row lines without
    `class=migrated`, and it changes nothing. The run with the reviewed digest
    prints a `plan:` line for `late@0.1.0`, prints `plan changed since the
@@ -7939,6 +8051,7 @@ observes it.
      --bind 127.0.0.1:8168 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8168/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    printf 'defaults:\n  registry: http://127.0.0.1:8168\n  verify_signatures: never\n' > "$HOME/.podium/sync.yaml"
    ```
 
@@ -8004,7 +8117,8 @@ the edits run against the SQLite file a deployment holds.
    serve() { podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
      --bind 127.0.0.1:8169 > "$WORK/srv.log" 2>&1 &
      SRV=$!
-     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8169/healthz; }
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8169/healthz
+     server_alive "$SRV" "$WORK/srv.log"; }
    stop() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
    export PODIUM_REGISTRY=http://127.0.0.1:8169
    INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
@@ -8167,6 +8281,7 @@ surface has leaked the parent at least once through a field no assertion read.
      --bind 127.0.0.1:8170 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8170/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    export URL=http://127.0.0.1:8170
    as() { who="$1"; shift; curl -s -H "X-Podium-User-Sub: $who@acme.com" "$@"; }
    ```
@@ -8302,6 +8417,7 @@ process rejected, which no in-process test provides.
      --bind 127.0.0.1:8171 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8171/healthz
+   server_alive "$SRV" "$WORK/srv.log"
    ```
 
 3. Start two gateways in front of the registry. `podium-mcp` sends no identity
@@ -8433,7 +8549,8 @@ requests the browser sends, and no Go test observes either.
 
 2. Build and serve the two-layer registry from S71 step 2 with the web UI
    mounted, on port 8174 instead of 8171, by adding `--web-ui` to the
-   `podium serve` line. Record its PID in `SRV`.
+   `podium serve` line. Record its PID in `SRV`, and run
+   `server_alive "$SRV" "$WORK/srv.log"` after the `/healthz` poll.
 
 3. Write `gateway.py` as in S71 step 3, and start one unaltering gateway per
    identity. Each port is a separate browser origin.
@@ -8501,7 +8618,8 @@ rather than on the text an operator reads.
    podium artifact scaffold --type skill --description "Rotation skill" "$WORK/reg/rotated" > /dev/null
    serve() { podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
        --bind 127.0.0.1:8177 > "$WORK/srv$1.log" 2>&1 & SRV=$!
-     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8177/healthz; }
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8177/healthz
+     server_alive "$SRV" "$WORK/srv$1.log"; }
    stop() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
    serve 1
    export PODIUM_REGISTRY=http://127.0.0.1:8177
@@ -8599,7 +8717,8 @@ by that count.
    podium artifact scaffold --type skill --description "Cached skill" "$WORK/reg/cached" > /dev/null
    serve() { podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
        --bind 127.0.0.1:8178 > "$WORK/srv$1.log" 2>&1 & SRV=$!
-     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8178/healthz; }
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8178/healthz
+     server_alive "$SRV" "$WORK/srv$1.log"; }
    stop() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
    serve 1
    export PODIUM_REGISTRY=http://127.0.0.1:8178
@@ -8768,8 +8887,15 @@ scenario under `make test-live-kind`; run the scenario by hand to read each
 refusal and each log line as an operator does.
 
 **Prerequisites.** `helm` v4, `kubectl`, `kind`, `git`, and a working Docker
-daemon. When any is absent, skip and record the skip. The commands run from the
-repository, because the `helm` commands name the chart by its relative path.
+daemon. When any is absent, skip and record the skip. The shell stays in
+`$WORK`, as the isolation block leaves it. Step 1 names the repository in
+`REPO` and the chart in `CHART`, and links `$WORK/deploy` to the repository's
+`deploy` directory. The procedure's commands in `docs/deployment/clustered.md`
+name the chart as `./deploy/helm/podium` and read and write
+`podium-values.yaml`, `dry-run.log`, and `run.log` in the working directory, so
+they run verbatim from `$WORK`, and every file the scenario writes stays there.
+The isolation block's `HOME` also keeps the kind cluster's kubeconfig under
+`$WORK`.
 
 **Steps.**
 
@@ -8777,11 +8903,13 @@ repository, because the `helm` commands name the chart by its relative path.
    cluster.
 
    ```bash
-   cd "$REAL_HOME/projects/podium"
-   git worktree add --detach "$WORK/v040" v0.4.0
-   docker build -t podium-live:current .
+   REPO="$REAL_HOME/projects/podium"
+   CHART="$REPO/deploy/helm/podium"
+   ln -s "$REPO/deploy" "$WORK/deploy"
+   git -C "$REPO" worktree add --detach "$WORK/v040" v0.4.0
+   docker build -t podium-live:current "$REPO"
    docker build -t podium-live:v0.4.0 "$WORK/v040"
-   go build -o "$WORK/podium" ./cmd/podium
+   go -C "$REPO" build -o "$WORK/podium" ./cmd/podium
    "$WORK/podium" admin signing-key generate --key-file "$WORK/registry-signing.key"
    kind create cluster --name podium-s76 --wait 180s
    kind load docker-image podium-live:current podium-live:v0.4.0 --name podium-s76
@@ -8792,6 +8920,7 @@ repository, because the `helm` commands name the chart by its relative path.
      docker save --platform "linux/$arch" -o "$WORK/image.tar" "$image"
      kind load image-archive "$WORK/image.tar" --name podium-s76
    done
+   docker exec podium-s76-control-plane crictl images
    ```
 
    The loop loads the third-party images as single-platform archives and pulls
@@ -8802,38 +8931,193 @@ repository, because the `helm` commands name the chart by its relative path.
    containerd image store with `content digest ... not found`.
 
    **Expect.** Both builds succeed, `generate` prints one key and a
-   `key_id=... role=signing` line, and the node reports `Ready`.
+   `key_id=... role=signing` line, and the node reports `Ready`. `kind load
+   image-archive` prints nothing when it succeeds, so read the loads from
+   `crictl images`, which lists both `podium-live` tags and each third-party
+   image at its pinned tag.
 
 2. Deploy Postgres and MinIO, create the bucket and the Secrets, and seed the
    store with v0.4.0. MinIO keeps its data on a claim, because step 10 scales
    it to zero. The seed runs `podium-live:v0.4.0` as a standalone pod with
    `PODIUM_LAYER_PATH` on a ConfigMap layer that holds a small skill and a
    skill with a bundled resource of about 350 KB, above the 256 KB inline
-   cutoff. The manifests are the constants `backingManifest`,
-   `seedPodManifest`, and `seedConfigMap` in
-   `test/chart/kind_upgrade_test.go`; apply them with the namespace
-   `default` and `kubectl apply --server-side`, because the ConfigMap exceeds
-   the 256 KiB limit of the annotation a client-side apply writes. Then create the Secrets as S46 steps 3 to 5 do, with the bucket
-   `podium`. Wait for the seed pod to report `Ready`, then delete it.
+   cutoff. The files below are the manifests and the layer that
+   `backingManifest`, `seedPodManifest`, and `seedConfigMap` build in
+   `test/chart/kind_upgrade_test.go`, with the namespace left to the current
+   context so steps 15 and 16 reuse them.
 
-   The host needs no `mc`. The function `mc_run` runs an `mc` script in a
-   throwaway pod inside the cluster, as S46 step 3 and the kind test's `mc`
-   helper do, with the alias `m` retried until MinIO answers. The later steps
-   read the bucket through it.
+   ```bash
+   cat > "$WORK/backing.yaml" <<'YAML'
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata: {name: pg}
+   spec:
+     selector: {matchLabels: {app: pg}}
+     template:
+       metadata: {labels: {app: pg}}
+       spec:
+         containers:
+           - name: pg
+             image: pgvector/pgvector:pg16
+             env:
+               - {name: POSTGRES_USER, value: podium}
+               - {name: POSTGRES_PASSWORD, value: podium}
+               - {name: POSTGRES_DB, value: podium}
+               - {name: PGDATA, value: /tmp/pgdata}
+             ports: [{containerPort: 5432}]
+   ---
+   apiVersion: v1
+   kind: Service
+   metadata: {name: pg}
+   spec:
+     selector: {app: pg}
+     ports: [{port: 5432}]
+   ---
+   apiVersion: v1
+   kind: PersistentVolumeClaim
+   metadata: {name: minio-data}
+   spec:
+     accessModes: [ReadWriteOnce]
+     resources: {requests: {storage: 1Gi}}
+   ---
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata: {name: minio}
+   spec:
+     strategy: {type: Recreate}
+     selector: {matchLabels: {app: minio}}
+     template:
+       metadata: {labels: {app: minio}}
+       spec:
+         containers:
+           - name: minio
+             image: minio/minio:RELEASE.2024-10-29T16-01-48Z
+             args: [server, /data]
+             env:
+               - {name: MINIO_ROOT_USER, value: minioadmin}
+               - {name: MINIO_ROOT_PASSWORD, value: minioadmin}
+             ports: [{containerPort: 9000}]
+             readinessProbe: {httpGet: {path: /minio/health/ready, port: 9000}}
+             volumeMounts: [{name: data, mountPath: /data}]
+         volumes: [{name: data, persistentVolumeClaim: {claimName: minio-data}}]
+   ---
+   apiVersion: v1
+   kind: Service
+   metadata: {name: minio}
+   spec:
+     selector: {app: minio}
+     ports: [{port: 9000}]
+   YAML
+   cat > "$WORK/seed-pod.yaml" <<'YAML'
+   apiVersion: v1
+   kind: Pod
+   metadata: {name: seed}
+   spec:
+     restartPolicy: Never
+     containers:
+       - name: seed
+         image: podium-live:v0.4.0
+         imagePullPolicy: IfNotPresent
+         envFrom: [{secretRef: {name: podium-secrets}}]
+         env:
+           - {name: PODIUM_LAYER_PATH, value: /layer}
+           - {name: PODIUM_IDENTITY_PROVIDER, value: ""}
+           - {name: PODIUM_BIND, value: "0.0.0.0:8080"}
+           - {name: PODIUM_REGISTRY_STORE, value: postgres}
+           - {name: PODIUM_OBJECT_STORE, value: s3}
+           - {name: PODIUM_VECTOR_BACKEND, value: none}
+           - {name: PODIUM_EMBEDDING_PROVIDER, value: none}
+           - {name: HOME, value: /tmp}
+         readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 2}
+         volumeMounts:
+           - {name: layer, mountPath: /layer/demo/hello/greet/SKILL.md, subPath: greet-skill, readOnly: true}
+           - {name: layer, mountPath: /layer/demo/hello/greet/ARTIFACT.md, subPath: greet-artifact, readOnly: true}
+           - {name: layer, mountPath: /layer/demo/hello/bigref/SKILL.md, subPath: bigref-skill, readOnly: true}
+           - {name: layer, mountPath: /layer/demo/hello/bigref/ARTIFACT.md, subPath: bigref-artifact, readOnly: true}
+           - {name: layer, mountPath: /layer/demo/hello/bigref/references/big.md, subPath: bigref-body, readOnly: true}
+           - {name: tmp, mountPath: /tmp}
+     volumes:
+       - name: tmp
+         emptyDir: {}
+       - name: layer
+         configMap:
+           name: seed-layer
+   YAML
+   mkdir -p "$WORK/seed"
+   for name in greet bigref; do
+     printf -- '---\nname: %s\ndescription: A seeded skill for the chart upgrade test.\n---\n\nSeeded by the kind upgrade test.\n' \
+       "$name" > "$WORK/seed/$name-skill"
+     printf -- '---\ntype: skill\nversion: 1.0.0\nwhen_to_use:\n  - "When the upgrade test runs."\nsensitivity: low\n---\n\n<!-- Skill body lives in SKILL.md. -->\n' \
+       > "$WORK/seed/$name-artifact"
+   done
+   yes 'The chart upgrade test stores this line in object storage.' | head -n 6000 > "$WORK/seed/bigref-body"
+   ls -l "$WORK/seed"
+   ```
+
+   Each pod mount is a `subPath`, because a projected ConfigMap volume exposes
+   its files through `..data` symlinks and v0.4.0's filesystem layer ingests
+   none of them. The vector backend and the embedding provider are off because
+   their defaults require an OpenAI key the seed does not have.
+
+   Then define the helpers the later steps call, and run them. `mc_run` runs
+   an `mc` script in a throwaway pod inside the cluster, as S46 step 3 and the
+   kind test's `mc` helper do, with the alias `m` retried until MinIO answers,
+   so the host needs no `mc`. `rows` prints each org schema's manifest row
+   count and unsigned count. `backing` deploys the services, creates the
+   bucket `podium`, and creates the `podium-secrets` Secret with the keys S46
+   step 5 gives. `seed` creates the layer ConfigMap and the seed pod, waits
+   until the store holds both rows, and deletes the pod. `kubectl create
+   configmap` writes no `last-applied-configuration` annotation, which matters
+   because the ConfigMap exceeds that annotation's 256 KiB limit. The signing
+   key Secret holds step 1's `$WORK/registry-signing.key` rather than a key
+   generated as S46 step 4 does, because step 12 verifies the served
+   signatures against that file's public key.
 
    ```bash
    mc_run() { kubectl run "mc-$$-$RANDOM" --image=minio/mc:RELEASE.2024-10-29T15-34-59Z \
      --restart=Never --rm -i --quiet --command -- sh -c \
      "for i in \$(seq 1 30); do mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null 2>&1 && break; sleep 2; done && $1"; }
-   mc_run 'mc ls --recursive m/podium'
-   kubectl exec -i deploy/pg -- psql -U podium -d podium -At <<'SQL'
+   rows() {
+     kubectl exec -i deploy/pg -- psql -U podium -d podium -At <<'SQL'
    SELECT format('SELECT count(*), count(*) FILTER (WHERE signature = %L) FROM %I.manifests', '', table_schema)
      FROM information_schema.tables WHERE table_name = 'manifests' \gexec
    SQL
+   }
+   backing() {
+     kubectl apply --server-side -f "$WORK/backing.yaml"
+     kubectl rollout status deployment/pg --timeout=5m
+     kubectl rollout status deployment/minio --timeout=5m
+     until kubectl exec deploy/pg -- pg_isready -U podium -d podium >/dev/null 2>&1; do sleep 2; done
+     mc_run 'mc mb -p m/podium'
+     kubectl create secret generic podium-secrets \
+       --from-literal=PODIUM_POSTGRES_DSN="postgres://podium:podium@pg:5432/podium?sslmode=disable" \
+       --from-literal=PODIUM_S3_BUCKET=podium \
+       --from-literal=PODIUM_S3_ENDPOINT="http://minio:9000" \
+       --from-literal=PODIUM_S3_REGION=us-east-1 \
+       --from-literal=AWS_ACCESS_KEY_ID=minioadmin \
+       --from-literal=AWS_SECRET_ACCESS_KEY=minioadmin
+   }
+   seed() {
+     kubectl create configmap seed-layer --from-file="$WORK/seed"
+     kubectl apply -f "$WORK/seed-pod.yaml"
+     kubectl wait --for=condition=Ready pod/seed --timeout=5m
+     until [ "$(rows | awk -F'|' '{n += $1} END {print n + 0}')" -ge 2 ]; do sleep 2; done
+     kubectl delete pod seed --wait=true
+   }
+   backing
+   kubectl create secret generic podium-signing-key \
+     --from-file=registry-signing.key="$WORK/registry-signing.key"
+   seed
+   mc_run 'mc ls --recursive m/podium'
+   rows
    ```
 
-   **Expect.** `mc_run` lists at least one object, which is the large
-   resource's body, and the query prints a line such as `2|2`: two rows, both
+   **Expect.** `ls -l` lists `bigref-artifact`, `bigref-body` at about
+   354 KB, `bigref-skill`, `greet-artifact`, and `greet-skill`. The rollouts
+   complete, `mc mb` prints `Bucket created successfully`, both Secrets and
+   the ConfigMap report `created`, and `kubectl wait` prints `pod/seed
+   condition met`. `mc_run` lists at least one object, which is the large
+   resource's body, and `rows` prints a line such as `2|2`: two rows, both
    unsigned.
 
 3. Install v0.4.0 from the worktree and prepare the values file.
@@ -8842,12 +9126,13 @@ repository, because the `helm` commands name the chart by its relative path.
    helm install podium "$WORK/v040/deploy/helm/podium" --set image.repository=podium-live \
      --set image.tag=v0.4.0 --set replicaCount=2 --set config.identityProvider.type="" \
      --wait --timeout 10m
-   helm get values podium -o yaml > podium-values.yaml
+   kubectl get pods -l app.kubernetes.io/name=podium
+   helm get values podium -o yaml > "$WORK/podium-values.yaml"
    helm history podium --max 1
    export HELM_MAX_HISTORY=0
    ```
 
-   Edit `podium-values.yaml`: set `image.tag` to `current`, and add
+   Edit `$WORK/podium-values.yaml`: set `image.tag` to `current`, and add
    `signing.secretName: podium-signing-key` and `migration.previousImage:
    podium-live:v0.4.0`. Keep the shell that exported
    `HELM_MAX_HISTORY` for the remaining steps, so no later upgrade prunes the
@@ -8856,61 +9141,79 @@ repository, because the `helm` commands name the chart by its relative path.
    **Expect.** Two pods report `1/1 Running`, and `helm history` lists
    revision 1.
 
-4. Try a default upgrade, and define the completion-record query the later
-   steps read.
+4. Try a default upgrade, and define the functions the later steps read:
+   `current_pod` prints the name of a registry pod on `podium-live:current`,
+   and `record` prints the count of the §13.4 completion record.
 
    ```bash
-   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=2 \
+   helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --set replicaCount=2 \
      --wait --timeout 5m
    kubectl get pods -l app.kubernetes.io/name=podium \
-     -o custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount
-   kubectl logs --previous <pod on podium-live:current>
+     -o 'custom-columns=NAME:.metadata.name,IMAGE:.spec.containers[0].image,READY:.status.containerStatuses[0].ready,RESTARTS:.status.containerStatuses[0].restartCount'
+   current_pod() { kubectl get pods -l app.kubernetes.io/name=podium \
+     -o jsonpath='{range .items[?(@.spec.containers[0].image=="podium-live:current")]}{.metadata.name}{"\n"}{end}' \
+     | head -n 1; }
+   current_pod
+   kubectl logs --previous "$(current_pod)"
    record() { kubectl exec deploy/pg -- psql -U podium -d podium -At -c \
      "SELECT count(*) FROM public.data_migrations WHERE name = 'content-hash-framing'"; }
    record
    ```
 
-   **Expect.** The upgrade fails once `--timeout` passes. A pod on
-   `podium-live:current` restarts, and its `kubectl logs --previous` names
-   `sign-stored-rows`. Both v0.4.0 pods still report Ready, and `record`
-   prints `0`. A pod on `podium-live:current` that reports Ready means a
-   registry served the unmigrated store.
+   **Expect.** The upgrade fails once `--timeout` passes. `current_pod` prints
+   the name of the pod on `podium-live:current`, which restarts, and its
+   `kubectl logs --previous` names `sign-stored-rows`. Both v0.4.0 pods still
+   report Ready, and `record` prints `0`. A pod on `podium-live:current` that
+   reports Ready means a registry served the unmigrated store.
 
-5. Create a pod that carries the registry's labels and fails, then run step 2
-   of the procedure with the v0.4.0 tag kept.
+5. Create a pod that carries the registry's labels and fails, wait until it
+   has failed, then run step 2 of the procedure with the v0.4.0 tag kept.
 
    ```bash
    kubectl run evicted-look-alike --image=busybox:1.36 --restart=Never \
      --labels=app.kubernetes.io/name=podium,app.kubernetes.io/instance=podium -- sh -c 'exit 1'
-   sed 's/tag: current/tag: v0.4.0/' podium-values.yaml > old-values.yaml
-   helm upgrade podium ./deploy/helm/podium -f old-values.yaml --set replicaCount=0
+   kubectl wait pod/evicted-look-alike --for=jsonpath='{.status.phase}'=Failed --timeout=3m
+   sed 's/tag: current/tag: v0.4.0/' "$WORK/podium-values.yaml" > "$WORK/old-values.yaml"
+   helm upgrade podium "$CHART" -f "$WORK/old-values.yaml" --set replicaCount=0
    kubectl wait --for=delete pod --timeout=10m \
      -l app.kubernetes.io/name=podium,app.kubernetes.io/instance=podium \
      --field-selector=status.phase!=Succeeded,status.phase!=Failed
+   kubectl get pods -l app.kubernetes.io/name=podium
+   kubectl delete pod evicted-look-alike
    ```
 
-   **Expect.** `evicted-look-alike` reaches `Error` (phase `Failed`), and the
-   wait returns once the registry pods are deleted. A wait that times out on
-   the failed pod means the field selector is missing.
+   **Expect.** The first wait prints `pod/evicted-look-alike condition met`
+   once the pod reaches phase `Failed`. The delete wait returns once the
+   registry pods are deleted, and `kubectl get pods` then lists only
+   `evicted-look-alike`, with status `Error`. The last command deletes it, so
+   the later pod listings show registry pods alone. A delete wait started
+   while `evicted-look-alike` is still `Pending` or `Running` times out after
+   10 minutes, because `kubectl wait --for=delete` applies its field selector
+   once, when it starts, and then waits for every pod it matched; nothing
+   deletes the look-alike. The first wait prevents that.
 
-6. Repeat step 2 with the new tag, then back up the store.
+6. Repeat step 2 of the procedure with the new tag, then back up the store.
 
    ```bash
-   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0
+   helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --set replicaCount=0
+   kubectl get deployment podium-podium
    kubectl exec deploy/pg -- pg_dump -U podium -d podium -Fc -f /tmp/step2.dump
+   kubectl exec deploy/pg -- ls -l /tmp/step2.dump
    mc_run 'mc mb -p m/podium-backup && mc mirror --overwrite m/podium m/podium-backup'
+   mc_run 'mc ls --recursive m/podium-backup'
    ```
 
-   **Expect.** The Deployment shows `0/0`, `kubectl exec deploy/pg -- ls -l
-   /tmp/step2.dump` lists the dump, and `mc_run 'mc ls --recursive
-   m/podium-backup'` lists the bucket's objects. Step 14 restores from this dump and this mirror.
+   **Expect.** The Deployment shows `0/0`, `ls -l` lists the dump, and the
+   last `mc_run` lists the bucket's objects. Step 14 restores from this dump
+   and this mirror.
 
-7. Run step 3 of the procedure exactly as `docs/deployment/clustered.md` gives
-   it, then run its completeness check and read the digest from the last line.
+7. Run step 3 of the procedure from `$WORK`, exactly as
+   `docs/deployment/clustered.md` gives it, then run its completeness check
+   and read the digest from the last line.
 
    ```bash
-   grep -E '^dry-run: plan digest ' dry-run.log
-   digest=$(sed -n 's/^dry-run: plan digest \(sha256:[0-9a-f]*\) .*/\1/p' dry-run.log)
+   grep -E '^dry-run: plan digest ' "$WORK/dry-run.log"
+   digest=$(sed -n 's/^dry-run: plan digest \(sha256:[0-9a-f]*\) .*/\1/p' "$WORK/dry-run.log")
    ```
 
    **Expect.** The `helm upgrade` notes name `podium-podium-migrate` and the
@@ -8924,28 +9227,28 @@ repository, because the `helm` commands name the chart by its relative path.
 8. Run step 4 of the procedure with a wrong digest, then with the reviewed
    digest and a different unsigned-row setting. The function below is step 4
    with the digest and any extra `--set` flags as arguments, and it streams
-   the run log to `run.log`.
+   the run log to `$WORK/run.log`.
 
    ```bash
    run_step4() {
      kubectl delete job podium-podium-migrate --ignore-not-found --wait=true
-     helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+     helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --set replicaCount=0 \
        --set migration.mode=run --set migration.planDigest="$1" "${@:2}" --timeout 30m &
      helm_pid=$!
      until kubectl get job podium-podium-migrate >/dev/null 2>&1 || ! kill -0 "$helm_pid" 2>/dev/null; do
        sleep 2
      done
      if kubectl get job podium-podium-migrate >/dev/null 2>&1; then
-       kubectl logs -f job/podium-podium-migrate --pod-running-timeout=10m > run.log
+       kubectl logs -f job/podium-podium-migrate --pod-running-timeout=10m > "$WORK/run.log"
      fi
      wait "$helm_pid"
    }
    exit_code() { kubectl get pod -l job-name=podium-podium-migrate \
      -o jsonpath='{.items[0].status.containerStatuses[0].state.terminated.exitCode}'; echo; }
    run_step4 sha256:0000000000000000000000000000000000000000000000000000000000000000
-   kubectl get job podium-podium-migrate; exit_code; grep -c '^plan: ' run.log
+   kubectl get job podium-podium-migrate; exit_code; grep -c '^plan: ' "$WORK/run.log"
    run_step4 "$digest" --set migration.includeUnsigned=false
-   kubectl get job podium-podium-migrate; exit_code; grep -c '^plan: ' run.log
+   kubectl get job podium-podium-migrate; exit_code; grep -c '^plan: ' "$WORK/run.log"
    ```
 
    **Expect.** Each `helm upgrade` exits non-zero, the Job reports `Failed`,
@@ -8971,7 +9274,7 @@ repository, because the `helm` commands name the chart by its relative path.
    END $$;
    SQL
    run_step4 "$digest"
-   exit_code; grep -E '^plan: .*@9\.9\.9-planted class=' run.log; record
+   exit_code; grep -E '^plan: .*@9\.9\.9-planted class=' "$WORK/run.log"; record
    kubectl exec -i deploy/pg -- psql -U podium -d podium -At <<'SQL'
    SELECT format('DELETE FROM %I.manifests WHERE version = %L', table_schema, '9.9.9-planted')
      FROM information_schema.tables WHERE table_name = 'manifests' \gexec
@@ -8987,25 +9290,26 @@ repository, because the `helm` commands name the chart by its relative path.
    replicas.
 
    ```bash
-   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --wait --timeout 5m
-   kubectl logs --previous <pod on podium-live:current>
+   helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --wait --timeout 5m
+   kubectl logs --previous "$(current_pod)"
    record
-   helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0
+   helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --set replicaCount=0
    kubectl wait --for=delete pod --timeout=10m \
      -l app.kubernetes.io/name=podium,app.kubernetes.io/instance=podium \
      --field-selector=status.phase!=Succeeded,status.phase!=Failed
    ```
 
    **Expect.** The serving upgrade fails once `--timeout` passes, its pods
-   restart, the previous log of each names `sign-stored-rows`, and `record`
-   prints `0`. The wait returns once the pods are deleted.
+   restart, the previous log of the pod `current_pod` names carries
+   `sign-stored-rows`, and `record` prints `0`. The wait returns once the pods
+   are deleted.
 
 10. Stop MinIO and run step 4 with the digest from step 8's closing rerun.
 
     ```bash
     kubectl scale deployment/minio --replicas=0
     run_step4 "$digest"
-    exit_code; grep 'plan changed' run.log; grep -E '^plan: .* class=body_unavailable' run.log
+    exit_code; grep 'plan changed' "$WORK/run.log"; grep -E '^plan: .* class=body_unavailable' "$WORK/run.log"
     record
     kubectl get deployment podium-podium
     ```
@@ -9015,18 +9319,37 @@ repository, because the `helm` commands name the chart by its relative path.
     `plan:` lines with `class=body_unavailable`, `record` prints `0`, and the
     Deployment shows `0/0` with no pod. The refused run wrote nothing.
 
-11. Restore MinIO with `kubectl scale deployment/minio --replicas=1`, wait
-    until it answers through its Service (`mc_run 'mc ls m/podium'`
-    succeeds), rerun step 3 of the procedure, and run step 4 with its fresh
-    digest.
+11. Restore MinIO and wait until it answers through its Service.
 
-    **Expect.** The run exits 0, its log carries `rehash: 0 unsigned left`,
-    `record` prints `1`, and the row query reports `2|0`.
+    ```bash
+    kubectl scale deployment/minio --replicas=1
+    kubectl rollout status deployment/minio --timeout=5m
+    mc_run 'mc ls m/podium'
+    ```
+
+    The rollout can finish before the Service routes to the new pod, and a
+    dry run started then holds the object-held row back as
+    `class=body_unavailable`, so `mc_run` retries until MinIO answers. Rerun
+    step 3 of the procedure from `$WORK` as step 7 does, then run step 4 with
+    its fresh digest.
+
+    ```bash
+    digest=$(sed -n 's/^dry-run: plan digest \(sha256:[0-9a-f]*\) .*/\1/p' "$WORK/dry-run.log")
+    run_step4 "$digest"; echo "exit=$?"
+    exit_code; grep 'rehash: 0 unsigned left' "$WORK/run.log"
+    record
+    rows
+    ```
+
+    **Expect.** `mc_run` lists the bucket's objects, and the dry run lists no
+    `class=body_unavailable` row. The run prints `exit=0`, `exit_code` prints
+    `0`, `grep` prints the `rehash: 0 unsigned left` line, `record` prints
+    `1`, and `rows` reports `2|0`.
 
 12. Run step 5 as documented, and verify a seeded artifact.
 
     ```bash
-    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --wait --timeout 10m
+    helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --wait --timeout 10m
     kubectl get pods -l app.kubernetes.io/name=podium
     kubectl logs -l app.kubernetes.io/name=podium --tail=-1 | grep ' rewritten, '
     kubectl port-forward svc/podium-podium 18180:8080 >/dev/null 2>&1 &
@@ -9044,10 +9367,10 @@ repository, because the `helm` commands name the chart by its relative path.
 
     ```bash
     kubectl exec deployment/podium-podium -- /usr/local/bin/podium-server \
-      sign-stored-rows --include-unsigned --dry-run | tee rerun.log
+      sign-stored-rows --include-unsigned --dry-run | tee "$WORK/rerun.log"
     kubectl exec deployment/podium-podium -- /usr/local/bin/podium-server \
       sign-stored-rows --include-unsigned \
-      --plan-digest="$(sed -n 's/^dry-run: plan digest \(sha256:[0-9a-f]*\) .*/\1/p' rerun.log)"
+      --plan-digest="$(sed -n 's/^dry-run: plan digest \(sha256:[0-9a-f]*\) .*/\1/p' "$WORK/rerun.log")"
     ```
 
     **Expect.** The dry run lists no `signed_by=unsigned` row. The second
@@ -9059,7 +9382,7 @@ repository, because the `helm` commands name the chart by its relative path.
     ```bash
     docker tag podium-live:current podium-live:current2
     kind load docker-image podium-live:current2 --name podium-s76
-    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set image.tag=current2 \
+    helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --set image.tag=current2 \
       --wait --timeout 10m
     helm get hooks podium
     ```
@@ -9067,30 +9390,44 @@ repository, because the `helm` commands name the chart by its relative path.
     **Expect.** The pods roll to `current2`, and `helm get hooks` prints
     nothing.
 
-14. Roll back through the backup.
+14. Roll back through the backup: stop the release, recreate the `podium`
+    database from step 6's dump, mirror the backup bucket back, and roll back
+    to revision 1, the v0.4.0 revision step 3 printed. The database is the
+    scenario's `pg` Deployment, whose superuser is `podium`, so the drop
+    connects to the `postgres` database.
 
     ```bash
-    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0
+    helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --set replicaCount=0
+    kubectl wait --for=delete pod --timeout=10m \
+      -l app.kubernetes.io/name=podium,app.kubernetes.io/instance=podium \
+      --field-selector=status.phase!=Succeeded,status.phase!=Failed
+    kubectl exec deploy/pg -- psql -U podium -d postgres -c 'DROP DATABASE podium WITH (FORCE)'
+    kubectl exec deploy/pg -- createdb -U podium podium
+    kubectl exec deploy/pg -- pg_restore -U podium -d podium /tmp/step2.dump
+    mc_run 'mc mirror --overwrite --remove m/podium-backup m/podium'
+    record
+    rows
+    helm rollback podium 1 --wait --timeout 10m
+    kubectl get pods -l app.kubernetes.io/name=podium
     ```
 
-    Wait as step 5 does, recreate the `podium` database from
-    `/tmp/step2.dump` with `pg_restore`, mirror the backup bucket back with
-    `mc_run 'mc mirror --overwrite --remove m/podium-backup m/podium'`, and
-    run `helm rollback podium 1 --wait`, where 1 is the v0.4.0 revision step 3
-    printed. Then try to serve this release over
-    the restored store.
+    **Expect.** `psql` prints `DROP DATABASE`, `createdb` and `pg_restore`
+    exit 0, `record` prints `0`, and `rows` reports `2|2`. Two v0.4.0 pods report
+    `1/1 Running` after the rollback.
+
+    Then try to serve this release over the restored store.
 
     ```bash
-    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=2 \
+    helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --set replicaCount=2 \
       --wait --timeout 5m
-    kubectl logs --previous <pod on podium-live:current>
+    kubectl logs --previous "$(current_pod)"
     record
     ```
 
-    **Expect.** Two v0.4.0 pods serve after the rollback. The upgrade fails
-    once `--timeout` passes, a pod on `podium-live:current` restarts and its
-    previous log names `sign-stored-rows`, both v0.4.0 pods still report
-    Ready, and `record` prints `0`.
+    **Expect.** The upgrade fails once `--timeout` passes, a pod on
+    `podium-live:current` restarts and its previous log names
+    `sign-stored-rows`, both v0.4.0 pods still report Ready, and `record`
+    prints `0`.
 
     Then reinstall over the restored store with the dry run as a
     `post-install` hook, capturing the Job's log as step 3 of the procedure
@@ -9102,15 +9439,15 @@ repository, because the `helm` commands name the chart by its relative path.
       -l app.kubernetes.io/name=podium,app.kubernetes.io/instance=podium \
       --field-selector=status.phase!=Succeeded,status.phase!=Failed
     kubectl delete job podium-podium-migrate --ignore-not-found --wait=true
-    helm install podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+    helm install podium "$CHART" -f "$WORK/podium-values.yaml" --set replicaCount=0 \
       --set migration.mode=dry-run --set migration.previousImage=podium-live:v0.4.0 --timeout 30m &
     helm_pid=$!
     until kubectl get job podium-podium-migrate >/dev/null 2>&1 || ! kill -0 "$helm_pid" 2>/dev/null; do
       sleep 2
     done
-    kubectl logs -f job/podium-podium-migrate --pod-running-timeout=10m > dry-run.log
+    kubectl logs -f job/podium-podium-migrate --pod-running-timeout=10m > "$WORK/dry-run.log"
     wait "$helm_pid"
-    tail -n 1 dry-run.log
+    tail -n 1 "$WORK/dry-run.log"
     record
     kubectl delete job -l app.kubernetes.io/instance=podium,app.kubernetes.io/component=migrate
     kubectl get job -l app.kubernetes.io/instance=podium,app.kubernetes.io/component=migrate
@@ -9120,19 +9457,34 @@ repository, because the `helm` commands name the chart by its relative path.
     plan digest` line, `record` prints `0`, and the last command reports `No
     resources found`.
 
-15. Create a second namespace and select it with `kubectl config
-    set-context --current --namespace <namespace>`. Repeat steps 2, 3, and 5
-    there with `signing.mode: none`, `migration.includeUnsigned: false`, and
-    `migration.previousImage: podium-live:v0.4.0` in the values file in place
-    of the signing Secret. Then run step 3 of the procedure, a serving upgrade, step 2's zero-replica
-    command and its wait, and the run and serve steps of the procedure with
-    the digest.
+15. Create a second namespace, select it, and repeat steps 2 and 3 there
+    without the signing Secret.
 
     ```bash
-    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --wait --timeout 5m
-    kubectl logs --previous <pod on podium-live:current>
+    kubectl create namespace podium-s76-off
+    kubectl config set-context --current --namespace podium-s76-off
+    backing
+    seed
+    rows
+    helm install podium "$WORK/v040/deploy/helm/podium" --set image.repository=podium-live \
+      --set image.tag=v0.4.0 --set replicaCount=2 --set config.identityProvider.type="" \
+      --wait --timeout 10m
+    helm get values podium -o yaml > "$WORK/podium-values.yaml"
+    ```
+
+    The `helm get values` line replaces the first namespace's values file,
+    which no later step reads. Edit `$WORK/podium-values.yaml` as step 3 does,
+    with `signing.mode: none`, `migration.includeUnsigned: false`, and
+    `migration.previousImage: podium-live:v0.4.0` in place of the signing
+    Secret. Repeat step 5. Then run step 3 of the procedure from `$WORK` as
+    step 7 does, a serving upgrade, step 2's zero-replica command and its
+    wait, and the run and serve steps of the procedure with the digest.
+
+    ```bash
+    helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --wait --timeout 5m
+    kubectl logs --previous "$(current_pod)"
     record
-    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0
+    helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --set replicaCount=0
     kubectl wait --for=delete pod --timeout=10m \
       -l app.kubernetes.io/name=podium,app.kubernetes.io/instance=podium \
       --field-selector=status.phase!=Succeeded,status.phase!=Failed
@@ -9145,24 +9497,32 @@ repository, because the `helm` commands name the chart by its relative path.
     kubectl get pods -l app.kubernetes.io/name=podium
     kubectl get deployment podium-podium \
       -o jsonpath='{.spec.template.spec.containers[0].startupProbe.httpGet.path}'
-    helm upgrade podium ./deploy/helm/podium -f podium-values.yaml --set replicaCount=0 \
+    helm upgrade podium "$CHART" -f "$WORK/podium-values.yaml" --set replicaCount=0 \
       --set migration.mode=dry-run --set migration.includeUnsigned=true
     ```
 
-    **Expect.** The dry-run log's header carries `signing_key=-`, and no row
-    carries `sign=true`. The serving upgrade before the run fails, a pod on
-    `podium-live:current` restarts, its `kubectl logs --previous` names
-    `sign-stored-rows` and not `--plan-digest`, and `record` prints `0`. The
-    run Job succeeds and `record` prints `1`. Both serving pods become Ready
-    with `0` restarts, because the values file carries `replicaCount: 2` from
-    step 3's `helm get values`, and the probe path prints `/healthz`. The last
-    command is refused naming `migration.includeUnsigned=false`.
+    **Expect.** `rows` reports `2|2` after the seed. The dry-run log's header
+    carries `signing_key=-`, and no row carries `sign=true`. The serving
+    upgrade before the run fails, a pod on `podium-live:current` restarts, its
+    `kubectl logs --previous` names `sign-stored-rows` and not
+    `--plan-digest`, and `record` prints `0`. The run Job succeeds and
+    `record` prints `1`. Both serving pods become Ready with `0` restarts,
+    because the values file carries `replicaCount: 2` from this step's `helm
+    get values`, and the probe path prints `/healthz`. The last command is
+    refused naming `migration.includeUnsigned=false`.
 
-16. In a third namespace, selected as step 15 selects the second, with fresh
-    Postgres and MinIO, install the chart, then uninstall it.
+16. Create a third namespace, select it, and deploy fresh Postgres and MinIO
+    with the bucket, the `podium-secrets` Secret, and the signing key Secret,
+    as step 2 does with no seed. Install the chart over the empty store, then
+    uninstall it.
 
     ```bash
-    helm install podium ./deploy/helm/podium --set image.repository=podium-live \
+    kubectl create namespace podium-s76-fresh
+    kubectl config set-context --current --namespace podium-s76-fresh
+    backing
+    kubectl create secret generic podium-signing-key \
+      --from-file=registry-signing.key="$WORK/registry-signing.key"
+    helm install podium "$CHART" --set image.repository=podium-live \
       --set image.tag=current --set signing.secretName=podium-signing-key \
       --set config.identityProvider.type="" --set replicaCount=1 --wait --timeout 10m
     kubectl get pods -l app.kubernetes.io/name=podium
@@ -9172,14 +9532,21 @@ repository, because the `helm` commands name the chart by its relative path.
     kubectl delete job -l app.kubernetes.io/instance=podium,app.kubernetes.io/component=migrate
     ```
 
-    **Expect.** The install serves with one Ready pod and no Job, `record`
-    prints `1`, and the delete reports `No resources found` and exits 0.
+    **Expect.** `mc mb` prints `Bucket created successfully`, and both Secrets
+    report `created`. The install serves with one Ready pod and no Job,
+    `record` prints `1`, and the delete reports `No resources found` and
+    exits 0.
 
 **Cleanup.**
 
+The cluster holds every namespace, Job, and pod the scenario created, and
+`$WORK` holds the values files, the logs, the staged manifests, the image
+archive, the `deploy` link, and the kubeconfig.
+
 ```bash
+kill "$PF" 2>/dev/null
 kind delete cluster --name podium-s76
 docker rmi podium-live:current podium-live:current2 podium-live:v0.4.0
-git worktree remove --force "$WORK/v040"
+git -C "$REAL_HOME/projects/podium" worktree remove --force "$WORK/v040"
 rm -rf "$WORK"
 ```
