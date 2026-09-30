@@ -108,13 +108,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
-- **The Helm chart's strategy rendering** (§13.4): the Deployment renders
-  `strategy.rollingUpdate.maxSurge` and `strategy.rollingUpdate.maxUnavailable`
-  explicitly under `RollingUpdate`, 25% each by default, and omits
-  `rollingUpdate` under `Recreate`, so a release installed with server-side
-  apply can switch to `Recreate`. The registry pod's selector labels take
-  precedence over a `podLabels` entry with the same key, which previously
-  rendered a duplicate key.
 - **The §4.7.6 content hash length-frames its parts** (§4.7.6, §13.4, §6.4,
   §6.5): the canonical serialization now prefixes every part with its length
   before the SHA-256, so every content hash Podium computes moves. This reaches
@@ -125,273 +118,347 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   identifier, no negotiation, no dual computation, and no compatibility path for
   the previous digest. This entry is the release's upgrade note.
 
-  **Upgrade order for the registry.** Stop every registry process that uses the
-  store. In a clustered deployment that means holding the registry at zero
-  replicas, because the Helm chart's default rolling update would start the new
-  version beside the previous one, and a registry still running the previous
-  binary ingests under the previous digest: no automatic start rewrites a row
-  it writes after the new version's first start has examined its tenant. A
-  `sign-stored-rows` run moves such a row to the new digest, signing it when a
-  key of the registry's verification key set verifies its envelope, and, for an
-  unsigned row the operator attests, under `--include-unsigned` with the
-  reviewed dry run's `--plan-digest`. Back up the
+  **Rules every upgrade follows.** Stop every registry process that uses the
+  store before the first process on the new version starts. A registry still
+  running the previous binary ingests under the previous digest, and no
+  automatic start rewrites a row it writes after the new version's first start
+  has examined its tenant. A `sign-stored-rows` run moves such a row to the new
+  digest, signing it when a key of the registry's verification key set
+  verifies its envelope, and, for an unsigned row the operator attests, under
+  `--include-unsigned` with the reviewed dry run's `--plan-digest`. Back up the
   registry store after the stop, so that the backup holds every write the
   previous binary made. Restoring that backup is the only route back to the
   previous binary, and it is the only way to make the whole rewrite run again
   once it has completed; `sign-stored-rows` re-applies the rewrite's rules to
-  the stored rows on demand. Install the new binary or image.
+  the stored rows on demand.
 
-  While no completion of the rewrite is recorded, a registry start over a
-  store that holds a manifest row is refused in either signing mode, unless
-  the store is the SQLite store in the directory of the key file at
-  `PODIUM_SIGN_KEY_PATH`, or at the default key location when that variable is
-  unset. The refused start applies the additive schema and seeds the default
-  tenant and the bootstrap grants, and it rewrites no manifest row, signs no
-  row, and records no completion. A store that holds no manifest row records
-  completion at its first start. Every other deployment, a standard one
-  included, therefore runs `sign-stored-rows` once before its first start: a
-  `podium-server sign-stored-rows --dry-run --include-unsigned`, a review of
-  the rows it lists, and a
-  `podium-server sign-stored-rows --include-unsigned --plan-digest=<digest>`
-  run with the `sha256:` value on the dry run's last line. v0.4.0 stored every
-  row unsigned by default, and `--include-unsigned` attests the unsigned rows
-  the reviewed dry run lists. With signing off, both commands drop
-  `--include-unsigned`, which the command refuses with signing off, and run
-  with `PODIUM_SIGN=none` in their environment. The docker-compose evaluation
-  stack, whose registry runs with `PODIUM_SIGN: "none"` over Postgres, and a
-  signing-off SQLite store outside the directory of the key location
-  `PODIUM_SIGN_KEY_PATH` resolves to (`~/.podium/standalone/` when it is
-  unset) each run `sign-stored-rows --dry-run` and `sign-stored-rows` once
-  before the upgraded registry starts: the stack through
-  `docker compose run --rm registry`, and the SQLite store with
-  `PODIUM_SIGN=none` in the command's environment. On a Helm chart deployment
-  the chart runs that command as a Job in either signing mode: `helm upgrade`
-  with `replicaCount=0` stops the registry, a `migration.mode=dry-run` upgrade
-  lists the plan and its digest, a `migration.mode=run` upgrade with
-  `migration.planDigest` set to that digest performs the rewrite and records
-  it, and a final upgrade serves. `docs/deployment/clustered.md` gives the
-  procedure, including the signing-off values, the GitOps commit order, and an
-  install over an existing v0.4.0 store. Do not pass `--rollback-on-failure` or
-  `--atomic` to those upgrades, because a rollback reinstalls the previous
-  binary over rewritten rows.
+  **The start rule.** While no completion of the rewrite is recorded, a
+  registry start over a store that holds a manifest row, including a
+  soft-deleted one, is refused in either signing mode, unless the store is the
+  SQLite store in the directory of the key file at `PODIUM_SIGN_KEY_PATH`, or
+  at the default key location `~/.podium/standalone/registry-signing.key` when
+  that variable is unset. The refused start applies the additive schema and
+  seeds the default tenant and the bootstrap grants, and it rewrites no
+  manifest row, signs no row, and records no completion. A store that holds no
+  manifest row records completion at its first start. Over every other store,
+  a standard deployment included, the rewrite runs through `sign-stored-rows`
+  while no registry process on the previous release serves the store: a
+  `sign-stored-rows --dry-run`, a review of the rows it lists, and a
+  `sign-stored-rows` run with `--plan-digest` set to the `sha256:` value on the
+  dry run's last line. The run records completion, and the start that follows
+  it proceeds. This entry calls that sequence the reviewed `sign-stored-rows`
+  pass. Wherever this entry says that the rewrite runs again over such a store,
+  it runs through that pass, and the start is refused until the pass records
+  completion.
 
-  Start the registry. Where the store is the SQLite store in the key file's
-  directory, the first start rewrites every stored content hash before it
-  ingests or serves anything, unless `sign-stored-rows` already did, re-signs
-  each row it rewrites where signing is configured, which it is by default from
-  this release, and attaches a first envelope to each stored row that carries
-  none. For every other store, `sign-stored-rows` has performed the rewrite
-  before the start; it re-signs each row it rewrites where signing is on, and
-  it leaves an unsigned row unsigned unless the reviewed run attested it under
-  `--include-unsigned`. The rewrite appends one `artifact.signed` event per
-  signed row to the audit sink, with the manifest-declared §8.2 redaction
-  ingest applies. It leaves the tenant's dependency rows, layer configs, admin
-  grants, and tenants untouched, and it re-ingests nothing. A
-  `podium layer reingest` is neither required nor sufficient, because a
-  reingest reaches only the version each artifact directory currently
-  declares. A registry that turns signing on after the rewrite signs no row it
-  already stores on any later start, and a signing registry refuses each row
-  stored unsigned to every reader with `materialize.signature_missing` until a
-  `sign-stored-rows --include-unsigned --dry-run` and a run with its plan
-  digest sign it or a new version of the artifact is ingested.
+  **Upgrade a standalone registry.** These steps apply where the store is the
+  SQLite store in the key file's directory, which is the zero-configuration
+  standalone layout under `~/.podium/standalone/`.
 
-  **Read the summary line the rewrite logs.** Where the store is the SQLite
-  store in the key file's directory, the first start logs it; for any other
-  store, the `sign-stored-rows` run logs it, which on a Helm chart deployment
-  is the migrate Job. It carries the counts of rows rewritten, rows already
-  migrated, and rows left untouched by class, and the rewrite logs one line
-  per untouched row naming that row and its class. A start can be refused
-  instead. Three refusals name `PODIUM_SIGN_KEY_PATH` as the setting to fix,
-  and the message says which it is. A refusal saying the registry signing key
-  would be generated under the process's home, outside the directory that
-  holds the store, is the key-persistence refusal: signing is on, the store is
-  Postgres or a SQLite file outside `~/.podium/standalone/`, and
-  `PODIUM_SIGN_KEY_PATH` is unset. It fires whether or not the store holds a
-  signed row, and it is cleared by setting `PODIUM_SIGN_KEY_PATH` to a file on
-  the store's persistent storage or by setting `PODIUM_SIGN=none`. With
-  `PODIUM_SIGN=none`, a store outside the SQLite store beside the default key
-  that holds rows and no completion record then meets the unmigrated-store
-  refusal below, whose repair is `sign-stored-rows`. The other two refusals
-  mean that the store holds signed rows. One says those rows need their
-  content hash rewritten while no signer is configured; it comes from a start
-  only over the SQLite store in the key file's directory, and otherwise from
-  the `sign-stored-rows` dry run. Remove `PODIUM_SIGN=none` and point
-  `PODIUM_SIGN_KEY_PATH` at the key that signed them. The other says
-  `PODIUM_SIGN_KEY_PATH` names no file: point the variable at the key that
-  signed them. The Helm chart mounts the key from the Secret
-  `signing.secretName` names, so on a chart deployment that refusal means the
-  Secret does not hold that key under `signing.key`. Where no copy of the key
-  survives, no start configuration clears the refusal against the deployment's
-  own store: write a persistent key file first by starting the new binary with
-  `PODIUM_SIGN=registry-key` and `PODIUM_SIGN_KEY_PATH` against a store that
-  holds no signed row, such as `podium serve --standalone` with
-  `PODIUM_REGISTRY_STORE=sqlite` and `PODIUM_SQLITE_PATH` naming a new database
-  file outside the deployment's store directory. Then, where the store is the
-  SQLite store in the key file's directory, start the deployment with
-  `PODIUM_SIGN_KEY_PATH` naming that file. Over any other store, in either
-  signing mode, that start is refused while no completion is recorded, so a
-  `sign-stored-rows` dry run and a run with its plan digest, with
-  `PODIUM_SIGN_KEY_PATH` naming that file, precede it.
+  1. Stop the registry.
+  2. Back up `~/.podium/standalone/`, which holds the SQLite database, the
+     objects directory, and the signing key file `registry-signing.key`.
+  3. Replace the binary.
+  4. Start the registry. The first start rewrites every stored content hash
+     before it ingests or serves anything, unless `sign-stored-rows` already
+     did, re-signs each row it rewrites where signing is configured, which it
+     is by default from this release, and attaches a first envelope to each
+     stored row that carries none. Read the summary line it logs, as
+     "Summary line and untouched rows" below describes.
 
-  The unmigrated-store refusal names `sign-stored-rows`. While no completion
-  is recorded, a start in either signing mode over a store that holds a
-  manifest row, including a soft-deleted one, and that is not the SQLite store
-  in the key file's directory, refuses, rewriting no manifest row, signing no
-  row, and recording no completion. A store that holds no manifest row is
-  exempt. When the key-persistence refusal, or the refusal for a signing key
-  that did not exist before the start, also applies, the start reports that
-  refusal first. The message names the store, one stored row, and the key
-  location. Repair it with a `sign-stored-rows --dry-run`, a review of its
-  report, and a `sign-stored-rows` run with `--plan-digest` set to the digest
-  on the report's last line, then start the registry. With signing on, the run
-  repeats the dry run's `--include-unsigned` setting, and where no file exists
-  at the key location, `podium admin signing-key generate --key-file <path>`
-  creates it before the dry run, because neither the refused start nor
-  `sign-stored-rows` generates a key. With signing off, both commands run with
-  `PODIUM_SIGN=none` in their environment.
+  **Upgrade a registry on any other store.** These steps apply to a registry
+  run as a binary or a container over Postgres or over a SQLite file outside
+  the key file's directory.
+
+  1. Set `PODIUM_SIGN_KEY_PATH` to a file on the store's persistent storage,
+     or set `PODIUM_SIGN=none`. With signing on and `PODIUM_SIGN_KEY_PATH`
+     unset, the start is refused unless the store is the SQLite store beside
+     the default key. A deployment that starts more than one registry process
+     with signing on provisions the one key file at `PODIUM_SIGN_KEY_PATH`
+     before the start, because processes that each generate a key at one path
+     overwrite each other's key.
+  2. Stop every registry process that uses the store.
+  3. Back up the store.
+  4. Install the new binary or image.
+  5. With signing on, where no file exists at `PODIUM_SIGN_KEY_PATH`, create
+     it with `podium admin signing-key generate --key-file <path>` and keep it
+     in the deployment's backup. The upgrade start is refused before it loads
+     or generates a key, and `sign-stored-rows` never generates one. Where the
+     store holds signed rows, point `PODIUM_SIGN_KEY_PATH` at the key that
+     signed them instead.
+  6. Run `podium-server sign-stored-rows --dry-run --include-unsigned`, review
+     the rows it lists, and run
+     `podium-server sign-stored-rows --include-unsigned --plan-digest=<digest>`
+     with the `sha256:` value on the dry run's last line. v0.4.0 stored every
+     row unsigned by default, and `--include-unsigned` attests the unsigned
+     rows the reviewed dry run lists. With signing off, both commands drop
+     `--include-unsigned`, which the command refuses with signing off, and run
+     with `PODIUM_SIGN=none` in their environment.
+  7. Start the registry, and read the summary line the run logged.
+
+  **Upgrade a Helm chart deployment.** The chart runs the rewrite as a migrate
+  Job in either signing mode. The Job has no probe, and the registry pods start
+  after the rewrite is recorded. The section "Upgrading the chart from v0.4.0"
+  of `docs/deployment/clustered.md` gives the commands, the signing-off values,
+  the GitOps commit order, and an install over an existing v0.4.0 store.
+
+  1. Prepare the values file and the signing Secret: this release's image,
+     `migration.previousImage` naming the v0.4.0 image, and
+     `signing.secretName`, or `signing.mode=none` with
+     `migration.includeUnsigned=false`, because the command signs no row with
+     signing off.
+  2. Run `helm upgrade` with `replicaCount=0`, wait for the registry pods to be
+     deleted, and back up the store. The chart's default rolling update would
+     otherwise start the new version beside the previous one.
+  3. Run a `migration.mode=dry-run` upgrade, which lists the plan and its
+     digest, and review the Job's log.
+  4. Run a `migration.mode=run` upgrade with `migration.planDigest` set to
+     that digest, which performs the rewrite and records it.
+  5. Run a final upgrade without the migration values, which serves.
+
+  Do not pass `--rollback-on-failure` or `--atomic` to those upgrades, because
+  a rollback reinstalls the previous binary over rewritten rows. A GitOps
+  controller such as Argo CD runs the same steps as value commits.
+
+  **Upgrade the docker-compose evaluation stack.** The stack's registry runs
+  with `PODIUM_SIGN: "none"` over Postgres, so it takes the reviewed
+  `sign-stored-rows` pass with signing off before the upgraded registry starts.
+  The service environment carries `PODIUM_SIGN: "none"`, so the command needs
+  no other setting.
+
+  1. Stop the registry with `docker compose stop registry`, and back up the
+     store.
+  2. Rebuild the image with `docker compose build registry`.
+  3. Run `docker compose run --rm registry sign-stored-rows --dry-run`, and
+     review its report.
+  4. Run
+     `docker compose run --rm registry sign-stored-rows --plan-digest=<digest>`
+     with the `sha256:` value on the dry run's last line.
+  5. Start the stack with `docker compose up -d`.
+
+  **Roll the consumers.**
+
+  1. Roll consumers to the new binary after the registry serves on it, inside
+     the same maintenance window, because a consumer on the previous binary
+     fails its loads against the upgraded registry.
+  2. Clear each consumer's cache, as "Clearing each consumer's cache" below
+     states.
+  3. Set `PODIUM_SIGNATURE_VERIFY_KEY` to the registry's public key on every
+     consumer that is not on the standalone registry's machine. Without it
+     such a consumer refuses to start, as the entry "The registry signs at
+     ingest by default, and `podium-mcp` verifies every load" below states. A
+     consumer of a registry running with `PODIUM_SIGN=none` sets
+     `PODIUM_VERIFY_SIGNATURES=never` instead.
+  4. Remove `PODIUM_SIGNATURE_KEY_ID`, the `medium-and-above` value of
+     `PODIUM_VERIFY_SIGNATURES` or `defaults.verify_signatures`, and
+     `PODIUM_PREFETCH` with the `prefetch` configuration key, as the `Removed`
+     entries state.
+
+  **Return to the previous binary.** Restore the backup the upgrade takes,
+  revert the registry and every consumer together, and clear each reverted
+  consumer's cache. On a Helm chart deployment, the "Rollback" section of
+  `docs/deployment/clustered.md` gives the procedure.
+
+  **What the rewrite does.** Where the store is the SQLite store in the key
+  file's directory, the first start performs the rewrite. For every other
+  store, the reviewed `sign-stored-rows` pass performs it before the start; it
+  re-signs each row it rewrites where signing is on, and it leaves an unsigned
+  row unsigned unless the reviewed run attested it under `--include-unsigned`.
+  The rewrite appends one `artifact.signed` event per signed row to the audit
+  sink, with the manifest-declared §8.2 redaction ingest applies. It leaves the
+  tenant's dependency rows, layer configs, admin grants, and tenants untouched,
+  and it re-ingests nothing. A `podium layer reingest` is neither required nor
+  sufficient, because a reingest reaches only the version each artifact
+  directory currently declares. A registry that turns signing on after the
+  rewrite signs no row it already stores on any later start, and a signing
+  registry refuses each row stored unsigned to every reader with
+  `materialize.signature_missing` until a reviewed `sign-stored-rows` pass with
+  `--include-unsigned` signs it or a new version of the artifact is ingested.
+
+  **Start refusals.** A start can be refused in place of the rewrite. Three
+  refusals name `PODIUM_SIGN_KEY_PATH` as the setting to fix, and the message
+  says which it is.
+
+  - The key-persistence refusal says that the registry signing key would be
+    generated under the process's home, outside the directory that holds the
+    store. It fires when signing is on, the store is Postgres or a SQLite file
+    outside `~/.podium/standalone/`, and `PODIUM_SIGN_KEY_PATH` is unset,
+    whether or not the store holds a signed row. Set `PODIUM_SIGN_KEY_PATH` to
+    a file on the store's persistent storage, or set `PODIUM_SIGN=none`. With
+    `PODIUM_SIGN=none`, a store other than the SQLite store beside the default
+    key that holds rows and no completion record then meets the
+    unmigrated-store refusal.
+  - A refusal saying that stored rows carry a signature and need their content
+    hash rewritten while no signer is configured means that the store holds
+    signed rows. It comes from a start only over the SQLite store in the key
+    file's directory, and otherwise from `sign-stored-rows` and its dry run.
+    Remove `PODIUM_SIGN=none` and point `PODIUM_SIGN_KEY_PATH` at the key that
+    signed them.
+  - A refusal saying that `PODIUM_SIGN_KEY_PATH` names no file means that the
+    store holds signed rows and the start would generate a key. Point the
+    variable at the key that signed them. The Helm chart mounts the key from
+    the Secret `signing.secretName` names, so on a chart deployment this
+    refusal means the Secret does not hold that key under `signing.key`. Where
+    no copy of the key survives, no start configuration clears the refusal
+    against the deployment's own store. Write a persistent key file first with
+    `podium admin signing-key generate --key-file <path>`. Where the store is
+    the SQLite store in the key file's directory, start the deployment with
+    `PODIUM_SIGN_KEY_PATH` naming that file. Over any other store, run the
+    reviewed `sign-stored-rows` pass with `PODIUM_SIGN_KEY_PATH` naming that
+    file before the start.
+
+  The unmigrated-store refusal is the start rule above, and it names
+  `sign-stored-rows`. When the key-persistence refusal, or the refusal for a
+  signing key that did not exist before the start, also applies, the start
+  reports that refusal first. The message names the store, one stored row, and
+  the key location. Repair it with the reviewed `sign-stored-rows` pass, then
+  start the registry. With signing on, the run repeats the dry run's
+  `--include-unsigned` setting, and where no file exists at the key location,
+  `podium admin signing-key generate --key-file <path>` creates it before the
+  dry run, because neither the refused start nor `sign-stored-rows` generates a
+  key. With signing off, both commands run with `PODIUM_SIGN=none` in their
+  environment.
+
+  A start over any store other than the SQLite store in the key file's
+  directory, including an empty one, is also refused before it ingests
+  anything when the rewrite leaves no completion record: its listener did not
+  bind, a row held the record back, or the record write failed. The start
+  stores no manifest row, and its message tells the operator to read the
+  `rehash:` lines. Over an empty store, fix the cause and start again. Over a
+  store with a held row, the next start meets the unmigrated-store refusal,
+  and the reviewed `sign-stored-rows` pass records completion.
+
+  **Summary line and untouched rows.** Where the store is the SQLite store in
+  the key file's directory, the first start logs the rewrite's summary line;
+  for any other store, the `sign-stored-rows` run logs it, which on a Helm
+  chart deployment is the migrate Job. It carries the counts of rows
+  rewritten, rows already migrated, and rows left untouched by class, and the
+  rewrite logs one line per untouched row naming that row and its class.
 
   Rows the summary names as untouched keep their stored hash, and the
   registry's stored-row admission (§13.4) refuses each such row before any
   consumer check runs, to every reader, the SDKs and `podium sync` included,
-  whatever the consumer's policy. The code depends on the row's class. A row
-  still at the previous release's digest, which covers an `unreproducible` row
-  and a `signature_unverified` row at that digest, and a `body_missing` row are
-  refused with `materialize.content_hash_mismatch`. A `body_unavailable` row is
-  refused with `registry.unavailable` while an object read fails or times out.
-  A row the wrong-root guard reclassified as `body_unavailable`, and every
-  object-held row while the object store reports its body absent, are refused
-  with `materialize.content_hash_mismatch`. Point the object store at the right
-  root or bucket; that class holds the record of the rewrite back, so the
-  rewrite runs again. Where the store is the SQLite store in the key file's
-  directory, restart, and the start runs it. Over any other store, in either
-  signing mode, that start is refused while no completion is recorded, so a
-  `sign-stored-rows` dry run and a run with its plan digest precede it. On a
-  signing registry, a `signature_unverified` row at the framed digest is
-  refused with `materialize.signature_invalid`, and a row stored unsigned with
-  `materialize.signature_missing`, which a `sign-stored-rows --include-unsigned`
-  dry run and a run with its plan digest repair. A `body_unavailable` row is
-  repaired by making the object readable and raising
-  `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` where the read timed out: the rewrite
-  left its record unset, so it runs again, at the next start where the store
-  is the SQLite store in the key file's directory. Over any other store, in
-  either signing mode, that start is refused while no completion is recorded,
-  so a `sign-stored-rows` dry run and a run with its plan digest precede it. An
-  `unreproducible` row is repaired by publishing a new version of the
-  artifact, because the record of the rewrite is set and no later rewrite
-  examines it again. A `signature_unverified` row whose signing key is gone is
-  repaired by listing that key's public half on a `verify:` line of the key
-  file, restarting the registry, and running `sign-stored-rows`, which moves
-  the row to the new digest and re-signs it; where no copy of that public half
-  survives, publish a new version of the artifact. A `body_missing` row is
-  repaired by publishing a new version as well.
+  whatever the consumer's policy. The code and the repair depend on the row's
+  class.
+
+  - A row still at the previous release's digest, which covers an
+    `unreproducible` row and a `signature_unverified` row at that digest, is
+    refused with `materialize.content_hash_mismatch`.
+  - An `unreproducible` row is repaired by publishing a new version of the
+    artifact, because the record of the rewrite is set and no later rewrite
+    examines it again.
+  - A `signature_unverified` row at the framed digest is refused on a signing
+    registry with `materialize.signature_invalid`. A `signature_unverified`
+    row whose signing key is gone is repaired by listing that key's public
+    half on a `verify:` line of the key file, restarting the registry, and
+    running `sign-stored-rows`, which moves the row to the new digest and
+    re-signs it. Where no copy of that public half survives, publish a new
+    version of the artifact.
+  - A `body_missing` row is refused with `materialize.content_hash_mismatch`
+    and repaired by publishing a new version of the artifact.
+  - A `body_unavailable` row is refused with `registry.unavailable` while an
+    object read fails or times out. It is repaired by making the object
+    readable and raising `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` where the read
+    timed out. The rewrite left its record unset, so it runs again: at the next
+    start where the store is the SQLite store in the key file's directory, and
+    otherwise through the reviewed `sign-stored-rows` pass.
+  - A row the wrong-root guard reclassified as `body_unavailable`, and every
+    object-held row while the object store reports its body absent, are
+    refused with `materialize.content_hash_mismatch`. Point the object store
+    at the right root or bucket. That class holds the record of the rewrite
+    back, so the rewrite runs again: at the next restart where the store is
+    the SQLite store in the key file's directory, and otherwise through the
+    reviewed `sign-stored-rows` pass.
+  - A row stored unsigned is refused on a signing registry with
+    `materialize.signature_missing`, which a reviewed `sign-stored-rows` pass
+    with `--include-unsigned` repairs.
 
   Where the summary reports that no object-storage read returned a body, or
   reports rows that hold the record of the rewrite back, that record stays
-  unset and the rewrite runs over those rows again: at the next start where
-  the store is the SQLite store in the key file's directory, and otherwise
-  through a `sign-stored-rows` dry run and a run with its plan digest, without
-  which the start is refused in either signing mode. Where the summary reports
-  every signed row as `signature_unverified` because the configured key is a
-  different key from the one that signed those rows, restore the backup the
-  upgrade order takes and start again with the key that signed them, where the
-  store is the SQLite store in the key file's directory; over any other store
-  the restored store's start is refused in either signing mode, so a
-  `sign-stored-rows` dry run and a run with its plan digest, under that key,
-  precede it. On a Helm chart deployment, the rewrite runs in the migrate Job
+  unset and the rewrite runs over those rows again, as the start rule states.
+  Where the summary reports every signed row as `signature_unverified` because
+  the configured key is a different key from the one that signed those rows,
+  restore the backup the upgrade takes and start again with the key that
+  signed them, where the store is the SQLite store in the key file's
+  directory. Over any other store, run the reviewed `sign-stored-rows` pass
+  under that key against the restored store before its start.
+
+  **Repairs on a Helm chart deployment.** The rewrite runs in the migrate Job
   rather than at a start, in either signing mode. Correct the values or the
   referenced Secrets and rerun the dry-run and run steps of
-  docs/deployment/clustered.md. Raise `config.migrationObjectReadTimeout` when
-  the object store reports itself healthy and a rerun dry run still lists
+  `docs/deployment/clustered.md`. Raise `config.migrationObjectReadTimeout`
+  when the object store reports itself healthy and a rerun dry run still lists
   `class=body_unavailable` rows. A run refused with exit status 3, such as one
   whose object-store reads failed after a clean dry run, wrote nothing and is
   repaired by rerunning the dry-run and run steps. After a backup restore,
   hold the Deployment at zero replicas and rerun steps 3 to 5.
 
-  A registry with signing on and no `PODIUM_SIGN_KEY_PATH` refuses to start
-  unless its store is the SQLite store beside the default key, so a Postgres
-  deployment or a moved SQLite store sets `PODIUM_SIGN_KEY_PATH` on the store's
-  persistent storage, or sets `PODIUM_SIGN=none`, before its upgrade start. In
-  either signing mode, such a store also runs `sign-stored-rows` before that
-  start once it holds rows, because the start is otherwise refused. With
-  signing on, such a store whose rows are unsigned also creates the file at
-  `PODIUM_SIGN_KEY_PATH` with
-  `podium admin signing-key generate --key-file <path>` before the
-  `sign-stored-rows` dry run, because the upgrade start is refused before it
-  loads or generates a key, and `sign-stored-rows` never generates one. A
-  deployment that starts more than one registry process with signing on
-  provisions the key file at `PODIUM_SIGN_KEY_PATH` before the start, because
-  processes that each generate a key at one path overwrite each other's key. A
-  Helm chart deployment runs the rewrite in the chart's migrate Job in either
-  signing mode, which has no probe, and its pods start after the rewrite is
-  recorded. A chart deployment with `signing.mode=none` runs the migrate Job
-  with `migration.includeUnsigned=false`, because the command signs no row
-  with signing off.
-
   **Migrating with `podium admin migrate-to-standard`.** The command copies rows
   as the source stores them and clears the target store's record of the
   rewrite, so the rewrite runs again over the copied rows under the signing
   key that signed the source's rows: at the target's next start where the
-  target is the SQLite store in the key file's directory, and otherwise, in
-  either signing mode, through a `sign-stored-rows` dry run and a run with its
-  plan digest against the target store, without which the target's start is
-  refused. No registry process runs on the target store while the command
-  runs, so a target registry that is already running, such as one installed
-  ahead of the migration, is stopped before the command's first run. The
-  target registry is started, or restarted, only after a run of the command
-  that exits 0. Recreate the target store empty before the command runs again
-  when a run failed with the immutability error at a copied row, or when a
-  registry started on the target store, or the source registry started on the
-  new version, at any point after the command's first run against it began.
-  On a Helm chart deployment, run the command before any chart release serves
-  the target store, install or upgrade at zero replicas with
+  target is the SQLite store in the key file's directory, and otherwise
+  through the reviewed `sign-stored-rows` pass against the target store, as
+  the start rule states. No registry process runs on the target store while
+  the command runs, so a target registry that is already running, such as one
+  installed ahead of the migration, is stopped before the command's first run.
+  The target registry is started, or restarted, only after a run of the
+  command that exits 0. Recreate the target store empty before the command
+  runs again when a run failed with the immutability error at a copied row, or
+  when a registry started on the target store, or the source registry started
+  on the new version, at any point after the command's first run against it
+  began. On a Helm chart deployment, run the command before any chart release
+  serves the target store, install or upgrade at zero replicas with
   `migration.previousImage`, and run the target's rewrite in the migrate Job,
   as the "Migration from single node" section of
   `docs/deployment/clustered.md` states.
 
-  **Rolling the consumers.** Roll consumers to the new binary after the registry
-  has started on it, and clear each consumer's cache as the next paragraph
-  states. The registry's stored-row admission (§13.4) refuses a row the rewrite
-  has not rewritten to every reader, whatever binary the reader runs. An
-  upgraded `podium-mcp` recomputes no §4.7.6 digest: it checks the §4.7.10
-  delivery record the registry serves, and only a filesystem-source
-  `podium sync` recomputes the §4.7.6 digest. A consumer still on the previous
-  binary, against the upgraded registry, receives neither `signature` nor
-  `raw_frontmatter`, so it fails every load of a rewritten row with
-  `materialize.content_hash_mismatch`, or earlier with its signature refusal
-  wherever its policy requires a signature. Loads fail for the consumers that
-  have not yet rolled, between the registry's first start on the new binary and
-  the last consumer rolling, so schedule the consumer roll inside the same
-  maintenance window. A return to the previous binary restores the backup the
-  upgrade order takes, reverts the registry and every consumer together, and
-  clears each reverted consumer's cache. A reverted consumer refuses each cached
-  bucket the new binary wrote with `materialize.content_hash_mismatch`, or
-  earlier with `materialize.signature_invalid` wherever its policy requires a
-  signature, because the new binary's buckets carry no bucket-level `signature`
-  side file and the previous binary checks the signature before the content
-  hash.
+  **Why the consumers roll with the registry.** The registry's stored-row
+  admission (§13.4) refuses a row the rewrite has not rewritten to every
+  reader, whatever binary the reader runs. An upgraded `podium-mcp` recomputes
+  no §4.7.6 digest: it checks the §4.7.10 delivery record the registry serves,
+  and only a filesystem-source `podium sync` recomputes the §4.7.6 digest. A
+  consumer still on the previous binary, against the upgraded registry,
+  receives neither `signature` nor `raw_frontmatter`, so it fails every load
+  of a rewritten row with `materialize.content_hash_mismatch`, or earlier with
+  its signature refusal wherever its policy requires a signature. Loads fail
+  for the consumers that have not yet rolled, between the registry's first
+  start on the new binary and the last consumer rolling. A reverted consumer
+  refuses each cached bucket the new binary wrote with
+  `materialize.content_hash_mismatch`, or earlier with
+  `materialize.signature_invalid` wherever its policy requires a signature,
+  because the new binary's buckets carry no bucket-level `signature` side file
+  and the previous binary checks the signature before the content hash.
 
-  **Clear each consumer's cache.** The caches do not repair themselves, and the
-  clear applies on every binary change in either direction, on the upgrade and
-  on a return to the previous binary. On an upgraded consumer a pre-upgrade
-  bucket carries no per-ID delivery side files and is a cache miss, so no
-  unverified record is served from it: `offline-first` and a reachable
-  `always-revalidate` fetch the artifact live, `offline-only` returns its
-  offline cache-miss error, and the §7.4 degraded-network fallback surfaces
-  `network.registry_unreachable`. The clear removes the pre-upgrade
+  **Clearing each consumer's cache.** The caches do not repair themselves, and
+  the clear applies on every binary change in either direction, on the upgrade
+  and on a return to the previous binary. On an upgraded consumer a
+  pre-upgrade bucket carries no per-ID delivery side files and is a cache
+  miss, so no unverified record is served from it: `offline-first` and a
+  reachable `always-revalidate` fetch the artifact live, `offline-only` returns
+  its offline cache-miss error, and the §7.4 degraded-network fallback
+  surfaces `network.registry_unreachable`. The clear removes the pre-upgrade
   `raw_frontmatter` side files, which hold the IDs of parent artifacts, and the
   pre-upgrade `id@<semver>` resolution pins, which the §6.5 resolution index
   keeps across a binary change and never expires. The cache directory is
-  `$PODIUM_CACHE_DIR` when that variable is set and `~/.podium/cache` when it is
-  not. Remove that directory wholesale, or run `podium cache prune --days 0`
+  `$PODIUM_CACHE_DIR` when that variable is set and `~/.podium/cache` when it
+  is not. Remove that directory wholesale, or run `podium cache prune --days 0`
   together with `rm -rf <cache dir>/.resolutions`, because prune resolves the
   same default but is age-based and skips the resolution index. Object storage
   is keyed per blob and is unaffected. A `podium sync` rewrites the
   `content_hash` of every entry in its lock file on its first run against the
   new registry, and that run reports every target as changed.
 
-  A §6.4 workspace overlay now serves the canonical hash over its whole package,
-  so an overlay skill's `content_hash` moves when its `SKILL.md` or one of its
-  bundled resources changes.
+  **Workspace overlays.** A §6.4 workspace overlay now serves the canonical
+  hash over its whole package, so an overlay skill's `content_hash` moves when
+  its `SKILL.md` or one of its bundled resources changes.
+- **The Helm chart's strategy rendering** (§13.4): the Deployment renders
+  `strategy.rollingUpdate.maxSurge` and `strategy.rollingUpdate.maxUnavailable`
+  explicitly under `RollingUpdate`, 25% each by default, and omits
+  `rollingUpdate` under `Recreate`, so a release installed with server-side
+  apply can switch to `Recreate`. The registry pod's selector labels take
+  precedence over a `podLabels` entry with the same key, which previously
+  rendered a duplicate key.
 - **`load_artifact` serves a delivery attestation, and the response fields
   change** (§4.7.10, §6.6, §7.2, §7.6.2): the `load_artifact` response and each
   `artifacts:batchLoad` item carry `delivery_hash`, a digest over the record the
