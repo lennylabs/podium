@@ -65,16 +65,17 @@ func (h ctxHook) Apply(_ context.Context, m map[string]any, f hook.File) (hook.R
 	return hook.Result{File: f}, nil
 }
 
-// fixtureResp builds a response whose content_hash matches its frontmatter so
-// the §6.6 step 2 check passes by default.
+// fixtureResp builds a response whose content_hash is the §4.7.6 digest of its
+// frontmatter and whose delivery_hash frames the record, so the §6.6 step 2
+// delivery check passes by default.
 func fixtureResp(id, frontmatter string) loadArtifactResponse {
-	return loadArtifactResponse{
+	return sealDelivery(loadArtifactResponse{
 		ID:          id,
 		Type:        "context",
 		Version:     "1.0.0",
 		Frontmatter: frontmatter,
-		ContentHash: "sha256:" + version.ContentHash([]byte(frontmatter)),
-	}
+		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(frontmatter), nil, nil),
+	})
 }
 
 // Spec: §6.6 step 4 — the MaterializationHook chain runs in declared order
@@ -204,10 +205,10 @@ func TestDeliver_HookRunsForHarnessNone(t *testing.T) {
 	}
 }
 
-// ----- §6.6 step 2 content-hash verification ------------------------------
+// ----- §6.6 step 2 delivery-hash verification -----------------------------
 
-// Spec: §6.6 step 2 / §4.7.6 — a manifest whose bytes do not reproduce the
-// served content_hash is rejected before materialization.
+// Spec: §6.6 step 2, §4.7.10 — a response whose served content_hash is not the
+// one its delivery hash frames is rejected before materialization.
 func TestDeliver_ContentHashMismatchRejected(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
@@ -224,7 +225,7 @@ func TestDeliver_ContentHashMismatchRejected(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 2 — a tampered inline resource (consistent content_hash kept
+// Spec: §6.6 step 2, §4.7.10 — a tampered inline resource (delivery_hash kept
 // but resource bytes changed) is rejected, closing the sub-threshold gap.
 func TestDeliver_TamperedInlineResourceRejected(t *testing.T) {
 	t.Parallel()
@@ -235,7 +236,8 @@ func TestDeliver_TamperedInlineResourceRejected(t *testing.T) {
 		ID: "team/x", Type: "context", Version: "1.0.0", Frontmatter: fm,
 		Resources: map[string]string{"data/a.txt": "original"},
 	}
-	resp.ContentHash = "sha256:" + version.ContentHash([]byte(fm), nil, []byte("data/a.txt"), []byte("original"))
+	resp.ContentHash = "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"data/a.txt": []byte("original")})
+	resp = sealDelivery(resp)
 	// Tamper the resource after the hash was fixed.
 	resp.Resources["data/a.txt"] = "tampered"
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
@@ -256,8 +258,8 @@ func TestDeliver_ContentHashMatchAccepts(t *testing.T) {
 		ID: "team/x", Type: "context", Version: "1.0.0", Frontmatter: fm,
 		Resources: map[string]string{"data/a.txt": "hello"},
 	}
-	resp.ContentHash = "sha256:" + version.ContentHash([]byte(fm), nil, []byte("data/a.txt"), []byte("hello"))
-	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
+	resp.ContentHash = "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"data/a.txt": []byte("hello")})
+	out := s.deliverLoadArtifact(sealDelivery(resp), deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	if _, isErr := m["error"]; isErr {
 		t.Fatalf("matching hash rejected: %v", m)
@@ -267,9 +269,8 @@ func TestDeliver_ContentHashMatchAccepts(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 2 / §4.7.6 — a skill's content_hash covers the verbatim
-// SKILL.md the registry ships in skill_raw, so the bridge reproduces the hash
-// over (ARTIFACT.md, SKILL.md, resources) and a matching skill passes the
+// Spec: §6.6 step 2, §4.7.10 — a skill's delivery record frames the verbatim
+// SKILL.md the registry ships in skill_raw, so a matching skill passes the
 // check instead of skipping it.
 func TestDeliver_SkillVerifiesContentHash(t *testing.T) {
 	t.Parallel()
@@ -282,19 +283,21 @@ func TestDeliver_SkillVerifiesContentHash(t *testing.T) {
 		Frontmatter:  fm,
 		SkillRaw:     skillRaw,
 		ManifestBody: "skill prose",
-		ContentHash:  "sha256:" + version.ContentHash([]byte(fm), []byte(skillRaw)),
+		ContentHash:  "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(skillRaw), nil),
 	}
-	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
+	out := s.deliverLoadArtifact(sealDelivery(resp), deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	if _, isErr := m["error"]; isErr {
-		t.Fatalf("valid skill rejected by content-hash check: %v", m)
+		t.Fatalf("valid skill rejected by the delivery check: %v", m)
+	}
+	if got, _ := m["manifest_body"].(string); got != "skill prose" {
+		t.Errorf("manifest_body = %q, want the served skill prose", got)
 	}
 }
 
-// Spec: §6.6 step 2 — a skill whose served SKILL.md bytes were altered while the
-// content_hash field was kept consistent is rejected before materialization,
-// closing the gap where a skill skipped the check entirely under a permissive
-// signature policy.
+// Spec: §6.6 step 2, §4.7.10 — a skill whose served SKILL.md bytes were altered
+// while the delivery_hash field was kept is rejected before materialization
+// under a permissive signature policy.
 func TestDeliver_SkillTamperedSkillRawRejected(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
@@ -306,8 +309,9 @@ func TestDeliver_SkillTamperedSkillRawRejected(t *testing.T) {
 		Frontmatter:  fm,
 		SkillRaw:     skillRaw,
 		ManifestBody: "skill prose",
-		ContentHash:  "sha256:" + version.ContentHash([]byte(fm), []byte(skillRaw)),
+		ContentHash:  "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(skillRaw), nil),
 	}
+	resp = sealDelivery(resp)
 	// Tamper the SKILL.md after the hash was fixed.
 	resp.SkillRaw = skillRaw + "\ninjected"
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
@@ -320,50 +324,53 @@ func TestDeliver_SkillTamperedSkillRawRejected(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 2 / §4.6 — a merged manifest's served frontmatter is a
-// re-serialization with the hidden parent stripped, so the bridge reproduces
-// the hash from the leaf child's pre-merge raw_frontmatter and a matching
-// merged manifest passes.
-func TestDeliver_MergedManifestVerifiesContentHash(t *testing.T) {
+// Spec: §6.6 step 2, §4.7.10 — a merged manifest's delivery record frames the
+// served merged frontmatter, the document the consumer materializes, so a
+// matching merged manifest passes the delivery check and materializes that
+// document.
+func TestDeliver_MergedManifestVerifiesDeliveryHash(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
 	raw := "---\ntype: context\nextends: shared/parent@1.x\n---\nbody"
-	resp := loadArtifactResponse{
+	merged := "---\ntype: context\n---\nbody"
+	resp := sealDelivery(loadArtifactResponse{
 		ID: "team/x", Type: "context", Version: "1.0.0",
-		Frontmatter:    "---\ntype: context\n---\nbody", // re-serialized, parent stripped
-		RawFrontmatter: raw,
-		ManifestMerged: true,
-		ContentHash:    "sha256:" + version.ContentHash([]byte(raw)),
-	}
+		Frontmatter: merged, // re-serialized, parent stripped
+		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(raw), nil, nil),
+	})
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	if _, isErr := m["error"]; isErr {
-		t.Fatalf("valid merged manifest rejected by content-hash check: %v", m)
+		t.Fatalf("valid merged manifest rejected by the delivery check: %v", m)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dest, "team/x", "ARTIFACT.md")); string(b) != merged {
+		t.Errorf("materialized ARTIFACT.md = %q, want the served merged document", b)
 	}
 }
 
-// Spec: §6.6 step 2 — a merged manifest whose pre-merge bytes do not reproduce
-// the served content_hash (tampered raw_frontmatter) is rejected, so the merged
-// path no longer passes step 2 without any integrity check.
+// Spec: §6.6 step 2, §4.7.10 — a merged manifest whose served frontmatter was
+// altered after the delivery hash was composed is rejected, so the merged
+// bytes the consumer materializes are covered by the check.
 func TestDeliver_MergedManifestTamperedRejected(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
 	raw := "---\ntype: context\nextends: shared/parent@1.x\n---\nbody"
-	resp := loadArtifactResponse{
+	resp := sealDelivery(loadArtifactResponse{
 		ID: "team/x", Type: "context", Version: "1.0.0",
-		Frontmatter:    "---\ntype: context\n---\nbody",
-		RawFrontmatter: raw,
-		ManifestMerged: true,
-		ContentHash:    "sha256:" + version.ContentHash([]byte(raw)),
-	}
-	// Tamper the pre-merge bytes after the hash was fixed.
-	resp.RawFrontmatter = raw + "\ntampered"
+		Frontmatter: "---\ntype: context\n---\nbody",
+		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(raw), nil, nil),
+	})
+	// Tamper the merged bytes after the hash was fixed.
+	resp.Frontmatter += "\ntampered"
 	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	if code, _ := m["code"].(string); code != "materialize.content_hash_mismatch" {
 		t.Errorf("code = %v, want materialize.content_hash_mismatch", m["code"])
+	}
+	if entries, _ := os.ReadDir(dest); len(entries) != 0 {
+		t.Errorf("tampered merged manifest left files in destination: %v", entries)
 	}
 }
 
@@ -410,7 +417,7 @@ func TestAbsMaterializeRoot(t *testing.T) {
 // ----- resources_base64 -------------------------------------------
 
 // Spec: §6.6 — when the registry flags inline resources base64, the
-// MCP decodes them to raw bytes before the hash check and materialization.
+// MCP decodes them to raw bytes before the delivery check and materialization.
 func TestDeliver_Base64InlineResourceDecoded(t *testing.T) {
 	t.Parallel()
 	dest := t.TempDir()
@@ -423,9 +430,9 @@ func TestDeliver_Base64InlineResourceDecoded(t *testing.T) {
 		Resources:    map[string]string{"bin/blob": enc},
 		ResourcesB64: true,
 		// content_hash is over the DECODED bytes, matching the registry.
-		ContentHash: "sha256:" + version.ContentHash([]byte(fm), nil, []byte("bin/blob"), raw),
+		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, map[string][]byte{"bin/blob": raw}),
 	}
-	out := s.deliverLoadArtifact(resp, deliverOpts{harness: "none", destination: dest})
+	out := s.deliverLoadArtifact(sealDelivery(resp), deliverOpts{harness: "none", destination: dest})
 	m := out.(map[string]any)
 	if _, isErr := m["error"]; isErr {
 		t.Fatalf("base64 delivery failed: %v", m)
@@ -459,11 +466,11 @@ func TestDeliver_InvalidBase64Rejected(t *testing.T) {
 	}
 }
 
-// Spec: §6.6 step 2 / §4.7.6 — the step-2 gate composes the recomputed hash
-// through the shared version.CanonicalContentHash, so a bundle of several
-// resources verifies against the digest the registry's ingest produced over
-// the same parts, and a single altered served byte in any resource is
-// rejected before materialization.
+// Spec: §6.6 step 2, §4.7.10 — the step-2 gate composes the recomputed hash
+// through the shared version.DeliveryHash, so a bundle of several resources
+// verifies against the digest the registry produced over the same parts, and
+// a single altered served byte in any resource is rejected before
+// materialization.
 func TestDeliver_MultiResourceContentHashRoundTrip(t *testing.T) {
 	t.Parallel()
 	fm := "---\ntype: context\n---\nbody"
@@ -484,10 +491,10 @@ func TestDeliver_MultiResourceContentHashRoundTrip(t *testing.T) {
 		for k, v := range resources {
 			copied[k] = v
 		}
-		return loadArtifactResponse{
+		return sealDelivery(loadArtifactResponse{
 			ID: "team/x", Type: "context", Version: "1.0.0",
 			Frontmatter: fm, Resources: copied, ContentHash: hash,
-		}
+		})
 	}
 
 	dest := t.TempDir()

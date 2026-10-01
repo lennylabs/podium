@@ -10,8 +10,9 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// Spec: §13.4 Migrations — "a binary upgrade migrates an
-// existing database forward in place, without a separate migration step."
+// Spec: §13.4 Migrations — "a binary upgrade that changes only the schema
+// migrates an existing database forward in place, without a separate migration
+// step and without downtime."
 // This exercises the contract end-to-end through the real podium binary:
 // `admin migrate-to-standard` opens the SQLite source via the same
 // store.OpenSQLite path the server uses, so pointing it at a database

@@ -4729,14 +4729,11 @@ describe("the artifact viewer", () => {
 
   // Spec: §13.10 — the viewer links to extending or dependent artifacts. The
   // dependents endpoint serves the reverse index alone, so the artifact's own
-  // outbound extends reaches the rail from the manifest. A merged response
-  // strips the parent from the frontmatter it re-serializes and carries the
-  // pre-merge document beside it, which is where the reference survives. The
-  // catalog read lists the parent, so this caller may be told it exists.
+  // outbound extends reaches the rail from the load response's extends_pin,
+  // which the registry serves only to a caller who can see the parent (§4.6).
   it("splits the rail's relations into the artifact's own extends and the artifacts extending it", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
-      "/v1/catalog": { body: { ids: ["finance/ap/pay-invoice"] } },
       "/v1/load_artifact": {
         body: {
           id: "finance/ap/three-way-match",
@@ -4745,9 +4742,7 @@ describe("the artifact viewer", () => {
           content_hash: "sha256:abc",
           manifest_body: "# Three-way match\n",
           frontmatter: "---\ntype: skill\nversion: 1.0.0\n---\n",
-          manifest_merged: true,
-          raw_frontmatter:
-            "---\ntype: skill\nversion: 1.0.0\nextends: finance/ap/pay-invoice@1.2.0\n---\n",
+          extends_pin: "finance/ap/pay-invoice@1.2.0",
         },
       },
       "/v1/dependents": { body: { edges: [] } },
@@ -4756,8 +4751,7 @@ describe("the artifact viewer", () => {
     render(<App />);
     const relations = await screen.findByLabelText("Relations");
     // The direction the artifact declares is a group of its own, and the
-    // chip keeps the authored reference while the link drops the version
-    // constraint, which can name a range rather than a stored version.
+    // chip shows the served pin while the link drops its version.
     const declared = within(relations).getByText(
       "finance/ap/pay-invoice@1.2.0",
     );
@@ -4783,7 +4777,6 @@ describe("the artifact viewer", () => {
   it("names the withheld key on the frontmatter panel that the rail links as a parent", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
-      "/v1/catalog": { body: { ids: ["eng/deploy"] } },
       "/v1/load_artifact": {
         body: {
           id: "eng/overlay",
@@ -4792,9 +4785,7 @@ describe("the artifact viewer", () => {
           content_hash: "sha256:abc",
           manifest_body: "# Overlay\n",
           frontmatter: "---\ntype: context\nversion: 0.1.0\n---\n",
-          manifest_merged: true,
-          raw_frontmatter:
-            "---\ntype: context\nversion: 0.1.0\nextends: eng/deploy\n---\n",
+          extends_pin: "eng/deploy@1.0.0",
         },
       },
       "/v1/dependents": { body: { edges: [] } },
@@ -4802,7 +4793,7 @@ describe("the artifact viewer", () => {
     goTo("#/artifact/eng%2Foverlay");
     render(<App />);
     const relations = await screen.findByLabelText("Relations");
-    await within(relations).findByText("eng/deploy");
+    await within(relations).findByText("eng/deploy@1.0.0");
     fireEvent.click(screen.getByRole("tab", { name: /Frontmatter/ }));
     // The served block carries no extends row, and the panel says so rather
     // than claiming the pairs are the ones the author wrote.
@@ -4824,15 +4815,12 @@ describe("the artifact viewer", () => {
     );
   });
 
-  // Spec: §4.6 — when the caller cannot see the layer that contributes a
-  // parent, the registry merges it server-side and "the parent's existence
-  // and ID are not surfaced to the requester". The pre-merge document travels
-  // beside the merged manifest for the content-hash check, so the authored
-  // reference is still on the response, and republishing it as a chip would
-  // tell the reader an artifact they cannot open exists. The catalog read
-  // omits the parent, so the group reads as it does for an artifact that
-  // declares none.
-  it("withholds the extends chip when the catalog does not list the declared parent", async () => {
+  // Spec: §4.6 — the registry decides whether the reader may be told a parent
+  // exists and serves no extends_pin when it may not, so the group reads as it
+  // does for an artifact that extends nothing. The viewer makes no scoped
+  // catalog read to decide it in the browser; the unscoped catalog read the
+  // sidebar footer makes on every route is stubbed and not asserted on.
+  it("draws no extends chip when the load response carries no extends_pin", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
       "/v1/catalog": { body: { ids: [] } },
@@ -4844,9 +4832,6 @@ describe("the artifact viewer", () => {
           content_hash: "sha256:abc",
           manifest_body: "# Child\n",
           frontmatter: "---\ntype: skill\nversion: 0.1.0\n---\n",
-          manifest_merged: true,
-          raw_frontmatter:
-            "---\ntype: skill\nversion: 0.1.0\nextends: hidden/parent\n---\n",
         },
       },
       "/v1/dependents": { body: { edges: [] } },
@@ -4855,45 +4840,10 @@ describe("the artifact viewer", () => {
     render(<App />);
     const relations = await screen.findByLabelText("Relations");
     await within(relations).findByText("This artifact extends nothing.");
-    // Neither the ID nor a link to it reaches the page.
-    expect(screen.queryByText("hidden/parent")).toBeNull();
+    expect(relations.querySelector(".relation-dot.outbound")).toBeNull();
     expect(
-      relations.querySelector('a[href="#/artifact/hidden%2Fparent"]'),
-    ).toBeNull();
-    // The read that settled it was taken over the parent's own domain.
-    expect(
-      requests.some((req) => req.url.includes("/v1/catalog?scope=hidden")),
-    ).toBe(true);
-  });
-
-  // Spec: §4.6 — a concealment rule that cannot be evaluated denies. When the
-  // catalog read fails, the rail cannot establish that the caller may see the
-  // declared parent, so it withholds the chip rather than falling back to the
-  // reference the pre-merge document carries.
-  it("withholds the extends chip when the catalog read fails", async () => {
-    stubRegistry({
-      "/v1/ui/session": { body: posture({ public_mode: true }) },
-      "/v1/catalog": { rejects: true },
-      "/v1/load_artifact": {
-        body: {
-          id: "pub/child",
-          type: "skill",
-          version: "0.1.0",
-          content_hash: "sha256:abc",
-          manifest_body: "# Child\n",
-          frontmatter: "---\ntype: skill\nversion: 0.1.0\n---\n",
-          manifest_merged: true,
-          raw_frontmatter:
-            "---\ntype: skill\nversion: 0.1.0\nextends: hidden/parent\n---\n",
-        },
-      },
-      "/v1/dependents": { body: { edges: [] } },
-    });
-    goTo("#/artifact/pub%2Fchild");
-    render(<App />);
-    const relations = await screen.findByLabelText("Relations");
-    await within(relations).findByText("This artifact extends nothing.");
-    expect(screen.queryByText("hidden/parent")).toBeNull();
+      requests.some((req) => req.url.includes("/v1/catalog?scope=")),
+    ).toBe(false);
   });
 
   // Spec: §13.10 — the viewer links to extending or dependent artifacts. The
@@ -4903,7 +4853,6 @@ describe("the artifact viewer", () => {
   it("tones each relation chip's leading dot by the direction of its edge", async () => {
     stubRegistry({
       "/v1/ui/session": { body: posture({ public_mode: true }) },
-      "/v1/catalog": { body: { ids: ["finance/ap/pay-invoice"] } },
       "/v1/load_artifact": {
         body: {
           id: "finance/ap/three-way-match",
@@ -4912,9 +4861,7 @@ describe("the artifact viewer", () => {
           content_hash: "sha256:abc",
           manifest_body: "# Three-way match\n",
           frontmatter: "---\ntype: skill\nversion: 1.0.0\n---\n",
-          manifest_merged: true,
-          raw_frontmatter:
-            "---\ntype: skill\nversion: 1.0.0\nextends: finance/ap/pay-invoice\n---\n",
+          extends_pin: "finance/ap/pay-invoice@1.0.0",
         },
       },
       "/v1/dependents": {

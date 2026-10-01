@@ -1617,6 +1617,36 @@ func TestHTTPAPI_SLOLoadArtifact(t *testing.T) {
 	t.Skip("SLO p99 latency is a benchmark concern; covered by test/bench/latency_test.go rather than the doc e2e suite")
 }
 
+// Spec: §4.7.4, §13.4 — "When the manifest sets replaced_by:, every load of
+// the artifact returns the upgrade target." A SQLite-backed registry derives
+// it from the admitted manifest, so a load of an artifact that is not
+// deprecated returns its declared replaced_by on the single load and on the
+// batch item, with no deprecation warning.
+func TestHTTPAPI_LoadNonDeprecatedArtifactReturnsReplacedBy(t *testing.T) {
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"finance/live/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nreplaced_by: finance/next\ndescription: A live artifact that already names its successor for callers here.\n---\n\nLive body.\n",
+	}))
+	st, body := getRaw(t, srv.BaseURL+"/v1/load_artifact?id=finance/live")
+	apiWantStatus(t, st, 200, "load_artifact non-deprecated", body)
+	m := apiJSONObj(t, body)
+	if m["replaced_by"] != "finance/next" || m["deprecation_warning"] != nil {
+		t.Errorf("load_artifact replaced_by = %v, deprecation_warning = %v; want finance/next and none", m["replaced_by"], m["deprecation_warning"])
+	}
+
+	resp, err := http.Post(srv.BaseURL+"/v1/artifacts:batchLoad", "application/json", strings.NewReader(`{"ids":["finance/live"]}`))
+	if err != nil {
+		t.Fatalf("POST batchLoad: %v", err)
+	}
+	defer resp.Body.Close()
+	var items []map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil || len(items) != 1 {
+		t.Fatalf("decode batchLoad: %v (%d items)", err, len(items))
+	}
+	if items[0]["replaced_by"] != "finance/next" || items[0]["deprecation_warning"] != nil {
+		t.Errorf("batch item replaced_by = %v, deprecation_warning = %v; want finance/next and none", items[0]["replaced_by"], items[0]["deprecation_warning"])
+	}
+}
+
 // spec: http-api.md § load_artifact — deprecated/replaced_by fields.
 func TestHTTPAPI_DeprecatedFields(t *testing.T) {
 	srv := startServer(t, apiReg(t))
@@ -1629,8 +1659,9 @@ func TestHTTPAPI_DeprecatedFields(t *testing.T) {
 	}
 	// replaced_by is preserved in the raw frontmatter blob and also surfaces as
 	// the structured top-level field. The store schema has no replaced_by column,
-	// so the load path recovers it from the stored frontmatter (core.replacedByOf)
-	// for the SQL backends, satisfying the §4.7.4 documented round-trip.
+	// so the §13.4 stored-row admission check derives it from the admitted
+	// frontmatter for the SQL backends, satisfying the §4.7.4 documented
+	// round-trip.
 	fm, _ := m["frontmatter"].(string)
 	if !strings.Contains(fm, "replaced_by: finance/run") {
 		t.Fatalf("frontmatter does not preserve replaced_by: %q", fm)

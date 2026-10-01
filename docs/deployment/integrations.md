@@ -6,7 +6,7 @@ description: The backing services a Podium registry uses. Metadata store, object
 
 # Server-side integrations
 
-A registry process reaches out to several backing services. Each one has a default that a [single-node](single-node) deployment runs without extra infrastructure, and each one is selectable per deployment through an environment variable or the matching `registry.yaml` key.
+A registry process reaches out to several backing services. Each one has a default that a [single-node](single-node) deployment runs without extra infrastructure, and each one is selectable per deployment through an environment variable or the matching `registry.yaml` key. Moving the metadata store off the default also takes a signing-key setting that exists only as an environment variable, as [Metadata store](#metadata-store) states.
 
 The [local](local) tier runs no registry process, so nothing on this page applies to it.
 
@@ -29,6 +29,8 @@ The metadata store holds manifest metadata, dependency edges, layer config, and 
 
 - **SQLite** is the default. The file lives at `~/.podium/standalone/podium.db` unless `PODIUM_SQLITE_PATH` moves it. One process owns the file, so it does not survive being shared between replicas.
 - **Postgres** is selected with `PODIUM_REGISTRY_STORE=postgres` and a DSN. Registry replicas share it, which is what makes horizontal scaling possible. The [clustered](clustered) tier requires it.
+
+The registry signs every artifact at ingest by default, with a key file that defaults to `~/.podium/standalone/registry-signing.key`. Moving the SQLite file out of `~/.podium/standalone/` with `PODIUM_SQLITE_PATH`, or selecting Postgres, also requires `PODIUM_SIGN_KEY_PATH` naming a key file on the store's persistent storage, or `PODIUM_SIGN=none`, because a key lost while the rows it signed survive leaves those rows unloadable. A registry started with signing on and neither setting is refused at start with an error naming both. `PODIUM_SIGN_KEY_PATH` has no `registry.yaml` key.
 
 `podium admin migrate-to-standard --postgres <dsn> --object-store <url>` exports a SQLite-backed deployment into Postgres and object storage.
 

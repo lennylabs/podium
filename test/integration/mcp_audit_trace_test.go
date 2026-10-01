@@ -12,6 +12,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // Spec: §8.1 — "Both streams share trace IDs." The MCP bridge
@@ -23,6 +26,7 @@ import (
 // matching trace id.
 func TestPodiumMCP_LocalAuditSharesTraceID(t *testing.T) {
 	t.Parallel()
+	const traceFM = "---\nname: x\ntype: context\nversion: 1.0.0\n---\n"
 
 	var mu sync.Mutex
 	var gotTraceparent string
@@ -31,17 +35,18 @@ func TestPodiumMCP_LocalAuditSharesTraceID(t *testing.T) {
 			mu.Lock()
 			gotTraceparent = r.Header.Get("traceparent")
 			mu.Unlock()
-			// A non-empty id drives the bridge into its delivery path, where the
-			// artifact.loaded event is emitted before content-hash verification.
-			// The bogus hash then fails verification, but the audit event has
-			// already been written, which is exactly what this test inspects.
+			// A non-empty id drives the bridge into its delivery path. The
+			// bridge emits the artifact.loaded event only after the §6.6
+			// step-2 delivery verification passes, so the stub serves a valid
+			// §4.7.10 delivery record and the load reaches the event this test
+			// inspects.
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			_ = json.NewEncoder(w).Encode(testharness.SealDelivery(map[string]any{
 				"id":           "finance/x",
 				"version":      "1.0.0",
-				"content_hash": "sha256:" + strings.Repeat("a", 64),
-				"frontmatter":  "---\nname: x\ntype: context\nversion: 1.0.0\n---\n",
-			})
+				"content_hash": "sha256:" + version.CanonicalContentHash([]byte(traceFM), nil, nil),
+				"frontmatter":  traceFM,
+			}))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -61,6 +66,7 @@ func TestPodiumMCP_LocalAuditSharesTraceID(t *testing.T) {
 	cmd := exec.Command(bin)
 	cmd.Env = append(os.Environ(),
 		"PODIUM_REGISTRY="+stub.URL,
+		"PODIUM_CACHE_DIR="+t.TempDir(),
 		"PODIUM_AUDIT_SINK="+auditPath,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"OTEL_EXPORTER_OTLP_ENDPOINT="+otlp.URL,

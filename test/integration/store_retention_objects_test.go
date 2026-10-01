@@ -36,6 +36,7 @@ import (
 	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 func TestStoreRetention_PurgesDeprecatedBytesProtectsPinnedParent(t *testing.T) {
@@ -72,7 +73,7 @@ func TestStoreRetention_PurgesDeprecatedBytesProtectsPinnedParent(t *testing.T) 
 	// 1) An UNPINNED deprecated version of id A, backdated past the window, with
 	//    a resource only it references (orphanHash) plus the shared resource.
 	const idA = "finance/close/run-variance"
-	putManifest(t, st, store.ManifestRecord{
+	putManifest(t, st, objStore, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: idA, Version: "1.0.0", ContentHash: "sha256:a-old",
 		Type: "context", Layer: "team", Deprecated: true, DeprecatedAt: ptrTime(old),
 		IngestedAt: old,
@@ -82,7 +83,7 @@ func TestStoreRetention_PurgesDeprecatedBytesProtectsPinnedParent(t *testing.T) 
 		},
 	})
 	// 2) A NON-DEPRECATED successor of id A that still references the shared bytes.
-	putManifest(t, st, store.ManifestRecord{
+	putManifest(t, st, objStore, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: idA, Version: "2.0.0", ContentHash: "sha256:a-new",
 		Type: "context", Layer: "team", IngestedAt: fresh,
 		Resources: []store.ResourceRef{
@@ -93,7 +94,7 @@ func TestStoreRetention_PurgesDeprecatedBytesProtectsPinnedParent(t *testing.T) 
 	// 3) A DEPRECATED parent version (id P) backdated past the window, carrying its
 	//    own resource, that a live child pins via extends.
 	const idP = "platform/base/policy"
-	putManifest(t, st, store.ManifestRecord{
+	putManifest(t, st, objStore, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: idP, Version: "1.0.0", ContentHash: "sha256:p-old",
 		Type: "context", Layer: "platform", Deprecated: true, DeprecatedAt: ptrTime(old),
 		IngestedAt: old,
@@ -103,7 +104,7 @@ func TestStoreRetention_PurgesDeprecatedBytesProtectsPinnedParent(t *testing.T) 
 	})
 	// 4) A live CHILD (id C) pinning the deprecated parent at its exact version.
 	const idC = "team/checkout/policy"
-	putManifest(t, st, store.ManifestRecord{
+	putManifest(t, st, objStore, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: idC, Version: "1.0.0", ContentHash: "sha256:c",
 		Type: "context", Layer: "team", IngestedAt: fresh,
 		Frontmatter: []byte("---\ntype: context\nversion: 1.0.0\ndescription: checkout policy\nextends: " + idP + "@1.0.0\n---\n\nbody\n"),
@@ -111,10 +112,12 @@ func TestStoreRetention_PurgesDeprecatedBytesProtectsPinnedParent(t *testing.T) 
 	})
 
 	// Sanity: the child loads before the sweep (it resolves the pinned parent).
+	// Spec: §13.4 — admission reads the parent's object-held body, so the
+	// registry is given the object store the bodies were put in.
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "team", Precedence: 2, Visibility: layer.Visibility{Public: true}},
 		{ID: "platform", Precedence: 1, Visibility: layer.Visibility{Public: true}},
-	})
+	}).WithAdmission(nil, objStore, objectstore.DefaultReadTimeout)
 	if _, err := reg.LoadArtifact(ctx, layer.Identity{IsPublic: true}, idC, core.LoadArtifactOptions{}); err != nil {
 		t.Fatalf("pre-sweep child load failed: %v", err)
 	}
@@ -173,9 +176,11 @@ func putObject(t *testing.T, os objectstore.Provider, body []byte) string {
 }
 
 // putManifest persists rec, failing the test on error.
-func putManifest(t *testing.T, st store.Store, rec store.ManifestRecord) {
+// putManifest seals rec against objects, which holds its object-held bodies,
+// so the §13.4 admission check serves it.
+func putManifest(t *testing.T, st store.Store, objects objectstore.Provider, rec store.ManifestRecord) {
 	t.Helper()
-	if err := st.PutManifest(context.Background(), rec); err != nil {
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, rec, objects, nil)); err != nil {
 		t.Fatalf("PutManifest %s@%s: %v", rec.ArtifactID, rec.Version, err)
 	}
 }

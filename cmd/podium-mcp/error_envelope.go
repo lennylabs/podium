@@ -48,9 +48,13 @@ func parseRegistryError(status int, body []byte) error {
 	}
 	if err := json.Unmarshal(body, &env); err == nil && env.Code != "" {
 		return &registryError{
-			Status:          status,
-			Code:            env.Code,
-			Message:         env.Message,
+			Status: status,
+			Code:   env.Code,
+			// The registry's message repeats the code as its own prefix
+			// ("registry.not_found: <id>"), and Error() and the MCP
+			// envelope both prepend the code, so the prefix is dropped
+			// here to keep a client from reading the code twice.
+			Message:         strings.TrimPrefix(env.Message, env.Code+": "),
 			Details:         env.Details,
 			Retryable:       env.Retryable,
 			SuggestedAction: env.SuggestedAction,

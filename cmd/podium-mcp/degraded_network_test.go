@@ -3,46 +3,61 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
-// Spec: §7.4 — always-revalidate + unreachable registry +
-// cache hit: serve from cache with status=offline +
-// served_from_cache=true.
+// Spec: §7.4 — always-revalidate + unreachable registry + cache hit: serve
+// the verified cached record with status=offline + served_from_cache=true.
+// Both markers are also stamped on an error envelope, so the success signal is
+// the absence of an error and the served body.
 func TestLoadArtifact_AlwaysRevalidateFallsBackToCacheOnNetworkError(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	cache, _ := newContentCache(dir)
-	const hash = "sha256:abc"
-	if err := cache.put(hash, "fm", "body", nil); err != nil {
-		t.Fatalf("put: %v", err)
+	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	srv := cacheServer(t, dir, "http://127.0.0.1:1", "always-revalidate") // unbound port → connect refused
+	if err := srv.cacheVerifiedRecord(rec); err != nil {
+		t.Fatalf("cacheVerifiedRecord: %v", err)
 	}
-	resolutions := newResolutionCache(dir)
-	resolutions.PutLatest("team/x", "", hash, time.Now())
+	srv.resolutions.PutLatest("team/x", "1.0.0", rec.ContentHash, time.Now())
 
-	srv := &mcpServer{
-		cfg: &config{
-			cacheDir:  dir,
-			cacheMode: "always-revalidate",
-			registry:  "http://127.0.0.1:1", // unbound port → connect refused
-			harness:   "none",
-		},
-		cache:       cache,
-		resolutions: resolutions,
-		http:        &http.Client{},
-	}
 	out := srv.loadArtifact(map[string]any{"id": "team/x"})
-	m, ok := out.(map[string]any)
-	if !ok {
-		t.Fatalf("loadArtifact returned %T, want map", out)
-	}
+	wantServed(t, out, "body\n")
+	m := out.(map[string]any)
 	if m["status"] != "offline" {
 		t.Errorf("status = %v, want offline", m["status"])
 	}
 	if served, _ := m["served_from_cache"].(bool); !served {
 		t.Errorf("served_from_cache = %v, want true", m["served_from_cache"])
+	}
+}
+
+// Spec: §7.4, §4.7.10, §6.6 — the degraded-network fallback re-verifies the
+// cached record: a per-ID document edited after a valid record was written
+// fails the delivery check and writes nothing, and neither offline marker
+// makes the refusal a served record.
+func TestLoadArtifact_AlwaysRevalidateFallbackRefusesAnEditedCacheRecord(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	dest := t.TempDir()
+	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	srv := cacheServer(t, dir, "http://127.0.0.1:1", "always-revalidate")
+	if err := srv.cacheVerifiedRecord(rec); err != nil {
+		t.Fatalf("cacheVerifiedRecord: %v", err)
+	}
+	srv.resolutions.PutLatest("team/x", "1.0.0", rec.ContentHash, time.Now())
+	edited := filepath.Join(deliveryDir(dir, rec), "frontmatter")
+	if err := os.WriteFile(edited, []byte(rec.Frontmatter+"injected: true\n"), 0o644); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+
+	out := srv.loadArtifact(map[string]any{"id": "team/x", "destination": dest})
+	wantRefused(t, out, "materialize.content_hash_mismatch")
+	if entries, _ := os.ReadDir(dest); len(entries) != 0 {
+		t.Errorf("a refused fallback wrote to the destination: %v", entries)
 	}
 }
 
@@ -160,4 +175,24 @@ func errorMessageText(out any) string {
 		return e
 	}
 	return ""
+}
+
+// Spec: §4.7.9, §6.5, §7.4 — the degraded-network fallback checks the cached
+// record before it serves it. With the registry unreachable before the HEAD, a
+// cached delivery pair that fails under the current key set is a cache miss:
+// the load returns network.registry_unreachable, not the offline status with
+// served_from_cache.
+// Matrix: §6.10 (network.registry_unreachable)
+func TestLoadArtifact_AlwaysRevalidateFallbackRetiredKeySignatureIsUnreachable(t *testing.T) {
+	t.Parallel()
+	f, _, ts := rotationSetup(t, "always-revalidate", http.StatusOK)
+	ts.Close()
+
+	out := f.srv.loadArtifact(rotationArgs)
+	wantRefused(t, out, "network.registry_unreachable")
+	wantNotDelivered(t, out)
+	m := out.(map[string]any)
+	if m["status"] == "offline" || m["served_from_cache"] == true {
+		t.Errorf("fallback served the failing record as offline: %v", m)
+	}
 }

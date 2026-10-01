@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // stubArtifact is one artifact a stub registry serves over /v1/load_artifact.
@@ -172,6 +173,50 @@ func TestRun_ServerSource_SkillWritesSkillMD(t *testing.T) {
 	}
 	if got := readFileT(t, filepath.Join(root, "SKILL.md")); got != skillMD {
 		t.Errorf("SKILL.md = %q", got)
+	}
+}
+
+// Spec: §4.7.6, §7.5.3 — a /v1/load_artifact response carrying no
+// content_hash leaves the consumer to compute one, and the digest it records
+// is the canonical one over the served frontmatter, the served SKILL.md, and
+// the served resources. fetchServerRecord copies the served frontmatter into
+// the record's authored slot, so a record built without that copy hashes an
+// empty manifest and fails here.
+func TestRun_ServerSourceWithoutContentHashHashesTheServedFrontmatter(t *testing.T) {
+	t.Parallel()
+	const skillFM = "---\ntype: skill\nversion: 1.0.0\ndescription: lint the tree\n---\n"
+	const skillMD = "---\nname: lint\ndescription: Run the project linter.\n---\n\nRun the linter.\n"
+	resources := map[string]string{"references/style.md": "Style notes.\n", "scripts/lint.sh": "#!/bin/sh\n"}
+	srv := newStubRegistry(t, map[string]stubArtifact{
+		"eng/lint": {
+			typ:          "skill",
+			layer:        "local",
+			frontmatter:  skillFM,
+			manifestBody: "Run the linter.\n",
+			skillRaw:     skillMD,
+			resources:    resources,
+			// contentHash is unset, so the response omits content_hash.
+		},
+	})
+	target := t.TempDir()
+	if _, err := Run(Options{RegistryPath: srv.URL, Target: target, AdapterID: "none", HTTPClient: srv.Client()}); err != nil {
+		t.Fatalf("server-source Run: %v", err)
+	}
+	lock, err := ReadLock(target)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+	want := "sha256:" + version.CanonicalContentHash([]byte(skillFM), []byte(skillMD), map[string][]byte{
+		"references/style.md": []byte(resources["references/style.md"]),
+		"scripts/lint.sh":     []byte(resources["scripts/lint.sh"]),
+	})
+	if lock == nil || len(lock.Artifacts) == 0 {
+		t.Fatalf("lock artifacts = %+v, want at least one entry", lock)
+	}
+	for _, la := range lock.Artifacts {
+		if la.ContentHash != want {
+			t.Errorf("lock %s content_hash = %q, want the digest over the served bytes %q", la.MaterializedPath, la.ContentHash, want)
+		}
 	}
 }
 

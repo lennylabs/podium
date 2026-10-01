@@ -8,6 +8,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // scopeRegistry seeds a public layer with finance (two versions) and hr
@@ -21,11 +22,11 @@ func scopeRegistry(t *testing.T) (*core.Registry, *recorder) {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	put := func(id, ver string) {
-		if err := st.PutManifest(context.Background(), store.ManifestRecord{
+		if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 			TenantID: tenantID, ArtifactID: id, Version: ver,
 			ContentHash: "sha256:" + id + ver, Type: "context",
 			Description: id, Layer: "shared",
-		}); err != nil {
+		}, nil, nil)); err != nil {
 			t.Fatalf("PutManifest(%s@%s): %v", id, ver, err)
 		}
 	}

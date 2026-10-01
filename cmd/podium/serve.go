@@ -48,9 +48,9 @@ func serveCmd(args []string) int {
 	// §13.10 hybrid search: force BM25-only regardless of any configured
 	// vector backend or embedding provider.
 	noEmbeddings := fs.Bool("no-embeddings", false, "disable embeddings and fall back to BM25-only search (overrides PODIUM_NO_EMBEDDINGS)")
-	// §13.10 signing: standalone signing is disabled by default; opt in to
-	// registry-managed-key signing on ingest with --sign registry-key.
-	signMode := fs.String("sign", "", "enable ingest signing; the only accepted value is registry-key (overrides PODIUM_SIGN)")
+	// §13.10 signing: registry-managed-key signing on ingest is on by
+	// default; --sign none turns it off.
+	signMode := fs.String("sign", "", "ingest signing mode: registry-key (the default) or none (overrides PODIUM_SIGN)")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return parseExit(err)

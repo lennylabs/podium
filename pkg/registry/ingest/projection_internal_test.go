@@ -23,6 +23,7 @@ func TestManifestRecordFor_PersistsNameAndWhenToUse(t *testing.T) {
 			WhenToUse: []string{"when X"},
 		},
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nwhen_to_use:\n  - when X\n---\n"),
+		AuthoredBytes: []byte("---\ntype: skill\nversion: 1.0.0\nwhen_to_use:\n  - when X\n---\n"),
 		Skill: &manifest.Skill{
 			Name:        "run-variance",
 			Description: "from skill",

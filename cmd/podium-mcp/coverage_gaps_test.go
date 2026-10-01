@@ -301,7 +301,6 @@ func TestApplyConfigKV_AllKeys(t *testing.T) {
 		{"harness", "claude-code"},
 		{"cache-dir", "/var/cache/podium"},
 		{"cache-mode", "offline-first"},
-		{"prefetch", "a/x, b/y ,c/z"},
 		{"cache-resolution-ttl-seconds", "45"},
 		{"materialize-root", "/tmp/mat"},
 		{"overlay-path", "/work/.podium"},
@@ -325,9 +324,6 @@ func TestApplyConfigKV_AllKeys(t *testing.T) {
 	}
 	if c.cacheDir != "/var/cache/podium" || c.cacheMode != "offline-first" {
 		t.Errorf("cache-dir/mode = %q/%q", c.cacheDir, c.cacheMode)
-	}
-	if strings.Join(c.prefetchIDs, "|") != "a/x|b/y|c/z" {
-		t.Errorf("prefetch = %v, want trimmed CSV split", c.prefetchIDs)
 	}
 	if c.resolutionTTL.Seconds() != 45 {
 		t.Errorf("resolution TTL = %v, want 45s", c.resolutionTTL)

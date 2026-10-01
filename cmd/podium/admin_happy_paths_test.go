@@ -242,44 +242,19 @@ func TestDomainAnalyze_HappyPath(t *testing.T) {
 	})
 }
 
-// verify with a noop provider where sign produces a valid envelope.
-func TestVerifyCmd_RoundTripWithNoop(t *testing.T) {
-	out := captureStdout(t, func() {
-		withStderr(t, func() {
-			if code := signCmd([]string{
-				"--provider", "noop",
-				"--content-hash", "sha256:" + strings.Repeat("b", 64),
-			}); code != 0 {
-				t.Errorf("signCmd = %d", code)
-			}
-		})
-	})
-	envelope := strings.TrimSpace(out)
-	if envelope == "" {
-		t.Fatalf("no envelope from signCmd")
+// spec: §4.7.9 — the registry-managed default signs with the key file's
+// private half and verifies with its public half: the matching hash verifies
+// and a tampered one does not.
+func TestVerifyCmd_RoundTripWithRegistryManagedKey(t *testing.T) {
+	writeRegistryKeyFile(t)
+	hash := "sha256:" + strings.Repeat("b", 64)
+	envelope := signContentHash(t, hash)
+	if code, stderr := verifyContentHash(t, hash, envelope); code != 0 {
+		t.Errorf("verifyCmd = %d, want 0; stderr %q", code, stderr)
 	}
-	// Verify against the same hash succeeds.
-	withStderr(t, func() {
-		code := verifyCmd([]string{
-			"--provider", "noop",
-			"--content-hash", "sha256:" + strings.Repeat("b", 64),
-			"--signature", envelope,
-		})
-		if code != 0 {
-			t.Errorf("verifyCmd = %d, want 0", code)
-		}
-	})
-	// Verify with a tampered hash fails.
-	withStderr(t, func() {
-		code := verifyCmd([]string{
-			"--provider", "noop",
-			"--content-hash", "sha256:" + strings.Repeat("c", 64),
-			"--signature", envelope,
-		})
-		if code != 1 {
-			t.Errorf("verifyCmd(tampered) = %d, want 1", code)
-		}
-	})
+	if code, _ := verifyContentHash(t, "sha256:"+strings.Repeat("c", 64), envelope); code != 1 {
+		t.Errorf("verifyCmd(tampered) = %d, want 1", code)
+	}
 }
 
 func TestVerifyCmd_BadProvider(t *testing.T) {

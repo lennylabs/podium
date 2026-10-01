@@ -1,5 +1,11 @@
 package server
 
+import (
+	"errors"
+
+	"github.com/lennylabs/podium/pkg/registry/core"
+)
+
 // spec: SS 6.10 — the structured error envelope carries a `retryable`
 // flag and a `suggested_action` remediation hint. errorCodeMeta is the
 // per-code source of truth for both so every emission path (writeError,
@@ -42,6 +48,19 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	"registry.read_only": {
 		retryable:       true,
 		suggestedAction: "Retry the write once the registry leaves read-only mode; reads continue to serve from the replica.",
+	},
+	// spec §13.4: stored-row admission refuses a row that fails its
+	// integrity check before the registry serves it. The condition is in the
+	// stored row, so a retry fails the same way until an operator repairs
+	// the row, and each hint names that repair.
+	"materialize.content_hash_mismatch": {
+		suggestedAction: "The registry refused a stored row whose bytes do not reproduce its stored content hash; retrying does not help. An operator reads the registry log for the row, then restores it from backup, reruns the reviewed sign-stored-rows pass where the rewrite held it back, or publishes a new version of the artifact.",
+	},
+	"materialize.signature_invalid": {
+		suggestedAction: "The registry refused a stored row whose signature does not verify under any key of its verification key set; retrying does not help. An operator restores the signing key or lists its public half on a verify: line of the key file and runs sign-stored-rows, or publishes a new version of the artifact.",
+	},
+	"materialize.signature_missing": {
+		suggestedAction: "The signing registry refused a stored row that carries no signature; retrying does not help. An operator signs it with a reviewed sign-stored-rows --include-unsigned dry run and a run with its --plan-digest, or publishes a new version of the artifact.",
 	},
 	// spec §7.3.1 ingest-cases: "Same version, different content_hash |
 	// Rejected as ingest.immutable_violation. The author bumps the version."
@@ -103,6 +122,20 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	"registry.tenant_management_unavailable": {
 		suggestedAction: "Start the registry in multi-tenant mode (PODIUM_MULTI_TENANT) on a standard backend to manage tenants.",
 	},
+}
+
+// admissionCode returns the §6.10 code of a §13.4 stored-row admission
+// refusal: the sentinel's own text, which is the code it names. None of the
+// codes has a registry entry, so each is served retryable: false.
+// Callers reach it only for an error that wraps one of the three, so the
+// registry.unavailable return is defensive.
+func admissionCode(err error) string {
+	for _, sentinel := range []error{core.ErrContentHashMismatch, core.ErrStoredSignatureMissing, core.ErrStoredSignatureInvalid} {
+		if errors.Is(err, sentinel) {
+			return sentinel.Error()
+		}
+	}
+	return "registry.unavailable"
 }
 
 // enrichEnvelope fills the retryable flag and suggested_action from the

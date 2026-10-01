@@ -2,87 +2,97 @@ package sign
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
+	"strings"
 	"testing"
-
-	"github.com/lennylabs/podium/pkg/manifest"
 )
 
-// Spec: §4.7.9 Signing — Sign + Verify round-trip on a known content hash.
-func TestNoop_RoundTrip(t *testing.T) {
+// testHash is a well-formed sha256 content hash the registry-managed key can
+// sign; decodeContentHash rejects anything shorter.
+const testHash = "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+
+// newTestKey returns a registry-managed key generated for one test.
+func newTestKey(t *testing.T) RegistryManagedKey {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	return RegistryManagedKey{PrivateKey: priv, PublicKey: pub}
+}
+
+// Spec: §4.7.9 — the noop provider refuses the placeholder its own Sign
+// produced, because that value is derived from a content hash served in the
+// clear and anyone could mint it.
+// Matrix: §6.10 (materialize.signature_invalid)
+func TestNoopVerifyRefusesItsOwnSignature(t *testing.T) {
 	t.Parallel()
 	p := Noop{}
-	sig, err := p.Sign(context.Background(), "sha256:abc")
+	sig, err := p.Sign(context.Background(), testHash)
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
-	if err := p.Verify(context.Background(), "sha256:abc", sig); err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-}
-
-// Spec: §4.7.9 — a signature that does not match the content hash fails
-// with ErrSignatureInvalid (maps to materialize.signature_invalid).
-// Matrix: §6.10 (materialize.signature_invalid)
-func TestNoop_VerifyRejectsMismatch(t *testing.T) {
-	t.Parallel()
-	p := Noop{}
-	err := p.Verify(context.Background(), "sha256:abc", "noop:sha256:def")
+	err = p.Verify(context.Background(), testHash, sig)
 	if !errors.Is(err, ErrSignatureInvalid) {
-		t.Fatalf("got %v, want ErrSignatureInvalid", err)
+		t.Fatalf("Verify(own signature) = %v, want ErrSignatureInvalid", err)
+	}
+	if !strings.Contains(err.Error(), "PODIUM_VERIFY_SIGNATURES=never") {
+		t.Errorf("refusal %q does not name the never policy as the way to skip verification", err)
 	}
 }
 
-// Spec: §6.2 — PolicyMediumAndAbove enforces verification for medium
-// and high sensitivity, skips low.
+// Spec: §4.7.9 — Sign still returns "noop:" + hash, which the §8.3 audit
+// anchor and the ingest tests depend on.
+func TestNoopSignUnchanged(t *testing.T) {
+	t.Parallel()
+	sig, err := Noop{}.Sign(context.Background(), testHash)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if want := "noop:" + testHash; sig != want {
+		t.Errorf("Sign = %q, want %q", sig, want)
+	}
+}
+
+// Spec: §4.7.9 — a signature the response carries is verified under any
+// policy other than never: a signature that does not validate is refused and
+// one that validates is admitted.
+func TestEnforceVerification_AlwaysVerifiesAPresentSignature(t *testing.T) {
+	t.Parallel()
+	key := newTestKey(t)
+	err := EnforceVerification(context.Background(), PolicyAlways, key, testHash, "noop:"+testHash)
+	if !errors.Is(err, ErrSignatureInvalid) {
+		t.Fatalf("always, invalid signature = %v, want ErrSignatureInvalid", err)
+	}
+	sig, err := key.Sign(context.Background(), testHash)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	if err := EnforceVerification(context.Background(), PolicyAlways, key, testHash, sig); err != nil {
+		t.Errorf("always, valid signature = %v, want nil", err)
+	}
+}
+
+// Spec: §4.7.9 — under always a missing signature aborts the load.
 // Matrix: §6.10 (materialize.signature_missing)
-// Matrix: §6.10 (materialize.signature_invalid)
-func TestEnforceVerification_PolicyMediumAndAbove(t *testing.T) {
+func TestEnforceVerification_MissingSignatureUnderAlways(t *testing.T) {
 	t.Parallel()
-	p := Noop{}
-	cases := []struct {
-		s         manifest.Sensitivity
-		signature string
-		wantErr   error
-	}{
-		{manifest.SensitivityLow, "", nil},
-		{manifest.SensitivityMedium, "noop:sha256:abc", nil},
-		{manifest.SensitivityHigh, "noop:sha256:abc", nil},
-		{manifest.SensitivityMedium, "", ErrSignatureMissing},
-		{manifest.SensitivityHigh, "noop:wrong", ErrSignatureInvalid},
-	}
-	for _, c := range cases {
-		err := EnforceVerification(context.Background(), PolicyMediumAndAbove, p, c.s, "sha256:abc", c.signature)
-		if c.wantErr == nil {
-			if err != nil {
-				t.Errorf("(s=%s sig=%q) got %v, want nil", c.s, c.signature, err)
-			}
-		} else if !errors.Is(err, c.wantErr) {
-			t.Errorf("(s=%s sig=%q) got %v, want %v", c.s, c.signature, err, c.wantErr)
-		}
+	err := EnforceVerification(context.Background(), PolicyAlways, newTestKey(t), testHash, "")
+	if !errors.Is(err, ErrSignatureMissing) {
+		t.Fatalf("always, no signature = %v, want ErrSignatureMissing", err)
 	}
 }
 
-// Spec: §6.2 — PolicyNever skips verification regardless of sensitivity.
-func TestEnforceVerification_PolicyNever(t *testing.T) {
+// Spec: §4.7.9 — never checks nothing, including a signature the response
+// carries.
+func TestEnforceVerification_NeverSkipsAPresentInvalidSignature(t *testing.T) {
 	t.Parallel()
-	p := Noop{}
-	for _, s := range []manifest.Sensitivity{
-		manifest.SensitivityLow,
-		manifest.SensitivityMedium,
-		manifest.SensitivityHigh,
-	} {
-		if err := EnforceVerification(context.Background(), PolicyNever, p, s, "sha256:abc", ""); err != nil {
-			t.Errorf("PolicyNever, s=%s: got %v, want nil", s, err)
+	key := newTestKey(t)
+	for _, sig := range []string{"", "noop:" + testHash, "not an envelope"} {
+		if err := EnforceVerification(context.Background(), PolicyNever, key, testHash, sig); err != nil {
+			t.Errorf("never, signature %q = %v, want nil", sig, err)
 		}
-	}
-}
-
-// Spec: §6.2 — PolicyAlways enforces every sensitivity, including low.
-func TestEnforceVerification_PolicyAlways(t *testing.T) {
-	t.Parallel()
-	p := Noop{}
-	if err := EnforceVerification(context.Background(), PolicyAlways, p, manifest.SensitivityLow, "sha256:abc", ""); !errors.Is(err, ErrSignatureMissing) {
-		t.Errorf("PolicyAlways low: got %v, want ErrSignatureMissing", err)
 	}
 }

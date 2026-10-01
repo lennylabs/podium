@@ -56,6 +56,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,7 +177,11 @@ func ruStageLegacyDatabase(t *testing.T, dsn string) (id, version, contentHash s
 	t.Helper()
 	id = "ops/runbooks/restart-gateway"
 	version = "1.4.2"
-	contentHash = "sha256:legacyhash1234"
+	// Spec: §13.4 — the legacy row stores the §4.7.6 digest of its own bytes
+	// (an empty manifest, no SKILL.md, and no resources), so the rewrite
+	// reproduces it, a reviewed sign-stored-rows --include-unsigned run mints
+	// its first envelope, and the stored-row admission check admits it.
+	contentHash = legacyEmptyRowHash
 
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -207,6 +212,18 @@ func ruStageLegacyDatabase(t *testing.T, dsn string) (id, version, contentHash s
 		tenantID, ruLegacyLayer, "local"); err != nil {
 		t.Fatalf("seed legacy layer_config row: %v", err)
 	}
+	// Spec: §13.4 — a database an earlier binary left carries no record that
+	// the first-start stored-value rewrite completed, so sign-stored-rows
+	// performs the rewrite in place of the first start. A prior run on this
+	// shared Postgres may have set the record, so it is cleared.
+	pg, err := store.OpenPostgres(dsn)
+	if err != nil {
+		t.Fatalf("open postgres store: %v", err)
+	}
+	if err := pg.SetDataMigrationApplied(context.Background(), store.DataMigrationContentHashFraming, false); err != nil {
+		t.Fatalf("clear the rewrite record: %v", err)
+	}
+	_ = pg.Close()
 	// Precondition: the legacy tables genuinely lack a recent additive column, so
 	// the assertion that the boot adds it is meaningful.
 	if ruColumnExists(t, dsn, "manifests", "deleted_at") {
@@ -273,7 +290,32 @@ func ruSeededManifestRow(t *testing.T, dsn, id, version string) (hash string, ok
 // two replicas of a roll share one path so one key verifies against both.
 func ruStartUpgradedServer(t *testing.T, dsn, keysPath string) *serverProc {
 	t.Helper()
-	return startServerArgs(t, []string{
+	return startServerArgs(t, ruUpgradedEnv(t, dsn, keysPath), "serve")
+}
+
+// ruSignLegacyRows runs `podium admin sign-stored-rows --include-unsigned
+// --dry-run` against the staged database before the upgraded binary's first
+// start, then the run with the dry run's plan digest, which is the upgrade step
+// a standard deployment with signing on takes: the store is Postgres, so the
+// first start on this store is refused until the command records completion,
+// and the run attests the legacy row the dry run listed. Spec: §13.4.
+func ruSignLegacyRows(t *testing.T, dsn, keysPath string) {
+	t.Helper()
+	dry := signStoredRows(t, ruUpgradedEnv(t, dsn, keysPath), "--include-unsigned", "--dry-run")
+	if dry.Exit != 0 {
+		t.Fatalf("sign-stored-rows --include-unsigned --dry-run exit=%d\nstdout:\n%s\nstderr:\n%s", dry.Exit, dry.Stdout, dry.Stderr)
+	}
+	res := signStoredRows(t, ruUpgradedEnv(t, dsn, keysPath), "--include-unsigned", "--plan-digest="+planDigestOf(t, dry.Stdout))
+	if res.Exit != 0 || !strings.Contains(res.Stdout, "rehash: 0 unsigned left") {
+		t.Fatalf("sign-stored-rows --include-unsigned exit=%d, want 0 and no unsigned row left\nstdout:\n%s\nstderr:\n%s", res.Exit, res.Stdout, res.Stderr)
+	}
+}
+
+// ruUpgradedEnv is the environment ruStartUpgradedServer boots with, with a
+// fresh HOME and object-store root on each call.
+func ruUpgradedEnv(t *testing.T, dsn, keysPath string) []string {
+	t.Helper()
+	return []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_REGISTRY_STORE=postgres",
 		"PODIUM_POSTGRES_DSN=" + dsn,
@@ -288,8 +330,11 @@ func ruStartUpgradedServer(t *testing.T, dsn, keysPath string) *serverProc {
 		"PODIUM_OAUTH_AUDIENCE=" + injAudience,
 		"PODIUM_RUNTIME_KEYS_PATH=" + keysPath,
 		"PODIUM_BOOTSTRAP_ADMINS=alice@acme.com",
+		// Every standard boot on the shared database signs under one key
+		// (§13.12), so none generates its own under its fresh HOME.
+		"PODIUM_SIGN_KEY_PATH=" + msSigningKeyPath(t),
 		"PODIUM_DEFAULT_LAYER_VISIBILITY=public",
-	}, "serve")
+	}
 }
 
 // ruLoad GETs load_artifact for an explicit version with the bearer token and
@@ -360,6 +405,17 @@ func TestServerOps_RollingUpgradeCoexistence(t *testing.T) {
 	// runs the §13.4 additive migration on the legacy schema at boot.
 	priv, pemPath := injKeyPair(t)
 	keysPath := injSeedRuntimeKeys(t, pemPath)
+	// Spec: §13.4 — a start over the staged store, which holds a manifest row
+	// and no completion record, is refused before sign-stored-rows runs and
+	// leaves the seeded row at its stored hash.
+	refused := runPodium(t, "", ruUpgradedEnv(t, dsn, keysPath), "serve", "--bind", "127.0.0.1:0")
+	if refused.Exit == 0 || !strings.Contains(refused.Stdout+refused.Stderr, "sign-stored-rows") {
+		t.Fatalf("start before sign-stored-rows exit=%d, want a refusal naming sign-stored-rows\nstdout:\n%s\nstderr:\n%s", refused.Exit, refused.Stdout, refused.Stderr)
+	}
+	if hash, ok := ruSeededManifestRow(t, dsn, id, version); !ok || hash != contentHash {
+		t.Errorf("seeded row after the refused start = (%q, %v), want (%q, true)", hash, ok, contentHash)
+	}
+	ruSignLegacyRows(t, dsn, keysPath)
 	srvNew := ruStartUpgradedServer(t, dsn, keysPath)
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))
 
@@ -480,6 +536,7 @@ func TestServerOps_RollbackBeforeFinalize(t *testing.T) {
 	id, version, contentHash := ruStageLegacyDatabase(t, dsn)
 	priv, pemPath := injKeyPair(t)
 	keysPath := injSeedRuntimeKeys(t, pemPath)
+	ruSignLegacyRows(t, dsn, keysPath)
 	srvNew := ruStartUpgradedServer(t, dsn, keysPath)
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))
 
@@ -536,11 +593,18 @@ func TestServerOps_RollbackBeforeFinalize(t *testing.T) {
 	if _, err := db.ExecContext(context.Background(),
 		`INSERT INTO manifests (tenant_id, artifact_id, version, content_hash, type, description, layer, ingested_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, now())`,
-		lcDefaultOrgID(), rolledBackID, "2.0.0", "sha256:rolledback", "context", "failover the db", ruLegacyLayer); err != nil {
+		lcDefaultOrgID(), rolledBackID, "2.0.0", legacyEmptyRowHash, "context", "failover the db", ruLegacyLayer); err != nil {
 		t.Fatalf("rolled-back write (legacy column set) failed against migrated table: %v", err)
 	}
-	if v, h, _, ok := rollbackRead(rolledBackID); !ok || v != "2.0.0" || h != "sha256:rolledback" {
-		t.Errorf("rolled-back write not durable: got %s/%s ok=%v, want 2.0.0/sha256:rolledback", v, h, ok)
+	// The row carries no signature, so a signing registry's §13.4 admission
+	// check refuses it. The default org schema is shared with the other
+	// standard-stack tests, whose syncs load every stored artifact, so the row
+	// is removed when this test ends.
+	t.Cleanup(func() {
+		_, _ = db.ExecContext(context.Background(), `DELETE FROM manifests WHERE artifact_id = $1`, rolledBackID)
+	})
+	if v, h, _, ok := rollbackRead(rolledBackID); !ok || v != "2.0.0" || h != legacyEmptyRowHash {
+		t.Errorf("rolled-back write not durable: got %s/%s ok=%v, want 2.0.0/%s", v, h, ok, legacyEmptyRowHash)
 	}
 
 	// ---- Re-upgrade coexists: a current binary reads every row -----------------
@@ -549,10 +613,17 @@ func TestServerOps_RollbackBeforeFinalize(t *testing.T) {
 	// binary wrote, so no step in the rollback lost data and the schema stayed
 	// forward-compatible throughout.
 	srvReupgrade := ruStartUpgradedServer(t, dsn, keysPath)
-	for _, want := range []string{id, newID, rolledBackID} {
+	for _, want := range []string{id, newID} {
 		if st, _, body := ruLoad(t, srvReupgrade, token, want, ""); st != 200 {
 			t.Errorf("re-upgraded binary cannot load %q after the rollback: HTTP %d\nbody: %s", want, st, body)
 		}
+	}
+	// Spec: §13.4 — the rolled-back binary's row carries no signature, and the
+	// first-start rewrite does not run again once its completion is recorded,
+	// so the signing registry's admission check refuses it rather than serving
+	// an unsigned row. The row is still stored, which the scan below confirms.
+	if st, _, body := ruLoad(t, srvReupgrade, token, rolledBackID, ""); st != 500 || !strings.Contains(string(body), "materialize.signature_missing") {
+		t.Errorf("re-upgraded load of the unsigned rolled-back row = HTTP %d, want 500 materialize.signature_missing\nbody: %s", st, body)
 	}
 
 	// Scan-safety: the row the rolled-back binary wrote omitted every recent
@@ -569,8 +640,8 @@ func TestServerOps_RollbackBeforeFinalize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("store read of the rolled-back binary's row (scan-safety after legacy insert): %v", err)
 	}
-	if m.ContentHash != "sha256:rolledback" {
-		t.Errorf("rolled-back row content_hash = %q, want sha256:rolledback", m.ContentHash)
+	if m.ContentHash != legacyEmptyRowHash {
+		t.Errorf("rolled-back row content_hash = %q, want %s", m.ContentHash, legacyEmptyRowHash)
 	}
 	if m.Description != "failover the db" {
 		t.Errorf("rolled-back row description = %q, want %q (the legacy-column write must survive the store scan)", m.Description, "failover the db")

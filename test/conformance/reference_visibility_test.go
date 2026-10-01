@@ -7,6 +7,8 @@ package conformance
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"io/fs"
 	"net/http"
@@ -17,7 +19,6 @@ import (
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/lint"
-	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/server"
@@ -141,9 +142,9 @@ func keysOf(m map[string]bool) []string {
 
 // Spec: §11 / §4.7.9 — the reference fixture's artifacts sign at ingest and
 // verify at materialization time across multiple sensitivities; a tampered
-// signature is rejected with materialize.signature_invalid. The Noop provider
-// stands in for a real SignatureProvider (Sigstore / registry-managed key);
-// the signing and verification control flow is identical.
+// signature is rejected with materialize.signature_invalid. A registry-managed
+// key generated for the test signs and verifies, because the noop provider
+// refuses every signature on Verify.
 func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 	t.Parallel()
 	reg, err := filesystem.Open(referencePath(t))
@@ -155,7 +156,11 @@ func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenant, Name: tenant}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	provider := sign.Noop{}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	provider := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub}
 	signer := func(ctx context.Context, contentHash string) (string, error) {
 		return provider.Sign(ctx, contentHash)
 	}
@@ -186,9 +191,9 @@ func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 			t.Errorf("artifact %q has no signature; the configured signer must sign every accepted manifest", rec.ArtifactID)
 			continue
 		}
-		// PolicyAlways verifies regardless of sensitivity, exercising the
-		// §4.7.9 materialization-time check against the fixture's data.
-		if err := sign.EnforceVerification(context.Background(), sign.PolicyAlways, provider, manifest.Sensitivity(rec.Sensitivity), rec.ContentHash, rec.Signature); err != nil {
+		// PolicyAlways verifies every stored signature, exercising the
+		// §4.7.9 envelope check against the fixture's data.
+		if err := sign.EnforceVerification(context.Background(), sign.PolicyAlways, provider, rec.ContentHash, rec.Signature); err != nil {
 			t.Errorf("verify %q (sensitivity %q): %v", rec.ArtifactID, rec.Sensitivity, err)
 		}
 		sensitivities[rec.Sensitivity] = true
@@ -210,7 +215,7 @@ func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 	if medium.ArtifactID == "" {
 		t.Fatalf("fixture carries no medium-sensitivity artifact to tamper")
 	}
-	err = sign.EnforceVerification(context.Background(), sign.PolicyMediumAndAbove, provider, manifest.Sensitivity(medium.Sensitivity), medium.ContentHash, "noop:tampered")
+	err = sign.EnforceVerification(context.Background(), sign.PolicyAlways, provider, medium.ContentHash, "noop:tampered")
 	if err == nil || !strings.Contains(err.Error(), "signature_invalid") {
 		t.Errorf("tampered signature: got err=%v, want signature_invalid", err)
 	}

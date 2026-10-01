@@ -22,7 +22,7 @@ func runMCPSession(t *testing.T, registryURL string, stdin []byte) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+registryURL)
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+registryURL)
 	cmd.Stdin = bytes.NewReader(stdin)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout

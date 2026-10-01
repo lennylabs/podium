@@ -1176,7 +1176,9 @@ func TestHarness_StandaloneMCPResolvesRegistryFromSyncYAML(t *testing.T) {
 	// is a local handshake and does not contact the registry, so no live server
 	// is required to exercise the resolution.
 	chWriteSyncYAML(t, home, "defaults:\n  registry: http://127.0.0.1:8080\n")
-	chAssertInitOK(t, []string{"PODIUM_REGISTRY=", "PODIUM_CACHE_DIR=" + t.TempDir(), "HOME=" + home})
+	// The home holds no registry key file, so the policy is stated as never:
+	// the subject is the registry resolution, not verification.
+	chAssertInitOK(t, []string{"PODIUM_REGISTRY=", "PODIUM_CACHE_DIR=" + t.TempDir(), "HOME=" + home, "PODIUM_VERIFY_SIGNATURES=never"})
 }
 
 // standalone recipe negative: with no PODIUM_REGISTRY

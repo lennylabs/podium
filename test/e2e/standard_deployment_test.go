@@ -22,6 +22,32 @@ package e2e
 //     docs_organization_compose_test.go without Docker.
 //   - some entries need a registered runtime key and signed JWT
 //     (skipped with honest reason).
+//   - the page's `kubectl create secret` and `helm install` lines need a
+//     cluster; TEST-8's chart render cases and manual scenario S46 cover
+//     them, and TestStandardDeploy_SigningKeyFileFromGenerate runs the
+//     key-generation and extraction blocks that precede them.
+//   - the blocks under the page's Upgrading the chart from v0.4.0 section
+//     need a cluster; the render tests in test/chart/migrate_render_test.go
+//     pin every refusal a render can check, TestChart_KindUpgradeFromV040
+//     (`make test-live-kind`) runs the procedure on kind, and manual
+//     scenario S76 walks it by hand. Manual scenario S66 drives the
+//     `sign-stored-rows --include-unsigned --dry-run` the migrate Job runs,
+//     then the run with the dry run's plan digest, against a standalone
+//     registry.
+//   - the blocks under the page's GitOps controllers section need a cluster
+//     and Argo CD; no test runs them. The render tests in
+//     test/chart/migrate_render_test.go pin that the chart reads nothing from
+//     the cluster, so a helm template render matches the helm upgrade render
+//     those blocks rely on.
+//   - the docker-compose upgrade block under the page's Provision
+//     dependencies section needs Docker and a v0.4.0 volume; no test runs it.
+//     TestE2E_FirstStartRefusesAnUnmigratedStoreWhenTheKeyIsElsewhere and
+//     TestE2E_SigningOffRewriteThroughSignStoredRows in boot_rehash_test.go
+//     drive the same signing-off refusal and sign-stored-rows run against a
+//     standalone registry.
+//   - the replica rotation roll under the page's Signing key operations
+//     section needs a cluster; manual scenarios S73 and S74 drive the same
+//     commands against a standalone registry.
 
 import (
 	"bytes"
@@ -42,6 +68,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // ---- local helpers (prefixed with org) --------------------------------------
@@ -979,26 +1006,32 @@ func TestStandardDeploy_LoginMissingIssuer(t *testing.T) {
 	}
 }
 
-// -- MCP server initializes successfully; PODIUM_VERIFY_SIGNATURES defaults to medium-and-above.
+// -- MCP server initializes successfully; PODIUM_VERIFY_SIGNATURES defaults to
+// always (§6.2), so an unsigned artifact is refused with
+// materialize.signature_missing. The registry starts unsigned because it signs
+// at ingest by default, and the bridge is given a verification key so it
+// starts under the default policy.
 func TestStandardDeploy_MCPVerifySignaturesDefault(t *testing.T) {
 	t.Parallel()
 	reg := orgLocalReg(t)
-	srv := startServer(t, reg)
+	srv := startServerUnsigned(t, reg)
 	env := []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		verifyKeyEnv(t),
 	}
 	res := mcpExec(t, env, rpcReq{ID: 1, Method: "initialize", Params: map[string]any{
 		"protocolVersion": "2024-11-05",
 		"capabilities":    map[string]any{},
 		"clientInfo":      map[string]any{"name": "test", "version": "1"},
-	}})
+	}}, toolCall(2, "load_artifact", map[string]any{"id": "hello"}))
 	result := rpcResult(t, res.Stdout, 1)
 	if result["serverInfo"] == nil {
 		t.Errorf("initialize response missing serverInfo: %v", result)
 	}
-	// Verify the default policy is in effect: a low-sensitivity unsigned artifact
-	// should load fine under medium-and-above.
+	if errStr, _ := rpcResult(t, res.Stdout, 2)["error"].(string); !strings.HasPrefix(errStr, "materialize.signature_missing") {
+		t.Errorf("unsigned load under the default policy = %q, want materialize.signature_missing", errStr)
+	}
 }
 
 // -- the MCP bridge reads PODIUM_SESSION_TOKEN and the
@@ -1018,6 +1051,7 @@ func TestStandardDeploy_MCPSessionToken(t *testing.T) {
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_SESSION_TOKEN=" + token,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}
 	res := mcpExec(t, env, toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
@@ -1032,6 +1066,7 @@ func TestStandardDeploy_MCPSessionToken(t *testing.T) {
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_SESSION_TOKEN=not-a-valid-jwt",
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}
 	resBad := mcpExec(t, envBad, toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
 	if strings.Contains(mustJSON(rpcEnvelope(t, resBad.Stdout, 1)), "finance/run") {
@@ -1059,6 +1094,7 @@ func TestStandardDeploy_MCPSessionTokenFile(t *testing.T) {
 		"PODIUM_IDENTITY_PROVIDER=injected-session-token",
 		"PODIUM_SESSION_TOKEN_FILE=" + tokFile,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}
 	res := mcpExec(t, env, toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
@@ -1078,6 +1114,7 @@ func TestStandardDeploy_MigrateToStandardDryRun(t *testing.T) {
 	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_SQLITE_PATH=" + srcDB,
+		"PODIUM_SIGN=none",
 	}, "serve", "--standalone", "--layer-path", reg)
 	// Register a layer to populate the DB.
 	orgMustRegisterLayer(t, srv.BaseURL, "migrate-test-layer", reg)
@@ -1148,6 +1185,7 @@ func TestStandardDeploy_MigrateToSQLite(t *testing.T) {
 	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_SQLITE_PATH=" + srcDB,
+		"PODIUM_SIGN=none",
 	}, "serve", "--standalone", "--layer-path", reg)
 	orgMustRegisterLayer(t, srv.BaseURL, "migrate-layer", reg)
 	stopProc(srv.cmd)
@@ -1186,6 +1224,7 @@ func TestStandardDeploy_MigrateAuditLog(t *testing.T) {
 	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_SQLITE_PATH=" + srcDB,
+		"PODIUM_SIGN=none",
 	}, "serve", "--standalone", "--layer-path", reg)
 	stopProc(srv.cmd)
 	time.Sleep(300 * time.Millisecond)
@@ -1729,5 +1768,103 @@ func TestStandardDeploy_AdminNoSubcommand(t *testing.T) {
 		if !strings.Contains(combined, sub) {
 			t.Errorf("admin help missing subcommand %q:\n%s", sub, combined)
 		}
+	}
+}
+
+// Spec: §4.7.9, §13.12 — the key-generation procedure docs/deployment/clustered.md
+// publishes for the chart's signing Secret. The page's commands run verbatim
+// on a test HOME that already holds an unsigned standalone store.
+// `podium admin signing-key generate` writes a 0600 key file the key-file
+// reader accepts into the scratch directory alone, so the test HOME's store
+// stays byte-for-byte as it was and gains no file. The key set generate prints
+// equals the page's extraction output, which is the value a bridge's
+// PODIUM_SIGNATURE_VERIFY_KEY takes, and a registry reading the key from a
+// read-only directory (the chart's Secret mount) signs what it serves, so the
+// bridge loads under the always default.
+func TestStandardDeploy_SigningKeyFileFromGenerate(t *testing.T) {
+	t.Parallel()
+	keygen := docBashBlock(t, "docs/deployment/clustered.md", "signing-key generate")
+	extract := docBashBlock(t, "docs/deployment/clustered.md", "awk '/^public:/")
+
+	// A pre-existing unsigned standalone store in the operator's home.
+	home := t.TempDir()
+	unsigned := startServerArgs(t, []string{"HOME=" + home, "PODIUM_SIGN=none"},
+		"serve", "--standalone", "--layer-path", orgLocalReg(t))
+	stopProc(unsigned.cmd)
+	before := snapshotTree(t, home)
+
+	// The page's blocks run in one shell and print four lines: generate's key
+	// set and key_id lines, the extracted key, and the scratch directory
+	// mktemp chose, which BSD mktemp places outside TMPDIR.
+	binDir := filepath.Dir(cmdharness.Bin(t, "podium"))
+	res := runDocBlock(t, []string{
+		"HOME=" + home,
+		"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}, keygen+extract+`printf '%s\n' "$KEY_DIR"`+"\n")
+	lines := strings.Split(strings.TrimSpace(res.Stdout), "\n")
+	if res.Exit != 0 || len(lines) != 4 {
+		t.Fatalf("documented key generation exit=%d\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	keyDir := strings.TrimSpace(lines[3])
+	t.Cleanup(func() { _ = os.RemoveAll(keyDir) })
+	if after := snapshotTree(t, home); after != before {
+		t.Errorf("the key-generation start changed the operator's home:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+
+	keyFile := filepath.Join(keyDir, "registry-signing.key")
+	info, err := os.Stat(keyFile)
+	if err != nil {
+		t.Fatalf("stat key file: %v", err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Errorf("key file mode = %v, want 0600", info.Mode().Perm())
+	}
+	kf, err := sign.ReadKeyFile(keyFile)
+	if err != nil {
+		t.Fatalf("ReadKeyFile: %v", err)
+	}
+	pub := kf.Public
+	if kf.Private == nil || !pub.Equal(kf.Private.Public()) {
+		t.Fatal("the key file's public and private lines are not one keypair")
+	}
+	verifyKey := strings.TrimSpace(lines[2])
+	if got, err := sign.PublicKeyFromBase64(verifyKey); err != nil || !got.Equal(pub) {
+		t.Fatalf("extraction output %q is not the key file's public key (err=%v)", verifyKey, err)
+	}
+	if keySet := strings.TrimSpace(lines[0]); keySet != verifyKey {
+		t.Errorf("generate printed key set %q, want the extracted key %q", keySet, verifyKey)
+	}
+	if idLine := strings.TrimSpace(lines[1]); !strings.HasPrefix(idLine, "key_id=") || !strings.HasSuffix(idLine, "role=signing") {
+		t.Errorf("generate's second line = %q, want key_id=<hex> role=signing", idLine)
+	}
+
+	// The chart mounts the Secret read-only; the registry reads the key and
+	// writes nothing beside it.
+	mount := t.TempDir()
+	mounted := filepath.Join(mount, "registry-signing.key")
+	if err := os.WriteFile(mounted, []byte(readFile(t, keyFile)), 0o600); err != nil {
+		t.Fatalf("stage mounted key: %v", err)
+	}
+	if err := os.Chmod(mount, 0o500); err != nil {
+		t.Fatalf("make mount read-only: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(mount, 0o700) })
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_SIGN_KEY_PATH=" + mounted},
+		"serve", "--standalone", "--layer-path", orgLocalReg(t))
+
+	var served struct {
+		DeliverySignature string `json:"delivery_signature"`
+	}
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id=hello", &served)
+	if served.DeliverySignature == "" {
+		t.Fatalf("registry on the mounted key served no delivery signature\nlog:\n%s", srv.log())
+	}
+	load := mcpExec(t, []string{
+		"PODIUM_REGISTRY=" + srv.BaseURL,
+		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_SIGNATURE_VERIFY_KEY=" + verifyKey,
+	}, toolCall(1, "load_artifact", map[string]any{"id": "hello"}))
+	if errStr, _ := rpcResult(t, load.Stdout, 1)["error"].(string); errStr != "" {
+		t.Fatalf("bridge with the extracted key refused the load: %s\nstderr=%s", errStr, load.Stderr)
 	}
 }

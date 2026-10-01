@@ -1,13 +1,15 @@
 // Package version implements semver pinning and content-hash derivation
 // for spec §4.7.6 (Version Resolution and Consistency) and §4.7
-// (immutability invariant).
+// (immutability invariant), and the §4.7.10 delivery-hash derivation.
 package version
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"sort"
 	"strconv"
 	"strings"
@@ -246,37 +248,132 @@ func less(a, b Pin) bool {
 }
 
 // CanonicalContentHash returns the §4.7.6 content hash of one artifact: the
-// digest over its manifest bytes, its SKILL.md bytes when it carries one, and
-// every bundled resource in sorted-path order. The digest carries no "sha256:"
-// prefix; a caller that stores or serves the value adds one.
+// SHA-256 digest over the framed manifest bytes, the framed SKILL.md bytes, and
+// each bundled resource's framed path and framed body in ascending path order.
+// A framed value is its length as an unsigned 64-bit big-endian integer
+// followed by its bytes. The digest carries no "sha256:" prefix; a caller that
+// stores or serves the value adds one.
 //
-// It exists so the registry and the filesystem consumer cannot compute the hash
-// differently. They did: the filesystem path hashed SKILL.md *instead of* the
-// manifest for a skill, so a frontmatter-only edit left the lock's content_hash
-// unmoved while the materialized output changed, and the same artifact hashed
-// differently in the two deployment modes, which §11 requires to agree.
+// The framing is what makes the serialization injective. Without it the digest
+// is a function of the concatenation of the parts, so a byte moved across a
+// part boundary leaves it unchanged and a resource named "ab" with body "c"
+// hashes the same as one named "a" with body "bc". Every place the digest
+// stands in for the artifact under an independent attestation then stops
+// binding the bytes: the §4.7.9 signature envelope is produced over the hash at
+// ingest and verified over the served hash, so a re-partitioned delivery would
+// carry a valid signature from the legitimate signer; an @sha256: pin resolves
+// against the stored value; and the §7.5.3 lock records it. The §6.6 step-2
+// gate is where a consumer recomputes this value from the served bytes.
 //
-// An absent SKILL.md contributes no bytes, so a non-skill artifact hashes the
-// same under this function as it did under either of the two it replaced.
+// It also exists so the registry and the filesystem consumer cannot compute the
+// hash differently. They did: the filesystem path hashed SKILL.md instead of
+// the manifest for a skill, so a frontmatter-only edit left the lock's
+// content_hash unmoved while the materialized output changed.
+//
+// An absent SKILL.md frames a zero-length value, so an absent and an empty
+// SKILL.md hash alike. That is deliberate: ingest passes a nil SKILL.md slot
+// while the consumer passes the wire's omitempty skill_raw as a non-nil empty
+// slice for the same artifact, and manifest parsing refuses input with no
+// frontmatter, so no stored artifact carries a zero-byte SKILL.md.
 func CanonicalContentHash(artifactBytes, skillBytes []byte, resources map[string][]byte) string {
-	parts := [][]byte{artifactBytes, skillBytes}
+	h := sha256.New()
+	WriteFramed(h, artifactBytes)
+	WriteFramed(h, skillBytes)
 	keys := make([]string, 0, len(resources))
 	for k := range resources {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		parts = append(parts, []byte(k), resources[k])
-	}
-	return ContentHash(parts...)
-}
-
-// ContentHash returns the SHA-256 hex digest of the canonicalized bytes.
-// Spec §4.7 invariant: ingest is keyed by this hash.
-func ContentHash(bytes ...[]byte) string {
-	h := sha256.New()
-	for _, b := range bytes {
-		_, _ = h.Write(b)
+		WriteFramed(h, []byte(k))
+		WriteFramed(h, resources[k])
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// WriteFramed writes v's length as an unsigned 64-bit big-endian integer
+// followed by v itself, the §4.7.6 length framing. Every digest the registry
+// frames uses it, so a domain-tagged digest outside this package frames its
+// values the same way. A hash never fails a write.
+// Spec: §4.7.6
+func WriteFramed(w io.Writer, v []byte) {
+	var n [8]byte
+	binary.BigEndian.PutUint64(n[:], uint64(len(v)))
+	_, _ = w.Write(n[:])
+	_, _ = w.Write(v)
+}
+
+// deliveryRecordTag is the framed leading value of every §4.7.10 delivery
+// stream.
+const deliveryRecordTag = "podium/delivery-record/1"
+
+// DeliveryRecord is the §4.7.10 delivery record: the values one load response
+// serves, as the registry composes them and as the consumer receives them.
+// Every field is the served value, so for a child declaring extends: the
+// Frontmatter is the merged ARTIFACT.md document, whatever the type.
+type DeliveryRecord struct {
+	// ID is the canonical artifact ID the response carries.
+	ID string
+	// Version is the resolved semver the response carries.
+	Version string
+	// Type is the served artifact type.
+	Type string
+	// ContentHash is the §4.7.6 content hash of the stored artifact the
+	// response was composed from, as served.
+	ContentHash string
+	// Sensitivity is the served sensitivity value.
+	Sensitivity string
+	// Frontmatter is the served ARTIFACT.md document.
+	Frontmatter string
+	// ManifestBody is the served manifest body.
+	ManifestBody string
+	// SkillRaw is the served SKILL.md, empty when the artifact has none.
+	SkillRaw string
+	// Resources maps each bundled resource's path to its content hash.
+	Resources map[string]string
+}
+
+// DeliveryHash returns the §4.7.10 delivery hash of rec as "sha256:<hex>":
+// the SHA-256 digest over the framed tag "podium/delivery-record/1", the
+// framed ID, version, type, content hash, and sensitivity, the framed
+// ARTIFACT.md document, manifest body, and SKILL.md, and then each bundled
+// resource's framed path and framed content hash in ascending path order. An
+// absent SKILL.md frames a zero-length value.
+//
+// The leading tag separates this digest's domain from the §4.7.6 content
+// hash. Both use the same framing, the same hex encoding, and are signed under
+// the same registry-managed key, so without the tag a stream that parses as
+// both a delivery record and a stored package would give one digest two
+// meanings, and a signature over either would be accepted as a signature over
+// the other.
+//
+// Resources contribute their content hash rather than their body so that
+// composing the digest reads nothing from object storage on each load. The
+// consumer checks every resource body it fetches or decodes against the hash
+// the verified record carries, which binds the body to the attestation.
+//
+// The per-caller extends_pin and the lifecycle fields are absent from the
+// record: the digest must not depend on who reads the record or when, so the
+// single-load path, the batch path, and every consumer agree on it.
+//
+// Spec: §4.7.10
+func DeliveryHash(rec DeliveryRecord) string {
+	h := sha256.New()
+	for _, v := range []string{
+		deliveryRecordTag,
+		rec.ID, rec.Version, rec.Type, rec.ContentHash, rec.Sensitivity,
+		rec.Frontmatter, rec.ManifestBody, rec.SkillRaw,
+	} {
+		WriteFramed(h, []byte(v))
+	}
+	paths := make([]string, 0, len(rec.Resources))
+	for p := range rec.Resources {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		WriteFramed(h, []byte(p))
+		WriteFramed(h, []byte(rec.Resources[p]))
+	}
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }

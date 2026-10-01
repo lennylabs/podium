@@ -14,6 +14,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 func newBatchFixture(t *testing.T) (*httptest.Server, store.Store) {
@@ -28,7 +29,7 @@ func newBatchFixture(t *testing.T) (*httptest.Server, store.Store) {
 		{TenantID: "default", ArtifactID: "team/b", Version: "1.0.0",
 			ContentHash: "sha256:b", Type: "skill", Layer: "L"},
 	} {
-		if err := st.PutManifest(context.Background(), m); err != nil {
+		if err := st.PutManifest(context.Background(), storetest.Seal(t, m, nil, nil)); err != nil {
 			t.Fatalf("PutManifest: %v", err)
 		}
 	}
@@ -153,10 +154,10 @@ func TestBatchLoad_VersionPinsHonored(t *testing.T) {
 	t.Parallel()
 	ts, st := newBatchFixture(t)
 	// Add a v2 of team/a.
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "team/a", Version: "2.0.0",
 		ContentHash: "sha256:a2", Type: "skill", Layer: "L",
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	body, _ := json.Marshal(map[string]any{

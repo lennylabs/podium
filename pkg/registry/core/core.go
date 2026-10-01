@@ -14,10 +14,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 	"unicode"
 
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
@@ -25,6 +27,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
+	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/vector"
 	"github.com/lennylabs/podium/pkg/version"
@@ -49,6 +52,20 @@ var (
 	// (expose_scope_preview: false). The HTTP layer maps it to
 	// 403 config.scope_preview_disabled.
 	ErrScopePreviewDisabled = errors.New("config.scope_preview_disabled")
+	// ErrContentHashMismatch is the §13.4 stored-row admission refusal of a
+	// row whose bytes do not reproduce its stored content hash, whose
+	// resource refs do not match their bodies, whose body object storage
+	// reports absent, or whose parent pin its manifest does not declare
+	// (materialize.content_hash_mismatch).
+	ErrContentHashMismatch = errors.New("materialize.content_hash_mismatch")
+	// ErrStoredSignatureMissing is the §13.4 admission refusal of a row that
+	// carries no signature on a registry with a signer configured
+	// (materialize.signature_missing).
+	ErrStoredSignatureMissing = errors.New("materialize.signature_missing")
+	// ErrStoredSignatureInvalid is the §13.4 admission refusal of a row whose
+	// stored signature does not verify over its stored content hash under the
+	// configured signer (materialize.signature_invalid).
+	ErrStoredSignatureInvalid = errors.New("materialize.signature_invalid")
 )
 
 // Registry is the core registry type. Construct one per tenant; the
@@ -98,6 +115,12 @@ type Registry struct {
 	// reranking surfaces signal-based ordering"). Nil leaves ranking on its
 	// lexical, vector, and author-curated order alone.
 	usage UsageSignals
+	// admitSigner, admitObjects, and admitReadTimeout are the §13.4 stored-row
+	// admission inputs WithAdmission sets. They are written once, before the
+	// registry serves a request, and only read afterwards.
+	admitSigner      sign.Provider
+	admitObjects     objectstore.Provider
+	admitReadTimeout time.Duration
 }
 
 // DiscoveryDefaults carries the §13.12 tenant-scope discovery knobs from
@@ -1294,17 +1317,38 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 		// so the stored value is the resolved one and the search path runs
 		// no read-time fold per result.
 		d.Sensitivity = sc.rec.Sensitivity
-		// spec: §4.6 hidden parents — an extends child's descriptor names
-		// no parent, so the authored block travels with its extends: key
-		// removed. A record with no pin keeps the block descriptorOf built,
-		// which leaves the common path free of a YAML decode.
+		// A record with no pin keeps the block descriptorOf built, which
+		// leaves the common path free of a chain walk and a YAML decode.
 		if sc.rec.ExtendsPin != "" {
-			d.Frontmatter = manifest.FrontmatterHidingParent(sc.rec.Frontmatter)
+			d.Frontmatter = r.descriptorBlockHidingChain(ctx, sc.rec)
 		}
 		res.Results = append(res.Results, d)
 	}
 	ev.ResultSize = len(res.Results)
 	return res, nil
+}
+
+// descriptorBlockHidingChain returns a pinned child's authored frontmatter
+// block for its search descriptor, held to the parent-ID test load_artifact
+// applies over the same child's whole pinned chain. The walk is the unadmitted
+// one revalidationRedactKeys makes, because a search result serves no admitted
+// content (§13.4). A chain that cannot be resolved, whether an ancestor is
+// missing, the pins cycle, or the store fails, yields the empty block: the
+// search caller gets the descriptor without its frontmatter key and no error,
+// and the walk error, which can name an ancestor, stays in the server log.
+//
+// Spec: §4.6 hidden parents (withheld).
+func (r *Registry) descriptorBlockHidingChain(ctx context.Context, rec store.ManifestRecord) string {
+	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
+	if err != nil {
+		log.Printf("search: descriptor of %s/%s: %v", r.tenantFor(ctx), rec.ArtifactID, err)
+		return ""
+	}
+	pins := make([]string, 0, len(chain))
+	for _, member := range chain {
+		pins = append(pins, member.ExtendsPin)
+	}
+	return manifest.FrontmatterHidingParent(rec.Frontmatter, rec.ArtifactID, pins)
 }
 
 // vectorRanks embeds the query and returns the top-K nearest
@@ -1401,39 +1445,34 @@ type LoadArtifactResult struct {
 	SkillRaw []byte
 	Layer    string
 	// Resources are the §4.4 bundled resources for the artifact,
-	// resolved from the persisted manifest record (§7.2 data plane).
-	// Small resources carry their bytes inline; large ones carry a
-	// content-hash reference the HTTP layer presigns. Nil when the
-	// package bundles no resources.
+	// resolved from the persisted manifest record (§7.2 data plane) and
+	// bound to their bytes by §13.4 admission. A resource the record
+	// holds inline carries its bytes at any size; an object-held one
+	// carries a content-hash reference the HTTP layer presigns or reads.
+	// Nil when the package bundles no resources.
 	Resources   []store.ResourceRef
 	Sensitivity string
 	// Deprecated reports whether the resolved manifest was marked
 	// deprecated at ingest. Per §4.7.4 the registry continues to
 	// serve deprecated artifacts but surfaces a warning.
 	Deprecated bool
-	// ReplacedBy carries the §4.7.4 upgrade target when the
-	// deprecated artifact's manifest names one. Empty when not set.
+	// ReplacedBy carries the §4.7.4 upgrade target when the artifact's
+	// manifest names one, whether or not the artifact is deprecated. Empty
+	// when not set.
 	ReplacedBy string
 	// DeprecationWarning is the human-readable warning the registry
 	// emits when serving a deprecated artifact, per §4.7.4. Empty
 	// when the artifact is live.
 	DeprecationWarning string
-	// Signature is the §4.7.9 envelope produced at ingest by the
-	// configured SignatureProvider. Empty when ingest had no
-	// signer wired. Consumers verify via sign.EnforceVerification
-	// against PODIUM_VERIFY_SIGNATURES.
-	Signature string
-	// Merged is true when the served Frontmatter is an extends-merged
-	// re-serialization with the hidden parent stripped (§4.6) rather than
-	// the original child bytes the ContentHash was computed over. The
-	// consumer reads RawFrontmatter (below) to reproduce the §4.7.6 hash.
-	Merged bool
-	// RawFrontmatter carries the leaf child's original (pre-merge) ARTIFACT.md
-	// bytes when Merged is set, so the consumer can reproduce the §4.7.6
-	// content hash (computed over these bytes, the verbatim SKILL.md, and the
-	// bundled resources) instead of skipping the §6.6 step 2 check. Empty for
-	// a non-merged result, where Frontmatter already holds the hashed bytes.
-	RawFrontmatter []byte
+	// ExtendsPin is the "<id>@<version>" parent pin the artifact resolved at
+	// ingest, set only when the requesting identity can see that parent
+	// record. It is empty for an artifact that extends nothing and for a
+	// caller who cannot see the parent, and the two are indistinguishable.
+	// LoadArtifact sets it on the full result and on the revalidation result
+	// alike, because the HTTP validator folds it in (§7.2).
+	//
+	// Spec: §4.6 hidden parents (withheld), §7.2.
+	ExtendsPin string
 }
 
 // LoadArtifactOptions captures §5 arguments. Empty Version means
@@ -1450,6 +1489,13 @@ type LoadArtifactOptions struct {
 	// the admin role (adminVisibleManifests re-checks); the override is
 	// itself audited via admin.visibility_override.
 	AsAdmin bool
+	// Revalidate, when set, is consulted after the §6.3.1 load-scope check
+	// with a result built from the resolved row that carries its ID, version,
+	// content hash, and layer and no content. When it returns true the load
+	// is answered with that result and without §13.4 stored-row admission,
+	// which is how a HEAD and a conditional GET whose validator matches are
+	// answered. A nil Revalidate admits every load.
+	Revalidate func(res *LoadArtifactResult) bool
 }
 
 // LoadArtifact returns the manifest body. When the resolved manifest
@@ -1527,36 +1573,47 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 			}
 			return nil, fmt.Errorf("%w: artifact %s", ErrNotFound, artifactID)
 		}
-		res, served, err := r.assembleResult(ctx, rec)
-		if err == nil {
-			// §8.2 manifest-declared redaction + §4.7.5 read-event context:
-			// record the resolved version/content_hash/layer and carry the
-			// manifest's audit_redact key set so the audit adapter masks any
-			// named eligible key before the event lands in a sink. This is
-			// the read-side counterpart of the ingest publish event, which
-			// already redacts these same keys.
-			ev.Context = map[string]string{
-				"version":      rec.Version,
-				"content_hash": rec.ContentHash,
-				"layer":        rec.Layer,
-			}
-			// §8.2 manifest-declared redaction. The audit_redact directive is
-			// the authoritative source of truth in the stored frontmatter; the
-			// SQL backends do not persist ManifestRecord.AuditRedact as its own
-			// column, so derive the key set from the frontmatter when the field
-			// is absent. This keeps redaction working uniformly across the
-			// memory, SQLite, and Postgres stores.
-			// The served record rather than the stored one: for an extends
-			// child the two differ, and §4.6 makes audit_redact inheritable,
-			// so reading the leaf's own frontmatter would drop a directive
-			// the child inherits. assembleResult returns rec itself for a
-			// record with no extends chain, where the two are the same bytes.
-			redactKeys := served.AuditRedact
-			if len(redactKeys) == 0 && len(served.Frontmatter) > 0 {
-				if a, perr := manifest.ParseArtifact(served.Frontmatter); perr == nil {
-					redactKeys = a.AuditRedact
+		// §8.2 manifest-declared redaction + §4.7.5 read-event context:
+		// record the resolved version/content_hash/layer and carry the
+		// manifest's audit_redact key set so the audit adapter masks any
+		// named eligible key before the event lands in a sink. This is
+		// the read-side counterpart of the ingest publish event, which
+		// already redacts these same keys.
+		readContext := map[string]string{
+			"version":      rec.Version,
+			"content_hash": rec.ContentHash,
+			"layer":        rec.Layer,
+		}
+		// Spec: §4.6 hidden parents (withheld), §7.2 — the pin is served only
+		// to a caller who can see the parent record, and it is computed once
+		// against the same view for the revalidation result and the full
+		// result, so a HEAD, a 304, and a full GET publish one validator.
+		extendsPin := servedExtends(rec.ExtendsPin, visible)
+		if opts.Revalidate != nil {
+			unadmitted := revalidationResult(rec)
+			unadmitted.ExtendsPin = extendsPin
+			if opts.Revalidate(unadmitted) {
+				// Spec: §13.4 — a revalidation returns no content and is
+				// answered from the resolved row without admission, so the
+				// key set comes from the unadmitted chain walk.
+				keys, err := r.revalidationRedactKeys(ctx, rec, artifactID)
+				if err != nil {
+					return nil, err
 				}
+				ev.Context = readContext
+				ev.RedactKeys = keys
+				return unadmitted, nil
 			}
+		}
+		res, served, err := r.assembleResult(ctx, rec, artifactID)
+		if err == nil {
+			res.ExtendsPin = extendsPin
+			ev.Context = readContext
+			// The served record carries the admitted audit_redact key set:
+			// admission derives it from the row's bytes, and for an extends
+			// child mergeChain folds it over the admitted chain, because §4.6
+			// makes audit_redact inheritable.
+			redactKeys := served.AuditRedact
 			// Surface the author-named sensitive frontmatter fields (e.g.
 			// bank_account, ssn) into the read-event context so the directive
 			// has a concrete target. The audit emitter masks every RedactKeys
@@ -1658,39 +1715,60 @@ func (r *Registry) recordSessionPin(session, id, ver string) {
 	r.sessions[sessionKey{session: session, id: id}] = ver
 }
 
-// assembleResult turns one manifest record into a LoadArtifactResult.
-// When the record declares ExtendsPin, the parent is loaded
-// (privilege-bypassing the visibility filter — hidden-parent semantics
-// per §4.6) and field-merged. Cycle detection prevents infinite loops.
-// It also returns the record the caller was served, which is rec for a
-// record with no chain and the merged record otherwise. The §8.2 read
-// emitter needs the merged frontmatter and the merged audit_redact
-// directive, and LoadArtifactResult is a client-facing type that carries
-// neither the directive nor any internal field, so the record travels
-// beside the result rather than widening the wire contract.
-func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord) (*LoadArtifactResult, store.ManifestRecord, error) {
-	if rec.ExtendsPin == "" {
-		return withDeprecationWarning(resultFromRecord(rec)), rec, nil
-	}
-	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
+// assembleResult turns one manifest record into a LoadArtifactResult. It
+// admits the record and every row of its extends: chain first (§13.4), then
+// field-merges a chain per §4.6, loading each parent privilege-bypassing the
+// visibility filter under hidden-parent semantics. It also returns the record
+// the caller was served, which is the admitted row for a record with no chain
+// and the merged record otherwise. The §8.2 read emitter needs the served
+// frontmatter and the served audit_redact directive, and LoadArtifactResult is
+// a client-facing type that carries neither the directive nor any internal
+// field, so the record travels beside the result rather than widening the wire
+// contract.
+func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord, requestedID string) (*LoadArtifactResult, store.ManifestRecord, error) {
+	chain, err := r.admitChain(ctx, rec, requestedID)
 	if err != nil {
 		return nil, store.ManifestRecord{}, err
+	}
+	if len(chain) == 1 {
+		return withDeprecationWarning(resultFromRecord(chain[0])), chain[0], nil
 	}
 	merged, err := mergeChain(chain)
 	if err != nil {
 		return nil, store.ManifestRecord{}, err
 	}
-	result := resultFromRecord(merged)
-	// This branch runs only for an extends artifact, and mergeChain always
-	// re-serializes the frontmatter with the hidden parent stripped (§4.6),
-	// so the served Frontmatter no longer reproduces the stored ContentHash.
-	// Flag the result and deliver the leaf child's original ARTIFACT.md bytes
-	// (rec is the leaf of the chain) as RawFrontmatter so the consumer can
-	// still run the §6.6 step 2 content-hash match against the bytes the hash
-	// was computed over rather than skipping it.
-	result.Merged = true
-	result.RawFrontmatter = append([]byte(nil), rec.Frontmatter...)
-	return withDeprecationWarning(result), merged, nil
+	return withDeprecationWarning(resultFromRecord(merged)), merged, nil
+}
+
+// revalidationResult is the result a revalidation is answered with: the
+// resolved row's coordinates and validator, and no content.
+func revalidationResult(rec store.ManifestRecord) *LoadArtifactResult {
+	return &LoadArtifactResult{
+		ID:          rec.ArtifactID,
+		Version:     rec.Version,
+		ContentHash: rec.ContentHash,
+		Layer:       rec.Layer,
+	}
+}
+
+// servedExtends returns pin when the parent record it names, keyed on
+// (ArtifactID, Version), is in visible, and the empty string otherwise. The key
+// is the pair rather than the ID because a §4.6 same-ID overlay's parent shares
+// the child's ID: a caller who sees only the overlaying layer sees the ID and
+// not the pinned version, and an ID-keyed test would serve that version.
+//
+// Spec: §4.6 hidden parents (withheld).
+func servedExtends(pin string, visible []store.ManifestRecord) string {
+	if pin == "" {
+		return ""
+	}
+	parentID, parentVer := splitParentRef(pin)
+	for _, m := range visible {
+		if m.ArtifactID == parentID && m.Version == parentVer {
+			return pin
+		}
+	}
+	return ""
 }
 
 // resolveExtendsChain returns the chain of records starting at rec and
@@ -1726,7 +1804,7 @@ func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRe
 // re-serializes the merged frontmatter so every consumer that reads the
 // served frontmatter, and not only the indexed Sensitivity record field,
 // observes the merged result. The merged record keeps the child's identity
-// (id, version, content hash, signature, layer, and body), and it surfaces the
+// (id, version, content hash, and layer) and the child's body, and it surfaces the
 // merged Type, Sensitivity, Deprecated, ReplacedBy, and AuditRedact back onto
 // the row. Every other merged field reaches its consumers through the
 // re-serialized frontmatter alone.
@@ -1745,12 +1823,6 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 		out.ArtifactID = c.ArtifactID
 		out.Version = c.Version
 		out.ContentHash = c.ContentHash
-		// Spec: §4.7.9 — the signature covers the content hash, and the line
-		// above takes the child's, so the envelope must follow it. Left at
-		// the root parent's, an extends child was served a signature that
-		// could not verify against the hash it was served with, which fails
-		// closed and makes signing and extends: mutually exclusive.
-		out.Signature = c.Signature
 		out.Layer = c.Layer
 		out.IngestedAt = c.IngestedAt
 		out.ExtendsPin = c.ExtendsPin
@@ -1784,11 +1856,7 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 	// deliberately absent: LoadArtifactResult declares no such fields, and the
 	// search path reads the stored columns the ingest fold writes rather than
 	// this record, so an assignment here would be unread.
-	out.Type = string(merged.Type)
-	out.Sensitivity = string(merged.Sensitivity)
-	out.Deprecated = merged.Deprecated
-	out.ReplacedBy = merged.ReplacedBy
-	out.AuditRedact = append([]string(nil), merged.AuditRedact...)
+	setManifestFields(&out, merged)
 	// Serialize through the chain's authored blocks so an extension type's
 	// own frontmatter keys survive, and strip the extends reference so the
 	// hidden parent is not surfaced (§4.6). A merged block that names a chain
@@ -1813,12 +1881,32 @@ func mergeChain(chain []store.ManifestRecord) (store.ManifestRecord, error) {
 			ErrInvalidArgument, out.ArtifactID, err)
 	}
 	out.Frontmatter = fm
+	// Spec: §4.7.10 — for a type whose prose lives in ARTIFACT.md, the served
+	// body is the one the served document splits to. SerializeMerged embeds
+	// the body with its trailing newlines normalized, and a consumer that
+	// receives the document by manifest_body_url re-derives the body from it,
+	// so serving the stored body verbatim would let the inline and the URL
+	// delivery of one record carry different bodies. A skill keeps its stored
+	// body, because its served document is its own SKILL.md.
+	if out.Type != string(manifest.TypeSkill) {
+		a, err := manifest.ParseArtifact(fm)
+		if err != nil {
+			return store.ManifestRecord{}, fmt.Errorf("%w: extends manifest for %s: %v",
+				ErrInvalidArgument, out.ArtifactID, err)
+		}
+		out.Body = []byte(a.Body)
+	}
 	return out, nil
 }
 
 // parsedArtifact decodes a record's stored frontmatter into a
-// manifest.Artifact. Ingested records always parse (ingest parsed them);
-// the indexed-field fallback is defense in depth for a malformed record.
+// manifest.Artifact. A record whose frontmatter is empty or does not parse
+// yields its stored columns instead, including every field setManifestFields
+// serves, so mergeChain and revalidationRedactKeys fold the same per-row
+// values that admission leaves on such a row.
+//
+// Spec: §13.4 — a row whose manifest is empty or does not parse is served
+// with its stored values.
 func parsedArtifact(rec store.ManifestRecord) *manifest.Artifact {
 	if a, err := manifest.ParseArtifact(rec.Frontmatter); err == nil && a != nil {
 		return a
@@ -1829,6 +1917,9 @@ func parsedArtifact(rec store.ManifestRecord) *manifest.Artifact {
 		Description: rec.Description,
 		Tags:        append([]string(nil), rec.Tags...),
 		Sensitivity: manifest.Sensitivity(rec.Sensitivity),
+		Deprecated:  rec.Deprecated,
+		ReplacedBy:  rec.ReplacedBy,
+		AuditRedact: append([]string(nil), rec.AuditRedact...),
 	}
 }
 
@@ -1870,27 +1961,8 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 		Sensitivity:  rec.Sensitivity,
 		Resources:    rec.Resources,
 		Deprecated:   rec.Deprecated,
-		ReplacedBy:   replacedByOf(rec),
-		Signature:    rec.Signature,
+		ReplacedBy:   rec.ReplacedBy,
 	}
-}
-
-// replacedByOf returns the §4.7.4 upgrade target for a deprecated record. The
-// SQL metadata stores do not persist replaced_by as an indexed column (it lives
-// in the stored ARTIFACT.md frontmatter, not a manifests column), so a record
-// scanned from SQLite or Postgres carries an empty ReplacedBy even when the
-// manifest names a successor. Recover it from the stored frontmatter so an
-// explicit load of a deprecated version surfaces the upgrade target on every
-// backend, matching the in-memory store that retains the field. A non-deprecated
-// record never carries the warning, so the parse is skipped for it.
-func replacedByOf(rec store.ManifestRecord) string {
-	if rec.ReplacedBy != "" || !rec.Deprecated {
-		return rec.ReplacedBy
-	}
-	if a, err := manifest.ParseArtifact(rec.Frontmatter); err == nil && a != nil {
-		return a.ReplacedBy
-	}
-	return ""
 }
 
 // CanonicalManifestDoc returns the document whose body the §6.6 presigned
@@ -1913,22 +1985,24 @@ func ManifestBodyKey(doc []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// ResolveResourceOwner returns the ID of a visible artifact that
-// bundles a resource whose content hash matches key (the bare hex
-// digest, no "sha256:" prefix), and ok=false when the caller can see no
-// such artifact. The §7.2 data-plane /objects/{key} route uses it to
-// re-check visibility on every fetch so a caller who has lost access to
-// every artifact bundling the bytes can no longer follow a
+// ResolveResourceOwner returns the ID of a visible artifact that owns the
+// object whose content hash is key (the bare hex digest, no "sha256:" prefix),
+// and ok=false when the caller can see no such artifact. The §7.2 data-plane
+// /objects/{key} route uses it to re-check visibility on every fetch so a
+// caller who has lost access to every owner can no longer follow a
 // previously-issued URL. Bytes are deduplicated by content hash across
 // artifacts (§4.4), so any one visible owner authorizes the read.
 //
-// The same route serves the §6.6 presigned manifest body, keyed by the
-// sha256 of a manifest's canonical document (SKILL.md for a skill,
-// ARTIFACT.md otherwise). A manifest-body key is authorized for the same
-// caller/visibility as the artifact, so the presigned body is
-// access-controlled identically to the inline path. Only documents above
-// the inline cutoff are ever stored externally, so the hash is computed
-// for those alone.
+// An artifact owns each resource it bundles and the §6.6 presigned manifest
+// document it serves. The served document is the stored SKILL.md for a skill
+// and the stored ARTIFACT.md for an artifact with no parent. For a non-skill
+// child declaring extends: it is the merged document, so the stored pre-merge
+// ARTIFACT.md has no owner: it is never served, and authorizing its key would
+// let a caller confirm a guessed extends: line by the route's answer. Only
+// documents above the inline cutoff are stored externally, so the hash is
+// computed for those alone.
+//
+// Spec: §13.12 filesystem backend.
 func (r *Registry) ResolveResourceOwner(ctx context.Context, id layer.Identity, key string) (string, bool) {
 	visible, err := r.visibleManifests(ctx, id)
 	if err != nil {
@@ -1944,11 +2018,46 @@ func (r *Registry) ResolveResourceOwner(ctx context.Context, id layer.Identity, 
 	}
 	for _, m := range visible {
 		doc := CanonicalManifestDoc(m.Type, m.Frontmatter, m.SkillRaw)
-		if len(doc) > objectstore.InlineCutoff && ManifestBodyKey(doc) == key {
+		if len(doc) <= objectstore.InlineCutoff || ManifestBodyKey(doc) != key {
+			continue
+		}
+		if servesMergedDocument(m) {
+			continue
+		}
+		return m.ArtifactID, true
+	}
+	for _, m := range visible {
+		if servesMergedDocument(m) && r.mergedDocumentKeyMatches(ctx, m, key) {
 			return m.ArtifactID, true
 		}
 	}
 	return "", false
+}
+
+// servesMergedDocument reports whether rec's served manifest document is the
+// §4.6 merged ARTIFACT.md rather than a stored document: a pinned child of a
+// type other than skill. A skill serves its own stored SKILL.md whatever its
+// pin.
+func servesMergedDocument(rec store.ManifestRecord) bool {
+	return rec.ExtendsPin != "" && rec.Type != string(manifest.TypeSkill)
+}
+
+// mergedDocumentKeyMatches reports whether key names rec's merged manifest
+// document above the inline cutoff. It walks and folds the chain without
+// admission, because the /objects route serves no admitted content (§13.4)
+// and reads no object storage. A walk or merge error answers false, so a
+// broken chain authorizes nothing and answers as a key that does not exist.
+func (r *Registry) mergedDocumentKeyMatches(ctx context.Context, rec store.ManifestRecord, key string) bool {
+	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
+	if err != nil {
+		return false
+	}
+	merged, err := mergeChain(chain)
+	if err != nil {
+		return false
+	}
+	doc := CanonicalManifestDoc(merged.Type, merged.Frontmatter, merged.SkillRaw)
+	return len(doc) > objectstore.InlineCutoff && ManifestBodyKey(doc) == key
 }
 
 // withDeprecationWarning fills in DeprecationWarning when the

@@ -20,9 +20,15 @@ type DependentsEdge struct {
 }
 
 // DependentsOf walks the §4.7.3 reverse-dependency index for the
-// artifact and returns every edge ending at it. Visibility filtering
-// applies: edges from invisible artifacts are dropped so callers do
-// not see what they shouldn't.
+// artifact and returns every edge ending at it that the caller may see.
+// An edge survives only when both endpoints are visible to the caller, and
+// an extends edge additionally resolves through the child's pinned parent
+// record, so the §4.6 same-ID overlay's self-edge does not disclose a
+// lower-precedence layer the caller cannot read. The query is filtered
+// rather than refused: an invisible target yields the same empty list as a
+// target that does not exist, and no visibility.denied event is emitted.
+//
+// Spec: §4.7.3
 func (r *Registry) DependentsOf(ctx context.Context, id layer.Identity, artifactID string) ([]DependentsEdge, error) {
 	r.emit(ctx, AuditEvent{
 		Type:   "artifacts.dependents_of",
@@ -37,17 +43,66 @@ func (r *Registry) DependentsOf(ctx context.Context, id layer.Identity, artifact
 	if err != nil {
 		return nil, err
 	}
-	visibleIDs := map[string]bool{}
-	for _, m := range visible {
-		visibleIDs[m.ArtifactID] = true
-	}
+	view := newDependentsView(visible)
 	out := make([]DependentsEdge, 0, len(edges))
 	for _, e := range edges {
-		if visibleIDs[e.From] {
+		if view.admits(e) {
 			out = append(out, DependentsEdge{From: e.From, To: e.To, Kind: e.Kind})
 		}
 	}
 	return out, nil
+}
+
+// dependentsView is the caller's visible record set indexed for the
+// §4.7.3 edge filter.
+type dependentsView struct {
+	// ids holds every visible artifact ID.
+	ids map[string]bool
+	// pins holds every visible record as "<id>@<version>", the format of
+	// store.ManifestRecord.ExtendsPin.
+	pins map[string]bool
+	// childPins maps a visible child ID to the non-empty ExtendsPin values
+	// its visible records carry. A child with several visible versions may
+	// pin different parent records, and any one visible pin admits the edge.
+	childPins map[string][]string
+}
+
+func newDependentsView(visible []store.ManifestRecord) dependentsView {
+	v := dependentsView{
+		ids:       make(map[string]bool, len(visible)),
+		pins:      make(map[string]bool, len(visible)),
+		childPins: map[string][]string{},
+	}
+	for _, m := range visible {
+		v.ids[m.ArtifactID] = true
+		v.pins[m.ArtifactID+"@"+m.Version] = true
+		if m.ExtendsPin != "" {
+			v.childPins[m.ArtifactID] = append(v.childPins[m.ArtifactID], m.ExtendsPin)
+		}
+	}
+	return v
+}
+
+// admits reports whether the caller may see edge e. Both endpoints must be
+// visible by ID. An extends edge is also tested against the parent record
+// the child pinned at ingest (§4.7.6): the same-ID overlay records the edge
+// {From: X, To: X}, which the ID test alone admits for a caller who sees
+// only the overlaying layer. A child whose visible records carry no pin
+// names no parent record to test, so its edge is dropped rather than
+// falling back to the ID test.
+func (v dependentsView) admits(e store.DependencyEdge) bool {
+	if !v.ids[e.From] || !v.ids[e.To] {
+		return false
+	}
+	if e.Kind != "extends" {
+		return true
+	}
+	for _, pin := range v.childPins[e.From] {
+		if parentID, _ := splitParentRef(pin); parentID == e.To && v.pins[pin] {
+			return true
+		}
+	}
+	return false
 }
 
 // dependencyRanking returns the §4.7.3 "frequently-depended-on artifacts

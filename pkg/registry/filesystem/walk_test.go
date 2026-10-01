@@ -495,3 +495,96 @@ func indexPercent(s, target string) int {
 	}
 	return -1
 }
+
+// TestWalk_ResourceSetIsEveryFileUnderThePackageRoot covers
+// spec: §4.4, §4.7.6 — the bundled-resource set is every file under the
+// package root, dot-prefixed names included, other than the package root's
+// ARTIFACT.md, the package root's SKILL.md for a skill, and the files of a
+// nested package. The complete key set is asserted, rather than the absence
+// of one prefix, so a hidden-name skip or a base-name SKILL.md skip added to
+// captureResources fails here instead of silently moving every stored hash.
+func TestWalk_ResourceSetIsEveryFileUnderThePackageRoot(t *testing.T) {
+	t.Parallel()
+	const crlfNotes = "line one\r\nline two\r\n"
+	const hiddenNote = "hidden note body\n"
+	const toolingConfig = "{\"tool\":\"config\"}\n"
+	const referencesSkill = "reference skill body\n"
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{Path: "outer/ARTIFACT.md", Content: skillArtifact},
+		testharness.WriteTreeOption{
+			Path:    "outer/SKILL.md",
+			Content: stringf(skillBody, "outer", "Outer skill", "outer"),
+		},
+		testharness.WriteTreeOption{Path: "outer/notes.md", Content: crlfNotes},
+		testharness.WriteTreeOption{Path: "outer/.hidden-note", Content: hiddenNote},
+		testharness.WriteTreeOption{Path: "outer/.tooling/config.json", Content: toolingConfig},
+		testharness.WriteTreeOption{Path: "outer/references/SKILL.md", Content: referencesSkill},
+		testharness.WriteTreeOption{
+			Path:    "outer/inner/ARTIFACT.md",
+			Content: stringf(contextArtifact, "Inner", "inner"),
+		},
+		testharness.WriteTreeOption{Path: "outer/inner/data.txt", Content: "inner data\n"},
+		testharness.WriteTreeOption{
+			Path:    "outer/.nested/ARTIFACT.md",
+			Content: stringf(contextArtifact, "Nested", "nested"),
+		},
+		testharness.WriteTreeOption{Path: "outer/.nested/note.txt", Content: "nested note\n"},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	got, err := reg.Walk(WalkOptions{})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	byID := map[string]ArtifactRecord{}
+	for _, r := range got {
+		byID[r.ID] = r
+	}
+	outer, ok := byID["outer"]
+	if !ok {
+		t.Fatalf("missing outer record (got %v)", idsOf(got))
+	}
+	want := map[string]string{
+		"notes.md":             crlfNotes,
+		".hidden-note":         hiddenNote,
+		".tooling/config.json": toolingConfig,
+		"references/SKILL.md":  referencesSkill,
+	}
+	if len(outer.Resources) != len(want) {
+		t.Fatalf("outer resource keys = %v, want %v", resourceKeys(outer.Resources), resourceKeys(toBytes(want)))
+	}
+	for k, v := range want {
+		body, ok := outer.Resources[k]
+		if !ok {
+			t.Errorf("outer missing resource %q (got %v)", k, resourceKeys(outer.Resources))
+			continue
+		}
+		if string(body) != v {
+			t.Errorf("outer resource %q = %q, want %q", k, body, v)
+		}
+	}
+	if string(outer.SkillBytes) != stringf(skillBody, "outer", "Outer skill", "outer") {
+		t.Errorf("outer SkillBytes = %q, want the package root's SKILL.md", outer.SkillBytes)
+	}
+	inner, ok := byID["outer/inner"]
+	if !ok {
+		t.Fatalf("missing nested outer/inner record (got %v)", idsOf(got))
+	}
+	if len(inner.Resources) != 1 || string(inner.Resources["data.txt"]) != "inner data\n" {
+		t.Errorf("outer/inner resources = %v, want exactly data.txt", resourceKeys(inner.Resources))
+	}
+	if _, ok := byID["outer/.nested"]; ok {
+		t.Errorf("a dot-prefixed directory was discovered as an artifact (got %v)", idsOf(got))
+	}
+}
+
+func toBytes(m map[string]string) map[string][]byte {
+	out := make(map[string][]byte, len(m))
+	for k, v := range m {
+		out[k] = []byte(v)
+	}
+	return out
+}

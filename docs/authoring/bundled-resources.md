@@ -8,6 +8,8 @@ description: "Files that ship alongside ARTIFACT.md (and SKILL.md, for skills): 
 
 Anything in an artifact's directory other than `ARTIFACT.md` (and `SKILL.md` for skills) is a bundled resource. Python scripts, Jinja templates, JSON schemas, evaluation datasets, binary blobs, model weights, all packaged together with the manifest and shipped to the host at materialization time.
 
+The set is every file under the directory, including a file or a directory whose name begins with a dot, such as `.DS_Store` or an editor swap file. Only the package's own `ARTIFACT.md`, and for a skill its own `SKILL.md`, sit outside the set, so a file named `SKILL.md` in a subfolder such as `references/` is an ordinary bundled resource. A nested directory that carries its own `ARTIFACT.md` is excluded from the enclosing artifact's set, and it is discovered as a separate artifact whose files belong to it unless its own name, or the name of a directory between it and the layer or overlay root, begins with a dot. Artifact discovery does not descend into a directory below the layer or overlay root whose name begins with a dot, so an `ARTIFACT.md` anywhere below such a directory produces no artifact, and the files of that nested package ship nowhere and enter no content hash. A dot-prefixed directory inside a package that carries no `ARTIFACT.md` of its own is part of that package's set, together with every file below it outside a nested package. The root itself is walked even when its own name, or the name of a directory above it, begins with a dot, so a layer at `.podium/registry/` or an overlay at `.podium/overlay/` is discovered. No ignore file applies, and the size thresholds below never remove a file from the set. The registry's content hash covers every file in the set, so an incidental file in the directory changes the artifact's hash, and an author who does not want a file shipped removes it before ingest.
+
 For skills, the [agentskills.io](https://agentskills.io/specification) standard recommends three conventional subfolders: `scripts/` for executable code, `references/` for documentation loaded on demand, and `assets/` for templates and data files. Other subfolder names are permitted; these three are recognized by SKILL.md-aware tools.
 
 ```
@@ -51,7 +53,7 @@ Size thresholds:
 
 | Threshold | Limit | Behavior |
 |:--|:--|:--|
-| Inline cutoff | 256 KB | At or below this, resource bytes are returned in the `load_artifact` response body. Above it, the response carries a URL to fetch them from. |
+| Inline cutoff | 256 KB | At or below this, resource bytes are returned in the `load_artifact` response body. Above it, the response carries a URL to fetch them from, unless the registry holds the resource inline, as it does for every resource of an artifact ingested while no object store was configured. |
 | Per-file soft cap | 1 MB | Ingest-time warning above this. |
 | Per-package soft cap | 10 MB | Ingest-time error above this. |
 

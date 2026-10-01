@@ -625,7 +625,7 @@ func TestSDK_TSBulkEmpty(t *testing.T) {
 func TestSDK_NoBulkMCPTool(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, csSkillReg(t))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list", Params: map[string]any{}})
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list", Params: map[string]any{}})
 	result := rpcResult(t, res.Stdout, 1)
 	// tools/list advertises the meta-tools plus the §13.9 health tool;
 	// the bulk endpoint is intentionally absent (asserted below).

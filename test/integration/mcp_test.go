@@ -45,7 +45,7 @@ func TestPodiumMCP_InitializeReturnsCapabilities(t *testing.T) {
 
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+h.URL)
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "initialize", ID: 1},
 	}))
@@ -74,7 +74,7 @@ func TestPodiumMCP_ToolsListReturnsMetaTools(t *testing.T) {
 	h := registryharness.New(t)
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+h.URL)
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "tools/list", ID: 1},
 	}))
@@ -104,7 +104,7 @@ func TestPodiumMCP_RejectsFilesystemRegistry(t *testing.T) {
 	dir := t.TempDir()
 	cmd := exec.Command(bin)
 	// An absolute filesystem path is a §7.5.2 filesystem source.
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+dir)
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+dir)
 	// No stdin is consumed: the bridge must reject the config before serving.
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -133,6 +133,7 @@ func TestPodiumMCP_RejectsUnknownHarness(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=http://127.0.0.1:1", // server source so only the harness is at fault
 		"PODIUM_HARNESS=claude-codex-typo",
 	)
@@ -169,7 +170,7 @@ func TestPodiumMCP_ToolsListDescriptionsSchemasAndInstructions(t *testing.T) {
 	h := registryharness.New(t)
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+h.URL)
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "initialize", ID: 1, Params: map[string]any{"protocolVersion": "2024-11-05"}},
 		{Method: "tools/list", ID: 2},
@@ -256,7 +257,7 @@ func TestPodiumMCP_ToolsCallProxiesSearchArtifacts(t *testing.T) {
 	)
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+h.URL)
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "tools/call", ID: 1, Params: map[string]any{
 			"name": "search_artifacts",
@@ -326,7 +327,7 @@ func TestPodiumMCP_ResourcesMirror(t *testing.T) {
 	)
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+h.URL, "PODIUM_CACHE_DIR="+t.TempDir())
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL, "PODIUM_CACHE_DIR="+t.TempDir())
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "initialize", ID: 1, Params: map[string]any{"protocolVersion": "2024-11-05"}},
 		{Method: "resources/list", ID: 2},

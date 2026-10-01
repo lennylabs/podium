@@ -1,0 +1,92 @@
+{{- $mode := toString .Values.migration.mode }}
+{{- $job := include "podium.migrateFullname" . }}
+{{- $name := include "podium.name" . }}
+{{- if eq $mode "dry-run" }}
+The migrate Job {{ $job }} ran `podium-server sign-stored-rows{{ if .Values.migration.includeUnsigned }} --include-unsigned{{ end }} --dry-run`. It wrote no
+row and no completion record; opening the store creates the empty data_migrations table when it is absent.
+
+The kubelet rotates container logs, and a read after the Job ends returns only
+the current file, so the review reads the log that step 3 of the upgrade
+procedure in docs/deployment/clustered.md streamed to dry-run.log while the Job
+ran. A capture taken now is truncated on a large store; rerun the dry-run step
+with that background capture when dry-run.log is missing.
+
+Check that the capture is complete, and rerun the dry-run step when it is not:
+the count of lines matching `^dry-run: .* class=` equals N in the
+`dry-run: N row(s) planned` line, and the log ends with the
+`dry-run: plan digest` line.
+
+  grep -cE '^dry-run: .* class=' dry-run.log
+  grep -E '^dry-run: [0-9]+ row\(s\) planned' dry-run.log
+  tail -n 1 dry-run.log
+{{- if eq .Values.signing.mode "registry-key" }}
+
+Review every row with signed_by=unsigned and sign=true. Confirm that no row
+reports class=body_unavailable, class=signature_unverified, signed_by=unverified,
+class=unreproducible, or class=body_missing. The run leaves each such row at its
+previous content hash, and only a body_unavailable row holds the completion
+record back, so the others pass the run unnoticed. A signature_unverified row
+means that the signing Secret
+holds, neither as its key nor as a verify: key, the key that signed the stored
+rows; fix the Secret and rerun the dry-run step.
+{{- else }}
+
+Signing is off, so every row reports sign=false, and a signed row reports
+signed_by=unchecked. Confirm that no row reports class=body_unavailable,
+class=unreproducible, or class=body_missing.
+{{- end }}
+
+Then print the plan digest the reviewed dry run ended with:
+
+  grep -E '^dry-run: plan digest ' dry-run.log
+
+and run the reviewed plan with the same values file, passing the `sha256:`
+value from that line:
+
+  helm upgrade {{ .Release.Name }} <chart> -f <values> --set replicaCount=0 \
+    --set migration.mode=run --set migration.planDigest=<digest> --timeout 6h
+{{- else if eq $mode "run" }}
+The migrate Job {{ $job }} ran `podium-server sign-stored-rows{{ if .Values.migration.includeUnsigned }} --include-unsigned{{ end }} --plan-digest={{ .Values.migration.planDigest }}`. Read the
+log that step 4 of the upgrade procedure in docs/deployment/clustered.md
+streamed to run.log while the Job ran.
+
+Exit status 3 with `plan:` lines in the log means that the plan changed since
+the reviewed dry run, and the Job wrote no row, no audit event, and no
+completion record. Compare the `plan:` lines in run.log with the reviewed
+dry-run.log; a `kubectl logs` read after the Job ends is truncated on a large
+store. Then repeat the dry-run and run steps.
+
+{{- if .Values.migration.includeUnsigned }}
+
+Expect the `rehash:` summary line and `rehash: 0 unsigned left`. Then serve with
+the same values file, which scales the Deployment to its replicaCount:
+{{- else if eq .Values.signing.mode "registry-key" }}
+
+Expect the `rehash:` summary line. The run passed no --include-unsigned, so the
+log reports the unsigned rows it left as `rehash: N unsigned left`. Those rows
+stay unsigned, and serving refuses them with materialize.signature_missing
+until they are signed or republished. Then serve with the same values file,
+which scales the Deployment to its replicaCount:
+{{- else }}
+
+Expect the `rehash:` summary line. Signing is off, so the Job signs no row, the
+log carries no unsigned-left line, and serving checks no row's signature. Then
+serve with the same values file, which scales the Deployment to its
+replicaCount:
+{{- end }}
+
+  helm upgrade {{ .Release.Name }} <chart> -f <values>
+
+In either signing mode, a registry pod over a store that holds manifest rows
+and no §13.4 completion record exits at start, and its log names
+sign-stored-rows. It rewrites no manifest row, signs no row, and records no
+completion.
+{{- else if eq (int .Values.replicaCount) 0 }}
+The Deployment {{ include "podium.fullname" . }} runs no replica. Wait until every registry pod is deleted:
+
+  kubectl wait --for=delete pod --timeout=10m -n {{ .Release.Namespace }} \
+    -l app.kubernetes.io/name={{ $name }},app.kubernetes.io/instance={{ .Release.Name }} \
+    --field-selector=status.phase!=Succeeded,status.phase!=Failed
+{{- else }}
+The Deployment {{ include "podium.fullname" . }} serves {{ .Values.replicaCount }} replica(s).
+{{- end }}

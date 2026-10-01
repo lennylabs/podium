@@ -243,11 +243,8 @@ func TestExtendsFrontmatter_InheritedValuesSpellingTheParentFailClosed(t *testin
 
 // Spec: §4.6 hidden parents — the guarantee covers the block the requester is
 // served, so a key the child authored itself fails the load under those same
-// spellings. The child's own bytes reach this requester through
-// `raw_frontmatter` and through the search descriptor, which is a disclosure
-// recorded on those surfaces and does not license the merged block to repeat
-// it, and the materialized bytes pkg/sync feeds the harness adapters have
-// neither surface at all.
+// spellings. The origin of a value does not decide whether it is checked, and
+// the materialized bytes pkg/sync feeds the harness adapters are this block.
 func TestExtendsFrontmatter_ChildAuthoredValuesSpellingTheParentFailClosed(t *testing.T) {
 	t.Parallel()
 	for name, value := range parentNamingValues {

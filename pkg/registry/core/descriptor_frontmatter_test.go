@@ -1,10 +1,10 @@
 package core
 
 import (
-	"github.com/lennylabs/podium/pkg/manifest"
 	"strings"
 	"testing"
 
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -48,12 +48,12 @@ func TestDescriptorOf_SearchDropsBody(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 hidden parents — frontmatterBlockHidingParent removes the
+// Spec: §4.6 hidden parents (withheld) — FrontmatterHidingParent removes the
 // top-level extends key and keeps every other authored key, including one
 // manifest.Artifact does not declare. It fails closed on any input it cannot
-// split, decode, or re-encode, and on any rewritten block that does not read
-// back as a mapping free of an extends value, because the block it could not
-// rewrite is the block that names the parent.
+// split, decode, or re-encode, on any rewritten block that does not read back
+// as a mapping free of an extends value, and on a block that still names a
+// pinned chain member other than the child itself.
 func TestFrontmatterBlockHidingParent(t *testing.T) {
 	tests := []struct {
 		name string
@@ -115,12 +115,27 @@ func TestFrontmatterBlockHidingParent(t *testing.T) {
 		},
 		{
 			// A nested extends the child never merges in is not what the
-			// parser resolved, so it is the child's authored text and rides
-			// along with the rest of the block.
-			name: "an unmerged nested extends is served",
+			// parser resolved, but its value names the pinned parent, so the
+			// parent-ID test refuses the block.
+			name: "an unmerged nested extends naming the parent fails closed",
 			src:  "---\nbase:\n  extends: shared/parent@1.0.0\ntype: agent\n---\n\nbody\n",
-			want: []string{"type: agent", "extends: shared/parent@1.0.0"},
-			gone: []string{"body"},
+			zero: true,
+		},
+		{
+			// A nested extends naming an artifact outside the chain is the
+			// child's authored text and rides along with the rest of the block.
+			name: "an unmerged nested extends naming another artifact is served",
+			src:  "---\nbase:\n  extends: shared/other@1.0.0\ntype: agent\nextends: shared/parent@1.0.0\n---\n\nbody\n",
+			want: []string{"type: agent", "extends: shared/other@1.0.0"},
+			gone: []string{"shared/parent", "body"},
+		},
+		{
+			// The child's own canonical ID is removed from the parent set, so
+			// a same-ID overlay whose block names itself keeps the block.
+			name: "a key naming the child's own ID is served",
+			src:  "---\ntype: agent\nacme_self: team/child\nextends: team/child@1.0.0\n---\n\nbody\n",
+			want: []string{"acme_self: team/child"},
+			gone: []string{"extends", "body"},
 		},
 		{
 			// Deleting the anchored extends value strands the alias, so the
@@ -147,7 +162,7 @@ func TestFrontmatterBlockHidingParent(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := manifest.FrontmatterHidingParent([]byte(tc.src))
+			got := manifest.FrontmatterHidingParent([]byte(tc.src), "team/child", []string{"shared/parent@1.0.0"})
 			if tc.zero {
 				if got != "" {
 					t.Fatalf("got %q, want empty (fail closed)", got)

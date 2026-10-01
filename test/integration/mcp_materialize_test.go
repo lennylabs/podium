@@ -33,6 +33,7 @@ func TestPodiumMCP_LoadArtifactMaterializes(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT="+target,
@@ -104,6 +105,7 @@ func TestPodiumMCP_TargetHarnessesSuppressesMaterialize(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT="+target,
@@ -166,6 +168,7 @@ func TestPodiumMCP_UntranslatableFieldFailsMaterialize(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
 		"PODIUM_HARNESS=claude-desktop",
 		"PODIUM_MATERIALIZE_ROOT="+target,
@@ -226,6 +229,7 @@ func TestPodiumMCP_LoadArtifactWithClaudeCodeAdapter(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
 		"PODIUM_HARNESS=claude-code",
 		"PODIUM_MATERIALIZE_ROOT="+target,
@@ -266,6 +270,7 @@ func TestPodiumMCP_PerCallHarnessOverride(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT="+target,
@@ -309,6 +314,7 @@ func TestPodiumMCP_LoadArtifactPopulatesContentCache(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT="+t.TempDir(),
@@ -354,6 +360,7 @@ func TestPodiumMCP_NoMaterializeRootReturnsManifestOnly(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
 		"PODIUM_CACHE_DIR="+t.TempDir(),
 	)

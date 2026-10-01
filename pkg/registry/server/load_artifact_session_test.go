@@ -12,20 +12,23 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // putVersion seeds one (id, version) manifest at the given ingest time so
 // `latest` resolution (ordered by ingest time, ties by semver) is
-// deterministic.
-func putVersion(t *testing.T, st store.Store, id, version, hash string, at time.Time) {
+// deterministic. The record is sealed so §13.4 admission serves it, and the
+// sealed content hash is returned for the validator assertions.
+func putVersion(t *testing.T, st store.Store, id, version string, at time.Time) string {
 	t.Helper()
-	err := st.PutManifest(context.Background(), store.ManifestRecord{
+	rec := storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: id, Version: version,
-		ContentHash: hash, Type: "skill", Layer: "L", IngestedAt: at,
-	})
-	if err != nil {
+		Type: "skill", Layer: "L", IngestedAt: at,
+	}, nil, nil)
+	if err := st.PutManifest(context.Background(), rec); err != nil {
 		t.Fatalf("PutManifest %s@%s: %v", id, version, err)
 	}
+	return rec.ContentHash
 }
 
 func loadVersion(t *testing.T, base, query string) (int, string) {
@@ -58,7 +61,7 @@ func TestLoadArtifact_SessionPinsLatest(t *testing.T) {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	t0 := time.Now().UTC()
-	putVersion(t, st, "team/a", "1.0.0", "sha256:v1", t0)
+	putVersion(t, st, "team/a", "1.0.0", t0)
 
 	reg := core.New(st, "default", []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
@@ -72,7 +75,7 @@ func TestLoadArtifact_SessionPinsLatest(t *testing.T) {
 	}
 
 	// A newer version is ingested after the pin.
-	putVersion(t, st, "team/a", "2.0.0", "sha256:v2", t0.Add(time.Hour))
+	putVersion(t, st, "team/a", "2.0.0", t0.Add(time.Hour))
 
 	// s1 still resolves the pinned 1.0.0 (session consistency).
 	if code, v := loadVersion(t, ts.URL, "id=team/a&session_id=s1"); code != 200 || v != "1.0.0" {

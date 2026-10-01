@@ -11,6 +11,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 type obsRec struct {
@@ -35,7 +36,7 @@ func TestLatencyObserver_RecordsPerOperationOverHTTP(t *testing.T) {
 	if err := st.CreateTenant(ctx, store.Tenant{ID: "default", Name: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	if err := st.PutManifest(ctx, store.ManifestRecord{
+	if err := st.PutManifest(ctx, storetest.Seal(t, store.ManifestRecord{
 		TenantID:    "default",
 		ArtifactID:  "finance/variance",
 		Version:     "1.0.0",
@@ -44,7 +45,7 @@ func TestLatencyObserver_RecordsPerOperationOverHTTP(t *testing.T) {
 		Description: "Variance analysis reference for vendor payments here today.",
 		Tags:        []string{"finance"},
 		Layer:       "shared",
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	reg := core.New(st, "default", []layer.Layer{

@@ -176,7 +176,7 @@
   <text class="dg-sub" x="620" y="460">always visible</text>
   <text class="dg-label" x="900" y="460">YES</text>
 
-  <text class="dg-foot" x="40" y="510">Visibility evaluation runs on every registry call. Layers the caller cannot see are silently excluded; the response</text>
-  <text class="dg-foot" x="40" y="528">contains no hint of their existence. Hidden parents merge server-side when a visible child declares extends:.</text>
+  <text class="dg-foot" x="40" y="510">Visibility evaluation runs on every registry call. Layers the caller cannot see are silently excluded from the view.</text>
+  <text class="dg-foot" x="40" y="528">When a visible child declares extends:, a hidden parent merges server-side and its ID and layer are withheld.</text>
   <text class="dg-foot" x="40" y="546">Public mode and filesystem-source deployments short-circuit visibility to true for every layer (no identity present).</text>
 </svg>

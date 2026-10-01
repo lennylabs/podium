@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -441,4 +442,185 @@ func TestAdminMigrateToStandard_AuditWarnsWithoutTarget(t *testing.T) {
 	if !strings.Contains(stderr, "audit history") || !strings.Contains(stderr, "NOT copied") {
 		t.Errorf("stderr = %q, want an audit-not-copied warning", stderr)
 	}
+}
+
+// Spec: §13.4 — the command clears the target store's record of the
+// content-hash rewrite before it copies the first manifest row, so the rewrite
+// runs again over the copied rows, at the target's next start or through
+// sign-stored-rows. A run that copies no manifest row,
+// and a --dry-run, leave the record as it was.
+func TestAdminMigrateToStandard_ClearsTheTargetMarker(t *testing.T) {
+	ctx := context.Background()
+	newTarget := func(t *testing.T, path string) {
+		t.Helper()
+		target, err := store.OpenSQLite(path)
+		if err != nil {
+			t.Fatalf("open target: %v", err)
+		}
+		defer func() { _ = target.Close() }()
+		if err := target.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, true); err != nil {
+			t.Fatalf("set marker: %v", err)
+		}
+	}
+	targetMarker := func(t *testing.T, path string) bool {
+		t.Helper()
+		target, err := store.OpenSQLite(path)
+		if err != nil {
+			t.Fatalf("open target: %v", err)
+		}
+		defer func() { _ = target.Close() }()
+		applied, err := target.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+		if err != nil {
+			t.Fatalf("read marker: %v", err)
+		}
+		return applied
+	}
+	newSource := func(t *testing.T, path string, withManifest bool) {
+		t.Helper()
+		src, err := store.OpenSQLite(path)
+		if err != nil {
+			t.Fatalf("open source: %v", err)
+		}
+		defer func() { _ = src.Close() }()
+		if err := src.CreateTenant(ctx, store.Tenant{ID: "default", Name: "default"}); err != nil {
+			t.Fatalf("CreateTenant: %v", err)
+		}
+		if !withManifest {
+			return
+		}
+		if err := src.PutManifest(ctx, store.ManifestRecord{
+			TenantID: "default", ArtifactID: "alpha", Version: "1.0.0",
+			ContentHash: "sha256:abc", Type: "skill", Layer: "team",
+		}); err != nil {
+			t.Fatalf("PutManifest: %v", err)
+		}
+	}
+	migrate := func(srcDB, dstDB string, extra ...string) int {
+		args := []string{"--source-sqlite", srcDB, "--target-store", "sqlite", "--target-sqlite", dstDB}
+		return adminMigrateToStandard(append(args, extra...))
+	}
+
+	t.Run("a copied manifest row clears the marker", func(t *testing.T) {
+		dir := t.TempDir()
+		srcDB, dstDB := filepath.Join(dir, "src.db"), filepath.Join(dir, "dst.db")
+		newSource(t, srcDB, true)
+		newTarget(t, dstDB)
+		if rc := migrate(srcDB, dstDB); rc != 0 {
+			t.Fatalf("rc = %d, want 0", rc)
+		}
+		if targetMarker(t, dstDB) {
+			t.Error("the target's marker is still set after a run that copied a manifest row")
+		}
+	})
+
+	t.Run("dry run leaves the marker set", func(t *testing.T) {
+		dir := t.TempDir()
+		srcDB, dstDB := filepath.Join(dir, "src.db"), filepath.Join(dir, "dst.db")
+		newSource(t, srcDB, true)
+		newTarget(t, dstDB)
+		if rc := migrate(srcDB, dstDB, "--dry-run"); rc != 0 {
+			t.Fatalf("rc = %d, want 0", rc)
+		}
+		if !targetMarker(t, dstDB) {
+			t.Error("--dry-run cleared the target's marker")
+		}
+	})
+
+	t.Run("no manifest row leaves the marker set", func(t *testing.T) {
+		dir := t.TempDir()
+		srcDB, dstDB := filepath.Join(dir, "src.db"), filepath.Join(dir, "dst.db")
+		newSource(t, srcDB, false)
+		newTarget(t, dstDB)
+		if rc := migrate(srcDB, dstDB); rc != 0 {
+			t.Fatalf("rc = %d, want 0", rc)
+		}
+		if !targetMarker(t, dstDB) {
+			t.Error("a run that copied no manifest row cleared the target's marker")
+		}
+	})
+}
+
+// markerRecorder records the order of the target writes pumpStore makes and can
+// fail either of them, which is what pins the clear-before-copy order.
+type markerRecorder struct {
+	store.Store
+	calls      []string
+	markerErr  error
+	putErrOn   int
+	putErr     error
+	putCounter int
+}
+
+func (m *markerRecorder) SetDataMigrationApplied(ctx context.Context, name string, applied bool) error {
+	m.calls = append(m.calls, "marker")
+	if m.markerErr != nil {
+		return m.markerErr
+	}
+	return m.Store.SetDataMigrationApplied(ctx, name, applied)
+}
+
+func (m *markerRecorder) PutManifest(ctx context.Context, rec store.ManifestRecord) error {
+	m.calls = append(m.calls, "put")
+	m.putCounter++
+	if m.putErr != nil && m.putCounter == m.putErrOn {
+		return m.putErr
+	}
+	return m.Store.PutManifest(ctx, rec)
+}
+
+// Spec: §13.4 — pumpStore clears the target's record of the content-hash
+// rewrite before its first PutManifest, so a pump that fails partway leaves the
+// target unmarked and the rewrite runs again over whatever was copied, at the
+// target's next start or through sign-stored-rows.
+func TestPumpStore_ClearsTheMarkerBeforeTheFirstWrite(t *testing.T) {
+	ctx := context.Background()
+	newPlan := func() *migrationPlan {
+		return &migrationPlan{
+			tenants: []store.Tenant{{ID: "default", Name: "default"}},
+			manifests: map[string][]store.ManifestRecord{"default": {
+				{TenantID: "default", ArtifactID: "alpha", Version: "1.0.0", ContentHash: "sha256:a", Type: "skill", Layer: "team"},
+				{TenantID: "default", ArtifactID: "beta", Version: "1.0.0", ContentHash: "sha256:b", Type: "skill", Layer: "team"},
+			}},
+			manifestCount: 2,
+			layerConfigs:  map[string][]store.LayerConfig{},
+			adminGrants:   map[string][]store.AdminGrant{},
+		}
+	}
+	newTarget := func(t *testing.T) *store.Memory {
+		t.Helper()
+		mem := store.NewMemory()
+		if err := mem.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, true); err != nil {
+			t.Fatalf("set marker: %v", err)
+		}
+		return mem
+	}
+
+	t.Run("a failed clear stops the copy", func(t *testing.T) {
+		target := &markerRecorder{Store: newTarget(t), markerErr: errors.New("connection refused")}
+		err := pumpStore(newPlan(), target)
+		if err == nil || !strings.Contains(err.Error(), "clear data-migration marker:") {
+			t.Fatalf("pumpStore = %v, want an error naming the marker clear", err)
+		}
+		for _, call := range target.calls {
+			if call == "put" {
+				t.Error("a manifest row was written after the clear failed")
+			}
+		}
+	})
+
+	t.Run("the clear precedes the first copy", func(t *testing.T) {
+		mem := newTarget(t)
+		target := &markerRecorder{Store: mem, putErrOn: 2, putErr: errors.New("disk full")}
+		err := pumpStore(newPlan(), target)
+		if err == nil || !strings.Contains(err.Error(), "put manifest") {
+			t.Fatalf("pumpStore = %v, want the write error", err)
+		}
+		if len(target.calls) < 2 || target.calls[0] != "marker" || target.calls[1] != "put" {
+			t.Errorf("call order = %v, want the marker clear before the first put", target.calls)
+		}
+		applied, err := mem.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+		if err != nil || applied {
+			t.Errorf("marker applied = %v (err %v), want false after a partial pump", applied, err)
+		}
+	})
 }

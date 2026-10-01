@@ -746,17 +746,30 @@ func TestArtifactResponse_TSRegistryError(t *testing.T) {
 
 // ---- Error handling ---------------------------------------------------------
 
-// materialize.signature_invalid when verification fails.
-func TestArtifactResponse_SignatureInvalid(t *testing.T) {
+// materialize.signature_missing when an enforcing policy loads an artifact
+// served with no signature.
+// Spec: §6.10
+func TestArtifactResponse_SignatureMissing(t *testing.T) {
 	t.Parallel()
-	srv := startServer(t, writeRegistry(t, map[string]string{
+	srv := startServerUnsigned(t, writeRegistry(t, map[string]string{
 		"finance/ap/pay-invoice/ARTIFACT.md": hrCtx("sensitivity: low"),
 	}))
 	mat := t.TempDir()
-	res := mcpExec(t, append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_VERIFY_SIGNATURES=always", "PODIUM_MATERIALIZE_ROOT="+mat),
+	// The environment is stated in full rather than built on mcpServerEnv,
+	// which carries its own PODIUM_VERIFY_SIGNATURES entry. The bridge needs
+	// verification material to start under always; the key signs nothing.
+	env := []string{
+		"PODIUM_REGISTRY=" + srv.BaseURL,
+		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_HARNESS=none",
+		"PODIUM_MATERIALIZE_ROOT=" + mat,
+		"PODIUM_VERIFY_SIGNATURES=always",
+		verifyKeyEnv(t),
+	}
+	res := mcpExec(t, env,
 		toolCall(1, "load_artifact", map[string]any{"id": "finance/ap/pay-invoice"}))
-	if e, _ := rpcResult(t, res.Stdout, 1)["error"].(string); !strings.Contains(e, "signature_invalid") {
-		t.Errorf("error=%q, want materialize.signature_invalid", e)
+	if e, _ := rpcResult(t, res.Stdout, 1)["error"].(string); !strings.Contains(e, "materialize.signature_missing") {
+		t.Errorf("error=%q, want materialize.signature_missing", e)
 	}
 }
 

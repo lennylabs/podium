@@ -1248,6 +1248,13 @@ func artifactShow(args []string) int {
 		params["session_id"] = *sessionID
 	}
 	body := mustGetJSON(*registry, "/v1/load_artifact", params)
+	// §6.6: a manifest document above the inline cutoff arrives by URL, so
+	// resolve the channel once before either printer reads the inline fields.
+	body, err = followManifestBody(context.Background(), body, readCLIToken(*registry))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "artifact show %s: manifest body: %v\n", id, err)
+		return 1
+	}
 	if *asJSON {
 		// spec: §7.6.1 — emit the documented {id, version, content_hash,
 		// frontmatter, body} schema. The wire response keys the manifest text

@@ -57,21 +57,24 @@ func TestValidate_WebUINonLoopbackAllowed(t *testing.T) {
 	}
 }
 
-// Spec: §13.10 — the only accepted --sign / PODIUM_SIGN value is
-// registry-key; any other value is named at startup rather than silently
-// leaving signing disabled.
+// Spec: §13.10 — --sign / PODIUM_SIGN accepts registry-key and none;
+// any other value is named at startup rather than silently read as a mode.
+// Matrix: §6.10 (config.invalid_sign_mode)
 func TestValidate_SignModeRejectsUnknown(t *testing.T) {
 	c := &Config{bind: "127.0.0.1:8080", signMode: "sigstore", storeType: "sqlite", objectStore: "filesystem"}
 	err := c.validate()
 	if err == nil || !strings.Contains(err.Error(), "config.invalid_sign_mode") {
 		t.Errorf("validate() = %v, want config.invalid_sign_mode", err)
 	}
+	if err != nil && !strings.Contains(err.Error(), "registry-key or none") {
+		t.Errorf("validate() = %v, want the message to name both accepted values", err)
+	}
 }
 
-// Spec: §13.10 — registry-key is accepted; an empty value (signing
-// disabled) is accepted.
+// Spec: §13.10 — registry-key and none are accepted, and an empty value
+// (which resolves to registry-key) is accepted.
 func TestValidate_SignModeAccepts(t *testing.T) {
-	for _, mode := range []string{"", "registry-key"} {
+	for _, mode := range []string{"", "registry-key", "none"} {
 		c := &Config{bind: "127.0.0.1:8080", signMode: mode, storeType: "sqlite", objectStore: "filesystem"}
 		if err := c.validate(); err != nil {
 			t.Errorf("validate() with signMode=%q = %v, want nil", mode, err)
@@ -80,33 +83,76 @@ func TestValidate_SignModeAccepts(t *testing.T) {
 }
 
 // Spec: §13.10 / §4.7.9 — registrySignerFor returns a working
-// registry-managed signer for "registry-key" and nil when signing is disabled.
+// registry-managed key and reports signing on for an empty mode and for
+// "registry-key", because the registry signs by default, and reports signing
+// off with the zero key for "none".
 func TestRegistrySignerFor(t *testing.T) {
 	t.Setenv("PODIUM_SIGN_KEY_PATH", t.TempDir()+"/registry-signing.key")
 
-	off, err := registrySignerFor("")
+	off, on, err := registrySignerFor("none")
+	if err != nil {
+		t.Fatalf("registrySignerFor(none): %v", err)
+	}
+	if on || off.PrivateKey != nil {
+		t.Errorf("registrySignerFor(none) = (%v, %v), want the zero key and signing off", off, on)
+	}
+
+	def, on, err := registrySignerFor("")
 	if err != nil {
 		t.Fatalf("registrySignerFor(\"\"): %v", err)
 	}
-	if off != nil {
-		t.Errorf("registrySignerFor(\"\") = non-nil, want nil (signing disabled)")
+	if !on || def.PrivateKey == nil {
+		t.Fatal("registrySignerFor(\"\") reports no signer, want one (signing is on by default)")
 	}
 
-	signer, err := registrySignerFor("registry-key")
+	signer, on, err := registrySignerFor("registry-key")
 	if err != nil {
 		t.Fatalf("registrySignerFor(registry-key): %v", err)
 	}
-	if signer == nil {
-		t.Fatal("registrySignerFor(registry-key) = nil, want a signer")
+	if !on || signer.PrivateKey == nil {
+		t.Fatal("registrySignerFor(registry-key) reports no signer, want one")
 	}
 	// A registry-managed signature is a non-empty JSON envelope over the
-	// content hash. spec: §4.7.9.
-	env, err := signer(context.Background(), "sha256:"+strings.Repeat("ab", 32))
+	// content hash, and the same provider verifies it. spec: §4.7.9. The
+	// §13.4 rehash pass relies on that round trip: it verifies a stored
+	// envelope with the loader's own provider before it rewrites the row.
+	hash := "sha256:" + strings.Repeat("ab", 32)
+	env, err := signer.Sign(context.Background(), hash)
 	if err != nil {
 		t.Fatalf("sign: %v", err)
 	}
 	if !strings.Contains(env, "signature") {
 		t.Errorf("signature envelope = %q, want a JSON object with a signature field", env)
+	}
+	if err := signer.Verify(context.Background(), hash, env); err != nil {
+		t.Errorf("Verify over the provider's own envelope: %v", err)
+	}
+}
+
+// Spec: §13.4, §13.12 — PODIUM_MIGRATION_OBJECT_READ_TIMEOUT bounds each
+// object-storage read the first-start stored-value rewrite makes. An unset,
+// zero, negative, or unparsable value takes the 30-second default, because a
+// zero deadline is no deadline at all and run's context carries none.
+func TestLoadConfig_MigrationObjectReadTimeout(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		set   bool
+		want  time.Duration
+	}{
+		{name: "unset", want: 30 * time.Second},
+		{name: "zero", value: "0", set: true, want: 30 * time.Second},
+		{name: "negative", value: "-1s", set: true, want: 30 * time.Second},
+		{name: "unparsable", value: "later", set: true, want: 30 * time.Second},
+		{name: "configured", value: "2s", set: true, want: 2 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			setEnvForTest(t, "PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", tc.value, tc.set)
+			if got := LoadConfig().migrationObjectReadTimeout; got != tc.want {
+				t.Errorf("migrationObjectReadTimeout = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

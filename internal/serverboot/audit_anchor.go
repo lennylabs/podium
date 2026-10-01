@@ -4,11 +4,9 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -141,9 +139,10 @@ func resolveAuditPath(p string) (string, error) {
 	return filepath.Join(home, ".podium", "audit.log"), nil
 }
 
-// loadOrGenerateAuditSigner reads the keypair from path; missing
-// file is filled in by generating a new keypair and writing it
-// back. The on-disk format is two base64 lines (private + public).
+// loadOrGenerateAuditSigner reads the §8.6 anchor keypair from path,
+// generating and writing one when the file is absent. The file uses the
+// registry key-file format, and any verify: line is ignored because the anchor
+// key is not rotated through a verification key set.
 func loadOrGenerateAuditSigner(path string) (sign.Provider, error) {
 	if path == "" {
 		home, err := os.UserHomeDir()
@@ -152,74 +151,40 @@ func loadOrGenerateAuditSigner(path string) (sign.Provider, error) {
 		}
 		path = filepath.Join(home, ".podium", "standalone", "audit.key")
 	}
-	priv, pub, err := readOrCreateEd25519(path)
+	kf, err := readOrCreateKeyFile(path)
 	if err != nil {
 		return nil, err
 	}
-	keyID := keyIDFor(pub)
-	return sign.RegistryManagedKey{
-		PrivateKey: priv,
-		PublicKey:  pub,
-		KeyID:      keyID,
-	}, nil
+	return sign.RegistryManagedKey{PrivateKey: kf.Private, PublicKey: kf.Public}, nil
 }
 
-func readOrCreateEd25519(path string) (ed25519.PrivateKey, ed25519.PublicKey, error) {
-	data, err := os.ReadFile(path)
-	if err == nil {
-		return parseEd25519PEM(data)
+// readOrCreateKeyFile reads the signing key file at path, or generates a
+// keypair and writes it there when the file is absent. It generates only on
+// fs.ErrNotExist, so an unreadable or malformed file is an error and is never
+// overwritten. Both callers sign, so a file with no private: line is refused.
+func readOrCreateKeyFile(path string) (sign.KeyFile, error) {
+	kf, err := sign.ReadKeyFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return generateKeyFile(path)
 	}
-	if !os.IsNotExist(err) {
-		return nil, nil, fmt.Errorf("read %s: %w", path, err)
+	if err != nil {
+		return sign.KeyFile{}, err
 	}
+	if kf.Private == nil {
+		return sign.KeyFile{}, fmt.Errorf("sign: key file %s carries no \"private:\" line", path)
+	}
+	return kf, nil
+}
+
+// generateKeyFile writes a fresh keypair to path and returns it.
+func generateKeyFile(path string) (sign.KeyFile, error) {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, nil, err
+		return sign.KeyFile{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, nil, err
+	kf := sign.KeyFile{Private: priv, Public: pub}
+	if err := sign.WriteKeyFile(path, kf); err != nil {
+		return sign.KeyFile{}, err
 	}
-	body := []byte(
-		"private: " + base64.StdEncoding.EncodeToString(priv) + "\n" +
-			"public: " + base64.StdEncoding.EncodeToString(pub) + "\n",
-	)
-	if err := os.WriteFile(path, body, 0o600); err != nil {
-		return nil, nil, fmt.Errorf("write %s: %w", path, err)
-	}
-	return priv, pub, nil
-}
-
-// parseEd25519PEM parses the simple two-line format produced by
-// readOrCreateEd25519.
-func parseEd25519PEM(data []byte) (ed25519.PrivateKey, ed25519.PublicKey, error) {
-	var priv ed25519.PrivateKey
-	var pub ed25519.PublicKey
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "private:"):
-			b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(strings.TrimPrefix(line, "private:")))
-			if err != nil {
-				return nil, nil, fmt.Errorf("decode private: %w", err)
-			}
-			priv = ed25519.PrivateKey(b)
-		case strings.HasPrefix(line, "public:"):
-			b, err := base64.StdEncoding.DecodeString(strings.TrimSpace(strings.TrimPrefix(line, "public:")))
-			if err != nil {
-				return nil, nil, fmt.Errorf("decode public: %w", err)
-			}
-			pub = ed25519.PublicKey(b)
-		}
-	}
-	if len(priv) == 0 || len(pub) == 0 {
-		return nil, nil, errors.New("audit signing key file: missing private or public block")
-	}
-	return priv, pub, nil
-}
-
-// keyIDFor returns a short fingerprint of the public key for the
-// envelope's `key_id` field. Format: hex of sha256(pub)[:8].
-func keyIDFor(pub ed25519.PublicKey) string {
-	sum := sha256.Sum256(pub)
-	return hex.EncodeToString(sum[:8])
+	return kf, nil
 }

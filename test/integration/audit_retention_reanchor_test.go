@@ -33,7 +33,7 @@ func TestAuditRetention_ReanchorsNewHeadAfterDrop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
 	}
-	signer := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub, KeyID: "test-key"}
+	signer := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub}
 
 	ctx := context.Background()
 	now := time.Now().UTC()

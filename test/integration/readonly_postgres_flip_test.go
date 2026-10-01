@@ -103,12 +103,12 @@ func TestConfigReadOnlyFlip_PostgresPrimaryOutage(t *testing.T) {
 	// Seed one manifest under a public layer so load_artifact and search serve a
 	// real Postgres row throughout the read-only window.
 	const seededID = "ops/runbooks/restart-gateway"
-	if err := pg.PutManifest(ctx, store.ManifestRecord{
+	if err := pg.PutManifest(ctx, storetest.Seal(t, store.ManifestRecord{
 		TenantID: roflipTenant, ArtifactID: seededID, Version: "1.0.0",
 		ContentHash: "sha256:roflipseed", Type: "context",
 		Description: "restart the api gateway", Layer: "ops",
 		IngestedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 

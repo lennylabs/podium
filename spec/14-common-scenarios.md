@@ -66,6 +66,8 @@ client = Client.from_env()         # picks up registry URL from sync.yaml + over
 2. Configure the tenant's layer list with Git-source layers and visibility rules (§4.6).
 3. Set Git webhooks pointing at the ingest endpoint (§7.3.1).
 
+The operator distributes the registry's public verification key to consumers out of band, for `PODIUM_SIGNATURE_VERIFY_KEY` (§4.7.9, §6.11).
+
 **Per developer:**
 
 4. `podium init --global --registry https://podium.acme.com`.
@@ -84,7 +86,7 @@ Operator setup as in §14.5. Per workspace:
 
 Operator setup as in §14.5. Per workspace:
 
-1. Configure the harness's MCP server entry (§6.11) with `PODIUM_REGISTRY` and `PODIUM_HARNESS`. `PODIUM_OVERLAY_PATH` is optional; when unset, the MCP server resolves the overlay from MCP roots (§6.4).
+1. Configure the harness's MCP server entry per the §6.11 recipe. `PODIUM_OVERLAY_PATH` is optional; when unset, the MCP server resolves the overlay from MCP roots (§6.4). A consumer of a remote registry also supplies the registry's verification key out of band, per §4.7.9.
 2. First call triggers OAuth device-code via MCP elicitation. Token caches in the OS keychain.
 3. Drop workspace-local artifacts under `.podium/overlay/`. The MCP server's fsnotify watcher picks up changes.
 
@@ -120,7 +122,7 @@ client.login()   # device-code flow before any catalog calls
        source: { git: { repo: ..., ref: main } }
        visibility: { public: true }
    ```
-3. Configure freeze windows, admin grants, signing (Sigstore-keyless or registry-managed).
+3. Configure freeze windows, admin grants, and registry-managed-key signing (§4.7.9).
 4. `podium lint` runs as a required CI check on each layer's repo.
 
 **Per author:** edit artifacts in the team's Git repo, open PR, merge. Webhook fires; registry ingests.
@@ -177,7 +179,7 @@ Registry runs entirely on an internal network with no public ingress.
 1. Deploy registry per §13.1 inside the internal network. Identity via the org's internal OIDC IdP. Object storage on internal S3-compatible storage (MinIO or similar).
 2. Layer Git repos hosted on internal Git server (GitLab/Gitea/internal GitHub Enterprise). Webhooks reach the registry over the internal network only.
 3. Embedding provider: `ollama` pointed at a local model server (no external API calls). Vector backend: pgvector (no external service).
-4. Sigstore-keyless requires public OIDC infrastructure; air-gapped deployments use the registry-managed signing key path instead.
+4. The registry signs with a registry-managed key in every deployment, and no public OIDC infrastructure is involved. An air-gapped deployment points `PODIUM_SIGN_KEY_PATH` at a key file on internal storage (§4.7.9, §13.12).
 
 **Consumers:** internal endpoint only; OIDC flow stays inside the network.
 

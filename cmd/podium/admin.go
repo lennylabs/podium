@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lennylabs/podium/internal/serverboot"
 	"github.com/lennylabs/podium/pkg/audit"
 )
 
@@ -34,6 +35,8 @@ func adminCmd(args []string) int {
 			{"runtime", "Manage trusted runtime signing keys."},
 			{"tenant", "Manage tenants (operator role)."},
 			{"migrate-to-standard", "Pump standalone state into a standard deployment."},
+			{"sign-stored-rows", "Rewrite stored rows under the §13.4 rules, signing under the registry signing key when signing is on."},
+			{"signing-key", "Generate or rotate the registry signing key file."},
 		})
 		if len(args) == 0 {
 			return 2
@@ -59,6 +62,11 @@ func adminCmd(args []string) int {
 		return adminTenantCmd(args[1:])
 	case "migrate-to-standard":
 		return adminMigrateToStandard(args[1:])
+	case "sign-stored-rows":
+		err := serverboot.RunSignStoredRows(context.Background(), args[1:])
+		return serverboot.SignStoredRowsExitCode(os.Stderr, err)
+	case "signing-key":
+		return adminSigningKeyCmd(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown admin subcommand: %s\n", args[0])
 		return 2

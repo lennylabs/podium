@@ -30,6 +30,15 @@ The Podium MCP server is a stdio binary the harness spawns alongside its other M
 | `PODIUM_HARNESS` | Harness adapter to use. Pass `none` for canonical raw output. |
 | `PODIUM_OVERLAY_PATH` | Optional. Workspace local-overlay path; falls back to `<workspace>/.podium/overlay/` when MCP roots resolve. |
 | `PODIUM_IDENTITY_PROVIDER` | `oauth-device-code` (developer hosts, default) or `injected-session-token` (managed runtimes). |
+| `PODIUM_VERIFY_SIGNATURES` | `always` (default) or `never`. Under `always`, every artifact the MCP server loads must carry a signature that verifies, and a load of an unsigned artifact fails with `materialize.signature_missing`. `never` checks nothing and fits only a registry running with `PODIUM_SIGN=none`. |
+| `PODIUM_SIGNATURE_PROVIDER` | `registry-managed` (default), `sigstore-keyless`, or `noop`. Under a policy above `never`, `noop` refuses the start, because it verifies nothing. |
+| `PODIUM_SIGNATURE_VERIFY_KEY` | The registry's verification key set, which the `registry-managed` provider verifies with: one base64 Ed25519 public key or, during a key rotation, a comma-separated list of them. A delivery signature that verifies under any key of the set is accepted. [Clustered](../deployment/clustered#2-deploy-the-registry) shows how to extract the key from the registry's key file. When set it is authoritative, and an entry that is empty or does not decode refuses the start. |
+| `PODIUM_SIGN_KEY_PATH` | Optional. The registry key file whose `public:` line and every `verify:` line supply the verification key set when `PODIUM_SIGNATURE_VERIFY_KEY` is unset. Default `~/.podium/standalone/registry-signing.key`. The MCP server reads it and never writes it. |
+| `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` | The PEM trust root a `sigstore-keyless` consumer requires; unset or unreadable under that provider and a policy above `never`, it refuses the start. |
+
+Under the default `always` policy, the MCP server resolves its verification key set once at start and refuses to start with `config.signature_provider_unavailable` when it resolves none. A consumer of a standard deployment sets `PODIUM_SIGNATURE_PROVIDER` and `PODIUM_SIGNATURE_VERIFY_KEY`, as each recipe below shows, and during a registry key rotation adds the new key to the variable as a comma-separated list before the registry signs under it. A standalone consumer running under the same user account as its registry resolves the set from the registry's own key file and sets neither, and a consumer whose standalone registry runs with a non-default `PODIUM_SIGN_KEY_PATH` sets that variable to the same path.
+
+The MCP server delivers a record from its cache only after the record passes the same signature check as a live response. A cached delivery signature made under a key the consumer no longer trusts, such as one cached before a rotation whose retired key has since left the set, is a cache miss under `PODIUM_CACHE_MODE=always-revalidate` and `offline-first`: the MCP server refetches the artifact, verifies the response, and replaces the cached record. When the registry is unreachable, the load returns the cache-miss outcome for the mode, `network.registry_unreachable` under `always-revalidate` and the offline status with no artifact under `offline-first`, and never delivers the failing record. Under `offline-only` the MCP server refuses such a record with `materialize.signature_invalid`, so an `offline-only` consumer keeps the retired key in its set, or clears its cache directory and refills it in `always-revalidate` or `offline-first`, before the retired key leaves its set.
 
 For `podium sync`, the same configuration lives in `<workspace>/.podium/sync.yaml` (or `~/.podium/sync.yaml` for per-developer defaults). See the per-harness sections for examples.
 
@@ -151,6 +160,8 @@ The adapter set grows as new harnesses appear. Custom adapters register through 
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
         "PODIUM_HARNESS": "claude-code",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<registry public key, base64>",
         "PODIUM_OVERLAY_PATH": "${WORKSPACE}/.podium/overlay/"
       }
     }
@@ -198,7 +209,9 @@ podium sync
       "command": "podium-mcp",
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "claude-desktop"
+        "PODIUM_HARNESS": "claude-desktop",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<registry public key, base64>"
       }
     }
   }
@@ -241,7 +254,9 @@ Cowork is Anthropic's web product for organizations (claude.ai). Plugin distribu
       "command": "podium-mcp",
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "cursor"
+        "PODIUM_HARNESS": "cursor",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<registry public key, base64>"
       }
     }
   }
@@ -290,7 +305,9 @@ podium sync
       "enabled": true,
       "environment": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "opencode"
+        "PODIUM_HARNESS": "opencode",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<registry public key, base64>"
       }
     }
   }
@@ -329,7 +346,7 @@ OpenCode uses plural component directories (`.opencode/agents/`, `.opencode/comm
 
 ## Codex
 
-**MCP server**: configure per OpenAI Codex's MCP config conventions. The env-var contract is the same as the other harnesses; pass `PODIUM_HARNESS=codex`.
+**MCP server**: configure per OpenAI Codex's MCP config conventions. The env-var contract is the same as the other harnesses, including `PODIUM_SIGNATURE_PROVIDER` and `PODIUM_SIGNATURE_VERIFY_KEY`; pass `PODIUM_HARNESS=codex`.
 
 **`podium sync`**:
 
@@ -364,7 +381,7 @@ Codex consumes `AGENTS.md` for rules and now has native skill, subagent, and hoo
 
 ## Gemini
 
-**MCP server**: configure per the Gemini CLI's MCP config conventions. Pass `PODIUM_HARNESS=gemini`.
+**MCP server**: configure per the Gemini CLI's MCP config conventions. Pass `PODIUM_HARNESS=gemini`, and set `PODIUM_SIGNATURE_PROVIDER` and `PODIUM_SIGNATURE_VERIFY_KEY` as the other recipes do.
 
 **`podium sync`**:
 
@@ -439,6 +456,8 @@ mcp_servers:
     env:
       PODIUM_REGISTRY: https://podium.acme.com
       PODIUM_HARNESS: hermes
+      PODIUM_SIGNATURE_PROVIDER: registry-managed
+      PODIUM_SIGNATURE_VERIFY_KEY: "<registry public key, base64>"
 ```
 
 **`podium sync`**:
@@ -477,7 +496,9 @@ For runtimes without a dedicated adapter, or when canonical raw output is needed
       "command": "podium-mcp",
       "env": {
         "PODIUM_REGISTRY": "https://podium.acme.com",
-        "PODIUM_HARNESS": "none"
+        "PODIUM_HARNESS": "none",
+        "PODIUM_SIGNATURE_PROVIDER": "registry-managed",
+        "PODIUM_SIGNATURE_VERIFY_KEY": "<registry public key, base64>"
       }
     }
   }
@@ -495,7 +516,7 @@ This is also the right harness for build pipelines and evaluation harnesses that
 
 ## Standalone (no env override)
 
-When `podium serve` has auto-bootstrapped `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080`, or `podium init --global --standalone` has written it explicitly, the MCP server resolves the registry from there and the `PODIUM_REGISTRY` env var can be omitted. The harness resolves separately. The MCP server reads `PODIUM_HARNESS` and falls back to the `none` adapter, and it does not read `defaults.harness` from `sync.yaml`, so a harness-native layout over the MCP path requires the variable. `podium sync` resolves `--harness`, then `PODIUM_HARNESS`, then the active profile's `harness`, then `defaults.harness`, then `none`, so a workspace initialized with `podium init --harness <name>` needs neither the flag nor the variable.
+When `podium serve` has auto-bootstrapped `~/.podium/sync.yaml` with `defaults.registry: http://127.0.0.1:8080`, or `podium init --global --standalone` has written it explicitly, the MCP server resolves the registry from there and the `PODIUM_REGISTRY` env var can be omitted. The harness resolves separately. The MCP server reads `PODIUM_HARNESS` and falls back to the `none` adapter, and it does not read `defaults.harness` from `sync.yaml`, so a harness-native layout over the MCP path requires the variable. `podium sync` resolves `--harness`, then `PODIUM_HARNESS`, then the active profile's `harness`, then `defaults.harness`, then `none`, so a workspace initialized with `podium init --harness <name>` needs neither the flag nor the variable. The verification key set also resolves without an override: the MCP server resolves it from the `public:` line and every `verify:` line of the registry key file at `~/.podium/standalone/registry-signing.key`, which the standalone registry wrote, so the recipe omits `PODIUM_SIGNATURE_PROVIDER` and `PODIUM_SIGNATURE_VERIFY_KEY`.
 
 ---
 

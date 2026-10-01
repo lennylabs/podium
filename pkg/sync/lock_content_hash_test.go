@@ -20,18 +20,15 @@ func TestContentHashFor_SkillBytesAndResources(t *testing.T) {
 	rec := materialRecord{
 		ID:            "finance/ap/pay-invoice",
 		ArtifactBytes: art,
+		AuthoredBytes: art,
 		SkillBytes:    skill,
 		Resources:     map[string][]byte{"ref.md": []byte("R"), "a.md": []byte("A")},
 	}
 	got := contentHashFor(rec)
 	// The manifest leads, the SKILL.md bytes follow, and resources contribute in
 	// sorted key order: a.md, then ref.md.
-	want := "sha256:" + version.ContentHash(
-		art,
-		skill,
-		[]byte("a.md"), []byte("A"),
-		[]byte("ref.md"), []byte("R"),
-	)
+	want := "sha256:" + version.CanonicalContentHash(art, skill,
+		map[string][]byte{"a.md": []byte("A"), "ref.md": []byte("R")})
 	if got != want {
 		t.Errorf("contentHashFor = %q, want %q", got, want)
 	}
@@ -40,14 +37,16 @@ func TestContentHashFor_SkillBytesAndResources(t *testing.T) {
 	}
 }
 
-// An artifact with no SKILL.md contributes no bytes for that slot, so the
-// digest is the one over the manifest bytes alone. spec: §7.5.3.
-func TestContentHashFor_NoSkillHashesManifestAlone(t *testing.T) {
+// An artifact with no SKILL.md frames a zero-length value in that slot, so the
+// digest is the §4.7.6 canonical one over the manifest with a nil SKILL.md and
+// no resources rather than a digest over the manifest bytes alone. spec:
+// §7.5.3.
+func TestContentHashFor_NoSkillFramesAnEmptySkillSlot(t *testing.T) {
 	t.Parallel()
 	art := []byte("---\ntype: agent\n---")
-	rec := materialRecord{ID: "x", ArtifactBytes: art}
+	rec := materialRecord{ID: "x", ArtifactBytes: art, AuthoredBytes: art}
 	got := contentHashFor(rec)
-	want := "sha256:" + version.ContentHash(art)
+	want := "sha256:" + version.CanonicalContentHash(art, nil, nil)
 	if got != want {
 		t.Errorf("contentHashFor = %q, want %q", got, want)
 	}
@@ -74,7 +73,7 @@ func TestContentHashFor_DistinctAndStable(t *testing.T) {
 // longer reproduce ContentHash").
 func TestLockContentHash_PrefersRegistryValue(t *testing.T) {
 	t.Parallel()
-	rec := materialRecord{ID: "x", ArtifactBytes: []byte("served bytes"), ContentHash: "sha256:authoritative"}
+	rec := materialRecord{ID: "x", ArtifactBytes: []byte("served bytes"), AuthoredBytes: []byte("served bytes"), ContentHash: "sha256:authoritative"}
 	if got := lockContentHash(rec); got != "sha256:authoritative" {
 		t.Errorf("lockContentHash = %q, want the registry value sha256:authoritative", got)
 	}
@@ -83,13 +82,21 @@ func TestLockContentHash_PrefersRegistryValue(t *testing.T) {
 	}
 }
 
-// spec: §7.5.3 — a filesystem source carries no recorded hash, so
-// lockContentHash falls back to the digest computed over the served bytes.
-func TestLockContentHash_FallsBackToComputed(t *testing.T) {
+// Spec: §4.7.6, §7.5.3 — a filesystem source carries no recorded hash, so
+// lockContentHash computes one, and it computes it over the authored
+// ARTIFACT.md rather than over the merged, parent-hidden re-serialization the
+// extends: resolver leaves in ArtifactBytes.
+func TestLockContentHash_FilesystemSourceHashesTheAuthoredManifest(t *testing.T) {
 	t.Parallel()
-	rec := materialRecord{ID: "x", ArtifactBytes: []byte("served bytes")} // no ContentHash
-	if got, want := lockContentHash(rec), contentHashFor(rec); got != want {
-		t.Errorf("lockContentHash = %q, want the computed digest %q", got, want)
+	authored := []byte("---\ntype: context\nversion: 2.0.0\ndescription: child desc\nextends: acme/base\n---\n\nChild body.\n")
+	merged := []byte("---\ntype: context\nversion: 2.0.0\ndescription: child desc\nname: Base\n---\n\nChild body.\n")
+	rec := materialRecord{ID: "acme/child", ArtifactBytes: merged, AuthoredBytes: authored} // no ContentHash
+	want := "sha256:" + version.CanonicalContentHash(authored, nil, nil)
+	if got := lockContentHash(rec); got != want {
+		t.Errorf("lockContentHash = %q, want the authored-bytes digest %q", got, want)
+	}
+	if overMerged := "sha256:" + version.CanonicalContentHash(merged, nil, nil); want == overMerged {
+		t.Fatal("test setup: the authored and the merged bytes hash alike; the fixture proves nothing")
 	}
 }
 
@@ -103,7 +110,7 @@ func TestRun_ServerSourceLockPinsRegistryContentHash(t *testing.T) {
 	const authoritative = "sha256:deadbeefcafef00d"
 	// Guard the fixture: the recomputed digest over the served frontmatter must
 	// differ from the authoritative stub value, or the test proves nothing.
-	if contentHashFor(materialRecord{ArtifactBytes: []byte(contextArtifactSrc)}) == authoritative {
+	if contentHashFor(materialRecord{AuthoredBytes: []byte(contextArtifactSrc)}) == authoritative {
 		t.Fatal("test setup: served frontmatter hashes to the authoritative value; pick a distinct stub hash")
 	}
 	srv := newStubRegistry(t, map[string]stubArtifact{
@@ -166,5 +173,64 @@ func TestRun_LockRecordsVersionAndContentHash(t *testing.T) {
 		if !strings.HasPrefix(la.ContentHash, "sha256:") || len(la.ContentHash) <= len("sha256:") {
 			t.Errorf("lock artifact %s content_hash = %q, want sha256:<hex>", la.ID, la.ContentHash)
 		}
+	}
+}
+
+// Spec: §4.7.6, §7.5.3 — a filesystem-source sync pins the digest over the
+// authored ARTIFACT.md for an extends: child, which is the value ingest stores
+// and a server-source sync records, rather than the digest over the merged
+// re-serialization the extends: resolver writes into ArtifactBytes. The parent
+// sits in the layer layer_order: places first, so the resolver finds it through
+// the effective view.
+func TestRun_FilesystemSourceLockHashesAnExtendsChildBeforeTheMerge(t *testing.T) {
+	t.Parallel()
+	registry := t.TempDir()
+	target := t.TempDir()
+	parent := "---\ntype: context\nversion: 1.0.0\nname: Base\ndescription: parent desc\n---\n\nParent body.\n"
+	child := "---\ntype: context\nversion: 2.0.0\ndescription: child desc\nextends: acme/base\n---\n\nChild body.\n"
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{
+			Path:    ".registry-config",
+			Content: "multi_layer: true\nlayer_order:\n  - team-shared\n  - personal\n",
+		},
+		testharness.WriteTreeOption{Path: "team-shared/acme/base/ARTIFACT.md", Content: parent},
+		testharness.WriteTreeOption{Path: "personal/acme/child/ARTIFACT.md", Content: child},
+	)
+	if _, err := Run(Options{RegistryPath: registry, Target: target, AdapterID: "none"}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	lock, err := ReadLock(target)
+	if err != nil {
+		t.Fatalf("ReadLock: %v", err)
+	}
+	want := "sha256:" + version.CanonicalContentHash([]byte(child), nil, nil)
+	// Guard the fixture: the merged re-serialization must hash differently, or
+	// the assertion below passes whichever bytes the composer read.
+	recs, err := filesystemRecords(Options{RegistryPath: registry})
+	if err != nil {
+		t.Fatalf("filesystemRecords: %v", err)
+	}
+	for _, rec := range recs {
+		if rec.ID != "acme/child" {
+			continue
+		}
+		mergedBytes := rec.ArtifactBytes
+		merged := "sha256:" + version.CanonicalContentHash(mergedBytes, nil, nil)
+		if merged == want {
+			t.Fatal("test setup: the merged bytes hash to the authored digest; the fixture proves nothing")
+		}
+	}
+	var seen int
+	for _, la := range lock.Artifacts {
+		if la.ID != "acme/child" {
+			continue
+		}
+		seen++
+		if la.ContentHash != want {
+			t.Errorf("lock content_hash = %q, want the authored-bytes digest %q", la.ContentHash, want)
+		}
+	}
+	if seen == 0 {
+		t.Fatalf("lock has no acme/child entry: %+v", lock.Artifacts)
 	}
 }

@@ -180,9 +180,26 @@ def _open_browser(url: str) -> None:
         pass
 
 
-def _fetch_bytes(url: str) -> bytes:
-    with urllib.request.urlopen(url) as resp:  # noqa: S310 - registry-issued presigned URL
+def _fetch_bytes(url: str, headers: dict[str, str] | None = None) -> bytes:
+    req = urllib.request.Request(url, headers=headers or {})
+    with urllib.request.urlopen(req) as resp:  # noqa: S310 - registry-issued presigned URL
         return resp.read()
+
+
+def _presigned_sigv4(url: str) -> bool:
+    """Report whether ``url`` is an AWS Signature V4 presigned URL.
+
+    spec §13.12: a consumer sends no credential when following an S3
+    presigned URL, which carries a non-empty ``X-Amz-Signature`` query
+    parameter, and sends its token to the filesystem backend's ``/objects``
+    route, which authorizes the read against the caller. A URL that fails to
+    parse is treated as not presigned, matching the Go consumers.
+    """
+    try:
+        query = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+    except ValueError:
+        return False
+    return any(v for v in query.get("X-Amz-Signature", []))
 
 
 def _decode_inline_resources(
@@ -268,6 +285,11 @@ class LoadedArtifact:
     # spec: §4.3.4 / §11 — the verbatim SKILL.md for a skill, delivered so the
     # materialized file is byte-identical to the authored source.
     skill_raw: str = ""
+    # spec: §4.7.10 — the registry's delivery attestation, passed through
+    # unverified. The SDK verifies nothing; a workspace-overlay load leaves
+    # both empty because no registry served the record.
+    delivery_hash: str = ""
+    delivery_signature: str = ""
 
     def materialize(
         self,
@@ -323,6 +345,9 @@ class BatchResult:
     frontmatter: str = ""
     skill_raw: str = ""
     resources: list[dict[str, Any]] = field(default_factory=list)
+    # spec: §4.7.10 — the delivery attestation, passed through unverified.
+    delivery_hash: str = ""
+    delivery_signature: str = ""
     error: "RegistryError | None" = None
 
     def materialize(
@@ -336,15 +361,16 @@ class BatchResult:
 
         Raises RegistryError when called on an ``error`` item so a caller
         that forgets to check ``status`` fails loudly rather than writing
-        an empty package. Batch resources travel as §7.6.2 presigned
-        references, so every resource is fetched from its URL.
+        an empty package. A resource the registry holds inline on the
+        manifest record travels inline, and every other resource travels as
+        a §7.6.2 presigned reference fetched from its URL.
         """
         if self.status != "ok":
             raise self.error or RegistryError("registry.unknown", f"cannot materialize {self.id}")
-        # §7.6.2: a resource carries a presigned_url with an object store
-        # configured. In the standalone-without-storage mode it carries the
-        # bytes inline (base64-encoded when inline_base64 is set), so deliver
-        # those rather than fetching a URL that does not exist.
+        # §7.6.2: a resource the registry holds inline on the manifest record
+        # carries its bytes inline (base64-encoded when inline_base64 is set),
+        # at any size and whether or not an object store is configured. Every
+        # other resource carries a presigned_url, which is fetched.
         inline: dict[str, str | bytes] = {}
         large: dict[str, dict[str, Any]] = {}
         for r in self.resources:
@@ -439,6 +465,8 @@ def _batch_result_from(env: dict[str, Any]) -> BatchResult:
         frontmatter=env.get("frontmatter", ""),
         skill_raw=env.get("skill_raw", ""),
         resources=env.get("resources", []) or [],
+        delivery_hash=env.get("delivery_hash", ""),
+        delivery_signature=env.get("delivery_signature", ""),
         error=err,
     )
 
@@ -1291,6 +1319,8 @@ class Client:
         # as a presigned manifest_body_url with the inline fields cleared. Resolve
         # it here so the returned artifact carries the manifest fields regardless
         # of the manifest's size, matching the inline path and the MCP server.
+        # The default follower sends the client's token to a URL that is not
+        # SigV4 presigned (§13.12); a caller-supplied fetch owns its transport.
         mbu = body.get("manifest_body_url")
         if mbu:
             manifest_body, frontmatter, skill_raw = _apply_manifest_body_url(
@@ -1299,7 +1329,8 @@ class Client:
                 manifest_body,
                 frontmatter,
                 skill_raw,
-                fetch or _fetch_bytes,
+                fetch
+                or (lambda u: _fetch_bytes(u, {} if _presigned_sigv4(u) else self._headers())),
             )
         return LoadedArtifact(
             id=body.get("id", artifact_id),
@@ -1316,6 +1347,8 @@ class Client:
             # §7.2 large resources travel as presigned references the
             # consumer fetches from object storage; materialize() pulls them.
             large_resources=body.get("large_resources", {}) or {},
+            delivery_hash=body.get("delivery_hash", ""),
+            delivery_signature=body.get("delivery_signature", ""),
         )
 
     def load_artifacts(

@@ -22,6 +22,14 @@ type ArtifactRecord struct {
 	ArtifactBytes []byte
 	SkillBytes    []byte
 	Resources     map[string][]byte
+	// AuthoredBytes is ARTIFACT.md as read from disk. It equals ArtifactBytes
+	// until the extends: resolver overwrites ArtifactBytes with the merged,
+	// parent-hidden re-serialization (§4.6), after which the two differ for a
+	// child. Materialization reads ArtifactBytes; the §4.7.6 digest reads
+	// AuthoredBytes, because the digest is defined over the bytes as ingested
+	// and a merged serialization does not reproduce it. The store's
+	// ManifestRecord.Frontmatter carries the same bytes on the registry side.
+	AuthoredBytes []byte
 }
 
 // CanonicalID is the path under the layer root, separated by "/".
@@ -185,6 +193,7 @@ func loadArtifactRecord(layer Layer, artifactPath string) (ArtifactRecord, error
 		Layer:         layer,
 		Artifact:      a,
 		ArtifactBytes: artifactBytes,
+		AuthoredBytes: artifactBytes,
 		Resources:     map[string][]byte{},
 	}
 

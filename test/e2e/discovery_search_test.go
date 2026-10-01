@@ -31,7 +31,14 @@ import (
 
 // ---- helpers ----------------------------------------------------------------
 
-func brEnv(baseURL string) []string { return []string{"PODIUM_REGISTRY=" + baseURL} }
+// brEnv and brMatEnv build the environment for the podium and podium-mcp
+// processes these suites spawn. The registry signs at ingest by default
+// (§13.10) and a bridge verifies any signature it is served under every policy
+// above never (§4.7.9), so these suites, whose subject is not signing, set
+// never. The podium CLI does not read the variable.
+func brEnv(baseURL string) []string {
+	return []string{"PODIUM_REGISTRY=" + baseURL, "PODIUM_VERIFY_SIGNATURES=never"}
+}
 
 func brMatEnv(t *testing.T, baseURL, mat string, extra ...string) []string {
 	return append([]string{
@@ -39,6 +46,7 @@ func brMatEnv(t *testing.T, baseURL, mat string, extra ...string) []string {
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, extra...)
 }
 
@@ -968,7 +976,7 @@ func TestSearch_SearchDomainsNoSubtree(t *testing.T) {
 // can distinguish a transient outage from a request rejection.
 func TestSearch_OfflineSearchArtifacts(t *testing.T) {
 	t.Parallel()
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
 		toolCall(1, "search_artifacts", map[string]any{"query": "anything"}))
 	result := rpcResult(t, res.Stdout, 1)
 	if result["status"] != "offline" {
@@ -986,7 +994,7 @@ func TestSearch_OfflineSearchArtifacts(t *testing.T) {
 // status, not an error.
 func TestSearch_OfflineLoadDomain(t *testing.T) {
 	t.Parallel()
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=http://127.0.0.1:1", "PODIUM_CACHE_MODE=always-revalidate", "PODIUM_CACHE_DIR=" + t.TempDir()},
 		toolCall(1, "load_domain", map[string]any{}))
 	result := rpcResult(t, res.Stdout, 1)
 	if result["status"] != "offline" {

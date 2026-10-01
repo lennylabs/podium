@@ -18,7 +18,7 @@ func TestPodiumMCP_RejectsOlderProtocol(t *testing.T) {
 	h := registryharness.New(t)
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+h.URL)
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "initialize", ID: 1, Params: map[string]any{
 			"protocolVersion": "2020-01-01",
@@ -53,7 +53,7 @@ func TestPodiumMCP_InitializeNegotiates(t *testing.T) {
 	h := registryharness.New(t)
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+h.URL)
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "initialize", ID: 1, Params: map[string]any{
 			"protocolVersion": "2024-11-05",
@@ -90,7 +90,7 @@ func TestPodiumMCP_NegotiatesDownToHostVersion(t *testing.T) {
 	h := registryharness.New(t)
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY="+h.URL)
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	// 2024-11-03 is >= supportedSince (2024-11-01) and < the binary max
 	// (2024-11-05): a compatible request the server must agree down to.
 	const hostMax = "2024-11-03"
@@ -132,7 +132,7 @@ func TestPodiumMCP_NetworkRegistryUnreachable(t *testing.T) {
 	bin := buildMCP(t)
 	cmd := exec.Command(bin)
 	// Point at a closed port to force a connection failure.
-	cmd.Env = append(cmd.Env, "PODIUM_REGISTRY=http://127.0.0.1:1") // RFC 6335 reserved port; nothing listens
+	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=http://127.0.0.1:1") // RFC 6335 reserved port; nothing listens
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "tools/call", ID: 1, Params: map[string]any{
 			"name":      "search_artifacts",

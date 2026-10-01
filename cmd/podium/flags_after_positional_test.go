@@ -147,7 +147,27 @@ func TestDomainShow_FlagsAfterPositional(t *testing.T) {
 	}
 }
 
-const signableArtifact = `{"content_hash":"sha256:abc","signature":"noop:sha256:abc"}`
+const signableArtifact = `{"content_hash":"sha256:abc","delivery_hash":"sha256:def","delivery_signature":"noop:sha256:def"}`
+
+// Spec: §4.7.9 — a response without a delivery hash does not stop `podium
+// sign`, which reads only the content hash and still reaches the provider
+// check, while `podium verify` refuses it naming the missing delivery hash.
+func TestSignVerifyCmd_MissingDeliveryHashRefusedByVerifyOnly(t *testing.T) {
+	ts, _ := recordingRegistry(t, `{"content_hash":"sha256:abc"}`)
+	var rc int
+	stderr := captureStderr(t, func() {
+		rc = signCmd([]string{"--registry", ts.URL, "finance/run-close", "--provider", "bogus"})
+	})
+	if rc != 1 || !strings.Contains(stderr, "unknown signature provider: bogus") {
+		t.Errorf("signCmd rc = %d, stderr = %q; want the provider check", rc, stderr)
+	}
+	stderr = captureStderr(t, func() {
+		rc = verifyCmd([]string{"--registry", ts.URL, "finance/run-close", "--provider", "bogus"})
+	})
+	if rc != 1 || !strings.Contains(stderr, "registry returned no delivery hash") {
+		t.Errorf("verifyCmd rc = %d, stderr = %q; want the missing delivery hash refusal", rc, stderr)
+	}
+}
 
 func TestSignCmd_FlagsAfterPositional(t *testing.T) {
 	ts, _ := recordingRegistry(t, signableArtifact)

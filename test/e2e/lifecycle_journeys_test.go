@@ -41,6 +41,7 @@ import (
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/uuid"
 	"github.com/lennylabs/podium/pkg/store"
+	podiumversion "github.com/lennylabs/podium/pkg/version"
 )
 
 // ---- extends parent-pin stability and reingest re-resolution --
@@ -302,6 +303,10 @@ func lcDefaultOrgID() string {
 	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("podium:org:default")).String()
 }
 
+// legacyEmptyRowHash is the §4.7.6 content hash of a legacy row, which stores
+// no manifest, SKILL.md, or resource bytes.
+var legacyEmptyRowHash = "sha256:" + podiumversion.CanonicalContentHash(nil, nil, nil)
+
 // TestLifecycle_InPlaceSQLiteUpgradePreservesArtifactsAndAudit seeds a
 // legacy-schema SQLite database (reduced tenants and manifests tables, none of
 // the post-initial columns) holding an ingested artifact under the standalone
@@ -327,7 +332,11 @@ func TestLifecycle_InPlaceSQLiteUpgradePreservesArtifactsAndAudit(t *testing.T) 
 
 	const id = "ops/runbooks/restart-gateway"
 	const version = "1.4.2"
-	const contentHash = "sha256:legacyhash1234"
+	// Spec: §13.4 — the legacy row stores the §4.7.6 digest of its own bytes
+	// (an empty manifest, no SKILL.md, and no resources), so the first-start
+	// rewrite and the stored-row admission check both reproduce it. Its empty
+	// manifest declares no extends:, and admission serves its stored columns.
+	contentHash := legacyEmptyRowHash
 
 	// Seed a legacy database the way an earlier binary would have written it:
 	// reduced tenants and manifests tables with only the columns that shipped
@@ -370,9 +379,15 @@ func TestLifecycle_InPlaceSQLiteUpgradePreservesArtifactsAndAudit(t *testing.T) 
 	// PODIUM_SQLITE_PATH selects the seeded legacy file; OpenSQLite runs the
 	// additive migration in place before serving. No --layer-path: the server must
 	// serve the pre-seeded manifest, not re-ingest a fresh registry over it.
+	// The in-place schema upgrade is the subject, so PODIUM_SIGN_KEY_PATH
+	// names a location in legacy.db's directory: a co-located signing-off
+	// store keeps the §13.4 boot rewrite, where a store elsewhere with a row
+	// and no completion record is refused until sign-stored-rows runs.
 	bootEnv := []string{
 		"HOME=" + home,
 		"PODIUM_SQLITE_PATH=" + dbPath,
+		"PODIUM_SIGN=none",
+		"PODIUM_SIGN_KEY_PATH=" + filepath.Join(home, "registry-signing.key"),
 		"PODIUM_AUDIT_LOG_PATH=" + auditPath,
 	}
 	srv := startServerArgs(t, bootEnv, "serve", "--standalone")

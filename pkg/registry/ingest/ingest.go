@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -233,8 +234,9 @@ type Request struct {
 	// stores the resulting envelope on the ManifestRecord. Optional:
 	// when nil, ingest stores no signature and downstream
 	// materialize-time verification (PODIUM_VERIFY_SIGNATURES) sees
-	// an empty envelope. Production deployments wire a real signer
-	// (sign.SigstoreKeyless / sign.RegistryManagedKey).
+	// an empty envelope. The registry wires the registry-managed key
+	// (sign.RegistryManagedKey) when its signing mode is on; no registry
+	// signing mode produces a keyless envelope (§4.7.9).
 	Signer SignerFunc
 	// AuditEmit, when non-nil, receives §8.1 audit events the
 	// ingest pipeline produces. Distinct from PublishEvent: the
@@ -744,12 +746,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				}
 			}
 			if !overlay {
-				res.Rejected = append(res.Rejected, RejectedArtifact{
-					ArtifactID: mr.ArtifactID,
-					Reason: fmt.Sprintf("cross-layer collision: %q already contributed by layer %q; declare extends: %s to overlay it",
-						mr.ArtifactID, crossLayer[0].Layer, mr.ArtifactID),
-					Code: "ingest.collision",
-				})
+				res.Rejected = append(res.Rejected, collisionRejection(req.TenantID, req.LayerID, mr.ArtifactID, crossLayer[0].Layer))
 				continue
 			}
 		}
@@ -863,15 +860,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			// audit_redact directive has a concrete target, then redact.
 			// Structural keys win on collision. The redacted map is what
 			// AuditEmit receives, so a raw value never leaves this closure.
-			redactExtra := manifest.FrontmatterFields(mr.Frontmatter, mr.AuditRedact)
-			redacted := func(base map[string]string) map[string]string {
-				for k, v := range redactExtra {
-					if _, ok := base[k]; !ok {
-						base[k] = v
-					}
-				}
-				return audit.RedactFields(base, mr.AuditRedact)
-			}
+			redacted := ArtifactEventRedactor(mr)
 			req.AuditEmit("artifact.published", mr.ArtifactID, redacted(map[string]string{
 				"version":      mr.Version,
 				"content_hash": mr.ContentHash,
@@ -1132,10 +1121,11 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 		Layer:         filesystem.Layer{ID: layerID},
 		Artifact:      a,
 		ArtifactBytes: bytes,
+		AuthoredBytes: bytes,
 		Resources:     map[string][]byte{},
 	}
+	skillPath := joinPath(dir, "SKILL.md")
 	if a.Type == manifest.TypeSkill {
-		skillPath := joinPath(dir, "SKILL.md")
 		skillBytes, err := fs.ReadFile(fsys, skillPath)
 		if err != nil {
 			// spec: §7.3.1/§6.10 — a SKILL.md the confinement refuses is a
@@ -1171,8 +1161,15 @@ func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecor
 			}
 			return nil
 		}
-		base := d.Name()
-		if base == "ARTIFACT.md" || (a.Type == manifest.TypeSkill && base == "SKILL.md") {
+		// spec: §4.4/§4.7.6 — the resource set excludes the package root's
+		// ARTIFACT.md and, for a skill, the package root's SKILL.md. A
+		// SKILL.md in a subdirectory is an ordinary bundled resource, which
+		// is the rule captureResources in pkg/registry/filesystem applies;
+		// comparing the base name here instead would drop it and give the
+		// two walks two digests for one package. A nested ARTIFACT.md is a
+		// package boundary the directory arm above has already skipped, so
+		// the base-name comparison reaches only the root's.
+		if d.Name() == "ARTIFACT.md" || (a.Type == manifest.TypeSkill && p == skillPath) {
 			return nil
 		}
 		data, err := fs.ReadFile(fsys, p)
@@ -1291,10 +1288,13 @@ func persistResources(ctx context.Context, put ResourcePutFunc, refs []store.Res
 }
 
 // contentHashOf computes the canonical content hash for an artifact:
-// SHA-256 over the artifact bytes, the optional SKILL.md bytes, and
-// every bundled resource in sorted-path order. Spec §4.7.6.
+// SHA-256 over the authored ARTIFACT.md bytes, the optional SKILL.md bytes,
+// and every bundled resource in sorted-path order. This walk does not resolve
+// extends:, so AuthoredBytes and ArtifactBytes hold the same bytes here; the
+// field names the digest's input so every composer reads one field. Spec
+// §4.7.6.
 func contentHashOf(rec filesystem.ArtifactRecord) string {
-	return version.CanonicalContentHash(rec.ArtifactBytes, rec.SkillBytes, rec.Resources)
+	return version.CanonicalContentHash(rec.AuthoredBytes, rec.SkillBytes, rec.Resources)
 }
 
 // edgesFor extracts cross-type dependency edges from the artifact
@@ -1430,6 +1430,23 @@ func indexedArtifact(mr store.ManifestRecord) manifest.Artifact {
 		Tags:             mr.Tags,
 		Sensitivity:      manifest.Sensitivity(mr.Sensitivity),
 		SearchVisibility: manifest.SearchVisibility(mr.SearchVisibility),
+	}
+}
+
+// collisionRejection builds the §4.6 cross-layer collision rejection for id.
+// The reason names the artifact and the extends: remedy and never the
+// contributing layer: the reingest response reaches a non-admin layer owner,
+// and the layer that already contributes id is a §4.7.2 configuration fact
+// about a part of the tenant that caller may not be able to read. The layer is
+// logged server-side so an operator can still trace the collision.
+//
+// Spec: §4.6 hidden parents (observable)
+func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArtifact {
+	log.Printf("ingest: tenant %s layer %s: cross-layer collision on %q with layer %q", tenantID, layerID, id, existingLayer)
+	return RejectedArtifact{
+		ArtifactID: id,
+		Reason:     fmt.Sprintf("cross-layer collision: %q is already contributed by another layer; declare extends: %s to overlay it", id, id),
+		Code:       "ingest.collision",
 	}
 }
 
@@ -1687,4 +1704,39 @@ func groupLintErrors(diags []lint.Diagnostic) map[string][]lint.Diagnostic {
 		out[d.ArtifactID] = append(out[d.ArtifactID], d)
 	}
 	return out
+}
+
+// ArtifactEventRedactor returns the §8.2 manifest-declared redaction for one
+// stored artifact: a function that merges the author-named sensitive
+// frontmatter fields into an event's context, without overwriting a structural
+// key, and then replaces every named value with "[redacted]". A raw value never
+// leaves the returned function.
+//
+// The key set is the record's AuditRedact when it carries one, and otherwise
+// the audit_redact of the record's parsed frontmatter, because the SQL backends
+// store no audit_redact column and a row read back from them carries an empty
+// AuditRedact. A frontmatter that does not parse yields no key set and no added
+// field, so the base context passes through unredacted.
+//
+// Ingest calls it for the artifact.published, artifact.deprecated, and
+// artifact.signed events it emits; the §13.4 rehash pass calls it for the
+// artifact.signed event it appends for each row it re-signs, so a re-signed row
+// carries the redaction its own manifest declares. Neither applies a directive
+// an extends: child inherits.
+func ArtifactEventRedactor(mr store.ManifestRecord) func(base map[string]string) map[string]string {
+	keys := mr.AuditRedact
+	if len(keys) == 0 {
+		if art, err := manifest.ParseArtifact(mr.Frontmatter); err == nil {
+			keys = art.AuditRedact
+		}
+	}
+	extra := manifest.FrontmatterFields(mr.Frontmatter, keys)
+	return func(base map[string]string) map[string]string {
+		for k, v := range extra {
+			if _, ok := base[k]; !ok {
+				base[k] = v
+			}
+		}
+		return audit.RedactFields(base, keys)
+	}
 }

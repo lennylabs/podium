@@ -941,6 +941,7 @@ func TestPluginSPI_HarnessNoneCanonicalLayout(t *testing.T) {
 			"PODIUM_HARNESS=none",
 			"PODIUM_MATERIALIZE_ROOT=" + mat,
 			"PODIUM_CACHE_DIR=" + t.TempDir(),
+			"PODIUM_VERIFY_SIGNATURES=never",
 		},
 		toolCall(1, "load_artifact", map[string]any{"id": id}),
 	)
@@ -1404,6 +1405,7 @@ func TestPluginSPI_LocalOverlaySearch(t *testing.T) {
 	mat := t.TempDir()
 	res := mcpExec(t,
 		[]string{
+			"PODIUM_VERIFY_SIGNATURES=never",
 			"PODIUM_REGISTRY=" + srv.BaseURL,
 			"PODIUM_HARNESS=none",
 			"PODIUM_MATERIALIZE_ROOT=" + mat,
@@ -1419,6 +1421,7 @@ func TestPluginSPI_LocalOverlaySearch(t *testing.T) {
 		// BM25 may require a non-empty query to surface overlay results; try with query
 		res2 := mcpExec(t,
 			[]string{
+				"PODIUM_VERIFY_SIGNATURES=never",
 				"PODIUM_REGISTRY=" + srv.BaseURL,
 				"PODIUM_HARNESS=none",
 				"PODIUM_MATERIALIZE_ROOT=" + mat,
@@ -1446,6 +1449,7 @@ func TestPluginSPI_LocalAuditSinkMCP(t *testing.T) {
 
 	res := mcpExec(t,
 		[]string{
+			"PODIUM_VERIFY_SIGNATURES=never",
 			"PODIUM_REGISTRY=" + srv.BaseURL,
 			"PODIUM_HARNESS=none",
 			"PODIUM_MATERIALIZE_ROOT=" + t.TempDir(),

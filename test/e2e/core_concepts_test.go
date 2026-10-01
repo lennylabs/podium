@@ -300,6 +300,7 @@ func TestCoreConcept_MCPMaterialize(t *testing.T) {
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, toolCall(1, "load_artifact", map[string]any{"id": "company-glossary"}))
 	result := rpcResult(t, res.Stdout, 1)
 	if paths, _ := result["materialized_at"].([]any); len(paths) == 0 {
@@ -316,6 +317,7 @@ func TestCoreConcept_MCPNoMaterializeRoot(t *testing.T) {
 	res := mcpExec(t, []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, toolCall(1, "load_artifact", map[string]any{"id": "company-glossary"}))
 	result := rpcResult(t, res.Stdout, 1)
 	if result["id"] != "company-glossary" {
@@ -349,7 +351,7 @@ func TestCoreConcept_LoadDomainRoot(t *testing.T) {
 		"alpha/x/ARTIFACT.md": contextArtifact("x"),
 		"beta/y/ARTIFACT.md":  contextArtifact("y"),
 	}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, toolCall(1, "load_domain", map[string]any{}))
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, toolCall(1, "load_domain", map[string]any{}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
 	if !strings.Contains(body, "alpha") || !strings.Contains(body, "beta") {
 		t.Errorf("root map missing top-level domains: %s", body)
@@ -363,7 +365,7 @@ func TestCoreConcept_LoadDomainPath(t *testing.T) {
 		"finance/ap/pay-invoice/ARTIFACT.md":                        contextArtifact("pay"),
 		"finance/close-reporting/run-variance-analysis/ARTIFACT.md": contextArtifact("variance"),
 	}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, toolCall(1, "load_domain", map[string]any{"path": "finance"}))
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, toolCall(1, "load_domain", map[string]any{"path": "finance"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
 	if !strings.Contains(body, "finance/ap") || !strings.Contains(body, "finance/close-reporting") {
 		t.Errorf("finance subdomains missing: %s", body)
@@ -378,7 +380,7 @@ func TestCoreConcept_SearchDomains(t *testing.T) {
 		"finance/ap/DOMAIN.md":               "---\ndescription: \"Accounts payable operations\"\ndiscovery:\n  keywords:\n    - reconciliation\n---\n",
 		"finance/ap/pay-invoice/ARTIFACT.md": contextArtifact("pay invoice"),
 	}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, toolCall(1, "search_domains", map[string]any{"query": "reconciliation"}))
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, toolCall(1, "search_domains", map[string]any{"query": "reconciliation"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
 	if !strings.Contains(body, "finance/ap") {
 		t.Errorf("search_domains did not retrieve finance/ap by keyword: %s", body)
@@ -391,7 +393,7 @@ func TestCoreConcept_SearchArtifactsQuery(t *testing.T) {
 	srv := startServer(t, writeRegistry(t, map[string]string{
 		"finance/va/ARTIFACT.md": contextArtifact("variance analysis report"),
 	}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "search_artifacts", map[string]any{"query": "variance"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
 	if !strings.Contains(body, "finance/va") {
@@ -410,7 +412,7 @@ func TestCoreConcept_SearchArtifactsScope(t *testing.T) {
 		"finance/b/ARTIFACT.md": contextArtifact("b"),
 		"eng/c/ARTIFACT.md":     contextArtifact("c"),
 	}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "search_artifacts", map[string]any{"scope": "finance"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
 	if strings.Contains(body, "eng/c") {
@@ -429,7 +431,7 @@ func TestCoreConcept_SearchArtifactsType(t *testing.T) {
 		"sk/SKILL.md":     skillBody("sk"),
 		"ctx/ARTIFACT.md": contextArtifact("a context"),
 	}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL},
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL},
 		toolCall(1, "search_artifacts", map[string]any{"type": "context"}))
 	body := mustJSON(rpcResult(t, res.Stdout, 1))
 	if strings.Contains(body, `"type":"skill"`) {
@@ -450,6 +452,7 @@ func TestCoreConcept_LoadArtifactAbsolutePaths(t *testing.T) {
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, toolCall(1, "load_artifact", map[string]any{"id": "company-glossary"}))
 	result := rpcResult(t, res.Stdout, 1)
 	paths, _ := result["materialized_at"].([]any)
@@ -466,7 +469,7 @@ func TestCoreConcept_LoadArtifactAbsolutePaths(t *testing.T) {
 func TestCoreConcept_FourMetaTools(t *testing.T) {
 	t.Parallel()
 	srv := startServer(t, writeRegistry(t, map[string]string{"x/ARTIFACT.md": contextArtifact("x")}))
-	res := mcpExec(t, []string{"PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list"})
+	res := mcpExec(t, []string{"PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY=" + srv.BaseURL}, rpcReq{ID: 1, Method: "tools/list"})
 	for _, tool := range []string{"load_domain", "search_domains", "search_artifacts", "load_artifact"} {
 		if !strings.Contains(res.Stdout, tool) {
 			t.Errorf("tools/list missing %q", tool)
@@ -526,6 +529,7 @@ func TestCoreConcept_LazyNavigation(t *testing.T) {
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	},
 		toolCall(1, "load_domain", map[string]any{}),
 		toolCall(2, "search_artifacts", map[string]any{"scope": "finance"}),
@@ -857,6 +861,7 @@ func TestCoreConcept_PerCallHarnessOverride(t *testing.T) {
 		"PODIUM_HARNESS=none",
 		"PODIUM_MATERIALIZE_ROOT=" + mat,
 		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_VERIFY_SIGNATURES=never",
 	}, toolCall(1, "load_artifact", map[string]any{"id": "rules/ts-style", "harness": "cursor"}))
 	if rpcResult(t, res.Stdout, 1) == nil {
 		t.Fatalf("load_artifact returned no result")

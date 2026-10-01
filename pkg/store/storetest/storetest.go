@@ -34,6 +34,13 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("ImmutabilityIdempotent", func(t *testing.T) { immutabilityIdempotent(t, factory(t)) })
 	t.Run("ConcurrentImmutabilityViolation", func(t *testing.T) { concurrentImmutabilityViolation(t, factory(t)) })
 	t.Run("ListManifestsScopedToTenant", func(t *testing.T) { listManifestsScopedToTenant(t, factory(t)) })
+	t.Run("ListManifestsIncludingDeletedScopedToTenant", func(t *testing.T) {
+		listManifestsIncludingDeletedScopedToTenant(t, factory(t))
+	})
+	t.Run("RehashManifest", func(t *testing.T) { rehashManifest(t, factory(t)) })
+	t.Run("RehashManifestSameHashSignsOnce", func(t *testing.T) { rehashManifestSameHashSignsOnce(t, factory(t)) })
+	t.Run("RehashManifestSignatureCAS", func(t *testing.T) { rehashManifestSignatureCAS(t, factory(t)) })
+	t.Run("DataMigrationMarker", func(t *testing.T) { dataMigrationMarker(t, factory(t)) })
 	t.Run("ListManifestsStableOrder", func(t *testing.T) { listManifestsStableOrder(t, factory(t)) })
 	t.Run("DependencyEdges", func(t *testing.T) { dependencyEdges(t, factory(t)) })
 	t.Run("DependentsScopedToTenant", func(t *testing.T) { dependentsScopedToTenant(t, factory(t)) })
@@ -325,6 +332,178 @@ func listManifestsScopedToTenant(t *testing.T, s store.Store) {
 			t.Errorf("tenant leak: %+v", m)
 		}
 	}
+}
+
+// Spec: §4.7.6 — RehashManifest is the one write to a stored content hash
+// after PutManifest. It is a compare-and-swap on the stored hash, it reaches
+// a soft-deleted row, and it is scoped to one tenant.
+func rehashManifest(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustCreateTenant(t, s, "b")
+	mustPut(t, s, manifestRec("a", "x", "1.0.0", "sha:old"))
+	mustPut(t, s, manifestRec("b", "x", "1.0.0", "sha:old"))
+
+	must(t, s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:old", "", "sha:new", "sig-1"))
+	got, err := s.GetManifest(ctx, "a", "x", "1.0.0")
+	must(t, err)
+	if got.ContentHash != "sha:new" || got.Signature != "sig-1" {
+		t.Fatalf("after rehash: hash %q signature %q, want sha:new and sig-1", got.ContentHash, got.Signature)
+	}
+
+	// The same call again names a hash the row no longer carries, so it is
+	// the conflict rather than an idempotent repeat.
+	if err := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:old", "sig-1", "sha:new", "sig-1"); !errors.Is(err, store.ErrImmutableViolation) {
+		t.Errorf("repeat rehash = %v, want ErrImmutableViolation", err)
+	}
+	if err := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:stale", "sig-1", "sha:other", "sig-2"); !errors.Is(err, store.ErrImmutableViolation) {
+		t.Errorf("stale rehash = %v, want ErrImmutableViolation", err)
+	}
+	got, err = s.GetManifest(ctx, "a", "x", "1.0.0")
+	must(t, err)
+	if got.ContentHash != "sha:new" || got.Signature != "sig-1" {
+		t.Errorf("refused rehash moved the row: hash %q signature %q", got.ContentHash, got.Signature)
+	}
+
+	if err := s.RehashManifest(ctx, "a", "absent", "1.0.0", "sha:old", "", "sha:new", ""); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("rehash of a missing key = %v, want ErrNotFound", err)
+	}
+	other, err := s.GetManifest(ctx, "b", "x", "1.0.0")
+	must(t, err)
+	if other.ContentHash != "sha:old" || other.Signature != "" {
+		t.Errorf("tenant b moved with tenant a: hash %q signature %q", other.ContentHash, other.Signature)
+	}
+
+	// §8.4 soft-deleted rows stay reachable, because a restore within the
+	// window would otherwise serve a pre-migration hash.
+	must(t, s.PutLayerConfig(ctx, store.LayerConfig{TenantID: "a", ID: "alice-personal", SourceType: "local", LocalPath: "/tmp/x"}))
+	deletedRec := manifestRec("a", "y", "1.0.0", "sha:old")
+	deletedRec.Layer = "alice-personal"
+	mustPut(t, s, deletedRec)
+	must(t, s.DeleteLayerConfig(ctx, "a", "alice-personal"))
+	must(t, s.RehashManifest(ctx, "a", "y", "1.0.0", "sha:old", "", "sha:new-y", "sig-y"))
+	visible, err := s.ListManifests(ctx, "a")
+	must(t, err)
+	all, err := s.ListManifestsIncludingDeleted(ctx, "a")
+	must(t, err)
+	if hashOf(visible, "y") != "" || hashOf(all, "y") != "sha:new-y" {
+		t.Errorf("soft-deleted row: ListManifests %q, ListManifestsIncludingDeleted %q, want \"\" and sha:new-y",
+			hashOf(visible, "y"), hashOf(all, "y"))
+	}
+}
+
+// Spec: §4.7, §4.7.6 — ListManifestsIncludingDeleted drops the tombstone
+// filter and keeps the tenant filter, so the §13.4 migration enumerates one
+// tenant's rows and no other tenant's.
+func listManifestsIncludingDeletedScopedToTenant(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustCreateTenant(t, s, "b")
+	must(t, s.PutLayerConfig(ctx, store.LayerConfig{TenantID: "a", ID: "gone", SourceType: "local", LocalPath: "/tmp/x"}))
+	kept := manifestRec("a", "x", "1.0.0", "sha:1")
+	kept.Layer = "kept"
+	mustPut(t, s, kept)
+	tombstoned := manifestRec("a", "y", "1.0.0", "sha:2")
+	tombstoned.Layer = "gone"
+	mustPut(t, s, tombstoned)
+	mustPut(t, s, manifestRec("b", "z", "1.0.0", "sha:3"))
+	must(t, s.DeleteLayerConfig(ctx, "a", "gone"))
+
+	got, err := s.ListManifestsIncludingDeleted(ctx, "a")
+	must(t, err)
+	leaked := ""
+	for _, m := range got {
+		if m.TenantID != "a" {
+			leaked = m.TenantID + "/" + m.ArtifactID
+		}
+	}
+	if len(got) != 2 || leaked != "" || hashOf(got, "y") != "sha:2" {
+		t.Errorf("ListManifestsIncludingDeleted(a) returned %d records (leaked %q, soft-deleted hash %q), want 2, no leak, sha:2",
+			len(got), leaked, hashOf(got, "y"))
+	}
+}
+
+// Spec: §4.7.6 — a rewrite that leaves the hash in place and only attaches a
+// first signature is a compare-and-swap on the signature, so two replicas
+// running the migration together cannot both sign one row.
+func rehashManifestSameHashSignsOnce(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustPut(t, s, manifestRec("a", "x", "1.0.0", "sha:same"))
+
+	first := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:same", "", "sha:same", "sig-first")
+	signed, err := s.GetManifest(ctx, "a", "x", "1.0.0")
+	must(t, err)
+	second := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:same", "", "sha:same", "sig-second")
+	after, err := s.GetManifest(ctx, "a", "x", "1.0.0")
+	must(t, err)
+	if first != nil || signed.Signature != "sig-first" || !errors.Is(second, store.ErrImmutableViolation) || after.Signature != "sig-first" {
+		t.Errorf("same-hash rehash: first %v signature %q, second %v signature %q; want nil, sig-first, ErrImmutableViolation, sig-first",
+			first, signed.Signature, second, after.Signature)
+	}
+}
+
+// Spec: §4.7.6, §13.4 — the write also compares the stored signature, so
+// sign-stored-rows re-signs a row only over the envelope it read, and a
+// second run, or a peer that re-signed first, cannot be overwritten. A
+// backend whose UPDATE omits the signature clause fails this case.
+func rehashManifestSignatureCAS(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustPut(t, s, manifestRec("a", "x", "1.0.0", "sha:h"))
+	must(t, s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:h", "", "sha:h", "sig-1"))
+
+	resign := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:h", "sig-1", "sha:h", "sig-2")
+	repeat := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:h", "sig-1", "sha:h", "sig-2")
+	stale := s.RehashManifest(ctx, "a", "x", "1.0.0", "sha:h", "sig-stale", "sha:h2", "sig-3")
+	got, err := s.GetManifest(ctx, "a", "x", "1.0.0")
+	must(t, err)
+	if resign != nil || !errors.Is(repeat, store.ErrImmutableViolation) || !errors.Is(stale, store.ErrImmutableViolation) ||
+		got.ContentHash != "sha:h" || got.Signature != "sig-2" {
+		t.Errorf("signature compare-and-swap: re-sign %v, repeat %v, stale %v, row %q/%q; want nil, ErrImmutableViolation, ErrImmutableViolation, sha:h/sig-2",
+			resign, repeat, stale, got.ContentHash, got.Signature)
+	}
+}
+
+// Spec: §13.4 — the data-migration marker records that a one-time rewrite of
+// stored values has run against this store. It is store-wide, and both
+// directions are idempotent so replicas finishing one pass together succeed.
+func dataMigrationMarker(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	const other = "some-other-migration"
+
+	unknown, err := s.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+	must(t, err)
+	must(t, s.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, true))
+	must(t, s.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, true))
+	set, err := s.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+	must(t, err)
+	unrelated, err := s.DataMigrationApplied(ctx, other)
+	must(t, err)
+	must(t, s.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, false))
+	must(t, s.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, false))
+	cleared, err := s.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+	must(t, err)
+	if unknown || !set || unrelated || cleared {
+		t.Errorf("marker: unknown %v, set %v, unrelated name %v, cleared %v; want false, true, false, false",
+			unknown, set, unrelated, cleared)
+	}
+}
+
+// hashOf returns the content hash of the named artifact in recs, or the empty
+// string when no record carries that artifact ID.
+func hashOf(recs []store.ManifestRecord, artifactID string) string {
+	for _, rec := range recs {
+		if rec.ArtifactID == artifactID {
+			return rec.ContentHash
+		}
+	}
+	return ""
 }
 
 // Spec: §4.7 — ListManifests returns records in stable order (artifact

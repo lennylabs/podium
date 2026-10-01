@@ -132,6 +132,23 @@ func dialOK(addr string, within time.Duration) bool {
 	return false
 }
 
+// healthOK reports whether the server at addr answers /healthz within the
+// deadline. run opens its listener early, so a raw dial lands in the backlog
+// long before the boot finishes; /healthz answers only once the serve loop is
+// running, which is after the §13.4 rehash pass and the bootstrap ingest.
+func healthOK(addr string, within time.Duration) bool {
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if resp, err := client.Get("http://" + addr + "/healthz"); err == nil {
+			_ = resp.Body.Close()
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
 // Spec: §13.9 / §13.10 — run boots the standalone server (SQLite, filesystem
 // object store, no auth) and shuts down gracefully when its context is
 // cancelled, the in-process equivalent of a SIGTERM. It exercises the full boot
@@ -154,9 +171,9 @@ func TestRun_StandaloneGracefulShutdown(t *testing.T) {
 	errc := make(chan error, 1)
 	go func() { errc <- run(ctx, func() {}) }()
 
-	if !dialOK(addr, 10*time.Second) {
+	if !healthOK(addr, 20*time.Second) {
 		cancel()
-		t.Fatal("standalone server did not start listening")
+		t.Fatal("standalone server did not become ready")
 	}
 	cancel()
 	select {

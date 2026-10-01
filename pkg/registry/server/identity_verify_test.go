@@ -16,6 +16,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // verifyFixture boots a server whose meta-tool routes run the §6.3.2
@@ -28,10 +29,10 @@ func verifyFixture(t *testing.T, verify func(*http.Request) (layer.Identity, err
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "finance/secret", Version: "1.0.0",
 		ContentHash: "sha256:a", Type: "context", Description: "finance secret", Layer: "fin",
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	reg := core.New(st, "default", []layer.Layer{
@@ -161,13 +162,13 @@ func objectsVerifyFixture(t *testing.T, verify func(*http.Request) (layer.Identi
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "default", ArtifactID: "finance/secret", Version: "1.0.0",
 		ContentHash: "sha256:a", Type: "context", Description: "finance secret", Layer: "fin",
 		Resources: []store.ResourceRef{
 			{Path: "data/big.bin", ContentHash: "sha256:" + key, Size: int64(len(large)), ContentType: "application/octet-stream"},
 		},
-	}); err != nil {
+	}, objStore, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	reg := core.New(st, "default", []layer.Layer{

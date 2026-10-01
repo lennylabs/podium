@@ -1,12 +1,17 @@
 package core_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/objectstore"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // Spec: §7.2 — LoadArtifact returns the bundled-resource refs persisted
@@ -19,19 +24,28 @@ func TestLoadArtifact_ReturnsResourceRefs(t *testing.T) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenantID}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	refs := []store.ResourceRef{
-		{Path: "scripts/run.py", ContentHash: "sha256:aaaa", Size: 4, Inline: []byte("data")},
-		{Path: "data/big.bin", ContentHash: "sha256:bbbb", Size: 9_000_000},
+	// The large body lives in object storage under its own hash, as ingest
+	// leaves a resource above the cutoff, and admission reads it there.
+	objects := objectstore.NewMemory()
+	big := bytes.Repeat([]byte("b"), objectstore.InlineCutoff+1)
+	bigSum := sha256.Sum256(big)
+	bigKey := hex.EncodeToString(bigSum[:])
+	if err := objects.Put(context.Background(), bigKey, big, "application/octet-stream"); err != nil {
+		t.Fatalf("Put: %v", err)
 	}
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	refs := []store.ResourceRef{
+		{Path: "scripts/run.py", Inline: []byte("data")},
+		{Path: "data/big.bin", ContentHash: "sha256:" + bigKey},
+	}
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenantID, ArtifactID: "finance/run", Version: "1.0.0",
-		ContentHash: "sha256:c", Type: "skill", Layer: "L", Resources: refs,
-	}); err != nil {
+		Type: "skill", Layer: "L", Resources: refs,
+	}, objects, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	reg := core.New(st, tenantID, []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
-	})
+	}).WithAdmission(nil, objects, objectstore.DefaultReadTimeout)
 	got, err := reg.LoadArtifact(context.Background(), layer.Identity{IsPublic: true}, "finance/run", core.LoadArtifactOptions{})
 	if err != nil {
 		t.Fatalf("LoadArtifact: %v", err)

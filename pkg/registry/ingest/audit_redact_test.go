@@ -129,3 +129,33 @@ sensitivity: low
 		}
 	}
 }
+
+// Spec: §8.2 — ArtifactEventRedactor derives the key set from the record's
+// AuditRedact when it carries one and from the stored frontmatter otherwise,
+// because the SQL backends store no audit_redact column and a row read back
+// from them carries an empty AuditRedact. A frontmatter that does not parse
+// yields no key set, so the base context passes through unredacted.
+func TestArtifactEventRedactor_DerivesTheKeySetFromTheStoredFrontmatter(t *testing.T) {
+	t.Parallel()
+	fm := []byte("---\nid: alpha\ntype: skill\nversion: 1.0.0\nname: alpha\ndescription: x\nsensitivity: low\naccount: acct-1234\naudit_redact: [version, account]\n---\n# alpha\n")
+	base := func() map[string]string {
+		return map[string]string{"version": "1.0.0", "content_hash": "sha256:abc"}
+	}
+	declared := ingest.ArtifactEventRedactor(store.ManifestRecord{
+		Frontmatter: fm,
+		AuditRedact: []string{"version", "account"},
+	})(base())
+	stored := ingest.ArtifactEventRedactor(store.ManifestRecord{Frontmatter: fm})(base())
+	unparsable := ingest.ArtifactEventRedactor(store.ManifestRecord{Frontmatter: []byte("not a manifest")})(base())
+
+	switch {
+	case declared["version"] != "[redacted]" || declared["account"] != "[redacted]":
+		t.Errorf("declared redaction = %v, want version and account redacted", declared)
+	case declared["content_hash"] != "sha256:abc":
+		t.Errorf("declared redaction dropped the structural key: %v", declared)
+	case len(stored) != len(declared) || stored["version"] != declared["version"] || stored["account"] != declared["account"]:
+		t.Errorf("frontmatter-derived redaction = %v, want the same as %v", stored, declared)
+	case unparsable["version"] != "1.0.0" || unparsable["content_hash"] != "sha256:abc" || len(unparsable) != 2:
+		t.Errorf("unparsable frontmatter = %v, want the base context unredacted", unparsable)
+	}
+}

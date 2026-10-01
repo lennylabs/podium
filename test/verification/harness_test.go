@@ -16,6 +16,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 const vTenant = "verify"
@@ -30,7 +31,7 @@ func seedRegistry(tb testing.TB, st store.Store, n int) *core.Registry {
 		tb.Fatalf("CreateTenant: %v", err)
 	}
 	for i := 0; i < n; i++ {
-		if err := st.PutManifest(ctx, store.ManifestRecord{
+		if err := st.PutManifest(ctx, storetest.Seal(tb, store.ManifestRecord{
 			TenantID:    vTenant,
 			ArtifactID:  fmt.Sprintf("dom%d/artifact-%d", i%16, i),
 			Version:     "1.0.0",
@@ -39,7 +40,7 @@ func seedRegistry(tb testing.TB, st store.Store, n int) *core.Registry {
 			Description: fmt.Sprintf("Artifact %d about variance, ledgers, and reconciliation", i),
 			Tags:        []string{"finance", fmt.Sprintf("dom-%d", i%16)},
 			Layer:       "shared",
-		}); err != nil {
+		}, nil, nil)); err != nil {
 			tb.Fatalf("PutManifest: %v", err)
 		}
 	}

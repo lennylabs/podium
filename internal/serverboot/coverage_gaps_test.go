@@ -2,6 +2,7 @@ package serverboot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -372,15 +373,33 @@ func TestLoadOrGenerateAuditSigner_StableKeyIDFingerprint(t *testing.T) {
 		t.Fatalf("signer2 type = %T, want sign.RegistryManagedKey", signer2)
 	}
 
-	if rk1.KeyID == "" {
-		t.Error("KeyID is empty; the envelope would carry no key fingerprint")
+	id1 := envelopeKeyID(t, rk1)
+	if id1 == "" {
+		t.Error("envelope key_id is empty; the envelope would carry no key fingerprint")
 	}
-	if rk1.KeyID != rk2.KeyID {
-		t.Errorf("KeyID changed across reloads: %s vs %s", rk1.KeyID, rk2.KeyID)
+	if id2 := envelopeKeyID(t, rk2); id1 != id2 {
+		t.Errorf("envelope key_id changed across reloads: %s vs %s", id1, id2)
 	}
-	if want := keyIDFor(rk1.PublicKey); rk1.KeyID != want {
-		t.Errorf("KeyID = %s, want sha256 fingerprint %s of the public key", rk1.KeyID, want)
+	if want := sign.KeyIDFor(rk1.PublicKey); id1 != want {
+		t.Errorf("envelope key_id = %s, want sha256 fingerprint %s of the public key", id1, want)
 	}
+}
+
+// envelopeKeyID signs a fixed hash under k and returns the key_id its envelope
+// carries.
+func envelopeKeyID(t *testing.T, k sign.RegistryManagedKey) string {
+	t.Helper()
+	envelope, err := k.Sign(context.Background(), "sha256:"+strings.Repeat("ab", 32))
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	var env struct {
+		KeyID string `json:"key_id"`
+	}
+	if err := json.Unmarshal([]byte(envelope), &env); err != nil {
+		t.Fatalf("parse envelope: %v", err)
+	}
+	return env.KeyID
 }
 
 // Spec: §8.6 — loadOrGenerateAuditSigner surfaces a read error other than

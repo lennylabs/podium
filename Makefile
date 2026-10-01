@@ -21,7 +21,7 @@ LDFLAGS := -X 'github.com/lennylabs/podium/internal/buildinfo.Version=$(VERSION)
            -X 'github.com/lennylabs/podium/internal/buildinfo.Commit=$(COMMIT)' \
            -X 'github.com/lennylabs/podium/internal/buildinfo.Date=$(DATE)'
 
-.PHONY: help test test-live test-live-external test-auth-dex bench build \
+.PHONY: help test test-live test-live-external test-live-kind test-auth-dex bench build \
         lint update-golden \
         speccov speccov-uncovered speccov-drift speccov-report \
         doccov doccov-report doccov-check \
@@ -37,6 +37,7 @@ help:
 	@echo "  test             Run the full Go test suite"
 	@echo "  test-live        Run the suite with env vars pointing at docker-compose services"
 	@echo "  test-live-external  Run the suite against managed vector/embedding services (PODIUM_LIVE_EXTERNAL=1)"
+	@echo "  test-live-kind   Run the Helm chart upgrade from v0.4.0 on a kind cluster (PODIUM_LIVE_KIND=1)"
 	@echo "  test-auth-dex    Bring up the bundled Dex and run the live device-code login e2e"
 	@echo "  bench            Run §7.1 latency benchmarks (informational)"
 	@echo "  lint             Run linters (golangci-lint when available)"
@@ -228,6 +229,15 @@ dex-down:
 # rest of the suite is not pulled in.
 test-auth-dex: dex-up
 	$(LOAD_TEST_ENV) PODIUM_LIVE_DEX=1 $(GO) test $(GOFLAGS) -count=1 -run TestDexLogin ./test/e2e/...
+
+# Run the chart's §13.4 upgrade procedure from v0.4.0 on a kind cluster. The
+# test (test/chart/kind_upgrade_test.go) builds the current image and the
+# v0.4.0 image from a git worktree, creates the kind cluster podium-live,
+# walks the upgrade procedure in docs/deployment/clustered.md, and deletes the
+# cluster, the worktree, and both images. It needs docker with a running
+# daemon, kind, kubectl, helm, and git, and it skips without PODIUM_LIVE_KIND=1.
+test-live-kind:
+	PODIUM_LIVE_KIND=1 $(GO) test $(GOFLAGS) -count=1 -timeout 120m -run TestChart_KindUpgradeFromV040 -v ./test/chart/
 
 # Run the §7.1 latency benchmark suite. Output is informational;
 # CI does not gate on absolute numbers because cloud runners vary.

@@ -166,7 +166,7 @@ func TestAuditScale_SamplingAlwaysRecordedRetentionAndVolume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateKey: %v", err)
 	}
-	signer := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub, KeyID: keyIDFor(pub)}
+	signer := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub}
 
 	now := time.Now().UTC()
 	// 50 over-age artifact.loaded events (older than the 1-year metadata window)

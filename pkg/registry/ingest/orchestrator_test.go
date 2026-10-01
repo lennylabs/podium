@@ -94,8 +94,8 @@ func TestSourceIngest_TracksLastIngestedRef(t *testing.T) {
 
 // Spec: §4.7.9 / §13.10 — a Signer supplied on
 // SourceIngestOptions threads through to the ingest Request so the
-// registry-managed-key signing the standalone --sign registry-key path
-// configures lands on the persisted manifest.
+// registry-managed-key signing the registry configures by default lands on
+// the persisted manifest.
 func TestSourceIngest_SignerThreadsThrough(t *testing.T) {
 	t.Parallel()
 	st := store.NewMemory()

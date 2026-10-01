@@ -20,7 +20,11 @@ package e2e
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -869,6 +873,7 @@ func TestExtends_McpLoadMergedBody(t *testing.T) {
 			"PODIUM_HARNESS=none",
 			"PODIUM_MATERIALIZE_ROOT=" + t.TempDir(),
 			"PODIUM_CACHE_DIR=" + t.TempDir(),
+			"PODIUM_VERIFY_SIGNATURES=never",
 		},
 		toolCall(1, "load_artifact", map[string]any{"id": exParentID}),
 	)
@@ -1080,45 +1085,49 @@ func TestExtends_ChildHiddenWithoutLayerAccess(t *testing.T) {
 	assertHas(t, carolIDs, "shared/parent", "carol search still includes the public parent")
 }
 
-// Spec: §6.6 step 2 / §4.7.6 — a real extends-merged artifact's served
+// Spec: §6.6 step 2 / §4.7.10 — a real extends-merged artifact's served
 // frontmatter is a re-serialization (parent folded in, extends stripped) that
-// cannot reproduce the stored content_hash, but the registry delivers the leaf
-// child's pre-merge bytes in raw_frontmatter and those reproduce it. This pins
-// the registry's real ingest canonicalization to what the MCP bridge recomputes
-// in §6.6 step 2, so the two cannot drift and silently disable the consumer's
-// content-hash check for merged manifests.
-func TestExtends_MergedDeliversRawFrontmatterForHash(t *testing.T) {
+// cannot reproduce the stored content_hash, and the registry serves a
+// delivery_hash that the served bytes do reproduce, with no pre-merge document
+// and no merge flag. This pins the registry's composition of the served record
+// to what the MCP bridge recomputes in §6.6 step 2, so the two cannot drift.
+func TestExtends_MergedDeliveryHashReproducesFromServedBytes(t *testing.T) {
 	t.Parallel()
 	parent := "---\ntype: context\nversion: 1.0.0\ndescription: org parent\ntags: [from-parent]\n---\n\nparent body\n"
 	child := "---\ntype: context\nversion: 2.0.0\ndescription: child\nextends: " + exParentID + "@1.x\n---\n\nchild body\n"
 	srv := extendsBoot(t, parent, child, nil)
 
 	var r struct {
-		ContentHash    string `json:"content_hash"`
-		Frontmatter    string `json:"frontmatter"`
-		RawFrontmatter string `json:"raw_frontmatter"`
-		ManifestMerged bool   `json:"manifest_merged"`
+		ID           string `json:"id"`
+		Type         string `json:"type"`
+		Version      string `json:"version"`
+		ContentHash  string `json:"content_hash"`
+		Sensitivity  string `json:"sensitivity"`
+		Frontmatter  string `json:"frontmatter"`
+		ManifestBody string `json:"manifest_body"`
+		SkillRaw     string `json:"skill_raw"`
+		DeliveryHash string `json:"delivery_hash"`
 	}
+	var raw map[string]any
 	getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+exParentID, &r)
-
-	if !r.ManifestMerged {
-		t.Fatal("manifest_merged = false for an extends child, want true")
-	}
-	if r.RawFrontmatter == "" {
-		t.Fatal("raw_frontmatter empty; the consumer cannot reproduce the content hash for a merged manifest")
+	getJSON(t, srv.BaseURL+"/v1/load_artifact?id="+exParentID, &raw)
+	for _, key := range []string{"raw_frontmatter", "manifest_merged", "signature"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("response carries the removed %s field", key)
+		}
 	}
 	// The served (merged) frontmatter strips extends and folds in the parent, so
-	// it must not reproduce the stored hash...
-	if "sha256:"+version.ContentHash([]byte(r.Frontmatter)) == r.ContentHash {
+	// it does not reproduce the stored hash...
+	if "sha256:"+version.CanonicalContentHash([]byte(r.Frontmatter), nil, nil) == r.ContentHash {
 		t.Error("served merged frontmatter unexpectedly reproduced the content hash")
 	}
-	// ...but the pre-merge raw_frontmatter (the child's authored ARTIFACT.md, no
-	// skill and no resources here) reproduces it exactly.
-	if got := "sha256:" + version.ContentHash([]byte(r.RawFrontmatter)); got != r.ContentHash {
-		t.Errorf("raw_frontmatter does not reproduce content hash: got %s, want %s", got, r.ContentHash)
-	}
-	if !strings.Contains(r.RawFrontmatter, "extends: "+exParentID) {
-		t.Errorf("raw_frontmatter is not the pre-merge child bytes:\n%s", r.RawFrontmatter)
+	// ...and the delivery hash recomputed from the served record matches.
+	got := version.DeliveryHash(version.DeliveryRecord{
+		ID: r.ID, Version: r.Version, Type: r.Type, ContentHash: r.ContentHash, Sensitivity: r.Sensitivity,
+		Frontmatter: r.Frontmatter, ManifestBody: r.ManifestBody, SkillRaw: r.SkillRaw,
+	})
+	if r.DeliveryHash == "" || got != r.DeliveryHash {
+		t.Errorf("recomputed delivery hash %s, served %q", got, r.DeliveryHash)
 	}
 }
 
@@ -1150,12 +1159,12 @@ func TestSkill_ContentHashCoversSkillRaw(t *testing.T) {
 		t.Errorf("skill_raw is not the verbatim SKILL.md:\n got %q\nwant %q", r.SkillRaw, skillMD)
 	}
 	// The bridge recomputes the hash over (ARTIFACT.md, SKILL.md, resources).
-	if got := "sha256:" + version.ContentHash([]byte(r.Frontmatter), []byte(r.SkillRaw)); got != r.ContentHash {
+	if got := "sha256:" + version.CanonicalContentHash([]byte(r.Frontmatter), []byte(r.SkillRaw), nil); got != r.ContentHash {
 		t.Errorf("ContentHash(frontmatter, skill_raw) = %s, want stored %s", got, r.ContentHash)
 	}
 	// The prose body / ARTIFACT.md alone does not reproduce the hash, which is
 	// why skipping the check for skills left them unverified.
-	if "sha256:"+version.ContentHash([]byte(r.Frontmatter)) == r.ContentHash {
+	if "sha256:"+version.CanonicalContentHash([]byte(r.Frontmatter), nil, nil) == r.ContentHash {
 		t.Error("hash reproduced without skill_raw; the SKILL.md is not actually covered")
 	}
 }
@@ -1205,5 +1214,257 @@ func TestExtends_SearchDescriptorInheritsDescriptionAndHidesParent(t *testing.T)
 	}
 	if !strings.Contains(got.Frontmatter, "child-tag") {
 		t.Errorf("search descriptor lost the child's authored keys:\n%s", got.Frontmatter)
+	}
+}
+
+// ---- Hidden parent across every read surface -----------------------------
+
+// exHiddenBaseID is the parent the cross-surface tests hide. The ID is
+// distinctive so a substring scan of a response body or a cache file cannot
+// match it by accident.
+const exHiddenBaseID = "shared/zz-hidden-base"
+
+// exHiddenChildID is the public child that extends exHiddenBaseID.
+const exHiddenChildID = "finance/visible-child"
+
+// exHiddenAlice is the trusted-headers identity of a caller who reads the
+// child layer and not the parent layer; exHiddenBob is the parent layer's
+// sole grantee and serves as the positive control.
+var (
+	exHiddenAlice = map[string]string{"X-Podium-User-Sub": "alice@acme.com"}
+	exHiddenBob   = map[string]string{"X-Podium-User-Sub": "bob@acme.com"}
+)
+
+// exTrustedHeadersHiddenParent boots a standalone registry in trusted-headers
+// mode with a parent layer restricted to bob and a public child layer whose
+// artifact extends the parent. trusted-headers keeps the visibility arms off
+// the oidc-jwt stack, which skips on darwin. The layer set reuses the auth
+// harness renderer, so the registry.yaml matches the injected-token tests.
+func exTrustedHeadersHiddenParent(t *testing.T) *serverProc {
+	t.Helper()
+	home := t.TempDir()
+	spec := authServerSpec{Layers: []authLayer{
+		{
+			ID: "secret-parent",
+			Files: map[string]string{
+				exHiddenBaseID + "/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\n" +
+					"description: restricted base\ntags: [from-base]\n---\n\nbase body\n",
+			},
+			Visibility: authVisibility{Users: []string{"bob@acme.com"}},
+		},
+		{
+			ID: "public-child",
+			Files: map[string]string{
+				exHiddenChildID + "/ARTIFACT.md": "---\ntype: context\nversion: 2.0.0\n" +
+					"description: visible child\ntags: [child-tag]\n" +
+					"extends: " + exHiddenBaseID + "@1.x\n---\n\nchild body\n",
+			},
+			Visibility: authVisibility{Public: true},
+		},
+	}}
+	cfgPath := filepath.Join(home, "registry.yaml")
+	if err := os.WriteFile(cfgPath, []byte(authRenderConfig(t, home, spec)), 0o644); err != nil {
+		t.Fatalf("write registry.yaml: %v", err)
+	}
+	return startServerArgs(t, []string{
+		"HOME=" + home,
+		"PODIUM_CONFIG_FILE=" + cfgPath,
+		"PODIUM_INGEST_OFFLINE=true",
+		"PODIUM_IDENTITY_PROVIDER=trusted-headers",
+	}, "serve", "--standalone")
+}
+
+// exHeaderPost issues a JSON POST carrying the trusted identity headers and
+// returns the status and the raw body.
+func exHeaderPost(t *testing.T, url string, headers map[string]string, body string) (int, []byte) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read POST %s body: %v", url, err)
+	}
+	return resp.StatusCode, out
+}
+
+// exHiddenSurfaceBodies captures the raw response body of every read surface
+// that can carry an extends parent: load_artifact, search_artifacts, catalog,
+// sync/manifest, dependents (queried on the child and on the parent), and
+// artifacts:batchLoad, each requested as headers. Every surface must answer
+// 200 so an error envelope cannot pass the scan vacuously.
+func exHiddenSurfaceBodies(t *testing.T, srv *serverProc, headers map[string]string) map[string][]byte {
+	t.Helper()
+	gets := map[string]string{
+		"load_artifact":       "/v1/load_artifact?id=" + exHiddenChildID,
+		"search_artifacts":    "/v1/search_artifacts?query=",
+		"search_artifacts(q)": "/v1/search_artifacts?query=visible",
+		"catalog":             "/v1/catalog",
+		"sync/manifest":       "/v1/sync/manifest",
+		"dependents(child)":   "/v1/dependents?id=" + exHiddenChildID,
+		"dependents(parent)":  "/v1/dependents?id=" + exHiddenBaseID,
+	}
+	bodies := make(map[string][]byte, len(gets)+1)
+	for name, path := range gets {
+		st, body := gwHeaderGet(t, srv.BaseURL+path, headers)
+		if st != http.StatusOK {
+			t.Fatalf("%s = HTTP %d, want 200 (body=%s)\nlog:\n%s", name, st, body, srv.log())
+		}
+		bodies[name] = body
+	}
+	st, body := exHeaderPost(t, srv.BaseURL+"/v1/artifacts:batchLoad", headers,
+		`{"ids":["`+exHiddenChildID+`"]}`)
+	if st != http.StatusOK {
+		t.Fatalf("artifacts:batchLoad = HTTP %d, want 200 (body=%s)", st, body)
+	}
+	bodies["artifacts:batchLoad"] = body
+	return bodies
+}
+
+// Spec: §4.6 hidden parents — a caller who cannot see the parent layer
+// receives the merged child on every read surface, and no response body names
+// the parent's ID. The per-surface tests cover one field each; this test reads
+// the surfaces together so a field added to any of them is caught. The
+// merged child's inherited tag proves the parent was folded in, and bob's
+// search body naming the parent proves the scan detects the ID.
+func TestExtends_HiddenParentNeverAppearsOnTheWire(t *testing.T) {
+	t.Parallel()
+	srv := exTrustedHeadersHiddenParent(t)
+
+	bodies := exHiddenSurfaceBodies(t, srv, exHiddenAlice)
+	if !strings.Contains(string(bodies["load_artifact"]), "from-base") {
+		t.Fatalf("alice's load of the child did not fold in the parent's tag:\n%s", bodies["load_artifact"])
+	}
+	if !strings.Contains(string(bodies["artifacts:batchLoad"]), "from-base") {
+		t.Errorf("alice's batch load of the child did not fold in the parent's tag:\n%s", bodies["artifacts:batchLoad"])
+	}
+	for name, body := range bodies {
+		if strings.Contains(string(body), exHiddenBaseID) {
+			t.Errorf("%s response names the hidden parent %s:\n%s", name, exHiddenBaseID, body)
+		}
+	}
+
+	// Control: bob reads the parent layer, so the same scan finds the ID in his
+	// search and catalog bodies, and his dependents of the parent list the child.
+	control := exHiddenSurfaceBodies(t, srv, exHiddenBob)
+	for _, name := range []string{"search_artifacts", "catalog"} {
+		if !strings.Contains(string(control[name]), exHiddenBaseID) {
+			t.Errorf("control: bob's %s body does not name the parent he can read:\n%s", name, control[name])
+		}
+	}
+	if !strings.Contains(string(control["dependents(parent)"]), exHiddenChildID) {
+		t.Errorf("control: bob's dependents of the parent omit the child:\n%s", control["dependents(parent)"])
+	}
+}
+
+// exFilesContaining walks dir and returns every regular file whose bytes
+// contain needle.
+func exFilesContaining(t *testing.T, dir, needle string) []string {
+	t.Helper()
+	var hits []string
+	err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(b), needle) {
+			hits = append(hits, p)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", dir, err)
+	}
+	return hits
+}
+
+// exIdentityProxy fronts srv with a reverse proxy that stamps the trusted
+// identity headers on every request, standing in for the gateway that injects
+// them in a trusted-headers deployment. podium-mcp sends no identity headers of
+// its own, so the proxy is how the compiled consumer loads as alice.
+func exIdentityProxy(t *testing.T, srv *serverProc, headers map[string]string) string {
+	t.Helper()
+	target, err := url.Parse(srv.BaseURL)
+	if err != nil {
+		t.Fatalf("parse %s: %v", srv.BaseURL, err)
+	}
+	proxy := &httputil.ReverseProxy{Rewrite: func(r *httputil.ProxyRequest) {
+		r.SetURL(target)
+		for k, v := range headers {
+			r.Out.Header.Set(k, v)
+		}
+	}}
+	ts := httptest.NewServer(proxy)
+	t.Cleanup(ts.Close)
+	return ts.URL
+}
+
+// Spec: §4.6 hidden parents — the compiled podium-mcp, loading a merged child
+// as a caller who cannot see the parent layer, writes the child's cache bucket
+// and no file under the cache directory names the parent's ID. Only
+// deliverLoadArtifact writes the cache, so the load goes through podium-mcp.
+// The control writes the ID into a second directory and asserts the same scan
+// finds it.
+func TestExtends_ConsumerCacheHoldsNoParentID(t *testing.T) {
+	t.Parallel()
+	srv := exTrustedHeadersHiddenParent(t)
+
+	st, raw := gwHeaderGet(t, srv.BaseURL+"/v1/load_artifact?id="+exHiddenChildID, exHiddenAlice)
+	if st != http.StatusOK {
+		t.Fatalf("alice load %s = HTTP %d (body=%s)", exHiddenChildID, st, raw)
+	}
+	var direct struct {
+		ContentHash string `json:"content_hash"`
+	}
+	if err := json.Unmarshal(raw, &direct); err != nil || direct.ContentHash == "" {
+		t.Fatalf("decode load: %v (body=%s)", err, raw)
+	}
+
+	cacheDir, root := t.TempDir(), t.TempDir()
+	res := mcpExec(t,
+		[]string{
+			"PODIUM_REGISTRY=" + exIdentityProxy(t, srv, exHiddenAlice),
+			"PODIUM_HARNESS=none",
+			"PODIUM_MATERIALIZE_ROOT=" + root,
+			"PODIUM_CACHE_DIR=" + cacheDir,
+			"PODIUM_VERIFY_SIGNATURES=never",
+		},
+		toolCall(1, "load_artifact", map[string]any{"id": exHiddenChildID}),
+	)
+	rpcResult(t, res.Stdout, 1)
+	art, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(exHiddenChildID), "ARTIFACT.md"))
+	if err != nil || !strings.Contains(string(art), "from-base") {
+		t.Fatalf("podium-mcp did not materialize the merged child (err=%v):\n%s\nstderr:\n%s", err, art, res.Stderr)
+	}
+
+	bucket := filepath.Join(cacheDir, strings.TrimPrefix(direct.ContentHash, "sha256:"))
+	if _, err := os.Stat(filepath.Join(bucket, "frontmatter")); err != nil {
+		t.Fatalf("cache holds no bucket for the child at %s: %v", bucket, err)
+	}
+	if hits := exFilesContaining(t, cacheDir, exHiddenBaseID); len(hits) > 0 {
+		t.Errorf("cache files name the hidden parent %s: %v", exHiddenBaseID, hits)
+	}
+
+	// Control: the scan finds the ID when a cache file carries it.
+	controlDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(controlDir, "raw_frontmatter"),
+		[]byte("extends: "+exHiddenBaseID+"@1.x\n"), 0o644); err != nil {
+		t.Fatalf("write control file: %v", err)
+	}
+	if hits := exFilesContaining(t, controlDir, exHiddenBaseID); len(hits) != 1 {
+		t.Errorf("control: scan found %v, want the one file carrying the parent ID", hits)
 	}
 }

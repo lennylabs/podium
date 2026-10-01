@@ -390,6 +390,23 @@ type Store interface {
 	PutManifest(ctx context.Context, rec ManifestRecord) error
 	GetManifest(ctx context.Context, tenantID, artifactID, version string) (ManifestRecord, error)
 	ListManifests(ctx context.Context, tenantID string) ([]ManifestRecord, error)
+	// RehashManifest replaces the content_hash and signature of one manifest
+	// row, including a soft-deleted one, only when the stored content_hash
+	// equals oldHash and the stored signature equals oldSignature. It returns
+	// ErrNotFound when no row exists for the key and ErrImmutableViolation
+	// when either condition fails. Its callers are the §13.4 stored-value
+	// rewrite and the sign-stored-rows command, and the compare-and-swap
+	// keeps a concurrent ingest, the same pass on a peer replica, or a second
+	// command run from overwriting a hash or an envelope it did not read. A
+	// call with oldSignature "" on an unchanged hash is the sign-once case: it
+	// attaches a first envelope, and two replicas cannot both sign one row.
+	// It is the only write to a stored content_hash after PutManifest, which
+	// is the immutability anchor and refuses a differing hash for an
+	// existing key, so no ingest path can repair a stored value.
+	RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, oldSignature, newHash, signature string) error
+	// ListManifestsIncludingDeleted is ListManifests without the deleted_at
+	// filter, so a migration reaches the rows a restored layer would serve.
+	ListManifestsIncludingDeleted(ctx context.Context, tenantID string) ([]ManifestRecord, error)
 	// PurgeDeprecatedManifests hard-deletes deprecated manifest versions
 	// whose DeprecatedAt predates `before`, implementing the §8.4
 	// "Deprecated artifact versions: 90 days after the deprecation flag
@@ -443,7 +460,36 @@ type Store interface {
 	// their artifacts whose DeletedAt predates `before`, ending the §8.4
 	// 30-day recovery window. Returns the number of layers removed.
 	PurgeExpiredLayerDeletions(ctx context.Context, before time.Time) (int, error)
+
+	// Data-migration markers (§13.4). The §13.4 additive schema guarantee
+	// does not cover the values stored under the schema, so a one-time
+	// rewrite of stored values records that it has run and never runs twice
+	// against one store.
+	//
+	// DataMigrationApplied reports whether the named one-time rewrite of
+	// stored values has completed against this store. The marker is global
+	// to the store rather than per tenant.
+	DataMigrationApplied(ctx context.Context, name string) (bool, error)
+	// SetDataMigrationApplied records (applied true) or removes (applied
+	// false) the named marker. Both directions are idempotent, so replicas
+	// that finish the same pass together both succeed. The pass sets it.
+	// podium admin migrate-to-standard, which copies rows another store
+	// computed, removes it on the target so the rewrite runs again over the
+	// copied rows: at the target's next start only when the target is the
+	// SQLite store in the signing key file's directory, and otherwise
+	// through sign-stored-rows.
+	SetDataMigrationApplied(ctx context.Context, name string, applied bool) error
 }
+
+// DataMigrationContentHashFraming names the one-time rewrite of every stored
+// content hash onto the §4.7.6 framed canonical serialization. The registry's
+// first start on the new binary runs the pass and sets the marker when the
+// store is the SQLite store in the signing key file's directory or holds no
+// manifest row; for every other store, sign-stored-rows runs the pass and
+// sets the marker, and a start refuses until it has. podium admin
+// migrate-to-standard clears the marker on its target so the rewrite runs
+// again over the rows it copied, by the same rule.
+const DataMigrationContentHashFraming = "content-hash-framing"
 
 // SuiteName is the canonical name of the conformance suite (§9.3).
 // Implementations import test/conformance/store and reference this

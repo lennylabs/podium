@@ -29,6 +29,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // The fixture's scope set is other than the default, and the scope the stub
@@ -223,11 +224,11 @@ func newBrowserStack(t *testing.T, opts stackOpts) *browserStack {
 		{ID: "pub", Precedence: 1, Visibility: layer.Visibility{Public: true}},
 		{ID: "eng", Precedence: 2, Visibility: layer.Visibility{Groups: []string{"engineering"}}},
 	}
-	if err := st.PutManifest(t.Context(), store.ManifestRecord{
+	if err := st.PutManifest(t.Context(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "eng/secret", Version: "1.0.0",
 		ContentHash: "sha256:eng", Type: "context", Description: "eng secret", Layer: "eng",
 		IngestedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 

@@ -7,18 +7,6 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
-// enforceSignaturePolicy bubbles up provider construction errors.
-func TestEnforceSignaturePolicy_BadProviderConfig(t *testing.T) {
-	t.Parallel()
-	s := &mcpServer{cfg: &config{
-		signatureProvider: "bogus",
-		verifyPolicy:      sign.PolicyAlways,
-	}}
-	if err := s.enforceSignaturePolicy(loadArtifactResponse{}); err == nil {
-		t.Errorf("expected provider error")
-	}
-}
-
 // enforceSignaturePolicy passes when the policy is never.
 func TestEnforceSignaturePolicy_PolicyNeverSucceeds(t *testing.T) {
 	t.Parallel()

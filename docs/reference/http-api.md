@@ -173,7 +173,7 @@ Hybrid retrieval over artifact frontmatter. Every argument is optional. When `qu
 
 `as_admin=1` (or `as_admin=true`) requests the admin diagnostic visibility override, which searches across every layer regardless of the caller's visibility. A caller without the admin role is rejected with `403 auth.forbidden`.
 
-Each result's `frontmatter` is the artifact's stored YAML frontmatter as a string. For an artifact that declares `extends:`, the `extends` key is removed before the block is returned, so the result does not surface the parent. That block is re-encoded from the remaining keys, which normalizes comments, quoting, and indentation, and the result carries no `frontmatter` key when the child's stored frontmatter cannot be read, rewritten, or re-encoded, or when the rewritten block still resolves a parent, which is the case for a child that supplies `extends:` through a YAML merge key or anchors its value.
+Each result's `frontmatter` is the artifact's stored YAML frontmatter as a string. For an artifact that declares `extends:`, the `extends` key is removed before the block is returned, so the result does not surface the parent. That block is re-encoded from the remaining keys, which normalizes comments, quoting, and indentation, and the result carries no `frontmatter` key in any of these cases: the child's stored frontmatter cannot be read, rewritten, or re-encoded; the rewritten block still resolves a parent, which is the case for a child that supplies `extends:` through a YAML merge key or anchors its value; the rewritten block still names an ancestor in the chain the child pinned at ingest, other than an ancestor that shares the child's canonical ID (the same-ID overlay), which is exempt from this test; or that chain cannot be resolved. The result itself is still returned in each case.
 
 Response:
 
@@ -205,7 +205,7 @@ GET /v1/load_artifact?id={id}&version={v}&session_id={uuid}&as_admin={bool}
 
 `version` is optional (default `latest`). `session_id` is optional; the first `latest` lookup within a session is recorded and reused for subsequent same-id lookups in the session, so the host sees a consistent snapshot. `as_admin=1` (or `as_admin=true`) requests the admin diagnostic visibility override; a caller without the admin role is rejected with `403 auth.forbidden`.
 
-A `HEAD` request revalidates the consumer's resolution cache: the registry returns the resolved content hash in the `X-Podium-Content-Hash` header (and the version in `X-Podium-Version`) with no body. A `GET` that carries a matching `If-None-Match` is answered `304 Not Modified`.
+A `HEAD` request revalidates the consumer's resolution cache: the registry returns the resolved content hash in the `X-Podium-Content-Hash` header (and the version in `X-Podium-Version`) with no body. A `GET` that carries a matching `If-None-Match` is answered `304 Not Modified`. The entity tag is computed from the content hash and the `extends_pin` value the requesting identity is served, on a full response, a `HEAD`, and a `304` alike. A cached body served to one identity with an `extends_pin` value therefore does not revalidate for an identity that is served a different value or none.
 
 Response:
 
@@ -221,11 +221,27 @@ Response:
   },
   "large_resources": {
     "assets/model.bin": { "presigned_url": "...", "content_hash": "sha256:...", "size": 5242880 }
-  }
+  },
+  "delivery_hash": "sha256:...",
+  "delivery_signature": "...",
+  "extends_pin": "finance/ap/pay-invoice@1.2.0"
 }
 ```
 
-A resource at or below the inline cutoff (256 KB) is returned in `resources`, a map of package-relative path to inline bytes. A larger resource is returned in `large_resources`, a map of path to a presigned URL into object storage that the consumer fetches directly; the registry does not proxy the bytes. When any inline resource is binary, the whole `resources` map is base64-encoded and `resources_base64` is `true`. A canonical manifest above the cutoff is delivered the same way, as `manifest_body_url` with the inline `manifest_body` cleared. The `load_artifacts` batch endpoint below returns each artifact's resources as an array of objects rather than these maps.
+The response carries these integrity and reference fields:
+
+- `content_hash` names the stored artifact. It is the resolution-cache key, the `sync.lock` value, and the target of an `@sha256:` pin. For an artifact that declares `extends:`, it covers the child's pre-merge package, so the merged bytes the response serves do not reproduce it.
+- `delivery_hash` is a SHA-256 digest over the record this response delivers: the identity, version, type, content hash, sensitivity, served `ARTIFACT.md` document, manifest body, `SKILL.md`, and each bundled resource's path and content hash. It is present on every response, for every artifact, whether or not the artifact declares `extends:`.
+- `delivery_signature` is the registry's signature over `delivery_hash`, minted per response with the registry-managed key. It is absent when the registry runs without a signing key. It is a registry-managed envelope whatever key model signed the artifact at ingest, so a consumer verifies it with the registry-managed verifier under its verification key set.
+- `extends_pin` is the `<id>@<version>` parent pin the registry resolved when it ingested the child. It is present only when the calling identity can see the parent record. Its absence does not mean the artifact extends nothing.
+
+`podium-mcp` recomputes `delivery_hash` from the bytes it received on every load and fails the load with `materialize.content_hash_mismatch` when the values differ, before it applies its signature policy to `delivery_signature`. Server-source `podium sync` and the language SDKs receive the delivery fields and do not verify them.
+
+The delivery record carries no timestamp and no nonce, so a record captured from an earlier response verifies when it is replayed. Rollback to an earlier version is detected for `podium sync` by the `sync.lock` pin of `(id, version, content_hash)`. The delivery record also attests that the registry composed and served the bytes. It does not attest that the merge folded the parent the child declared, because a consumer that cannot see a hidden parent cannot check the fold.
+
+The response carries no `raw_frontmatter`, `manifest_merged`, or `signature` field. A registry configured with a signer verifies the signature it stored at ingest before it serves a row, and no registry serves that stored signature. No response field marks whether an artifact is merged.
+
+A resource at or below the inline cutoff (256 KB) is returned in `resources`, a map of package-relative path to inline bytes. A larger resource is returned in `large_resources`, a map of path to a presigned URL into object storage that the consumer fetches directly; the registry does not proxy the bytes. A resource the registry holds inline on the manifest record, which includes every resource of a row ingested while no object store was configured, is returned in `resources` at any size. When any inline resource is binary, the whole `resources` map is base64-encoded and `resources_base64` is `true`. A canonical manifest above the cutoff is delivered the same way, as `manifest_body_url` with the inline `manifest_body` cleared. The rule applies to a merged manifest as well, so an above-cutoff merged manifest is served by URL like any other. The `load_artifacts` batch endpoint below returns each artifact's resources as an array of objects rather than these maps.
 
 ### `load_artifacts` (bulk)
 
@@ -257,7 +273,9 @@ Response: an array of per-item envelopes. Each item has its own `status` (`ok` o
     "version": "1.2.0",
     "content_hash": "sha256:...",
     "manifest_body": "...",
-    "resources": [...]
+    "resources": [...],
+    "delivery_hash": "sha256:...",
+    "delivery_signature": "..."
   },
   {
     "id": "finance/restricted/payroll-runner",
@@ -266,6 +284,10 @@ Response: an array of per-item envelopes. Each item has its own `status` (`ok` o
   }
 ]
 ```
+
+Each entry of an item's `resources` array carries `path` and `content_hash`, and either `presigned_url` or, for a resource the registry holds inline, `inline`, with `inline_base64: true` when the bytes are not valid UTF-8. On a deployment with an object store, a resource at or below the inline cutoff arrives in `inline`, and only a resource the registry read from object storage carries a `presigned_url`.
+
+Each `ok` item carries `delivery_hash` and `delivery_signature`, composed and signed by the same code as the `load_artifact` response, so both endpoints serve one delivery hash per artifact. A batch item carries no `extends_pin`. The MCP server does not call this endpoint and performs no startup cache warm-up.
 
 Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied`. No leak about whether the artifact exists in some hidden layer.
 
@@ -307,6 +329,8 @@ GET /v1/dependents?id={id}
 ```
 
 Returns the cross-artifact dependency edges that point at the artifact, under the `edges` key. Each edge carries `from`, `to`, and `kind`.
+
+The edges are filtered per caller. An edge is returned only when the caller can see both of its endpoints: the artifact that declared the relation and the artifact it names. For an `extends` edge the endpoint tested is the parent record the child pinned at ingest, so a child that overlays a lower-precedence layer's artifact under the same canonical ID returns no edge to a caller who cannot see that layer. A query against an artifact the caller cannot see answers `200 {"edges":[]}`, the same response as a query against an artifact that does not exist or that nothing depends on. The endpoint filters rather than refuses, so it returns no `visibility.denied` error. The search ranking signal counts dependents across the tenant and is not filtered.
 
 ### `domain/analyze`
 
@@ -578,7 +602,7 @@ GET  /objects/{key}
 HEAD /objects/{key}
 ```
 
-Serves a large resource's bytes for the filesystem object-store backend. The `presigned_url` a `load_artifact` response returns for the filesystem backend points here. The `key` is the resource's content hash. Visibility is re-checked on every fetch, so a caller who has lost access to the artifact can no longer follow a previously-issued URL. `HEAD` reports the size without streaming the body. The S3 backend returns its own presigned URLs instead and does not use this route.
+Serves object bytes for the filesystem object-store backend. The `presigned_url` a `load_artifact` response returns for the filesystem backend points here, in `large_resources` and in `manifest_body_url`. The `key` is a content hash. The route serves a bundled resource to a caller who can see an artifact that bundles it, and it serves a manifest document to a caller who can see an artifact that serves that document through `manifest_body_url`: a skill's `SKILL.md`, or another type's served `ARTIFACT.md`, which for an artifact that declares `extends:` is the merged document. The stored pre-merge `ARTIFACT.md` of such an artifact is not served. A key the caller can see no owner of is answered as a key that does not exist. Visibility is re-checked on every fetch, so a caller who has lost access to the artifact can no longer follow a previously-issued URL. `HEAD` reports the size without streaming the body. The S3 backend returns its own presigned URLs instead and does not use this route.
 
 ---
 

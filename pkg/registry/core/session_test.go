@@ -7,6 +7,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 func newRegistryWithStore(t *testing.T) (*core.Registry, store.Store) {
@@ -23,10 +24,10 @@ func newRegistryWithStore(t *testing.T) (*core.Registry, store.Store) {
 
 func putVersion(t *testing.T, st store.Store, id, version string) {
 	t.Helper()
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: "t", ArtifactID: id, Version: version,
 		ContentHash: "sha256:" + version, Type: "context", Layer: "L",
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest %s@%s: %v", id, version, err)
 	}
 }

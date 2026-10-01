@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/sign"
@@ -104,8 +105,6 @@ func applyConfigKV(c *config, key, val string) {
 		c.cacheDir = val
 	case "cache-mode":
 		c.cacheMode = val
-	case "prefetch":
-		c.prefetchIDs = splitCSV(val)
 	case "cache-resolution-ttl-seconds":
 		c.resolutionTTL = parseTTLSeconds(val)
 	case "materialize-root":
@@ -167,32 +166,38 @@ func registryFromWorkspace(workspace string) string {
 	return synccfg.ResolveRegistryPath(workspace, cfg.Defaults.Registry)
 }
 
-// verifySignaturesFromSyncYAML resolves defaults.verify_signatures from
-// sync.yaml using the same scope order as the registry lookup: the workspace
-// overlay first, then the home-global ~/.podium/sync.yaml a standalone
-// deployment writes. Returns "" when no scope sets it (§13.10).
-func verifySignaturesFromSyncYAML() string {
-	if ws, err := os.Getwd(); err == nil {
-		if v := verifySignaturesFromWorkspace(ws); v != "" {
-			return v
+// verifySignaturesFromSyncYAML resolves defaults.verify_signatures across the
+// §7.5.2 file scopes by per-key precedence: the workspace's
+// .podium/sync.local.yaml, then its .podium/sync.yaml, then the home-global
+// ~/.podium/sync.yaml. The workspace is discovered by walking up from the
+// working directory, as §7.5.2 states; with none found only the home file is
+// read. It returns the first non-empty value with the path of the file that
+// carried it, or two empty strings when no scope sets it. A file that is
+// absent or does not parse contributes nothing. synccfg.LoadMergedConfig is
+// not reused because it merges no verify_signatures and reports no per-key
+// scope, which the stale-never warning and the invalid-policy error name.
+//
+// Spec: §7.5.2, §4.7.9.
+func verifySignaturesFromSyncYAML() (value, path string) {
+	var paths []string
+	if cwd, err := os.Getwd(); err == nil {
+		if ws, ok := synccfg.DiscoverWorkspace(cwd); ok {
+			paths = append(paths,
+				filepath.Join(ws, ".podium", "sync.local.yaml"),
+				filepath.Join(ws, ".podium", "sync.yaml"))
 		}
 	}
 	if home, err := os.UserHomeDir(); err == nil {
-		if v := verifySignaturesFromWorkspace(home); v != "" {
-			return v
+		paths = append(paths, filepath.Join(home, ".podium", "sync.yaml"))
+	}
+	for _, p := range paths {
+		cfg, err := synccfg.ReadConfigFile(p)
+		if err != nil || cfg == nil || cfg.Defaults.VerifySignatures == "" {
+			continue
 		}
+		return cfg.Defaults.VerifySignatures, p
 	}
-	return ""
-}
-
-// verifySignaturesFromWorkspace reads <workspace>/.podium/sync.yaml and
-// returns its defaults.verify_signatures, or "" when absent or invalid.
-func verifySignaturesFromWorkspace(workspace string) string {
-	cfg, err := synccfg.ReadConfig(workspace)
-	if err != nil || cfg == nil {
-		return ""
-	}
-	return cfg.Defaults.VerifySignatures
+	return "", ""
 }
 
 // checkServerVersionFromSyncYAML enforces the §6.7 "Versioning" pin: if any

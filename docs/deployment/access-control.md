@@ -159,4 +159,5 @@ Layer visibility answers who can read. The related concerns below are decided el
 |:--|:--|
 | Who can publish to a layer | The layer's source. Branch protection and required reviewers on the Git ref, or filesystem permissions on a `local` path. Podium does not duplicate them. |
 | Who can administer the registry | The tenant `admin` role, managed with `podium admin grant` and `podium admin revoke`. Instance-operator rights for tenant management are separate and seeded through `PODIUM_OPERATOR_ADMINS`. |
-| How sensitive an artifact is | The `sensitivity:` frontmatter field. `PODIUM_VERIFY_SIGNATURES` reads it to decide which artifacts require a valid signature at materialization. [Progressive adoption](progressive-adoption) covers rolling it out. |
+| How sensitive an artifact is | The `sensitivity:` frontmatter field, which feeds visibility, search, and audit. Signature verification does not read it. |
+| Whether a load requires a valid signature | `PODIUM_VERIFY_SIGNATURES` on each `podium-mcp` consumer, `always` by default, where every artifact the bridge loads requires a valid signature. A signing registry also verifies each stored signature before it serves the row. [Progressive adoption](progressive-adoption) covers rolling it out. |

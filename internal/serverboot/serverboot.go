@@ -43,6 +43,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/scim"
+	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/tracing"
 	"github.com/lennylabs/podium/pkg/vector"
@@ -775,25 +776,35 @@ func Run() error {
 	return run(ctx, stop)
 }
 
-// run is Run's body with the lifecycle context injected. ctx is cancelled on a
-// signal; stop restores the default signal handler so a second signal aborts a
-// stuck drain. A test drives a full boot and graceful shutdown by calling run
-// directly with a cancellable context.
-func run(ctx context.Context, stop func()) error {
+// loadBootConfig resolves and validates the configuration a registry start
+// reads. run and sign-stored-rows both call it, so the one-shot command opens
+// the store, object storage, and signing key the serving process would.
+func loadBootConfig() (*Config, error) {
 	// §13.10: an explicitly named --config / PODIUM_CONFIG_FILE that
 	// does not exist is a hard error — the operator named a config, so a missing
 	// one is not a cue to invent standalone defaults.
 	if cf := os.Getenv("PODIUM_CONFIG_FILE"); cf != "" {
 		if _, err := os.Stat(cf); err != nil {
 			if os.IsNotExist(err) {
-				return fmt.Errorf("config file %q does not exist", cf)
+				return nil, fmt.Errorf("config file %q does not exist", cf)
 			}
-			return fmt.Errorf("config file %q: %w", cf, err)
+			return nil, fmt.Errorf("config file %q: %w", cf, err)
 		}
 	}
-
 	cfg := LoadConfig()
 	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// run is Run's body with the lifecycle context injected. ctx is cancelled on a
+// signal; stop restores the default signal handler so a second signal aborts a
+// stuck drain. A test drives a full boot and graceful shutdown by calling run
+// directly with a cancellable context.
+func run(ctx context.Context, stop func()) error {
+	cfg, err := loadBootConfig()
+	if err != nil {
 		return err
 	}
 
@@ -809,7 +820,12 @@ func run(ctx context.Context, stop func()) error {
 	// performs was reported before a bind was attempted. Returning here instead
 	// would put a bind failure ahead of them, and an operator whose
 	// configuration is refused would read "address already in use" rather than
-	// the §6.10 code naming what is wrong with their configuration.
+	// the §6.10 code naming what is wrong with their configuration. The one
+	// exception is a start unmigratedStoreGoverned covers with no §13.4
+	// completion record: refuseUnrecordedIngest returns the bind failure
+	// before the bootstrap ingest and ahead of the later startup refusals,
+	// because ingesting without the record would leave rows that refuse every
+	// later start.
 	configuredBind := cfg.bind
 	ln, bindErr := net.Listen("tcp", configuredBind)
 	if bindErr == nil {
@@ -884,16 +900,109 @@ func run(ctx context.Context, stop func()) error {
 		resourcePut = objStore.Put
 	}
 
-	// §13.10 / §4.7.9 ingest signing: when --sign registry-key (PODIUM_SIGN)
-	// is set, every accepted manifest's content hash is signed with the
-	// registry-managed key. Disabled by default; the bootstrap and reingest
-	// paths leave the signature envelope empty.
-	ingestSigner, err := registrySignerFor(cfg.signMode)
-	if err != nil {
-		return fmt.Errorf("registry signing key: %w", err)
+	// §13.12 signing: refuse a start whose generated signing key would sit on
+	// storage with a different fate from the store it signs. It runs before
+	// the §13.4 refusal and the loader, so a refused start writes no key and
+	// rewrites no row.
+	if err := refuseUnpersistedSigningKey(cfg); err != nil {
+		return err
 	}
-	if ingestSigner != nil {
+
+	// §13.4: refuse a start that would generate a signing key while the
+	// content-hash rewrite below has not completed and a stored row carries a
+	// §4.7.9 signature. It runs ahead of the loader whatever the bind outcome,
+	// so a refused start writes no key and the next start with the same
+	// configuration is refused the same way.
+	if err := refuseGeneratedSigningKey(ctx, st, cfg.signMode); err != nil {
+		return err
+	}
+
+	// §13.4: outside the SQLite store in the key file's directory, refuse a
+	// start over a store that holds a manifest row and no record that the
+	// content-hash rewrite completed; sign-stored-rows runs that rewrite
+	// behind a reviewed dry run. It runs whatever the bind outcome and before
+	// the loader, so a refused start writes no key file, no manifest row, and
+	// no completion record.
+	if err := refuseUnmigratedStore(ctx, st, cfg); err != nil {
+		return err
+	}
+
+	// §13.10 / §4.7.9 ingest signing: signing is on by default, so every
+	// accepted manifest's content hash is signed with the registry-managed
+	// key. --sign none (PODIUM_SIGN=none) turns it off, and the bootstrap and
+	// reingest paths then leave the signature envelope empty.
+	// The loader's error names the key file and carries the §6.10 code, so it
+	// is returned unwrapped and reaches stderr as written. The provider is
+	// built only when signing is on, because the zero key in an interface is
+	// never nil and would read as a signer to every consumer below.
+	signKey, signingOn, err := registrySignerFor(cfg.signMode)
+	if err != nil {
+		return err
+	}
+	var signProvider sign.Provider
+	var ingestSigner ingest.SignerFunc
+	if signingOn {
+		signProvider = signKey
+		ingestSigner = signKey.Sign
 		log.Printf("ingest signing: registry-managed key (§4.7.9)")
+	}
+
+	// §8.3 audit sink and §8.2 query-text scrubber. Both read only cfg, and
+	// they are resolved here rather than at the mount below because the §13.4
+	// rewrite emits one artifact.signed event per row it re-signs.
+	//
+	// auditSink is the sink every event is emitted through (a file sink, or an
+	// EndpointSink when PODIUM_AUDIT_LOG_PATH names a SIEM endpoint).
+	// auditFile is the same sink in its file form, non-nil only for the file
+	// case; the §8.6 anchor/verify, §8.4 retention, and §8.5 erasure paths
+	// rewrite the on-disk chain and run only against it. A nil scrubber means
+	// an operator disabled scrubbing.
+	auditSink, auditFile := openAuditSink(cfg)
+	scrubber, err := cfg.piiRedaction.BuildScrubber()
+	if err != nil {
+		return fmt.Errorf("pii redaction config: %w", err)
+	}
+
+	// §13.4: rewrite every stored §4.7.6 content hash from the bytes the
+	// registry holds, once per store, before the bootstrap ingest and before
+	// anything is served. A start whose listener never bound does not run it:
+	// rewriting and re-signing the store another process is still serving,
+	// only to exit on the bind error, is the one failure the guard prevents.
+	if bindErr == nil {
+		deps := rehashDeps{
+			Store:       st,
+			Objects:     objStore,
+			ReadTimeout: cfg.migrationObjectReadTimeout,
+			Sink:        auditSink,
+			Scrubber:    scrubber,
+		}
+		// Assigned only when signing is on: the zero key in the interface
+		// field would never be nil and would send unsigned rows to Sign. The
+		// unsigned-row policy matters only with a signer, so a signing-off
+		// start never resolves a key path it does not use.
+		if signingOn {
+			deps.Signer = signKey
+			if deps.MintUnsigned, err = mintUnsignedOnFirstRun(cfg, os.Getenv("PODIUM_SIGN_KEY_PATH")); err != nil {
+				return err
+			}
+		}
+		// The boot logs the counts and the hold value through the summary
+		// lines and acts on neither; a held row is retried next start only
+		// over the co-located store; outside it, refuseUnrecordedIngest fails
+		// this start before it ingests, the held row stays in the store, and
+		// the next start is refused until sign-stored-rows records
+		// completion.
+		if _, _, err := rehashStoredHashes(ctx, deps, true); err != nil {
+			return err
+		}
+	}
+
+	// §13.4: on a start refuseUnmigratedStore governs, ingest only once the
+	// completion record exists. It closes a listener that did not bind, a
+	// row the rewrite held back, and a failed record write, each of which
+	// would otherwise store rows that refuse every later start.
+	if err := refuseUnrecordedIngest(ctx, st, cfg, bindErr, configuredBind); err != nil {
+		return err
 	}
 
 	// §4.7.2: route ingest embedding through the transactional outbox when the
@@ -964,7 +1073,12 @@ func run(ctx context.Context, stop func()) error {
 	if cfg.multiTenant {
 		boundTenant = multiTenantUnrouted
 	}
-	registry := core.New(st, boundTenant, bootLayers)
+	// Spec: §13.4 — the registry admits each stored row before it serves the
+	// row's content, under the signer the first-start rewrite and ingest use,
+	// against the object store ingest wrote bodies into, and within the
+	// PODIUM_MIGRATION_OBJECT_READ_TIMEOUT deadline. It is set here, before
+	// the listener serves any request.
+	registry := core.New(st, boundTenant, bootLayers).WithAdmission(signProvider, objStore, cfg.migrationObjectReadTimeout)
 	// §13.12 / §4.5.5: apply the tenant registry.yaml discovery defaults
 	// and the allow_per_domain_overrides gate to load_domain rendering.
 	registry = registry.WithDiscoveryDefaults(cfg.discoveryDefaults(), cfg.allowPerDomain())
@@ -1111,6 +1225,11 @@ func run(ctx context.Context, stop func()) error {
 
 	bootOpts := bootstrapOptions(cfg, objStore)
 	bootOpts = append(bootOpts, server.WithWebhooks(webhookWorker), server.WithMode(mode))
+	// §4.7.10: the read path signs every served delivery hash with the one
+	// registry-managed key ingest, the §13.4 rewrite, and admission already
+	// hold, so every envelope the registry mints carries one key_id. A nil
+	// provider (signing mode none) serves an empty delivery signature.
+	bootOpts = append(bootOpts, server.WithDeliverySigner(signProvider))
 
 	// §13.9 /readyz reachability probes, run at request time and
 	// bounded by the handler's deadline. The metadata-store probe
@@ -1425,27 +1544,12 @@ func run(ctx context.Context, stop func()) error {
 	}
 	mux.Handle("/", srv.Handler())
 
-	// §8.3 audit sink: file-backed, hash-chained, shared by the
-	// anchor scheduler, the retention scheduler, the read-only
-	// probe transition events, and the §8.1 meta-tool emission
-	// hook on the registry. Nil when the path can't be resolved
-	// (probes still log; downstream features that need the sink
-	// gracefully no-op).
-	// auditSink is the §8.3 registry sink every event is emitted through
-	// (a file sink, or an EndpointSink when PODIUM_AUDIT_LOG_PATH names a
-	// SIEM endpoint). auditFile is the same sink in its file form,
-	// non-nil only for the file case; the §8.6 anchor/verify, §8.4 retention,
-	// and §8.5 erasure paths rewrite the on-disk chain and run only against
-	// it.
-	auditSink, auditFile := openAuditSink(cfg)
-	// §8.2 default-on query-text scrubbing: build the scrubber from the
-	// resolved PIIRedactionConfig (env PODIUM_PII_REDACTION + registry.yaml
-	// pii_redaction). A nil scrubber means an operator disabled it. Resolved
-	// here unconditionally so the reingest runner's audit emitter shares it.
-	scrubber, err := cfg.piiRedaction.BuildScrubber()
-	if err != nil {
-		return fmt.Errorf("pii redaction config: %w", err)
-	}
+	// The §8.3 sink and the §8.2 scrubber are opened before the §13.4 rewrite
+	// above, which emits through them. They are shared from here by the anchor
+	// scheduler, the retention scheduler, the read-only probe transition
+	// events, the §8.1 meta-tool emission hook on the registry, and the
+	// reingest runner's audit emitter.
+	//
 	// §8.4 optional sampling for high-volume low-sensitivity events
 	// (e.g. domain.loaded at 10%). Built from PODIUM_AUDIT_SAMPLE_RATES;
 	// nil when unset, in which case every event is kept.
@@ -1626,7 +1730,10 @@ func run(ctx context.Context, stop func()) error {
 	emitStartupBanner(os.Stderr, cfg.publicMode)
 	// Every startup refusal above has had its chance, so a bind that could not
 	// be satisfied is reported here, which is where it surfaced when the
-	// listener was opened by http.Server.ListenAndServe.
+	// listener was opened by http.Server.ListenAndServe. The exception is a
+	// start unmigratedStoreGoverned covers with no §13.4 completion record,
+	// whose bind failure refuseUnrecordedIngest returns before the bootstrap
+	// ingest.
 	if bindErr != nil {
 		return fmt.Errorf("serve: bind %s: %w", configuredBind, bindErr)
 	}
@@ -1719,10 +1826,20 @@ type Config struct {
 	// http.Client.Timeout is no deadline at all and the registry's own
 	// http.Server carries ReadHeaderTimeout alone.
 	webUIOAuthExchangeTimeout time.Duration
+	// migrationObjectReadTimeout bounds each object-storage read the §13.4
+	// first-start stored-value rewrite makes, each one the sign-stored-rows
+	// command makes, and each one the §13.4 stored-row admission check makes
+	// before a load is served
+	// (PODIUM_MIGRATION_OBJECT_READ_TIMEOUT, §13.12). Environment only; there
+	// is no registry.yaml key. An unset, unparsable, or non-positive value
+	// takes the 30-second default, because run's context carries no deadline
+	// and the object-store providers set none of their own.
+	migrationObjectReadTimeout time.Duration
 	// signMode is the §13.10 ingest-signing selection (--sign /
-	// PODIUM_SIGN). Standalone signing is disabled by default; the only
-	// accepted value is "registry-key", which signs every accepted manifest
-	// with a registry-managed Ed25519 key (§4.7.9).
+	// PODIUM_SIGN). The accepted values are "registry-key" and "none". An
+	// empty value resolves to "registry-key", which signs every accepted
+	// manifest with a registry-managed Ed25519 key (§4.7.9); "none" turns
+	// signing off.
 	signMode         string
 	identityProvider string
 	// oauthAudiences is the §6.3.3 accepted-audience set. A token satisfies
@@ -2096,6 +2213,7 @@ func LoadConfig() *Config {
 		webUIOAuthTokenEndpoint:         os.Getenv("PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT"),
 		webUIOAuthScopes:                envScopeSet("PODIUM_WEB_UI_OAUTH_SCOPES", defaultWebUIOAuthScopes),
 		webUIOAuthExchangeTimeout:       envPositiveDuration("PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT", defaultWebUIOAuthExchangeTimeout),
+		migrationObjectReadTimeout:      envPositiveDuration("PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", objectstore.DefaultReadTimeout),
 		signMode:                        os.Getenv("PODIUM_SIGN"),
 		identityProvider:                os.Getenv("PODIUM_IDENTITY_PROVIDER"),
 		oauthAudiences:                  identity.NormalizeAudiences(splitCSVTrim(os.Getenv("PODIUM_OAUTH_AUDIENCE"))),
@@ -2353,11 +2471,13 @@ func (c *Config) validate() error {
 	if err := startup.Validate(); err != nil {
 		return err
 	}
-	// §13.10 signing: the only accepted --sign / PODIUM_SIGN value is
-	// "registry-key"; reject anything else at startup so a typo is named
-	// rather than silently leaving signing disabled.
-	if c.signMode != "" && c.signMode != "registry-key" {
-		return fmt.Errorf("config.invalid_sign_mode: PODIUM_SIGN must be registry-key, got %q", c.signMode)
+	// §13.10 signing: --sign / PODIUM_SIGN accepts "registry-key" and "none",
+	// and an empty value resolves to "registry-key". Anything else is refused
+	// at startup so a typo is named rather than silently read as a mode.
+	switch c.signMode {
+	case "", "registry-key", "none":
+	default:
+		return fmt.Errorf("config.invalid_sign_mode: PODIUM_SIGN must be registry-key or none, got %q", c.signMode)
 	}
 	// §6.3.1 / §13.12: a non-empty PODIUM_IDP_GROUP_MAPPING that does not
 	// resolve to a table fails startup under every identity provider.

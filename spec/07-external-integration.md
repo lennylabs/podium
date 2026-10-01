@@ -27,9 +27,17 @@ The registry exposes two surfaces:
 
 **Control plane (HTTP API).** Returns metadata: manifest bodies, descriptors, search results, domain maps. Synchronous. Audited. Every call carries the host's OAuth identity and is visibility-filtered.
 
-**Data plane (object storage).** Holds bundled resources. The control plane never streams bytes for resources above the inline cutoff (256 KB). Instead, `load_artifact` returns presigned URLs that the Podium MCP server fetches directly from object storage.
+**Data plane (object storage).** Holds bundled resources. The control plane never streams bytes for a resource above the inline cutoff (256 KB) that the registry holds in object storage. Instead, `load_artifact` returns presigned URLs that the Podium MCP server fetches directly from object storage. A resource the registry holds inline on the manifest record, which includes every resource of a row ingested while no object store was configured, is returned inline whatever its size, because no object exists to presign.
 
 Below the inline cutoff, resources are returned inline. This avoids round-trips for small fixtures.
+
+**Integrity and reference fields.** The registry's HTTP `load_artifact` response carries three fields beside the manifest and the resources:
+
+- `delivery_hash`: the §4.7.10 digest over the record this response delivers. Present on every response.
+- `delivery_signature`: the registry's §4.7.10 signature over `delivery_hash`. Absent when the registry runs without a signing key.
+- `extends_pin`: the pinned `<id>@<version>` this artifact extends, as the registry resolved it at ingest; the manifest's `extends:` key may carry a version range, and this field carries the resolved pin rather than the authored reference, present only when the calling identity can see the parent record (§4.6). Its absence does not mean the artifact extends nothing.
+
+These are fields of the HTTP response. The §5 `load_artifact` meta-tool result does not carry them. The entity tag the registry publishes for a `load_artifact` of an `(id, version)` is computed from the content hash and the `extends_pin` value the requesting identity is served, on a full response, on a HEAD, and on a 304 alike, so a response that carries `extends_pin` publishes an entity tag that differs from the one the same `(id, version)` publishes without it, and a conditional request cannot revalidate a cached body whose `extends_pin` value differs from the one the requesting identity is served.
 
 ### 7.2.1 Control-Plane JSON Conventions
 
@@ -85,6 +93,7 @@ Artifacts enter the registry by being merged into a tracked Git ref (or, for `lo
 | Freeze-window in effect              | Rejected as `ingest.frozen` unless `--break-glass` passed via the manual reingest path.                                                                                                                                     |
 | Force-push detected                  | Tolerant by default; previously-ingested commits' bytes are preserved in the content store, and a `layer.history_rewritten` event is emitted. Strict mode is configurable per layer (`force_push_policy: strict` rejects).  |
 | Source unreachable                   | Ingest fails; existing served artifacts are unaffected.                                                                                                                                                                     |
+| Configured signer fails              | Rejected as `ingest.sign_failed`. The rejection covers that one artifact; the rest of the batch is accepted.                                                                                                                |
 
 **Layer CLI.**
 
@@ -126,7 +135,7 @@ The layer object never carries the layer's inbound webhook HMAC secret under any
 
 A layer declared in the registry config, which §4.6 defines as the admin-defined layer list, names its provider in the declaration's git source block instead, because the registry re-applies every declared entry at each start and the declaration is authoritative for the fields it carries. A declared provider the registry has not registered aborts startup with an error naming the layer and the value, on the same terms as an invalid declared force-push policy.
 
-**Errors.** Lint failures (`ingest.lint_failed`), webhook signature failures (`ingest.webhook_invalid`), same-version content conflicts (`ingest.immutable_violation`), freeze-window blocks (`ingest.frozen`), quota exhaustion (`quota.*`, including the user-defined-layer cap), source unreachable (`ingest.source_unreachable`), admin-only operations attempted by a non-admin, and layer writes attempted by a caller whom the layer write authorization rule above authorizes on neither arm (`auth.forbidden`), and a registration, a filesystem-path patch, a restore, or a reingest of a layer that names a filesystem path on the registry host attempted by a caller the local-source authorization rule above does not authorize (`auth.forbidden`, carrying `details.constraint: "local_source"`), and a registration asserting an admin-only registration field attempted by a caller the admin-only registration fields rule above does not admit (`auth.forbidden`, carrying `details.constraint: "admin_only_fields"`), and an update asserting an owner or a visibility field against a stored user-defined layer, which the immutable visibility rule above refuses (`registry.invalid_argument`, carrying `details.constraint: "immutable_visibility"`).
+**Errors.** Lint failures (`ingest.lint_failed`), webhook signature failures (`ingest.webhook_invalid`), same-version content conflicts (`ingest.immutable_violation`), freeze-window blocks (`ingest.frozen`), quota exhaustion (`quota.*`, including the user-defined-layer cap), source unreachable (`ingest.source_unreachable`), signing failures of a configured signer (`ingest.sign_failed`), admin-only operations attempted by a non-admin, and layer writes attempted by a caller whom the layer write authorization rule above authorizes on neither arm (`auth.forbidden`), and a registration, a filesystem-path patch, a restore, or a reingest of a layer that names a filesystem path on the registry host attempted by a caller the local-source authorization rule above does not authorize (`auth.forbidden`, carrying `details.constraint: "local_source"`), and a registration asserting an admin-only registration field attempted by a caller the admin-only registration fields rule above does not admit (`auth.forbidden`, carrying `details.constraint: "admin_only_fields"`), and an update asserting an owner or a visibility field against a stored user-defined layer, which the immutable visibility rule above refuses (`registry.invalid_argument`, carrying `details.constraint: "immutable_visibility"`).
 
 **Ingest outcome.** A completed ingest cycle classifies each artifact in the snapshot as accepted, unchanged, or dropped. An artifact is dropped when the cycle rejects it rather than storing it. The rejections include a same-version content change and a lint failure (the ingest cases above), a quota (the errors rule above), the public-mode sensitivity floor and an unenforceable sandbox profile (§13.10), a cross-layer collision and an `extends:` chain that crosses types (§4.6), an unresolved `extends` pin, a manifest record the cycle cannot build, a signing failure, and a resource-store failure. A non-blocking advisory (§3.3) and an artifact whose embedding call failed (§4.7) are not drops: the artifact is stored and served. `podium layer reingest <id>` exits non-zero when the cycle dropped at least one artifact. On a completed cycle it names each conflicted and each rejected artifact on standard error with that artifact's identifier, its §6.10 code, and its reason, and it reports a lint drop as the number of lint diagnostics the cycle raised; `podium lint` against the source names the artifacts those diagnostics came from. A cycle the registry answers with a §6.10 error reports that error envelope instead and exits non-zero. `podium layer watch <id>` runs until it is interrupted and carries no exit status of its own.
 
@@ -333,6 +342,7 @@ defaults:
   harness: claude-code
   target: ~/.claude/
   profile: project-default # default profile when --profile is not passed
+  verify_signatures: always # never | always — see §4.7.9
 
 profiles:
   project-default:
@@ -380,6 +390,8 @@ targets:
           skip_if_no_changes: true
         - run: ["git", "-C", "$PODIUM_WORKDIR", "push", "origin", "$PODIUM_GIT_BRANCH"]
 ```
+
+`defaults.verify_signatures` sets the §4.7.9 signature policy the MCP server applies when `PODIUM_VERIFY_SIGNATURES` is unset. The MCP server resolves it across the three file scopes by the precedence above, discovering the workspace by the same walk up from CWD, so a project-local `sync.local.yaml` value overrides a project-shared one. It is the only signing-related key in this block: verification key material is resolved from the environment and from the registry's key file, in the order §4.7.9 states, and is never written to or read from `sync.yaml`.
 
 **Registry source.** `defaults.registry` accepts either a URL or a filesystem path; the client adapts:
 
@@ -687,6 +699,8 @@ for result in artifacts:
     "status": "ok",
     "version": "1.2.0",
     "content_hash": "sha256:...",
+    "delivery_hash": "sha256:...",
+    "delivery_signature": "...",
     "manifest_body": "...",
     "resources": [
       { "path": "...", "presigned_url": "...", "content_hash": "..." }
@@ -706,9 +720,9 @@ for result in artifacts:
 - **Visibility:** identical to `load_artifact`. Items the caller cannot see come back as `status: "error"` with `visibility.denied`; no leak about whether the artifact exists in some hidden layer.
 - **Session consistency:** with `session_id`, the first occurrence of each `(id, "latest")` in the batch freezes the resolved version for the rest of the batch and session.
 - **Partial failure** does not fail the batch. Each item carries its own status.
-- **Bandwidth:** large bundled resources travel via presigned URLs (§4.4) so the response body stays small; the SDK fetches resources concurrently after the response.
+- **Bandwidth:** a bundled resource the registry does not hold inline on the manifest record travels via a presigned URL (§4.4) so the response body stays small, and the SDK fetches those resources concurrently after the response. A resource the registry holds inline on the manifest record travels in the reference's `inline` field in place of `presigned_url`, including when a copy of it also exists in object storage, base64-encoded with `inline_base64: true` when its bytes are not valid UTF-8. The registry holds inline every resource at or below the §4.1 inline cutoff, and every resource of a row ingested while no object store was configured (§7.2), so every link it serves names an object the §13.4 stored-row admission read.
 
-**Not exposed as an MCP meta-tool** (§5). The MCP path is agent-mediated and load-on-demand; bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list. The MCP server uses this endpoint internally for cache warm-up when configured to prefetch.
+**Not exposed as an MCP meta-tool** (§5). The MCP path is agent-mediated and load-on-demand; bulk loading is a programmatic-runtime concern that doesn't belong in the agent's tool list. The MCP server does not call this endpoint. It writes a §6.5 cache entry only from a `load_artifact` response whose §4.7.10 delivery record it has verified (§6.6), and it performs no startup warm-up.
 
 ## 7.7 Onboarding: `podium init`, `podium config show`, `podium login`
 

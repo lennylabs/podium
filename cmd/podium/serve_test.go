@@ -51,6 +51,9 @@ func TestServe_BootsAndAnswersHealthz(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("PODIUM_BIND", fmt.Sprintf("127.0.0.1:%d", port))
 	t.Setenv("PODIUM_REGISTRY_STORE", "memory")
+	// Signing is on by default (§13.10) and would generate a key under the
+	// real home; this case is not about signing.
+	t.Setenv("PODIUM_SIGN", "none")
 	t.Setenv("PODIUM_OBJECT_STORE", "none")
 	t.Setenv("PODIUM_CONFIG_FILE", emptyServerConfig(t))
 	t.Setenv("PODIUM_FILESYSTEM_ROOT", tmp)

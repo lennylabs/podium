@@ -109,12 +109,12 @@ func bootstrapStandaloneFiles(cfg *Config) {
 	}
 
 	// ~/.podium/sync.yaml — the client registry pointer the §14.3/§14.10
-	// flows depend on. The format mirrors `podium init --global`. §13.10: the
-	// standalone deployment relaxes the consumer-side signature-verification
-	// default to `never` here, so the MCP server and SDKs pick it up without an
-	// env var; an operator who wants enforcement sets PODIUM_VERIFY_SIGNATURES.
+	// flows depend on. The format mirrors `podium init --global`. It carries
+	// no signature policy and no key material: the registry signs at ingest
+	// and the consumer resolves the registry's own key file through
+	// sign.KeyFilePath, so the §6.2 always default holds on first run (§4.7.9).
 	syncPath := filepath.Join(podiumDir, "sync.yaml")
-	syncBody := []byte("defaults:\n  registry: " + cfg.publicURL + "\n  verify_signatures: never\n")
+	syncBody := []byte("defaults:\n  registry: " + cfg.publicURL + "\n")
 	if written, err := writeFileIfAbsent(syncPath, syncBody); err != nil {
 		log.Printf("warning: standalone bootstrap %s: %v", syncPath, err)
 	} else if written {

@@ -7,6 +7,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // Spec: §4.7.4 — deprecated artifacts are excluded from default
@@ -67,11 +68,11 @@ func TestLoadArtifact_DeprecatedReturnsWarning(t *testing.T) {
 	const tenant = "t"
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "x/old", Version: "1.0.0",
 		ContentHash: "sha256:dep", Type: "skill", Layer: "L",
 		Deprecated: true, ReplacedBy: "x/new",
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	reg := core.New(st, tenant, []layer.Layer{
@@ -100,10 +101,10 @@ func TestLoadArtifact_LiveArtifactHasNoWarning(t *testing.T) {
 	const tenant = "t"
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
-	_ = st.PutManifest(context.Background(), store.ManifestRecord{
+	_ = st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "x/live", Version: "1.0.0",
 		ContentHash: "sha256:a", Type: "skill", Layer: "L",
-	})
+	}, nil, nil))
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
 	})

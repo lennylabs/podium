@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // ---- package-level helpers for single-node tests ----------------------------
@@ -956,6 +957,7 @@ func TestStandaloneServer_MCPLoadArtifact(t *testing.T) {
 			"PODIUM_HARNESS=none",
 			"PODIUM_MATERIALIZE_ROOT=" + mat,
 			"PODIUM_CACHE_DIR=" + t.TempDir(),
+			"PODIUM_VERIFY_SIGNATURES=never",
 		},
 		toolCall(1, "load_artifact", map[string]any{"id": id}),
 	)
@@ -979,6 +981,7 @@ func TestStandaloneServer_MCPSearchArtifacts(t *testing.T) {
 
 	res := mcpExec(t,
 		[]string{
+			"PODIUM_VERIFY_SIGNATURES=never",
 			"PODIUM_REGISTRY=" + srv.BaseURL,
 			"PODIUM_CACHE_DIR=" + t.TempDir(),
 		},
@@ -1138,7 +1141,7 @@ func TestStandaloneServer_SchemaRestartIdempotent(t *testing.T) {
 
 	// First start: creates the SQLite file.
 	srv1 := startServerArgs(t,
-		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + sqlitePath},
+		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + sqlitePath, "PODIUM_SIGN=none"},
 		"serve", "--standalone", "--layer-path", reg)
 	// Confirm it's up.
 	getJSON(t, srv1.BaseURL+"/healthz", nil)
@@ -1147,7 +1150,7 @@ func TestStandaloneServer_SchemaRestartIdempotent(t *testing.T) {
 
 	// Second start: must not produce a migration error.
 	srv2 := startServerArgs(t,
-		[]string{"HOME=" + t.TempDir(), "PODIUM_SQLITE_PATH=" + sqlitePath},
+		[]string{"HOME=" + t.TempDir(), "PODIUM_SQLITE_PATH=" + sqlitePath, "PODIUM_SIGN=none"},
 		"serve", "--standalone", "--layer-path", reg)
 	var health struct {
 		Mode string `json:"mode"`
@@ -1173,7 +1176,7 @@ func TestStandaloneServer_MigrateToStandardSQLite(t *testing.T) {
 
 	// Populate source SQLite by starting and stopping the server.
 	srv := startServerArgs(t,
-		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + srcDB},
+		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + srcDB, "PODIUM_SIGN=none"},
 		"serve", "--standalone", "--layer-path", reg)
 	getJSON(t, srv.BaseURL+"/healthz", nil)
 	stopProc(srv.cmd)
@@ -1196,6 +1199,71 @@ func TestStandaloneServer_MigrateToStandardSQLite(t *testing.T) {
 	mustExist(t, dstDB)
 }
 
+// Spec: §4.7.9, §13.4, §13.12 — the migration key-copy step
+// docs/deployment/single-node.md publishes. A default-mode source signs its
+// fixture, and migrate-to-standard copies the signed row into a SQLite target.
+// A target start without the source's key is refused naming
+// PODIUM_SIGN_KEY_PATH and writes no key, whether the key path is unset (the
+// persistence refusal) or names a missing file (the generated-key refusal).
+// After the page's copy step runs verbatim, the target starts, and the
+// delivery signature the target serves for the migrated artifact verifies
+// under the source's public key.
+func TestStandaloneServer_MigrateToStandardWithTheSourceKey(t *testing.T) {
+	t.Parallel()
+	copyStep := docBashBlock(t, "docs/deployment/single-node.md", "TARGET_SIGN_KEY_PATH")
+
+	srcHome := t.TempDir()
+	src := startServerArgs(t, []string{"HOME=" + srcHome}, "serve", "--standalone",
+		"--layer-path", writeRegistry(t, map[string]string{"mig/ARTIFACT.md": smallteamLowArtifact("migrate artifact")}))
+	stopProc(src.cmd)
+	standalone := filepath.Join(srcHome, ".podium", "standalone")
+
+	dst := t.TempDir()
+	dstDB := filepath.Join(dst, "target.db")
+	dstObjects := filepath.Join(dst, "objects")
+	res := runPodium(t, "", []string{"HOME=" + t.TempDir()},
+		"admin", "migrate-to-standard",
+		"--source-sqlite", filepath.Join(standalone, "podium.db"),
+		"--source-objects", filepath.Join(standalone, "objects"),
+		"--target-store", "sqlite", "--target-sqlite", dstDB,
+		"--target-objects", dstObjects)
+	if res.Exit != 0 {
+		t.Fatalf("migrate-to-standard exit=%d\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+
+	targetHome := t.TempDir()
+	targetKey := filepath.Join(dst, "registry-signing.key")
+	targetEnv := []string{"HOME=" + targetHome, "PODIUM_SQLITE_PATH=" + dstDB, "PODIUM_FILESYSTEM_ROOT=" + dstObjects}
+	for _, keyEnv := range [][]string{nil, {"PODIUM_SIGN_KEY_PATH=" + targetKey}} {
+		refused := runBin(t, cmdharness.Bin(t, "podium"), "", append(append([]string{}, targetEnv...), keyEnv...), nil,
+			60*time.Second, "serve", "--standalone", "--bind", "127.0.0.1:0")
+		if refused.Exit == 0 || !strings.Contains(refused.Stderr+refused.Stdout, "PODIUM_SIGN_KEY_PATH") {
+			t.Fatalf("target start %v without the source key: exit=%d, want a refusal naming PODIUM_SIGN_KEY_PATH\nstderr=%s", keyEnv, refused.Exit, refused.Stderr)
+		}
+	}
+	mustNotExist(t, targetKey)
+	mustNotExist(t, filepath.Join(targetHome, ".podium", "standalone", "registry-signing.key"))
+
+	cp := runDocBlock(t, []string{"HOME=" + srcHome, "TARGET_SIGN_KEY_PATH=" + targetKey}, copyStep)
+	if cp.Exit != 0 {
+		t.Fatalf("documented key copy exit=%d\nstderr=%s", cp.Exit, cp.Stderr)
+	}
+	target := startServerArgs(t, append(targetEnv, "PODIUM_SIGN_KEY_PATH="+targetKey), "serve", "--standalone")
+
+	var served struct {
+		DeliveryHash      string `json:"delivery_hash"`
+		DeliverySignature string `json:"delivery_signature"`
+	}
+	getJSON(t, target.BaseURL+"/v1/load_artifact?id=mig", &served)
+	kf, err := sign.ReadKeyFile(filepath.Join(standalone, "registry-signing.key"))
+	if err != nil {
+		t.Fatalf("read the source key: %v", err)
+	}
+	if err := (sign.RegistryManagedKey{PublicKey: kf.Public}).Verify(context.Background(), served.DeliveryHash, served.DeliverySignature); err != nil {
+		t.Fatalf("the target's delivery pair does not verify under the source key: %v\nlog:\n%s", err, target.log())
+	}
+}
+
 // podium admin migrate-to-standard --dry-run writes nothing.
 func TestStandaloneServer_MigrateToStandardDryRun(t *testing.T) {
 	t.Parallel()
@@ -1206,7 +1274,7 @@ func TestStandaloneServer_MigrateToStandardDryRun(t *testing.T) {
 	})
 
 	srv := startServerArgs(t,
-		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + srcDB},
+		[]string{"HOME=" + home, "PODIUM_SQLITE_PATH=" + srcDB, "PODIUM_SIGN=none"},
 		"serve", "--standalone", "--layer-path", reg)
 	getJSON(t, srv.BaseURL+"/healthz", nil)
 	stopProc(srv.cmd)

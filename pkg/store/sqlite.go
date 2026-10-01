@@ -158,6 +158,10 @@ func (s *SQLite) applySchema() error {
 			last_error TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
+		`CREATE TABLE IF NOT EXISTS data_migrations (
+			name TEXT PRIMARY KEY,
+			applied_at TEXT NOT NULL
+		)`,
 	}
 	// Indexes are created after the additive column migration because
 	// idx_manifests_tenant_layer references the `layer` column, which the
@@ -515,15 +519,104 @@ func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version 
 	return rec, err
 }
 
+// RehashManifest rewrites one row's content hash and signature under the
+// compare-and-swap the Store interface documents. It carries no deleted_at
+// condition, because the §13.4 migration rewrites a soft-deleted row a
+// restore would bring back.
+func (s *SQLite) RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, oldSignature, newHash, signature string) error {
+	stmt := `
+		UPDATE manifests SET content_hash = ?, signature = ?
+		WHERE tenant_id = ? AND artifact_id = ? AND version = ?
+		  AND content_hash = ? AND signature = ?`
+	res, err := s.db.ExecContext(ctx, stmt,
+		newHash, signature, tenantID, artifactID, version, oldHash, oldSignature)
+	if err != nil {
+		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
+	}
+	if n > 0 {
+		return nil
+	}
+	return s.classifyRehashMiss(ctx, tenantID, artifactID, version)
+}
+
+// classifyRehashMiss reads the row back to tell an absent key (ErrNotFound)
+// from a stored value that no longer matches what the caller read
+// (ErrImmutableViolation).
+func (s *SQLite) classifyRehashMiss(ctx context.Context, tenantID, artifactID, version string) error {
+	var existing string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT content_hash FROM manifests
+		WHERE tenant_id = ? AND artifact_id = ? AND version = ?`,
+		tenantID, artifactID, version).Scan(&existing)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
+	}
+	return ErrImmutableViolation
+}
+
+// DataMigrationApplied reports whether the named §13.4 stored-value rewrite
+// has completed against this database.
+func (s *SQLite) DataMigrationApplied(ctx context.Context, name string) (bool, error) {
+	row := s.db.QueryRowContext(ctx, `SELECT 1 FROM data_migrations WHERE name = ?`, name)
+	var dummy int
+	err := row.Scan(&dummy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("store: data migration %s: %w", name, err)
+	}
+	return true, nil
+}
+
+// SetDataMigrationApplied records or removes the named marker. Both
+// directions are idempotent.
+func (s *SQLite) SetDataMigrationApplied(ctx context.Context, name string, applied bool) error {
+	var err error
+	if applied {
+		_, err = s.db.ExecContext(ctx, `
+			INSERT OR IGNORE INTO data_migrations (name, applied_at) VALUES (?, ?)`,
+			name, time.Now().UTC().Format(time.RFC3339Nano))
+	} else {
+		_, err = s.db.ExecContext(ctx, `DELETE FROM data_migrations WHERE name = ?`, name)
+	}
+	if err != nil {
+		return fmt.Errorf("store: data migration %s: %w", name, err)
+	}
+	return nil
+}
+
 // ListManifests returns every manifest for the tenant, ordered by
 // artifact ID then version (matches Memory).
 func (s *SQLite) ListManifests(ctx context.Context, tenantID string) ([]ManifestRecord, error) {
+	return s.listManifests(ctx, tenantID, false)
+}
+
+// ListManifestsIncludingDeleted returns the tenant's manifests without the
+// §8.4 tombstone filter, so the §13.4 stored-value migration reaches the rows
+// a restored layer would serve.
+func (s *SQLite) ListManifestsIncludingDeleted(ctx context.Context, tenantID string) ([]ManifestRecord, error) {
+	return s.listManifests(ctx, tenantID, true)
+}
+
+func (s *SQLite) listManifests(ctx context.Context, tenantID string, includeDeleted bool) ([]ManifestRecord, error) {
+	tombstone := "AND deleted_at IS NULL"
+	if includeDeleted {
+		tombstone = ""
+	}
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
 		       extends_pin, signature, search_visibility, resources, deprecated_at, deleted_at
 		FROM manifests
-		WHERE tenant_id = ? AND deleted_at IS NULL
+		WHERE tenant_id = ? `+tombstone+`
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
 	if err != nil {
 		return nil, err

@@ -437,6 +437,18 @@ func startServer(t testing.TB, registry string) *serverProc {
 	return startServerArgs(t, []string{"HOME=" + t.TempDir()}, args...)
 }
 
+// startServerUnsigned is startServer with ingest signing off. The registry
+// signs at ingest by default (§13.10), so a case whose subject is an unsigned
+// artifact states that here rather than inheriting a signed fixture.
+func startServerUnsigned(t testing.TB, registry string) *serverProc {
+	t.Helper()
+	args := []string{"serve", "--standalone"}
+	if registry != "" {
+		args = append(args, "--layer-path", registry)
+	}
+	return startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_SIGN=none"}, args...)
+}
+
 // stopProc asks the process to stop, then force-kills if it lingers.
 func stopProc(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
@@ -765,4 +777,34 @@ func skillBody(name string) string {
 // used where a search query must match the skill's description.
 func skillBodyDesc(name, description string) string {
 	return fmt.Sprintf("---\nname: %s\ndescription: %s\n---\n\n%s body.\n", name, description, name)
+}
+
+// docBashBlock returns the body of the one ```bash fenced block on the page at
+// path (relative to the repository root) that contains marker. A D-slug case
+// runs the documented commands through it, so the test executes the text the
+// page publishes rather than a copy that can drift from it.
+func docBashBlock(t testing.TB, path, marker string) string {
+	t.Helper()
+	page := readFile(t, filepath.Join(repoRoot(t), path))
+	var found []string
+	for _, chunk := range strings.Split(page, "```bash\n")[1:] {
+		end := strings.Index(chunk, "\n```")
+		if end < 0 {
+			t.Fatalf("%s: unterminated bash block", path)
+		}
+		if block := chunk[:end+1]; strings.Contains(block, marker) {
+			found = append(found, block)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("%s: %d bash blocks contain %q, want exactly 1", path, len(found), marker)
+	}
+	return found[0]
+}
+
+// runDocBlock runs a documented shell block under bash with the given extra
+// environment, bounded like every other subprocess the suite starts.
+func runDocBlock(t testing.TB, env []string, script string) cliResult {
+	t.Helper()
+	return runBin(t, "bash", "", env, nil, 90*time.Second, "-c", "set -e\n"+script)
 }

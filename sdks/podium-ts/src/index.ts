@@ -369,6 +369,20 @@ function manifestBodyFrom(doc: string): string {
   return m ? m[1].replace(/^[\r\n]+/, "") : "";
 }
 
+// presignedSigV4 reports whether raw is an AWS Signature V4 presigned URL, one
+// whose query carries a non-empty X-Amz-Signature parameter. spec §13.12: a
+// consumer sends no credential when following an S3 presigned URL, and sends
+// its token to the filesystem backend's /objects route, which authorizes the
+// read against the caller. A URL that fails to parse is treated as not
+// presigned, matching the Go consumers.
+function presignedSigV4(raw: string): boolean {
+  try {
+    return (new URL(raw).searchParams.get("X-Amz-Signature") ?? "") !== "";
+  } catch {
+    return false;
+  }
+}
+
 export interface MaterializeOptions {
   // Accepted per §2.2 ("The SDKs accept a harness parameter on
   // materialize()"). Harness-specific adaptation is the registry's shared
@@ -501,6 +515,11 @@ export class LoadedArtifact {
   deprecated?: boolean;
   replaced_by?: string;
   deprecation_warning?: string;
+  // spec: §4.7.10 — the registry's delivery attestation, passed through
+  // unverified. The SDK verifies nothing; a workspace-overlay load carries
+  // neither field because no registry served the record.
+  delivery_hash?: string;
+  delivery_signature?: string;
 
   constructor(data: Partial<LoadedArtifact>) {
     this.id = data.id ?? "";
@@ -522,6 +541,8 @@ export class LoadedArtifact {
     this.deprecated = data.deprecated;
     this.replaced_by = data.replaced_by;
     this.deprecation_warning = data.deprecation_warning;
+    this.delivery_hash = data.delivery_hash;
+    this.delivery_signature = data.delivery_signature;
   }
 
   async materialize(to: string, opts: MaterializeOptions = {}): Promise<string[]> {
@@ -541,8 +562,9 @@ export class LoadedArtifact {
 
 // Spec §7.6.2 — one bulk-load envelope with a materialize() helper. Status
 // is "ok" when the artifact resolved and "error" otherwise; the error
-// envelope carries the §6.10 code. Batch resources travel as presigned
-// references, so materialize fetches every resource.
+// envelope carries the §6.10 code. A resource the registry holds inline on
+// the manifest record travels inline, and materialize fetches every other
+// resource from its presigned reference.
 export class BatchResult {
   id: string;
   status: "ok" | "error";
@@ -553,9 +575,10 @@ export class BatchResult {
   frontmatter?: string;
   // spec: §4.3.4 / §11 — verbatim SKILL.md for a skill (byte-identical).
   skill_raw?: string;
-  // A resource carries presigned_url with an object store configured, or the
-  // bytes inline (base64-encoded when inline_base64 is set) in the
-  // standalone-without-storage mode (§7.6.2).
+  // A resource the registry holds inline on the manifest record carries its
+  // bytes inline (base64-encoded when inline_base64 is set), at any size and
+  // whether or not an object store is configured; every other resource
+  // carries presigned_url (§7.6.2).
   resources?: {
     path: string;
     presigned_url?: string;
@@ -566,6 +589,9 @@ export class BatchResult {
   deprecated?: boolean;
   replaced_by?: string;
   deprecation_warning?: string;
+  // spec: §4.7.10 — the delivery attestation, passed through unverified.
+  delivery_hash?: string;
+  delivery_signature?: string;
   error?: {
     code: string;
     message: string;
@@ -588,6 +614,8 @@ export class BatchResult {
     this.deprecated = data.deprecated;
     this.replaced_by = data.replaced_by;
     this.deprecation_warning = data.deprecation_warning;
+    this.delivery_hash = data.delivery_hash;
+    this.delivery_signature = data.delivery_signature;
     this.error = data.error;
   }
 
@@ -603,10 +631,10 @@ export class BatchResult {
         suggested_action: this.error?.suggested_action,
       });
     }
-    // §7.6.2: a resource carries a presigned_url with an object store
-    // configured. In the standalone-without-storage mode it carries the bytes
-    // inline (base64-encoded when inline_base64 is set), so deliver those
-    // rather than fetching a URL that does not exist.
+    // §7.6.2: a resource the registry holds inline on the manifest record
+    // carries its bytes inline (base64-encoded when inline_base64 is set), at
+    // any size and whether or not an object store is configured. Every other
+    // resource carries a presigned_url, which is fetched.
     const large: Record<string, LargeResourceLink> = {};
     const inline: Record<string, string | Uint8Array> = {};
     for (const r of this.resources ?? []) {
@@ -1257,7 +1285,10 @@ export class Client {
       if (!link.url) {
         throw new RegistryError("registry.unknown", "manifest_body_url has no presigned URL");
       }
-      const resp = await (opts.fetcher ?? fetch)(link.url);
+      // The client's token goes to a URL that is not SigV4 presigned (§13.12).
+      const resp = await (opts.fetcher ?? fetch)(link.url, {
+        headers: presignedSigV4(link.url) ? {} : this.headers(),
+      });
       if (!resp.ok) {
         throw new RegistryError("registry.unknown", `fetch manifest body: HTTP ${resp.status}`);
       }

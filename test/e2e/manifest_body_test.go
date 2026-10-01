@@ -18,6 +18,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/version"
 )
 
@@ -30,7 +31,17 @@ func mbStubRegistry(t *testing.T, id, artifactMD string, status int) (*httptest.
 	t.Helper()
 	sum := sha256.Sum256([]byte(artifactMD))
 	key := hex.EncodeToString(sum[:])
-	contentHash := "sha256:" + version.ContentHash([]byte(artifactMD))
+	contentHash := "sha256:" + version.CanonicalContentHash([]byte(artifactMD), nil, nil)
+	// The delivery record frames the document and the body the bridge
+	// reconstitutes from the link, not the cleared inline fields.
+	art, err := manifest.ParseArtifact([]byte(artifactMD))
+	if err != nil {
+		t.Fatalf("ParseArtifact: %v", err)
+	}
+	deliveryHash := version.DeliveryHash(version.DeliveryRecord{
+		ID: id, Version: "1.0.0", Type: "context", ContentHash: contentHash,
+		Frontmatter: artifactMD, ManifestBody: art.Body,
+	})
 	var bodyHits int32
 
 	mux := http.NewServeMux()
@@ -47,6 +58,7 @@ func mbStubRegistry(t *testing.T, id, artifactMD string, status int) (*httptest.
 		resp := map[string]any{
 			"id": id, "type": "context", "version": "1.0.0",
 			"content_hash":  contentHash,
+			"delivery_hash": deliveryHash,
 			"manifest_body": "", "frontmatter": "",
 			"manifest_body_url": map[string]any{
 				"presigned_url": "http://" + r.Host + "/objects/" + key,
@@ -76,6 +88,7 @@ func TestManifestBody_BridgeFetchesReconstitutesMaterializes(t *testing.T) {
 
 	mat := t.TempDir()
 	env := []string{
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=" + ts.URL, "PODIUM_CACHE_DIR=" + t.TempDir(),
 		"HOME=" + t.TempDir(), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT=" + mat,
 	}
@@ -119,6 +132,7 @@ func TestManifestBody_BridgeFetchFailureAborts(t *testing.T) {
 
 	mat := t.TempDir()
 	env := []string{
+		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=" + ts.URL, "PODIUM_CACHE_DIR=" + t.TempDir(),
 		"HOME=" + t.TempDir(), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT=" + mat,
 	}

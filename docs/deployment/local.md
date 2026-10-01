@@ -159,7 +159,7 @@ Each developer's `<workspace>/.podium/sync.yaml` switches `defaults.registry` fr
 
 The shared library does the same parsing, composition, and adapter work in both tiers, so output is bit-identical for the same target and profile.
 
-**To clustered.** When multi-tenancy, SCIM group sync, signing with a transparency log, or production availability is required, follow [Clustered](clustered) and use `podium admin migrate-to-standard` to export the single-node state.
+**To clustered.** When multi-tenancy, SCIM group sync, transparency-log anchoring of the audit chain, or production availability is required, follow [Clustered](clustered) and use `podium admin migrate-to-standard` to export the single-node state.
 
 ---
 

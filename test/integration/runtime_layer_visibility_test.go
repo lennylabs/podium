@@ -13,6 +13,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 var (
@@ -29,7 +30,7 @@ func rlvLayer(t *testing.T, st store.Store, c store.LayerConfig) {
 
 func rlvManifest(t *testing.T, st store.Store, m store.ManifestRecord) {
 	t.Helper()
-	if err := st.PutManifest(context.Background(), m); err != nil {
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, m, nil, nil)); err != nil {
 		t.Fatalf("PutManifest %q: %v", m.ArtifactID, err)
 	}
 }

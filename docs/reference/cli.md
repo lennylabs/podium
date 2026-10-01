@@ -30,7 +30,7 @@ Flags:
         filesystem registry path (required)
 ```
 
-Dispatcher groups (`admin`, `cache`, `config`, `domain`, `artifact`, `layer`, `profile`, `admin runtime`, `admin tenant`) print their subcommand list. `sync` also dispatches the `override` and `save-as` subcommands when one is the first argument, and otherwise runs materialization directly:
+Dispatcher groups (`admin`, `cache`, `config`, `domain`, `artifact`, `layer`, `profile`, `admin runtime`, `admin signing-key`, `admin tenant`) print their subcommand list. `sync` also dispatches the `override` and `save-as` subcommands when one is the first argument, and otherwise runs materialization directly:
 
 ```
 $ podium admin --help
@@ -46,6 +46,8 @@ Subcommands:
   runtime              Manage trusted runtime signing keys.
   tenant               Manage tenants (operator role).
   migrate-to-standard  Pump standalone state into a standard deployment.
+  sign-stored-rows     Rewrite stored rows under the §13.4 rules, signing under the registry signing key when signing is on.
+  signing-key          Generate or rotate the registry signing key file.
 ```
 
 ---
@@ -133,7 +135,7 @@ podium serve [--standalone] [--strict]
              [--layer-path <path>]
              [--public-mode] [--allow-public-bind]
              [--no-embeddings] [--presign-ttl-seconds <n>]
-             [--sign registry-key]
+             [--sign registry-key|none]
              [--web-ui] [--web-ui-allow-public-bind]
              [--web-ui-auth] [--web-ui-auth-transaction-ttl <duration>]
 ```
@@ -151,7 +153,7 @@ Each flag overrides the matching `PODIUM_*` env var for the duration of the proc
 | `--allow-public-bind` | Allow non-loopback bind in public mode or with trusted headers (typically behind an authenticated reverse proxy). Overrides `PODIUM_ALLOW_PUBLIC_BIND`. |
 | `--no-embeddings` | Disable embeddings and fall back to BM25-only search. Overrides `PODIUM_NO_EMBEDDINGS`. |
 | `--presign-ttl-seconds <n>` | Presigned-URL TTL in seconds. Overrides `PODIUM_PRESIGN_TTL_SECONDS` and the `object_store.presign_ttl_seconds` key in `registry.yaml`. |
-| `--sign registry-key` | Enable registry-managed-key signing on ingest. The only accepted value is `registry-key`. Overrides `PODIUM_SIGN`. |
+| `--sign <mode>` | Ingest signing mode, `registry-key` or `none`. `registry-key`, the default, signs each accepted manifest with the registry-managed key at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`), generating the keypair on first run. `none` turns ingest signing off and generates no key file, so a `podium-mcp` consumer on that machine sets `PODIUM_VERIFY_SIGNATURES=never`; on a home that carries no key file the bridge otherwise refuses to start with `config.signature_provider_unavailable`. Overrides `PODIUM_SIGN`. |
 | `--web-ui` | Mount the bundled web UI at `/app/`, and redirect `GET /` to it. Overrides `PODIUM_WEB_UI`. |
 | `--web-ui-allow-public-bind` | Allow the web UI on a non-loopback bind when an identity provider is configured, so a UI reachable beyond the loopback interface is served only by a registry that resolves a caller's identity and filters what it serves by that identity. Overrides `PODIUM_WEB_UI_ALLOW_PUBLIC_BIND`. |
 | `--web-ui-auth` | Sign the browser in through the registry with the OAuth authorization-code flow. Requires `--web-ui`, `PODIUM_IDENTITY_PROVIDER=oidc-jwt`, public mode off, and the browser-flow acquisition values in the environment-variable table below, including `PODIUM_WEB_UI_REDIRECT_URI`, which must be an `https` URL or an `http` URL whose host is a loopback address. A configuration that fails one of those conjuncts aborts startup with `config.web_ui_auth_unconfigured`, and the [error-code catalog](error-codes) states the whole guard. Overrides `PODIUM_WEB_UI_AUTH`. |
@@ -601,6 +603,47 @@ podium admin runtime register --keys-file <path> --issuer <name> --algorithm <al
 
 The command reads the existing records and rewrites the whole file, so the keys file has a single writer and the result of concurrent `register` invocations is undefined. The registry loads the new record at its next start. Read the file back with `cat` or `jq`; it holds public keys alone.
 
+### `podium admin signing-key`
+
+Writes the registry-managed key file that the registry reads at `PODIUM_SIGN_KEY_PATH`. Like `podium admin runtime register`, this is a local form: it edits a file on the host, calls no registry, and opens no store.
+
+```
+podium admin signing-key generate --key-file <path>
+podium admin signing-key rotate --key-file <path> [--staged-out <path>]
+```
+
+| Flag | Effect |
+|:--|:--|
+| `--key-file <path>` | Path to the registry key file. Required; it takes no environment default, so a bare invocation never resolves `PODIUM_SIGN_KEY_PATH` or `~/.podium/standalone/registry-signing.key`. |
+| `--staged-out <path>` | `rotate` only. Also writes the previous key file plus a `verify:` line for the new key to this path, which a multi-replica rotation deploys to every replica before the rotated file. It must name a file other than `--key-file`. |
+
+`generate` writes a new signing keypair, with mode `0600`, as a `private:` line and a `public:` line, and refuses to replace an existing file. `rotate` reads the existing file, writes a new signing keypair in its place, and keeps the previous public key and every previous `verify:` key as `verify:` lines, so the registry keeps admitting every row they signed. A key file carries zero or more `verify:` lines, each a base64 Ed25519 public key trusted for verification only, and the `public:` key and the `verify:` keys form the registry's verification key set.
+
+Both subcommands print the verification key set on their first line as a comma-separated list of base64 keys, signing key first, which is the value a consumer's `PODIUM_SIGNATURE_VERIFY_KEY` takes. One line per key follows, `key_id=<hex> role=signing` for the signing key and `key_id=<hex> role=verify` for each `verify:` key, where `key_id` is the lowercase hex of the first 8 bytes of the SHA-256 digest of the public key. Each subcommand exits 0 on success, 2 on a usage error, including a missing `--key-file`, and 1 on any other error. The registry loads the key file once, at start, so a running registry picks a rotated key up at its next start. [Rotating the signing key](../deployment/operator-guide#rotating-the-signing-key) gives the procedure.
+
+### `podium admin sign-stored-rows`
+
+Rewrites stored rows under the §13.4 rules, signing under the registry signing key when signing is on. The same command runs as `podium-server sign-stored-rows`, which is the form the container image carries, and both forms share one implementation. It reads the configuration a registry start reads, opens the same store and object storage, binds no listen address, and exits.
+
+```
+podium admin sign-stored-rows [--include-unsigned] [--dry-run | --plan-digest=<digest>]
+podium-server sign-stored-rows [--include-unsigned] [--dry-run | --plan-digest=<digest>]
+```
+
+| Flag | Effect |
+|:--|:--|
+| `--include-unsigned` | Also sign every stored row that carries no signature. The flag is the operator's attestation for every unsigned row the reviewed dry run lists, because an unsigned row carries no evidence of who stored it. Outside `--dry-run` it requires `--plan-digest`. With signing off the command refuses it. |
+| `--dry-run` | Print every write the command would make and make none. It prints one `dry-run:` line per planned row, in ascending order of tenant, artifact ID, and version: `<tenant>/<artifact>@<version> class=<class> target=<hash> write=<bool> sign=<bool> signed_by=<state> stored=<hash>`, where `signed_by` is the `key_id` that verifies the stored envelope, `unsigned`, `unverified`, or, with signing off, `unchecked`, and `stored` is the row's stored content hash. A `dry-run: plan mode=<mode> include_unsigned=<bool> signing_key=<key_id> verify_keys=<key_id,...>` header line follows, then the totals a run would report, and last `dry-run: plan digest sha256:<hex> over <K> row(s)`. `K` counts the rows the digest covers, which are every planned row other than one reported `class=migrated`. It writes no row and no record of the rewrite's completion. Opening the store still applies the store's schema, which on Postgres creates the empty `data_migrations` table when it is absent. |
+| `--plan-digest=<digest>` | Bind the run to the plan a reviewed `--dry-run` printed. The value is `sha256:` followed by 64 lowercase hexadecimal digits, taken from the dry run's last line. Before it writes anything, the command computes the plan digest of the plan it builds. When that digest differs, it writes no row, no audit event, and no completion record, prints its own plan as `plan:` lines in the dry-run format, and exits with status 3. Required with `--include-unsigned`, and optional otherwise. |
+
+`--plan-digest` given with `--dry-run`, a malformed digest, and `--include-unsigned` given without `--dry-run` and without `--plan-digest` are usage errors, which the command refuses before it opens the store. The digest depends on the completion-record mode, the `--include-unsigned` setting, the signing `key_id` and the verification-only `key_id`s, and each covered row's tenant, ID, version, stored hash, outcome, target, sign decision, and signature state. A store, DSN, bucket, or Secret change that leaves those values identical does not change it. A row stored after the command builds its plan is absent from that plan, and the command leaves it as it is. A row a signing registry ingests between the dry run and the run is at the current hash and signed under the current key, so it is reported `class=migrated` and leaves the digest unchanged. A row purged, or its object-held body deleted, between the dry run and the run changes the digest when the digest covered it. The digest's byte encoding belongs to the release that computes it, so a dry run and a run of different releases can disagree, and the run then refuses.
+
+The command re-signs under the signing key every row whose stored signature a `verify:` key verifies and whose stored bytes reproduce its stored hash or the previous release's digest. It never signs a row whose envelope fails under every key of the verification key set, and it leaves a row already signed under the signing key at the current hash untouched. With signing on, it refuses with `config.signature_provider_unavailable`, writing nothing, when the key file at `PODIUM_SIGN_KEY_PATH` is absent, and it never generates a key. A malformed key file, or one whose `public:` line is not the public half of its `private:` line, refuses it with the same code. With signing off (`PODIUM_SIGN=none`), the command rewrites without signing: it moves each reproducible unsigned row to the new digest, signs and re-signs no row, and records completion under the same rule. It then refuses `--include-unsigned` given with `--dry-run` or `--plan-digest` with `config.signature_provider_unavailable`, writing nothing, while `--include-unsigned` given alone stays a usage error. Whether or not the completion record is present, the command and its `--dry-run` refuse, writing nothing, when no signer is configured and a signed row's stored bytes reproduce the previous release's digest, because the rewrite would strand that row's signature. It is subject to the same refusal as a registry start for a signing key that is not persisted with the store.
+
+When the store records that the first-start rewrite of stored content hashes has completed, the command may run while registry processes on this release serve the store, because each write replaces a row only when its stored content hash and stored signature are the ones the command read. When the store holds no such record, the command performs that rewrite in place of the first start and records its completion, so it runs only while no registry process on the previous release serves the store. The command binds nothing and cannot detect such a process, so stop every one first. While no completion is recorded, a registry start over a store that holds a manifest row is refused in either signing mode, rewriting no manifest row, signing no row, and recording no completion, unless the store is the SQLite store in the directory of the key file at `PODIUM_SIGN_KEY_PATH`, or at the default key location when that variable is unset. The refusal names this command, and this command performs the rewrite in place of that start. A store that holds no manifest row records completion at its first start. The command also signs each unsigned row the first start would sign, which it does only when the store is the SQLite store in the key file's directory. Beyond those rows, it signs a row that carries no signature only under `--include-unsigned`; without the flag, such a row is moved to the new digest when its bytes reproduce the previous release's digest and is left unsigned.
+
+The command prints the rewrite's summary line, `rehash: <n> rewritten, ...`, in both signing modes. With signing on, it then prints `rehash: <n> unsigned left` and `rehash: verify key <key_id>: <n> row(s) still signed under it` for each verification-only key, including a key with a count of zero; with signing off it prints neither. The count covers every row that key verifies and that the run did not re-sign, and it supports removing the key from the verification key set only when the run exits 0. The command exits 0 on success, 0 with its usage text for `--help`, 2 with its usage text on a usage error, 3 when its plan differs from the one `--plan-digest` names, and 1 when it is refused, when a row holds the completion record back, or when a write fails.
+
 ### `podium admin migrate-to-standard`
 
 Pumps a standalone deployment's state (SQLite metadata plus the filesystem object store) into a standard deployment (Postgres plus S3). The source flags default to the standalone layout under `~/.podium`, so the short form runs verbatim on a standalone host. The granular `--target-*` flags remain available for advanced S3 configuration.
@@ -623,6 +666,12 @@ podium admin migrate-to-standard --postgres <dsn> --object-store <url>
 | `--dry-run` | Report the source plan (tenant, manifest, layer-config, and admin-grant counts); migrate nothing. |
 
 Manifests, layer configs, admin grants, and content blobs are copied. Dependency edges are regenerated by the next ingest. Granular target overrides (`--target-store`, `--target-postgres-dsn`, `--target-sqlite`, `--target-objects`, `--target-objects-type`, and the `--target-s3-*` family) are available for non-default destinations.
+
+The command copies each row as the source stores it and clears the target store's record of the rewrite of stored content hashes, so the rewrite runs again over the copied rows. Where the target is the SQLite store in the key file's directory, the target registry's next start runs it. For any other target, such as a Postgres store, the target registry's start is refused in either signing mode until `sign-stored-rows` runs against the target store: a `--dry-run`, a review of its report, and a run with its `--plan-digest`, which with signing on repeats the dry run's `--include-unsigned` setting and with signing off runs with `PODIUM_SIGN=none` in its environment.
+
+The target registry signs with the source's key. Before the target's first start after the migration, place the source's registry signing key at the target's `PODIUM_SIGN_KEY_PATH`, replacing any key file already there, or create the chart's signing Secret from it; [Single node](../deployment/single-node#migrating-to-clustered) gives the copy step. A target with no key file is refused at start. A target holding any other key leaves every copied signed row untouched, and the `sign-stored-rows` dry run such a target requires reports each of them `class=signature_unverified`. A row the source had already rewritten is then refused with `materialize.signature_invalid`, and placing the source's key and restarting the target repairs it. A row a source that never started on this release still held at the previous content hash is refused with `materialize.content_hash_mismatch`, and it needs the target store recreated empty and the command run again with the source's key in place, followed by `sign-stored-rows` before the target's start where the target is outside the SQLite store in the key file's directory. The same section states both cases.
+
+No registry process runs on the target store while the command runs, so a target registry that is already running is stopped first, and the target registry is started, or restarted, only after a run of the command that succeeds. Recreate the target store empty before the command runs again when a run failed with the immutability error, or when a registry started on the target store, or the source registry started on the new version, at any point after the command's first run against it began, because a re-run into that store fails with the immutability error at the first copied row the two stores hold at different hashes.
 
 ### Verifying integrity
 
@@ -680,13 +729,13 @@ podium sign --content-hash sha256:<hex> [--provider <name>]
 |:--|:--|
 | `--registry <url>` | Registry URL used to resolve the `<artifact>` form. Defaults to `PODIUM_REGISTRY`. |
 | `--content-hash sha256:<hex>` | Sign this content hash directly, instead of resolving an artifact. |
-| `--provider <name>` | Signature provider: `noop`, `registry-managed`, or `sigstore-keyless`. Defaults to `PODIUM_SIGNATURE_PROVIDER`, then `noop`. |
+| `--provider <name>` | Signature provider: `registry-managed`, `sigstore-keyless`, or `noop`. Defaults to `PODIUM_SIGNATURE_PROVIDER`, then `registry-managed`. |
 
-The `registry-managed` provider uses a per-org key managed by the registry. The `sigstore-keyless` provider produces an OIDC-attested signature with a transparency-log entry, configured through the `PODIUM_SIGSTORE_*` env vars.
+The `registry-managed` provider uses one Ed25519 signing keypair per registry deployment, at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`), shared by every process serving that store and across every tenant it serves. `podium sign` takes the `private:` line of that key file and does not read `PODIUM_SIGNATURE_VERIFY_KEY`, and its envelope carries the signing key's `key_id` as every registry-managed envelope does. The `sigstore-keyless` provider produces an OIDC-attested signature with a transparency-log entry, configured through the `PODIUM_SIGSTORE_*` env vars. `--provider noop` signs a placeholder that `podium verify` always refuses. An invocation that cannot resolve the key it needs exits non-zero naming `config.signature_provider_unavailable`. `podium verify <artifact> --signature <envelope>` checks the envelope the `<artifact>` form prints against the artifact's resolved content hash.
 
 ### `podium verify`
 
-Ad-hoc signature verification. The `<artifact>` form resolves the artifact's content hash and stored signature through the registry; an explicit `--signature` overrides the stored envelope. The `--content-hash` plus `--signature` form verifies an explicit pair. Exits 0 on a valid signature and 1 on a mismatch or other error.
+Ad-hoc signature verification. The `<artifact>` form without `--signature` resolves the artifact's delivery hash and delivery signature through the registry and verifies that pair, which is the pair `podium-mcp` verifies on a load. It verifies the pair under the verification key set the resolution order below finds, and it refuses a response that carries no delivery hash or no delivery signature. With `--signature`, the `<artifact>` form verifies the explicit envelope against the artifact's resolved content hash, which is what `podium sign <artifact>` signs. The `--content-hash` plus `--signature` form verifies an explicit pair. Exits 0 on a valid signature and 1 on a mismatch or other error.
 
 ```
 podium verify <artifact> [--registry <url>] [--provider <name>] [--signature <envelope>]
@@ -697,10 +746,12 @@ podium verify --content-hash sha256:<hex> --signature <envelope> [--provider <na
 |:--|:--|
 | `--registry <url>` | Registry URL used to resolve the `<artifact>` form. Defaults to `PODIUM_REGISTRY`. |
 | `--content-hash sha256:<hex>` | Verify against this content hash directly, instead of resolving an artifact. |
-| `--signature <envelope>` | Signature envelope to verify. Pairs with `--content-hash`; overrides the stored signature in the `<artifact>` form. |
-| `--provider <name>` | Signature provider: `noop`, `registry-managed`, or `sigstore-keyless`. Defaults to `PODIUM_SIGNATURE_PROVIDER`, then `noop`. |
+| `--signature <envelope>` | Signature envelope to verify. Pairs with `--content-hash`. In the `<artifact>` form it is verified against the resolved content hash in place of the served delivery signature. |
+| `--provider <name>` | Signature provider: `registry-managed`, `sigstore-keyless`, or `noop`. Defaults to `PODIUM_SIGNATURE_PROVIDER`, then `registry-managed`. |
 
-The MCP server verifies signatures automatically on materialization for sensitivity at or above medium (configurable per deployment).
+The `registry-managed` provider resolves the verification key set from `PODIUM_SIGNATURE_VERIFY_KEY` when that variable is set, as one base64 key or a comma-separated list, and otherwise from the `public:` line and every `verify:` line of the key file at `PODIUM_SIGN_KEY_PATH` (default `~/.podium/standalone/registry-signing.key`). A signature that verifies under any key of the set is accepted, and the envelope's `key_id` selects the key tried first without refusing an envelope another key of the set verifies. A set variable with an entry that is empty or does not decode is an error naming it. `podium verify` reads no private key. An invocation that cannot resolve the key exits non-zero naming `config.signature_provider_unavailable`. `--provider noop` refuses every envelope. The delivery signature is always a registry-managed envelope, so the form without `--signature` verifies with `--provider registry-managed`, and `--provider sigstore-keyless` refuses it.
+
+The MCP server verifies the delivery signature on every artifact it loads under the default `PODIUM_VERIFY_SIGNATURES=always`, after it recomputes the delivery hash, and a signing registry verifies each stored signature before it serves the row.
 
 ---
 
@@ -760,7 +811,11 @@ podium search "month-end close OR variance" --type skill --top-k 15 --json \
 | `PODIUM_AUDIT_SINK` | Local audit destination. |
 | `PODIUM_MATERIALIZE_ROOT` | Default destination for `load_artifact` materialization. |
 | `PODIUM_PRESIGN_TTL_SECONDS` | Override for presigned URL TTL. |
-| `PODIUM_VERIFY_SIGNATURES` | `never`, `medium-and-above` (default), `always`. |
+| `PODIUM_MIGRATION_OBJECT_READ_TIMEOUT` | Registry-process boot setting, environment only and no config-file key. Deadline on each object-storage read made by the first-start rewrite of stored content hashes, by `sign-stored-rows`, and by the registry when it admits a stored row before serving it, 30 seconds by default. An unset, unparsable, or non-positive value takes the default, so no configuration removes the bound. |
+| `PODIUM_VERIFY_SIGNATURES` | `never` or `always` (default). Read by `podium-mcp`. Under `always`, a load whose artifact carries no signature fails with `materialize.signature_missing`; under either value above `never`, a signature the response carries is verified. `never` checks nothing. |
+| `PODIUM_SIGNATURE_VERIFY_KEY` | The verification key set the `registry-managed` provider verifies with, in `podium-mcp` and `podium verify`: one base64 Ed25519 public key or a comma-separated list of them. When set it is authoritative, and an entry that is empty or does not decode is an error naming it. When unset, the set comes from the `public:` line and every `verify:` line of the key file at `PODIUM_SIGN_KEY_PATH`. |
+| `PODIUM_SIGN_KEY_PATH` | Registry signing key file, default `~/.podium/standalone/registry-signing.key`. It carries the signing keypair on `private:` and `public:` lines and zero or more verification-only `verify:` lines. The registry reads it, or generates it on first run, when signing is on, and `sign-stored-rows` reads it and never generates it. `podium admin signing-key` takes its path from `--key-file` and does not read this variable. `podium sign` reads its `private:` line, and `podium verify` and `podium-mcp` read its `public:` line and every `verify:` line when `PODIUM_SIGNATURE_VERIFY_KEY` is unset. |
+| `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` | Trust root for the `sigstore-keyless` provider. `podium sign` and `podium verify` read it under `--provider sigstore-keyless` whatever the policy. An unset or unreadable value does not refuse the command, and `podium verify` then refuses each envelope as `materialize.signature_invalid`. |
 | `PODIUM_IDENTITY_PROVIDER` | Consumer side (MCP server and SDKs): `oauth-device-code` (default) or `injected-session-token`. Registry process: `injected-session-token`, `oidc-jwt`, or `trusted-headers`. `oauth-device-code` has no server-side verifier, so setting it on the registry aborts startup with `config.identity_provider_unverified`. |
 | `PODIUM_OAUTH_AUDIENCE`, `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` | OAuth provider config. `PODIUM_OAUTH_AUDIENCE` carries the audience both acquisition flows send: the device-code flow sends the value the client resolves, and the registry's browser sign-in redirect sends the first value the registry resolved. The registry process reads the variable as a comma-separated set of audiences it accepts, while a client process sends the value verbatim as the one audience it asks for, so a client sharing the registry's environment needs `--audience` or an environment of its own. `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` is the device-authorization endpoint of the device-code flow, and the browser flow does not read it; the browser flow redirects to `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT` alone, and a configuration that sets the device-code key and leaves the web-UI one empty aborts startup with `config.web_ui_auth_unconfigured`. |
 | `PODIUM_WEB_UI_OAUTH_CLIENT_ID`, `PODIUM_WEB_UI_OAUTH_CLIENT_SECRET`, `PODIUM_WEB_UI_REDIRECT_URI`, `PODIUM_WEB_UI_OAUTH_AUTHORIZATION_ENDPOINT`, `PODIUM_WEB_UI_OAUTH_TOKEN_ENDPOINT` | Registry-process boot settings, environment only and no `podium serve` flag. The browser flow's acquisition values: the OAuth client identifier and credential the registry presents, the callback URL the IdP returns the browser to, and the IdP endpoints the sign-in route redirects to and the callback exchanges the code at. Each is required where `--web-ui-auth` is set. |

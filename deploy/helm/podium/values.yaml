@@ -28,8 +28,9 @@ config:
     s3ForcePathStyle: false  # set true for MinIO/R2/Ceph
     filesystemRoot: /objects  # used when type: filesystem
 
-  # Hybrid search is off by default so a bare `helm install` boots without an
-  # embedding-provider credential. Turn it on by setting both of the following
+  # Hybrid search is off by default so an install needs no embedding-provider
+  # credential. An install does need the signing key Secret named under
+  # signing: below, or signing.mode set to none. Turn hybrid search on by setting both of the following
   # and supplying the provider's key in the secret: vectorBackend.type to
   # pgvector (or pinecone/weaviate/qdrant, whose per-backend env vars from
   # §13.12 go in the same secret), and embeddingProvider.type to openai,
@@ -87,6 +88,20 @@ config:
   bootstrapAdmins: ""         # comma-separated list of admin identities on first boot
   defaultLayerVisibility: ""  # public | organization | private; empty uses server default
 
+  # The deadline on each object-store read during the §13.4 rewrite of stored
+  # rows, as a Go duration (for example 2m). It reaches both the registry and
+  # the migrate Job as PODIUM_MIGRATION_OBJECT_READ_TIMEOUT. Empty keeps the
+  # registry's 30s default. A read that exceeds it holds the row back as
+  # body_unavailable, and the migration reports it.
+  migrationObjectReadTimeout: ""
+
+  # PODIUM_AUDIT_LOG_PATH for both the registry and the migrate Job. Empty
+  # keeps the default file under the home directory, which the read-only root
+  # filesystem cannot hold, so the audit events of a pod are dropped. An
+  # http(s) endpoint ships them, including the artifact.signed events the
+  # migration run appends for every row it signs.
+  auditLogPath: ""
+
   # The §13.12 / §4.5.5 discovery block is config-file-only: it has no
   # environment variable, and this chart configures the registry through env.
   # Setting it here did nothing, so it is not offered. Supply it in a
@@ -126,8 +141,29 @@ securityContext:
   capabilities:
     drop: ["ALL"]
 
+# The Deployment strategy. type is RollingUpdate or Recreate. Under
+# RollingUpdate the chart renders rollingUpdate.maxSurge and
+# rollingUpdate.maxUnavailable explicitly, each 25% when unset, so the release
+# owns the field and a later switch to Recreate is accepted under server-side
+# apply. Under Recreate it renders no rollingUpdate key and ignores the values
+# below.
 strategy:
   type: RollingUpdate
+  # rollingUpdate:
+  #   maxSurge: 25%
+  #   maxUnavailable: 25%
+
+# Startup budget for the registry container. The kubelet holds the liveness and
+# readiness probes off until the startup probe succeeds, and the registry
+# answers neither path until its boot work finishes. periodSeconds times
+# failureThreshold is the budget: the defaults below give fifteen minutes. The
+# budget covers an ordinary start. A release that migrates a stored value
+# rewrites every stored row before it serves, and the chart runs that rewrite in
+# the migrate Job below, so a start after a successful Job finds the completion
+# record and skips it.
+startupProbe:
+  periodSeconds: 10
+  failureThreshold: 90
 
 nameOverride: ""
 fullnameOverride: ""
@@ -153,6 +189,31 @@ objects:
   storageClass: ""
   accessMode: ReadWriteOnce
 
+# Registry signing key (§4.7.9, §13.10). The registry signs every artifact at
+# ingest, and every replica signs under a key that every other replica's
+# verification key set contains. In steady state every replica signs under the
+# one key the chart mounts from one Secret, and during a rotation every replica
+# trusts the new key before any replica signs under it. The chart mounts an
+# operator-supplied Secret rather than letting each pod generate its own on a
+# read-only root filesystem. The Secret holds the key file
+# `podium admin signing-key generate --key-file <path>` writes, with its
+# private: and public: lines, under the key named below. The file may also
+# carry verify: lines, each a public key the registry trusts for verification
+# only, which `podium admin signing-key rotate` writes for a key rotation. A
+# render with no secretName fails unless mode is none.
+#
+# mode is registry-key or none. none turns ingest signing off; a consumer of
+# such a registry then sets PODIUM_VERIFY_SIGNATURES=never, because under its
+# default of always every unsigned artifact is refused.
+signing:
+  mode: registry-key
+  secretName: ""
+  mountPath: /signing
+  # The key within secretName that holds the key file. The registry reads
+  # mountPath/key as a file; mountPath itself is the directory the volume
+  # mounts at.
+  key: registry-signing.key
+
 # Secret mounted as a volume for runtime-keys (identity provider: injected-session-token).
 runtimeKeys:
   enabled: false
@@ -162,6 +223,71 @@ runtimeKeys:
   # mountPath/key as a file; mountPath itself is the directory the volume
   # mounts at, and naming it instead fails the boot.
   key: runtime-keys.json
+
+# The §13.4 stored-value migration. The first start of a release that migrates
+# a stored value rewrites every stored row before it serves, and it requires
+# every registry process on the previous release stopped first. The chart runs
+# that rewrite as a Job, `podium-server sign-stored-rows`, rendered as a Helm
+# post-install and post-upgrade hook while the Deployment is held at
+# replicaCount 0.
+#
+# In either signing mode, a registry pod over a store that holds manifest rows
+# and has not completed the rewrite exits at start: it rewrites no manifest
+# row, signs no row, and records no completion, and its log names
+# sign-stored-rows. The chart therefore needs no check between a serving render
+# and the store.
+#
+# The upgrade procedure in docs/deployment/clustered.md sets mode and
+# planDigest per step, with --set or as value commits to a GitOps repository;
+# keep those two at their defaults in a shared values file. The chart reads
+# nothing from the cluster, so helm template, helm install, helm upgrade, and a
+# GitOps controller render the same manifests from the same values.
+migration:
+  # disabled, dry-run, or run. A mode renders the Job and requires
+  # replicaCount 0 and migration.previousImage. dry-run lists every row the
+  # run would write, writes no row, and ends its log with the plan digest; run
+  # performs the rewrite and records its completion. The value is the string
+  # "disabled" because YAML reads an unquoted off as false.
+  mode: disabled
+  # Passes --include-unsigned in both dry-run and run, so the dry run lists
+  # with sign=true every unsigned row the run attests. The run must use the
+  # setting of the dry run whose digest it passes. Set false for both steps to
+  # leave unsigned rows unsigned. signing.mode none requires false, because the
+  # command signs no row with signing off.
+  includeUnsigned: true
+  # The sha256: value on the `dry-run: plan digest` line that ends the
+  # reviewed dry run's log. run requires it and passes it as --plan-digest,
+  # and the command refuses, writing nothing and exiting with status 3, when
+  # its own plan has a different digest.
+  planDigest: ""
+  # The image the store's previous registry ran, such as
+  # ghcr.io/lennylabs/podium-server:v0.4.0. A dry-run or run render requires
+  # it and refuses to render the migrate Job on that image, because the
+  # v0.4.0 podium-server ignores its arguments and would start a registry that
+  # never exits.
+  previousImage: ""
+  backoffLimit: 0
+  # 0 renders no activeDeadlineSeconds. Helm waits on the hook only up to
+  # --timeout, so pass a --timeout larger than this value.
+  activeDeadlineSeconds: 0
+  # Merged per key over resources above, so a key set here replaces only that
+  # key and the Job keeps the rest. The plan holds every row in memory, so a
+  # large store raises limits.memory here.
+  resources: {}
+  # Merged over podAnnotations on the Job pod only, winning per key. On a
+  # service mesh without native sidecars an injected sidecar keeps running
+  # after the command exits and the Job never completes; set the mesh's
+  # opt-out here, such as sidecar.istio.io/inject: "false" or
+  # linkerd.io/inject: disabled, when the store is reachable without the mesh.
+  # The chart sets none by default, because a mesh that enforces mTLS to the
+  # store would then block the Job.
+  podAnnotations: {}
+  # Merged over podLabels on the Job pod only, winning per key; the Job's own
+  # name, instance, and component labels win over both. A mesh reads its
+  # injection label ahead of its annotation, so when podLabels enables
+  # injection, such as sidecar.istio.io/inject: "true", set the opt-out label
+  # here, such as sidecar.istio.io/inject: "false".
+  podLabels: {}
 
 ingress:
   enabled: false

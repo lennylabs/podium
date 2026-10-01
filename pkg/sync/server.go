@@ -2,7 +2,9 @@ package sync
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/objectstore"
 )
 
 // defaultServerTimeout bounds every server-source HTTP request so a sync
@@ -61,6 +64,13 @@ type serverLoadResponse struct {
 	LargeResources map[string]struct {
 		URL string `json:"presigned_url"`
 	} `json:"large_resources"`
+	// ManifestBodyURL carries the canonical manifest document (SKILL.md for
+	// a skill, ARTIFACT.md otherwise) when it exceeds the inline cutoff, in
+	// which case the registry clears that inline field (§6.6, §7.2).
+	ManifestBodyURL *struct {
+		URL         string `json:"presigned_url"`
+		ContentHash string `json:"content_hash"`
+	} `json:"manifest_body_url"`
 }
 
 // errorEnvelope is the §6.10 structured error a registry returns on a
@@ -108,6 +118,9 @@ func fetchServerRecord(ctx context.Context, client *http.Client, base, token, id
 	if resp.Layer != "" {
 		layerID = resp.Layer
 	}
+	if err := restoreManifestDocument(ctx, client, token, &resp); err != nil {
+		return materialRecord{}, fmt.Errorf("load_artifact %s: %w", id, err)
+	}
 
 	resources, err := decodeInlineResources(resp.Resources, resp.ResourcesB64)
 	if err != nil {
@@ -131,6 +144,7 @@ func fetchServerRecord(ctx context.Context, client *http.Client, base, token, id
 		LayerID:       layerID,
 		ContentHash:   resp.ContentHash,
 		ArtifactBytes: []byte(resp.Frontmatter),
+		AuthoredBytes: []byte(resp.Frontmatter),
 		Resources:     resources,
 	}
 	// Parse the served frontmatter so the §4.3 target_harnesses gate runs.
@@ -148,6 +162,35 @@ func fetchServerRecord(ctx context.Context, client *http.Client, base, token, id
 		rec.SkillBytes = []byte(resp.SkillRaw)
 	}
 	return rec, nil
+}
+
+// restoreManifestDocument follows a manifest_body_url and restores the field
+// the registry cleared: SkillRaw for a skill, Frontmatter otherwise. A body
+// whose digest differs from the link's content hash is refused, so a sync
+// never materializes a document other than the one the registry linked. A
+// no-op when the document arrived inline. Server-source sync runs no §6.6
+// delivery verification; the digest check binds the fetched bytes to the link.
+//
+// Spec: §2.2, §6.6, §13.12.
+func restoreManifestDocument(ctx context.Context, client *http.Client, token string, resp *serverLoadResponse) error {
+	if resp.ManifestBodyURL == nil {
+		return nil
+	}
+	link := resp.ManifestBodyURL
+	doc, err := fetchBytes(ctx, client, link.URL, token)
+	if err != nil {
+		return fmt.Errorf("fetch manifest body: %w", err)
+	}
+	sum := sha256.Sum256(doc)
+	if "sha256:"+hex.EncodeToString(sum[:]) != link.ContentHash {
+		return fmt.Errorf("manifest body content hash mismatch")
+	}
+	if resp.Type == string(manifest.TypeSkill) {
+		resp.SkillRaw = string(doc)
+	} else {
+		resp.Frontmatter = string(doc)
+	}
+	return nil
 }
 
 // decodeInlineResources copies the inline resource map to bytes, decoding
@@ -221,13 +264,14 @@ func httpGetJSON(ctx context.Context, client *http.Client, rawURL, token string,
 //     self-validating; "consumers do not send credentials when following the
 //     URL." An Authorization header alongside the SigV4 query makes S3 reject
 //     the request as "multiple authentication types" (HTTP 400), so the token
-//     MUST be withheld. presignedSigV4 detects this case by the SigV4 query.
+//     MUST be withheld. objectstore.PresignedSigV4 detects this case by the
+//     SigV4 query.
 func fetchBytes(ctx context.Context, client *http.Client, rawURL, token string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	if token != "" && !presignedSigV4(rawURL) {
+	if token != "" && !objectstore.PresignedSigV4(rawURL) {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := client.Do(req)
@@ -239,19 +283,4 @@ func fetchBytes(ctx context.Context, client *http.Client, rawURL, token string) 
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 256<<20))
-}
-
-// presignedSigV4 reports whether rawURL is an AWS Signature V4 presigned URL,
-// identified by the X-Amz-Signature query parameter the S3 backend appends. The
-// filesystem backend's /objects/{content_hash} route carries none, so this
-// separates a self-validating S3 URL (no caller credential) from the
-// token-bound registry route (§13.11). A URL that fails to parse is treated as
-// not presigned so the caller credential is attached, the safe default for the
-// registry route.
-func presignedSigV4(rawURL string) bool {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return false
-	}
-	return u.Query().Get("X-Amz-Signature") != ""
 }

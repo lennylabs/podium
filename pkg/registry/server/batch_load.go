@@ -10,6 +10,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
+	"github.com/lennylabs/podium/pkg/store"
 )
 
 // BatchLoadCap is the §7.6.2 hard cap on batch size. Larger
@@ -40,26 +41,30 @@ type BatchLoadEnvelope struct {
 	// rather than reconstructing it from frontmatter plus body. Empty for
 	// non-skills.
 	SkillRaw string `json:"skill_raw,omitempty"`
-	// Resources carries every bundled resource as a presigned reference
-	// per the §7.6.2 wire example {path, presigned_url, content_hash}.
-	// The batch path keeps the response body small by delivering all
-	// resources via URL; the SDK fetches them concurrently afterward.
-	// In the standalone-without-storage mode (§13.11) ingest keeps every
-	// resource inline, so the reference carries the bytes inline instead
-	// of a presigned_url.
+	// Resources carries every bundled resource as a §7.6.2 reference. A
+	// resource the registry holds inline on the manifest record travels
+	// inline, whatever its size and whether or not an object store is
+	// configured. Every other resource travels as a presigned_url the SDK
+	// fetches concurrently afterward, per the §7.6.2 wire example
+	// {path, presigned_url, content_hash}.
 	Resources          []BatchResource `json:"resources,omitempty"`
 	Deprecated         bool            `json:"deprecated,omitempty"`
 	ReplacedBy         string          `json:"replaced_by,omitempty"`
 	DeprecationWarning string          `json:"deprecation_warning,omitempty"`
-	Error              *ErrorResponse  `json:"error,omitempty"`
+	// DeliveryHash and DeliverySignature are the §4.7.10 attestation of the
+	// record this envelope delivers, composed and signed by the same code as
+	// the single-load response, so both paths serve one digest per artifact.
+	DeliveryHash      string         `json:"delivery_hash,omitempty"`
+	DeliverySignature string         `json:"delivery_signature,omitempty"`
+	Error             *ErrorResponse `json:"error,omitempty"`
 }
 
 // BatchResource is one §7.6.2 bundled-resource reference in a batch
-// envelope. With an object store configured the resource travels as a
-// presigned_url (the §7.6.2 wire example). In the standalone-without-storage
-// mode the bytes travel inline in Inline (base64-encoded, with InlineBase64
-// set, when the payload is not valid UTF-8) so a batch consumer materializes
-// the same complete package the single-load path delivers.
+// envelope. A resource the registry holds inline on the manifest record
+// travels in Inline (base64-encoded, with InlineBase64 set, when the payload
+// is not valid UTF-8), including when a copy of it also exists in object
+// storage. Every other resource travels as a presigned_url naming the object
+// the §13.4 stored-row admission read.
 type BatchResource struct {
 	Path         string `json:"path"`
 	PresignedURL string `json:"presigned_url,omitempty"`
@@ -126,29 +131,23 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
 	}
-	// §7.6.2: bundled resources travel as presigned URLs so the batch
-	// response body stays small. In the standalone-without-storage mode
-	// (§13.11) ingest kept every resource inline regardless of size, so
-	// with no object store deliver those bytes inline rather than dropping
-	// them, mirroring attachResources on the single-load path.
-	for _, ref := range res.Resources {
-		if s.objectStore != nil {
-			url, err := s.objectStore.Presign(ctx, resourceKey(ref), s.presignTTL)
-			if err != nil {
-				return BatchLoadEnvelope{
-					ID:     artifactID,
-					Status: "error",
-					Error:  errorEnvelopeFor(err),
-				}
-			}
-			env.Resources = append(env.Resources, BatchResource{
-				Path:         ref.Path,
-				PresignedURL: url,
-				ContentHash:  ref.ContentHash,
-			})
-			continue
+	// Spec: §4.7.10 — the batch entry carries the attestation the single-load
+	// response carries for the same admitted result.
+	deliveryHash, deliverySig, err := s.attestDelivery(ctx, res)
+	if err != nil {
+		return BatchLoadEnvelope{
+			ID:     artifactID,
+			Status: "error",
+			Error:  errorEnvelopeFor(err),
 		}
-		body, err := s.inlineBytes(ctx, ref)
+	}
+	env.DeliveryHash, env.DeliverySignature = deliveryHash, deliverySig
+	// Spec: §7.6.2, §13.4 — a resource the admitted row holds inline travels
+	// inline from the bytes admission hashed, and is never presigned, because
+	// admission read no object under its key. Every other resource travels as
+	// a presigned link to the object admission read.
+	for _, ref := range res.Resources {
+		br, err := s.batchResource(ctx, ref)
 		if err != nil {
 			return BatchLoadEnvelope{
 				ID:     artifactID,
@@ -156,18 +155,33 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 				Error:  errorEnvelopeFor(err),
 			}
 		}
-		br := BatchResource{Path: ref.Path, ContentHash: ref.ContentHash}
-		// §4.1/§7.2: a binary resource is base64-encoded so
-		// encoding/json does not replace its non-UTF-8 bytes with U+FFFD.
-		if utf8.Valid(body) {
-			br.Inline = string(body)
-		} else {
-			br.Inline = base64.StdEncoding.EncodeToString(body)
-			br.InlineBase64 = true
-		}
 		env.Resources = append(env.Resources, br)
 	}
 	return env
+}
+
+// batchResource builds one admitted ref's §7.6.2 reference. A server with no
+// object store answers an object-held ref with an error rather than serving
+// bytes.
+func (s *Server) batchResource(ctx context.Context, ref store.ResourceRef) (BatchResource, error) {
+	br := BatchResource{Path: ref.Path, ContentHash: ref.ContentHash}
+	if ref.Inline == nil {
+		link, err := s.presignResource(ctx, ref)
+		if err != nil {
+			return BatchResource{}, err
+		}
+		br.PresignedURL = link.URL
+		return br, nil
+	}
+	// §4.1/§7.2: a binary resource is base64-encoded so encoding/json does
+	// not replace its non-UTF-8 bytes with U+FFFD.
+	if utf8.Valid(ref.Inline) {
+		br.Inline = string(ref.Inline)
+	} else {
+		br.Inline = base64.StdEncoding.EncodeToString(ref.Inline)
+		br.InlineBase64 = true
+	}
+	return br, nil
 }
 
 // batchLoadError maps a per-item load failure to the §7.6.2 envelope. A
@@ -198,6 +212,10 @@ func errorEnvelopeFor(err error) *ErrorResponse {
 		e = &ErrorResponse{Code: "registry.unavailable", Message: err.Error()}
 	case errors.Is(err, core.ErrInvalidArgument):
 		e = &ErrorResponse{Code: "registry.invalid_argument", Message: err.Error()}
+	case errors.Is(err, core.ErrContentHashMismatch),
+		errors.Is(err, core.ErrStoredSignatureMissing),
+		errors.Is(err, core.ErrStoredSignatureInvalid):
+		e = &ErrorResponse{Code: admissionCode(err), Message: err.Error()}
 	default:
 		e = &ErrorResponse{Code: "registry.unknown", Message: err.Error()}
 	}

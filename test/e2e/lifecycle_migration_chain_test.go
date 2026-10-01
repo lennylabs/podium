@@ -77,7 +77,11 @@ func TestLifecycle_MigrationChainFilesystemStandaloneStandard(t *testing.T) {
 
 	// ---- Stage 2: standalone ingest -----------------------------------------
 	// Boot a standalone server over the same source with an explicit SQLite path
-	// and filesystem object root so the migration can read them in stage 3.
+	// and filesystem object root so the migration can read them in stage 3. It
+	// signs under the key the standard target holds, which is the documented
+	// key-copy step in effect, so the sign-stored-rows run on the migrated
+	// target classifies the row migrated rather than signature_unverified
+	// (§13.4).
 	home := t.TempDir()
 	sqlitePath := filepath.Join(home, "standalone.db")
 	objectsRoot := filepath.Join(home, "objects")
@@ -85,6 +89,7 @@ func TestLifecycle_MigrationChainFilesystemStandaloneStandard(t *testing.T) {
 		"HOME=" + home,
 		"PODIUM_SQLITE_PATH=" + sqlitePath,
 		"PODIUM_FILESYSTEM_ROOT=" + objectsRoot,
+		"PODIUM_SIGN_KEY_PATH=" + msSigningKeyPath(t),
 	}, "serve", "--standalone", "--layer-path", reg)
 
 	// load_artifact returns the artifact; capture its content hash (the immutable
@@ -134,10 +139,19 @@ func TestLifecycle_MigrationChainFilesystemStandaloneStandard(t *testing.T) {
 		t.Fatalf("migrate did not pump the standalone manifest (wrong source tenant id?):\n%s", migrate.Stdout)
 	}
 
+	// Spec: §13.4 — migrate-to-standard cleared the target's completion
+	// record, and a Postgres target is outside the co-located SQLite store, so
+	// sign-stored-rows records completion before the target's first start. The
+	// migrated row was signed under the shared key, so it is class migrated
+	// and the run needs no plan digest.
+	priv, pemPath := injKeyPair(t)
+	if run := signStoredRows(t, msStandardEnv(t, dsn, bucket, region, pemPath)); run.Exit != 0 {
+		t.Fatalf("stage 3 sign-stored-rows exit=%d\nstdout:\n%s\nstderr:\n%s", run.Exit, run.Stdout, run.Stderr)
+	}
+
 	// Boot a standard-mode server on the migrated Postgres + S3. It reuses the
 	// injected-session-token identity path the parity helper wires; the migrated
 	// public layer is visible to a verified caller.
-	priv, pemPath := injKeyPair(t)
 	standard := msStartStandardServer(t, dsn, bucket, region, pemPath)
 	token := injSignJWT(t, priv, injClaims("alice@acme.com"))
 

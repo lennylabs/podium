@@ -164,21 +164,6 @@ func TestRetentionPolicy_OmitsIntegrityAndErasureTypes(t *testing.T) {
 	}
 }
 
-func TestKeyIDFor_StableShortHex(t *testing.T) {
-	t.Parallel()
-	id1 := keyIDFor([]byte{1, 2, 3})
-	id2 := keyIDFor([]byte{1, 2, 3})
-	if id1 != id2 {
-		t.Errorf("keyIDFor not deterministic: %q vs %q", id1, id2)
-	}
-	if id3 := keyIDFor([]byte{9, 9, 9}); id3 == id1 {
-		t.Errorf("expected different ids; got %q twice", id1)
-	}
-	if len(id1) != 16 {
-		t.Errorf("len = %d, want 16 (hex of 8 bytes)", len(id1))
-	}
-}
-
 func TestResolveAuditPath_ExpandsHome(t *testing.T) {
 	t.Parallel()
 	if got, err := resolveAuditPath("/explicit"); err != nil || got != "/explicit" {

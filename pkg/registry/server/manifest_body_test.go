@@ -16,6 +16,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // mbLargeContextDoc is an ARTIFACT.md whose bytes exceed the §4.2 inline
@@ -42,7 +43,7 @@ func manifestBodyServer(t *testing.T, rec store.ManifestRecord, withStore bool) 
 	}
 	rec.TenantID = "default"
 	rec.Layer = "L"
-	if err := st.PutManifest(t.Context(), rec); err != nil {
+	if err := st.PutManifest(t.Context(), storetest.Seal(t, rec, nil, nil)); err != nil {
 		t.Fatalf("PutManifest: %v", err)
 	}
 	reg := core.New(st, "default", []layer.Layer{

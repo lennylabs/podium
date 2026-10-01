@@ -8,6 +8,7 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // overlayTestServer constructs an mcpServer with a configured
@@ -46,6 +47,8 @@ func TestLoadArtifactFromOverlay_PolicyAlwaysStillAllowsOverlay(t *testing.T) {
 		ID: "personal/draft",
 		ArtifactBytes: []byte(
 			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
+		AuthoredBytes: []byte(
+			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
 		Artifact: &manifest.Artifact{
 			Type:        manifest.TypeContext,
 			Version:     "1.0.0",
@@ -68,62 +71,30 @@ func TestLoadArtifactFromOverlay_PolicyAlwaysStillAllowsOverlay(t *testing.T) {
 }
 
 // Spec: §4.7.9 — the registry-fetched path DOES enforce signature
-// policy. A response with no signature under PolicyAlways must
-// return an error result. This contrasts with the overlay path
+// policy. A response whose bytes reproduce its delivery hash and that carries
+// no delivery signature fails the policy under PolicyAlways with the leading
+// code materialize.signature_missing. This contrasts with the overlay path
 // above and pins the asymmetry.
 func TestDeliverLoadArtifact_PolicyAlwaysRejectsUnsigned(t *testing.T) {
 	t.Parallel()
 	s := overlayTestServer(t, sign.PolicyAlways)
-	resp := loadArtifactResponse{
+	fm := "---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"
+	resp := sealDelivery(loadArtifactResponse{
 		ID:          "team/x",
 		Type:        "context",
 		Version:     "1.0.0",
-		ContentHash: "sha256:" + strings.Repeat("a", 64),
-		Frontmatter: "---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n",
+		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil),
+		Frontmatter: fm,
 		Sensitivity: "low",
-		Signature:   "", // missing
-	}
+	})
 	got := s.deliverLoadArtifact(resp)
-	m, ok := got.(map[string]any)
-	if !ok {
-		t.Fatalf("type = %T (%v)", got, got)
-	}
-	errStr, _ := m["error"].(string)
-	if !strings.Contains(errStr, "materialize.signature_invalid") &&
-		!strings.Contains(errStr, "signature_missing") {
-		t.Errorf("error = %q, want materialize.signature_invalid or signature_missing", errStr)
-	}
-}
-
-// Spec: §4.7.9 — PolicyMediumAndAbove (the default) requires a
-// signature only for medium/high sensitivity. A low-sensitivity
-// overlay load under the default policy succeeds — that's the
-// "personal drafts work without signing keys" case.
-func TestLoadArtifactFromOverlay_PolicyMediumAndAboveAllowsLowSensitivity(t *testing.T) {
-	t.Parallel()
-	s := overlayTestServer(t, sign.PolicyMediumAndAbove)
-	rec := &filesystem.ArtifactRecord{
-		ID: "personal/draft",
-		ArtifactBytes: []byte(
-			"---\ntype: context\nversion: 1.0.0\nsensitivity: low\n---\n"),
-		Artifact: &manifest.Artifact{
-			Type:        manifest.TypeContext,
-			Version:     "1.0.0",
-			Sensitivity: manifest.SensitivityLow,
-		},
-	}
-	got := s.loadArtifactFromOverlay(rec, nil)
-	m, ok := got.(map[string]any)
-	if !ok {
-		t.Fatalf("type = %T", got)
-	}
-	if _, has := m["error"]; has {
-		t.Errorf("low-sensitivity overlay should not require a signature, got %v", m)
+	if errStr := errorMessageText(got); !strings.HasPrefix(errStr, "materialize.signature_missing") {
+		t.Errorf("error = %q, want a leading materialize.signature_missing", errStr)
 	}
 }
 
 // Spec: §6.4 / §6.6 — a high-sensitivity overlay artifact loads
-// without signature verification even under PolicyMediumAndAbove.
+// without signature verification even under PolicyAlways.
 // This is the same trust boundary as above: overlay bytes are the
 // developer's own local files, exempt from the registry-issued
 // signature regime. Sensitivity affects how the host treats the
@@ -131,10 +102,12 @@ func TestLoadArtifactFromOverlay_PolicyMediumAndAboveAllowsLowSensitivity(t *tes
 // promote the overlay into the registry's chain of custody.
 func TestLoadArtifactFromOverlay_HighSensitivityAllowedOnLocalAuthor(t *testing.T) {
 	t.Parallel()
-	s := overlayTestServer(t, sign.PolicyMediumAndAbove)
+	s := overlayTestServer(t, sign.PolicyAlways)
 	rec := &filesystem.ArtifactRecord{
 		ID: "personal/high",
 		ArtifactBytes: []byte(
+			"---\ntype: context\nversion: 1.0.0\nsensitivity: high\n---\n"),
+		AuthoredBytes: []byte(
 			"---\ntype: context\nversion: 1.0.0\nsensitivity: high\n---\n"),
 		Artifact: &manifest.Artifact{
 			Type:        manifest.TypeContext,
@@ -148,7 +121,7 @@ func TestLoadArtifactFromOverlay_HighSensitivityAllowedOnLocalAuthor(t *testing.
 		t.Fatalf("type = %T", got)
 	}
 	if _, has := m["error"]; has {
-		t.Errorf("high-sensitivity overlay rejected under PolicyMediumAndAbove; "+
+		t.Errorf("high-sensitivity overlay rejected under PolicyAlways; "+
 			"spec §6.6 scopes signature verification to registry-returned bytes. "+
 			"Got: %v", m["error"])
 	}
@@ -165,6 +138,7 @@ func TestLoadArtifactFromOverlay_PolicyNeverAlwaysAllows(t *testing.T) {
 	rec := &filesystem.ArtifactRecord{
 		ID:            "personal/x",
 		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nsensitivity: high\n---\n"),
+		AuthoredBytes: []byte("---\ntype: skill\nversion: 1.0.0\nsensitivity: high\n---\n"),
 		Artifact: &manifest.Artifact{
 			Type:        manifest.TypeSkill,
 			Version:     "1.0.0",

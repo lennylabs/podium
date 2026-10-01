@@ -7,6 +7,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/store/storetest"
 )
 
 // Spec: §4.7.6 — `latest` resolves to the most recently
@@ -20,17 +21,17 @@ func TestLoadArtifact_LatestSkipsDeprecatedVersion(t *testing.T) {
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: tenant}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "team/x", Version: "1.0.0",
 		ContentHash: "sha256:a", Type: "skill", Layer: "L",
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("Put 1: %v", err)
 	}
-	if err := st.PutManifest(context.Background(), store.ManifestRecord{
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "team/x", Version: "2.0.0",
 		ContentHash: "sha256:b", Type: "skill", Layer: "L",
 		Deprecated: true,
-	}); err != nil {
+	}, nil, nil)); err != nil {
 		t.Fatalf("Put 2: %v", err)
 	}
 	reg := core.New(st, tenant, []layer.Layer{
@@ -56,11 +57,11 @@ func TestLoadArtifact_LatestFallsBackWhenAllDeprecated(t *testing.T) {
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
 	for _, v := range []string{"1.0.0", "2.0.0"} {
-		_ = st.PutManifest(context.Background(), store.ManifestRecord{
+		_ = st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 			TenantID: tenant, ArtifactID: "team/x", Version: v,
 			ContentHash: "sha256:" + v, Type: "skill", Layer: "L",
 			Deprecated: true,
-		})
+		}, nil, nil))
 	}
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
@@ -86,11 +87,11 @@ func TestLoadArtifact_ExactVersionLoadsDeprecated(t *testing.T) {
 	const tenant = "t"
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: tenant})
-	_ = st.PutManifest(context.Background(), store.ManifestRecord{
+	_ = st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
 		TenantID: tenant, ArtifactID: "team/x", Version: "2.0.0",
 		ContentHash: "sha256:b", Type: "skill", Layer: "L",
 		Deprecated: true,
-	})
+	}, nil, nil))
 	reg := core.New(st, tenant, []layer.Layer{
 		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
 	})

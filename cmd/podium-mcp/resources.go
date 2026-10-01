@@ -66,8 +66,13 @@ func (s *mcpServer) handleResourcesList() any {
 // requested URI back to an artifact ID, loads the artifact body from the
 // same /v1/load_artifact path the canonical `load_artifact` tool uses,
 // and returns the manifest (frontmatter + body) as the resource content.
-// This is the read-only half of the §5.0 mirror: it performs none of
-// load_artifact's filesystem materialization side effects.
+// This is the read-only half of the §5.0 mirror. It runs the same §6.6
+// reconstitution and verification load_artifact runs, through
+// verifyServedArtifact, and performs none of load_artifact's other effects:
+// it emits no read event, caches nothing, runs neither §4.4.1 gate, and
+// materializes nothing.
+//
+// Spec: §5.0, §6.6 step 2, §4.7.9
 func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 	var args struct {
 		URI string `json:"uri"`
@@ -79,7 +84,8 @@ func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 	if !ok {
 		return errorResult("resources.invalid_argument: uri must be " + resourceURIPrefix + "<id>")
 	}
-	body, err := s.fetchJSON("/v1/load_artifact", map[string]any{"id": id})
+	loadArgs := map[string]any{"id": id}
+	body, err := s.fetchJSON("/v1/load_artifact", loadArgs)
 	if err != nil {
 		return errorResultFrom(err)
 	}
@@ -89,6 +95,15 @@ func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 	}
 	if resp.ID == "" {
 		return errorResult("resources.not_found: " + id)
+	}
+	// §5.0: the mirror is a read-only mirror of load_artifact, so it returns
+	// no text load_artifact would refuse. The refreshers are the ones the
+	// live load_artifact path passes, built from the same arguments.
+	if err := s.verifyServedArtifact(&resp, deliverOpts{
+		refresh:         s.largeResourceRefresher(loadArgs),
+		manifestRefresh: s.manifestBodyRefresher(loadArgs),
+	}); err != nil {
+		return errorResult(err.Error())
 	}
 	return map[string]any{
 		"contents": []map[string]any{

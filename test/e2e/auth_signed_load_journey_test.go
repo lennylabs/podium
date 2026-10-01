@@ -2,29 +2,27 @@ package e2e
 
 // Signed artifact verifies on load and a tampered blob is refused.
 //
-// The filesystem bootstrap attaches no signatures, so signature verification
-// and tamper detection skipped end to end. The signedArtifactFixture
-// produces a real registry-managed signature envelope over an offline keypair
-// and drives the shipped podium-mcp verifier. This is the journey the gap
-// names: under the default-on verifier (no PODIUM_VERIFY_SIGNATURES set, which
-// falls back to the secure medium-and-above policy), a validly-signed
-// medium-sensitivity artifact loads and verifies, then tampering its stored
-// bytes makes the same load abort with materialize.signature_invalid, while a
-// co-resident untampered signed artifact keeps loading. The untampered control
-// proves the verifier is selective: it blocks the tampered blob without
-// breaking a clean one.
+// The signedArtifactFixture serves a real registry-managed delivery signature
+// over an offline keypair and drives the shipped podium-mcp verifier. Under the
+// default-on verifier (no PODIUM_VERIFY_SIGNATURES set, which falls back to the
+// always policy), a validly-signed medium-sensitivity artifact loads and
+// verifies. Tampering its served record makes the same load abort with
+// materialize.content_hash_mismatch, because the delivery-hash comparison runs
+// before the signature policy, and a delivery signature over another value
+// aborts with materialize.signature_invalid. A co-resident untampered signed
+// artifact keeps loading, which proves the verifier is selective.
 //
-// Two independent signed fixtures back the journey so the tamper to one cannot
-// affect the other. Each holds a real signature from its own offline key,
+// Independent signed fixtures back the journey so the tamper to one cannot
+// affect another. Each holds a real signature from its own offline key,
 // verified consumer-side with that key. The policy is left unset so the binary
 // exercises its own default rather than an explicitly-configured one (§6.2: an
-// absent PODIUM_VERIFY_SIGNATURES defaults to medium-and-above).
+// absent PODIUM_VERIFY_SIGNATURES defaults to always).
 //
-// Spec: §4.7.9 (each version is signed by a registry-managed key at ingest; the
-// MCP server verifies on materialization for sensitivity >= medium; a signature
-// failure aborts with materialize.signature_invalid before anything is written
-// to disk), §6.2 (PODIUM_VERIFY_SIGNATURES defaults to medium-and-above), §6.6
-// step 2 (content-hash match over the delivered bytes).
+// Spec: §4.7.9 (the MCP server verifies every served delivery signature under
+// any policy above never; a signature failure aborts with
+// materialize.signature_invalid before anything is written to disk), §6.2
+// (PODIUM_VERIFY_SIGNATURES defaults to always), §6.6 step 2 (the delivery-hash
+// comparison over the delivered bytes runs first).
 
 import (
 	"strings"
@@ -32,9 +30,9 @@ import (
 )
 
 // signedDefaultEnv returns the fixture's consumer env with the verification
-// policy left unset, so the bridge falls back to its secure default
-// (medium-and-above). f.Env sets PODIUM_VERIFY_SIGNATURES to the passed value;
-// passing the empty string makes the binary treat it as "not configured."
+// policy left unset, so the bridge falls back to its default (always). f.Env
+// sets PODIUM_VERIFY_SIGNATURES to the passed value; passing the empty string
+// makes the binary treat it as "not configured."
 func signedDefaultEnv(t *testing.T, f *signedArtifactFixture) []string {
 	t.Helper()
 	env := f.Env(t, "")
@@ -55,8 +53,9 @@ func signedDefaultEnv(t *testing.T, f *signedArtifactFixture) []string {
 
 // TestAuthSignedLoadJourney_VerifyThenTamperRefused loads two validly-signed
 // medium-sensitivity artifacts under the default-on verifier, asserts both
-// verify, tampers one artifact's stored bytes, then asserts the tampered load
-// aborts with the signature error while the untampered artifact still loads.
+// verify, tampers one artifact's served record, then asserts the tampered load
+// aborts with the delivery-hash code, a re-signed sibling aborts with the
+// signature code, and the untampered artifact still loads.
 func TestAuthSignedLoadJourney_VerifyThenTamperRefused(t *testing.T) {
 	t.Parallel()
 
@@ -81,14 +80,23 @@ func TestAuthSignedLoadJourney_VerifyThenTamperRefused(t *testing.T) {
 	}
 
 	// ---- Tamper the stored bytes of one artifact -----------------------------
-	// Rewriting the served content hash to a value the offline signature does
-	// not cover is the signed-then-tampered case: the default-on verifier
-	// recomputes against the signature and refuses the load before materializing.
+	// Rewriting the served content hash, a field the delivery record frames, is
+	// the signed-then-tampered case: the default-on verifier's delivery-hash
+	// comparison runs before the signature policy and refuses the load before
+	// materializing.
 	tampered.TamperContentHash()
 
 	errStr, result := loadSignedArtifact(t, tamperEnv, tampered.ID())
-	if !strings.Contains(errStr, "materialize.signature_invalid") {
-		t.Fatalf("tampered blob must be refused with materialize.signature_invalid under the default verifier, got: %q\nresult=%v", errStr, result)
+	if !strings.Contains(errStr, "materialize.content_hash_mismatch") {
+		t.Fatalf("tampered blob must be refused with materialize.content_hash_mismatch under the default verifier, got: %q\nresult=%v", errStr, result)
+	}
+
+	// A delivery signature over another value, on an intact record of the
+	// control artifact's sibling, is refused by the signature policy.
+	resigned := newSignedArtifactFixture(t, signedArtifactSpec{ID: "finance/policy/resigned"})
+	resigned.TamperDeliverySignature()
+	if errStr, result := loadSignedArtifact(t, signedDefaultEnv(t, resigned), resigned.ID()); !strings.Contains(errStr, "materialize.signature_invalid") {
+		t.Fatalf("a delivery signature over another value must be refused with materialize.signature_invalid, got: %q\nresult=%v", errStr, result)
 	}
 
 	// ---- The untampered artifact still loads ---------------------------------

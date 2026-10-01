@@ -205,6 +205,7 @@ func TestDeclarativeLayers_DeclaredGitProviderSurvivesRestart(t *testing.T) {
 		"HOME=" + home,
 		"PODIUM_CONFIG_FILE=" + cfgPath,
 		"PODIUM_SQLITE_PATH=" + filepath.Join(home, "podium.db"),
+		"PODIUM_SIGN=none",
 	}
 
 	srv := startServerArgs(t, env, "serve", "--standalone")
@@ -257,6 +258,7 @@ func TestDeclarativeLayers_HTTPGitProviderRevertsToDeclared(t *testing.T) {
 				"HOME=" + home,
 				"PODIUM_CONFIG_FILE=" + cfgPath,
 				"PODIUM_SQLITE_PATH=" + filepath.Join(home, "podium.db"),
+				"PODIUM_SIGN=none",
 				"PODIUM_INGEST_OFFLINE=true",
 			}
 
@@ -332,6 +334,7 @@ func TestDeclarativeLayers_HTTPVisibilityNarrowingRevertsToDeclared(t *testing.T
 		"HOME=" + home,
 		"PODIUM_CONFIG_FILE=" + cfgPath,
 		"PODIUM_SQLITE_PATH=" + filepath.Join(home, "podium.db"),
+		"PODIUM_SIGN=none",
 		"PODIUM_INGEST_OFFLINE=true",
 	}
 

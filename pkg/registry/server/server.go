@@ -6,7 +6,9 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +29,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/scim"
+	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/webhook"
 )
@@ -76,6 +79,10 @@ type Server struct {
 	objectStore   objectstore.Provider
 	objectBaseURL string
 	presignTTL    time.Duration
+	// deliverySigner is the registry-managed key that signs every served
+	// §4.7.10 delivery hash on the single-load and the batch paths. Nil
+	// serves an empty delivery signature.
+	deliverySigner sign.Provider
 	// webhooks is the §7.3.2 outbound delivery worker. When set,
 	// PublishEvent fans the event out to every matching receiver.
 	webhooks *webhook.Worker
@@ -355,7 +362,11 @@ func NewFromFilesystem(path string, opts ...Option) (*Server, error) {
 		})
 	}
 
-	registry := core.New(st, tenant, layers)
+	// Spec: §13.4 — admission reads the object-held bodies this ingest wrote,
+	// because ingest dropped the inline copy of every resource above the
+	// cutoff. A filesystem-source registry signs nothing, so it admits on the
+	// content hash alone.
+	registry := core.New(st, tenant, layers).WithAdmission(nil, probe.objectStore, objectstore.DefaultReadTimeout)
 	// §3.3 / §12 learn-from-usage: the standalone server reranks search and
 	// load_domain by access frequency, like the standard-topology registry.
 	registry = registry.WithUsageSignals(core.NewMemoryUsageSignals())
@@ -569,10 +580,11 @@ type SearchResponse struct {
 	Domains      []DomainDescriptor   `json:"domains,omitempty"`
 }
 
-// LoadArtifactResponse is /v1/load_artifact output. Resources below
-// the §4.1 256 KB inline cutoff are returned inline as text;
-// resources above the cutoff are returned in LargeResources as
-// follow-the-URL references the consumer fetches separately.
+// LoadArtifactResponse is /v1/load_artifact output. A resource the registry
+// holds inline on the manifest record is returned inline at any size, and so
+// is an object-held resource at or below the §4.1 256 KB inline cutoff. An
+// object-held resource above the cutoff is returned in LargeResources as a
+// follow-the-URL reference the consumer fetches separately (§7.2).
 type LoadArtifactResponse struct {
 	ID           string `json:"id"`
 	Type         string `json:"type"`
@@ -599,16 +611,6 @@ type LoadArtifactResponse struct {
 	// §6.6 step 1 and reconstitutes them. Nil when the body is below the
 	// cutoff or no object store is configured (delivered inline).
 	ManifestBodyURL *LargeResourceLink `json:"manifest_body_url,omitempty"`
-	// ManifestMerged signals that Frontmatter is an extends-merged
-	// re-serialization with the hidden parent stripped (§4.6), so its bytes
-	// no longer reproduce ContentHash. The consumer recomputes the §6.6 step 2
-	// content hash over RawFrontmatter instead.
-	ManifestMerged bool `json:"manifest_merged,omitempty"`
-	// RawFrontmatter carries the leaf child's original pre-merge ARTIFACT.md
-	// bytes when ManifestMerged is set, so the consumer reproduces the §4.7.6
-	// content hash for the merged manifest rather than skipping the check.
-	// Empty for a non-merged response.
-	RawFrontmatter string `json:"raw_frontmatter,omitempty"`
 	// Deprecated, ReplacedBy, and DeprecationWarning surface the
 	// §4.7.4 lifecycle signal so consumers see the warning
 	// alongside the served bytes and can route callers to the
@@ -616,11 +618,16 @@ type LoadArtifactResponse struct {
 	Deprecated         bool   `json:"deprecated,omitempty"`
 	ReplacedBy         string `json:"replaced_by,omitempty"`
 	DeprecationWarning string `json:"deprecation_warning,omitempty"`
-	// Signature is the §4.7.9 envelope produced at ingest by the
-	// configured SignatureProvider. Empty when ingest had no
-	// signer wired. Consumers verify against
-	// PODIUM_VERIFY_SIGNATURES at materialize time.
-	Signature string `json:"signature,omitempty"`
+	// DeliveryHash is the §4.7.10 digest over the record this response
+	// delivers. It is present on every response.
+	DeliveryHash string `json:"delivery_hash"`
+	// DeliverySignature is the registry-managed signature over DeliveryHash,
+	// absent when the registry runs without a signing key (§4.7.10).
+	DeliverySignature string `json:"delivery_signature,omitempty"`
+	// ExtendsPin is the "<id>@<version>" parent pin the artifact resolved at
+	// ingest, present only when the caller can see the parent record (§4.6).
+	// Its absence does not mean the artifact extends nothing.
+	ExtendsPin string `json:"extends_pin,omitempty"`
 }
 
 // LargeResourceLink describes one resource whose payload exceeded
@@ -1025,9 +1032,21 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	ifNoneMatch := r.Header.Get("If-None-Match")
 	res, err := s.core.LoadArtifact(r.Context(), s.identity(r), id, core.LoadArtifactOptions{
 		Version: q.Get("version"),
 		AsAdmin: asAdmin,
+		// Spec: §13.4 — a HEAD, and a GET the ETag branch below answers 304,
+		// return no content and are answered from the resolved row without
+		// stored-row admission. A GET carrying If-None-Match: * matches before
+		// the validator is read, so it takes the admitted result.
+		Revalidate: func(res *core.LoadArtifactResult) bool {
+			if r.Method == http.MethodHead {
+				return true
+			}
+			etag := validatorFor(res)
+			return etag != "" && strings.TrimSpace(ifNoneMatch) != "*" && ifNoneMatchHit(ifNoneMatch, etag)
+		},
 		// §5 load_artifact "Optional session_id"; §4.7.6 — within a
 		// session the first `latest` lookup pins, so a later same-id
 		// lookup resolves to the same version even after a newer ingest.
@@ -1047,9 +1066,9 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 	// content-addressed cache instead of re-downloading the manifest body and
 	// re-presigning resources. The check runs for GET and HEAD alike and
 	// before any resource presigning so a revalidated hit avoids that work.
-	if etag := contentHashETag(res.ContentHash); etag != "" {
+	if etag := validatorFor(res); etag != "" {
 		w.Header().Set("ETag", etag)
-		if ifNoneMatchHit(r.Header.Get("If-None-Match"), etag) {
+		if ifNoneMatchHit(ifNoneMatch, etag) {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
@@ -1078,13 +1097,19 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		Deprecated:         res.Deprecated,
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
-		Signature:          res.Signature,
-		ManifestMerged:     res.Merged,
-		RawFrontmatter:     string(res.RawFrontmatter),
+		ExtendsPin:         res.ExtendsPin,
 	}
-	// §7.2 data plane: resources at or below the inline cutoff return
-	// inline; larger ones return as presigned URLs the consumer fetches
-	// directly from object storage.
+	// Spec: §4.7.10 — attest the record before the manifest-body channel
+	// clears the inline document, because the record frames the served
+	// document whichever channel carries it.
+	deliveryHash, deliverySig, err := s.attestDelivery(r.Context(), res)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+		return
+	}
+	resp.DeliveryHash, resp.DeliverySignature = deliveryHash, deliverySig
+	// §7.2 data plane: each resource's source follows where admission read
+	// its bytes (see attachResources).
 	if err := s.attachResources(r.Context(), &resp, res.Resources); err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
@@ -1097,6 +1122,29 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// validatorFor returns the HTTP validator a load_artifact response carries.
+// The Revalidate predicate and the ETag branch both read it, so the §13.4
+// admission bypass is taken for a GET only when the ETag branch answers
+// 304. A change to the validator lands in both decisions at once.
+func validatorFor(res *core.LoadArtifactResult) string {
+	return loadArtifactETag(res.ContentHash, res.ExtendsPin)
+}
+
+// loadArtifactETag is the strong ETag of a load_artifact response. With no
+// extends_pin served it is the content-hash ETag. With one it appends the hex
+// SHA-256 of the pin, so a body that carries one caller's extends_pin is never
+// revalidated for a caller who is served a different one, or none. The pin is
+// hashed rather than embedded so the validator repeats no parent ID.
+//
+// Spec: §7.2, §13.4.
+func loadArtifactETag(contentHash, extendsPin string) string {
+	if extendsPin == "" || contentHash == "" {
+		return contentHashETag(contentHash)
+	}
+	sum := sha256.Sum256([]byte(extendsPin))
+	return `"` + contentHash + "+" + hex.EncodeToString(sum[:]) + `"`
 }
 
 // contentHashETag formats a resolved content hash as a strong HTTP ETag
@@ -1133,19 +1181,25 @@ func ifNoneMatchHit(ifNoneMatch, etag string) bool {
 	return false
 }
 
-// attachResources splits the §4.4 bundled resources of a load result
-// into the §7.2 inline set (at or below objectstore.InlineCutoff) and
-// the large set (above it). Small resources serve from the bytes ingest
-// stored inline, falling back to an object-store read; large resources
-// presign against the configured store.
+// attachResources places each §4.4 bundled resource of an admitted load
+// result in the §7.2 inline set or the large set. The source follows the
+// admitted ref's Inline, which records where §13.4 admission read the body:
 //
-// A large resource presigns only when an object store is configured. In
-// the standalone-without-storage mode (§13.11) ingest keeps every
-// resource inline regardless of size, so when no object store is present
-// those bytes serve inline rather than failing the load (§7.2).
+//   - Inline set, at any size: served from those bytes. A ref whose Inline is
+//     set is never presigned, because admission bound the key to the inline
+//     bytes and read no object under it.
+//   - Inline nil and above objectstore.InlineCutoff: a presigned link to the
+//     object admission read.
+//   - Inline nil and at or below the cutoff: the object, read again for
+//     inline delivery.
+//
+// A server with no object store answers an object-held ref with an error
+// rather than serving bytes.
+//
+// Spec: §4.1, §7.2, §13.4.
 func (s *Server) attachResources(ctx context.Context, resp *LoadArtifactResponse, refs []store.ResourceRef) error {
 	for _, ref := range refs {
-		if ref.Size > objectstore.InlineCutoff && s.objectStore != nil {
+		if ref.Inline == nil && ref.Size > objectstore.InlineCutoff {
 			link, err := s.presignResource(ctx, ref)
 			if err != nil {
 				return err
@@ -1198,11 +1252,12 @@ func encodeBinaryInlineResources(resp *LoadArtifactResponse) {
 // the canonical-document field. Below the cutoff, or without an object
 // store (the §13.11 standalone-without-storage mode), the body stays inline.
 //
-// An extends-merged manifest keeps its body inline: the served frontmatter
-// is a re-serialization distinct from the hash-bound raw bytes, so it is
-// excluded from the channel to avoid an ambiguous reconstitution.
+// A merged manifest takes the channel like any other. It was once kept inline
+// because the consumer hashed the pre-merge bytes the URL does not deliver;
+// the §4.7.10 delivery hash frames the served document itself, and a channel
+// that differed for a merged manifest would disclose the merge (§4.6).
 func (s *Server) attachManifestBody(ctx context.Context, resp *LoadArtifactResponse, res *core.LoadArtifactResult) error {
-	if s.objectStore == nil || res.Merged {
+	if s.objectStore == nil {
 		return nil
 	}
 	doc := core.CanonicalManifestDoc(res.Type, res.Frontmatter, res.SkillRaw)
@@ -1402,6 +1457,13 @@ func (s *Server) writeCoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusNotFound, "domain.not_found", err.Error())
 	case errors.Is(err, core.ErrNotFound):
 		writeError(w, http.StatusNotFound, "registry.not_found", err.Error())
+	case errors.Is(err, core.ErrContentHashMismatch),
+		errors.Is(err, core.ErrStoredSignatureMissing),
+		errors.Is(err, core.ErrStoredSignatureInvalid):
+		// Spec: §13.4 — a stored row that fails admission is refused with the
+		// code its sentinel names. The condition is in the stored row, so the
+		// same request fails identically until an operator repairs it.
+		writeError(w, http.StatusInternalServerError, admissionCode(err), err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 	}
