@@ -11,6 +11,11 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # The chart NOTES tests render through Helm v4's client-side dry run;
+      # the runner's preinstalled Helm v3 needs a cluster for it.
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.1.4
 
       - run: make tools
       - name: Spec section coverage

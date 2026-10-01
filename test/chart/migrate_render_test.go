@@ -580,6 +580,12 @@ func TestChart_MigrationConfigReachesBothPods(t *testing.T) {
 // which needs no cluster. `helm template` does not render NOTES.
 func renderNotes(t *testing.T, args ...string) string {
 	t.Helper()
+	// Helm v3 checks that a cluster is reachable on every install, a dry run
+	// included, and `helm template` does not render NOTES. Only Helm v4's
+	// client-side dry run renders them without a cluster.
+	if v, err := helmRun(t, "version", "--short"); err != nil || !strings.HasPrefix(strings.TrimSpace(v), "v4.") {
+		t.Skipf("rendering NOTES without a cluster needs Helm v4; helm version --short printed %q", strings.TrimSpace(v))
+	}
 	out, err := helmRun(t, append([]string{"install", "t", chartDir, "--dry-run=client"}, args...)...)
 	if err != nil {
 		t.Fatalf("helm install --dry-run=client %v: %v\n%s", args, err, out)
