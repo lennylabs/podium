@@ -2026,6 +2026,14 @@ func (s *mcpServer) loadArtifactFromOverlay(rec *filesystem.ArtifactRecord, args
 		resp.Type = string(rec.Artifact.Type)
 		resp.Version = rec.Artifact.Version
 		resp.ManifestBody = rec.Artifact.Body
+		// Spec: §4.3.4, §4.4, §6.4 — a skill's manifest body is its SKILL.md
+		// prose, the value ingest stores and the registry serves for the same
+		// package. A skill's ARTIFACT.md has no prose body (at most a pointer
+		// comment), so serving it would hand the agent different content for
+		// an overlay load than for a registry load.
+		if rec.Artifact.Type == manifest.TypeSkill && rec.Skill != nil {
+			resp.ManifestBody = rec.Skill.Body
+		}
 	}
 	// §8.1 / §8.2: the overlay load path emits its own artifact.loaded event,
 	// matching the registry-served path (deliverLoadArtifact), so an overlay

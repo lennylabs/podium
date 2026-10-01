@@ -26,6 +26,7 @@ import (
 	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/identity"
 	"github.com/lennylabs/podium/pkg/lint"
+	"github.com/lennylabs/podium/pkg/manifest"
 	overlaypkg "github.com/lennylabs/podium/pkg/overlay"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sync"
@@ -1586,15 +1587,28 @@ func printArtifactHuman(body []byte) {
 		fmt.Println(string(body))
 		return
 	}
-	if a.Frontmatter != "" {
-		fmt.Print(a.Frontmatter)
-		if !strings.HasSuffix(a.Frontmatter, "\n") {
+	if fm := frontmatterHeader(a.Frontmatter); fm != "" {
+		fmt.Print(fm)
+		if !strings.HasSuffix(fm, "\n") {
 			fmt.Println()
 		}
 	}
 	if a.ManifestBody != "" {
 		fmt.Println(a.ManifestBody)
 	}
+}
+
+// frontmatterHeader returns the ---fenced--- frontmatter block of the wire
+// frontmatter field. The field carries the whole ARTIFACT.md, prose included,
+// so the registry can deliver the canonical document byte-for-byte (§6.6);
+// printing it whole would print a non-skill's body a second time beside
+// manifest_body. A field with no parseable frontmatter is returned unchanged.
+func frontmatterHeader(doc string) string {
+	fm, _, err := manifest.SplitFrontmatter([]byte(doc))
+	if err != nil {
+		return doc
+	}
+	return "---\n" + string(fm) + "\n---\n"
 }
 
 // domainNode is one node in the load_domain subdomain tree, used by

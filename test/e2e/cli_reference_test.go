@@ -1236,6 +1236,24 @@ func TestCLI_ArtifactShow(t *testing.T) {
 	}
 }
 
+// Spec: §7.6.1 — the human form prints a manifest as the markdown body with
+// frontmatter at the top, once. The wire frontmatter field carries the whole
+// ARTIFACT.md, so a non-skill's body must not print a second time from it.
+func TestCLI_ArtifactShowPrintsBodyOnce(t *testing.T) {
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"team/faq/ARTIFACT.md": contextArtifact("Frequently asked questions."),
+	}))
+	res := runPodium(t, "", brEnv(srv.BaseURL), "artifact", "show", "team/faq")
+	cliWantExit(t, res, 0, "artifact show team/faq")
+	want := "---\ntype: context\nversion: 1.0.0\ndescription: Frequently asked questions.\n---\n"
+	if !strings.HasPrefix(res.Stdout, want) {
+		t.Fatalf("artifact show did not open with the frontmatter block:\n%s", res.Stdout)
+	}
+	if n := strings.Count(res.Stdout, "Frequently asked questions. body."); n != 1 {
+		t.Fatalf("artifact show printed the body %d times, want 1:\n%s", n, res.Stdout)
+	}
+}
+
 // spec: doc "podium artifact show", "Does not materialize bundled resources".
 func TestCLI_ArtifactShowNoResourcesWritten(t *testing.T) {
 	srv := startServer(t, cliReg(t))

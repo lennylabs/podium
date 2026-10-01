@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -258,5 +259,47 @@ func TestLoadArtifactFromOverlay_ExtendsChildServesTheAuthoredContentHash(t *tes
 	}
 	if want := "sha256:" + version.CanonicalContentHash(authored, nil, nil); m["content_hash"] != want {
 		t.Errorf("content_hash = %v, want %v", m["content_hash"], want)
+	}
+}
+
+// Spec: §4.3.4, §4.4, §6.4 — an overlay skill load returns the SKILL.md prose
+// as manifest_body, the value the registry serves for the same package. A
+// skill's ARTIFACT.md carries only a pointer comment, which the overlay served
+// before the fix. A non-skill keeps its ARTIFACT.md body.
+func TestLoadArtifactFromOverlay_SkillServesSkillBody(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	files := map[string]string{
+		"team/greet/ARTIFACT.md": "---\ntype: skill\nversion: 1.0.0\n---\n\n<!-- Skill body lives in SKILL.md. -->\n",
+		"team/greet/SKILL.md":    "---\nname: greet\ndescription: Greets\n---\n\nSay hello.\n",
+		"team/notes/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\ndescription: Notes\n---\n\nThe notes.\n",
+	}
+	for rel, content := range files {
+		path := filepath.Join(dir, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+	}
+	records, _, err := resolveOverlayAll(dir)
+	if err != nil {
+		t.Fatalf("resolveOverlayAll: %v", err)
+	}
+	s := &mcpServer{cfg: &config{harness: "none", verifyPolicy: sign.PolicyNever}, adapters: adapter.DefaultRegistry()}
+	bodies := map[string]string{}
+	for i := range records {
+		m, ok := s.loadArtifactFromOverlay(&records[i], map[string]any{}).(map[string]any)
+		if !ok {
+			t.Fatalf("overlay load of %s returned no result map", records[i].ID)
+		}
+		bodies[records[i].ID], _ = m["manifest_body"].(string)
+	}
+	if got := strings.TrimSpace(bodies["team/greet"]); got != "Say hello." {
+		t.Errorf("skill manifest_body = %q, want the SKILL.md body", bodies["team/greet"])
+	}
+	if got := strings.TrimSpace(bodies["team/notes"]); got != "The notes." {
+		t.Errorf("context manifest_body = %q, want the ARTIFACT.md body", bodies["team/notes"])
 	}
 }
