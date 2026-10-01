@@ -29,7 +29,7 @@ The registry exposes two surfaces:
 
 **Data plane (object storage).** Holds bundled resources. The control plane never streams bytes for a resource above the inline cutoff (256 KB) that the registry holds in object storage. Instead, `load_artifact` returns presigned URLs that the Podium MCP server fetches directly from object storage. A resource the registry holds inline on the manifest record, which includes every resource of a row ingested while no object store was configured, is returned inline whatever its size, because no object exists to presign.
 
-Below the inline cutoff, resources are returned inline. This avoids round-trips for small fixtures.
+At or below the inline cutoff, resources are returned inline. This avoids round-trips for small fixtures.
 
 **Integrity and reference fields.** The registry's HTTP `load_artifact` response carries three fields beside the manifest and the resources:
 
