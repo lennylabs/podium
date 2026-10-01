@@ -4931,7 +4931,7 @@ rather than trying to avoid them.
    kubectl set env deployment/pg POSTGRES_USER=podium POSTGRES_PASSWORD=podium \
      POSTGRES_DB=podium PGDATA=/tmp/pgdata
    kubectl expose deployment pg --port=5432
-   kubectl create deployment minio --image=minio/minio:RELEASE.2024-10-29T16-01-48Z -- \
+   kubectl create deployment minio --image=pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 -- \
      minio server /data
    kubectl set env deployment/minio MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin
    kubectl expose deployment minio --port=9000
@@ -4946,7 +4946,7 @@ rather than trying to avoid them.
 3. Create the bucket the registry expects.
 
    ```bash
-   kubectl run mc --image=minio/mc:RELEASE.2024-10-29T15-34-59Z --restart=Never --rm -i \
+   kubectl run mc --image=pgsty/mc:RELEASE.2026-09-16T00-00-00Z@sha256:cfc83108c3abb371f8fb84d99c1fdc88f8c237e022409b0081fb7c0a3be634dd --restart=Never --rm -i \
      --quiet --command -- sh -c \
      'for i in $(seq 1 30); do mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null 2>&1 && break; sleep 2; done && mc mb -p m/podium'
    ```

@@ -87,6 +87,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **The docker-compose evaluation stack pulls MinIO again**: MinIO removed
+  `minio/minio` and `minio/mc` from Docker Hub in September 2026, and
+  `quay.io/minio` requires authentication, so `docker compose up` on a machine
+  without a cached image failed to pull the object store. The stack now runs
+  the `pgsty/minio` and `pgsty/mc` community builds of the same server and
+  client, pinned by digest. `scripts/install-dev-deps.sh` pulls those images,
+  and its native Linux path, which downloaded binaries from `dl.min.io`, now
+  stops with a message, because `dl.min.io` no longer serves them.
 - **Signature verification in `podium-mcp`** (§4.7.9, §6.6): a response that
   declared `sensitivity: low` skipped the signature check whatever signature it
   carried, and the `noop` provider accepted `noop:<content_hash>`, which any
