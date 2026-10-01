@@ -1,7 +1,7 @@
 # Proposal 0031: State the policy condition on the malformed PODIUM_SIGNATURE_VERIFY_KEY refusal, and keep the §13.12 key-persistence rule scoped to the backends the spec defines
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-01). Signed off as staged; OQ-1 resolved: keep CODE-1, no §13.12 sentence.
+- Status: Applied to spec (2026-10-01). Signed off as staged; OQ-1 resolved: keep CODE-1, no §13.12 sentence.
 - Date: 2026-10-01
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
