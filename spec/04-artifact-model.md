@@ -229,7 +229,7 @@ hook_action: |                    # shell snippet executed when the event fires;
 server_identifier: npx:@company/finance-warehouse-mcp
 
 # Inheritance — explicitly extend another artifact's manifest (cross-layer merge)
-extends: finance/ap/pay-invoice@1.2
+extends: finance/ap/pay-invoice@1.2.x
 
 # Adapter targeting — opt out of cross-harness materialization for this artifact
 target_harnesses: [claude-code, opencode]
