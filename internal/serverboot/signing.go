@@ -28,7 +28,8 @@ func registrySigningEnabled(mode string) bool {
 // or until a surviving copy of the lost key's public half is listed on a
 // verify: line and the registry restarts, which admits them; sign-stored-rows
 // then re-signs them under the current key so the line can be removed. A
-// memory store persists nothing and so strands no signature;
+// memory store, a test backend that §13.12 does not list (see openStore),
+// persists nothing and so strands no signature;
 // the zero-configuration standalone SQLite store sits in the directory the
 // default key resolves to, so the two share a fate. The error names the
 // backend and PODIUM_SIGN_KEY_PATH and never a DSN. Spec: §13.12, §4.7.9.
