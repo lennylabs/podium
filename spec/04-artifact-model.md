@@ -73,7 +73,7 @@ finance/procurement/vendor-compliance-check/
 
 **Three size thresholds with distinct roles:**
 
-- **Inline cutoff (256 KB)**: below this, resource bytes are returned in the `load_artifact` response body; above, presigned URL. A resource the registry holds inline on the manifest record is returned inline at any size (§7.2).
+- **Inline cutoff (256 KB, 262144 bytes)**: a resource at or below this size is returned in the `load_artifact` response body; a resource above it is returned as a presigned URL. A resource the registry holds inline on the manifest record is returned inline at any size (§7.2).
 - **Per-file soft cap (1 MB)**: ingest-time warning above this.
 - **Per-package soft cap (10 MB)**: ingest-time error above this.
 
