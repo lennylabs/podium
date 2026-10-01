@@ -294,3 +294,80 @@ func TestResourceDelivery_InlineRefAboveCutoffServedInlineWithObjectStore(t *tes
 		t.Errorf("batch resource presigned_url = %q, inline %d bytes; want inline only", r.PresignedURL, len(r.Inline))
 	}
 }
+
+// Spec: §4.1, §7.2 — the delivery split is inclusive at the inline cutoff:
+// an object-held resource of exactly objectstore.InlineCutoff bytes is
+// delivered inline, and one byte more is delivered as a large-resource link.
+// The ref is seeded with Inline nil rather than driven through ingest,
+// because ingest keeps a ref at the cutoff inline and attachResources serves
+// any ref with Inline set before it compares sizes, which would pass against
+// an exclusive comparison as well.
+func TestResourceDelivery_InlineCutoffBoundary(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		size   int
+		inline bool
+	}{
+		{"at cutoff", objectstore.InlineCutoff, true},
+		{"above cutoff", objectstore.InlineCutoff + 1, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			// A valid UTF-8 body keeps resources_base64 unset, so the inline
+			// value compares directly against the seeded bytes.
+			body := bytes.Repeat([]byte("q"), tc.size)
+			ts := objectHeldFixture(t, "data/edge.txt", body)
+			parsed, _ := getLoadArtifact(t, ts)
+
+			got, inInline := parsed.Resources["data/edge.txt"]
+			_, inLarge := parsed.LargeResources["data/edge.txt"]
+			if tc.inline {
+				if !inInline || inLarge {
+					t.Fatalf("size %d: inline=%v large=%v, want inline only", tc.size, inInline, inLarge)
+				}
+				if got != string(body) {
+					t.Errorf("size %d: inline bytes differ (%d vs %d)", tc.size, len(got), len(body))
+				}
+				return
+			}
+			if inInline || !inLarge {
+				t.Fatalf("size %d: inline=%v large=%v, want large only", tc.size, inInline, inLarge)
+			}
+		})
+	}
+}
+
+// objectHeldFixture boots a registry and server sharing one memory object
+// store that holds body under its bare hex digest, with a sealed manifest
+// whose single resource ref points at that object and carries no inline copy.
+func objectHeldFixture(t *testing.T, path string, body []byte) *httptest.Server {
+	t.Helper()
+	sum := sha256.Sum256(body)
+	digest := hex.EncodeToString(sum[:])
+	objects := objectstore.NewMemory()
+	if err := objects.Put(context.Background(), digest, body, "text/plain"); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
+		t.Fatalf("CreateTenant: %v", err)
+	}
+	if err := st.PutManifest(context.Background(), storetest.Seal(t, store.ManifestRecord{
+		TenantID: "default", ArtifactID: "finance/run", Version: "1.0.0", Type: "context", Layer: "L",
+		Resources: []store.ResourceRef{{
+			Path:        path,
+			ContentHash: "sha256:" + digest,
+			Size:        int64(len(body)),
+		}},
+	}, objects, nil)); err != nil {
+		t.Fatalf("PutManifest: %v", err)
+	}
+	reg := core.New(st, "default", []layer.Layer{
+		{ID: "L", Precedence: 1, Visibility: layer.Visibility{Public: true}},
+	}).WithAdmission(nil, objects, objectstore.DefaultReadTimeout)
+	ts := httptest.NewServer(server.New(reg, server.WithObjectStore(objects, "placeholder", 0)).Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
