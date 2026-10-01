@@ -458,6 +458,7 @@ collision-rejection rule.
    podium artifact scaffold --type skill --description "Base greet" --force "$WORK/base/greet"
    podium artifact scaffold --type skill --description "Team greet override" --force "$WORK/team/greet"
    podium artifact scaffold --type skill --description "Team deploy" --force "$WORK/team/deploy"
+   echo "BASE BODY" >> "$WORK/base/greet/SKILL.md"
    cat > "$WORK/registry.yaml" <<YAML
    registry:
      layers:
@@ -502,7 +503,8 @@ collision-rejection rule.
   base layer's (`Base greet`), confirming the base artifact survives and the
   colliding team artifact was rejected rather than silently shadowing it.
 - Searching `deploy` returns the team-only `deploy` skill.
-- `artifact show greet` prints the base layer's body.
+- `artifact show greet` prints the base layer's body, which contains
+  `BASE BODY`.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
@@ -1695,8 +1697,8 @@ the single-Postgres stack.
 
 - `domain show` renders the `finance`, `finance/close`, and `eng` domains, with
   the `DOMAIN.md` descriptions attached to `finance` and `eng`.
-- `domain search "accounting close"` returns the `finance` domain and reports
-  `total_matched: 1`. The `finance` projection (its `DOMAIN.md` description plus
+- `domain search "accounting close"` returns the `finance` domain and prints
+  `Showing 1 of 1 results` (`total_matched: 1` under `--json`). The `finance` projection (its `DOMAIN.md` description plus
   the `finance, accounting, close` keywords) overlaps the query. With
   `--no-embeddings` the registry runs BM25 alone, so `eng` scores zero against
   this query and does not appear; the empty-query browse-all form
@@ -2026,6 +2028,8 @@ log, `admin erase`, `admin retention`.
    export PODIUM_IDENTITY_PROVIDER=injected-session-token
    export PODIUM_RUNTIME_KEYS_PATH="$WORK/keys/runtimes.json"
    export PODIUM_OAUTH_AUDIENCE=https://podium.manual
+   # The --layer-path layer is private by default once an identity provider is set (§13.12).
+   export PODIUM_DEFAULT_LAYER_VISIBILITY=public
    podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8122 > "$WORK/srv.log" 2>&1 &
    SRV=$!
    curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8122/healthz
@@ -2055,8 +2059,9 @@ log, `admin erase`, `admin retention`.
   subject and email.
 - `admin erase` reports the count of entries it redacted for alice.
 - After the erase, alice's email no longer appears in the audit log (it is
-  replaced by a salted tombstone), and the audit hash chain still verifies (the
-  erase rewrites the record in place without breaking the chain).
+  replaced by a salted tombstone). No step here checks the audit hash chain,
+  because no command runs the chain verification; the erase is specified to
+  rewrite the record in place without breaking the chain.
 
 **Cleanup.** Stop the server and `rm -rf "$WORK"`.
 
@@ -2541,7 +2546,7 @@ export GIT_COMMITTER_NAME="podium-bot" GIT_COMMITTER_EMAIL="bot@acme.com"
   no `.claude-plugin/`).
 - Step 6 prints each `prepare` and `publish` command with its `PODIUM_*`
   variables substituted, and the remote's commit count is unchanged.
-- Step 7 reports `changed: true`, lists the three `finance/` and
+- Step 7 reports `changed: true`, lists `(manifest)` and the three `finance/` and
   `payment-helpers/` artifacts, and reports `published: true`. The remote gains
   one commit.
 - Step 8 lists `.claude-plugin/marketplace.json`, `.agents/plugins/marketplace.json`,
@@ -3293,7 +3298,7 @@ the defect is present.
 
 1. Run the isolation block.
 
-2. Build a parent and an inheriting child. Strip the leading indentation before running the heredocs.
+2. Build a parent and an inheriting child.
 
 ```bash
 mkdir -p "$WORK/reg/shared/base" "$WORK/reg/team/derived"
@@ -3669,12 +3674,24 @@ find "$WORK/fs-target" -name ARTIFACT.md | wc -l   # must be 2, not 0
 diff -r -x sync.lock "$WORK/fs-target" "$WORK/srv-target" && echo "IDENTICAL"
 ```
 
+   Then compare the two lock files with the per-consumer fields removed.
+
+```bash
+diff <(grep -v -e '^target:' -e '^last_synced_at:' "$WORK/fs-target/.podium/sync.lock") \
+     <(grep -v -e '^target:' -e '^last_synced_at:' "$WORK/srv-target/.podium/sync.lock") \
+  && echo "LOCKS IDENTICAL"
+```
+
+   **Expect.** `LOCKS IDENTICAL`. A differing `content_hash` line means the
+   filesystem consumer and the registry hash different inputs.
+
    **Expect.** A non-zero count, then `IDENTICAL`. The count runs first
    because an empty tree compared against an empty tree also reports no
    differences, which scores as a pass while proving nothing. The lock file is
    excluded rather than tolerated: its `target` and `last_synced_at` differ by
-   construction between two consumers, and its `content_hash` is computed from
-   different inputs in the two modes. Any difference in an `ARTIFACT.md` or
+   construction between two consumers. Its `content_hash` entries match
+   between the two modes, because both compute the §4.7.6 framed hash from
+   the same inputs, and the lock comparison below checks them. Any difference in an `ARTIFACT.md` or
    `SKILL.md` is the §11 equivalence break that repairing one resolver alone
    produces.
 
@@ -7249,14 +7266,13 @@ container, or certificate is required.
 
 **Steps.**
 
-1. Create the working directory and the three layer directories this scenario
-   registers, then start a public-mode standalone registry that ingests none
+1. Run the isolation block from "Per-scenario isolation" above, then create
+   the three layer directories this scenario registers, then start a public-mode standalone registry that ingests none
    of them at boot. Every artifact sits under its own domain path, because a
    canonical artifact identifier derives from its domain directory and two
    layers contributing the same identifier is a cross-layer collision.
 
    ```bash
-   export WORK="$(mktemp -d)"
    export REG="http://127.0.0.1:8080"
    mkdir -p "$WORK/mixed/ops/runbook" "$WORK/mixed/ops/payroll" \
      "$WORK/rejected/finance/ledger" "$WORK/clean/ops/oncall"
@@ -7280,7 +7296,7 @@ container, or certificate is required.
      "Closing the monthly ledger." medium
    write_artifact "$WORK/clean/ops/oncall/ARTIFACT.md" \
      "Handing over the on-call pager." low
-   PODIUM_PUBLIC_MODE=true podium serve --standalone \
+   PODIUM_PUBLIC_MODE=true podium serve --standalone --no-embeddings \
      > "$WORK/server.log" 2>&1 &
    echo "$!" > "$WORK/server.pid"
    sleep 2
