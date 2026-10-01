@@ -41,8 +41,8 @@ const (
 	liveSelector = "app.kubernetes.io/name=podium,app.kubernetes.io/instance=podium"
 	liveCleanup  = "app.kubernetes.io/instance=podium,app.kubernetes.io/component=migrate"
 	liveRecord   = "content-hash-framing"
-	minioImage   = "minio/minio:RELEASE.2024-10-29T16-01-48Z"
-	mcImage      = "minio/mc:RELEASE.2024-10-29T15-34-59Z"
+	minioImage   = "pgsty/minio:RELEASE.2026-08-04T00-00-00Z"
+	mcImage      = "pgsty/mc:RELEASE.2026-09-16T00-00-00Z"
 	pgImage      = "pgvector/pgvector:pg16"
 	busyboxImage = "busybox:1.36"
 	// bundledPGImage is the chart's postgresql.image default, loaded so a

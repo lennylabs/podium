@@ -4896,7 +4896,7 @@ rather than trying to avoid them.
    kubectl wait --for=condition=Ready node --all --timeout=180s
    kind load docker-image ghcr.io/lennylabs/podium:0.0.0-dev --name podium-s46
    arch="$(docker version --format '{{.Server.Arch}}')"
-   for image in minio/minio:RELEASE.2024-10-29T16-01-48Z minio/mc:RELEASE.2024-10-29T15-34-59Z \
+   for image in pgsty/minio:RELEASE.2026-08-04T00-00-00Z pgsty/mc:RELEASE.2026-09-16T00-00-00Z \
        pgvector/pgvector:pg16; do
      docker image inspect "$image" >/dev/null 2>&1 || docker pull --platform "linux/$arch" "$image"
      docker save --platform "linux/$arch" -o "$WORK/image.tar" "$image"
@@ -4931,7 +4931,7 @@ rather than trying to avoid them.
    kubectl set env deployment/pg POSTGRES_USER=podium POSTGRES_PASSWORD=podium \
      POSTGRES_DB=podium PGDATA=/tmp/pgdata
    kubectl expose deployment pg --port=5432
-   kubectl create deployment minio --image=pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372 -- \
+   kubectl create deployment minio --image=pgsty/minio:RELEASE.2026-08-04T00-00-00Z -- \
      minio server /data
    kubectl set env deployment/minio MINIO_ROOT_USER=minioadmin MINIO_ROOT_PASSWORD=minioadmin
    kubectl expose deployment minio --port=9000
@@ -4946,7 +4946,7 @@ rather than trying to avoid them.
 3. Create the bucket the registry expects.
 
    ```bash
-   kubectl run mc --image=pgsty/mc:RELEASE.2026-09-16T00-00-00Z@sha256:cfc83108c3abb371f8fb84d99c1fdc88f8c237e022409b0081fb7c0a3be634dd --restart=Never --rm -i \
+   kubectl run mc --image=pgsty/mc:RELEASE.2026-09-16T00-00-00Z --restart=Never --rm -i \
      --quiet --command -- sh -c \
      'for i in $(seq 1 30); do mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null 2>&1 && break; sleep 2; done && mc mb -p m/podium'
    ```
@@ -8930,7 +8930,7 @@ The isolation block's `HOME` also keeps the kind cluster's kubeconfig under
    kind create cluster --name podium-s76 --wait 180s
    kind load docker-image podium-live:current podium-live:v0.4.0 --name podium-s76
    arch="$(docker version --format '{{.Server.Arch}}')"
-   for image in minio/minio:RELEASE.2024-10-29T16-01-48Z minio/mc:RELEASE.2024-10-29T15-34-59Z \
+   for image in pgsty/minio:RELEASE.2026-08-04T00-00-00Z pgsty/mc:RELEASE.2026-09-16T00-00-00Z \
        pgvector/pgvector:pg16 postgres:17-alpine busybox:1.36; do
      docker image inspect "$image" >/dev/null 2>&1 || docker pull --platform "linux/$arch" "$image"
      docker save --platform "linux/$arch" -o "$WORK/image.tar" "$image"
@@ -9007,7 +9007,7 @@ The isolation block's `HOME` also keeps the kind cluster's kubeconfig under
        spec:
          containers:
            - name: minio
-             image: minio/minio:RELEASE.2024-10-29T16-01-48Z
+             image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z
              args: [server, /data]
              env:
                - {name: MINIO_ROOT_USER, value: minioadmin}
@@ -9090,7 +9090,7 @@ The isolation block's `HOME` also keeps the kind cluster's kubeconfig under
    signatures against that file's public key.
 
    ```bash
-   mc_run() { kubectl run "mc-$$-$RANDOM" --image=minio/mc:RELEASE.2024-10-29T15-34-59Z \
+   mc_run() { kubectl run "mc-$$-$RANDOM" --image=pgsty/mc:RELEASE.2026-09-16T00-00-00Z \
      --restart=Never --rm -i --quiet --command -- sh -c \
      "for i in \$(seq 1 30); do mc alias set m http://minio:9000 minioadmin minioadmin >/dev/null 2>&1 && break; sleep 2; done && $1"; }
    rows() {
