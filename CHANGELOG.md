@@ -547,9 +547,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   §6.2): the variable takes one base64 Ed25519 public key or a comma-separated
   list of them, and `podium-mcp` and `podium verify` accept a delivery
   signature that verifies under any key of the set. When the variable is unset
-  they read the key file's `public:` line and every `verify:` line. Under a
-  policy above `never`, an entry that is empty or does not decode refuses the
-  `podium-mcp` start, and fails `podium verify`, with
+  they read the key file's `public:` line and every `verify:` line. An entry
+  that is empty or does not decode fails `podium verify`, and under a policy
+  above `never` refuses the `podium-mcp` start, with
   `config.signature_provider_unavailable`, naming the variable.
 - **Every registry-managed envelope carries a `key_id`** (§4.7.9): the
   lowercase hex of the first 8 bytes of the SHA-256 digest of the signing
