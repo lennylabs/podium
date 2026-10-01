@@ -140,7 +140,7 @@ runtime_requirements:
   system_packages: [jq]
 ```
 
-The harness refuses to materialize when a system package isn't available.
+A Podium MCP server whose host advertises its runtime capabilities or opts into enforcement refuses a `load_artifact` when a declared system package is unavailable, with `materialize.runtime_unavailable`. `podium sync` does not check requirements. See [Bundled resources](bundled-resources).
 
 ---
 

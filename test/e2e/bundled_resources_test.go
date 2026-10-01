@@ -543,11 +543,12 @@ func TestBundled_RuntimeRequirementsParse(t *testing.T) {
 	}
 }
 
-// a host that advertises no capabilities does not
-// gate on runtime_requirements: it surfaces the requirement to the caller and
-// materializes (§4.4.1 "Adapters surface these requirements to the host where
-// supported"). The runtime gate activates only once the host
-// advertises a capability; see tests 16 and 17 for the refusal path.
+// a host that advertises no capabilities and does not opt into enforcement
+// does not gate on runtime_requirements: it surfaces the requirement to the
+// caller and materializes (§4.4.1 "Adapters surface these requirements to the
+// host where supported"). The runtime gate activates only once the host
+// advertises a capability or opts into enforcement; see tests 16 and 17 for
+// the refusal path.
 func TestBundled_RuntimeRequirementsSurfacedNotGated(t *testing.T) {
 	t.Parallel()
 	id := "finance/close-reporting/run-variance-analysis"

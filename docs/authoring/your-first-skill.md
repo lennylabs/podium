@@ -95,7 +95,7 @@ Lint resolves markdown links in the body against the artifact's bundled files at
 
 ## Declare runtime requirements
 
-The script needs Python. Declare the requirement so a host that advertises its runtime capabilities to the Podium MCP server refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable` instead of failing at execution time. A host that advertises no capabilities receives the requirement and proceeds, and `podium sync` materializes the artifact without checking it. Add this to `ARTIFACT.md`:
+The script needs Python. Declare the requirement so a host that advertises its runtime capabilities to the Podium MCP server refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable` instead of failing at execution time. A host that advertises no capabilities and does not opt into enforcement receives the requirement and proceeds, and `podium sync` materializes the artifact without checking it. Add this to `ARTIFACT.md`:
 
 ```yaml
 runtime_requirements:
