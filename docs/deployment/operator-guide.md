@@ -160,7 +160,7 @@ Roll back by reverting the binary. The additive schema stays forward-compatible 
 
 ## Read-only mode
 
-When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to read-only mode: read endpoints continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, freeze toggles, admin grants, and tenant management) are rejected with the structured error `registry.read_only`. `GET /v1/admin/tenants` is a read and stays available.
+When the Postgres primary becomes unreachable but a read replica is up, the registry falls back to read-only mode: read endpoints continue to serve from the replica; write endpoints (ingest webhooks, layer admin operations, admin grants, and tenant management) are rejected with the structured error `registry.read_only`. `GET /v1/admin/tenants` is a read and stays available.
 
 A health-state machine governs the transition. The registry probes the primary every 5 s and flips to read-only after three consecutive failures (tunable via `PODIUM_READONLY_PROBE_INTERVAL` and `PODIUM_READONLY_PROBE_FAILURES`). It flips back automatically after three consecutive probe successes once the primary is reachable again.
 

@@ -4717,11 +4717,11 @@ them into S21 permanently if its setup already reaches this state.
    grep -n "Impact" -A4 "$REAL_HOME/projects/podium/deploy/runbook.md" | grep -i "ingest webhooks"
    ```
 
-   **Expect.** Both enumerate ingest webhooks, layer admin operations, freeze
-   toggles, admin grants, and tenant management. Neither write-set list names
-   token issuance or a session table. `docs/reference/http-api.md` documents the
-   §7.3.4 authentication route paths outside that list, and those routes are no
-   members of it.
+   **Expect.** Both enumerate ingest webhooks, layer admin operations, admin
+   grants, and tenant management, and neither names freeze toggles. Neither
+   write-set list names token issuance or a session table.
+   `docs/reference/http-api.md` documents the §7.3.4 authentication route paths
+   outside that list, and those routes are no members of it.
 
 3. Issue each write request and read the error code from the body rather than
    the status class. `$PORT` is the port S21 bound, `127.0.0.1:8118` unless it
@@ -4749,29 +4749,29 @@ them into S21 permanently if its setup already reaches this state.
 
    `/v1/admin/erase` and `/v1/admin/reembed` are rejected but appear in neither
    shipped document's list. That is consistent with §13.2.1, which says the
-   named five "do not bound the rule", and it means the documents describe less
-   than the registry enforces. Record it rather than treating it as a failure.
+   named categories "do not bound the rule", and it means the documents describe
+   less than the registry enforces. Record it rather than treating it as a
+   failure.
 
-   **Two of the five named categories cannot reach `registry.read_only` on this
+   **Two of the named categories cannot reach `registry.read_only` on this
    setup, and a run that records them as failures is wrong.** `POST
    /v1/admin/grants` returns `403 auth.forbidden` because `requireAdmin` runs
    before `rejectIfReadOnly` (`pkg/registry/server/admin.go:22-33`), and with no
-   identity provider configured no caller is an admin. `POST
-   /v1/admin/tenants` returns `404 registry.tenant_management_unavailable`
-   because `tenantAdminGate` runs first
-   (`pkg/registry/server/tenants.go:138-143`). Both responses are identical to
-   their healthy-registry baseline, so this step establishes nothing about them.
-   Demonstrating either needs a registry with a real identity provider and an
-   authenticated admin, which S21 does not set up. Take the baseline first and
-   compare, rather than reading a 403 or a 404 as a read-only rejection.
+   identity provider configured no caller is an admin. `POST /v1/admin/tenants`
+   returns `404 registry.tenant_management_unavailable` because
+   `tenantAdminGate` runs first (`pkg/registry/server/tenants.go:138-143`). Both
+   responses are identical to their healthy-registry baseline, so this step
+   establishes nothing about them. Demonstrating either needs a registry with a
+   real identity provider and an authenticated admin, which S21 does not set up.
+   Take the baseline first and compare, rather than reading a 403 or a 404 as a
+   read-only rejection.
 
-   **Freeze toggles are not asserted here.** The §13.2.1 list names them and no
-   freeze endpoint exists: freeze windows are config-file-only
-   (`internal/serverboot/yaml_config.go:404`), enforced during ingest, and
-   bypassed with `podium layer reingest --break-glass`. Whether the spec sentence
-   or the product is wrong is an open question recorded outside this document,
-   so this step asserts nothing about them. Add the assertion when that is
-   settled.
+   **No freeze endpoint is in the write set.** Freeze windows are
+   configuration-only: they come from the `registry.yaml` `freeze_windows:` key
+   (`internal/serverboot/yaml_config.go`, §4.7.2), are enforced during ingest,
+   and are bypassed with `podium layer reingest --break-glass`. §13.2.1 does not
+   name freeze toggles, and the break-glass reingest write is covered by the
+   `POST /v1/layers/reingest` probe above.
 
 4. Confirm this stack registers neither the registry's authentication routes nor
    the posture read, so the write set the two documents enumerate is the whole of
