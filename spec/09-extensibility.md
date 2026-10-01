@@ -31,8 +31,6 @@ Marketplace publishing (§7.8) introduces no new SPI. The git workflow is operat
 
 Plugins ship as Go modules importable into a registry build. A deployment that needs a custom `IdentityProvider` or `GitProvider` builds a registry binary from source with the plugin imported.
 
-A community plugin registry is hosted at the project's public URL.
-
 ## 9.3 Forward Compatibility for Out-of-Process Plugins
 
 Plugins today are in-process Go modules (§9.2). A future release may add an out-of-process plugin protocol (subprocess over stdin/stdout, gRPC, or similar) so plugins can ship as separate binaries: closed-source plugins, plugins written in other languages, plugins distributed without a registry rebuild. The SPIs in §9.1 are designed today to make that transition source-compatible. Plugin authors who follow the constraints below will be able to ship the same plugin in-process now and out-of-process later, without code changes to the plugin's interface contract.
