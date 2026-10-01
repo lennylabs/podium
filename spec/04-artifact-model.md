@@ -586,7 +586,7 @@ Composition order (lowest to highest precedence):
 2. User-defined layers belonging to the caller, in the user-controlled order returned by `podium layer list`.
 3. The workspace local overlay (when configured).
 
-Higher-precedence layers override lower on collisions. Resolution of layers 1 and 2 happens at the registry on every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call, and includes `extends:` resolution per the §9.1 `LayerComposer` row; layer 3 is merged in by the MCP server before returning results.
+A canonical-ID collision between layers follows the merge semantics for collisions below: the collision is rejected unless the higher-precedence artifact declares `extends:` on the lower-precedence one. Resolution of layers 1 and 2 happens at the registry on every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call, and includes `extends:` resolution per the §9.1 `LayerComposer` row; layer 3 is merged in by the MCP server before returning results.
 
 ### Source types
 
