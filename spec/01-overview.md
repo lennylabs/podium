@@ -118,6 +118,6 @@ The canonical artifact format is intended for upstream contribution to an MCP-ad
 - **License.** MIT.
 - **Governance.** Maintainer model + RFC process for spec changes; see `GOVERNANCE.md`.
 - **Distribution.** OSS-first development; optional commercial managed offering by the sponsoring entity (separate doc).
-- **Public registry.** A reference registry with curated example artifacts is hosted at the project's public URL.
+- **Reference registry.** A multi-layer example registry with curated artifacts across every first-class type ships in the repository as the §11 example artifact registry.
 - **Multi-vendor neutrality.** The project does not adopt contributions, governance changes, or roadmap pressure that would bind it to a single harness vendor's surface.
 - **Standards engagement.** Where adjacent open standards (MCP, AAIF-governed standards, etc.) overlap with Podium concerns, the project participates upstream and harmonizes wherever doing so doesn't compromise Podium's broader scope across artifact types.
