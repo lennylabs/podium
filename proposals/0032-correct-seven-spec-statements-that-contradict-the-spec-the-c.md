@@ -1,7 +1,7 @@
 # Proposal 0032: Correct seven spec statements that contradict the spec, the code, or the deployed project
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-01). Signed off as staged. OQ-1: the overlay and filesystem sync are to follow extends-or-reject, as separate follow-up work outside this proposal. OQ-2: no public hosting commitment; SPEC-6 and SPEC-7 stand. OQ-3: list the runtime-capability variables in §6.2 in a separate follow-up proposal.
+- Status: Applied to spec (2026-10-01). Signed off as staged. OQ-1: the overlay and filesystem sync are to follow extends-or-reject, as separate follow-up work outside this proposal. OQ-2: no public hosting commitment; SPEC-6 and SPEC-7 stand. OQ-3: list the runtime-capability variables in §6.2 in a separate follow-up proposal.
 - Date: 2026-10-01
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
