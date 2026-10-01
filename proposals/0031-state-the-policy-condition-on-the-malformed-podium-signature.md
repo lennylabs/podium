@@ -1,7 +1,7 @@
 # Proposal 0031: State the policy condition on the malformed PODIUM_SIGNATURE_VERIFY_KEY refusal, and keep the §13.12 key-persistence rule scoped to the backends the spec defines
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-01). Signed off as staged; OQ-1 resolved: keep CODE-1, no §13.12 sentence.
+- Status: Implemented (2026-10-01). Signed off as staged; OQ-1 resolved: keep CODE-1, no §13.12 sentence.
 - Date: 2026-10-01
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -41,19 +41,19 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. The §6.2 `PODIUM_SIGNATURE_VERIFY_KEY` row conditions the malformed-entry start refusal on a policy above `never`.
+- [x] **S1 · spec** — SPEC-1. The §6.2 `PODIUM_SIGNATURE_VERIFY_KEY` row conditions the malformed-entry start refusal on a policy above `never`.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. The §4.7.9 verification-key-set sentence conditions the start refusal on a consumer whose policy is above `never`.
+- [x] **S2 · spec** — SPEC-2. The §4.7.9 verification-key-set sentence conditions the start refusal on a consumer whose policy is above `never`.
       Levels: —. Depends on: —
-- [ ] **S3 · code** — CODE-1. The `refuseUnpersistedSigningKey` doc comment names the memory store as a test backend that §13.12 does not list.
+- [x] **S3 · code** — CODE-1. The `refuseUnpersistedSigningKey` doc comment names the memory store as a test backend that §13.12 does not list.
       Levels: unit. Depends on: —
-- [ ] **S4 · test** — TEST-1. `TestLoadConfig_VerifierResolution` gains the `never` row with a malformed `PODIUM_SIGNATURE_VERIFY_KEY`, and its doc comment names the case.
+- [x] **S4 · test** — TEST-1. `TestLoadConfig_VerifierResolution` gains the `never` row with a malformed `PODIUM_SIGNATURE_VERIFY_KEY`, and its doc comment names the case.
       Levels: unit. Depends on: S1, S2
-- [ ] **S5 · docs** — DOC-1. The configure-your-harness `PODIUM_SIGNATURE_VERIFY_KEY` row states the policy condition.
+- [x] **S5 · docs** — DOC-1. The configure-your-harness `PODIUM_SIGNATURE_VERIFY_KEY` row states the policy condition.
       Levels: —. Depends on: S1, S2
-- [ ] **S6 · docs** — DOC-2. The `docs/reference/cli.md` Environment variables `PODIUM_SIGNATURE_VERIFY_KEY` row conditions the `podium-mcp` error on a policy above `never` and keeps the `podium verify` error unconditional.
+- [x] **S6 · docs** — DOC-2. The `docs/reference/cli.md` Environment variables `PODIUM_SIGNATURE_VERIFY_KEY` row conditions the `podium-mcp` error on a policy above `never` and keeps the `podium verify` error unconditional.
       Levels: —. Depends on: S1, S2
-- [ ] **S7 · docs** — DOC-3. The `CHANGELOG.md` `[Unreleased]` `PODIUM_SIGNATURE_VERIFY_KEY` entry attaches the policy condition to the `podium-mcp` start only.
+- [x] **S7 · docs** — DOC-3. The `CHANGELOG.md` `[Unreleased]` `PODIUM_SIGNATURE_VERIFY_KEY` entry attaches the policy condition to the `podium-mcp` start only.
       Levels: —. Depends on: S1, S2
 
 **Ordering constraints.** S1 and S2 touch different spec files and are independent. S3 is a comment edit with no spec dependency. S4 pins the conditioned wording, so it follows the spec steps it cites. S5, S6, and S7 restate the spec text, so each follows S1 and S2.
