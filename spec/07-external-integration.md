@@ -606,7 +606,7 @@ for event in client.subscribe(["artifact.published", "artifact.deprecated"]):
     ...
 
 # Cross-type dependency walks (for impact analysis in custom tooling)
-deps = client.dependents_of("finance/ap/pay-invoice@1.2")
+deps = client.dependents_of("finance/ap/pay-invoice")
 ```
 
 Identity providers, the cache, visibility filtering, layer composition, and audit are all the same as in the MCP path; the SDK is just a different transport. Identity provider plug-points are exposed; custom providers register through the same interface as the MCP server's.
