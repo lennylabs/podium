@@ -58,7 +58,8 @@ install_docker_path() {
 
   echo "Pulling the images docker-compose.yml uses..."
   docker pull pgvector/pgvector:pg16
-  docker pull minio/minio:RELEASE.2024-10-29T15-34-59Z || docker pull minio/minio:latest
+  docker pull pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+  docker pull pgsty/mc:RELEASE.2026-09-16T00-00-00Z@sha256:cfc83108c3abb371f8fb84d99c1fdc88f8c237e022409b0081fb7c0a3be634dd
 
   echo "Starting Postgres + MinIO + bucket bootstrap..."
   make services-up
@@ -122,12 +123,10 @@ install_native_minio() {
         brew install minio/stable/minio minio/stable/mc
         ;;
       Linux)
-        echo "Installing MinIO server + client binaries from dl.min.io..."
-        local bindir="${HOME}/.local/bin"; mkdir -p "$bindir"
-        curl -fsSL https://dl.min.io/server/minio/release/linux-amd64/minio  -o "$bindir/minio" && chmod +x "$bindir/minio"
-        curl -fsSL https://dl.min.io/client/mc/release/linux-amd64/mc        -o "$bindir/mc"    && chmod +x "$bindir/mc"
-        case ":$PATH:" in *":$bindir:"*) ;; *) echo "Add $bindir to your PATH.";; esac
-        export PATH="$bindir:$PATH"
+        # dl.min.io stopped serving MinIO binaries in 2026 (it answers 410).
+        echo "dl.min.io no longer serves MinIO binaries. Install minio and mc on PATH yourself,"
+        echo "or use the Docker path, which runs MinIO with \`make services-up\`."
+        exit 1
         ;;
     esac
   else
