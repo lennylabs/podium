@@ -1220,19 +1220,23 @@ func TestPluginSPI_DependentsOfEmpty(t *testing.T) {
 	}
 }
 
-// Community plugin registry URL: doc mentions the registry but omits a URL.
-func TestPluginSPI_CommunityPluginRegistryDocGap(t *testing.T) {
+// The plugin distribution section names Go modules as the only channel and
+// does not claim a hosted plugin registry, which does not exist.
+// Spec: §9.2
+func TestPluginSPI_PluginDistributionGoModulesOnly(t *testing.T) {
 	t.Parallel()
 	docPath := filepath.Join(repoRoot(t), "docs", "deployment", "extending.md")
 	content := readFile(t, docPath)
-	if !strings.Contains(content, "community plugin registry") {
-		t.Errorf("extending.md missing 'community plugin registry' mention")
+	for _, banned := range []string{"community plugin registry", "hosted at the project's public URL"} {
+		if strings.Contains(content, banned) {
+			t.Errorf("extending.md still contains %q", banned)
+		}
 	}
-	// The URL is not cited — assert this doc-accuracy gap is recorded.
-	if !strings.Contains(content, "Plugin distribution") {
-		t.Errorf("extending.md missing 'Plugin distribution' section")
+	for _, want := range []string{"Plugin distribution", "Plugins ship as Go modules importable into a registry build."} {
+		if !strings.Contains(content, want) {
+			t.Errorf("extending.md missing %q", want)
+		}
 	}
-	t.Logf("community plugin registry mentioned without a specific URL (doc-accuracy gap)")
 }
 
 // Out-of-process plugin protocol: no transport surface exposed.
