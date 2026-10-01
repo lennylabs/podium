@@ -1,7 +1,7 @@
 # Proposal 0032: Correct seven spec statements that contradict the spec, the code, or the deployed project
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-01). Signed off as staged. OQ-1: the overlay and filesystem sync are to follow extends-or-reject, as separate follow-up work outside this proposal. OQ-2: no public hosting commitment; SPEC-6 and SPEC-7 stand. OQ-3: list the runtime-capability variables in §6.2 in a separate follow-up proposal.
+- Status: Implemented (2026-10-01). Signed off as staged. OQ-1: the overlay and filesystem sync are to follow extends-or-reject, as separate follow-up work outside this proposal. OQ-2: no public hosting commitment; SPEC-6 and SPEC-7 stand. OQ-3: list the runtime-capability variables in §6.2 in a separate follow-up proposal.
 - Date: 2026-10-01
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -43,48 +43,52 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. The §4.6 layer-list sentence defers to the collision merge semantics.
+- [x] **S1 · spec** — SPEC-1. The §4.6 layer-list sentence defers to the collision merge semantics.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. The §4.3 `extends:` example uses `@1.2.x`.
+- [x] **S2 · spec** — SPEC-2. The §4.3 `extends:` example uses `@1.2.x`.
       Levels: —. Depends on: —
-- [ ] **S3 · spec** — SPEC-3. The §7.6 `dependents_of` example passes the bare artifact ID.
+- [x] **S3 · spec** — SPEC-3. The §7.6 `dependents_of` example passes the bare artifact ID.
       Levels: —. Depends on: —
-- [ ] **S4 · spec** — SPEC-4. The §4.1 inline cutoff states "at or below" and "above" and defines 262144 bytes.
+- [x] **S4 · spec** — SPEC-4. The §4.1 inline cutoff states "at or below" and "above" and defines 262144 bytes.
       Levels: —. Depends on: —
-- [ ] **S5 · spec** — SPEC-5. The §7.2 inline sentence says "At or below the inline cutoff".
+- [x] **S5 · spec** — SPEC-5. The §7.2 inline sentence says "At or below the inline cutoff".
       Levels: —. Depends on: —
-- [ ] **S6 · spec** — SPEC-6. The §1.6 public-registry bullet states that the reference registry ships in the repository as the §11 example artifact registry.
+- [x] **S6 · spec** — SPEC-6. The §1.6 public-registry bullet states that the reference registry ships in the repository as the §11 example artifact registry.
       Levels: —. Depends on: —
-- [ ] **S7 · spec** — SPEC-7. The §9.2 community-plugin-registry sentence is deleted.
+- [x] **S7 · spec** — SPEC-7. The §9.2 community-plugin-registry sentence is deleted.
       Levels: —. Depends on: —
-- [ ] **S8 · spec** — SPEC-8. The §4.4.1 runtime-requirement paragraph states the opt-in condition, the override, and the `podium sync` scope.
+- [x] **S8 · spec** — SPEC-8. The §4.4.1 runtime-requirement paragraph states the opt-in condition, the override, and the `podium sync` scope.
       Levels: —. Depends on: —
-- [ ] **S9 · spec** — SPEC-9. The §6.9 "Runtime requirement unsatisfiable" row states the opt-in condition.
+- [x] **S9 · spec** — SPEC-9. The §6.9 "Runtime requirement unsatisfiable" row states the opt-in condition.
       Levels: —. Depends on: S8
-- [ ] **S10 · spec** — SPEC-10. The §13.2.1 write-endpoint examples drop "freeze toggles".
+- [x] **S10 · spec** — SPEC-10. The §13.2.1 write-endpoint examples drop "freeze toggles".
       Levels: —. Depends on: —
-- [ ] **S11 · spec** — SPEC-11. The §4.7.5 audited admin actions drop "freeze-window toggles".
+- [x] **S11 · spec** — SPEC-11. The §4.7.5 audited admin actions drop "freeze-window toggles".
       Levels: —. Depends on: —
-- [ ] **S12 · spec** — SPEC-12. The §9.1 `NotificationProvider` Default cell becomes opt-in.
+- [x] **S12 · spec** — SPEC-12. The §9.1 `NotificationProvider` Default cell becomes opt-in.
       Levels: —. Depends on: —
-- [ ] **S13 · code** — CODE-1. The `openNotifier` "multi" comment, the provider-list comment in the boot sequence, and the `SMTP` type comment stop citing the old default.
+- [x] **S13 · code** — CODE-1. The `openNotifier` "multi" comment, the provider-list comment in the boot sequence, and the `SMTP` type comment stop citing the old default.
       Levels: unit. Depends on: S12
-- [ ] **S14 · test** — TEST-1. Ingest boundary test at `InlineCutoff` and `InlineCutoff+1`.
+- [x] **S14 · test** — TEST-1. Ingest boundary test at `InlineCutoff` and `InlineCutoff+1`.
       Levels: unit. Depends on: S4, S5
-- [ ] **S15 · test** — TEST-2. Delivery boundary test at `InlineCutoff` and `InlineCutoff+1` over `GET /v1/load_artifact`.
+- [x] **S15 · test** — TEST-2. Delivery boundary test at `InlineCutoff` and `InlineCutoff+1` over `GET /v1/load_artifact`.
       Levels: integration. Depends on: S4, S5
-- [ ] **S16 · test** — TEST-3. `wiring_helpers_test.go` comment corrected and `TestOpenNotifier_NoopAndUnset` annotated with `// Spec: §9.1`.
+- [x] **S16 · test** — TEST-3. `wiring_helpers_test.go` comment corrected and `TestOpenNotifier_NoopAndUnset` annotated with `// Spec: §9.1`.
       Levels: unit. Depends on: S12
-- [ ] **S17 · docs** — DOC-1, DOC-2. The concepts-page prose and ASCII fallback, and the layer-composition SVG, describe precedence without shadowing. Bundled because the fallback mirrors the SVG and one reviewer checks both together.
+- [x] **S17 · docs** — DOC-1, DOC-2. The concepts-page prose and ASCII fallback, and the layer-composition SVG, describe precedence without shadowing. Bundled because the fallback mirrors the SVG and one reviewer checks both together.
       Levels: —. Depends on: S1
-- [ ] **S18 · docs** — DOC-3, TEST-4. The `docs/deployment/extending.md` community-plugin-registry sentence is deleted, and `TestPluginSPI_CommunityPluginRegistryDocGap` is replaced by `TestPluginSPI_PluginDistributionGoModulesOnly`. Bundled because the existing test fails as soon as the sentence is deleted.
+- [x] **S18 · docs** — DOC-3, TEST-4. The `docs/deployment/extending.md` community-plugin-registry sentence is deleted, and `TestPluginSPI_CommunityPluginRegistryDocGap` is replaced by `TestPluginSPI_PluginDistributionGoModulesOnly`. Bundled because the existing test fails as soon as the sentence is deleted.
       Levels: e2e. Depends on: S7
-- [ ] **S19 · docs** — DOC-4. `docs/authoring/bundled-resources.md`, `docs/authoring/your-first-skill.md`, and `docs/authoring/your-first-agent.md` state the enforcement opt-in beside the advertising condition, and `docs/authoring/frontmatter-reference.md` and `docs/authoring/hooks.md` state the refusal with its condition.
+- [x] **S19 · docs** — DOC-4. `docs/authoring/bundled-resources.md`, `docs/authoring/your-first-skill.md`, and `docs/authoring/your-first-agent.md` state the enforcement opt-in beside the advertising condition, and `docs/authoring/frontmatter-reference.md` and `docs/authoring/hooks.md` state the refusal with its condition.
       Levels: —. Depends on: S8
-- [ ] **S20 · docs** — DOC-5, MV-1. The read-only restatements drop "freeze toggles", and manual-validation scenario S45 expects the corrected lists. Bundled because S45 step 2 greps two of the restated documents and fails against either half landed alone.
+- [x] **S20 · docs** — DOC-5, MV-1. The read-only restatements drop "freeze toggles", and manual-validation scenario S45 expects the corrected lists. Bundled because S45 step 2 greps two of the restated documents and fails against either half landed alone.
       Levels: manual. Depends on: S10
 
 **Ordering constraints.** The spec steps touch independent sentences and can land in any order, except that S9 restates S8. Each code, test, and docs step follows the spec step whose text it restates or cites.
+
+## Deviations from the checklist
+
+- S21: the implementation run reported a step S21 as landed, and the checklist above carries no S21. The branch carries no commit for it beyond the changes of S1 through S20, so it records no additional spec, code, test, or documentation change.
 
 ## Current state and the gap
 
