@@ -111,6 +111,13 @@ func cachePrune(args []string) int {
 		}
 		pruned++
 	}
+	// A dry run deletes nothing, so its summary reports what a real run would
+	// prune and keep rather than claiming buckets were pruned.
+	if *dryRun {
+		fmt.Printf("cache: would prune %d bucket(s) (%d B), would keep %d (cutoff %s)\n",
+			pruned, bytesPruned, kept, cutoff.Format(time.RFC3339))
+		return 0
+	}
 	fmt.Printf("cache: pruned %d bucket(s) (%d B), kept %d (cutoff %s)\n",
 		pruned, bytesPruned, kept, cutoff.Format(time.RFC3339))
 	return 0

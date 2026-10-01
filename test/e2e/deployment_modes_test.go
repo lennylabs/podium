@@ -684,6 +684,7 @@ func TestDeployment_ReadOnlyHeaders(t *testing.T) {
 }
 
 // cache prune removes old buckets.
+// Spec: §6.5
 func TestDeployment_CachePrune(t *testing.T) {
 	t.Parallel()
 	cache := t.TempDir()
@@ -706,6 +707,15 @@ func TestDeployment_CachePrune(t *testing.T) {
 	dry := runPodium(t, "", nil, "cache", "prune", "--dir", cache2, "--days", "30", "--dry-run")
 	if !strings.Contains(dry.Stdout, "would prune") {
 		t.Errorf("dry-run missing 'would prune':\n%s", dry.Stdout)
+	}
+	// The dry-run summary describes what a real run would do. It must not
+	// claim buckets were pruned when none were deleted.
+	if !strings.Contains(dry.Stdout, "cache: would prune 1 bucket(s)") ||
+		!strings.Contains(dry.Stdout, "would keep 0") {
+		t.Errorf("dry-run summary does not report what would be pruned:\n%s", dry.Stdout)
+	}
+	if strings.Contains(dry.Stdout, "cache: pruned") {
+		t.Errorf("dry-run summary claims buckets were pruned:\n%s", dry.Stdout)
 	}
 	if _, err := os.Stat(bucket2); err != nil {
 		t.Errorf("dry-run deleted the bucket")

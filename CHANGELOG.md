@@ -87,6 +87,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **The `podium cache prune --dry-run` summary**: a dry run deleted nothing,
+  but its summary line read `cache: pruned N bucket(s) (<size> B), kept M`, which said
+  the buckets were pruned. The summary under `--dry-run` now reads
+  `cache: would prune N bucket(s) (<size> B), would keep M`. The summary of a run
+  without `--dry-run` is unchanged.
 - **The docker-compose evaluation stack pulls MinIO again**: MinIO removed
   `minio/minio` and `minio/mc` from Docker Hub in September 2026, and
   `quay.io/minio` requires authentication, so `docker compose up` on a machine
