@@ -98,6 +98,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   the command printed it in full before `manifest_body`. The command now
   prints only the fenced frontmatter block from that field, followed by the
   body. The `--json` output is unchanged.
+- **A workspace-overlay skill load returns the `SKILL.md` body** (§4.3.4,
+  §6.4): `load_artifact` on a skill in the `podium-mcp` workspace overlay
+  (`PODIUM_OVERLAY_PATH`) returned the skill's `ARTIFACT.md` body, which is
+  empty or a `<!-- Skill body lives in SKILL.md. -->` pointer, as
+  `manifest_body`. It now returns the `SKILL.md` prose body, the value the
+  registry returns for the same skill. The materialized files were already
+  correct.
 - **The docker-compose evaluation stack pulls MinIO again**: MinIO removed
   `minio/minio` and `minio/mc` from Docker Hub in September 2026, and
   `quay.io/minio` requires authentication, so `docker compose up` on a machine
