@@ -753,7 +753,8 @@ func TestLoadArtifact_PerCallDestinationMaterializes(t *testing.T) {
 // spec: §4.7.9, §6.2, §6.9 — loadConfig resolves the verification material
 // once, through resolveVerifier, with one case per cell of the resolution
 // table: an unrecognized provider name refuses with config.invalid under every
-// policy, never resolves no material, noop under always refuses, a set
+// policy, never resolves no material, even from a malformed
+// PODIUM_SIGNATURE_VERIFY_KEY, noop under always refuses, a set
 // PODIUM_SIGNATURE_VERIFY_KEY is authoritative over the key file, the key file
 // answers only when the variable is unset, and sigstore-keyless needs a
 // readable trust root.
@@ -793,6 +794,7 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 		{name: "unknown name under always", policy: "always", provider: "bogus", keyFile: true, want: outcome{code: "config.invalid:", msg: []string{"bogus"}}},
 		{name: "never resolves nothing", policy: "never", provider: "registry-managed", want: outcome{}},
 		{name: "never with noop", policy: "never", provider: "noop", want: outcome{}},
+		{name: "never with a malformed verify key", policy: "never", provider: "registry-managed", env: map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": "!!!not base64"}, want: outcome{}},
 		{name: "noop under always", policy: "always", provider: "noop", keyFile: true, want: outcome{code: "config.signature_provider_unavailable", msg: []string{"noop"}}},
 		{
 			name: "verify key set and decodes", policy: "always", provider: "registry-managed", keyFile: true,
