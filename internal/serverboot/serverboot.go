@@ -145,9 +145,9 @@ func openNotifier() notification.Provider {
 		}
 		return smtp
 	case "multi":
-		// §9.1 default "Email + webhook": "multi" combines the log
-		// provider with the webhook and email providers when each is
-		// configured. Useful for "alert + record" deployments.
+		// §9.1 "multi" combines the log provider with the webhook and
+		// email providers when each is configured. Useful for
+		// "alert + record" deployments.
 		out := []notification.Provider{notification.LogProvider{}}
 		if url := os.Getenv("PODIUM_NOTIFICATION_WEBHOOK_URL"); url != "" {
 			out = append(out, notification.Webhook{
@@ -1120,11 +1120,12 @@ func run(ctx context.Context, stop func()) error {
 	}
 
 	// §9 NotificationProvider: chosen via PODIUM_NOTIFICATION_PROVIDER
-	// (one of "noop", "log", "webhook", or "multi"). Wraps the
-	// notifier in core.NotificationFunc so the registry can fire
-	// operational notifications without depending on this package. The
-	// adapted func is reused by the layer endpoint so an ingest-failure on
-	// the §7.3.1 reingest path fires a §9.1 notification too (spec §9).
+	// (one of "noop", "log", "webhook", "email" (or "smtp"), or
+	// "multi"). Wraps the notifier in core.NotificationFunc so the
+	// registry can fire operational notifications without depending on
+	// this package. The adapted func is reused by the layer endpoint so
+	// an ingest-failure on the §7.3.1 reingest path fires a §9.1
+	// notification too (spec §9).
 	notifier := openNotifier()
 	if notifier != nil {
 		registry = registry.WithNotifier(adaptNotifier(notifier))

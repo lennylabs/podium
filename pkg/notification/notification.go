@@ -138,12 +138,11 @@ func (w Webhook) Notify(ctx context.Context, n Notification) error {
 	return nil
 }
 
-// SMTP delivers notifications as email over SMTP, the email half of
-// the §9.1 NotificationProvider "Email + webhook" default. Each
-// Notification is sent to its own Recipients list when present,
-// falling back to the provider's configured To addresses. The
-// message body carries the severity, title, and body as an RFC 5322
-// text/plain mail.
+// SMTP delivers notifications as email over SMTP, the email delivery
+// of the §9.1 NotificationProvider. Each Notification is sent to its
+// own Recipients list when present, falling back to the provider's
+// configured To addresses. The message body carries the severity,
+// title, and body as an RFC 5322 text/plain mail.
 type SMTP struct {
 	// Host and Port name the SMTP relay (for example "smtp.acme.com",
 	// 587). Port 0 defaults to 587 (submission).
