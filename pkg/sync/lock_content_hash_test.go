@@ -206,7 +206,7 @@ func TestRun_FilesystemSourceLockHashesAnExtendsChildBeforeTheMerge(t *testing.T
 	want := "sha256:" + version.CanonicalContentHash([]byte(child), nil, nil)
 	// Guard the fixture: the merged re-serialization must hash differently, or
 	// the assertion below passes whichever bytes the composer read.
-	recs, err := filesystemRecords(Options{RegistryPath: registry})
+	recs, _, err := filesystemRecords(Options{RegistryPath: registry})
 	if err != nil {
 		t.Fatalf("filesystemRecords: %v", err)
 	}

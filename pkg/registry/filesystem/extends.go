@@ -2,9 +2,9 @@ package filesystem
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // resolveExtends folds the extends: chain of every deduped record per the
@@ -94,7 +94,7 @@ func mergeRecord(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, eff
 	}
 	seen[key] = true
 
-	parentID := stripPin(rec.Artifact.Extends)
+	parentID := version.StripPin(rec.Artifact.Extends)
 
 	var parentRec ArtifactRecord
 	var parentIdx int
@@ -134,17 +134,6 @@ func mergeRecord(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, eff
 	return &merged, nil
 }
 
-// stripPin returns the canonical ID portion of an extends reference,
-// dropping any "@version" or "@sha256:..." pin. Filesystem layers are the
-// versioning mechanism, so parent selection is by canonical ID and layer
-// precedence rather than by pin resolution.
-func stripPin(ref string) string {
-	if i := strings.Index(ref, "@"); i >= 0 {
-		return ref[:i]
-	}
-	return ref
-}
-
 // authoredChain returns the ARTIFACT.md bytes of rec's extends chain paired
 // with each member's declared extends reference, parent first, which is the
 // order manifest.SerializeMerged wants: a key the child also sets keeps the
@@ -167,7 +156,7 @@ func authoredChain(rec ArtifactRecord, layerIdx int, deduped []ArtifactRecord, e
 			break
 		}
 		seen[key] = true
-		parentID := stripPin(cur.Artifact.Extends)
+		parentID := version.StripPin(cur.Artifact.Extends)
 		if parentID == cur.ID {
 			if curIdx-1 < 0 {
 				break

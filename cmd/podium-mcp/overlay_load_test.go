@@ -15,7 +15,8 @@ import (
 
 // loadArtifactFromOverlay should return a load_artifact-shaped map
 // directly from a filesystem overlay record, without consulting the
-// registry.
+// registry. Spec: §6.4 — the overlay is the exception to the §4.6 collision
+// rule, so an overlay match replaces the registry-side artifact wholesale.
 func TestLoadArtifactFromOverlay_ReturnsLayerOverlay(t *testing.T) {
 	t.Parallel()
 	cache, _ := newContentCache(t.TempDir())
@@ -223,7 +224,7 @@ func TestLoadArtifactFromOverlay_ServesTheCanonicalContentHash(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.6, §11 — a §6.4 overlay resolves no extends: chain, so a child
+// Spec: §4.7.6, §6.4, §11 — a §6.4 overlay resolves no extends: chain, so a child
 // that declares extends: with no parent in the overlay is served the §4.7.6
 // digest over its own authored ARTIFACT.md, the value ingest computes for
 // the same bytes.

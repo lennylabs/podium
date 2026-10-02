@@ -46,7 +46,9 @@ func makeOverlayWithBody(t *testing.T, dir, body string) string {
 }
 
 // Spec: §6.4 — workspace overlay sits at the highest precedence and
-// replaces the registry's contribution at the same canonical ID.
+// replaces the registry's contribution at the same canonical ID. The overlay
+// is the §6.4 exception to the §4.6 collision rule, so the replacement needs
+// no extends: and reports no drop.
 func TestRun_OverlayOverridesRegistry(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -76,6 +78,53 @@ func TestRun_OverlayOverridesRegistry(t *testing.T) {
 	}
 	if strings.Contains(string(body), "from registry") {
 		t.Errorf("materialized body still contains registry content: %q", body)
+	}
+}
+
+// Spec: §6.4 — an overlay artifact that declares extends: replaces the
+// same-ID registry-side artifact wholesale. The consumer resolves no extends:
+// chain for an overlay artifact, so the registry copy's fields (tag a) never
+// merge in, an unresolvable parent is not an error, and the §4.6 collision
+// rule drops nothing.
+func TestRun_OverlayWithExtendsReplacesWholesale(t *testing.T) {
+	t.Parallel()
+	registryBody := "---\ntype: context\nversion: 1.0.0\ndescription: base\nsensitivity: low\ntags: [a]\n---\n\nfrom registry\n"
+	cases := map[string]string{
+		"extends the registry artifact": "finance/intro",
+		"extends a missing parent":      "missing/parent",
+	}
+	for name, parent := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			overlayBody := "---\ntype: context\nversion: 1.0.0\ndescription: overlay\nsensitivity: low\nextends: " +
+				parent + "\ntags: [b]\n---\n\nfrom overlay\n"
+			registry := makeRegistryWithBody(t, dir, registryBody)
+			ovl := makeOverlayWithBody(t, dir, overlayBody)
+			target := filepath.Join(dir, "out")
+			res, err := sync.Run(sync.Options{
+				RegistryPath: registry,
+				OverlayPath:  ovl,
+				Target:       target,
+				AdapterID:    "none",
+			})
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if len(res.Dropped) != 0 {
+				t.Errorf("Dropped = %+v, want none for an overlay replacement", res.Dropped)
+			}
+			body, err := os.ReadFile(filepath.Join(target, "finance", "intro", "ARTIFACT.md"))
+			if err != nil {
+				t.Fatalf("ReadFile: %v", err)
+			}
+			if string(body) != overlayBody {
+				t.Errorf("ARTIFACT.md = %q, want the overlay's authored bytes %q", body, overlayBody)
+			}
+			if strings.Contains(string(body), "tags: [a]") || strings.Contains(string(body), "- a\n") {
+				t.Errorf("registry tag a merged into the overlay artifact: %q", body)
+			}
+		})
 	}
 }
 

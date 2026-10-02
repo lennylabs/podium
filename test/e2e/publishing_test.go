@@ -17,8 +17,12 @@ package e2e
 // writing any target tree or lock, a `kind: workspace` target with a workflow
 // running its prepare/publish commands around the materialization, a marketplace
 // target against a server-source registry passing the resolved credential so the
-// restricted effective view is rendered, and a harness set naming opencode or
-// none exiting non-zero with config.invalid.
+// restricted effective view is rendered, a harness set naming opencode or
+// none exiting non-zero with config.invalid, and a colliding filesystem
+// registry (§13.11.3): a marketplace or workspace target drops the
+// higher-precedence copy, prints the rejected line, runs its publish phase on
+// the output without the dropped copy, and then counts as failed, while
+// --check renders nothing for a marketplace target and reports no drop.
 //
 // The git interaction is configuration: the workflow's clone/add/commit/push are
 // operator-authored argv commands, so the test asserts the observable result in
@@ -812,6 +816,175 @@ func TestPublishing_PublishCommandRemoved(t *testing.T) {
 	if !strings.Contains(res.Stderr, "unknown command: publish") {
 		t.Fatalf("publish stderr=%q, want \"unknown command: publish\"", res.Stderr)
 	}
+}
+
+// ---- collision ---------------------------------------------------------------
+
+// pubDroppedDesc is the description of the colliding copy the sync drops.
+const pubDroppedDesc = "Dropped copy of pay-invoice."
+
+// pubCollisionRejected is the rejected line printed for the dropped copy.
+const pubCollisionRejected = "rejected: finance/ap/pay-invoice (ingest.collision):"
+
+// writeCollidingPublishRegistry stages writePublishRegistry plus a
+// team-shared copy of finance/ap/pay-invoice that declares no extends:. With no
+// layer_order, team-shared follows team-finance alphabetically and has the
+// higher precedence, so the sync drops it. The colliding ID sits inside the
+// finance-pack plugin scope (finance/**), so a marketplace render composes it.
+func writeCollidingPublishRegistry(t *testing.T) string {
+	t.Helper()
+	reg := writePublishRegistry(t)
+	testharness.WriteTree(t, reg,
+		testharness.WriteTreeOption{Path: "team-shared/finance/ap/pay-invoice/ARTIFACT.md", Content: pubAgentArtifact(pubDroppedDesc)},
+	)
+	return reg
+}
+
+// assertTreeHoldsLowerCopy checks that some file under dir carries the
+// team-finance pay-invoice description and that none carries the dropped copy.
+func assertTreeHoldsLowerCopy(t *testing.T, dir string) {
+	t.Helper()
+	lower := false
+	for path, body := range testharness.ReadTree(t, dir) {
+		if strings.Contains(body, pubDroppedDesc) {
+			t.Errorf("%s carries the dropped copy:\n%s", path, body)
+		}
+		if strings.Contains(body, "Pay an approved invoice.") {
+			lower = true
+		}
+	}
+	if !lower {
+		t.Errorf("no file under %s carries the lower-precedence pay-invoice copy", dir)
+	}
+}
+
+// A kind: marketplace target over a colliding filesystem registry renders the
+// lower-precedence copy, reports the drop, and counts as failed.
+//
+// Spec: §13.11.3
+// Matrix: §6.10 (ingest.collision)
+func TestPublishing_MarketplaceTargetCollisionFails(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	reg := writeCollidingPublishRegistry(t)
+	remote := bareRemote(t)
+	ws := t.TempDir()
+	cfg := writeSyncConfigMarketplace(t, ws, reg, remote, "claude-code")
+
+	res := runPodium(t, "", gitEnv(), "sync", "--config", cfg)
+	if res.Exit != 1 {
+		t.Fatalf("sync --config exit=%d, want 1\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	for _, want := range []string{pubCollisionRejected, "target acme-agents:"} {
+		if !strings.Contains(res.Stderr, want) {
+			t.Errorf("stderr missing %q:\n%s", want, res.Stderr)
+		}
+	}
+	assertTreeHoldsLowerCopy(t, filepath.Join(ws, "build", "acme-agents", "claude"))
+}
+
+// --config --check renders nothing for a kind: marketplace target, so it
+// composes no layers and reports no drop.
+//
+// Spec: §13.11.3
+// Matrix: §6.10 (ingest.collision)
+func TestPublishing_CheckConfigMarketplaceCollisionSilent(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	reg := writeCollidingPublishRegistry(t)
+	remote := bareRemote(t)
+	ws := t.TempDir()
+	cfg := writeSyncConfigMarketplace(t, ws, reg, remote, "claude-code")
+
+	res := runPodium(t, "", gitEnv(), "sync", "--config", cfg, "--check")
+	if res.Exit != 0 {
+		t.Fatalf("sync --config --check exit=%d, want 0\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	if strings.Contains(res.Stderr, "rejected:") {
+		t.Errorf("--check reported a drop:\n%s", res.Stderr)
+	}
+}
+
+// A kind: marketplace target that drops an artifact runs its publish phase on
+// the rendered output and then counts as failed.
+//
+// Spec: §13.11.3
+// Matrix: §6.10 (ingest.collision)
+func TestPublishing_MarketplaceCollisionPublishesThenFails(t *testing.T) {
+	t.Parallel()
+	reg := writeCollidingPublishRegistry(t)
+	ws := t.TempDir()
+	marker := filepath.Join(ws, "publish-ran")
+	cfg := writeSyncConfigMarketplaceMarker(t, ws, reg, marker)
+
+	res := runPodium(t, "", nil, "sync", "--config", cfg)
+	if res.Exit != 1 {
+		t.Fatalf("sync --config exit=%d, want 1\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Errorf("publish phase did not run before the failure (no marker): %v", err)
+	}
+	if !strings.Contains(res.Stderr, pubCollisionRejected) {
+		t.Errorf("stderr missing %q:\n%s", pubCollisionRejected, res.Stderr)
+	}
+}
+
+// A kind: workspace target with a workflow that drops an artifact runs its
+// publish phase on the materialized output and then counts as failed.
+//
+// Spec: §13.11.3
+// Matrix: §6.10 (ingest.collision)
+func TestPublishing_WorkspaceCollisionPublishesThenFails(t *testing.T) {
+	t.Parallel()
+	reg := writeCollidingPublishRegistry(t)
+	ws := t.TempDir()
+	target := filepath.Join(ws, "out", "claude")
+	cfg := writeSyncConfigWorkspaceWorkflow(t, ws, reg, target)
+
+	res := runPodium(t, "", nil, "sync", "--config", cfg)
+	if res.Exit != 1 {
+		t.Fatalf("sync --config exit=%d, want 1\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	if _, err := os.Stat(filepath.Join(ws, "publish-ran")); err != nil {
+		t.Errorf("publish phase did not run before the failure (no marker): %v", err)
+	}
+	for _, want := range []string{pubCollisionRejected, "target claude-workspace:"} {
+		if !strings.Contains(res.Stderr, want) {
+			t.Errorf("stderr missing %q:\n%s", want, res.Stderr)
+		}
+	}
+	assertTreeHoldsLowerCopy(t, target)
+}
+
+// writeSyncConfigMarketplaceMarker writes a sync.yaml whose kind: marketplace
+// target has no git remote and a publish command that writes marker, so a test
+// observes that the publish phase ran without a git checkout.
+func writeSyncConfigMarketplaceMarker(t *testing.T, workspace, registry, marker string) string {
+	t.Helper()
+	dir := filepath.Join(workspace, ".podium")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir .podium: %v", err)
+	}
+	path := filepath.Join(dir, "sync.yaml")
+	body := "" +
+		"defaults:\n" +
+		"  registry: " + registry + "\n" +
+		"  identity: publisher@acme.com\n" +
+		"targets:\n" +
+		"  - id: acme-agents\n" +
+		"    kind: marketplace\n" +
+		"    target: " + filepath.Join(workspace, "build", "acme-agents") + "\n" +
+		"    harnesses: [claude-code]\n" +
+		"    plugins:\n" +
+		"      - name: finance-pack\n" +
+		"        include: [\"finance/**\"]\n" +
+		"    workflow:\n" +
+		"      publish:\n" +
+		"        - sh: \"echo done > " + marker + "\"\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write sync.yaml: %v", err)
+	}
+	return path
 }
 
 // ---- config + stub helpers --------------------------------------------------

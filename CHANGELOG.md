@@ -689,6 +689,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   lands in a MINOR bump. An unset or empty value still configures no table and
   startup proceeds. Pre-1.0, no flag, environment variable, or configuration key
   restores the previous behavior.
+- **Filesystem-source `podium sync` applies the §4.6 collision rule** (§4.6,
+  §7.3.1, §13.11.3): when two registry layer directories contribute the same
+  artifact ID and the higher-precedence copy declares no `extends:` on that ID,
+  sync drops the higher-precedence copy and materializes the lower-precedence
+  one. That is the copy `podium serve --standalone --layer-path` serves on the
+  same directory. Sync prints `rejected: <id> (ingest.collision): <reason>` on
+  standard error for each dropped artifact, materializes every other artifact,
+  writes the lock file without the dropped artifact, and exits 1. `--dry-run`
+  reports the drop and exits 1. A `--config` target that dropped an artifact
+  counts as a failed target, including a `kind: workspace` target under
+  `--check`. `podium sync --watch` exits 1 on interrupt when any cycle it
+  reported dropped an artifact, and `podium sync override` reports the drops of
+  its re-materialization and exits 1. A sync that previously kept the
+  higher-precedence copy and exited 0 now keeps the lower-precedence copy and
+  exits 1. To keep overriding the lower copy, declare `extends: <id>` on the
+  higher copy. A server-source `podium sync` and the workspace overlay are
+  unchanged. This is a backward-incompatible change and lands in a MINOR bump.
+  No flag restores the previous behavior.
 
 ### Removed
 

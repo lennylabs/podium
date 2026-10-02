@@ -11,6 +11,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/sync"
 )
 
@@ -552,7 +553,7 @@ func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (d
 	// (sensitivity floor, sandbox profile, cross-layer collision, quota,
 	// unresolved extends, or a data-plane resource-store failure).
 	for _, rj := range report.Rejected {
-		fmt.Fprintf(stderr, "rejected: %s (%s): %s\n", rj.ArtifactID, rj.Code, rj.Reason)
+		printRejected(stderr, rj.ArtifactID, rj.Code, rj.Reason)
 	}
 	if report.LintFailures > 0 {
 		fmt.Fprintf(stderr, "lint failures: %d\n", report.LintFailures)
@@ -563,6 +564,25 @@ func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (d
 		fmt.Fprintf(stderr, "embedding failure: %s@%s: %s\n", ef.ArtifactID, ef.Version, ef.Reason)
 	}
 	return len(report.Conflicts) + len(report.Rejected) + report.LintFailures, true
+}
+
+// printRejected writes one rejected-artifact line in the format `podium layer
+// reingest` and a filesystem-source `podium sync` share, so a reader matches the
+// same line from either command.
+func printRejected(w io.Writer, id, code, reason string) {
+	fmt.Fprintf(w, "rejected: %s (%s): %s\n", id, code, reason)
+}
+
+// reportDropped prints a rejected line for each artifact a filesystem-source
+// composition dropped under the §4.6 collision rule and reports whether it
+// printed anything, so the caller can set a non-zero exit status.
+//
+// Spec: §13.11.3
+func reportDropped(w io.Writer, dropped []layer.Collision) bool {
+	for _, c := range dropped {
+		printRejected(w, c.ArtifactID, layer.CollisionCode, c.Reason())
+	}
+	return len(dropped) > 0
 }
 
 // resolveLayerRegistry resolves the registry URL for the standalone `podium

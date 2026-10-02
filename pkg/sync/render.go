@@ -13,6 +13,7 @@ import (
 	"sort"
 
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/materialize"
 )
 
@@ -57,6 +58,10 @@ type RenderResult struct {
 	Changed          bool
 	ChangedArtifacts []string
 	Files            []string
+	// Dropped lists the artifacts the filesystem-source composition dropped
+	// under the §4.6 collision rule (§13.11.3). The render omits them;
+	// callers report each entry with layer.CollisionCode and Reason().
+	Dropped []layer.Collision
 }
 
 // ErrNoEmitter signals that a harness in the output's harness set has no §7.8
@@ -100,7 +105,7 @@ type assigned struct {
 //
 // spec: §7.8 (render pipeline), §4.6 (effective view), §7.5.1 (scope filters).
 func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
-	records, err := FetchRecords(Options{
+	records, dropped, err := FetchRecords(Options{
 		RegistryPath: opts.Registry,
 		Token:        opts.Token,
 		HTTPClient:   opts.HTTPClient,
@@ -124,7 +129,12 @@ func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
 		return nil, err
 	}
 
-	return reconcile(opts.Workdir, opts.OutputID, rendered)
+	res, err := reconcile(opts.Workdir, opts.OutputID, rendered)
+	if err != nil {
+		return nil, err
+	}
+	res.Dropped = dropped
+	return res, nil
 }
 
 // renderedFile pairs an emitted file with the canonical artifact ID that

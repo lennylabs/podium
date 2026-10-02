@@ -13,6 +13,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // ruleArtifactBodyForSkill enforces §4.3.4 line 286: a skill's
@@ -164,16 +165,6 @@ func artifactCatalog(records []filesystem.ArtifactRecord) map[string]bool {
 	return m
 }
 
-// stripVersionPin removes a trailing §4.7.6 pin (@<semver>, @<semver>.x, or
-// @sha256:<hash>) from an artifact reference so the bare ID matches a
-// catalog entry.
-func stripVersionPin(ref string) string {
-	if i := strings.Index(ref, "@"); i >= 0 {
-		return ref[:i]
-	}
-	return ref
-}
-
 func (r ruleProseReferenceResolution) relevantBody(rec filesystem.ArtifactRecord) []byte {
 	if rec.Artifact != nil && rec.Artifact.Type == manifest.TypeSkill && len(rec.SkillBytes) > 0 {
 		return bodyAfterFrontmatter(rec.SkillBytes)
@@ -212,7 +203,7 @@ func (r ruleProseReferenceResolution) checkReference(rec filesystem.ArtifactReco
 	// current visible catalog). A reference that names another artifact by
 	// its canonical ID resolves; an unknown ID is the ingest error §4.4
 	// line 350 mandates. Strip any §4.7.6 version pin before the lookup.
-	if catalog[stripVersionPin(clean)] {
+	if catalog[version.StripPin(clean)] {
 		return nil
 	}
 	return &Diagnostic{

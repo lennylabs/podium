@@ -69,9 +69,11 @@ func TestRun_ServerSource_NoTokenSendsNoAuth(t *testing.T) {
 	}
 }
 
-// spec: §6.4 — the workspace overlay merges as the highest-precedence
+// Spec: §6.4 — the workspace overlay merges as the highest-precedence
 // layer for a server source too. The consumer merges it client-side because the
-// developer's overlay directory is local and the server cannot see it.
+// developer's overlay directory is local and the server cannot see it. The
+// overlay is the §6.4 exception to the §4.6 collision rule, so the replacement
+// needs no extends:.
 func TestRun_ServerSource_OverlayOverridesServer(t *testing.T) {
 	t.Parallel()
 	srv := newStubRegistry(t, map[string]stubArtifact{

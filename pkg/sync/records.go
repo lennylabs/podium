@@ -2,6 +2,7 @@ package sync
 
 import (
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
@@ -81,13 +82,17 @@ func (f ScopeFilter) Select(records []Record) []Record {
 //
 // spec: §7.5.2 (source dispatch), §7.8 (the marketplace render reads the same
 // view as a workspace sync).
-func FetchRecords(opts Options) ([]Record, error) {
+//
+// The second return lists the artifacts a filesystem-source composition
+// dropped under the §4.6 collision rule (§13.11.3); a server source returns
+// none.
+func FetchRecords(opts Options) ([]Record, []layer.Collision, error) {
 	if opts.RegistryPath == "" {
-		return nil, ErrNoRegistry
+		return nil, nil, ErrNoRegistry
 	}
-	internal, err := resolveRecords(opts)
+	internal, dropped, err := resolveRecords(opts)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]Record, len(internal))
 	for i, rec := range internal {
@@ -101,7 +106,7 @@ func FetchRecords(opts Options) ([]Record, error) {
 			ContentHash:   rec.ContentHash,
 		}
 	}
-	return out, nil
+	return out, dropped, nil
 }
 
 // Reconcile removes from target every materialized path the prior lock recorded

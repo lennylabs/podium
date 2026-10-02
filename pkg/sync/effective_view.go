@@ -42,7 +42,11 @@ func ResolveEffectiveView(opts Options) ([]EffectiveArtifact, error) {
 	}
 
 	if opts.RegistryPath != "" {
-		all, err := resolveRecords(opts)
+		// A dropped artifact is outside the effective view, as it is on a
+		// server that rejected it at ingest, so the checklist omits it. The
+		// override's apply step reports the drops through
+		// OverrideResult.Dropped.
+		all, _, err := resolveRecords(opts)
 		if err != nil {
 			return nil, err
 		}

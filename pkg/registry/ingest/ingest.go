@@ -23,6 +23,7 @@ import (
 	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/audit"
 	domainpkg "github.com/lennylabs/podium/pkg/domain"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -665,7 +666,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				res.Rejected = append(res.Rejected, RejectedArtifact{
 					ArtifactID: rec.ID,
 					Reason: fmt.Sprintf("extends: child type %q does not match parent %s type %q",
-						rec.Artifact.Type, stripPin(rec.Artifact.Extends), parentType),
+						rec.Artifact.Type, version.StripPin(rec.Artifact.Extends), parentType),
 					Code: "ingest.invalid_artifact",
 				})
 				continue
@@ -681,7 +682,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 					Code:       "lint.license_changed_across_layers",
 					Severity:   lint.SeverityWarning,
 					Message: fmt.Sprintf("license %q differs from extended parent %s license %q; the child's license wins per §4.6",
-						rec.Artifact.License, stripPin(rec.Artifact.Extends), parentLicense),
+						rec.Artifact.License, version.StripPin(rec.Artifact.Extends), parentLicense),
 				})
 			}
 			mr.ExtendsPin = pin
@@ -736,10 +737,10 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// existing cross-layer record does (the existing record is the
 		// overlay). Anything else is a silent shadow, which the spec forbids.
 		if crossLayer := crossLayerByID[mr.ArtifactID]; len(crossLayer) > 0 {
-			overlay := stripPin(rec.Artifact.Extends) == mr.ArtifactID
+			overlay := layer.ExtendsOverlays(rec.Artifact.Extends, mr.ArtifactID)
 			if !overlay {
 				for _, ex := range crossLayer {
-					if stripPin(ex.ExtendsPin) == mr.ArtifactID {
+					if layer.ExtendsOverlays(ex.ExtendsPin, mr.ArtifactID) {
 						overlay = true
 						break
 					}
@@ -1306,12 +1307,12 @@ func edgesFor(a *manifest.Artifact, id string, serverIDs map[string]string) []st
 	var out []store.DependencyEdge
 	if a.Extends != "" {
 		out = append(out, store.DependencyEdge{
-			From: id, To: stripPin(a.Extends), Kind: "extends",
+			From: id, To: version.StripPin(a.Extends), Kind: "extends",
 		})
 	}
 	for _, target := range a.DelegatesTo {
 		out = append(out, store.DependencyEdge{
-			From: id, To: stripPin(target), Kind: "delegates_to",
+			From: id, To: version.StripPin(target), Kind: "delegates_to",
 		})
 	}
 	// spec: §4.7.3 — an mcpServers reference resolves to an
@@ -1384,15 +1385,6 @@ func recordBytes(rec store.ManifestRecord) int64 {
 	return int64(len(rec.Frontmatter)) + int64(len(rec.Body))
 }
 
-// stripPin removes the @semver / @sha256 suffix from a reference so the
-// dependency graph keys on the canonical artifact ID.
-func stripPin(ref string) string {
-	if i := strings.Index(ref, "@"); i >= 0 {
-		return ref[:i]
-	}
-	return ref
-}
-
 // foldExtendsParent folds the pinned parent's stored record into the
 // child's and returns the child. Only the columns every store backend
 // persists are written: Description, Tags, Sensitivity, and
@@ -1445,8 +1437,8 @@ func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArt
 	log.Printf("ingest: tenant %s layer %s: cross-layer collision on %q with layer %q", tenantID, layerID, id, existingLayer)
 	return RejectedArtifact{
 		ArtifactID: id,
-		Reason:     fmt.Sprintf("cross-layer collision: %q is already contributed by another layer; declare extends: %s to overlay it", id, id),
-		Code:       "ingest.collision",
+		Reason:     layer.Collision{ArtifactID: id}.Reason(),
+		Code:       layer.CollisionCode,
 	}
 }
 

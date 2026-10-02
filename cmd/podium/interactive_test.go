@@ -284,6 +284,47 @@ func TestRunSyncOverrideInteractive_AddsAndMaterializes(t *testing.T) {
 	}
 }
 
+// Spec: §13.11.3
+// Matrix: §6.10 (ingest.collision)
+// TestRunSyncOverrideInteractive_CollisionExits1 pins that applying a toggle
+// from the TUI over a registry whose layers collide without extends: reports
+// the dropped artifact on standard error and exits 1, with the toggle kept.
+func TestRunSyncOverrideInteractive_CollisionExits1(t *testing.T) {
+	registry := t.TempDir()
+	testharness.WriteTree(t, registry,
+		testharness.WriteTreeOption{Path: ".registry-config", Content: "multi_layer: true\nlayer_order:\n  - base\n  - high\n"},
+		testharness.WriteTreeOption{Path: "base/shared/note/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: from-base\n---\n\nfrom-base\n"},
+		testharness.WriteTreeOption{Path: "high/shared/note/ARTIFACT.md", Content: "---\ntype: context\nversion: 1.0.0\ndescription: from-high\n---\n\nfrom-high\n"},
+	)
+	target := t.TempDir()
+	withInteractiveStdin(t, "1\nsave\n", true)
+
+	var stderr string
+	withCwd(t, t.TempDir(), func() {
+		stderr = captureStderr(t, func() {
+			captureStdout(t, func() {
+				if rc := runSyncOverrideInteractive(target, registry, "none", false); rc != 1 {
+					t.Errorf("rc = %d, want 1", rc)
+				}
+			})
+		})
+	})
+
+	if !strings.Contains(stderr, "rejected: shared/note (ingest.collision): cross-layer collision") {
+		t.Errorf("stderr missing the rejected line:\n%s", stderr)
+	}
+	if !strings.Contains(readLockString(t, target), "shared/note") {
+		t.Errorf("lock toggles.add missing the checked artifact")
+	}
+	got, err := os.ReadFile(filepath.Join(target, "shared", "note", "ARTIFACT.md"))
+	if err != nil {
+		t.Fatalf("lower copy not materialized: %v", err)
+	}
+	if !strings.Contains(string(got), "from-base") {
+		t.Errorf("materialized copy = %s, want the lower layer's", got)
+	}
+}
+
 func readLockString(t *testing.T, target string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(target, ".podium", "sync.lock"))

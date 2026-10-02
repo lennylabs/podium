@@ -401,6 +401,11 @@ func syncCmd(args []string) int {
 	} else {
 		printHuman(res, *dryRun)
 	}
+	// Spec: §13.11.3 — a drop is reported on standard error, so the --json
+	// envelope on standard output stays valid, and the sync exits 1.
+	if reportDropped(os.Stderr, res.Dropped) {
+		return 1
+	}
 	return 0
 }
 
@@ -444,6 +449,12 @@ func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
 			printJSON(ev.Result)
 		} else {
 			printHuman(ev.Result, opts.DryRun)
+		}
+		// Spec: §13.11.4 — each reported cycle that dropped an artifact counts
+		// toward the exit status on interrupt. A cycle whose event the watcher
+		// discarded on cancellation is reported by the next podium sync.
+		if reportDropped(os.Stderr, ev.Result.Dropped) {
+			failures++
 		}
 	}
 	if failures > 0 {
@@ -524,6 +535,11 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 	return 0
 }
 
+// errDropped marks a --config target whose composition dropped at least one
+// artifact under the §4.6 collision rule. runMultiTargetSync prints it as the
+// target's failure and counts the target as failed (§13.11.3).
+var errDropped = errors.New("dropped at least one artifact (ingest.collision)")
+
 // runWorkspaceTarget materializes a kind: workspace plan through sync.Run,
 // wrapped by the operator prepare/publish workflow phases when the plan carries
 // one (Decision 3). Under check it runs sync.Run with DryRun set so no tree or
@@ -558,10 +574,13 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, cacheMode s
 	if err != nil {
 		return err
 	}
+	// Spec: §13.11.3 — report the drops before the --check return, because a
+	// --check run of a kind: workspace target composes the layers too.
+	dropped := reportDropped(os.Stderr, res.Dropped)
 	if check {
 		// A --check run resolves the artifact set without materializing; do not
 		// print the per-artifact materialization summary.
-		return nil
+		return droppedErr(dropped)
 	}
 	if asJSON {
 		printJSON(res)
@@ -577,6 +596,16 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, cacheMode s
 		if err := runner.Phase(ctx, "publish", p.Workflow.Publish, vars, p.Workflow.PublishOnError); err != nil {
 			return err
 		}
+	}
+	// The publish phase has already pushed the output without the dropped
+	// artifact; the target still counts as failed (§13.11.3).
+	return droppedErr(dropped)
+}
+
+// droppedErr returns errDropped when the target reported a drop.
+func droppedErr(dropped bool) error {
+	if dropped {
+		return errDropped
 	}
 	return nil
 }
@@ -634,7 +663,13 @@ func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, dryRun, c
 	} else {
 		printMarketplaceHuman(res, dryRun)
 	}
-	return nil
+	// Spec: §13.11.3 — a --check run renders nothing, so Render is nil and no
+	// drop is reported. Otherwise the publish phase has already run inside
+	// RunMarketplace, and the target counts as failed after it.
+	if res.Render == nil {
+		return nil
+	}
+	return droppedErr(reportDropped(os.Stderr, res.Render.Dropped))
 }
 
 // marketplaceStdout selects the stream the marketplace pipeline's diagnostic
@@ -778,6 +813,11 @@ func syncOverrideCmd(args []string) int {
 	fmt.Printf("toggles.remove: %s\n", formatToggles(res.Lock.Toggles.Remove))
 	if !res.Changed {
 		fmt.Println("(no change)")
+	}
+	// Spec: §13.11.3 — the re-materialization's drops are reported and exit 1;
+	// the toggles stay recorded.
+	if reportDropped(os.Stderr, res.Dropped) {
+		return 1
 	}
 	return 0
 }
@@ -991,8 +1031,8 @@ func lintCmd(args []string) int {
 	// shadowing is never permitted"). The default policy honors the
 	// extends exception, so a legitimate higher-precedence overlay that
 	// declares extends: passes; only an unsanctioned shadow errors. sync
-	// keeps CollisionPolicyHighestWins because it materializes the
-	// caller's composed effective view rather than validating it.
+	// uses CollisionPolicyDrop, which drops and reports an unsanctioned
+	// collision and materializes the rest (§13.11.3).
 	records, err := reg.Walk(filesystem.WalkOptions{
 		CollisionPolicy: filesystem.CollisionPolicyDefault,
 	})

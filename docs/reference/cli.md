@@ -236,6 +236,8 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 
 Lock file at `<target>/.podium/sync.lock`.
 
+Against a local catalog, two registry layers that contribute the same ID, where the higher-precedence copy declares no `extends:`, are a collision. The command drops the higher-precedence copy and prints `rejected: <id> (ingest.collision): <reason>` on standard error for each dropped artifact, in the format `podium layer reingest` uses. It materializes every other artifact, writes the lock file without the dropped artifact, and exits 1. `--dry-run` reports the drop and exits 1 without writing. Under `--config`, a target that dropped an artifact counts as a failed target, and the command exits 1; this includes a `kind: workspace` target under `--check`. A target's workflow still runs before the target is marked failed. `--check` without `--config` validates `sync.yaml` only and reports no drop, and a `kind: marketplace` target under `--check` renders nothing. Under `--json` the report stays on standard error. Under `--watch` each cycle prints its report, and the command exits 1 on interrupt when any cycle it reported failed or dropped an artifact. A cycle still running when the interrupt arrives can finish without a report, and the next `podium sync` reports its drops. A sync against a server reports no drop, because the server rejected the artifact at ingest. A drop adds a cause for exit status 1 and leaves the command's other exit statuses unchanged.
+
 A `kind: marketplace` target renders the harness-native git-repo distribution into its `target` directory through the fixed `prepare`, `render`, `publish` pipeline. Podium owns the `render` phase, and the target's `workflow` supplies the `prepare` and `publish` commands that clone the repository into the working directory and push the rendered result to the remote. The marketplace fields (the git remote and branch, the harness set, the commit message, the plugins, and the publishing identity) are reached only through the `--config` path. See [Marketplace publishing](../consuming/publishing) for the model and the worked examples.
 
 ### `podium sync override`
@@ -251,6 +253,8 @@ podium sync override --add <id> --dry-run
 ```
 
 `--target <path>` selects the materialized directory and defaults to the current directory. `--registry <url-or-path>` and `--harness <name>` override the resolved registry and adapter for the toggle's materialization. An unset `--registry` resolves from `PODIUM_REGISTRY`, then the merged `sync.yaml`. An unset `--harness` resolves from `PODIUM_HARNESS`, then the harness recorded in the target's lock file, then the merged `sync.yaml`, then the built-in `none` adapter.
+
+When a registry is configured, override re-materializes the target through the same composition as `podium sync`. Against a local catalog with a collision between two registry layers, it prints the same `rejected: <id> (ingest.collision): <reason>` line for each dropped artifact, keeps the recorded toggles, and exits 1. `--dry-run` writes nothing, runs no re-materialization, and reports no drop.
 
 ### `podium sync save-as`
 

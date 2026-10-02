@@ -83,7 +83,7 @@ func TestScopeFilter_Select_NilArtifactType(t *testing.T) {
 // (empty) registry source rather than panicking, matching the sync.Run guard.
 func TestFetchRecords_NoRegistry(t *testing.T) {
 	t.Parallel()
-	_, err := FetchRecords(Options{})
+	_, _, err := FetchRecords(Options{})
 	if err == nil {
 		t.Fatalf("FetchRecords with no registry must error")
 	}

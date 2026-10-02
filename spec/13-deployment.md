@@ -336,6 +336,8 @@ What `podium sync` does in filesystem source:
 
 The composer, parsers, glob resolver, `extends:` resolver, and harness adapters used here are the same Go module functions the registry runs behind its HTTP API (§2.2 *Shared library code*). There is no separate filesystem-mode reimplementation, which is why migration to a server (§13.11.6) is mechanical and produces equivalent output for the same artifact directory.
 
+**Layer collisions.** Two registry layer subdirectories that contribute the same canonical ID follow the §4.6 collision rule. When the higher-precedence artifact declares no `extends:` on that ID, sync drops it and keeps the lower-precedence artifact, which is the artifact a server started fresh with `--layer-path` on the same directory serves. A dropped artifact takes no part in `extends:` resolution. Sync names each dropped artifact on standard error with its identifier, the code `ingest.collision`, and the reason. It still materializes every other artifact, runs the stale-file cleanup, and writes the lock file without the dropped artifact. `podium sync` exits 1 when it dropped at least one artifact, and so does `podium sync --dry-run`. Under `--config`, a target that dropped an artifact counts as a failed target; this includes a `kind: workspace` target under `--check`, which resolves the target's artifact set without writing it. A target's workflow runs on the materialized output as it does on a sync that dropped nothing, and the target then counts as failed. `podium sync --check` without `--config` validates the config only and composes no layers (§7.5.2), and a `kind: marketplace` target under `--check` renders nothing, so neither reports a drop. `podium sync override` re-materializes the target through the same composition when a registry is configured, so it names each dropped artifact the same way and exits 1 when it dropped at least one; `podium sync override --dry-run` writes nothing, runs no re-materialization, and reports no dropped artifact. The workspace overlay is merged after this composition and follows §6.4.
+
 What's **not available** in filesystem source:
 
 - The MCP server (§6) and progressive disclosure via meta-tools (§5).
@@ -354,7 +356,7 @@ Identity-based visibility filtering requires a server but not specifically a rem
 
 ### 13.11.4 Watch Mode
 
-`podium sync --watch` against a filesystem source uses `fsnotify` to watch the registry path and the workspace overlay; when files change, it re-runs composition and materialization and reconciles the target through the same stale-file cleanup as a one-shot sync, so the materialized output reflects every change.
+`podium sync --watch` against a filesystem source uses `fsnotify` to watch the registry path and the workspace overlay; when files change, it re-runs composition and materialization and reconciles the target through the same stale-file cleanup as a one-shot sync, so the materialized output reflects every change. Each cycle reports the artifacts it dropped under §13.11.3. When the process is interrupted, it exits 1 if any cycle it reported failed or dropped an artifact, and 0 otherwise. A cycle still running when the interrupt arrives can finish its writes without a report, and the next `podium sync` reports its drops.
 
 ### 13.11.5 Multi-User via a Shared Directory
 

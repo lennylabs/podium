@@ -262,9 +262,8 @@ func TestRun_RequiresTarget(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 — when two layers both contribute the same canonical ID,
-// sync uses highest-precedence wins (the user's effective view), not the
-// raw ingest behavior that errors on collision.
+// Spec: §4.6, §13.11.3 — a higher-precedence layer that declares extends: on
+// the colliding ID merges over the lower one, and sync drops nothing.
 func TestRun_HigherLayerWinsOnCollision(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
@@ -284,16 +283,19 @@ layer_order:
 		},
 		testharness.WriteTreeOption{
 			Path:    "personal/x/ARTIFACT.md",
-			Content: "---\ntype: context\nversion: 2.0.0\ndescription: personal\n---\n\npersonal body\n",
+			Content: "---\ntype: context\nversion: 2.0.0\nextends: x\ndescription: personal\n---\n\npersonal body\n",
 		},
 	)
-	_, err := Run(Options{RegistryPath: registry, Target: target})
+	res, err := Run(Options{RegistryPath: registry, Target: target})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
-	got := testharness.ReadTree(t, target)
-	if !contains(got["x/ARTIFACT.md"], "personal") {
-		t.Errorf("expected personal layer's content, got: %s", got["x/ARTIFACT.md"])
+	got := testharness.ReadTree(t, target)["x/ARTIFACT.md"]
+	if !contains(got, "description: personal") || !contains(got, "personal body") {
+		t.Errorf("expected personal layer's description and body, got: %s", got)
+	}
+	if len(res.Dropped) != 0 {
+		t.Errorf("Dropped = %+v, want empty", res.Dropped)
 	}
 }
 

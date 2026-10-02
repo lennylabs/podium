@@ -78,11 +78,12 @@ Covered in [Browsing the catalog](../consuming/browsing-the-catalog).
 ### Layered composition
 
 One catalog can be assembled from several independent sources. The layers
-compose in a declared order with deterministic merge. A higher layer overrides a
-lower one on a collision, and `extends:` lets an artifact inherit and refine a
-lower one without forking it. A catalog on disk composes its subdirectories as
-ordered layers through a `.registry-config` file. A registry server adds
-registered layers, remote Git sources, custom sources through the
+compose in a declared order with deterministic merge. Two layers that
+contribute the same artifact ID are a collision, which Podium rejects unless the
+higher artifact declares `extends:`. `extends:` lets that artifact inherit and
+refine the lower one without forking it. A catalog on disk composes its
+subdirectories as ordered layers through a `.registry-config` file. A registry
+server adds registered layers, remote Git sources, custom sources through the
 `LayerSourceProvider` SPI, and per-layer visibility.
 
 Covered in [Layered composition](../deployment/layers).

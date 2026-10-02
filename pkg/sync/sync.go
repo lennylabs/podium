@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/materialize"
 	"github.com/lennylabs/podium/pkg/overlay"
@@ -157,6 +158,11 @@ type Result struct {
 	// active adapter. Recorded so callers can report what was dropped
 	// rather than silently omitting it.
 	Skipped []string
+	// Dropped lists the artifacts a filesystem-source composition dropped
+	// under the §4.6 collision rule (§13.11.3). Callers render each entry
+	// with layer.CollisionCode and Reason(); a server source never reports
+	// one.
+	Dropped []layer.Collision
 	// Offline is set when a §7.4 offline-first sync could not reach the
 	// server-source registry and left the existing materialized output in
 	// place. Callers surface it as the offline status hosts can present.
@@ -187,7 +193,8 @@ type ArtifactResult struct {
 // Run executes one sync. The registry source is dispatched per §7.5.2: an
 // http(s):// URL reads the caller's effective view over the §7.5 HTTP API; a
 // filesystem path reads the registry directly, applies layer composition
-// with CollisionPolicyHighestWins (per §4.6), and writes the adapter output
+// with CollisionPolicyDrop (§4.6, §13.11.3), recording each dropped artifact
+// on Result.Dropped and materializing the rest, and writes the adapter output
 // to Target. Both paths run the configured HarnessAdapter and the §7.5
 // stale-file cleanup against the same lock file.
 //
@@ -225,7 +232,7 @@ func Run(opts Options) (*Result, error) {
 	// §7.5.2 dispatch: a URL routes to the Podium server, every other value
 	// to the local filesystem registry. The full effective view is resolved
 	// first; scope and toggles narrow it below.
-	all, err := resolveRecords(opts)
+	all, dropped, err := resolveRecords(opts)
 	if err != nil {
 		var unreachable *serverUnreachableError
 		if errors.As(err, &unreachable) {
@@ -258,7 +265,10 @@ func Run(opts Options) (*Result, error) {
 	// §7.5.1 scope + §7.5.5 toggles select the records to materialize.
 	records := selectRecords(opts.Scope, all, toggles)
 
-	res := &Result{Adapter: a.ID(), Target: opts.Target, Profile: opts.Profile, Scope: opts.Scope}
+	// §13.11.3: a drop does not stop the sync. The caller reports each
+	// dropped artifact, and the rest is materialized, stale-file cleanup
+	// runs, and the lock omits the dropped copy.
+	res := &Result{Adapter: a.ID(), Target: opts.Target, Profile: opts.Profile, Scope: opts.Scope, Dropped: dropped}
 
 	allFiles := []adapter.File{}
 	for _, rec := range records {
@@ -465,17 +475,21 @@ func offlineFirstNoop(opts Options, adapterID string) *Result {
 
 // resolveRecords dispatches on the registry source (§7.5.2) and returns the
 // source-neutral records to materialize. A server URL reads the effective
-// view over HTTP; any other value reads the local filesystem registry.
-func resolveRecords(opts Options) ([]materialRecord, error) {
+// view over HTTP; any other value reads the local filesystem registry. The
+// second return lists the artifacts a filesystem-source composition dropped
+// under the §4.6 collision rule. A server source contributes none, because
+// ingest already rejected the colliding artifact (§7.3.1).
+func resolveRecords(opts Options) ([]materialRecord, []layer.Collision, error) {
 	var records []materialRecord
+	var dropped []layer.Collision
 	var err error
 	if isServerSource(opts.RegistryPath) {
 		records, err = fetchServerRecords(context.Background(), opts)
 	} else {
-		records, err = filesystemRecords(opts)
+		records, dropped, err = filesystemRecords(opts)
 	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// §6.4 workspace overlay: records under OverlayPath sit at the highest
 	// precedence for both registry sources. The consumer (podium sync) merges
@@ -484,16 +498,17 @@ func resolveRecords(opts Options) ([]materialRecord, error) {
 	if opts.OverlayPath != "" {
 		records, err = applyOverlay(records, opts.OverlayPath)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
-	return records, nil
+	return records, dropped, nil
 }
 
 // applyOverlay resolves the §6.4 workspace overlay and merges its records on
 // top of base at the source-neutral materialRecord level. An overlay record
 // replaces the same-ID base record (or appends when no base record matches),
-// matching the highest-precedence semantics of §4.6. ErrNoOverlay (the
+// per the §6.4 overlay exception: an overlay record replaces the base record
+// whether or not it declares extends:. ErrNoOverlay (the
 // directory is absent) leaves base unchanged.
 func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, error) {
 	overlayRecords, oerr := overlay.Filesystem{Path: overlayPath}.Resolve(context.Background())
@@ -531,21 +546,27 @@ func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, 
 
 // filesystemRecords reads the filesystem registry and converts the result to
 // source-neutral records. The §6.4 workspace overlay is merged by the caller
-// (resolveRecords) so both registry sources honor it identically.
-func filesystemRecords(opts Options) ([]materialRecord, error) {
+// (resolveRecords) so both registry sources honor it identically. The
+// second return lists the artifacts dropped under the §4.6 collision rule.
+func filesystemRecords(opts Options) ([]materialRecord, []layer.Collision, error) {
 	reg, err := filesystem.Open(opts.RegistryPath)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// spec: §13.11.3 — filesystem source runs the same composer and extends:
 	// resolver as the server so materialization produces equivalent output for
-	// the same artifact directory (the §13.11.6 migration equivalence).
+	// the same artifact directory (the §13.11.6 migration equivalence). Per
+	// §4.6, an unsanctioned cross-layer collision drops the higher-precedence
+	// artifact, which a server would have rejected at ingest, and the walk
+	// continues with the rest.
+	var dropped []layer.Collision
 	records, err := reg.Walk(filesystem.WalkOptions{
-		CollisionPolicy: filesystem.CollisionPolicyHighestWins,
+		CollisionPolicy: filesystem.CollisionPolicyDrop,
+		OnCollision:     func(c layer.Collision) { dropped = append(dropped, c) },
 		ResolveExtends:  true,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	out := make([]materialRecord, 0, len(records))
@@ -560,7 +581,7 @@ func filesystemRecords(opts Options) ([]materialRecord, error) {
 			Resources:     rec.Resources,
 		})
 	}
-	return out, nil
+	return out, dropped, nil
 }
 
 // lockMergeKinds returns the materialized paths recorded in a lock, each

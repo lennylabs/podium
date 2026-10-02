@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	podsync "github.com/lennylabs/podium/pkg/sync"
 )
 
 // ---- fixtures ---------------------------------------------------------------
@@ -908,7 +909,7 @@ func TestFilesystemSync_LayerOrderExtraLayersAppendedAlphabetically(t *testing.T
 }
 
 // Same artifact ID in two layers raises ingest.collision via lint
-// (lint uses CollisionPolicyDefault; sync uses CollisionPolicyHighestWins).
+// (lint uses CollisionPolicyDefault; sync uses CollisionPolicyDrop).
 func TestFilesystemSync_CollisionRaisedByLint(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -926,23 +927,231 @@ func TestFilesystemSync_CollisionRaisedByLint(t *testing.T) {
 	}
 }
 
-// sync with CollisionPolicyHighestWins: later layer in layer_order wins.
-func TestFilesystemSync_CollisionHighestWinsLaterLayerWins(t *testing.T) {
-	t.Parallel()
-	reg := writeRegistry(t, map[string]string{
+// collidingSyncRegistry writes a two-layer filesystem registry in which
+// override-layer contributes shared/note without extends:, colliding with
+// base-layer's copy, plus a non-colliding base-layer/shared/other.
+func collidingSyncRegistry(t *testing.T) string {
+	t.Helper()
+	return writeRegistry(t, map[string]string{
 		".registry-config":                       solofsRegistryConfig("base-layer", "override-layer"),
 		"base-layer/shared/note/ARTIFACT.md":     "---\ntype: context\nversion: 1.0.0\ndescription: from-base\n---\n\nfrom-base body.\n",
+		"base-layer/shared/other/ARTIFACT.md":    contextArtifact("other"),
 		"override-layer/shared/note/ARTIFACT.md": "---\ntype: context\nversion: 1.1.0\ndescription: from-override\n---\n\nfrom-override body.\n",
 	})
-	target := t.TempDir()
-	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
-	if res.Exit != 0 {
-		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+}
+
+// collisionRejectedLine is the standard-error line a filesystem-source sync
+// prints for the dropped override-layer/shared/note.
+const collisionRejectedLine = "rejected: shared/note (ingest.collision): cross-layer collision"
+
+// assertCollisionReported checks the rejected line and the extends: remedy on
+// standard error.
+func assertCollisionReported(t *testing.T, res cliResult) {
+	t.Helper()
+	if !strings.Contains(res.Stderr, collisionRejectedLine) {
+		t.Errorf("stderr missing %q:\n%s", collisionRejectedLine, res.Stderr)
 	}
+	if !strings.Contains(res.Stderr, "declare extends: shared/note") {
+		t.Errorf("stderr missing the extends: remedy:\n%s", res.Stderr)
+	}
+}
+
+// assertLowerCopyMaterialized checks that target holds base-layer's
+// shared/note and the non-colliding shared/other.
+func assertLowerCopyMaterialized(t *testing.T, target string) {
+	t.Helper()
 	got := readFile(t, filepath.Join(target, "shared", "note", "ARTIFACT.md"))
-	if !strings.Contains(got, "from-override") {
-		t.Errorf("later layer should win; got:\n%s", got)
+	if !strings.Contains(got, "from-base") || strings.Contains(got, "from-override") {
+		t.Errorf("shared/note should hold the lower layer's copy; got:\n%s", got)
 	}
+	mustExist(t, filepath.Join(target, "shared", "other", "ARTIFACT.md"))
+}
+
+// A filesystem-source sync drops the higher-precedence copy of an artifact
+// two layers contribute without extends:, reports it on standard error,
+// materializes the rest, and exits 1.
+//
+// Spec: §13.11.3
+// Matrix: §6.10 (ingest.collision)
+func TestFilesystemSync_CollisionDropsHigherLayer(t *testing.T) {
+	t.Parallel()
+	reg := collidingSyncRegistry(t)
+
+	t.Run("one-shot", func(t *testing.T) {
+		t.Parallel()
+		target := t.TempDir()
+		res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
+		if res.Exit != 1 {
+			t.Fatalf("sync exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
+		}
+		assertCollisionReported(t, res)
+		assertLowerCopyMaterialized(t, target)
+		lock := readFile(t, filepath.Join(target, ".podium", "sync.lock"))
+		for _, want := range []string{"shared/note", "shared/other"} {
+			if !strings.Contains(lock, want) {
+				t.Errorf("lock missing %q:\n%s", want, lock)
+			}
+		}
+		if strings.Contains(lock, "override-layer") {
+			t.Errorf("lock records the dropped override-layer copy:\n%s", lock)
+		}
+	})
+
+	t.Run("dry-run", func(t *testing.T) {
+		t.Parallel()
+		target := t.TempDir()
+		res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none", "--dry-run")
+		if res.Exit != 1 {
+			t.Fatalf("sync --dry-run exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
+		}
+		assertCollisionReported(t, res)
+		if entries, _ := os.ReadDir(target); len(entries) != 0 {
+			t.Errorf("--dry-run wrote into the target: %v", entries)
+		}
+	})
+
+	t.Run("json", func(t *testing.T) {
+		t.Parallel()
+		target := t.TempDir()
+		res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none", "--json")
+		if res.Exit != 1 {
+			t.Fatalf("sync --json exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
+		}
+		var envelope map[string]any
+		if err := json.Unmarshal([]byte(res.Stdout), &envelope); err != nil {
+			t.Errorf("stdout is not the JSON envelope: %v\n%s", err, res.Stdout)
+		}
+		if strings.Contains(res.Stdout, "rejected:") {
+			t.Errorf("rejected line leaked into stdout:\n%s", res.Stdout)
+		}
+		assertCollisionReported(t, res)
+	})
+
+	t.Run("config workspace target", func(t *testing.T) {
+		t.Parallel()
+		ws := t.TempDir()
+		target := filepath.Join(ws, "out")
+		cfg := writeCollisionWorkspaceConfig(t, ws, reg, target)
+		res := runPodium(t, "", nil, "sync", "--config", cfg)
+		if res.Exit != 1 {
+			t.Fatalf("sync --config exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
+		}
+		assertCollisionReported(t, res)
+		if !strings.Contains(res.Stderr, "target collide-ws:") {
+			t.Errorf("stderr missing the target failure line:\n%s", res.Stderr)
+		}
+		assertLowerCopyMaterialized(t, target)
+	})
+
+	t.Run("config check", func(t *testing.T) {
+		t.Parallel()
+		ws := t.TempDir()
+		target := filepath.Join(ws, "out")
+		cfg := writeCollisionWorkspaceConfig(t, ws, reg, target)
+		res := runPodium(t, "", nil, "sync", "--config", cfg, "--check")
+		if res.Exit != 1 {
+			t.Fatalf("sync --config --check exit=%d, want 1\nstderr=%s", res.Exit, res.Stderr)
+		}
+		assertCollisionReported(t, res)
+		if _, err := os.Stat(target); !os.IsNotExist(err) {
+			t.Errorf("--check wrote the target (stat err=%v)", err)
+		}
+	})
+
+	t.Run("check without config", func(t *testing.T) {
+		t.Parallel()
+		ws := t.TempDir()
+		writeWorkspaceConfig(t, ws, "defaults:\n  registry: "+reg+"\n")
+		res := runPodium(t, ws, withIsolatedHome(nil, t.TempDir()), "sync", "--check")
+		if res.Exit != 0 {
+			t.Fatalf("sync --check exit=%d, want 0\nstderr=%s", res.Exit, res.Stderr)
+		}
+		if strings.Contains(res.Stderr, "rejected:") {
+			t.Errorf("sync --check composed the layers and reported a drop:\n%s", res.Stderr)
+		}
+	})
+
+	t.Run("watch", func(t *testing.T) {
+		t.Parallel()
+		target := t.TempDir()
+		w := startWatch(t, reg, target, "none")
+		// Wait on the rejected line rather than the materialized file: the file
+		// exists before the watcher emits the cycle's event, so an interrupt sent
+		// then could discard the event, and the watcher would exit 0.
+		if !pollLog(w, "rejected: shared/note (ingest.collision):", 10*time.Second) {
+			t.Fatalf("watch did not report the drop\nlog:\n%s", w.log())
+		}
+		if code := w.stop(t); code != 1 {
+			t.Errorf("watch exit=%d on SIGINT after a drop, want 1\nlog:\n%s", code, w.log())
+		}
+	})
+
+	t.Run("override add", func(t *testing.T) {
+		t.Parallel()
+		target := t.TempDir()
+		// Scope the first sync to shared/note so shared/other is outside the
+		// materialized set; --add of a materialized ID is a §7.5.5 no-op.
+		first := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none", "--include", "shared/note")
+		if first.Exit != 1 {
+			t.Fatalf("first sync exit=%d, want 1\nstderr=%s", first.Exit, first.Stderr)
+		}
+		res := runPodium(t, "", nil, "sync", "override", "--target", target, "--add", "shared/other", "--registry", reg, "--harness", "none")
+		if res.Exit != 1 {
+			t.Fatalf("override exit=%d, want 1\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
+		}
+		assertCollisionReported(t, res)
+		assertLowerCopyMaterialized(t, target)
+		lock, err := podsync.ReadLock(target)
+		if err != nil || lock == nil {
+			t.Fatalf("read lock: %v", err)
+		}
+		if len(lock.Toggles.Add) != 1 || lock.Toggles.Add[0].ID != "shared/other" {
+			t.Errorf("lock toggles.add = %+v, want [shared/other]", lock.Toggles.Add)
+		}
+	})
+
+	t.Run("override add dry-run", func(t *testing.T) {
+		t.Parallel()
+		target := t.TempDir()
+		first := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none", "--include", "shared/note")
+		if first.Exit != 1 {
+			t.Fatalf("first sync exit=%d, want 1\nstderr=%s", first.Exit, first.Stderr)
+		}
+		res := runPodium(t, "", nil, "sync", "override", "--target", target, "--add", "shared/other", "--registry", reg, "--harness", "none", "--dry-run")
+		if res.Exit != 0 {
+			t.Fatalf("override --dry-run exit=%d, want 0\nstderr=%s", res.Exit, res.Stderr)
+		}
+		if strings.Contains(res.Stderr, "rejected:") {
+			t.Errorf("override --dry-run reported a drop:\n%s", res.Stderr)
+		}
+	})
+}
+
+// writeCollisionWorkspaceConfig writes a sync.yaml with one kind: workspace
+// target, collide-ws, that materializes registry into target with the none
+// harness.
+func writeCollisionWorkspaceConfig(t *testing.T, ws, registry, target string) string {
+	t.Helper()
+	return writeWorkspaceConfig(t, ws, ""+
+		"defaults:\n"+
+		"  registry: "+registry+"\n"+
+		"targets:\n"+
+		"  - id: collide-ws\n"+
+		"    kind: workspace\n"+
+		"    harness: none\n"+
+		"    target: "+target+"\n")
+}
+
+// pollLog reports whether the watch log contains needle within the deadline.
+func pollLog(w *watchProc, needle string, within time.Duration) bool {
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if strings.Contains(w.log(), needle) {
+			return true
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return false
 }
 
 // DOMAIN.md files at layer root are not treated as artifacts.
