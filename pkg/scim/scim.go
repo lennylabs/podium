@@ -10,7 +10,7 @@
 //   - Users: id, externalId, userName, emails, active.
 //   - Groups: id, displayName, members.
 //   - Filter expressions: eq, sw, co on userName / displayName.
-//   - Bearer token auth via PODIUM_SCIM_TOKEN.
+//   - Bearer token auth via PODIUM_SCIM_TOKENS.
 //
 // Operations not shipped (return SCIM-conformant errors):
 //
