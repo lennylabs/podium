@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/testharness/cmdharness"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // ---- fixtures + helpers -----------------------------------------------------
@@ -1363,7 +1364,9 @@ func TestHarness_SyncIdempotent(t *testing.T) {
 	}
 }
 
-// PODIUM_OVERLAY_PATH overrides the registry for load_artifact.
+// PODIUM_OVERLAY_PATH overrides the registry for load_artifact. Spec: §6.4 —
+// the overlay is the exception to the §4.6 collision rule, so the replacement
+// needs no extends:.
 func TestHarness_MCPOverlayOverridesRegistry(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -1380,6 +1383,39 @@ func TestHarness_MCPOverlayOverridesRegistry(t *testing.T) {
 	fm, _ := result["frontmatter"].(string)
 	if !strings.Contains(body+fm, "OVERLAY V2") && !strings.Contains(fm, "2.0.0") {
 		t.Errorf("overlay did not take precedence; body=%q frontmatter=%q", body, fm)
+	}
+}
+
+// Spec: §6.4, §11 — an overlay artifact that declares extends: on the
+// registry-side ID replaces that artifact wholesale through podium-mcp. The
+// consumer resolves no extends: chain for an overlay artifact, so load_artifact
+// returns the overlay's own body and frontmatter without an error.
+func TestHarness_MCPOverlayWithExtendsReplaces(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"my-rule/ARTIFACT.md": "---\ntype: rule\nversion: 1.0.0\nrule_mode: always\ndescription: base\n---\n\nREGISTRY V1 body.\n",
+	})
+	overlayManifest := "---\ntype: rule\nversion: 2.0.0\nrule_mode: always\ndescription: overlay\nextends: my-rule\n---\n\nOVERLAY V2 body.\n"
+	overlay := writeRegistry(t, map[string]string{"my-rule/ARTIFACT.md": overlayManifest})
+	mat := t.TempDir()
+	res := mcpExec(t, chMCPEnv(t, reg, "PODIUM_HARNESS=none", "PODIUM_OVERLAY_PATH="+overlay, "PODIUM_MATERIALIZE_ROOT="+mat),
+		toolCall(1, "load_artifact", map[string]any{"id": "my-rule"}))
+	result := rpcResult(t, res.Stdout, 1)
+	if isErr, _ := result["isError"].(bool); isErr {
+		t.Fatalf("load_artifact returned an error result: %v", result)
+	}
+	body, _ := result["manifest_body"].(string)
+	if !strings.Contains(body, "OVERLAY V2 body.") || strings.Contains(body, "REGISTRY V1") {
+		t.Errorf("manifest_body = %q, want the overlay body only", body)
+	}
+	// The overlay load result carries the frontmatter through its derived
+	// fields: the overlay's version, the overlay layer, and the §4.7.6 digest
+	// over the overlay's own authored ARTIFACT.md, extends: line included.
+	if result["version"] != "2.0.0" || result["layer"] != "overlay" {
+		t.Errorf("version=%v layer=%v, want 2.0.0 from the overlay layer", result["version"], result["layer"])
+	}
+	if want := "sha256:" + version.CanonicalContentHash([]byte(overlayManifest), nil, nil); result["content_hash"] != want {
+		t.Errorf("content_hash = %v, want %v (the overlay's authored bytes)", result["content_hash"], want)
 	}
 }
 
