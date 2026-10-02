@@ -183,7 +183,7 @@ func TestRender_AssignmentByDeclarationOrder(t *testing.T) {
 	t.Parallel()
 	reg := renderFixtureRegistry(t)
 
-	records, err := FetchRecords(Options{RegistryPath: reg})
+	records, _, err := FetchRecords(Options{RegistryPath: reg})
 	if err != nil {
 		t.Fatalf("fetch records: %v", err)
 	}

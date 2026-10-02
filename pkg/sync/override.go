@@ -8,6 +8,7 @@ import (
 
 	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/layer"
 )
 
 // Errors related to override / save-as / profile edit.
@@ -55,6 +56,10 @@ type OverrideResult struct {
 	Lock     *LockFile
 	Changed  bool
 	Warnings []string
+	// Dropped lists the artifacts the re-materialization dropped under the
+	// §4.6 collision rule (§13.11.3); empty under DryRun, without a
+	// RegistryPath, and for a server source.
+	Dropped []layer.Collision
 }
 
 // Override applies the §7.5.5 toggle semantics to the lock file at
@@ -143,8 +148,9 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 	// Re-materialize the target from the lock's scope + the updated toggles
 	// so the on-disk set matches. PreserveToggles keeps the toggles we just
 	// wrote and rewrites the lock with the new materialized paths.
+	var dropped []layer.Collision
 	if !opts.DryRun && opts.RegistryPath != "" {
-		if _, err := Run(Options{
+		res, err := Run(Options{
 			RegistryPath:    opts.RegistryPath,
 			Target:          opts.Target,
 			AdapterID:       opts.AdapterID,
@@ -161,16 +167,20 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 			// spec: §7.5.3 — override-driven lock writes stamp
 			// last_synced_by: override.
 			LastSyncedBy: "override",
-		}); err != nil {
+		})
+		if err != nil {
 			return nil, fmt.Errorf("override: materialize: %w", err)
 		}
+		// The toggles and the lock are already written, so a drop does not
+		// roll the override back; the caller reports it (§13.11.3).
+		dropped = res.Dropped
 		// Reflect the rewritten lock (materialized paths, last_synced_at) in
 		// the returned state.
 		if reread, rerr := ReadLock(opts.Target); rerr == nil && reread != nil {
 			lock = reread
 		}
 	}
-	return &OverrideResult{Lock: lock, Changed: changed, Warnings: warnings}, nil
+	return &OverrideResult{Lock: lock, Changed: changed, Warnings: warnings, Dropped: dropped}, nil
 }
 
 // alreadyAdded reports whether id appears in the toggle list.

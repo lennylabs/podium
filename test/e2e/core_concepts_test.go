@@ -152,19 +152,24 @@ func TestCoreConcept_FilesystemVsStandaloneEquivalent(t *testing.T) {
 	t.Skip("blocked by a known gap: the server-source sync path is unimplemented, so the filesystem-vs-server content comparison cannot run")
 }
 
-// a higher-precedence layer overrides a lower one on collision.
+// a higher-precedence layer that declares extends: on the colliding ID
+// overrides the lower one through the §4.6 merge, and the sync exits 0.
 func TestCoreConcept_LayerPrecedenceOverride(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
-		".registry-config":                       "multi_layer: true\nlayer_order: [low-layer, high-layer]\n",
-		"low-layer/shared/glossary/ARTIFACT.md":  contextArtifact("low-description"),
-		"high-layer/shared/glossary/ARTIFACT.md": contextArtifact("high-description"),
+		".registry-config":                      "multi_layer: true\nlayer_order: [low-layer, high-layer]\n",
+		"low-layer/shared/glossary/ARTIFACT.md": contextArtifact("low-description"),
+		"high-layer/shared/glossary/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nextends: shared/glossary\n" +
+			"description: high-description\n---\n\nhigh-description body.\n",
 	})
 	tgt := t.TempDir()
-	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
+	if res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
 	got := readFile(t, filepath.Join(tgt, "shared/glossary/ARTIFACT.md"))
-	if !strings.Contains(got, "high-description") || strings.Contains(got, "low-description") {
-		t.Errorf("higher-precedence layer did not win:\n%s", got)
+	if !strings.Contains(got, "description: high-description") || strings.Contains(got, "description: low-description") {
+		t.Errorf("higher-precedence layer did not win through the merge:\n%s", got)
 	}
 }
 
@@ -185,18 +190,23 @@ func TestCoreConcept_OverlayHighestPrecedence(t *testing.T) {
 	}
 }
 
-// layer ordering defaults to alphabetical by subdirectory.
+// layer ordering defaults to alphabetical by subdirectory, so b-layer's
+// extends: child merges over a-layer's copy.
 func TestCoreConcept_LayerOrderAlphabeticalDefault(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		".registry-config":                "multi_layer: true\n",
 		"a-layer/shared/item/ARTIFACT.md": contextArtifact("from-a"),
-		"b-layer/shared/item/ARTIFACT.md": contextArtifact("from-b"),
+		"b-layer/shared/item/ARTIFACT.md": "---\ntype: context\nversion: 1.0.0\nextends: shared/item\n" +
+			"description: from-b\n---\n\nfrom-b body.\n",
 	})
 	tgt := t.TempDir()
-	runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none")
+	if res.Exit != 0 {
+		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
 	got := readFile(t, filepath.Join(tgt, "shared/item/ARTIFACT.md"))
-	if !strings.Contains(got, "from-b") {
+	if !strings.Contains(got, "description: from-b") {
 		t.Errorf("alphabetically-later layer did not win:\n%s", got)
 	}
 }

@@ -336,6 +336,10 @@ func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun
 	}
 	fmt.Printf("toggles.add:    %s\n", formatToggles(ovr.Lock.Toggles.Add))
 	fmt.Printf("toggles.remove: %s\n", formatToggles(ovr.Lock.Toggles.Remove))
+	// Spec: §13.11.3 — the re-materialization's drops are reported and exit 1.
+	if reportDropped(os.Stderr, ovr.Dropped) {
+		return 1
+	}
 	return 0
 }
 
