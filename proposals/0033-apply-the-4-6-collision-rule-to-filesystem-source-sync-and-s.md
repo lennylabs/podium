@@ -1,7 +1,7 @@
 # Proposal 0033: Apply the §4.6 collision rule to filesystem-source sync and state the workspace overlay exception
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-01). Signed off as staged, including the wholesale overlay replacement for an overlay artifact that declares `extends:`. OQ-1: keep the staged default (the workflow publishes the materialized output, then the target counts as failed).
+- Status: Applied to spec (2026-10-01). Signed off as staged, including the wholesale overlay replacement for an overlay artifact that declares `extends:`. OQ-1: keep the staged default (the workflow publishes the materialized output, then the target counts as failed).
 - Date: 2026-10-01
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
