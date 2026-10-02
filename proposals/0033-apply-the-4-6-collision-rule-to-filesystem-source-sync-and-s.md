@@ -1,7 +1,7 @@
 # Proposal 0033: Apply the §4.6 collision rule to filesystem-source sync and state the workspace overlay exception
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-01). Signed off as staged, including the wholesale overlay replacement for an overlay artifact that declares `extends:`. OQ-1: keep the staged default (the workflow publishes the materialized output, then the target counts as failed).
+- Status: Implemented (2026-10-01). Signed off as staged, including the wholesale overlay replacement for an overlay artifact that declares `extends:`. OQ-1: keep the staged default (the workflow publishes the materialized output, then the target counts as failed).
 - Date: 2026-10-01
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -47,39 +47,39 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-4. §7.3.1 defines `ingest.collision` in the Errors list and names it in the Ingest outcome.
+- [x] **S1 · spec** — SPEC-4. §7.3.1 defines `ingest.collision` in the Errors list and names it in the Ingest outcome.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-3. §6.4 replaces "merge semantics are identical to registry-side layers" with the overlay exception.
+- [x] **S2 · spec** — SPEC-3. §6.4 replaces "merge semantics are identical to registry-side layers" with the overlay exception.
       Levels: —. Depends on: —
-- [ ] **S3 · spec** — SPEC-5. §13.11.3 states the filesystem-source collision outcome, report, continuation, and exit status, and §13.11.4 states the watch-mode report and exit status.
+- [x] **S3 · spec** — SPEC-5. §13.11.3 states the filesystem-source collision outcome, report, continuation, and exit status, and §13.11.4 states the watch-mode report and exit status.
       Levels: —. Depends on: S1, S2
-- [ ] **S4 · spec** — SPEC-2. §4.6 states the collision rule for registry-side layers on every composition path, names `ingest.collision`, and narrows "Silent shadowing is never permitted".
+- [x] **S4 · spec** — SPEC-2. §4.6 states the collision rule for registry-side layers on every composition path, names `ingest.collision`, and narrows "Silent shadowing is never permitted".
       Levels: —. Depends on: S1, S2, S3
-- [ ] **S5 · spec** — SPEC-1. §1 restricts "no silent shadowing" to registry-side layers and names the §6.4 exception.
+- [x] **S5 · spec** — SPEC-1. §1 restricts "no silent shadowing" to registry-side layers and names the §6.4 exception.
       Levels: —. Depends on: S2
-- [ ] **S6 · spec** — SPEC-6. §11 overlay precedence test covers an overlay `extends:`, and the equivalence test gains the collision case.
+- [x] **S6 · spec** — SPEC-6. §11 overlay precedence test covers an overlay `extends:`, and the equivalence test gains the collision case.
       Levels: —. Depends on: S2, S3, S4
-- [ ] **S7 · code** — CODE-1. `pkg/layer/collision.go` and `version.StripPin` land, and ingest, the filesystem walk, and lint call them.
+- [x] **S7 · code** — CODE-1. `pkg/layer/collision.go` and `version.StripPin` land, and ingest, the filesystem walk, and lint call them.
       Levels: unit, integration. Depends on: S1, S4
-- [ ] **S8 · code** — CODE-2. `filesystem.Walk` gains `CollisionPolicyDrop` and `WalkOptions.OnCollision`.
+- [x] **S8 · code** — CODE-2. `filesystem.Walk` gains `CollisionPolicyDrop` and `WalkOptions.OnCollision`.
       Levels: unit. Depends on: S7
-- [ ] **S9 · test** — TEST-1. Unit tests for the shared collision helpers and the drop policy.
+- [x] **S9 · test** — TEST-1. Unit tests for the shared collision helpers and the drop policy.
       Levels: unit. Depends on: S7, S8
-- [ ] **S10 · code** — CODE-3, CODE-4, TEST-3. `pkg/sync` switches filesystem sync to the drop policy and carries the drops on `Result`, `RenderResult`, and `OverrideResult`, the CLI reports them and exits 1, the existing `pkg/sync` tests named in CODE-3 are updated, and the end-to-end tests that pin highest-wins are replaced. Bundled because the existing unit and end-to-end tests fail as soon as CODE-3 changes the kept copy and the signatures, and their replacements assert the CODE-4 exit status.
+- [x] **S10 · code** — CODE-3, CODE-4, TEST-3. `pkg/sync` switches filesystem sync to the drop policy and carries the drops on `Result`, `RenderResult`, and `OverrideResult`, the CLI reports them and exits 1, the existing `pkg/sync` tests named in CODE-3 are updated, and the end-to-end tests that pin highest-wins are replaced. Bundled because the existing unit and end-to-end tests fail as soon as CODE-3 changes the kept copy and the signatures, and their replacements assert the CODE-4 exit status.
       Levels: unit, integration, e2e. Depends on: S3, S8
-- [ ] **S11 · test** — TEST-2. `pkg/sync` collision tests for materialization, the lock, dry-run, and recovery.
+- [x] **S11 · test** — TEST-2. `pkg/sync` collision tests for materialization, the lock, dry-run, and recovery.
       Levels: integration. Depends on: S10
-- [ ] **S12 · test** — TEST-4. The §11 equivalence test gains the collision case.
+- [x] **S12 · test** — TEST-4. The §11 equivalence test gains the collision case.
       Levels: integration, materialization. Depends on: S6, S10
-- [ ] **S13 · code** — CODE-5. The `layer.Compose` and companion test comments stop claiming highest-wins is the §4.6 effective view.
+- [x] **S13 · code** — CODE-5. The `layer.Compose` and companion test comments stop claiming highest-wins is the §4.6 effective view.
       Levels: unit. Depends on: S4
-- [ ] **S14 · test** — TEST-5. Overlay exception tests: a sync unit case and an MCP end-to-end case for an overlay artifact declaring `extends:`, and exception comments on the existing overlay tests.
+- [x] **S14 · test** — TEST-5. Overlay exception tests: a sync unit case and an MCP end-to-end case for an overlay artifact declaring `extends:`, and exception comments on the existing overlay tests.
       Levels: unit, e2e. Depends on: S2, S10
-- [ ] **S15 · docs** — DOC-1. Layers, extends, why-podium, local deployment, error codes, and the `podium sync` and `podium sync override` CLI reference follow the spec.
+- [x] **S15 · docs** — DOC-1. Layers, extends, why-podium, local deployment, error codes, and the `podium sync` and `podium sync override` CLI reference follow the spec.
       Levels: —. Depends on: S10
-- [ ] **S16 · docs** — CL-1. The `## [Unreleased]` `### Changed` entry for the filesystem-sync break.
+- [x] **S16 · docs** — CL-1. The `## [Unreleased]` `### Changed` entry for the filesystem-sync break.
       Levels: —. Depends on: S10
-- [ ] **S17 · docs** — MV-1. Manual-validation scenario S77 for the filesystem-sync drop and the overlay exception.
+- [x] **S17 · docs** — MV-1. Manual-validation scenario S77 for the filesystem-sync drop and the overlay exception.
       Levels: manual. Depends on: S10
 
 **Ordering constraints.** The spec steps are ordered so that no edit cites text a later step adds. S1 defines `ingest.collision`, which S3, S4, and S6 name. S2 states the §6.4 exception, which S3, S4, S5, and S6 cite. S3 states the §13.11.3 filesystem-source drop, which the S4 rejection bullet cites. S6 restates S2, S3, and S4. Each code, test, and docs step follows the spec step whose text it implements or cites.
