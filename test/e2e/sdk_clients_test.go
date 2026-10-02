@@ -425,7 +425,7 @@ func TestSDK_PyBulkVisibilityDenied(t *testing.T) {
 // Python subscribe yields events.
 func TestSDK_PySubscribe(t *testing.T) {
 	t.Parallel()
-	t.Skip("subscription e2e requires a publish trigger and a bounded SSE read; not implemented as a stable gate")
+	t.Skip("subscription e2e requires a publish trigger and a bounded read of the NDJSON event stream; not implemented as a stable gate")
 }
 
 // Python subscribe accepts the documented positional
@@ -562,7 +562,7 @@ func TestSDK_TSDependentsOf(t *testing.T) {
 // TypeScript subscribe yields NDJSON events.
 func TestSDK_TSSubscribe(t *testing.T) {
 	t.Parallel()
-	t.Skip("subscription e2e requires a publish trigger and a bounded SSE read; not implemented as a stable gate")
+	t.Skip("subscription e2e requires a publish trigger and a bounded read of the NDJSON event stream; not implemented as a stable gate")
 }
 
 // injected-session-token is accepted as a constructor param.
