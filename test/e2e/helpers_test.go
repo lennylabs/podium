@@ -97,6 +97,13 @@ func mergeEnv(extra ...string) []string {
 			strings.HasPrefix(kv, "PODIUM_SESSION_TOKEN") {
 			continue
 		}
+		// An inherited PODIUM_BIND moves a `serve` subprocess off the address
+		// the test chose, because the environment variable outranks the
+		// registry.yaml bind key. A test that asserts on the bind passes it
+		// explicitly in `extra`.
+		if strings.HasPrefix(kv, "PODIUM_BIND=") {
+			continue
+		}
 		out = append(out, kv)
 	}
 	// Suppress the login browser auto-open for every CLI subprocess unless the
@@ -285,6 +292,11 @@ type serverProc struct {
 	Home    string
 	logPath string
 	cmd     *exec.Cmd
+	// exited is closed once the server process has exited. The readiness
+	// loops read it to fail as soon as a server dies at startup; ProcessState
+	// stays nil until something reaps the process, so checking it there never
+	// fired and a crashed boot cost the whole readiness deadline.
+	exited <-chan struct{}
 	// adminToken is a minted admin Bearer token for the server, set by the
 	// webhook-admin boot helpers so the admin-gated receiver CRUD helpers can
 	// authenticate. Empty when the server boots without an identity provider.
@@ -354,7 +366,7 @@ func awaitBoundAddr(t testing.TB, s *serverProc) string {
 		if m := listeningAddr.FindStringSubmatch(s.log()); m != nil {
 			return m[1]
 		}
-		if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
+		if s.hasExited() {
 			t.Fatalf("server exited before it reported a bound address\nlog:\n%s", s.log())
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -405,7 +417,7 @@ func launchServer(t testing.TB, env []string, args ...string) *serverProc {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	s := &serverProc{logPath: logf.Name(), cmd: cmd}
+	s := &serverProc{logPath: logf.Name(), cmd: cmd, exited: reapOnExit(cmd)}
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "HOME=") {
 			s.Home = strings.TrimPrefix(kv, "HOME=")
@@ -423,7 +435,7 @@ func launchServer(t testing.TB, env []string, args ...string) *serverProc {
 				return s
 			}
 		}
-		if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
+		if s.hasExited() {
 			t.Fatalf("server exited before ready\nlog:\n%s", s.log())
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -456,6 +468,30 @@ func startServerUnsigned(t testing.TB, registry string) *serverProc {
 }
 
 // stopProc asks the process to stop, then force-kills if it lingers.
+// reapOnExit waits for cmd in the background and returns a channel that is
+// closed once the process has exited. cmd must already be started. stopProc
+// still signals and waits on the process; when this goroutine reaps it first,
+// stopProc's own wait returns at once, so the two do not conflict.
+func reapOnExit(cmd *exec.Cmd) <-chan struct{} {
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	return done
+}
+
+// hasExited reports whether the server process has exited. A serverProc built
+// without reapOnExit never reports an exit.
+func (s *serverProc) hasExited() bool {
+	if s.exited == nil {
+		return false
+	}
+	select {
+	case <-s.exited:
+		return true
+	default:
+		return false
+	}
+}
+
 func stopProc(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return

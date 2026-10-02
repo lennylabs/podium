@@ -114,7 +114,7 @@ func startZeroFlagServer(t *testing.T, extraEnv ...string) *serverProc {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start zero-flag server: %v", err)
 	}
-	s := &serverProc{BaseURL: "http://127.0.0.1:8080", Home: home, logPath: logf.Name(), cmd: cmd}
+	s := &serverProc{BaseURL: "http://127.0.0.1:8080", Home: home, logPath: logf.Name(), cmd: cmd, exited: reapOnExit(cmd)}
 	t.Cleanup(func() { stopProc(s.cmd) })
 
 	deadline := time.Now().Add(25 * time.Second)
@@ -126,7 +126,7 @@ func startZeroFlagServer(t *testing.T, extraEnv ...string) *serverProc {
 				return s
 			}
 		}
-		if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
+		if s.hasExited() {
 			t.Fatalf("zero-flag server exited before ready\nlog:\n%s", s.log())
 		}
 		time.Sleep(100 * time.Millisecond)
