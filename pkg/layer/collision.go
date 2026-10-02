@@ -21,6 +21,11 @@ const CollisionCode = "ingest.collision"
 type Collision struct {
 	// ArtifactID is the canonical ID two registry-side layers contribute.
 	ArtifactID string
+	// Layer is the layer whose contribution was dropped. Reason omits it.
+	Layer string
+	// ExistingLayer is the layer whose contribution was kept. Reason omits
+	// it, because it can name a layer the caller is not entitled to see.
+	ExistingLayer string
 }
 
 // Reason returns the human-readable rejection text. It names the artifact

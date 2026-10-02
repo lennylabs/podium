@@ -42,15 +42,17 @@ func (r *ArtifactRecord) CanonicalID() string { return r.ID }
 // stable order: layer order first, alphabetical canonical-ID within each
 // layer.
 //
-// Per §4.6, when two layers contribute the same canonical ID
-// without extends:, ingest is rejected. WalkOptions let callers
-// either return an error on collision (the spec default) or pick
-// the highest-precedence-wins behavior (used by sync's
-// effective-view composition).
+// Per §4.6, two layers that contribute the same canonical ID collide
+// unless the higher-precedence artifact declares extends: on the ID.
+// WalkOptions.CollisionPolicy selects the outcome of an unsanctioned
+// collision: an ingest.collision error (the default), a drop reported
+// through OnCollision (filesystem-source sync, §13.11.3), or
+// highest-precedence-wins (the workspace overlay's walk of its own
+// directory, §6.4).
 func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
-	collisionError := opts.CollisionPolicy == CollisionPolicyDefault ||
-		opts.CollisionPolicy == CollisionPolicyError
-
+	if opts.CollisionPolicy == CollisionPolicyDrop && opts.OnCollision == nil {
+		return nil, errors.New("filesystem: CollisionPolicyDrop requires OnCollision")
+	}
 	all := []ArtifactRecord{}
 	for _, layer := range r.Layers {
 		records, err := walkLayer(layer)
@@ -60,41 +62,66 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 		all = append(all, records...)
 	}
 
-	// Detect collisions while preserving the layer order.
-	byID := map[string]int{}
-	deduped := make([]ArtifactRecord, 0, len(all))
-	for _, rec := range all {
-		idx, seen := byID[rec.ID]
-		if !seen {
-			byID[rec.ID] = len(deduped)
-			deduped = append(deduped, rec)
-			continue
-		}
-		// spec: §4.6 — "A collision is rejected at ingest unless the
-		// higher-precedence artifact declares extends: <lower-precedence-id>."
-		// rec is the higher-precedence record (later layers override
-		// earlier), so the collision is permitted when its extends:
-		// resolves to the colliding canonical ID; the extends merge is
-		// applied later at read time. A collision without that declaration
-		// is a forbidden silent shadow.
-		if collisionError && !layer.ExtendsOverlays(extendsOf(rec), rec.ID) {
-			return nil, fmt.Errorf("%s: artifact %q present in layers %q and %q",
-				layer.CollisionCode, rec.ID, deduped[idx].Layer.ID, rec.Layer.ID)
-		}
-		// Highest-precedence wins; later layers override earlier.
-		deduped[idx] = rec
+	deduped, kept, err := dedupe(all, opts)
+	if err != nil {
+		return nil, err
 	}
 
 	// spec: §13.11.3 — filesystem source resolves extends: through the same
 	// merge the registry applies at load time, so materialization produces
 	// equivalent output for the same artifact directory. Callers that want
-	// raw layer records (lint, conformance) leave ResolveExtends false.
+	// raw layer records (lint, conformance) leave ResolveExtends false. The
+	// resolver reads kept rather than all, so a dropped record never serves
+	// as a same-ID or different-ID parent.
 	if opts.ResolveExtends {
-		if err := resolveExtends(deduped, all); err != nil {
+		if err := resolveExtends(deduped, kept); err != nil {
 			return nil, err
 		}
 	}
 	return deduped, nil
+}
+
+// dedupe applies the §4.6 collision rule to all, which is in layer order.
+// It returns one record per canonical ID (deduped) and every record that
+// was not dropped, in layer order (kept). Under CollisionPolicyError and
+// CollisionPolicyHighestWins, kept equals all.
+//
+// Spec: §4.6, §13.11.3
+func dedupe(all []ArtifactRecord, opts WalkOptions) (deduped, kept []ArtifactRecord, err error) {
+	collisionError := opts.CollisionPolicy == CollisionPolicyDefault ||
+		opts.CollisionPolicy == CollisionPolicyError
+	byID := map[string]int{}
+	deduped = make([]ArtifactRecord, 0, len(all))
+	kept = make([]ArtifactRecord, 0, len(all))
+	for _, rec := range all {
+		idx, seen := byID[rec.ID]
+		if !seen {
+			byID[rec.ID] = len(deduped)
+			deduped = append(deduped, rec)
+			kept = append(kept, rec)
+			continue
+		}
+		// rec is the higher-precedence record (later layers override
+		// earlier), so the collision is sanctioned when its extends:
+		// resolves to the colliding canonical ID; the extends merge is
+		// applied later. A collision without that declaration is a
+		// forbidden silent shadow.
+		if !layer.ExtendsOverlays(extendsOf(rec), rec.ID) {
+			switch {
+			case collisionError:
+				return nil, nil, fmt.Errorf("%s: artifact %q present in layers %q and %q",
+					layer.CollisionCode, rec.ID, deduped[idx].Layer.ID, rec.Layer.ID)
+			case opts.CollisionPolicy == CollisionPolicyDrop:
+				// The comparison is against the kept record, so a third
+				// layer's drop names the first contributor as ExistingLayer.
+				opts.OnCollision(layer.Collision{ArtifactID: rec.ID, Layer: rec.Layer.ID, ExistingLayer: deduped[idx].Layer.ID})
+				continue
+			}
+		}
+		deduped[idx] = rec
+		kept = append(kept, rec)
+	}
+	return deduped, kept, nil
 }
 
 // extendsOf returns rec's declared extends: reference, or "" when the record
@@ -119,9 +146,15 @@ const (
 	// IDs across layers (per §4.6 default behavior, no extends:).
 	CollisionPolicyError
 	// CollisionPolicyHighestWins keeps the highest-precedence layer's
-	// record and drops earlier ones. Used by sync, which materializes the
-	// caller's effective view rather than ingesting raw layers.
+	// record and drops earlier ones. Used by the workspace overlay's walk
+	// of its own directory (pkg/overlay, §6.4), which the §4.6 collision
+	// rule exempts.
 	CollisionPolicyHighestWins
+	// CollisionPolicyDrop keeps the lower-precedence record, drops a
+	// higher-precedence one that declares no extends: on the ID, and
+	// reports it through WalkOptions.OnCollision (§4.6, §13.11.3). Used by
+	// filesystem-source sync.
+	CollisionPolicyDrop
 )
 
 // WalkOptions configures Walk behavior.
@@ -133,6 +166,10 @@ type WalkOptions struct {
 	// manifest (§4.6, §13.11.3). When false, records keep their authored
 	// frontmatter unchanged.
 	ResolveExtends bool
+	// OnCollision receives each record CollisionPolicyDrop drops. Walk
+	// refuses CollisionPolicyDrop when it is nil, so no drop goes
+	// unreported.
+	OnCollision func(layer.Collision)
 }
 
 // walkLayer enumerates every artifact directory in a single layer.

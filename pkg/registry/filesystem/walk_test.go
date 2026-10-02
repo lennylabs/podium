@@ -249,8 +249,8 @@ func TestWalk_CollisionExtendsOtherIDStillFails(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 — sync's effective-view composition uses
-// CollisionPolicyHighestWins so the highest-precedence layer wins.
+// Spec: §6.4 — the workspace overlay's walk of its own directory uses
+// CollisionPolicyHighestWins, so the highest-precedence layer wins.
 func TestWalk_HighestWinsKeepsTopLayer(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -285,6 +285,18 @@ layer_order:
 	}
 	if got[0].Layer.ID != "personal" {
 		t.Errorf("Layer.ID = %q, want personal (highest precedence)", got[0].Layer.ID)
+	}
+}
+
+// Spec: §4.6, §13.11.3 — CollisionPolicyDrop reports each drop through
+// OnCollision, so Walk refuses the policy without a callback rather than
+// dropping an artifact silently. The refusal precedes the layer walk.
+func TestWalk_DropPolicyRequiresOnCollision(t *testing.T) {
+	t.Parallel()
+	reg := &Registry{}
+	_, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyDrop})
+	if err == nil || !strings.Contains(err.Error(), "CollisionPolicyDrop requires OnCollision") {
+		t.Fatalf("Walk err = %v, want the missing-OnCollision refusal", err)
 	}
 }
 
