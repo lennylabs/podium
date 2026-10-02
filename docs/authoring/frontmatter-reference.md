@@ -155,7 +155,7 @@ sbom:                              # author-supplied passthrough
 |:--|:--|
 | `mcpServers` | List of MCP servers the artifact wants registered when loaded. The host registers them. |
 | `requiresApproval` | List of tools that require user approval before execution. The host enforces. |
-| `runtime_requirements` | Map of runtime versions and system packages the bundled scripts depend on. The host refuses to materialize when a requirement isn't satisfied. |
+| `runtime_requirements` | Map of runtime versions and system packages the bundled scripts depend on. A Podium MCP server whose host advertises its runtime capabilities or opts into enforcement refuses a `load_artifact` whose requirements those capabilities do not satisfy, with `materialize.runtime_unavailable`. `podium sync` does not check requirements. See [Bundled resources](bundled-resources). |
 | `sandbox_profile` | Execution sandbox. Hosts with sandbox capability honor it; hosts without it refuse to materialize artifacts whose `sandbox_profile != unrestricted` unless explicitly configured to ignore. |
 | `effort_hint` | Advisory hint about the reasoning budget the artifact ideally consumes. See [Hints](hints). |
 | `model_class_hint` | Advisory hint about the model capability tier. See [Hints](hints). |

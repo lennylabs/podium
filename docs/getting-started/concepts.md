@@ -128,10 +128,11 @@ A typical setup might have:
    sync`, or an SDK), always at highest precedence.
 
 When a caller asks for an artifact, Podium composes the caller's
-**effective view** from every visible layer, in
-precedence order. Higher-precedence layers override lower on
-collisions; `extends:` lets a higher artifact inherit and refine
-a lower one without forking.
+**effective view** from every visible layer, in precedence order.
+Two layers cannot contribute the same canonical ID unless the
+higher-precedence artifact declares `extends:` on the lower one. In
+that case the higher artifact inherits and refines the lower one
+without forking (see [extends](../authoring/extends)).
 
 ![Layer composition and precedence: an ordered layer stack on the left (lowest precedence at the bottom) composes into a single effective view for one caller identity on the right.](../assets/diagrams/layer-composition.svg)
 
@@ -140,12 +141,12 @@ ASCII fallback for the diagram above (layer composition and precedence):
 
   layer list (top = highest precedence)        |  effective view for alice@acme.com
                                                |
-  4. workspace-overlay                         |  Higher layers override on collision.
+  4. workspace-overlay                         |  Precedence orders the composed view.
      .podium/overlay/ - always highest         |
-  3. alice-personal                             |  overlay   -> wins
-     user-defined - visible to alice@ only      |  alice      -> if no overlay match
+  3. alice-personal                             |  overlay   -> highest
+     user-defined - visible to alice@ only      |  alice     -> if visible
   2. team-finance                              |  finance   -> if alice is a member
-     admin - groups: [finance]                 |  org       -> fallback for anyone
+     admin - groups: [finance]                 |  org       -> lowest, visible to anyone
   1. org-defaults                              |
      admin - organization: true                |  Layers the caller cannot see are
                                                |  silently excluded; hidden parents

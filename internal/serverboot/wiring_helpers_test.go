@@ -33,6 +33,7 @@ func TestBuildSCIMHandler_OnlyWhitespaceTokens(t *testing.T) {
 	}
 }
 
+// Spec: §9.1 — an unset PODIUM_NOTIFICATION_PROVIDER or "noop" wires no notifier.
 func TestOpenNotifier_NoopAndUnset(t *testing.T) {
 	t.Setenv("PODIUM_NOTIFICATION_PROVIDER", "")
 	if p := openNotifier(); p != nil {
@@ -110,8 +111,7 @@ func TestOpenNotifier_EmailRequiresHostAndFrom(t *testing.T) {
 	}
 }
 
-// Spec: §9.1 — the "Email + webhook" default is realized via "multi", which
-// includes the email provider when SMTP is configured alongside the webhook.
+// Spec: §9.1 — the "multi" built-in includes the email provider when SMTP is configured alongside the webhook.
 func TestOpenNotifier_MultiIncludesEmail(t *testing.T) {
 	t.Setenv("PODIUM_NOTIFICATION_PROVIDER", "multi")
 	t.Setenv("PODIUM_NOTIFICATION_WEBHOOK_URL", "http://example/")

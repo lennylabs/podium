@@ -48,8 +48,6 @@ Marketplace publishing adds no new SPI. The git workflow a `kind: marketplace` s
 
 Plugins ship as Go modules importable into a registry build. A deployment that needs a custom `IdentityProvider` or `GitProvider` builds a registry binary from source with the plugin imported.
 
-A community plugin registry is hosted at the project's public URL.
-
 ---
 
 ## Forward compatibility for out-of-process plugins

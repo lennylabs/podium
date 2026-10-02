@@ -15,8 +15,8 @@ Per spec §13.2.1.
   `registry.read_only_exited` bracket the window.
 
 **Impact.** Read endpoints serve from the replica. Write endpoints
-(ingest webhooks, layer admin operations, freeze toggles, admin
-grants, and tenant management) reject with `registry.read_only`.
+(ingest webhooks, layer admin operations, admin grants, and tenant
+management) reject with `registry.read_only`.
 
 **Mitigation.**
 1. Confirm the Postgres primary is unreachable; check infrastructure

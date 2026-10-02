@@ -84,7 +84,7 @@ runtime_requirements:
   system_packages: [git]
 ```
 
-Add the line to the frontmatter and re-run `podium sync`. The requirement ships with the artifact. A host that advertises its runtime capabilities to the Podium MCP server refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable`, naming the missing package. A host that advertises no capabilities receives the requirement and proceeds.
+Add the line to the frontmatter and re-run `podium sync`. The requirement ships with the artifact. A host that advertises its runtime capabilities to the Podium MCP server refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable`, naming the missing package. A host that advertises no capabilities and does not opt into enforcement receives the requirement and proceeds.
 
 ---
 

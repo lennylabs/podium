@@ -73,7 +73,7 @@ finance/procurement/vendor-compliance-check/
 
 **Three size thresholds with distinct roles:**
 
-- **Inline cutoff (256 KB)**: below this, resource bytes are returned in the `load_artifact` response body; above, presigned URL. A resource the registry holds inline on the manifest record is returned inline at any size (§7.2).
+- **Inline cutoff (256 KB, 262144 bytes)**: a resource at or below this size is returned in the `load_artifact` response body; a resource above it is returned as a presigned URL. A resource the registry holds inline on the manifest record is returned inline at any size (§7.2).
 - **Per-file soft cap (1 MB)**: ingest-time warning above this.
 - **Per-package soft cap (10 MB)**: ingest-time error above this.
 
@@ -229,7 +229,7 @@ hook_action: |                    # shell snippet executed when the event fires;
 server_identifier: npx:@company/finance-warehouse-mcp
 
 # Inheritance — explicitly extend another artifact's manifest (cross-layer merge)
-extends: finance/ap/pay-invoice@1.2
+extends: finance/ap/pay-invoice@1.2.x
 
 # Adapter targeting — opt out of cross-harness materialization for this artifact
 target_harnesses: [claude-code, opencode]
@@ -362,7 +362,7 @@ runtime_requirements:
   system_packages: ["jq", "curl"]
 ```
 
-Adapters surface these requirements to the host where supported. Hosts that cannot satisfy a requirement reject the artifact at load time with `materialize.runtime_unavailable`.
+Adapters surface these requirements to the host where supported. Once a host advertises its runtime capabilities to the Podium MCP server, or opts into enforcement, the MCP server refuses a `load_artifact` whose requirements the advertised capabilities do not satisfy with `materialize.runtime_unavailable`. A host that advertises no capabilities and does not opt in receives the requirements without a refusal. An explicit host override bypasses the refusal and logs a warning. `podium sync` does not evaluate runtime requirements.
 
 The `sandbox_profile:` field declares execution constraints:
 
@@ -586,7 +586,7 @@ Composition order (lowest to highest precedence):
 2. User-defined layers belonging to the caller, in the user-controlled order returned by `podium layer list`.
 3. The workspace local overlay (when configured).
 
-Higher-precedence layers override lower on collisions. Resolution of layers 1 and 2 happens at the registry on every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call, and includes `extends:` resolution per the §9.1 `LayerComposer` row; layer 3 is merged in by the MCP server before returning results.
+A canonical-ID collision between layers follows the merge semantics for collisions below: the collision is rejected unless the higher-precedence artifact declares `extends:` on the lower-precedence one. Resolution of layers 1 and 2 happens at the registry on every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call, and includes `extends:` resolution per the §9.1 `LayerComposer` row; layer 3 is merged in by the MCP server before returning results.
 
 ### Source types
 
@@ -857,7 +857,7 @@ Each artifact carries:
 
 ### 4.7.5 Audit
 
-Every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call is logged with caller identity, visibility outcome, requested artifact (or query), timestamp, resolved layer composition, and result size. Ingest events (success and failure), admin actions (layer-list edits, freeze-window toggles, admin grants), and break-glass invocations are also logged. Hosts keep their own audit streams for runtime events; Podium's audit stream stays focused on the catalogue. Detail in §8.
+Every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call is logged with caller identity, visibility outcome, requested artifact (or query), timestamp, resolved layer composition, and result size. Ingest events (success and failure), admin actions (layer-list edits, admin grants), and break-glass invocations are also logged. Hosts keep their own audit streams for runtime events; Podium's audit stream stays focused on the catalogue. Detail in §8.
 
 ### 4.7.6 Version Resolution and Consistency
 

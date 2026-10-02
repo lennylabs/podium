@@ -134,12 +134,12 @@
   <rect class="dg-panel" x="610" y="120" width="430" height="270" rx="10"/>
   <text class="dg-label" x="630" y="146">effective view for alice@acme.com</text>
 
-  <text class="dg-name dg-t-l" x="630" y="178">Higher layers override on collision.</text>
+  <text class="dg-name dg-t-l" x="630" y="178">Precedence orders the composed view.</text>
 
-  <text class="dg-mono" x="630" y="214">overlay  → wins</text>
-  <text class="dg-mono" x="630" y="238">alice     → if no overlay match</text>
+  <text class="dg-mono" x="630" y="214">overlay  → highest</text>
+  <text class="dg-mono" x="630" y="238">alice    → if visible</text>
   <text class="dg-mono" x="630" y="262">finance  → if alice is a member</text>
-  <text class="dg-mono" x="630" y="286">org      → fallback for anyone</text>
+  <text class="dg-mono" x="630" y="286">org      → lowest, visible to anyone</text>
 
   <text class="dg-sub" x="630" y="324">Layers the caller cannot see are silently</text>
   <text class="dg-sub" x="630" y="344">excluded. Hidden parents merge server-side</text>

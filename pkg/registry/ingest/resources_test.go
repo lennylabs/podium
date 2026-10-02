@@ -1,6 +1,7 @@
 package ingest_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -89,6 +90,53 @@ func TestIngest_PersistsResourcesWithObjectStore(t *testing.T) {
 	}
 	if got := rec.objects[hashKey(large)]; string(got) != string(large) {
 		t.Errorf("large blob not uploaded under its hash")
+	}
+}
+
+// Spec: §4.1, §7.2 — the inline cutoff is inclusive. A resource of
+// exactly objectstore.InlineCutoff bytes keeps its bytes inline on the
+// record, and a resource one byte larger drops them. Both blobs reach
+// the object store keyed by content hash.
+func TestIngest_InlineCutoffBoundary(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		size       int
+		wantInline bool
+	}{
+		{"at cutoff stays inline", objectstore.InlineCutoff, true},
+		{"above cutoff drops inline", objectstore.InlineCutoff + 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			body := []byte(strings.Repeat("D", tc.size))
+			files := fstest.MapFS{
+				"finance/run/ARTIFACT.md":   &fstest.MapFile{Data: []byte(skillArtifact())},
+				"finance/run/SKILL.md":      &fstest.MapFile{Data: []byte(skillBody("run"))},
+				"finance/run/data/edge.bin": &fstest.MapFile{Data: body},
+			}
+			rec := newPutRecorder()
+			st := newStore(t)
+			if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+				TenantID: "t", LayerID: "L", Files: files, ResourcePut: rec.put,
+			}); err != nil {
+				t.Fatalf("ingest: %v", err)
+			}
+			mr, err := st.GetManifest(context.Background(), "t", "finance/run", "1.0.0")
+			if err != nil {
+				t.Fatalf("GetManifest: %v", err)
+			}
+			wantInline := []byte(nil)
+			if tc.wantInline {
+				wantInline = body
+			}
+			if len(mr.Resources) != 1 || !bytes.Equal(mr.Resources[0].Inline, wantInline) ||
+				(tc.wantInline != (mr.Resources[0].Inline != nil)) ||
+				mr.Resources[0].Size != int64(len(body)) || !bytes.Equal(rec.objects[hashKey(body)], body) {
+				t.Errorf("size %d: resources = %+v, uploaded = %v; want inline=%v, Size=%d, blob uploaded",
+					tc.size, mr.Resources, rec.objects[hashKey(body)] != nil, tc.wantInline, len(body))
+			}
+		})
 	}
 }
 

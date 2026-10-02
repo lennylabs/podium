@@ -423,7 +423,7 @@ The MCP server is a stdio subprocess spawned by its host. The host is responsibl
 | Binary version mismatch with host caller      | Refuse to start; host's CLI prompts an update.                                                                                                              |
 | MCP protocol version mismatch                 | Negotiate down to host's max supported MCP version; if no compatible version, fail with `mcp.unsupported_version`.                                          |
 | Quota exhausted                               | Structured error (`quota.storage_exceeded` etc.); operation rejected.                                                                                       |
-| Runtime requirement unsatisfiable             | Fail with `materialize.runtime_unavailable`; lists the unsatisfied requirement.                                                                             |
+| Runtime requirement unsatisfiable             | When the host advertises runtime capabilities or opts into enforcement (§4.4.1), fail with `materialize.runtime_unavailable`; lists the unsatisfied requirement. |
 
 ## 6.10 Error Model
 
