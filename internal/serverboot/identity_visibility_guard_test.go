@@ -11,8 +11,9 @@ import (
 // boot guard refuses to start when a provider is configured but no
 // request-time verifier is wired, because the fallback (anonymous-public)
 // silently drops every authenticated, organization, and private layer from
-// every caller's view. Only injected-session-token is verified server-side
-// in this build; public mode and the empty/standalone default are exempt.
+// every caller's view. The providers in verifiedProviders are verified
+// server-side in this build; public mode and the empty/standalone default are
+// exempt.
 func TestIdentityVisibilityGuard(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

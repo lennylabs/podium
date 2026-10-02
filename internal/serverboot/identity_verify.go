@@ -86,11 +86,13 @@ func layerIdentityResolver(verify func(*http.Request) (layer.Identity, error)) f
 //
 // spec: §2.2, §6.3.1 — the registry "composes the caller's effective view
 // from the configured layer list per OAuth identity, applies per-layer
-// visibility." Resolving the caller requires a request-time verifier. Only
-// injected-session-token wires one in this build (verifierInstalled);
-// oauth-device-code (the other documented §6.3 built-in) needs the §6.3.1
-// server-side OIDC verifier that the registry does not yet ship. Without a
-// verifier the server falls back to the anonymous-public resolver, so every
+// visibility." Resolving the caller requires a request-time verifier.
+// injected-session-token (§6.3.2), oidc-jwt (§6.3.3), and trusted-headers
+// (§6.3.3) wire one in this build (verifierInstalled), and verifiedProviders
+// lists them. oauth-device-code is the §6.3 client-side acquisition provider:
+// the registry verifies the tokens it acquires under oidc-jwt, so selecting it
+// as the registry's provider wires no verifier. Without a verifier the server
+// falls back to the anonymous-public resolver, so every
 // caller composes as anonymous and authenticated, organization, and private
 // layers silently vanish from every effective view. Refuse to start in that
 // state rather than serve a registry whose visibility never applies.
@@ -107,8 +109,8 @@ func layerIdentityResolver(verify func(*http.Request) (layer.Identity, error)) f
 var verifiedProviders = []string{"injected-session-token", "oidc-jwt", "trusted-headers"}
 
 // The guard keys on providerSelected: a real provider resolved from the
-// identity.Default registry (the documented oauth-device-code /
-// injected-session-token built-ins, or an imported custom provider). A
+// identity.Default registry (a seeded built-in such as oauth-device-code or
+// oidc-jwt, or an imported custom provider). A
 // non-registered free-form label such as "oidc" yields providerSelected =
 // false; those deployments front the registry with external auth and are
 // exempt, matching selectIdentityProvider. Public mode opts out of identity

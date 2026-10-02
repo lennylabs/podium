@@ -1308,17 +1308,17 @@ func run(ctx context.Context, stop func()) error {
 	// verified claims to the caller Identity and rejecting an unregistered
 	// or unsigned token with auth.untrusted_runtime. Without this the server
 	// would treat every caller as anonymous-public, which defeats the trust
-	// model the section specifies. Only the injected-session-token provider
-	// installs it; oauth-device-code and standalone stay on the anonymous
-	// resolver.
+	// model the section specifies. The injected-session-token, oidc-jwt, and
+	// trusted-headers providers install a verifier; oauth-device-code and
+	// standalone stay on the anonymous resolver.
 	// §9.1/§9.2 IdentityProvider selection: consult the process-global
 	// identity.Default registry so a custom provider imported into a source
 	// build (via identity.Default.Register, mirroring typeprovider) is
 	// selected by its PODIUM_IDENTITY_PROVIDER id. The built-in
-	// oauth-device-code and injected-session-token providers are seeded into
-	// the registry; injected-session-token additionally installs the
-	// request-time JWT verifier so the registry verifies every meta-tool
-	// call. Server-side identity modes that are not MCP-server providers (the
+	// oauth-device-code, injected-session-token, oidc-jwt, and trusted-headers
+	// providers are seeded into the registry; the last three additionally
+	// install a request-time verifier so the registry resolves the caller on
+	// every meta-tool call. Server-side identity modes that are not MCP-server providers (the
 	// empty standalone default, "oidc", public mode) are absent from the
 	// registry and stay on the anonymous resolver.
 	verifierInstalled := false
