@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/sync"
 )
@@ -240,6 +241,120 @@ func collidingRegistry(t *testing.T) string {
 		},
 	)
 	return dir
+}
+
+// Spec: §11 (Filesystem ↔ server equivalence test) / §2.2 (Shared library
+// code) / §13.11.3 — a registry whose higher-precedence layer contributes an
+// artifact ID the lower layer already contributes, without declaring
+// extends:, materializes byte-identically under both registry sources. The
+// filesystem source drops the higher copy and reports the drop, and the
+// server source never stored it, so both serve the lower-precedence copy.
+// Matrix: §6.10 (ingest.collision)
+func TestSyncEquivalence_LayerCollisionIsByteIdentical(t *testing.T) {
+	t.Parallel()
+	dir := crossLayerCollisionRegistry(t)
+
+	for _, adapterID := range []string{"none", "claude-code"} {
+		adapterID := adapterID
+		t.Run(adapterID, func(t *testing.T) {
+			t.Parallel()
+
+			fsTarget := t.TempDir()
+			fsRes, err := sync.Run(sync.Options{
+				RegistryPath: dir,
+				Target:       fsTarget,
+				AdapterID:    adapterID,
+			})
+			if err != nil {
+				t.Fatalf("filesystem sync.Run: %v", err)
+			}
+
+			srv, err := server.NewFromFilesystem(dir)
+			if err != nil {
+				t.Fatalf("NewFromFilesystem: %v", err)
+			}
+			ts := httptest.NewServer(srv.Handler())
+			t.Cleanup(ts.Close)
+
+			srvTarget := t.TempDir()
+			srvRes, err := sync.Run(sync.Options{
+				RegistryPath: ts.URL,
+				Target:       srvTarget,
+				AdapterID:    adapterID,
+			})
+			if err != nil {
+				t.Fatalf("server sync.Run: %v", err)
+			}
+
+			fsTree := materializedTree(t, fsTarget)
+			srvTree := materializedTree(t, srvTarget)
+			if len(fsTree) == 0 {
+				t.Fatalf("filesystem sync materialized nothing")
+			}
+			assertTreesEqual(t, fsTree, srvTree)
+			if got, want := artifactKeys(srvRes), artifactKeys(fsRes); !equalStringSlices(got, want) {
+				t.Errorf("artifacts list mismatch:\n filesystem=%v\n server=    %v", want, got)
+			}
+			assertLockArtifactsEqual(t, fsTarget, srvTarget)
+
+			// Byte equality alone would also hold if both sources served the
+			// higher copy, so pin which copy each tree carries.
+			assertTreeHolds(t, fsTree, "shared/clash", "from-org")
+			assertTreeHolds(t, fsTree, "finance/ledger", "finance ledger")
+			for _, body := range fsTree {
+				if strings.Contains(body, "from-team") {
+					t.Errorf("the dropped team-finance copy of shared/clash was materialized")
+				}
+			}
+
+			want := layer.Collision{ArtifactID: "shared/clash", Layer: "team-finance", ExistingLayer: "org-defaults"}
+			if len(fsRes.Dropped) != 1 || fsRes.Dropped[0] != want {
+				t.Errorf("filesystem Dropped = %+v, want [%+v]", fsRes.Dropped, want)
+			}
+			if len(srvRes.Dropped) != 0 {
+				t.Errorf("server Dropped = %+v, want none", srvRes.Dropped)
+			}
+		})
+	}
+}
+
+// crossLayerCollisionRegistry writes a two-layer registry in which
+// team-finance contributes shared/clash without declaring extends:, colliding
+// with the org-defaults copy, and finance/ledger collides with nothing. Both
+// layers are public so the server source's anonymous identity sees the same
+// set the filesystem source walks.
+func crossLayerCollisionRegistry(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	contextArtifact := func(description string) string {
+		return "---\ntype: context\nversion: 1.0.0\ndescription: " + description +
+			"\nsensitivity: low\n---\n\n" + description + "\n"
+	}
+	testharness.WriteTree(t, dir,
+		testharness.WriteTreeOption{
+			Path:    ".registry-config",
+			Content: "multi_layer: true\nlayer_order:\n  - org-defaults\n  - team-finance\n",
+		},
+		testharness.WriteTreeOption{Path: "org-defaults/.layer-config", Content: "visibility:\n  public: true\n"},
+		testharness.WriteTreeOption{Path: "team-finance/.layer-config", Content: "visibility:\n  public: true\n"},
+		testharness.WriteTreeOption{Path: "org-defaults/shared/clash/ARTIFACT.md", Content: contextArtifact("from-org")},
+		testharness.WriteTreeOption{Path: "team-finance/shared/clash/ARTIFACT.md", Content: contextArtifact("from-team")},
+		testharness.WriteTreeOption{Path: "team-finance/finance/ledger/ARTIFACT.md", Content: contextArtifact("finance ledger")},
+	)
+	return dir
+}
+
+// assertTreeHolds asserts that some materialized file under a path naming the
+// artifact ID carries the given text. It reads the adapter-specific layout
+// loosely so the same check serves every adapter.
+func assertTreeHolds(t *testing.T, tree map[string]string, id, text string) {
+	t.Helper()
+	for path, body := range tree {
+		if strings.Contains(path, id) && strings.Contains(body, text) {
+			return
+		}
+	}
+	t.Errorf("no materialized file for %q carries %q", id, text)
 }
 
 // assertClaudeHookOrder asserts that the hook entries concatenated into
