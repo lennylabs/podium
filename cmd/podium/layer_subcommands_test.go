@@ -157,6 +157,49 @@ func TestLayerWatch_MissingIDExits2(t *testing.T) {
 	})
 }
 
+// Spec: §7.3.1 — `podium layer watch <id>`: the positional names the layer,
+// --id is an equivalent spelling, and two different IDs are refused.
+func TestWatchLayerID(t *testing.T) {
+	cases := []struct {
+		name, pos, flag, want string
+		wantErr               bool
+	}{
+		{"positional only", "a", "", "a", false},
+		{"flag only", "", "a", "a", false},
+		{"both agree", "a", "a", "a", false},
+		{"both disagree", "a", "b", "", true},
+		{"neither", "", "", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := watchLayerID(tc.pos, tc.flag)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, wantErr %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("id = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Spec: §7.3.1 — conflicting IDs, a second operand, and an unknown flag are
+// usage errors that exit 2 before any request is sent.
+func TestLayerWatch_ConflictAndExtraOperandExit2(t *testing.T) {
+	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
+	withStderr(t, func() {
+		if code := layerWatch([]string{"a", "--id", "b"}); code != 2 {
+			t.Errorf("layerWatch(conflict) = %d, want 2", code)
+		}
+		if code := layerWatch([]string{"a", "b"}); code != 2 {
+			t.Errorf("layerWatch(two operands) = %d, want 2", code)
+		}
+		if code := layerWatch([]string{"--bogus"}); code != 2 {
+			t.Errorf("layerWatch(bad flag) = %d, want 2", code)
+		}
+	})
+}
+
 // --- Happy paths driven by a stub registry ---------------------------------
 
 // stubRegistry returns 200 with an empty JSON body for every request.

@@ -104,6 +104,37 @@ The same five test jobs (minus the coverage budget and matrix audit, which are a
 
 The workflow lives in `.github/workflows/release.yml`.
 
+### Publish credentials and partial publishes
+
+The publish jobs authenticate as follows:
+
+| Job | Credential | Expires |
+|:--|:--|:--|
+| `publish-py` | PyPI Trusted Publishing through the job's OIDC token and the `pypi` environment. No secret is stored. | No |
+| `publish-ts` | Repository secret `NPM_TOKEN`, an npm access token with publish rights on the `@lennylabs` scope, passed to `npm publish` as `NODE_AUTH_TOKEN`. | Yes |
+| `container` | The workflow's built-in `GITHUB_TOKEN`. | No |
+| `publish-tap-bucket` | Repository secret `TAP_BUCKET_TOKEN`, a fine-grained personal access token with `contents: write` on `lennylabs/homebrew-tap` and `lennylabs/scoop-bucket`. | When created with an expiration date |
+
+npm access tokens carry an expiration date, so `NPM_TOKEN` stops working on a schedule rather than in response to a change in this repository. An expired or revoked token makes `npm publish` fail with `npm error code E404` on the `PUT https://registry.npmjs.org/@lennylabs%2fpodium-sdk` request. npm reports the authorization failure as a missing package, so the error does not name the credential.
+
+**Check the token before tagging.** Open the token list at `https://www.npmjs.com/settings/<user>/tokens` and confirm that the token stored as `NPM_TOKEN` expires after the planned release date. `gh secret list` shows when each repository secret was last updated, which identifies the token in use. To confirm that a token authenticates, run `npm whoami` against it:
+
+```bash
+printf '//registry.npmjs.org/:_authToken=%s\n' "$TOKEN" > "$TMPDIR/npmrc-check"
+npm whoami --userconfig "$TMPDIR/npmrc-check"
+rm "$TMPDIR/npmrc-check"
+```
+
+Replace an expiring token with `gh secret set NPM_TOKEN` before pushing the tag. Apply the same check to `TAP_BUCKET_TOKEN` on the GitHub token settings page.
+
+**Recover from a partial publish.** `publish-py` and `publish-ts` run independently after the test jobs, so one registry can hold the new version while the other still holds the previous one. Neither registry accepts a second upload of a version it already holds: PyPI rejects a file name it has already received, and npm rejects a version that was ever published, including an unpublished one. A re-run of the whole workflow therefore fails again on the job that already succeeded. The workflow has no `workflow_dispatch` trigger, so the recovery is a re-run of the failed jobs in the original tag run:
+
+1. Fix the cause. For an expired npm token, generate a new token and store it with `gh secret set NPM_TOKEN`. A re-run reads the current secret value.
+2. Re-run only the failed jobs of the release run with `gh run rerun <run-id> --failed`, or a single job with `gh run rerun <run-id> --job <job-id>`. `gh run view <run-id> --json jobs` lists the job IDs. GitHub accepts re-runs for 30 days after the original run.
+3. Confirm that both registries report the version, for example with `npm view @lennylabs/podium-sdk version` and the project page at `https://pypi.org/project/podium-sdk/`.
+
+When the failure requires a change to the package contents rather than a credential, the failed registry cannot receive the same version with different contents. Cut a patch release instead, so both registries carry the next version.
+
 ### Sigstore live tests are manual
 
 `pkg/sign/sigstore_live_test.go` is a Tier 2 suite the release gate does not run. The single test in it is `TestSigstoreKeyless_LiveSmoke`. The release gate runs the mocked `pkg/sign/sigstore_test.go` suite (round-trip, tampered hash, foreign trust root, Fulcio outage, and missing Rekor entry), so the signing logic is covered between manual runs; the live smoke adds end-to-end coverage of a real Fulcio certificate and a real Rekor inclusion proof.

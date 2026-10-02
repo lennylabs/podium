@@ -62,8 +62,9 @@ func NewRegistry() *Registry {
 
 // Default is the process-global identity-provider registry the server
 // consults when selecting a provider for PODIUM_IDENTITY_PROVIDER. It is
-// seeded with the built-in oauth-device-code and injected-session-token
-// providers; deployers add custom providers via Default.Register.
+// seeded with the built-in oauth-device-code, injected-session-token,
+// oidc-jwt, and trusted-headers providers; deployers add custom providers via
+// Default.Register.
 var Default = newDefault()
 
 func newDefault() *Registry {

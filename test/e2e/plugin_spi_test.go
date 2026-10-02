@@ -22,7 +22,7 @@ package e2e
 //   - needs two authenticated users and visibility enforcement.
 //   - structural static check over SPI interface decls.
 //   - needs a signed-then-tampered artifact.
-//   - SSE change-stream consumption with a bounded read.
+//   - NDJSON change-event stream (/v1/events) consumption with a bounded read.
 //   - default overlay path fallback behavior is uncertain
 //     without explicit PODIUM_OVERLAY_PATH; SKIP honest.
 //   - LocalAuditSink MCP audit log path behavior uncertain.
@@ -1321,9 +1321,10 @@ func TestPluginSPI_SignatureInvalidTampered(t *testing.T) {
 	t.Skip("requires a signed-then-tampered artifact in the object store; not constructable via the filesystem-source standalone harness")
 }
 
-// Subscription: client receives artifact.published via SSE.
-func TestPluginSPI_SSEArtifactPublished(t *testing.T) {
-	t.Skip("SSE change-stream consumption needs a streaming HTTP client with a bounded read and a reliable ingest trigger; not implemented as a stable e2e gate")
+// Subscription: client receives artifact.published on the NDJSON change-event
+// stream served at /v1/events.
+func TestPluginSPI_EventStreamArtifactPublished(t *testing.T) {
+	t.Skip("NDJSON change-event stream consumption needs a streaming HTTP client with a bounded read and a reliable ingest trigger; not implemented as a stable e2e gate")
 }
 
 // Ingest immutability: same version with different content

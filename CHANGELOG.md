@@ -87,6 +87,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **`podium layer watch <id>` accepts the layer ID as a positional** (§7.3.1):
+  the command accepted the layer only through `--id`, so the invocation the
+  specification writes, `podium layer watch <id> [--interval <duration>]`,
+  printed `error: --registry and --id are required` and exited 2. The
+  positional now names the layer, and flags may follow it. `--id` still names
+  the layer. A positional and an `--id` naming different layers are refused
+  with `error: layer id "<positional>" conflicts with --id "<flag>"` and exit
+  2, and a missing layer ID now reads `error: --registry and a layer id are
+  required`.
 - **The `podium cache prune --dry-run` summary**: a dry run deleted nothing,
   but its summary line read `cache: pruned N bucket(s) (<size> B), kept M`, which said
   the buckets were pruned. The summary under `--dry-run` now reads

@@ -86,6 +86,24 @@ func mergeEnv(extra ...string) []string {
 			strings.HasPrefix(kv, "COHERE_API_KEY=") {
 			continue
 		}
+		// Do not inherit ambient identity configuration either. A developer
+		// shell that exports PODIUM_IDENTITY_PROVIDER (with its runtime key
+		// set) boots every `serve` subprocess with identity verification on,
+		// so a test that expects the standalone anonymous read is answered
+		// 401 auth.untrusted_runtime. An inherited PODIUM_SESSION_TOKEN* makes
+		// a CLI subprocess attach a credential the test did not ask for. A
+		// test that needs either passes it explicitly in `extra`.
+		if strings.HasPrefix(kv, "PODIUM_IDENTITY") ||
+			strings.HasPrefix(kv, "PODIUM_SESSION_TOKEN") {
+			continue
+		}
+		// An inherited PODIUM_BIND moves a `serve` subprocess off the address
+		// the test chose, because the environment variable outranks the
+		// registry.yaml bind key. A test that asserts on the bind passes it
+		// explicitly in `extra`.
+		if strings.HasPrefix(kv, "PODIUM_BIND=") {
+			continue
+		}
 		out = append(out, kv)
 	}
 	// Suppress the login browser auto-open for every CLI subprocess unless the
@@ -274,6 +292,11 @@ type serverProc struct {
 	Home    string
 	logPath string
 	cmd     *exec.Cmd
+	// exited is closed once the server process has exited. The readiness
+	// loops read it to fail as soon as a server dies at startup; ProcessState
+	// stays nil until something reaps the process, so checking it there never
+	// fired and a crashed boot cost the whole readiness deadline.
+	exited <-chan struct{}
 	// adminToken is a minted admin Bearer token for the server, set by the
 	// webhook-admin boot helpers so the admin-gated receiver CRUD helpers can
 	// authenticate. Empty when the server boots without an identity provider.
@@ -325,14 +348,17 @@ func (s *serverProc) getMaybeAuth(t testing.TB, url string) (int, []byte) {
 
 // listeningAddr matches the address the server reports once it has bound. The
 // server resolves a configured port of 0 to an ephemeral one, so this line is
-// the only place the chosen port appears.
-var listeningAddr = regexp.MustCompile(`podium-server listening on (127\.0\.0\.1:\d+)`)
+// the only place the chosen port appears. The host is whatever the listener
+// holds, so a wildcard bind reports 0.0.0.0 or [::].
+var listeningAddr = regexp.MustCompile(`podium-server listening on (\S+:\d+)`)
 
 // awaitBoundAddr reads the address the server bound out of its log. Tests ask
 // for port 0 and take what the kernel gave, rather than picking a port from a
 // listener they then close: between that close and the server's own bind, any
 // other test in the package can take the same port, and the suite runs its
-// servers concurrently.
+// servers concurrently. A test whose port was taken probes whichever server
+// holds it, which can be another test's server under a different identity
+// provider, and reads that server's answers as its own.
 func awaitBoundAddr(t testing.TB, s *serverProc) string {
 	t.Helper()
 	deadline := time.Now().Add(25 * time.Second)
@@ -340,7 +366,7 @@ func awaitBoundAddr(t testing.TB, s *serverProc) string {
 		if m := listeningAddr.FindStringSubmatch(s.log()); m != nil {
 			return m[1]
 		}
-		if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
+		if s.hasExited() {
 			t.Fatalf("server exited before it reported a bound address\nlog:\n%s", s.log())
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -349,49 +375,41 @@ func awaitBoundAddr(t testing.TB, s *serverProc) string {
 	return ""
 }
 
-// pickPortWithRace binds an ephemeral port, reads its number, and closes the
-// listener before returning, so the port is free for anyone to take between
-// this call and the moment a server binds it. Any test in the package that
-// starts a server concurrently can win that race, which is a flake.
-//
-// It exists only for a test that needs a concrete, known address before the
-// server starts: TestStandaloneServer_RegistryYAMLBind (the address goes into a
-// registry.yaml bind: key, which is the thing under test),
-// TestConfigPrecedence_CLIFlagBeatsEnv (the assertion needs two distinct
-// addresses, one of which the server must not bind),
-// TestStandaloneServer_AllowPublicBindFlag (the server binds a non-loopback
-// address, which the log line the address is read back from does not carry),
-// and deadRegistry in sdk_clients_test.go (which wants a port with nothing
-// listening at all).
-//
-// A test that merely needs a server uses startServerArgs, which binds port 0
-// and reads the address the kernel gave back out of the server's log.
-func pickPortWithRace(t testing.TB) int {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+// loopbackProbeAddr returns the address a test dials to reach a server bound
+// at addr. A wildcard bind accepts on loopback, so an unspecified host is
+// replaced with 127.0.0.1, and any other address is returned unchanged.
+func loopbackProbeAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		t.Fatalf("pick port: %v", err)
+		return addr
 	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	if err := ln.Close(); err != nil {
-		t.Fatalf("close picked-port listener: %v", err)
+	if ip := net.ParseIP(host); ip != nil && ip.IsUnspecified() {
+		return net.JoinHostPort("127.0.0.1", port)
 	}
-	return port
+	return addr
 }
 
-// startServerArgs starts `podium <args> --bind 127.0.0.1:<freeport>` with
-// the given env (which must pin HOME to a temp dir), waits for /healthz to
-// return 200, and registers SIGINT/SIGKILL teardown. It never blocks past
-// the readiness deadline.
+// startServerArgs starts `podium <args> --bind 127.0.0.1:0` with the given
+// env (which must pin HOME to a temp dir), reads the bound address back from
+// the server's log, waits for /healthz to return 200, and registers
+// SIGINT/SIGKILL teardown. It never blocks past the readiness deadline.
 func startServerArgs(t testing.TB, env []string, args ...string) *serverProc {
 	t.Helper()
-	full := append(append([]string{}, args...), "--bind", "127.0.0.1:0")
+	return launchServer(t, env, append(append([]string{}, args...), "--bind", "127.0.0.1:0")...)
+}
 
+// launchServer starts `podium <args>` exactly as given, for a test whose
+// subject is where the bind address comes from: a registry.yaml key, an
+// environment variable, or a non-loopback --bind. The arguments or the
+// configuration must resolve to port 0 so the kernel picks the port, and the
+// server's own report of what it bound is the address the test then reaches.
+func launchServer(t testing.TB, env []string, args ...string) *serverProc {
+	t.Helper()
 	logf, err := os.CreateTemp(t.TempDir(), "server-*.log")
 	if err != nil {
 		t.Fatalf("server log: %v", err)
 	}
-	cmd := exec.Command(cmdharness.Bin(t, "podium"), full...)
+	cmd := exec.Command(cmdharness.Bin(t, "podium"), args...)
 	cmd.Env = mergeEnv(env...)
 	cmd.Stdin = bytes.NewReader(nil)
 	cmd.Stdout = logf
@@ -399,14 +417,14 @@ func startServerArgs(t testing.TB, env []string, args ...string) *serverProc {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	s := &serverProc{logPath: logf.Name(), cmd: cmd}
+	s := &serverProc{logPath: logf.Name(), cmd: cmd, exited: reapOnExit(cmd)}
 	for _, kv := range env {
 		if strings.HasPrefix(kv, "HOME=") {
 			s.Home = strings.TrimPrefix(kv, "HOME=")
 		}
 	}
 	t.Cleanup(func() { stopProc(s.cmd) })
-	s.BaseURL = "http://" + awaitBoundAddr(t, s)
+	s.BaseURL = "http://" + loopbackProbeAddr(awaitBoundAddr(t, s))
 
 	deadline := time.Now().Add(25 * time.Second)
 	for time.Now().Before(deadline) {
@@ -417,7 +435,7 @@ func startServerArgs(t testing.TB, env []string, args ...string) *serverProc {
 				return s
 			}
 		}
-		if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
+		if s.hasExited() {
 			t.Fatalf("server exited before ready\nlog:\n%s", s.log())
 		}
 		time.Sleep(100 * time.Millisecond)
@@ -450,6 +468,30 @@ func startServerUnsigned(t testing.TB, registry string) *serverProc {
 }
 
 // stopProc asks the process to stop, then force-kills if it lingers.
+// reapOnExit waits for cmd in the background and returns a channel that is
+// closed once the process has exited. cmd must already be started. stopProc
+// still signals and waits on the process; when this goroutine reaps it first,
+// stopProc's own wait returns at once, so the two do not conflict.
+func reapOnExit(cmd *exec.Cmd) <-chan struct{} {
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	return done
+}
+
+// hasExited reports whether the server process has exited. A serverProc built
+// without reapOnExit never reports an exit.
+func (s *serverProc) hasExited() bool {
+	if s.exited == nil {
+		return false
+	}
+	select {
+	case <-s.exited:
+		return true
+	default:
+		return false
+	}
+}
+
 func stopProc(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {
 		return

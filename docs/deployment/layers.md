@@ -142,7 +142,7 @@ Each layer refreshes from its source independently.
 |:--|:--|
 | Git webhook | A `git`-source layer whose host can reach the registry. The registry ingests on each merge to the tracked ref. Register the webhook URL that `podium layer register` returned. |
 | `podium layer reingest <id>` | A manual or scheduled pull. Covers offline mirrors, internal Git that cannot reach the registry, and any host without a public ingress. |
-| `podium layer watch --id <id>` | A polling loop against the layer's source at an interval set with `--interval` (default 1m). Works for `local` sources and for `git` sources with no webhook. Each tick reingests, so a loop over a source naming a host path is authorized as [the local-source rule](#who-may-register-a-local-source-layer) states. |
+| `podium layer watch <id>` | A polling loop against the layer's source at an interval set with `--interval` (default 1m). Works for `local` sources and for `git` sources with no webhook. Each tick reingests, so a loop over a source naming a host path is authorized as [the local-source rule](#who-may-register-a-local-source-layer) states. |
 
 `podium layer update --id <id>` patches a registered layer's mutable fields, including the tracked ref, the source path, and the visibility. Only the flags supplied are applied.
 

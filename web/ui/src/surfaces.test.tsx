@@ -3961,14 +3961,20 @@ describe("search", () => {
     // That press spent the cap, so the control it was on is gone once its own
     // results land. The focus goes to the first result the press appended
     // rather than to the document body, which is where the reader was
-    // reading.
+    // reading. The handoff runs in a passive effect after the commit that
+    // draws the rows, and that commit comes from a resolved fetch rather than
+    // from an event inside act(), so the effect can run a task after the rows
+    // appear. The focus is awaited in its own right for that reason: asserted
+    // on the render the row count settled, it reads the document body.
     await waitFor(() => {
       expect(screen.getAllByTestId("relevance-bars").length).toBe(50);
     });
     expect(screen.queryByTestId("search-continue")).toBeNull();
-    expect((document.activeElement as HTMLElement).textContent).toBe(
-      "platform/svc31",
-    );
+    await waitFor(() => {
+      expect((document.activeElement as HTMLElement).textContent).toBe(
+        "platform/svc31",
+      );
+    });
   });
 
   // Spec: §13.10 — the continuation asks for what is still withheld rather
@@ -15908,7 +15914,12 @@ describe("the shell’s identity cluster", () => {
     });
     render(<App />);
     fireEvent.click(await screen.findByTestId("account-trigger"));
-    expect((await screen.findByTestId("layer-quota")).textContent).toBe(
+    expect((
+      // The quota read starts only once the menu opens, behind the session
+      // read, so on a loaded runner it can land after the default one-second
+      // wait. The longer timeout covers that chain rather than a slow render.
+      await screen.findByTestId("layer-quota", {}, { timeout: 5000 })
+    ).textContent).toBe(
       "3 user-defined layers",
     );
   });
@@ -15943,7 +15954,12 @@ describe("the shell’s identity cluster", () => {
     });
     render(<App />);
     fireEvent.click(await screen.findByTestId("account-trigger"));
-    expect((await screen.findByTestId("layer-quota")).textContent).toBe(
+    expect((
+      // The quota read starts only once the menu opens, behind the session
+      // read, so on a loaded runner it can land after the default one-second
+      // wait. The longer timeout covers that chain rather than a slow render.
+      await screen.findByTestId("layer-quota", {}, { timeout: 5000 })
+    ).textContent).toBe(
       "no cap on your layers",
     );
   });
