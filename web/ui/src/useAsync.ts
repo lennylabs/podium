@@ -2,7 +2,7 @@
 // fetches. This hook is that request's state: loading, the value, or the
 // failure, plus the reload a retry control drives.
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export interface Async<T> {
   value: T | null;
@@ -16,9 +16,20 @@ export function useAsync<T>(run: () => Promise<T>, deps: unknown[]): Async<T> {
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(true);
   const [attempt, setAttempt] = useState(0);
+  const key = [...deps, attempt];
+  // startedFor holds the inputs of the read the effect last issued. On the
+  // render where the inputs change, the effect has not run yet, so the state
+  // still holds the previous read's settled value with loading false. Reported
+  // as is, a caller treats that value as the answer to the new inputs for one
+  // render: the palette drew "nothing matched" for a query it had not yet
+  // sent, and issued the catalog read that arm keys. Comparing the inputs here
+  // reports that render as loading instead.
+  const startedFor = useRef<unknown[] | null>(null);
+  const stale = startedFor.current === null || !sameInputs(startedFor.current, key);
 
   useEffect(() => {
     let live = true;
+    startedFor.current = key;
     setLoading(true);
     run().then(
       (next) => {
@@ -46,7 +57,13 @@ export function useAsync<T>(run: () => Promise<T>, deps: unknown[]): Async<T> {
   const reload = useCallback(() => {
     setAttempt((n) => n + 1);
   }, []);
-  return { value, error, loading, reload };
+  return { value, error, loading: loading || stale, reload };
+}
+
+/** sameInputs compares two dependency lists the way React compares an
+ * effect's dependencies, element by element with Object.is. */
+function sameInputs(a: unknown[], b: unknown[]): boolean {
+  return a.length === b.length && a.every((v, i) => Object.is(v, b[i]));
 }
 
 /** useErrorReport hands a catalog read's outcome to the shell, which is where

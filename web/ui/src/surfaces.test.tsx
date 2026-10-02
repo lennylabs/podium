@@ -15083,6 +15083,40 @@ describe("the command palette", () => {
   // The no-match arm replaces the whole listbox with a sentence, which is what
   // the field's aria-activedescendant pointed into, so it is announced rather
   // than left to a list that is no longer drawn.
+  // The read for a settled line goes out in an effect, so the render where
+  // the line settles still holds the previous line's empty result. Drawn as
+  // settled, that render flashed the no-match arm for a query that matches,
+  // and issued the catalog read the arm keys before the search was sent.
+  it("draws no no-match arm and reads no catalog for a query that matches", async () => {
+    palettePage([{ id: "platform/review", type: "skill", version: "1.2.0" }], 1);
+    render(<App />);
+    fireEvent.click(await screen.findByTestId("search-trigger"));
+    const panel = screen.getByTestId("palette");
+    let flashed = false;
+    const watch = new MutationObserver(() => {
+      if (/Nothing matched/.test(panel.textContent ?? "")) {
+        flashed = true;
+      }
+    });
+    watch.observe(panel, { childList: true, subtree: true, characterData: true });
+    // The shell reads the catalog for its own counts, so only a read issued
+    // after the line is typed is the palette's.
+    const catalogReads = () => requests.filter((r) => r.url.startsWith("/v1/catalog")).length;
+    const before = catalogReads();
+    try {
+      fireEvent.change(within(panel).getByLabelText("Search artifacts"), {
+        target: { value: "review" },
+      });
+      expect((await screen.findByTestId("palette-heading")).textContent).toBe(
+        "Artifacts · 1 of 1",
+      );
+    } finally {
+      watch.disconnect();
+    }
+    expect(flashed).toBe(false);
+    expect(catalogReads()).toBe(before);
+  });
+
   it("announces the no-match arm when the list empties", async () => {
     palettePage([], 0);
     render(<App />);
