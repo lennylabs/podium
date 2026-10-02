@@ -225,6 +225,7 @@ rm -rf "$WORK"
 | S74 | A cached pre-rotation delivery signature recovers | standalone | none | none | none |
 | S75 | `podium-server sign-stored-rows` refuses without a key and never writes one | standalone | none | none | none |
 | S76 | Chart upgrade from v0.4.0 | standard (Kubernetes) | none | none | kind, helm, kubectl, Docker |
+| S77 | A filesystem sync that drops a colliding artifact fails | solo, standalone | none | none | none |
 
 ---
 
@@ -9567,3 +9568,125 @@ docker rmi podium-live:current podium-live:current2 podium-live:v0.4.0
 git -C "$REAL_HOME/projects/podium" worktree remove --force "$WORK/v040"
 rm -rf "$WORK"
 ```
+
+---
+
+## S77: A filesystem sync that drops a colliding artifact fails
+
+**Goal.** Validate that `podium sync` against a filesystem registry drops the
+higher-precedence copy of an unsanctioned cross-layer collision, names it on
+standard error, materializes the rest, and exits 1; that a standalone server
+over the same directory serves the same copy; and that a workspace overlay
+artifact replaces the registry-side artifact silently even when it declares
+`extends:`.
+
+**Covers.** The §4.6 collision rule for registry-side layers, the §13.11.3
+report and exit status, the §11 filesystem-to-server equivalence requirement
+on a colliding directory, and the §6.4 overlay exception.
+
+**Why by hand.** The end-to-end suite reads the exit code and the streams
+through the harness. What it does not read is the operator's terminal: that
+the materialized file a developer opens holds the lower layer's text, that the
+rejection names the remedy in words an author can act on, and that `$?` is
+what a CI step gates on.
+
+**Prerequisites.** A built `podium` binary on `PATH`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then build a
+   two-layer registry in which both layers contribute `shared/clash` with no
+   `extends:`, and the lower layer also holds `shared/other`.
+
+   ```bash
+   mkdir -p "$WORK/reg/org-defaults/shared/clash" "$WORK/reg/org-defaults/shared/other" \
+     "$WORK/reg/team-finance/shared/clash"
+   printf 'multi_layer: true\nlayer_order:\n  - org-defaults\n  - team-finance\n' \
+     > "$WORK/reg/.registry-config"
+   printf 'visibility:\n  public: true\n' > "$WORK/reg/org-defaults/.layer-config"
+   printf 'visibility:\n  public: true\n' > "$WORK/reg/team-finance/.layer-config"
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: from-org\n---\n\nfrom-org\n' \
+     > "$WORK/reg/org-defaults/shared/clash/ARTIFACT.md"
+   printf -- '---\ntype: context\nversion: 1.0.0\ndescription: other\n---\n\nother\n' \
+     > "$WORK/reg/org-defaults/shared/other/ARTIFACT.md"
+   printf -- '---\ntype: context\nversion: 1.1.0\ndescription: from-team\n---\n\nfrom-team\n' \
+     > "$WORK/reg/team-finance/shared/clash/ARTIFACT.md"
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the three
+   `ARTIFACT.md` files exist.
+
+2. Sync through the filesystem source, keeping the two streams apart.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none \
+     > "$WORK/out.txt" 2> "$WORK/err.txt"
+   echo "exit=$?"
+   cat "$WORK/err.txt"
+   cat "$WORK/fs/shared/clash/ARTIFACT.md"
+   ls "$WORK/fs/shared/other"
+   ```
+
+   **Expect.** `exit=1`. `$WORK/err.txt` carries one line beginning
+   `rejected: shared/clash (ingest.collision): cross-layer collision` that
+   ends with `declare extends: shared/clash to overlay it`. The materialized
+   `shared/clash` holds `from-org`, and `shared/other` is present. `exit=0`
+   or `from-team` is the shipped behavior this scenario exists to catch.
+
+3. Repeat with `--dry-run` into a new target.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/dry" --harness none --dry-run; echo "exit=$?"
+   ls "$WORK/dry" 2>&1
+   ```
+
+   **Expect.** `exit=1`, the same `rejected:` line, and `ls` reports that
+   `$WORK/dry` does not exist.
+
+4. Start a standalone server over the same directory and sync through it.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+     --bind 127.0.0.1:8131 > "$WORK/srv.log" 2>&1 &
+   SRV=$!
+   curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8131/healthz
+   server_alive "$SRV" "$WORK/srv.log"
+   podium sync --registry http://127.0.0.1:8131 --target "$WORK/srv" --harness none; echo "exit=$?"
+   diff "$WORK/fs/shared/clash/ARTIFACT.md" "$WORK/srv/shared/clash/ARTIFACT.md" && echo same
+   ```
+
+   **Expect.** The server sync prints `exit=0` and no `rejected:` line, and
+   `diff` prints `same`. A difference means the two deployment modes kept
+   different copies.
+
+5. Sanction the collision and sync the filesystem target again.
+
+   ```bash
+   printf -- '---\ntype: context\nversion: 1.1.0\ndescription: from-team\nextends: shared/clash\n---\n\nfrom-team\n' \
+     > "$WORK/reg/team-finance/shared/clash/ARTIFACT.md"
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none; echo "exit=$?"
+   cat "$WORK/fs/shared/clash/ARTIFACT.md"
+   ```
+
+   **Expect.** `exit=0`, no `rejected:` line, and the materialized artifact
+   carries `description: from-team` with the `from-team` body.
+
+6. Add a workspace overlay artifact that declares `extends:` on the same ID
+   and sync with it.
+
+   ```bash
+   mkdir -p "$WORK/overlay/shared/clash"
+   printf -- '---\ntype: context\nversion: 9.0.0\ndescription: from-overlay\nextends: shared/clash\n---\n\nfrom-overlay\n' \
+     > "$WORK/overlay/shared/clash/ARTIFACT.md"
+   podium sync --registry "$WORK/reg" --target "$WORK/fs" --harness none \
+     --overlay "$WORK/overlay"; echo "exit=$?"
+   cat "$WORK/fs/shared/clash/ARTIFACT.md"
+   ```
+
+   **Expect.** `exit=0`, no `rejected:` line, and the materialized file is
+   byte-for-byte the overlay's authored `ARTIFACT.md`, including its
+   `extends: shared/clash` line. Merged registry fields in the file, a
+   `rejected:` line, or a non-zero exit means the §6.4 exception is not
+   honored.
+
+**Cleanup.** `kill "$SRV"` and `rm -rf "$WORK"`.
