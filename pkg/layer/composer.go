@@ -118,15 +118,11 @@ func EffectiveLayersWith(layers []Layer, id Identity, resolveGroup GroupResolver
 	return out
 }
 
-// Compose merges artifacts across layers under the §4.6 rules:
-//   - Higher-precedence layers override lower on collision.
-//   - Without `extends:`, raw ingest treats collisions as errors;
-//     the caller's effective view (this function) treats them as
-//     highest-wins.
-//   - With `extends:`, fields merge per the field-semantics table.
-//
-// Highest-precedence layer wins on collision; extends: resolution
-// runs on top per §4.6.
+// Compose returns, for each canonical ID, the candidate from the
+// highest-precedence layer in layers. It applies neither the §4.6 collision
+// rule nor extends: resolution. Ingest and filesystem.Walk enforce the
+// collision rule on their own inputs, and the consumer applies the workspace
+// overlay's exception (§6.4). No production path calls Compose.
 func Compose(layers []Layer, candidates map[string][]Candidate) []Composed {
 	if len(layers) == 0 || len(candidates) == 0 {
 		return nil

@@ -234,8 +234,7 @@ func TestEffectiveLayers_FiltersAndOrders(t *testing.T) {
 	}
 }
 
-// Spec: §4.6 — Compose under highest-wins keeps the highest-precedence
-// candidate per canonical ID.
+// Spec: §4.6 — Compose keeps the highest-precedence candidate per canonical ID, following the §4.6 composition order.
 func TestCompose_HighestPrecedenceWins(t *testing.T) {
 	t.Parallel()
 	layers := []Layer{
