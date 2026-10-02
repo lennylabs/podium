@@ -102,7 +102,7 @@ visibility:
 
 `podium sync` ignores it, because filesystem-source visibility is bypassed. It takes effect once a server serves the same directory through `podium serve --standalone --layer-path`: a layer with a non-empty `visibility:` block boots with that visibility, and a layer with no `.layer-config` or an empty block takes the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`). See [Access control](access-control).
 
-The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the filesystem-registry layers, at the same precedence it has against a server.
+The workspace local overlay (`<workspace>/.podium/overlay/`) sits on top of the filesystem-registry layers, at the same precedence it has against a server. An overlay artifact replaces a registry artifact with the same ID without a collision error; see [Authoring → extends](../authoring/extends#workspace-overlay). A collision between two registry layers fails `podium sync` instead; see [Layers](layers#merge-behavior-worth-knowing).
 
 ---
 

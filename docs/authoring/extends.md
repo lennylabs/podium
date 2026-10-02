@@ -144,9 +144,15 @@ The content hash the registry records covers the child's own package: its `ARTIF
 
 ## Replacing instead of extending
 
-To replace a parent artifact entirely (rather than refine it), the lower-precedence layer must remove the parent first or rename the higher-precedence one. Silent shadowing is not permitted: ingest rejects same-ID collisions across layers when neither declares `extends:`.
+To replace a parent artifact entirely (rather than refine it), the lower-precedence layer must remove the parent first or rename the higher-precedence one. Silent shadowing between registry-side layers is not permitted. Ingest rejects a same-ID collision across layers when neither artifact declares `extends:` on the ID. A filesystem-source `podium sync` drops the higher-precedence copy in the same case and exits 1.
 
 This is the safety property that prevents an upper layer from quietly overwriting an org-wide artifact. Replacement is an explicit two-step operation: remove (or rename) the parent, then ingest the replacement.
+
+---
+
+## Workspace overlay
+
+The workspace local overlay (`<workspace>/.podium/overlay/`) is an exception to the collision rule. An overlay artifact replaces the registry-side artifact with the same ID in the MCP server, in `podium sync`, and in the SDKs, and no consumer reports the replacement. The replacement is the same whether or not the overlay artifact declares `extends:`: a consumer resolves no `extends:` chain for an overlay artifact and serves it as authored. Copying the artifact into a shared layer subjects it to the collision rule and to `extends:` resolution.
 
 ---
 

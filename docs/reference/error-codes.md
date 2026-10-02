@@ -107,7 +107,7 @@ Codes map to MCP error payloads per the MCP spec for harnesses that consume Podi
 | `ingest.public_mode_rejects_sensitive` | Public-mode deployments reject ingest of `sensitivity: medium` and `sensitivity: high` artifacts. |
 | `ingest.sandbox_profile_unenforceable` | With `PODIUM_ENFORCE_SANDBOX_PROFILE=true` the registry rejects an artifact whose `sandbox_profile` the local host cannot honor; the host advertises its enforceable set via `PODIUM_HOST_SANDBOXES`. |
 | `ingest.invalid_artifact` | The manifest could not be decoded into an artifact record, or its `extends:` pin failed to resolve. The artifact is rejected; the rest of the ingest continues. |
-| `ingest.collision` | Another layer already contributes this canonical artifact ID and the incoming manifest declares no `extends:`, so the overlay is not sanctioned. |
+| `ingest.collision` | Another layer already contributes this canonical artifact ID and neither the incoming manifest nor the existing contribution declares `extends:` on it, so the overlay is not sanctioned. Ingest drops the incoming artifact. A filesystem-source `podium sync` drops the higher-precedence copy, materializes the rest, and exits 1. |
 | `ingest.sign_failed` | The configured signer rejected the artifact's content hash at ingest (§7.3.1). The rejection covers that one artifact, and the rest of the batch is accepted. |
 | `ingest.resource_store_failed` | A bundled resource could not be persisted to the object store, so the manifest was not committed. |
 
