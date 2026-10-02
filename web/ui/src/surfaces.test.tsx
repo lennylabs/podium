@@ -1872,27 +1872,33 @@ describe("the sign-in control", () => {
         toString: () => realLocation.toString(),
       },
     });
-    render(<App />);
-    // The sign-out entry point is the one the account menu carries, so the
-    // cluster is opened first.
-    fireEvent.click(await screen.findByTestId("account-trigger"));
-    const control = await screen.findByTestId("sign-out");
-    expect(screen.queryByTestId("sign-in")).toBeNull();
-    fireEvent.click(control);
-    await waitFor(() => {
-      expect(requests).toContainEqual({
-        url: "/v1/ui/auth/sign-out",
-        method: "POST",
+    // The stand-in is removed whether or not the case passes. Left in place by
+    // a failed assertion, it answers every later case's window.location.host
+    // with undefined, and one failure becomes several.
+    try {
+      render(<App />);
+      // The sign-out entry point is the one the account menu carries, so the
+      // cluster is opened first.
+      fireEvent.click(await screen.findByTestId("account-trigger"));
+      const control = await screen.findByTestId("sign-out");
+      expect(screen.queryByTestId("sign-in")).toBeNull();
+      fireEvent.click(control);
+      await waitFor(() => {
+        expect(requests).toContainEqual({
+          url: "/v1/ui/auth/sign-out",
+          method: "POST",
+        });
       });
-    });
-    await waitFor(() => {
-      expect(assign).toHaveBeenCalledWith("/app/");
-    });
-    Object.defineProperty(window, "location", {
-      configurable: true,
-      writable: true,
-      value: realLocation,
-    });
+      await waitFor(() => {
+        expect(assign).toHaveBeenCalledWith("/app/");
+      });
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        writable: true,
+        value: realLocation,
+      });
+    }
   });
 
   // Row three, driven with a subject present, which is the gateway-fronted
@@ -2905,7 +2911,11 @@ describe("the domain browser", () => {
     const head = within(browser).getByRole("heading", {
       level: 1,
     }).parentElement;
-    expect(head?.textContent).toBe("All domains312 ARTIFACTS2 DOMAINS");
+    // The artifact figure comes from the catalog read, which answers apart
+    // from the domain read that drew the browser.
+    await waitFor(() => {
+      expect(head?.textContent).toBe("All domains312 ARTIFACTS2 DOMAINS");
+    });
     // The catalog count heads the page without continuing the listing: those
     // artifacts sit under the subdomains rather than past a trimmed edge.
     expect(screen.queryByTestId("listing-continuation")).toBeNull();
@@ -3878,18 +3888,26 @@ describe("search", () => {
     await waitFor(() => {
       expect(lastSearch().get("top_k")).toBe("30");
     });
-    expect((await screen.findByTestId("result-count")).textContent).toBe(
-      "Showing 30 of 143 matches",
-    );
+    // The count element is already on the page with the previous total, so
+    // a findBy returns it at once. The new total lands with the answer.
+    await waitFor(() => {
+      expect(screen.getByTestId("result-count").textContent).toBe(
+        "Showing 30 of 143 matches",
+      );
+    });
     fireEvent.click(
       await screen.findByRole("button", { name: "Load 20 more" }),
     );
     await waitFor(() => {
       expect(lastSearch().get("top_k")).toBe("50");
     });
-    expect((await screen.findByTestId("result-count")).textContent).toBe(
-      "Showing 50 of 143 matches",
-    );
+    // The count element is already on the page with the previous total, so
+    // a findBy returns it at once. The new total lands with the answer.
+    await waitFor(() => {
+      expect(screen.getByTestId("result-count").textContent).toBe(
+        "Showing 50 of 143 matches",
+      );
+    });
     // The cap is spent, so the control is gone and narrowing the request is
     // what the surface offers.
     expect(screen.queryByTestId("search-continuation")).toBeNull();
@@ -4017,9 +4035,13 @@ describe("search", () => {
     await waitFor(() => {
       expect(lastSearch().get("top_k")).toBe("12");
     });
-    expect((await screen.findByTestId("result-count")).textContent).toBe(
-      "Showing 12 of 12 matches",
-    );
+    // The count element is already on the page with the previous total, so
+    // a findBy returns it at once. The new total lands with the answer.
+    await waitFor(() => {
+      expect(screen.getByTestId("result-count").textContent).toBe(
+        "Showing 12 of 12 matches",
+      );
+    });
     expect(screen.queryByTestId("search-continuation")).toBeNull();
     // The raised cap belonged to the request that carried it, so the filtered
     // request opens at the first page again.
@@ -4380,7 +4402,11 @@ describe("search", () => {
     await waitFor(() => {
       expect(lastSearch().get("type")).toBe("skill");
     });
-    expect(region.textContent).toBe("No artifact matched.");
+    // The request is issued before its answer lands, and the region is
+    // rewritten from that answer, so the text is awaited in its own right.
+    await waitFor(() => {
+      expect(region.textContent).toBe("No artifact matched.");
+    });
   });
 
   // Spec: §13.10 — a browse that no filter and no query narrowed reports an
@@ -4679,6 +4705,11 @@ describe("the artifact viewer", () => {
     goTo("#/artifact/finance%2Fap%2Fpay-invoice");
     render(<App />);
     const relations = await screen.findByLabelText("Relations");
+    // The rail stands once the artifact read answers, and the inbound groups
+    // follow from the dependents read, which answers on its own.
+    await waitFor(() => {
+      expect(relations.querySelectorAll(".rail-group").length).toBe(3);
+    });
     const groups = relations.querySelectorAll(".rail-group");
     // The outbound group leads, then one group per inbound relation, each
     // labelled in the passive direction.
@@ -4765,9 +4796,11 @@ describe("the artifact viewer", () => {
       "#/artifact/finance%2Fap%2Fpay-invoice",
     );
     // The other direction has no members, and says so on its own group
-    // rather than leaving the reader to read the absence off the first.
+    // rather than leaving the reader to read the absence off the first. That
+    // group is drawn from the dependents read, which answers after the rail
+    // stands.
     expect(
-      within(relations).getByText("Nothing extends this artifact."),
+      await within(relations).findByText("Nothing extends this artifact."),
     ).toBeTruthy();
     expect(
       within(relations).queryByText("This artifact extends nothing."),
@@ -8485,9 +8518,14 @@ describe("the layer panel", () => {
       "Precedence — drag or press the arrow keys on a handle to reorder",
     ).parentElement as HTMLElement;
     expect(within(label).getByText("lower row wins")).toBeTruthy();
-    expect(
-      (await screen.findByTestId("personal-layer-count")).textContent,
-    ).toBe("You have 1 of 3 personal layers.");
+    // The holding is drawn from the layer list and the cap from the quota
+    // read, which answers apart from it, so the line is awaited until it
+    // carries both.
+    await waitFor(() => {
+      expect(screen.getByTestId("personal-layer-count").textContent).toBe(
+        "You have 1 of 3 personal layers.",
+      );
+    });
     expect(
       panel.getByText(/Reordering takes effect on the next read/).textContent,
     ).toContain("it does not trigger a reingest");
@@ -13064,7 +13102,11 @@ describe("the layer write flows", () => {
     render(<App />);
     await screen.findByLabelText("Layer panel");
     fireEvent.click(screen.getByRole("button", { name: "Reingest all" }));
-    await screen.findByLabelText("Reingest all progress");
+    // The press draws the progress dialog inside its own act(), so it is read
+    // without a wait. A wait would yield to the deferred answers, and on a
+    // loaded runner the run can finish and replace the dialog before the case
+    // presses the control it is asserting on.
+    screen.getByLabelText("Reingest all progress");
     fireEvent.click(screen.getByRole("button", { name: "Stop waiting" }));
     expect(screen.queryByLabelText("Reingest all progress")).toBeNull();
     await screen.findByLabelText("Reingest all result");
@@ -15914,12 +15956,9 @@ describe("the shell’s identity cluster", () => {
     });
     render(<App />);
     fireEvent.click(await screen.findByTestId("account-trigger"));
-    expect((
-      // The quota read starts only once the menu opens, behind the session
-      // read, so on a loaded runner it can land after the default one-second
-      // wait. The longer timeout covers that chain rather than a slow render.
-      await screen.findByTestId("layer-quota", {}, { timeout: 5000 })
-    ).textContent).toBe(
+    // The quota read starts only once the menu opens, behind the session
+    // read, so the entry is awaited rather than read off the opened menu.
+    expect((await screen.findByTestId("layer-quota")).textContent).toBe(
       "3 user-defined layers",
     );
   });
@@ -15954,12 +15993,9 @@ describe("the shell’s identity cluster", () => {
     });
     render(<App />);
     fireEvent.click(await screen.findByTestId("account-trigger"));
-    expect((
-      // The quota read starts only once the menu opens, behind the session
-      // read, so on a loaded runner it can land after the default one-second
-      // wait. The longer timeout covers that chain rather than a slow render.
-      await screen.findByTestId("layer-quota", {}, { timeout: 5000 })
-    ).textContent).toBe(
+    // The quota read starts only once the menu opens, behind the session
+    // read, so the entry is awaited rather than read off the opened menu.
+    expect((await screen.findByTestId("layer-quota")).textContent).toBe(
       "no cap on your layers",
     );
   });
