@@ -206,7 +206,9 @@ The workspace local overlay is a per-developer set of artifact packages (`ARTIFA
 
 The MCP server watches the resolved path via fsnotify and re-indexes on change. `podium sync` reads it once per invocation and again on each watcher event when `--watch` is set. The SDK reads it on each `Client.search_artifacts` and `Client.load_artifact` call (cached for the duration of a `session_id`).
 
-Format: same `ARTIFACT.md` (plus `SKILL.md` for skills) and frontmatter as the registry; merge semantics are identical to registry-side layers.
+Format: same `ARTIFACT.md` (plus `SKILL.md` for skills) and frontmatter as the registry.
+
+**Collisions with registry-side artifacts.** The workspace local overlay is an exception to the §4.6 collision rule. An overlay artifact whose canonical ID matches an artifact in the caller's composed registry-side view replaces that artifact in the consumer's view on every consumer (the MCP server, `podium sync`, and the SDKs). This holds whether or not the overlay artifact declares `extends:`: the consumer resolves no `extends:` chain for an overlay artifact and serves it as authored. The collision is neither rejected nor reported. The overlay is per-developer, is never ingested or shared, and exists for the local iteration loop, so a replacement affects only the developer who wrote it. Promoting the artifact to a shared layer subjects it to the §4.6 rule, including `extends:` resolution.
 
 The workspace local overlay is **orthogonal to the registry-side `local` source type** (§4.6): the workspace overlay is merged in by the consumer (MCP server, sync, or SDK) and is visible only to the developer running it, while a registry-side `local`-source layer is read by the registry process and surfaced to whichever identities the layer's visibility declaration allows.
 
