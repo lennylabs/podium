@@ -15914,7 +15914,12 @@ describe("the shell’s identity cluster", () => {
     });
     render(<App />);
     fireEvent.click(await screen.findByTestId("account-trigger"));
-    expect((await screen.findByTestId("layer-quota")).textContent).toBe(
+    expect((
+      // The quota read starts only once the menu opens, behind the session
+      // read, so on a loaded runner it can land after the default one-second
+      // wait. The longer timeout covers that chain rather than a slow render.
+      await screen.findByTestId("layer-quota", {}, { timeout: 5000 })
+    ).textContent).toBe(
       "3 user-defined layers",
     );
   });
@@ -15949,7 +15954,12 @@ describe("the shell’s identity cluster", () => {
     });
     render(<App />);
     fireEvent.click(await screen.findByTestId("account-trigger"));
-    expect((await screen.findByTestId("layer-quota")).textContent).toBe(
+    expect((
+      // The quota read starts only once the menu opens, behind the session
+      // read, so on a loaded runner it can land after the default one-second
+      // wait. The longer timeout covers that chain rather than a slow render.
+      await screen.findByTestId("layer-quota", {}, { timeout: 5000 })
+    ).textContent).toBe(
       "no cap on your layers",
     );
   });
