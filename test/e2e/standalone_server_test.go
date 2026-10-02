@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -97,48 +98,6 @@ func smallteamRawExecFail(t *testing.T, env []string, args ...string) string {
 	cmd.Stderr = &out
 	_ = cmd.Run()
 	return out.String()
-}
-
-// startServerExplicitBind starts `podium <args> --bind <bind>` and probes
-// http://127.0.0.1:<probePort>/healthz (the probe host is always loopback,
-// even when the listen address is not). The default startServerArgs binds
-// 127.0.0.1 only, so this is the path used where the listen address must be
-// non-loopback (the --allow-public-bind case). It owns the process lifecycle
-// with a bounded readiness deadline and SIGINT/SIGKILL teardown.
-func startServerExplicitBind(t *testing.T, bind string, probePort int, env []string, args ...string) *serverProc {
-	t.Helper()
-	full := append(append([]string{}, args...), "--bind", bind)
-	logf, err := os.CreateTemp(t.TempDir(), "server-*.log")
-	if err != nil {
-		t.Fatalf("server log: %v", err)
-	}
-	cmd := exec.Command(cmdharness.Bin(t, "podium"), full...)
-	cmd.Env = mergeEnv(env...)
-	cmd.Stdin = bytes.NewReader(nil)
-	cmd.Stdout = logf
-	cmd.Stderr = logf
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start server: %v", err)
-	}
-	s := &serverProc{BaseURL: fmt.Sprintf("http://127.0.0.1:%d", probePort), logPath: logf.Name(), cmd: cmd}
-	t.Cleanup(func() { stopProc(s.cmd) })
-
-	deadline := time.Now().Add(25 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := httpClient.Get(s.BaseURL + "/healthz")
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				return s
-			}
-		}
-		if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
-			t.Fatalf("server exited before ready\nlog:\n%s", s.log())
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatalf("server not ready at %s within deadline\nlog:\n%s", s.BaseURL, s.log())
-	return nil
 }
 
 // ---- tests -----------------------------------------------------------------
@@ -294,68 +253,33 @@ func TestStandaloneServer_ConfigShowLayersPathSource(t *testing.T) {
 // bind key in registry.yaml changes listen address.
 func TestStandaloneServer_RegistryYAMLBind(t *testing.T) {
 	t.Parallel()
-	// The address under test goes into the registry.yaml bind: key, so it has
-	// to be known before the server starts.
-	bind := fmt.Sprintf("127.0.0.1:%d", pickPortWithRace(t))
-
+	// The registry.yaml bind: key asks for an ephemeral port, so the kernel
+	// picks it and no other test in the package can take it first. Ignoring
+	// the key would bind the 127.0.0.1:8080 default instead, so a server that
+	// reports a different loopback port has read the key.
+	const defaultBind = "127.0.0.1:8080"
 	cfgDir := t.TempDir()
 	cfgFile := filepath.Join(cfgDir, "registry.yaml")
-	yaml := fmt.Sprintf("registry:\n  bind: %s\n", bind)
-	if err := os.WriteFile(cfgFile, []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(cfgFile, []byte("registry:\n  bind: 127.0.0.1:0\n"), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
 
 	reg := writeRegistry(t, map[string]string{"a/ARTIFACT.md": smallteamLowArtifact("a")})
 
-	// Start server with --bind from registry.yaml; we still pass --layer-path
-	// so we don't need another config key and can use startServerArgs which
-	// appends its own --bind override. Since startServerArgs appends --bind we
-	// cannot rely on the yaml bind here — test the yaml path by starting the
-	// server raw instead.
-	logf, err := os.CreateTemp(t.TempDir(), "server-*.log")
-	if err != nil {
-		t.Fatalf("log file: %v", err)
-	}
-	bin := cmdharness.Bin(t, "podium")
-	cmd := exec.Command(bin, "serve", "--standalone", "--layer-path", reg)
-	cmd.Env = mergeEnv("HOME="+t.TempDir(), "PODIUM_CONFIG_FILE="+cfgFile)
-	cmd.Stdin = bytes.NewReader(nil)
-	cmd.Stdout = logf
-	cmd.Stderr = logf
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start server: %v", err)
-	}
-	t.Cleanup(func() { stopProc(cmd) })
+	// The server is launched without --bind, which startServerArgs would
+	// append and which would override the key under test. PODIUM_BIND is
+	// pinned empty because an inherited value also beats the file (§13.12).
+	srv := launchServer(t,
+		[]string{"HOME=" + t.TempDir(), "PODIUM_CONFIG_FILE=" + cfgFile, "PODIUM_BIND="},
+		"serve", "--standalone", "--layer-path", reg)
 
-	url := "http://" + bind + "/healthz"
-	deadline := time.Now().Add(25 * time.Second)
-	var ok bool
-	for time.Now().Before(deadline) {
-		resp, err := httpClient.Get(url)
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				ok = true
-				break
-			}
-		}
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			b, _ := os.ReadFile(logf.Name())
-			t.Fatalf("server exited before ready\nlog:\n%s", b)
-		}
-		time.Sleep(100 * time.Millisecond)
+	bound := strings.TrimPrefix(srv.BaseURL, "http://")
+	if bound == defaultBind || !strings.HasPrefix(bound, "127.0.0.1:") {
+		t.Errorf("server bound %s; the registry.yaml bind: 127.0.0.1:0 key must yield an ephemeral loopback port\nlog:\n%s",
+			bound, srv.log())
 	}
-	if !ok {
-		b, _ := os.ReadFile(logf.Name())
-		t.Fatalf("server not ready at %s\nlog:\n%s", url, b)
-	}
-	st := getStatus(t, url)
-	if st != 200 {
+	if st := getStatus(t, srv.BaseURL+"/healthz"); st != 200 {
 		t.Errorf("/healthz on yaml-configured bind = HTTP %d, want 200", st)
-	}
-	b, _ := os.ReadFile(logf.Name())
-	if !strings.Contains(string(b), bind) {
-		t.Errorf("startup log missing bind address %q:\n%s", bind, string(b))
 	}
 }
 
@@ -556,13 +480,20 @@ func TestStandaloneServer_PublicModeLoopbackEnforce(t *testing.T) {
 // bind a non-loopback address (typically behind an authenticated proxy).
 func TestStandaloneServer_AllowPublicBindFlag(t *testing.T) {
 	t.Parallel()
-	// This server does bind, and it binds a non-loopback address, which the
-	// listen line the ephemeral-port path reads back does not carry. The
-	// address has to be known up front, so the port is picked with the race.
-	port := pickPortWithRace(t)
-	srv := startServerExplicitBind(t, fmt.Sprintf("0.0.0.0:%d", port), port,
-		[]string{"HOME=" + t.TempDir()},
-		"serve", "--standalone", "--public-mode", "--allow-public-bind")
+	// The server binds the wildcard address on an ephemeral port and reports
+	// the address it holds, so the test reads the port back rather than
+	// picking one another test could take first. A wildcard listener accepts
+	// on loopback, which is where launchServer probes it.
+	srv := launchServer(t, []string{"HOME=" + t.TempDir()},
+		"serve", "--standalone", "--public-mode", "--allow-public-bind", "--bind", "0.0.0.0:0")
+
+	m := listeningAddr.FindStringSubmatch(srv.log())
+	if m == nil {
+		t.Fatalf("no listen line in the server log:\n%s", srv.log())
+	}
+	if host, _, err := net.SplitHostPort(m[1]); err != nil || !net.ParseIP(host).IsUnspecified() {
+		t.Errorf("server bound %s, want the non-loopback wildcard address --bind 0.0.0.0:0 names", m[1])
+	}
 
 	var health struct {
 		Mode string `json:"mode"`

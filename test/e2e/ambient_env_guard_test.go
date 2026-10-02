@@ -166,3 +166,57 @@ func TestServe_AmbientBackendEnvDoesNotSuppressNoAutostandalone(t *testing.T) {
 			"exit=%d\nstdout:\n%s\nstderr:\n%s", res.Exit, res.Stdout, res.Stderr)
 	}
 }
+
+// ambientIdentityEnv is identity configuration a developer shell can carry
+// that mergeEnv keeps out of a subprocess environment. The scrub matches the
+// PODIUM_IDENTITY and PODIUM_SESSION_TOKEN prefixes, so these members also
+// pin the prefix clauses.
+var ambientIdentityEnv = []string{
+	"PODIUM_IDENTITY_PROVIDER",
+	"PODIUM_SESSION_TOKEN",
+	"PODIUM_SESSION_TOKEN_FILE",
+	"PODIUM_SESSION_TOKEN_ENV",
+}
+
+// TestMergeEnv_StripsAmbientIdentityConfig asserts that mergeEnv removes the
+// ambient identity selector and session credentials from the subprocess
+// environment, and that an explicit value passed in `extra` still reaches it.
+//
+// Spec: §6.3 (the identity provider is configuration a deployment selects).
+func TestMergeEnv_StripsAmbientIdentityConfig(t *testing.T) {
+	for _, k := range ambientIdentityEnv {
+		t.Setenv(k, "ambient-should-be-scrubbed")
+	}
+
+	got := mergeEnv()
+	for _, k := range ambientIdentityEnv {
+		if envHasKey(got, k) {
+			t.Errorf("mergeEnv leaked ambient identity var %q into the subprocess env", k)
+		}
+	}
+
+	got = mergeEnv("PODIUM_IDENTITY_PROVIDER=injected-session-token")
+	if v := envValue(got, "PODIUM_IDENTITY_PROVIDER"); v != "injected-session-token" {
+		t.Errorf("PODIUM_IDENTITY_PROVIDER = %q, want the explicit override", v)
+	}
+}
+
+// TestServe_AmbientIdentityEnvDoesNotGateAnonymousRead boots a standalone
+// server through the shared harness while the test process carries
+// PODIUM_IDENTITY_PROVIDER=injected-session-token. Inherited, that variable
+// refuses the boot for want of a runtime key set or, with one, answers the
+// anonymous read 401 auth.untrusted_runtime. Scrubbed, the server serves the
+// read anonymously, which is what every standalone test in the package assumes.
+//
+// Spec: §13.10 (the standalone default serves reads without authentication).
+func TestServe_AmbientIdentityEnvDoesNotGateAnonymousRead(t *testing.T) {
+	t.Setenv("PODIUM_IDENTITY_PROVIDER", "injected-session-token")
+	t.Setenv("PODIUM_SESSION_TOKEN", "ambient-should-be-scrubbed")
+
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		"eng/sample/ARTIFACT.md": contextArtifact("sample"),
+	}))
+	if st, body := getRaw(t, srv.BaseURL+"/v1/search_artifacts?query=sample"); st != 200 {
+		t.Fatalf("anonymous search = HTTP %d, want 200; ambient identity configuration reached the server\n%s", st, body)
+	}
+}

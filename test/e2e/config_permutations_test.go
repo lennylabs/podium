@@ -12,7 +12,6 @@ package e2e
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -375,84 +374,41 @@ func TestConfigPrecedence_FullChainThroughConfigShow(t *testing.T) {
 	}
 }
 
-// startServerCLIBind boots `podium serve --standalone --bind <cliBind>` with the
-// given env and waits for /healthz on cliBind. Unlike startServerArgs (which
-// chooses its own --bind port), this launcher pins the CLI bind so a test can
-// set PODIUM_BIND to a different port and observe which one wins.
-func startServerCLIBind(t *testing.T, env []string, cliBind string) *serverProc {
-	t.Helper()
-	logf, err := os.CreateTemp(t.TempDir(), "server-*.log")
-	if err != nil {
-		t.Fatalf("server log: %v", err)
-	}
-	cmd := exec.Command(cmdharness.Bin(t, "podium"), "serve", "--standalone", "--bind", cliBind)
-	cmd.Env = mergeEnv(env...)
-	cmd.Stdin = bytes.NewReader(nil)
-	cmd.Stdout = logf
-	cmd.Stderr = logf
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start server: %v", err)
-	}
-	s := &serverProc{BaseURL: "http://" + cliBind, logPath: logf.Name(), cmd: cmd}
-	for _, kv := range env {
-		if strings.HasPrefix(kv, "HOME=") {
-			s.Home = strings.TrimPrefix(kv, "HOME=")
-		}
-	}
-	t.Cleanup(func() { stopProc(s.cmd) })
-	deadline := time.Now().Add(25 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := httpClient.Get(s.BaseURL + "/healthz")
-		if err == nil {
-			resp.Body.Close()
-			if resp.StatusCode == 200 {
-				return s
-			}
-		}
-		if s.cmd.ProcessState != nil && s.cmd.ProcessState.Exited() {
-			t.Fatalf("server exited before ready\nlog:\n%s", s.log())
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatalf("server not ready at %s within deadline\nlog:\n%s", s.BaseURL, s.log())
-	return nil
-}
-
 // TestConfigPrecedence_CLIFlagBeatsEnv closes the CLI-over-env half of
 // The serve command maps --bind onto PODIUM_BIND before config
 // resolution, so a --bind flag wins over an already-set PODIUM_BIND. It boots a
-// standalone server with PODIUM_BIND pointed at one loopback port and --bind at
-// a distinct port, then asserts the listen line names the CLI port, /healthz
-// serves on the CLI port, and nothing answers on the env port, proving the CLI
-// flag sits above the environment in the chain.
+// standalone server with PODIUM_BIND pointed at a loopback port the test holds
+// and --bind at an ephemeral port, then asserts the server bound the CLI
+// address and serves /healthz there, proving the CLI flag sits above the
+// environment in the chain.
 //
 // Spec: §13.12 (precedence CLI flag > env), §13.10 (the serve --bind override).
 func TestConfigPrecedence_CLIFlagBeatsEnv(t *testing.T) {
 	t.Parallel()
-	// Two distinct ports. pickPortWithRace releases immediately, so reserve the env
-	// port by holding its listener open for the life of the test; that both
-	// guarantees the two ports differ and proves the env port was never bound
-	// by the server (the server would fail to bind a held port, but the CLI
-	// flag means it never tries).
+	// The env port is held by a listener for the life of the test, so the
+	// server cannot bind it: a server that took PODIUM_BIND fails to start.
+	// The CLI --bind asks for an ephemeral port, which startServerArgs passes
+	// and reads back, so no port is picked and released for another test to
+	// take first.
 	envLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("reserve env port: %v", err)
 	}
 	defer envLn.Close()
 	envBind := envLn.Addr().String()
-	cliBind := fmt.Sprintf("127.0.0.1:%d", pickPortWithRace(t))
 
-	srv := startServerCLIBind(t, []string{
+	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
 		"PODIUM_BIND=" + envBind,
-	}, cliBind)
+	}, "serve", "--standalone")
 
-	// The server is healthy on the CLI bind (startServerCLIBind waited there),
-	// which is itself proof the CLI flag won. Corroborate with the listen line.
-	log := srv.log()
-	if !strings.Contains(log, "listening on "+cliBind) {
-		t.Errorf("listen line does not show the CLI --bind %s (CLI must beat env):\n%s", cliBind, log)
+	// The server is healthy on the address it reported, which is itself proof
+	// the CLI flag won. Corroborate with the listen line.
+	cliBind := strings.TrimPrefix(srv.BaseURL, "http://")
+	if cliBind == envBind {
+		t.Errorf("server bound the env PODIUM_BIND %s; the CLI --bind must win", envBind)
 	}
+	log := srv.log()
 	if strings.Contains(log, "listening on "+envBind) {
 		t.Errorf("server bound the env PODIUM_BIND %s; the CLI --bind must win:\n%s", envBind, log)
 	}

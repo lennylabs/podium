@@ -784,10 +784,13 @@ func TestSDK_PyIdentityUnchanged(t *testing.T) {
 }
 
 // deadRegistry returns a registry URL pointing at a closed local port so a
-// transport-level connection is refused immediately (no listener).
+// transport-level connection is refused immediately (no listener). Port 1 is
+// outside every ephemeral range and no test binds it, so no server the suite
+// starts concurrently can come to answer on it, which a port picked from a
+// released ephemeral listener cannot promise.
 func deadRegistry(t *testing.T) string {
 	t.Helper()
-	return "http://127.0.0.1:" + strconv.Itoa(pickPortWithRace(t))
+	return "http://127.0.0.1:1"
 }
 
 // Python: an unreachable registry surfaces the structured
