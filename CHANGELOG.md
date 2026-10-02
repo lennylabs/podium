@@ -87,6 +87,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **The web UI command palette no longer flashes "Nothing matched"**: on the
+  render where the typed query settled, the palette drew the no-match message
+  for one frame before the search for that query was sent, and issued an
+  unneeded catalog read. The shared request hook now reports that render as
+  loading, so no surface treats the previous result as the answer to new
+  inputs.
 - **`podium layer watch <id>` accepts the layer ID as a positional** (§7.3.1):
   the command accepted the layer only through `--id`, so the invocation the
   specification writes, `podium layer watch <id> [--interval <duration>]`,
