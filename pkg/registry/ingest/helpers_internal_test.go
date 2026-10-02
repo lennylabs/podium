@@ -6,21 +6,6 @@ import (
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
-func TestStripPin(t *testing.T) {
-	t.Parallel()
-	cases := map[string]string{
-		"foo/bar@1.0.0":      "foo/bar",
-		"foo/bar@sha256:abc": "foo/bar",
-		"foo/bar":            "foo/bar",
-		"":                   "",
-	}
-	for in, want := range cases {
-		if got := stripPin(in); got != want {
-			t.Errorf("stripPin(%q) = %q, want %q", in, got, want)
-		}
-	}
-}
-
 func TestSplitRef(t *testing.T) {
 	t.Parallel()
 	id, pin := splitRef("foo/bar@1.0.0")

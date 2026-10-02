@@ -564,3 +564,23 @@ func TestDeliveryHash_DiffersFromContentHashForTheSameBytes(t *testing.T) {
 		t.Errorf("DeliveryHash equals the content hash of the same bytes: %q", got)
 	}
 }
+
+// Spec: §4.7.6 — StripPin drops every pin form and returns the canonical ID
+// unchanged when the reference carries no pin.
+func TestStripPin(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in, want string
+	}{
+		{"foo/bar", "foo/bar"},
+		{"foo/bar@1.0.0", "foo/bar"},
+		{"foo/bar@1.2.x", "foo/bar"},
+		{"foo/bar@sha256:abc", "foo/bar"},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := StripPin(c.in); got != c.want {
+			t.Errorf("StripPin(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

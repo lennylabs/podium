@@ -1925,9 +1925,10 @@ func parsedArtifact(rec store.ManifestRecord) *manifest.Artifact {
 
 // splitParentRef splits "<id>@<version>" into its components. It splits on
 // the first "@" so it parses the §4.2 reference grammar identically to the
-// other split helpers (ingest.splitRef/stripPin, composer.SplitArtifactRef);
-// canonical-ID segments may not contain "@" (filesystem.ValidateCanonicalID),
-// so the suffix always begins at the first "@".
+// other split helpers (ingest.splitRef, version.StripPin,
+// composer.SplitArtifactRef); canonical-ID segments may not contain "@"
+// (filesystem.ValidateCanonicalID), so the suffix always begins at the first
+// "@".
 func splitParentRef(ref string) (id, ver string) {
 	if i := strings.Index(ref, "@"); i >= 0 {
 		return ref[:i], ref[i+1:]

@@ -104,6 +104,19 @@ func ParsePin(s string) (Pin, error) {
 	return Pin{}, fmt.Errorf("%w: %q", ErrInvalidPin, s)
 }
 
+// StripPin returns the canonical ID portion of a §4.7.6 reference by
+// dropping a trailing @<semver>, @<semver>.x, or @sha256:<hash> pin. It cuts
+// at the first "@" because canonical-ID segments cannot contain "@"
+// (filesystem.ValidateCanonicalID), so the pin always begins there.
+//
+// Spec: §4.7.6
+func StripPin(ref string) string {
+	if i := strings.Index(ref, "@"); i >= 0 {
+		return ref[:i]
+	}
+	return ref
+}
+
 // Resolve picks the highest version from candidates that satisfies pin.
 // Candidates is a list of "major.minor.patch" strings; the resolved
 // version is returned, or ErrInvalidPin when no match exists.

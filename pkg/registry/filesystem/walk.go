@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 )
 
@@ -76,9 +77,9 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 		// resolves to the colliding canonical ID; the extends merge is
 		// applied later at read time. A collision without that declaration
 		// is a forbidden silent shadow.
-		if collisionError && !declaresExtendsTo(rec, rec.ID) {
-			return nil, fmt.Errorf("ingest.collision: artifact %q present in layers %q and %q",
-				rec.ID, deduped[idx].Layer.ID, rec.Layer.ID)
+		if collisionError && !layer.ExtendsOverlays(extendsOf(rec), rec.ID) {
+			return nil, fmt.Errorf("%s: artifact %q present in layers %q and %q",
+				layer.CollisionCode, rec.ID, deduped[idx].Layer.ID, rec.Layer.ID)
 		}
 		// Highest-precedence wins; later layers override earlier.
 		deduped[idx] = rec
@@ -96,18 +97,14 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	return deduped, nil
 }
 
-// declaresExtendsTo reports whether rec's frontmatter declares
-// extends: <id>, comparing against the pin-stripped reference. Used to
-// honor the §4.6 same-ID extends exception during collision detection.
-func declaresExtendsTo(rec ArtifactRecord, id string) bool {
-	if rec.Artifact == nil || rec.Artifact.Extends == "" {
-		return false
+// extendsOf returns rec's declared extends: reference, or "" when the record
+// carries no parsed ARTIFACT.md, so the §4.6 collision check treats a record
+// without frontmatter as declaring no overlay.
+func extendsOf(rec ArtifactRecord) string {
+	if rec.Artifact == nil {
+		return ""
 	}
-	ref := rec.Artifact.Extends
-	if i := strings.Index(ref, "@"); i >= 0 {
-		ref = ref[:i]
-	}
-	return ref == id
+	return rec.Artifact.Extends
 }
 
 // CollisionPolicy controls how Walk handles two layers contributing the
