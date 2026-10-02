@@ -3961,14 +3961,20 @@ describe("search", () => {
     // That press spent the cap, so the control it was on is gone once its own
     // results land. The focus goes to the first result the press appended
     // rather than to the document body, which is where the reader was
-    // reading.
+    // reading. The handoff runs in a passive effect after the commit that
+    // draws the rows, and that commit comes from a resolved fetch rather than
+    // from an event inside act(), so the effect can run a task after the rows
+    // appear. The focus is awaited in its own right for that reason: asserted
+    // on the render the row count settled, it reads the document body.
     await waitFor(() => {
       expect(screen.getAllByTestId("relevance-bars").length).toBe(50);
     });
     expect(screen.queryByTestId("search-continue")).toBeNull();
-    expect((document.activeElement as HTMLElement).textContent).toBe(
-      "platform/svc31",
-    );
+    await waitFor(() => {
+      expect((document.activeElement as HTMLElement).textContent).toBe(
+        "platform/svc31",
+      );
+    });
   });
 
   // Spec: §13.10 — the continuation asks for what is still withheld rather
