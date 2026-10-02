@@ -586,7 +586,7 @@ Composition order (lowest to highest precedence):
 2. User-defined layers belonging to the caller, in the user-controlled order returned by `podium layer list`.
 3. The workspace local overlay (when configured).
 
-A canonical-ID collision between layers follows the merge semantics for collisions below: the collision is rejected unless the higher-precedence artifact declares `extends:` on the lower-precedence one. Resolution of layers 1 and 2 happens at the registry on every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call, and includes `extends:` resolution per the §9.1 `LayerComposer` row; layer 3 is merged in by the MCP server before returning results.
+A canonical-ID collision between registry-side layers (the admin-defined and user-defined layers above) follows the merge semantics for collisions below. The workspace local overlay follows §6.4. Resolution of layers 1 and 2 happens at the registry on every `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact` call, and includes `extends:` resolution per the §9.1 `LayerComposer` row; layer 3 is merged in by the consumer that reads it (§6.4).
 
 ### Source types
 
@@ -671,14 +671,14 @@ layers:
 
 If two layers contribute artifacts with the same canonical ID:
 
-- A collision is rejected at ingest **unless** the higher-precedence artifact declares `extends: <lower-precedence-id>` in frontmatter.
+- Between registry-side layers, the collision is rejected **unless** the higher-precedence artifact declares `extends: <lower-precedence-id>` in frontmatter. The rejected artifact is dropped with `ingest.collision` (§7.3.1), and the other artifact stays in the effective view. At ingest, the dropped artifact is the one the cycle is ingesting (§7.3.1). A filesystem-source `podium sync` drops the higher-precedence artifact (§13.11.3). The rejection reason names the artifact and the `extends:` remedy and does not name the layer that already contributes the ID, because that layer may be one the caller cannot read (§4.7.2).
 - When `extends:` is declared, fields merge per the table below.
 
 `extends:` is a single scalar (no multiple inheritance). Cycle detection at ingest time. Parent version is resolved at the child's ingest time and pinned (parent updates do not silently propagate; the child must be re-ingested to pick up changes).
 
 A child may not extend a deprecated parent version. When an `extends:` reference names a deprecated version explicitly, by exact semver or by content hash, ingest rejects the child with `ingest.invalid_artifact` (§6.10). A range or unpinned reference selects among the parent's non-deprecated versions per §4.7.6. Deprecation is per-version, so this rule applies to the version being ingested and never invalidates a child already stored against a parent version that was live when the child was ingested.
 
-To intentionally replace an artifact rather than extend it, the lower-precedence layer must remove it first or rename the higher-precedence one. Silent shadowing is never permitted.
+To intentionally replace an artifact rather than extend it, the lower-precedence layer must remove it first or rename the higher-precedence one. Silent shadowing between registry-side layers is never permitted. The workspace local overlay is an exception, and §6.4 states its collision rule.
 
 **Hidden parents.** When a child manifest declares `extends: <parent>` and the requesting identity cannot see the layer that contributes the parent, the registry resolves and merges the parent server-side and serves the merged manifest. This preserves layer privacy and keeps the consumer interface uniform regardless of layer membership.
 
