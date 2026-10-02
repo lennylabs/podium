@@ -243,10 +243,9 @@ func collidingRegistry(t *testing.T) string {
 	return dir
 }
 
-// Spec: §11 (Filesystem ↔ server equivalence test) / §2.2 (Shared library
-// code) / §13.11.3 — a registry whose higher-precedence layer contributes an
-// artifact ID the lower layer already contributes, without declaring
-// extends:, materializes byte-identically under both registry sources. The
+// Spec: §11 / §2.2 / §13.11.3 — Filesystem ↔ server equivalence test: a
+// registry whose higher-precedence layer contributes an artifact ID the lower
+// layer already contributes, without declaring extends:, materializes byte-identically under both registry sources. The
 // filesystem source drops the higher copy and reports the drop, and the
 // server source never stored it, so both serve the lower-precedence copy.
 // Matrix: §6.10 (ingest.collision)
