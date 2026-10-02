@@ -1,10 +1,13 @@
 package filesystem
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 const skillArtifact = `---
@@ -249,8 +252,10 @@ func TestWalk_CollisionExtendsOtherIDStillFails(t *testing.T) {
 	}
 }
 
-// Spec: §6.4 — the workspace overlay's walk of its own directory uses
-// CollisionPolicyHighestWins, so the highest-precedence layer wins.
+// CollisionPolicyHighestWins keeps the highest-precedence record for each ID
+// without checking extends:. The workspace overlay's walk of its own
+// directory (pkg/overlay) uses it; §6.4 defines no multi-layer overlay, so
+// this pins the policy rather than a spec rule.
 func TestWalk_HighestWinsKeepsTopLayer(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -291,12 +296,202 @@ layer_order:
 // Spec: §4.6, §13.11.3 — CollisionPolicyDrop reports each drop through
 // OnCollision, so Walk refuses the policy without a callback rather than
 // dropping an artifact silently. The refusal precedes the layer walk.
+//
+// Matrix: §6.10 (ingest.collision)
 func TestWalk_DropPolicyRequiresOnCollision(t *testing.T) {
 	t.Parallel()
 	reg := &Registry{}
-	_, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyDrop})
+	got, err := reg.Walk(WalkOptions{CollisionPolicy: CollisionPolicyDrop})
 	if err == nil || !strings.Contains(err.Error(), "CollisionPolicyDrop requires OnCollision") {
 		t.Fatalf("Walk err = %v, want the missing-OnCollision refusal", err)
+	}
+	if got != nil {
+		t.Errorf("Walk records = %v, want nil on the refusal", idsOf(got))
+	}
+}
+
+// dropFixtureArtifact is a context artifact whose description names the
+// contributing layer, with an optional extends: line and tags, so a test
+// can tell which layer's copy survived and what an extends: merge folded in.
+func dropFixtureArtifact(desc, extends string, tags ...string) string {
+	var b strings.Builder
+	b.WriteString("---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\n")
+	if extends != "" {
+		b.WriteString("extends: " + extends + "\n")
+	}
+	if len(tags) > 0 {
+		b.WriteString("tags:\n")
+		for _, tag := range tags {
+			b.WriteString("  - " + tag + "\n")
+		}
+	}
+	b.WriteString("---\n\nBody.\n")
+	return b.String()
+}
+
+// openDropFixture writes a multi-layer registry whose layer_order is layers
+// and whose files map "<layer>/<id>" to ARTIFACT.md content, and opens it.
+func openDropFixture(t *testing.T, layers []string, files map[string]string) *Registry {
+	t.Helper()
+	root := t.TempDir()
+	opts := []testharness.WriteTreeOption{{
+		Path:    ".registry-config",
+		Content: "multi_layer: true\nlayer_order:\n  - " + strings.Join(layers, "\n  - ") + "\n",
+	}}
+	for path, content := range files {
+		opts = append(opts, testharness.WriteTreeOption{Path: path + "/ARTIFACT.md", Content: content})
+	}
+	testharness.WriteTree(t, root, opts...)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	return reg
+}
+
+// Spec: §4.6 — under CollisionPolicyDrop an unsanctioned collision drops the
+// higher-precedence record, keeps the lower one, reports the drop through
+// OnCollision, and leaves every non-colliding artifact in place. A third
+// layer is compared against the kept record, so its drop names the first
+// contributor as ExistingLayer.
+//
+// Matrix: §6.10 (ingest.collision)
+func TestWalk_DropPolicy(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		layers    []string
+		files     map[string]string
+		wantDesc  string
+		wantLayer string
+		wantDrops []layer.Collision
+	}{
+		{
+			name:   "two layers without extends keep the lower copy",
+			layers: []string{"l1", "l2"},
+			files: map[string]string{
+				"l1/x": dropFixtureArtifact("from-l1", ""),
+				"l2/x": dropFixtureArtifact("from-l2", ""),
+			},
+			wantDesc:  "from-l1",
+			wantLayer: "l1",
+			wantDrops: []layer.Collision{{ArtifactID: "x", Layer: "l2", ExistingLayer: "l1"}},
+		},
+		{
+			name:   "three layers without extends drop both higher copies",
+			layers: []string{"l1", "l2", "l3"},
+			files: map[string]string{
+				"l1/x": dropFixtureArtifact("from-l1", ""),
+				"l2/x": dropFixtureArtifact("from-l2", ""),
+				"l3/x": dropFixtureArtifact("from-l3", ""),
+			},
+			wantDesc:  "from-l1",
+			wantLayer: "l1",
+			wantDrops: []layer.Collision{
+				{ArtifactID: "x", Layer: "l2", ExistingLayer: "l1"},
+				{ArtifactID: "x", Layer: "l3", ExistingLayer: "l1"},
+			},
+		},
+		{
+			name:   "higher copy declaring extends on the id is kept",
+			layers: []string{"l1", "l2"},
+			files: map[string]string{
+				"l1/x": dropFixtureArtifact("from-l1", ""),
+				"l2/x": dropFixtureArtifact("from-l2", "x"),
+			},
+			wantDesc:  "from-l2",
+			wantLayer: "l2",
+		},
+		{
+			name:   "higher copy declaring extends on another id is dropped",
+			layers: []string{"l1", "l2"},
+			files: map[string]string{
+				"l1/x": dropFixtureArtifact("from-l1", ""),
+				"l2/x": dropFixtureArtifact("from-l2", "other/id"),
+			},
+			wantDesc:  "from-l1",
+			wantLayer: "l1",
+			wantDrops: []layer.Collision{{ArtifactID: "x", Layer: "l2", ExistingLayer: "l1"}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			files := map[string]string{"l1/other": dropFixtureArtifact("other", "")}
+			for k, v := range tc.files {
+				files[k] = v
+			}
+			reg := openDropFixture(t, tc.layers, files)
+			var drops []layer.Collision
+			got, err := reg.Walk(WalkOptions{
+				CollisionPolicy: CollisionPolicyDrop,
+				OnCollision:     func(c layer.Collision) { drops = append(drops, c) },
+			})
+			if err != nil {
+				t.Fatalf("Walk: %v", err)
+			}
+			if !reflect.DeepEqual(drops, tc.wantDrops) {
+				t.Errorf("OnCollision calls = %+v, want %+v", drops, tc.wantDrops)
+			}
+			byID := map[string]ArtifactRecord{}
+			for _, rec := range got {
+				byID[rec.ID] = rec
+			}
+			if len(got) != 2 {
+				t.Fatalf("got %v, want x and other", idsOf(got))
+			}
+			if _, ok := byID["other"]; !ok {
+				t.Errorf("non-colliding artifact missing from %v", idsOf(got))
+			}
+			x := byID["x"]
+			if x.Layer.ID != tc.wantLayer || x.Artifact.Description != tc.wantDesc {
+				t.Errorf("x kept from layer %q (%q), want %q (%q)",
+					x.Layer.ID, x.Artifact.Description, tc.wantLayer, tc.wantDesc)
+			}
+		})
+	}
+}
+
+// Spec: §4.6 — a record CollisionPolicyDrop drops is also removed from the
+// extends: resolver's input, so a higher layer's extends: merges onto the
+// kept lower copy rather than onto the dropped middle copy.
+//
+// Matrix: §6.10 (ingest.collision)
+func TestWalk_DropPolicyDroppedRecordIsNotAParent(t *testing.T) {
+	t.Parallel()
+	reg := openDropFixture(t, []string{"l1", "l2", "l3"}, map[string]string{
+		"l1/x": dropFixtureArtifact("from-l1", "", "l1-tag"),
+		"l2/x": dropFixtureArtifact("from-l2", "", "l2-tag"),
+		"l3/x": dropFixtureArtifact("from-l3", "x", "l3-tag"),
+	})
+	var drops []layer.Collision
+	got, err := reg.Walk(WalkOptions{
+		CollisionPolicy: CollisionPolicyDrop,
+		ResolveExtends:  true,
+		OnCollision:     func(c layer.Collision) { drops = append(drops, c) },
+	})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	want := []layer.Collision{{ArtifactID: "x", Layer: "l2", ExistingLayer: "l1"}}
+	if !reflect.DeepEqual(drops, want) {
+		t.Errorf("OnCollision calls = %+v, want %+v", drops, want)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %v, want x only", idsOf(got))
+	}
+	a, err := manifest.ParseArtifact(got[0].ArtifactBytes)
+	if err != nil {
+		t.Fatalf("ParseArtifact(merged): %v", err)
+	}
+	if a.Description != "from-l3" {
+		t.Errorf("Description = %q, want from-l3", a.Description)
+	}
+	if !contains(a.Tags, "l1-tag") || !contains(a.Tags, "l3-tag") || contains(a.Tags, "l2-tag") {
+		t.Errorf("Tags = %v, want the union of l1-tag and l3-tag without l2-tag", a.Tags)
+	}
+	if strings.Contains(string(got[0].ArtifactBytes), "from-l2") {
+		t.Errorf("merged bytes carry the dropped copy's description:\n%s", got[0].ArtifactBytes)
 	}
 }
 
@@ -599,4 +794,17 @@ func toBytes(m map[string]string) map[string][]byte {
 		out[k] = []byte(v)
 	}
 	return out
+}
+
+// Spec: §4.6 — a record with no parsed ARTIFACT.md declares no extends:, so
+// the collision check treats it as an unsanctioned overlay.
+func TestExtendsOf(t *testing.T) {
+	t.Parallel()
+	if got := extendsOf(ArtifactRecord{}); got != "" {
+		t.Errorf("extendsOf(no artifact) = %q, want empty", got)
+	}
+	rec := ArtifactRecord{Artifact: &manifest.Artifact{Extends: "x@1.0.0"}}
+	if got := extendsOf(rec); got != "x@1.0.0" {
+		t.Errorf("extendsOf = %q, want x@1.0.0", got)
+	}
 }
