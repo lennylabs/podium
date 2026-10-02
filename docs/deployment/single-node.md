@@ -103,7 +103,7 @@ podium serve --standalone --layer-path /var/podium/team-artifacts/
 podium layer reingest team-artifacts
 ```
 
-For continuous updates, `podium layer watch --id <id>` re-triggers ingest on an interval set with `--interval` (default 1m).
+For continuous updates, `podium layer watch <id>` re-triggers ingest on an interval set with `--interval` (default 1m).
 
 **`git` source**: the registry mirrors a tracked Git ref. Configure layers in `~/.podium/registry.yaml`, under the same top-level `registry:` mapping the example above uses:
 

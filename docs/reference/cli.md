@@ -513,8 +513,10 @@ The visibility flags withdraw as well as grant, because the update endpoint appl
 Polls a layer's source for changes at a configured interval. Works against `local`-source layers and against `git`-source layers that do not have a webhook configured (for example, on a developer machine without a public ingress). Each tick posts to `/v1/layers/reingest`; the command runs until interrupted.
 
 ```
-podium layer watch --id <id> [--interval <duration>]
+podium layer watch <id> [--interval <duration>]
 ```
+
+`--id <id>` names the layer as the positional `<id>` does. Giving both with different values is refused before any request is sent: the command prints `error: layer id "<positional>" conflicts with --id "<flag>"` and exits 2. A second positional prints the usage line and exits 2.
 
 `--interval` takes a Go duration string (`30s`, `1h`) and defaults to `1m`. A non-positive value is rejected.
 

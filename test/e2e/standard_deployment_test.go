@@ -1678,7 +1678,7 @@ func TestStandardDeploy_LayerWatchPolls(t *testing.T) {
 	}
 }
 
-// -- `podium layer watch` fails with exit 2 when --id is missing.
+// -- `podium layer watch` fails with exit 2 when no layer id is given.
 func TestStandardDeploy_LayerWatchMissingID(t *testing.T) {
 	t.Parallel()
 	res := runPodium(t, "", []string{"PODIUM_REGISTRY=http://127.0.0.1:19999"},
@@ -1686,7 +1686,7 @@ func TestStandardDeploy_LayerWatchMissingID(t *testing.T) {
 	if res.Exit != 2 {
 		t.Errorf("exit=%d, want 2 (stderr=%s)", res.Exit, res.Stderr)
 	}
-	if !strings.Contains(res.Stderr, "--registry and --id are required") {
+	if !strings.Contains(res.Stderr, "--registry and a layer id are required") {
 		t.Errorf("stderr missing expected message:\n%s", res.Stderr)
 	}
 }

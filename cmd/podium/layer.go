@@ -27,6 +27,7 @@ var sleepFor = func(d time.Duration) { time.Sleep(d) }
 //	podium layer reorder <id> [<id> ...]
 //	podium layer unregister <id>
 //	podium layer reingest <id>
+//	podium layer watch <id> [--interval <duration>]
 func layerCmd(args []string) int {
 	if len(args) < 1 || isHelpArg(args[0]) {
 		printGroupHelp("layer", "Manage layers registered with the registry.", [][2]string{
@@ -165,34 +166,61 @@ func layerWatch(args []string) int {
 	fs := flag.NewFlagSet("layer watch", flag.ContinueOnError)
 	setUsage(fs, "Poll a layer's source on an interval.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
-	id := fs.String("id", "", "layer id (required)")
+	idFlag := fs.String("id", "", "layer id (alternative to the positional <id>)")
 	// spec §7.3.1 / §14.10: `podium layer watch <id> [--interval <duration>]`.
 	// The interval is a Go-style duration (e.g. 30s, 1h) so the §14.10 example
 	// `--interval 1h` parses; a bare integer is rejected by flag parsing.
 	interval := fs.Duration("interval", time.Minute, "duration between reingest pokes (e.g. 30s, 1h)")
 	fs.SetOutput(os.Stderr)
-	if err := fs.Parse(args); err != nil {
+	pos, nargs, err := parsePositional(fs, args)
+	if err != nil {
 		return parseExit(err)
 	}
+	if nargs > 1 {
+		fmt.Fprintln(os.Stderr, "usage: podium layer watch <id> [--interval <duration>]")
+		return 2
+	}
+	id, err := watchLayerID(pos, *idFlag)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
 	*registry = resolveLayerRegistry(*registry)
-	if *registry == "" || *id == "" {
-		fmt.Fprintln(os.Stderr, "error: --registry and --id are required")
+	if *registry == "" || id == "" {
+		fmt.Fprintln(os.Stderr, "error: --registry and a layer id are required")
 		return 2
 	}
 	if *interval <= 0 {
 		fmt.Fprintln(os.Stderr, "error: --interval must be positive")
 		return 2
 	}
-	url := *registry + "/v1/layers/reingest?id=" + *id
+	url := *registry + "/v1/layers/reingest?id=" + id
 	for {
 		out, status := doJSON(url, "POST", nil)
 		if status >= 400 {
 			fmt.Fprintf(os.Stderr, "reingest failed: HTTP %d\n%s\n", status, out)
 		} else {
-			fmt.Printf("[reingest %s] %s\n", *id, out)
+			fmt.Printf("[reingest %s] %s\n", id, out)
 		}
 		sleepFor(*interval)
 	}
+}
+
+// watchLayerID picks the layer a watch loop polls from the positional operand
+// and the --id flag. The spec writes the positional form; --id stays accepted
+// because the documentation has shown it. Naming two different layers is
+// refused rather than resolved by precedence, because either choice would poll
+// a layer the caller may not have meant.
+//
+// Spec: §7.3.1 — `podium layer watch <id> [--interval <duration>]`.
+func watchLayerID(positional, flagID string) (string, error) {
+	if positional != "" && flagID != "" && positional != flagID {
+		return "", fmt.Errorf("layer id %q conflicts with --id %q", positional, flagID)
+	}
+	if positional != "" {
+		return positional, nil
+	}
+	return flagID, nil
 }
 
 func layerRegister(args []string) int {
