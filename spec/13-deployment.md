@@ -387,7 +387,7 @@ Migration is mechanical:
 
 ## 13.12 Backend Configuration Reference
 
-This section covers **server-side** configuration: the registry process's storage backends, vector backend, embedding provider, and identity provider, configured in `registry.yaml` (default `/etc/podium/registry.yaml` for standard deployments and `~/.podium/registry.yaml` for standalone; override via `--config <path>`).
+This section covers **server-side** configuration: the registry process's storage backends, vector backend, embedding provider, and identity provider, configured in `registry.yaml`. The registry process reads the file that `PODIUM_CONFIG_FILE` names, and reads `~/.podium/registry.yaml` when the variable is unset. `podium serve --config <path>` sets `PODIUM_CONFIG_FILE` to `<path>` for the process, so the flag overrides a value inherited from the environment. The `podium-server` binary has no `--config` option, so it locates `registry.yaml` through `PODIUM_CONFIG_FILE` and the `~/.podium/registry.yaml` fallback only. The registry reads no other path. When `PODIUM_CONFIG_FILE` names a file that does not exist, the registry refuses to start (§13.10).
 
 For **client-side** configuration (`sync.yaml`, `defaults.registry`, profiles, scope filters, etc.), see §7.5.2. Client and server configs are independent. Clients don't read `registry.yaml`, servers don't read `sync.yaml`.
 
@@ -569,7 +569,7 @@ podium admin tenant deactivate <id> --registry <url>
 ### Config file format
 
 ```yaml
-# /etc/podium/registry.yaml (or ~/.podium/registry.yaml in standalone)
+# ~/.podium/registry.yaml, or the file PODIUM_CONFIG_FILE names
 registry:
   endpoint: https://podium.acme.com
   bind: 0.0.0.0:8080
