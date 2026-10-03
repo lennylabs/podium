@@ -134,6 +134,10 @@ func bridgeCodeMeta(code string) (retryable bool, suggested string) {
 		return false, "Set PODIUM_HARNESS to a registered adapter identifier."
 	case "materialize.signature_invalid":
 		return false, "The registry served bytes whose signature did not validate; verify the artifact's signing provenance before use."
+	case "materialize.stale_resolution":
+		// Spec: §6.9. Retrying in the same session reproduces the refusal,
+		// because the registry pins `latest` per session (§4.7.6).
+		return false, "A party between the registry and the MCP server served an older record for a latest load, or the registry served it from a lagging replica in read-only mode. A new session loads the current latest once the registry is out of read-only mode: pass a new session_id, or restart the MCP server when the load passes none. If the registry was restored from a backup, a lagging replica was promoted, or the newest version left the caller's view, stop every MCP server that uses this cache directory and run podium cache reset-revisions <id>."
 	}
 	return false, ""
 }

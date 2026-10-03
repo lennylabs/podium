@@ -40,7 +40,7 @@ func mbStubRegistry(t *testing.T, id, artifactMD string, status int) (*httptest.
 	}
 	deliveryHash := version.DeliveryHash(version.DeliveryRecord{
 		ID: id, Version: "1.0.0", Type: "context", ContentHash: contentHash,
-		Frontmatter: artifactMD, ManifestBody: art.Body,
+		ArtifactRevision: epochArtifactRevision, Frontmatter: artifactMD, ManifestBody: art.Body,
 	})
 	var bodyHits int32
 
@@ -57,9 +57,10 @@ func mbStubRegistry(t *testing.T, id, artifactMD string, status int) (*httptest.
 	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
 			"id": id, "type": "context", "version": "1.0.0",
-			"content_hash":  contentHash,
-			"delivery_hash": deliveryHash,
-			"manifest_body": "", "frontmatter": "",
+			"content_hash":      contentHash,
+			"artifact_revision": epochArtifactRevision,
+			"delivery_hash":     deliveryHash,
+			"manifest_body":     "", "frontmatter": "",
 			"manifest_body_url": map[string]any{
 				"presigned_url": "http://" + r.Host + "/objects/" + key,
 				"content_hash":  "sha256:" + key,

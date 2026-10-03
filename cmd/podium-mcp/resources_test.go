@@ -17,6 +17,9 @@ import (
 // offline.
 func resourcesFixture(t *testing.T, manifests map[string]map[string]any) *httptest.Server {
 	t.Helper()
+	for _, m := range manifests {
+		withEpochRevision(m)
+	}
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {

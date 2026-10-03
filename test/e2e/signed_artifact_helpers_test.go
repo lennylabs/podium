@@ -40,6 +40,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/version"
@@ -52,6 +53,7 @@ import (
 // after construction so a subsequent load is refused; consumer env (provider,
 // verification key set, registry URL) is exposed via Env.
 type signedArtifactFixture struct {
+	t       *testing.T
 	ts      *httptest.Server
 	priv    ed25519.PrivateKey
 	pub     ed25519.PublicKey
@@ -62,6 +64,8 @@ type signedArtifactFixture struct {
 	typ               string
 	version           string
 	sensitivity       string
+	artifactRevision  string // the served artifact_revision field
+	customFM          string // the caller's ARTIFACT.md, empty for the default
 	frontmatter       string // the served ARTIFACT.md bytes
 	manifestBody      string // the served manifest_body field
 	contentHash       string // the served content_hash field
@@ -79,12 +83,15 @@ type signedArtifactFixture struct {
 // ExtraTrustedKeys, when set, are listed ahead of the fixture's signing key in
 // the comma-separated PODIUM_SIGNATURE_VERIFY_KEY that Env emits, so the
 // consumer's §4.7.9 verification key set holds more than one key.
+// ArtifactRevision is the served §4.7.10 ingest time, an RFC 3339 string in
+// the fixed control-plane layout; it defaults to the epoch.
 type signedArtifactSpec struct {
 	ID               string
 	Type             string
 	Version          string
 	Sensitivity      string
 	Frontmatter      string
+	ArtifactRevision string
 	ExtraTrustedKeys []ed25519.PublicKey
 }
 
@@ -100,57 +107,19 @@ func newSignedArtifactFixture(t *testing.T, spec signedArtifactSpec) *signedArti
 		t.Fatalf("generate offline keypair: %v", err)
 	}
 
-	id := spec.ID
-	if id == "" {
-		id = "finance/secret-policy"
-	}
-	typ := spec.Type
-	if typ == "" {
-		typ = "context"
-	}
-	ver := spec.Version
-	if ver == "" {
-		ver = "1.0.0"
-	}
-	sens := spec.Sensitivity
-	if sens == "" {
-		sens = "medium"
-	}
-	fm := spec.Frontmatter
-	if fm == "" {
-		fm = "---\ntype: " + typ + "\nversion: " + ver + "\nsensitivity: " + sens +
-			"\ndescription: A signed medium-sensitivity policy artifact.\n---\n\nSigned policy body.\n"
-	}
-
-	// The §4.7.6 content hash for a non-skill, no-resource artifact, as the
-	// registry's ingest computes it, and the §4.7.10 delivery hash over the
-	// record the stub serves.
-	contentHash := "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(""), nil)
-	deliveryHash := version.DeliveryHash(version.DeliveryRecord{
-		ID: id, Version: ver, Type: typ, ContentHash: contentHash, Sensitivity: sens,
-		Frontmatter: fm, ManifestBody: fm,
-	})
-
-	signer := sign.RegistryManagedKey{PrivateKey: priv, PublicKey: pub}
-	envelope, err := signer.Sign(context.Background(), deliveryHash)
-	if err != nil {
-		t.Fatalf("sign delivery hash: %v", err)
-	}
-
 	f := &signedArtifactFixture{
-		priv:              priv,
-		pub:               pub,
-		trusted:           spec.ExtraTrustedKeys,
-		id:                id,
-		typ:               typ,
-		version:           ver,
-		sensitivity:       sens,
-		frontmatter:       fm,
-		manifestBody:      fm,
-		contentHash:       contentHash,
-		deliveryHash:      deliveryHash,
-		deliverySignature: envelope,
+		t:           t,
+		priv:        priv,
+		pub:         pub,
+		trusted:     spec.ExtraTrustedKeys,
+		id:          orDefault(spec.ID, "finance/secret-policy"),
+		typ:         orDefault(spec.Type, "context"),
+		sensitivity: orDefault(spec.Sensitivity, "medium"),
+		customFM:    spec.Frontmatter,
 	}
+	f.mu.Lock()
+	f.recompose(t, orDefault(spec.Version, "1.0.0"), orDefault(spec.ArtifactRevision, epochArtifactRevision))
+	f.mu.Unlock()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/load_artifact", func(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +130,7 @@ func newSignedArtifactFixture(t *testing.T, spec signedArtifactSpec) *signedArti
 			"type":               f.typ,
 			"version":            f.version,
 			"sensitivity":        f.sensitivity,
+			"artifact_revision":  f.artifactRevision,
 			"content_hash":       f.contentHash,
 			"frontmatter":        f.frontmatter,
 			"manifest_body":      f.manifestBody,
@@ -174,6 +144,63 @@ func newSignedArtifactFixture(t *testing.T, spec signedArtifactSpec) *signedArti
 	f.ts = httptest.NewServer(mux)
 	t.Cleanup(f.ts.Close)
 	return f
+}
+
+// epochArtifactRevision is the artifact_revision a registry serves for a
+// record with no ingest time (§4.7.10), the fixture's default.
+var epochArtifactRevision = version.FormatArtifactRevision(time.Time{})
+
+// orDefault returns v, or def when v is empty.
+func orDefault(v, def string) string {
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+// setRecord switches the served record to ver at the ingest time revision, an
+// artifact_revision string, from the same URL. It recomposes the frontmatter
+// for ver, recomputes the content and delivery hashes, and re-signs, so a
+// later load sees a valid record whose only differences are the version and
+// the revision. Serving every step from one URL keeps one §6.5 mark key.
+func (f *signedArtifactFixture) setRecord(ver, revision string) {
+	f.t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.recompose(f.t, ver, revision)
+}
+
+// recompose sets the served record to ver at revision: the ARTIFACT.md bytes,
+// the §4.7.6 content hash for a non-skill, no-resource artifact as ingest
+// computes it, the §4.7.10 delivery hash over the served record, and its
+// registry-managed signature. The caller holds f.mu.
+func (f *signedArtifactFixture) recompose(t *testing.T, ver, revision string) {
+	t.Helper()
+	fm := "---\ntype: " + f.typ + "\nversion: " + ver + "\nsensitivity: " + f.sensitivity +
+		"\ndescription: A signed medium-sensitivity policy artifact.\n---\n\nSigned policy body.\n"
+	if f.customFM != "" {
+		fm = strings.Replace(f.customFM, "\nversion: "+f.version+"\n", "\nversion: "+ver+"\n", 1)
+	}
+	contentHash := "sha256:" + version.CanonicalContentHash([]byte(fm), []byte(""), nil)
+	deliveryHash := version.DeliveryHash(version.DeliveryRecord{
+		ID: f.id, Version: ver, Type: f.typ, ContentHash: contentHash, Sensitivity: f.sensitivity,
+		ArtifactRevision: revision, Frontmatter: fm, ManifestBody: fm,
+	})
+	envelope, err := sign.RegistryManagedKey{PrivateKey: f.priv, PublicKey: f.pub}.
+		Sign(context.Background(), deliveryHash)
+	if err != nil {
+		t.Fatalf("sign delivery hash: %v", err)
+	}
+	if f.customFM != "" {
+		f.customFM = fm
+	}
+	f.version = ver
+	f.artifactRevision = revision
+	f.frontmatter = fm
+	f.manifestBody = fm
+	f.contentHash = contentHash
+	f.deliveryHash = deliveryHash
+	f.deliverySignature = envelope
 }
 
 // PublicKeyB64 returns the offline keypair's base64-encoded public key, the
