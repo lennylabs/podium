@@ -7,141 +7,180 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
+	"errors"
 	"fmt"
-	"io"
 	"net/http"
+	"strconv"
 	"strings"
 )
 
-// rekorRecord is the §8.6 Rekor entry shape we upload. We use the
-// hashedrekord type because Podium signs a content hash rather than
-// a blob; hashedrekord lets the log validate signature presence
-// without storing the underlying bytes.
-type rekorRecord struct {
-	Kind       string           `json:"kind"`
-	APIVersion string           `json:"apiVersion"`
-	Spec       hashedRekordSpec `json:"spec"`
+// rekorRawBytes is the protobuf-specs bytes wrapper Rekor v2 uses for a
+// certificate.
+type rekorRawBytes struct {
+	RawBytes []byte `json:"rawBytes"`
 }
 
-type hashedRekordSpec struct {
-	Signature hashedRekordSignature `json:"signature"`
-	Data      hashedRekordData      `json:"data"`
+// rekorSignature is the hashedrekord v0.0.2 signature: the signature
+// bytes and the verifier that made them. The create-entry request and the
+// stored entry body share it.
+type rekorSignature struct {
+	Content  []byte `json:"content"`
+	Verifier struct {
+		X509Certificate rekorRawBytes `json:"x509Certificate"`
+		KeyDetails      string        `json:"keyDetails"`
+	} `json:"verifier"`
 }
 
-type hashedRekordSignature struct {
-	Content   string                `json:"content"`
-	PublicKey hashedRekordPublicKey `json:"publicKey"`
+// rekorCreateRequest is the Rekor v2 create-entry request for a
+// hashedrekord v0.0.2 entry.
+type rekorCreateRequest struct {
+	HashedRekordRequestV002 struct {
+		Digest    []byte         `json:"digest"`
+		Signature rekorSignature `json:"signature"`
+	} `json:"hashedRekordRequestV002"`
 }
 
-type hashedRekordPublicKey struct {
-	Content string `json:"content"`
+// rekorEntryResponse is the protojson TransparencyLogEntry Rekor v2
+// returns. protojson writes int64 fields as decimal strings and omits
+// zero values, so logIndex is a string and an absent value means 0.
+type rekorEntryResponse struct {
+	LogIndex          string `json:"logIndex"`
+	CanonicalizedBody []byte `json:"canonicalizedBody"`
+	InclusionProof    *struct {
+		Hashes     [][]byte `json:"hashes"`
+		Checkpoint *struct {
+			Envelope string `json:"envelope"`
+		} `json:"checkpoint"`
+	} `json:"inclusionProof"`
 }
 
-type hashedRekordData struct {
-	Hash hashedRekordHash `json:"hash"`
+// hashedRekordEntry is the canonicalized hashedrekord v0.0.2 entry body
+// the log proves.
+type hashedRekordEntry struct {
+	Kind       string `json:"kind"`
+	APIVersion string `json:"apiVersion"`
+	Spec       struct {
+		HashedRekordV002 struct {
+			Data struct {
+				Algorithm string `json:"algorithm"`
+				Digest    []byte `json:"digest"`
+			} `json:"data"`
+			Signature rekorSignature `json:"signature"`
+		} `json:"hashedRekordV002"`
+	} `json:"spec"`
 }
 
-type hashedRekordHash struct {
-	Algorithm string `json:"algorithm"`
-	Value     string `json:"value"`
-}
-
-// rekorEntryResponse is keyed by entry UUID; we extract the first
-// (and only) entry the upload created.
-type rekorEntryResponse map[string]rekorEntry
-
-type rekorEntry struct {
-	LogID          string `json:"logID"`
-	LogIndex       int64  `json:"logIndex"`
-	IntegratedTime int64  `json:"integratedTime"`
-}
-
-// uploadRekor records the (cert, signature, content_hash) tuple in
-// the configured transparency log and returns the assigned log index.
-func (s SigstoreKeyless) uploadRekor(ctx context.Context, contentHash string, signature []byte, leaf *x509.Certificate) (int64, error) {
-	hashAlg, hashHex, err := splitContentHash(contentHash)
+// uploadRekor records the (digest, signature, leaf) entry in the Rekor v2
+// log at RekorURL and returns the entry with its inclusion proof and
+// checkpoint. A log that serves no /api/v2 path answers 404, which fails
+// the signing.
+//
+// Spec: §4.7.9, §6.2.
+func (s SigstoreKeyless) uploadRekor(ctx context.Context, digest, sig []byte, leaf *x509.Certificate) (*tlogEntry, error) {
+	var create rekorCreateRequest
+	create.HashedRekordRequestV002.Digest = digest
+	create.HashedRekordRequestV002.Signature.Content = sig
+	create.HashedRekordRequestV002.Signature.Verifier.X509Certificate.RawBytes = leaf.Raw
+	create.HashedRekordRequestV002.Signature.Verifier.KeyDetails = keyDetailsP256
+	body, err := json.Marshal(create)
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("encode request: %w", err)
 	}
-	leafPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: leaf.Raw})
-	body, err := json.Marshal(rekorRecord{
-		Kind:       "hashedrekord",
-		APIVersion: "0.0.1",
-		Spec: hashedRekordSpec{
-			Signature: hashedRekordSignature{
-				Content: base64.StdEncoding.EncodeToString(signature),
-				PublicKey: hashedRekordPublicKey{
-					Content: base64.StdEncoding.EncodeToString(leafPEM),
-				},
-			},
-			Data: hashedRekordData{
-				Hash: hashedRekordHash{Algorithm: hashAlg, Value: hashHex},
-			},
-		},
-	})
-	if err != nil {
-		return 0, err
-	}
-
-	url := strings.TrimRight(s.RekorURL, "/") + "/api/v1/log/entries"
+	url := strings.TrimRight(s.RekorURL, "/") + "/api/v2/log/entries"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
-
-	resp, err := s.httpClient().Do(req)
+	raw, err := s.post(req)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode/100 != 2 {
-		buf, _ := io.ReadAll(resp.Body)
-		return 0, fmt.Errorf("rekor: HTTP %d: %s", resp.StatusCode, string(buf))
+	var resp rekorEntryResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
-
-	var parsed rekorEntryResponse
-	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
-		return 0, fmt.Errorf("decode rekor response: %w", err)
-	}
-	for _, entry := range parsed {
-		return entry.LogIndex, nil
-	}
-	return 0, fmt.Errorf("rekor: empty response")
+	return resp.tlogEntry()
 }
 
-// fetchRekor checks that an entry with the given log index exists
-// in the transparency log. The cheap presence check is enough for
-// §8.6 anchoring: the cert chain validation already proves the
-// signature; Rekor presence anchors the signature in time.
-func (s SigstoreKeyless) fetchRekor(ctx context.Context, logIndex int64) error {
-	url := fmt.Sprintf("%s/api/v1/log/entries?logIndex=%d",
-		strings.TrimRight(s.RekorURL, "/"), logIndex)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return err
+// tlogEntry converts the response into the envelope's tlog object.
+func (r rekorEntryResponse) tlogEntry() (*tlogEntry, error) {
+	var index int64
+	if r.LogIndex != "" {
+		var err error
+		if index, err = strconv.ParseInt(r.LogIndex, 10, 64); err != nil {
+			return nil, fmt.Errorf("decode response: log index: %w", err)
+		}
 	}
-	req.Header.Set("Accept", "application/json")
+	switch {
+	case len(r.CanonicalizedBody) == 0:
+		return nil, errors.New("response carries no canonicalized body")
+	case r.InclusionProof == nil:
+		return nil, errors.New("response carries no inclusion proof")
+	case r.InclusionProof.Checkpoint == nil || r.InclusionProof.Checkpoint.Envelope == "":
+		return nil, errors.New("response carries no checkpoint")
+	}
+	hashes := make([]string, len(r.InclusionProof.Hashes))
+	for i, h := range r.InclusionProof.Hashes {
+		hashes[i] = base64.StdEncoding.EncodeToString(h)
+	}
+	return &tlogEntry{
+		LogIndex:   index,
+		Body:       base64.StdEncoding.EncodeToString(r.CanonicalizedBody),
+		Hashes:     hashes,
+		Checkpoint: r.InclusionProof.Checkpoint.Envelope,
+	}, nil
+}
 
-	resp, err := s.httpClient().Do(req)
+// bindEntry requires the proven entry body to record the digest being
+// verified, the envelope's signature, and the envelope's leaf. Without
+// it, a valid inclusion proof for an unrelated entry would pass.
+//
+// Spec: §4.7.9.
+func bindEntry(body string, digest, sig []byte, leaf *x509.Certificate) error {
+	raw, err := base64.StdEncoding.DecodeString(body)
 	if err != nil {
-		return err
+		return fmt.Errorf("log entry is not a hashedrekord v0.0.2 entry: %w", err)
 	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode == http.StatusNotFound {
-		return fmt.Errorf("rekor: log index %d not found", logIndex)
+	var entry hashedRekordEntry
+	if err := json.Unmarshal(raw, &entry); err != nil {
+		return fmt.Errorf("log entry is not a hashedrekord v0.0.2 entry: %w", err)
 	}
-	if resp.StatusCode/100 != 2 {
-		buf, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("rekor: HTTP %d: %s", resp.StatusCode, string(buf))
+	if entry.Kind != "hashedrekord" || entry.APIVersion != "0.0.2" {
+		return errors.New("log entry is not a hashedrekord v0.0.2 entry")
+	}
+	v2 := entry.Spec.HashedRekordV002
+	if v2.Data.Algorithm != "SHA2_256" || !bytes.Equal(v2.Data.Digest, digest) {
+		return errors.New("log entry does not bind the digest")
+	}
+	if !bytes.Equal(v2.Signature.Content, sig) {
+		return errors.New("log entry does not bind the signature")
+	}
+	if !bytes.Equal(v2.Signature.Verifier.X509Certificate.RawBytes, leaf.Raw) {
+		return errors.New("log entry does not bind the certificate")
 	}
 	return nil
 }
 
+// sha256Digest returns the digest bytes of a "sha256:hex" content hash.
+// A keyless signature covers a SHA-256 digest only, so another algorithm
+// is refused.
+//
+// Spec: §4.7.9.
+func sha256Digest(contentHash string) ([]byte, error) {
+	alg, hexStr, err := splitContentHash(contentHash)
+	if err != nil {
+		return nil, fmt.Errorf("content hash: %w", err)
+	}
+	if alg != "sha256" {
+		return nil, fmt.Errorf("content hash: algorithm %s is not sha256", alg)
+	}
+	// splitContentHash has already hex-decoded hexStr, so this cannot fail.
+	return hex.DecodeString(hexStr)
+}
+
 // splitContentHash splits "sha256:abc..." into ("sha256", "abc...").
-// Sigstore Rekor expects the algorithm and hex-encoded hash separately.
 func splitContentHash(contentHash string) (string, string, error) {
 	i := strings.Index(contentHash, ":")
 	if i <= 0 || i == len(contentHash)-1 {

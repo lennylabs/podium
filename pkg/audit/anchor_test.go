@@ -2,6 +2,7 @@ package audit_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -59,9 +60,9 @@ func TestAnchor_EmptyLogIsNoOp(t *testing.T) {
 }
 
 // Spec: §8.6 — when the configured signer produces a Sigstore-keyless
-// envelope with a Rekor log index, Anchor surfaces that index in the
-// audit.anchored event's context for cross-correlation with the
-// transparency log.
+// envelope whose tlog object carries a Rekor log index, Anchor surfaces
+// that index in the audit.anchored event's context for cross-correlation
+// with the transparency log.
 func TestAnchor_SurfacesRekorLogIndex(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -92,7 +93,7 @@ func TestAnchor_SurfacesRekorLogIndex(t *testing.T) {
 
 // Spec: §8.6 — Rekor log indices are zero-based, so a
 // genuine first entry has index 0. Anchor must preserve a present-and-zero
-// log_index as 0 rather than conflating it with the absent case (-1), so an
+// tlog.log_index as 0 rather than conflating it with the absent case (-1), so an
 // auditor can locate the index-0 entry in the transparency log.
 func TestAnchor_PreservesRekorLogIndexZero(t *testing.T) {
 	t.Parallel()
@@ -120,8 +121,8 @@ func TestAnchor_PreservesRekorLogIndexZero(t *testing.T) {
 	}
 }
 
-// Spec: §8.6 — an envelope with no log_index field (a signer
-// with no Rekor configured) still maps to -1.
+// Spec: §8.6 — an envelope with no tlog object (a signer that made no
+// transparency-log entry) still maps to -1.
 func TestAnchor_AbsentRekorLogIndexIsMinusOne(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -131,53 +132,58 @@ func TestAnchor_AbsentRekorLogIndexIsMinusOne(t *testing.T) {
 		Type:   audit.EventArtifactLoaded,
 		Caller: "alice",
 	})
-	// noRekorSigner emits a Sigstore-shaped envelope that omits log_index.
-	idx, err := audit.Anchor(context.Background(), sink, noRekorSigner{})
+	idx, err := audit.Anchor(context.Background(), sink, envelopeSigner{envelope: `{"cert":"-","signature":"-"}`})
 	if err != nil {
 		t.Fatalf("Anchor: %v", err)
 	}
 	if idx != -1 {
-		t.Errorf("returned LogIndex = %d, want -1 (no log_index field)", idx)
+		t.Errorf("returned LogIndex = %d, want -1 (no tlog object)", idx)
 	}
 }
 
-// noRekorSigner produces a valid envelope without a log_index field.
-type noRekorSigner struct{}
-
-func (noRekorSigner) ID() string { return "no-rekor" }
-func (noRekorSigner) Sign(_ context.Context, _ string) (string, error) {
-	return `{"cert":"-","signature":"-"}`, nil
+// Spec: §8.6 — the log index is read from tlog.log_index only, so an
+// envelope in the format that predates the tlog object, with a top-level
+// log_index, records -1.
+func TestAnchor_TopLevelLogIndexIsMinusOne(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "audit.log")
+	sink, _ := audit.NewFileSink(path)
+	_ = sink.Append(context.Background(), audit.Event{
+		Type:   audit.EventArtifactLoaded,
+		Caller: "alice",
+	})
+	signer := envelopeSigner{envelope: `{"cert":"-","signature":"-","log_index":12345}`}
+	idx, err := audit.Anchor(context.Background(), sink, signer)
+	if err != nil {
+		t.Fatalf("Anchor: %v", err)
+	}
+	if idx != -1 {
+		t.Errorf("returned LogIndex = %d, want -1 (top-level log_index is not read)", idx)
+	}
+	data, err := readSinkBytes(path)
+	if err != nil {
+		t.Fatalf("read sink: %v", err)
+	}
+	if !strings.Contains(string(data), `"log_index":"-1"`) {
+		t.Errorf("audit log must record log_index -1, got: %s", data)
+	}
 }
-func (noRekorSigner) Verify(_ context.Context, _, _ string) error { return nil }
 
-// fakeIndexedSigner produces a Sigstore-shaped envelope so the
-// extractRekorLogIndex code path is exercised without a live stack.
+// envelopeSigner returns a fixed envelope from Sign.
+type envelopeSigner struct{ envelope string }
+
+func (envelopeSigner) ID() string                                         { return "fixed-envelope" }
+func (s envelopeSigner) Sign(_ context.Context, _ string) (string, error) { return s.envelope, nil }
+func (envelopeSigner) Verify(_ context.Context, _, _ string) error        { return nil }
+
+// fakeIndexedSigner produces a Sigstore-keyless envelope in the tlog
+// format so the extractRekorLogIndex code path is exercised without a
+// live stack.
 type fakeIndexedSigner struct{ logIndex int64 }
 
 func (fakeIndexedSigner) ID() string { return "fake-indexed" }
-func (s fakeIndexedSigner) Sign(_ context.Context, contentHash string) (string, error) {
-	return `{"cert":"-","signature":"-","log_index":` + itoa(s.logIndex) + `}`, nil
+func (s fakeIndexedSigner) Sign(_ context.Context, _ string) (string, error) {
+	return fmt.Sprintf(`{"cert":"-","signature":"-","tlog":{"log_index":%d,"body":"-","hashes":[],"checkpoint":"-"},"timestamp":"-"}`, s.logIndex), nil
 }
 func (s fakeIndexedSigner) Verify(_ context.Context, _, _ string) error { return nil }
-
-func itoa(n int64) string {
-	if n == 0 {
-		return "0"
-	}
-	negative := n < 0
-	if negative {
-		n = -n
-	}
-	var buf [20]byte
-	i := len(buf)
-	for n > 0 {
-		i--
-		buf[i] = byte('0' + n%10)
-		n /= 10
-	}
-	if negative {
-		i--
-		buf[i] = '-'
-	}
-	return string(buf[i:])
-}
