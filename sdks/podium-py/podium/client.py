@@ -294,19 +294,18 @@ class LoadedArtifact:
         """Write the artifact to disk under ``to`` and return the paths.
 
         spec §7.6 / §2.2 — the loaded-artifact object exposes
-        ``materialize(to=..., harness=...)``. The artifact lands under
+        ``materialize(to=...)``. The artifact lands under
         ``<to>/<id>/`` in the canonical layout: ``ARTIFACT.md`` for every
         type, ``SKILL.md`` for skills, and each bundled resource at its
         package-relative path. Large resources are fetched from their
         §7.2 presigned URLs.
 
-        The ``harness`` parameter is accepted per §2.2. Harness-specific
-        adaptation is the registry's shared module (§2.2); the SDK is an
-        independent HTTP client that does not embed the harness adapters,
-        so it writes the canonical layout that the ``none`` adapter
-        produces. ``harness`` is recorded for forward compatibility with
-        server-side adaptation.
+        ``harness`` accepts only ``"none"`` (§2.2, §7.6). The SDK does not
+        embed the harness adapters, so any other value raises ValueError
+        before a file is written; run ``podium sync --harness <name>`` for
+        harness-native files.
         """
+        _require_canonical_harness(harness)
         return _materialize_canonical(
             to,
             artifact_id=self.id,
@@ -356,8 +355,11 @@ class BatchResult:
         that forgets to check ``status`` fails loudly rather than writing
         an empty package. A resource the registry holds inline on the
         manifest record travels inline, and every other resource travels as
-        a §7.6.2 presigned reference fetched from its URL.
+        a §7.6.2 presigned reference fetched from its URL. ``harness``
+        accepts only ``"none"`` and is checked before ``status`` (§7.6), so
+        an invalid value raises ValueError on an ``error`` item too.
         """
+        _require_canonical_harness(harness)
         if self.status != "ok":
             raise self.error or RegistryError("registry.unknown", f"cannot materialize {self.id}")
         # §7.6.2: a resource the registry holds inline on the manifest record
@@ -382,6 +384,17 @@ class BatchResult:
             inline_resources=inline,
             large_resources=large,
             fetch=fetch or _fetch_bytes,
+        )
+
+
+def _require_canonical_harness(harness: str) -> None:
+    # Spec: §2.2 / §7.6 — the SDK embeds no harness adapter and writes the
+    # canonical layout only; podium sync or the MCP server writes
+    # harness-native files.
+    if harness != "none":
+        raise ValueError(
+            f"materialize() writes the canonical layout only; harness must be 'none', got {harness!r}. "
+            "Use `podium sync --harness <name>` for harness-native files."
         )
 
 
