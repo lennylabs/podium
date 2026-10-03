@@ -1,7 +1,7 @@
 # Proposal 0039: Specify the variables a kind: workspace target's workflow receives in §7.5.2
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), decided on the user's behalf under the overnight authorization. Signed off as staged. OQ-1: the staged first option (no absolute-path promise). OQ-2: option (1), CODE-1, so podium sync --config reads PODIUM_REGISTRY, matching the §7.5.2 precedence and the existing CI examples.
+- Status: Applied to spec (2026-10-03). The approval was decided on the user's behalf under the overnight authorization and signed off as staged. OQ-1: the staged first option (no absolute-path promise). OQ-2: option (1), CODE-1, so podium sync --config reads PODIUM_REGISTRY, matching the §7.5.2 precedence and the existing CI examples.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off.
