@@ -1,7 +1,7 @@
 # Proposal 0045: Remove the unread harness field from batchLoad and load_artifacts, and drop the nonexistent `reembed --all` flag from §4.7
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), decided on the user's behalf under the overnight authorization. Signed off as staged: a retired harness key is ignored, following the server's lenient JSON-decoding convention.
+- Status: Applied to spec (2026-10-03). Approved (2026-10-03) on the user's behalf under the overnight authorization and signed off as staged: a retired harness key is ignored, following the server's lenient JSON-decoding convention.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
