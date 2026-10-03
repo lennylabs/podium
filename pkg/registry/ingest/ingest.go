@@ -646,10 +646,13 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			req.CurrentArtifactCount = projected
 		}
 
-		// §4.7.6 extends:-pin resolution. If the artifact extends a
-		// parent reference, resolve the parent against existing
-		// manifests and pin to an exact version. Parent updates do
-		// not silently propagate; only re-ingesting the child does.
+		// Spec: §4.7.6 extends:-pin resolution. If the artifact extends a
+		// parent reference, resolve the parent against existing manifests and
+		// pin to an exact version. The pin and the fold below are recomputed on
+		// every pass, but an unchanged re-ingest of a stored version is
+		// classified idempotent further down and discards them, because the
+		// content hash covers only the child's authored bytes (§4.7). A child
+		// picks up a newer parent only at a new version.
 		if rec.Artifact.Extends != "" {
 			pin, parentType, parentLicense, perr := resolveExtendsPin(ctx, st, req.TenantID, rec.Artifact.Extends, rec.ID, rec.Artifact.Version, req.LayerID)
 			if perr != nil {
