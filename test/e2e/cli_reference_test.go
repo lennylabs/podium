@@ -1748,7 +1748,7 @@ func TestCLI_AdminShowEffective(t *testing.T) {
 
 // spec: doc "Admin — podium admin reembed".
 func TestCLI_AdminReembed(t *testing.T) {
-	t.Skip("requires a configured vector backend; standalone has no embedder so reembed returns registry.unavailable. The doc's --all flag is also not implemented")
+	t.Skip("requires a configured vector backend; standalone has no embedder so reembed returns registry.unavailable")
 }
 
 // spec: doc "Admin — podium admin migrate", `--finalize`. The command
