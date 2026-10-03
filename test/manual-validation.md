@@ -227,6 +227,7 @@ rm -rf "$WORK"
 | S76 | Chart upgrade from v0.4.0 | standard (Kubernetes) | none | none | kind, helm, kubectl, Docker |
 | S77 | A filesystem sync that drops a colliding artifact fails | solo, standalone | none | none | none |
 | S78 | The registry refuses an unusable SCIM store, audit sink, or audit anchor key | standalone | none | none | none |
+| S79 | A workspace target's `$PODIUM_CHANGED` follows the bytes on disk | solo | none | none | none |
 
 ---
 
@@ -9820,3 +9821,95 @@ not show the operator's terminal: that the message names the path or the
   `warning: audit sink disabled` and starts unanchored.
 
 **Cleanup.** `rm -rf "$WORK"`.
+
+---
+
+## S79: A workspace target's `$PODIUM_CHANGED` follows the bytes on disk
+
+**Goal.** Validate that a `kind: workspace` target's `skip_if_no_changes`
+publish command runs when a sync rewrites a materialized file, including one
+restored after a hand edit, and is skipped when the sync leaves every
+materialized file byte-identical, including after the lock file is deleted
+and after an `ARTIFACT.md` edit the harness output does not carry.
+
+**Covers.** The §7.5.2 definition of `$PODIUM_CHANGED` for both target kinds.
+
+**Why by hand.** The end-to-end suite counts publish runs. What it does not
+read is the operator's terminal: the `skipped (no changes)` line a CI log
+shows, and whether a commit step would have run after a sync restored a file
+a teammate edited by hand.
+
+**Prerequisites.** A built `podium` binary on `PATH`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then build a
+   single-layer registry with one skill and a `sync.yaml` whose workspace
+   target appends a line to a counter file on every publish run.
+
+   ```bash
+   mkdir -p "$WORK/reg/team/hello" "$WORK/ws/.podium"
+   printf -- '---\ntype: skill\nversion: 1.0.0\ndescription: hello\ntags: [a]\n---\n' \
+     > "$WORK/reg/team/hello/ARTIFACT.md"
+   printf -- '---\nname: hello\ndescription: hello\n---\n\nSay hello.\n' \
+     > "$WORK/reg/team/hello/SKILL.md"
+   printf 'defaults:\n  registry: %s\ntargets:\n  - id: claude-workspace\n    kind: workspace\n    harness: claude-code\n    target: %s\n    workflow:\n      publish:\n        - sh: "echo run >> %s"\n          skip_if_no_changes: true\n' \
+     "$WORK/reg" "$WORK/out" "$WORK/count" > "$WORK/ws/.podium/sync.yaml"
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and both files
+   under `$WORK/reg/team/hello` exist.
+
+2. Sync twice.
+
+   ```bash
+   cd "$WORK/ws"
+   podium sync --config .podium/sync.yaml; echo "exit=$?"
+   podium sync --config .podium/sync.yaml 2> "$WORK/err2.txt"; echo "exit=$?"
+   wc -l < "$WORK/count"; cat "$WORK/err2.txt"
+   ```
+
+   **Expect.** Both runs print `exit=0`. The counter holds 1 line, and
+   `$WORK/err2.txt` contains `skipped (no changes)`.
+
+3. Edit the materialized `SKILL.md` by hand and sync.
+
+   ```bash
+   echo "local edit" >> "$WORK/out/.claude/skills/hello/SKILL.md"
+   podium sync --config .podium/sync.yaml 2> "$WORK/err3.txt"; echo "exit=$?"
+   wc -l < "$WORK/count"; cat "$WORK/err3.txt"
+   grep -c "local edit" "$WORK/out/.claude/skills/hello/SKILL.md"
+   ```
+
+   **Expect.** `exit=0`, the counter holds 2 lines, `$WORK/err3.txt` has no
+   `skipped (no changes)` line, and `grep -c` prints `0` because the sync
+   restored the file. A counter of 1 is the shipped behavior this step
+   exists to catch: the restored file would stay uncommitted.
+
+4. Delete the lock file and sync.
+
+   ```bash
+   rm "$WORK/out/.podium/sync.lock"
+   podium sync --config .podium/sync.yaml 2> "$WORK/err4.txt"; echo "exit=$?"
+   wc -l < "$WORK/count"; cat "$WORK/err4.txt"
+   ```
+
+   **Expect.** `exit=0`, the counter still holds 2 lines, and
+   `$WORK/err4.txt` contains `skipped (no changes)`. A counter of 3 means the
+   variable still follows the lock.
+
+5. Change only `tags:` in the authored `ARTIFACT.md` and sync.
+
+   ```bash
+   printf -- '---\ntype: skill\nversion: 1.0.0\ndescription: hello\ntags: [a, b]\n---\n' \
+     > "$WORK/reg/team/hello/ARTIFACT.md"
+   podium sync --config .podium/sync.yaml 2> "$WORK/err5.txt"; echo "exit=$?"
+   wc -l < "$WORK/count"; cat "$WORK/err5.txt"
+   ```
+
+   **Expect.** `exit=0`, the counter still holds 2 lines, and
+   `$WORK/err5.txt` contains `skipped (no changes)`, because Claude Code's
+   output carries `SKILL.md` and no `tags:` field. A counter of 3 means the
+   variable still follows the source content hash.
+
+**Cleanup.** `cd /` and `rm -rf "$WORK"`.
