@@ -2,36 +2,32 @@ package serverboot
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/audit"
 )
 
-func TestStartAnchorScheduler_NilSinkLogsAndReturns(t *testing.T) {
-	t.Parallel()
-	// nil sink path is the "audit anchor disabled" branch; reaching
-	// it without panicking is sufficient.
-	startAnchorScheduler(t.Context(), &Config{}, nil)
-}
-
-func TestStartAnchorScheduler_BadKeyPathLogsAndReturns(t *testing.T) {
+// Spec: §8.6 — startAnchorScheduler runs the periodic anchor with the signer
+// loadAnchorSigner loaded, and its goroutine exits when the context ends.
+func TestStartAnchorScheduler_RunsWithLoadedSigner(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	sink, err := audit.NewFileSink(filepath.Join(dir, "audit.log"))
 	if err != nil {
 		t.Fatalf("NewFileSink: %v", err)
 	}
-	// loadOrGenerateAuditSigner: bad path → generated key. Use a
-	// real path inside the temp dir to exercise the success branch.
-	cfg := &Config{
-		auditSigningKeyPath: filepath.Join(dir, "audit.key"),
-		auditAnchorInterval: 1,
+	signer, _, err := loadOrGenerateAuditSigner(filepath.Join(dir, "audit.key"))
+	if err != nil {
+		t.Fatalf("loadOrGenerateAuditSigner: %v", err)
 	}
-	startAnchorScheduler(t.Context(), cfg, sink)
-	// Give the scheduler a beat to run, then let test cleanup
-	// reclaim the goroutine via process exit.
+	cfg := &Config{auditAnchorInterval: 1}
+	startAnchorScheduler(t.Context(), cfg, sink, signer)
+	// Give the scheduler a beat to run its immediate pass; the test context's
+	// cancellation then stops the goroutine.
 	time.Sleep(20 * time.Millisecond)
 }
 
@@ -182,7 +178,10 @@ func TestOpenAuditSink_WithExplicitPath(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	cfg := &Config{auditLogPath: filepath.Join(dir, "x.log")}
-	sink, file := openAuditSink(cfg)
+	sink, file, err := openAuditSink(cfg)
+	if err != nil {
+		t.Fatalf("openAuditSink: %v", err)
+	}
 	if sink == nil {
 		t.Errorf("openAuditSink returned nil emit sink for writable path")
 	}
@@ -199,7 +198,10 @@ func TestOpenAuditSink_EndpointRedirect(t *testing.T) {
 	t.Parallel()
 	for _, raw := range []string{"http://siem.example/audit", "https://siem.example/audit"} {
 		cfg := &Config{auditLogPath: raw}
-		sink, file := openAuditSink(cfg)
+		sink, file, err := openAuditSink(cfg)
+		if err != nil {
+			t.Errorf("%s: openAuditSink error %v, want nil", raw, err)
+		}
 		if sink == nil {
 			t.Errorf("%s: emit sink is nil, want EndpointSink", raw)
 		}
@@ -217,8 +219,47 @@ func TestOpenAuditSink_EndpointRedirect(t *testing.T) {
 func TestOpenAuditSink_BadEndpointDisables(t *testing.T) {
 	t.Parallel()
 	cfg := &Config{auditLogPath: "http://%zz"}
-	sink, file := openAuditSink(cfg)
+	sink, file, err := openAuditSink(cfg)
+	if sink != nil || file != nil || err != nil {
+		t.Errorf("bad endpoint: got (%v, %v, %v), want (nil, nil, nil)", sink, file, err)
+	}
+}
+
+// Spec: §8.6, §13.12 — a file-path PODIUM_AUDIT_LOG_PATH that NewFileSink
+// cannot open returns an error naming the path, and both sinks are nil, so the
+// caller decides between refusing the start and warning.
+func TestOpenAuditSink_FileFailureReturnsError(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, path := range map[string]string{
+		"existing directory":  dir,
+		"regular-file parent": filepath.Join(blocker, "audit.log"),
+	} {
+		sink, file, err := openAuditSink(&Config{auditLogPath: path})
+		if sink != nil || file != nil {
+			t.Errorf("%s: sinks = (%v, %v), want (nil, nil)", name, sink, file)
+		}
+		if err == nil || !strings.Contains(err.Error(), path) {
+			t.Errorf("%s: err = %v, want an error naming %s", name, err, path)
+		}
+	}
+}
+
+// Spec: §8.6, §13.12 — with PODIUM_AUDIT_LOG_PATH unset and no resolvable
+// home directory, the default ~/.podium/audit.log cannot be resolved, and
+// openAuditSink returns the error rather than logging it.
+func TestOpenAuditSink_UnresolvableHomeReturnsError(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	sink, file, err := openAuditSink(&Config{})
 	if sink != nil || file != nil {
-		t.Errorf("bad endpoint: got (%v, %v), want (nil, nil)", sink, file)
+		t.Errorf("sinks = (%v, %v), want (nil, nil)", sink, file)
+	}
+	if err == nil || !strings.Contains(err.Error(), "~/.podium/audit.log") {
+		t.Errorf("err = %v, want an error naming ~/.podium/audit.log", err)
 	}
 }

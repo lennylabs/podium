@@ -355,22 +355,16 @@ func TestLoadOrGenerateAuditSigner_StableKeyIDFingerprint(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "audit.key")
 
-	signer1, err := loadOrGenerateAuditSigner(path)
+	rk1, got1, err := loadOrGenerateAuditSigner(path)
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	signer2, err := loadOrGenerateAuditSigner(path)
+	rk2, got2, err := loadOrGenerateAuditSigner(path)
 	if err != nil {
 		t.Fatalf("second call: %v", err)
 	}
-
-	rk1, ok := signer1.(sign.RegistryManagedKey)
-	if !ok {
-		t.Fatalf("signer1 type = %T, want sign.RegistryManagedKey", signer1)
-	}
-	rk2, ok := signer2.(sign.RegistryManagedKey)
-	if !ok {
-		t.Fatalf("signer2 type = %T, want sign.RegistryManagedKey", signer2)
+	if got1 != path || got2 != path {
+		t.Errorf("resolved paths %q and %q, want %q", got1, got2, path)
 	}
 
 	id1 := envelopeKeyID(t, rk1)
@@ -416,8 +410,12 @@ func TestLoadOrGenerateAuditSigner_UnreadablePathErrors(t *testing.T) {
 	if err := os.WriteFile(notADir, []byte("x"), 0o600); err != nil {
 		t.Fatalf("write blocker file: %v", err)
 	}
-	_, err := loadOrGenerateAuditSigner(filepath.Join(notADir, "audit.key"))
+	want := filepath.Join(notADir, "audit.key")
+	_, got, err := loadOrGenerateAuditSigner(want)
 	if err == nil {
 		t.Fatal("expected an error when the key path is unreachable, got nil")
+	}
+	if got != want {
+		t.Errorf("resolved %q, want %q", got, want)
 	}
 }

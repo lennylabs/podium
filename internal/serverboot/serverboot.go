@@ -977,7 +977,20 @@ func run(ctx context.Context, stop func()) error {
 	// case; the §8.6 anchor/verify, §8.4 retention, and §8.5 erasure paths
 	// rewrite the on-disk chain and run only against it. A nil scrubber means
 	// an operator disabled scrubbing.
-	auditSink, auditFile := openAuditSink(cfg)
+	auditSink, auditFile, sinkErr := openAuditSink(cfg)
+	// §8.6, §13.12: with anchoring on, an unopenable file sink, an anchor key
+	// that cannot be read, parsed, or generated, and an anchor key the
+	// registry key file also carries each refuse the start here, whatever the
+	// bind outcome and before the §13.4 rewrite and the bootstrap ingest, so a
+	// refused start changes no stored row.
+	anchorKey, anchoringOn, err := loadAnchorSigner(cfg, auditFile, sinkErr, signKey, signingOn)
+	if err != nil {
+		return err
+	}
+	// Reached with a sink error only when anchoring is off (§13.12).
+	if sinkErr != nil {
+		log.Printf("warning: audit sink disabled: %v", sinkErr)
+	}
 	scrubber, err := cfg.piiRedaction.BuildScrubber()
 	if err != nil {
 		return fmt.Errorf("pii redaction config: %w", err)
@@ -1636,20 +1649,21 @@ func run(ctx context.Context, stop func()) error {
 		startVectorOutboxWorker(ctx, cfg, st, vecProvider, embedProvider, mreg, auditSink, tenantID)
 	}
 
-	// §8.6 transparency anchoring: when the operator enables
-	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, a goroutine periodically
-	// anchors new entries via the registry-managed signing key.
-	// Operators monitor audit.anchored / audit.anchor_failed events.
+	// §8.6 local chain-head anchoring: with PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS
+	// above 0 and a file sink, a goroutine signs the chain head with the
+	// dedicated anchor key at PODIUM_AUDIT_SIGNING_KEY_PATH, loaded and checked
+	// above, and appends audit.anchored. Operators monitor audit.anchored and
+	// audit.anchor_failed.
 	var reAnchor func()
-	if cfg.auditAnchorInterval > 0 {
-		if signer := startAnchorScheduler(ctx, cfg, auditFile); signer != nil {
-			// §8.6: after a retention pass drops events the chain
-			// head moves, invalidating the last anchor. Re-anchor the new
-			// head immediately so verifiers do not wait for the next tick.
-			reAnchor = func() {
-				if _, err := audit.Anchor(context.Background(), auditFile, signer); err != nil {
-					log.Printf("audit re-anchor after retention failed: %v", err)
-				}
+	if anchoringOn {
+		startAnchorScheduler(ctx, cfg, auditFile, anchorKey)
+		// §8.6: after a retention pass drops events the chain head moves,
+		// invalidating the last anchor. Re-anchor the new head immediately so
+		// verifiers do not wait for the next tick. Only the periodic
+		// scheduler records audit.anchor_failed; this path logs.
+		reAnchor = func() {
+			if _, err := audit.Anchor(context.Background(), auditFile, anchorKey); err != nil {
+				log.Printf("audit re-anchor after retention failed: %v", err)
 			}
 		}
 	}

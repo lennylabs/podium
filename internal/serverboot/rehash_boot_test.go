@@ -314,6 +314,104 @@ func TestRun_RefusesToStrandAStoredSignature(t *testing.T) {
 	}
 }
 
+// Spec: §8.6, §13.12, §13.4 — each anchor refusal runs before the §13.4
+// first-start rewrite and before the bootstrap ingest. Registry signing is on,
+// so a refusal placed after the rewrite would re-sign the downgraded rows, set
+// the completion record, and log the ingest.
+func TestRun_AnchorKeyRefusalPrecedesTheRewrite(t *testing.T) {
+	cases := []struct {
+		name     string
+		wantCode string
+		// configure sets the anchor environment for the second start and
+		// returns the anchor key path.
+		configure func(t *testing.T, f *bootFixture) string
+	}{
+		{name: "shared", wantCode: "config.audit_anchor_key_shared", configure: func(t *testing.T, f *bootFixture) string {
+			return f.keyPath
+		}},
+		{name: "unavailable", wantCode: "config.audit_anchor_key_unavailable", configure: func(t *testing.T, f *bootFixture) string {
+			pub, _, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatalf("GenerateKey: %v", err)
+			}
+			path := filepath.Join(f.home, "public-only.key")
+			if err := sign.WriteKeyFile(path, sign.KeyFile{Public: pub}); err != nil {
+				t.Fatalf("WriteKeyFile: %v", err)
+			}
+			return path
+		}},
+		{name: "sink", wantCode: "config.audit_sink_unavailable", configure: func(t *testing.T, f *bootFixture) string {
+			logDir := filepath.Join(f.home, "audit-dir")
+			if err := os.Mkdir(logDir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("PODIUM_AUDIT_LOG_PATH", logDir)
+			return filepath.Join(f.home, "absent-audit.key")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newBootFixture(t)
+			t.Setenv("PODIUM_SIGN", "registry-key")
+			t.Setenv("PODIUM_SIGN_KEY_PATH", f.keyPath)
+			if _, err := f.boot(t); err != nil {
+				t.Fatalf("first start: %v", err)
+			}
+			st := f.openStoreDirect(t)
+			rows := downgradeRows(t, st, f.keyPath)
+			if err := st.Close(); err != nil {
+				t.Fatalf("close store: %v", err)
+			}
+
+			anchorPath := tc.configure(t, f)
+			t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", "60")
+			t.Setenv("PODIUM_AUDIT_SIGNING_KEY_PATH", anchorPath)
+			logs, err := f.boot(t)
+			if err == nil || !strings.HasPrefix(err.Error(), tc.wantCode) {
+				t.Fatalf("run = %v, want a %s refusal", err, tc.wantCode)
+			}
+			if tc.name == "sink" {
+				if _, serr := os.Stat(anchorPath); !os.IsNotExist(serr) {
+					t.Errorf("anchor key %s exists after a sink refusal (stat err %v)", anchorPath, serr)
+				}
+			}
+			after := f.openStoreDirect(t)
+			ctx := context.Background()
+			for _, seeded := range rows {
+				rec, gerr := after.GetManifest(ctx, seeded.TenantID, seeded.ArtifactID, seeded.Version)
+				if gerr != nil {
+					t.Fatalf("get manifest: %v", gerr)
+				}
+				if rec.ContentHash != seeded.ContentHash || rec.Signature != seeded.Signature {
+					t.Errorf("%s was written by a refused start", rec.ArtifactID)
+				}
+			}
+			applied, aerr := after.DataMigrationApplied(ctx, store.DataMigrationContentHashFraming)
+			if aerr != nil || applied {
+				t.Errorf("marker applied = %v (err %v), want false", applied, aerr)
+			}
+			if strings.Contains(logs, "ingested layer ") {
+				t.Errorf("a refused start ran the bootstrap ingest; logs:\n%s", logs)
+			}
+		})
+	}
+}
+
+// Spec: §8.3, §13.12 — with anchoring disabled, a file audit sink that cannot
+// be opened is logged and the registry starts without one.
+func TestRun_UnopenableSinkWithAnchoringOffStarts(t *testing.T) {
+	f := newBootFixture(t)
+	t.Setenv("PODIUM_AUDIT_LOG_PATH", f.home)
+	t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", "0")
+	logs, err := f.boot(t)
+	if err != nil {
+		t.Fatalf("run = %v, want a start", err)
+	}
+	if !strings.Contains(logs, "warning: audit sink disabled: audit: open "+f.home) {
+		t.Errorf("logs do not report the disabled sink:\n%s", logs)
+	}
+}
+
 // Spec: §4.7.6, §13.4 — a start whose listener could not bind does not run the
 // pass. Rewriting and re-signing the store another process is still serving,
 // only to exit on the bind error, is the one failure the guard prevents. The
