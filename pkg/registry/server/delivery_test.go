@@ -140,8 +140,9 @@ func TestLoadArtifact_NoDeliverySignerServesTheHashAlone(t *testing.T) {
 }
 
 // Spec: §7.2, §7.6.2, §4.7.10 — the single load and the batch entry serve the
-// same artifact_revision in the §7.2.1 layout, the response ETag stays the
-// content-hash validator, and a batch error entry carries no revision key.
+// same artifact_revision in the §7.2.1 layout and the same delivery_hash over
+// it, the response ETag stays the content-hash validator, and a batch error
+// entry carries no revision key.
 func TestLoadArtifact_ServesTheArtifactRevisionOnBothPaths(t *testing.T) {
 	t.Parallel()
 	ts := deliveryServer(t, nil)
@@ -173,6 +174,9 @@ func TestLoadArtifact_ServesTheArtifactRevisionOnBothPaths(t *testing.T) {
 	}
 	if raw[0]["artifact_revision"] != single.ArtifactRevision {
 		t.Errorf("batch artifact_revision = %v, want the single-load %q", raw[0]["artifact_revision"], single.ArtifactRevision)
+	}
+	if single.DeliveryHash == "" || raw[0]["delivery_hash"] != single.DeliveryHash {
+		t.Errorf("batch delivery_hash = %v, want the single-load %q", raw[0]["delivery_hash"], single.DeliveryHash)
 	}
 	if _, ok := raw[1]["artifact_revision"]; ok || raw[1]["status"] != "error" {
 		t.Errorf("batch error entry = %v, want status error and no artifact_revision", raw[1])

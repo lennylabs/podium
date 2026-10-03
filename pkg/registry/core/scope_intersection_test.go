@@ -9,6 +9,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/store/storetest"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // scopeRegistry seeds a public layer with finance (two versions) and hr
@@ -134,4 +135,28 @@ func TestLoadArtifact_NoScopeFullAccess(t *testing.T) {
 			t.Errorf("load %s with no scope: %v", target, err)
 		}
 	}
+}
+
+// Spec: §4.7.10, §6.3.1 — a token whose load scope pins x@1.0.0 receives
+// 1.0.0's own ingest time on its load, and a later 2.0.0 that the scope
+// withholds does not change the revision served to that token.
+func TestLoadArtifact_LoadScopePinServesPinnedRevision(t *testing.T) {
+	t.Parallel()
+	reg, st := newRegistryWithStore(t)
+	id := layer.Identity{Sub: "alice", IsAuthenticated: true, Scopes: []string{"podium:load:x@1.0.0"}}
+	want := version.FormatArtifactRevision(revAt(1))
+	putAt(t, st, "x", "1.0.0", 1, false)
+	load := func(step string) {
+		t.Helper()
+		got, err := reg.LoadArtifact(context.Background(), id, "x", core.LoadArtifactOptions{Version: "1.0.0"})
+		if err != nil {
+			t.Fatalf("%s: LoadArtifact: %v", step, err)
+		}
+		if got.Version != "1.0.0" || got.ArtifactRevision != want {
+			t.Errorf("%s: load = %s at %q, want 1.0.0 at %q", step, got.Version, got.ArtifactRevision, want)
+		}
+	}
+	load("before 2.0.0")
+	putAt(t, st, "x", "2.0.0", 2, false)
+	load("after 2.0.0")
 }

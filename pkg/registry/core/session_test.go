@@ -8,6 +8,7 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/store/storetest"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 func newRegistryWithStore(t *testing.T) (*core.Registry, store.Store) {
@@ -114,5 +115,27 @@ func TestLoadArtifact_ExplicitPinIgnoresSession(t *testing.T) {
 	}
 	if got.Version != "2.0.0" {
 		t.Errorf("Version = %q, want 2.0.0 (explicit pin)", got.Version)
+	}
+}
+
+// Spec: §4.7.10, §4.7.6 — a session-pinned latest serves the pinned version's
+// own ingest time after a newer version lands, while a new session serves the
+// newer version's time.
+func TestLoadArtifact_SessionPinnedLatestServesPinnedRevision(t *testing.T) {
+	t.Parallel()
+	reg, st := newRegistryWithStore(t)
+	putAt(t, st, "x", "1.0.0", 1, false)
+	pinned := core.LoadArtifactOptions{SessionID: "session-A"}
+	want := version.FormatArtifactRevision(revAt(1))
+	if ver, rev := loadRevision(t, reg, "x", pinned); ver != "1.0.0" || rev != want {
+		t.Fatalf("first load = %s at %q, want 1.0.0 at %q", ver, rev, want)
+	}
+	putAt(t, st, "x", "2.0.0", 2, false)
+	if ver, rev := loadRevision(t, reg, "x", pinned); ver != "1.0.0" || rev != want {
+		t.Errorf("pinned load = %s at %q, want 1.0.0 at %q", ver, rev, want)
+	}
+	newer := version.FormatArtifactRevision(revAt(2))
+	if ver, rev := loadRevision(t, reg, "x", core.LoadArtifactOptions{SessionID: "session-B"}); ver != "2.0.0" || rev != newer {
+		t.Errorf("new session load = %s at %q, want 2.0.0 at %q", ver, rev, newer)
 	}
 }

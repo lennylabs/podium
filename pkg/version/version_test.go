@@ -532,6 +532,21 @@ func TestDeliveryHash_RepartitioningChangesTheDigest(t *testing.T) {
 	}
 }
 
+// Spec: §4.7.10 — the ingest time is a framed field, so two records that
+// differ only in ArtifactRevision carry different delivery digests.
+func TestDeliveryHash_ArtifactRevisionChangesTheDigest(t *testing.T) {
+	t.Parallel()
+	base := DeliveryRecord{
+		ID: "a/b", Version: "1.0.0", Type: "skill", ContentHash: "sha256:c",
+		Sensitivity: "internal", ArtifactRevision: "2025-01-01T00:00:00.000000Z",
+	}
+	later := base
+	later.ArtifactRevision = "2025-01-01T00:00:00.000001Z"
+	if a, b := DeliveryHash(base), DeliveryHash(later); a == b {
+		t.Errorf("records differing only in ArtifactRevision share the digest %q", a)
+	}
+}
+
 // Spec: §4.7.10 — resources are framed in ascending path order, so the digest
 // does not depend on the order the caller's map was built in.
 func TestDeliveryHash_IgnoresMapInsertionOrder(t *testing.T) {
