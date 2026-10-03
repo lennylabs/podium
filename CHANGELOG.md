@@ -757,6 +757,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   upgrade. This is a backward-incompatible change and lands in a MINOR bump. No
   flag, environment variable, or configuration key restores the in-memory SCIM
   fallback or the unanchored start.
+- **Every harness adapter derives the skill `compatibility` field** (§4.3.4,
+  §6.7, §7.8): when a skill's `SKILL.md` omits `compatibility`, the Cursor,
+  Codex, Gemini, OpenCode, and Pi adapters and the Claude, Codex, Cursor, Pi,
+  and Hermes marketplace emitters now derive it from `runtime_requirements` and
+  `sandbox_profile`, as the Claude Code adapter already did. An authored value
+  is kept unchanged, and the `none` adapter still writes `SKILL.md` unchanged. A
+  re-sync or re-publish rewrites the affected `SKILL.md` files. Lock-file
+  `content_hash` values do not change, because they hash the authored artifact
+  bytes rather than adapter output.
 
 ### Removed
 
