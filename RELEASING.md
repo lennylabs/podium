@@ -137,30 +137,35 @@ When the failure requires a change to the package contents rather than a credent
 
 ### Sigstore live tests are manual
 
-`pkg/sign/sigstore_live_test.go` is a Tier 2 suite the release gate does not run. The single test in it is `TestSigstoreKeyless_LiveSmoke`. The release gate runs the mocked `pkg/sign/sigstore_test.go` suite (round-trip, tampered hash, foreign trust root, Fulcio outage, and missing Rekor entry), so the signing logic is covered between manual runs; the live smoke adds end-to-end coverage of a real Fulcio certificate and a real Rekor inclusion proof.
+`pkg/sign/sigstore_live_test.go` is a Tier 2 suite the release gate does not run. The single test in it is `TestSigstoreKeyless_LiveSmoke`. The release gate runs the mocked `pkg/sign/sigstore_test.go` suite (round-trip, tampered hash, foreign trust root, Fulcio and timestamp-authority outage, identity and issuer mismatch, a timestamp, inclusion proof, or checkpoint that does not verify, an entry that does not bind the envelope, and certificate validity at the timestamp time), and the release gate also runs `pkg/sign/sigstore_fixture_test.go`, which verifies the recorded staging envelope offline, so the signing logic is covered between manual runs; the live smoke adds end-to-end coverage of a Fulcio certificate, an RFC 3161 timestamp from the staging timestamp authority, and a Rekor v2 inclusion proof and checkpoint from a running Sigstore instance, and of the entry-binding check against that log's entry body.
 
 **Decision: keep the live smoke manual and documented.** A credentialed CI lane is not wired. The live test gates on an ambient OIDC token (`PODIUM_SIGSTORE_OIDC_TOKEN`) that the configured Fulcio issuer accepts. A CI lane would have to mint a GitHub Actions OIDC token and bind it as a trusted issuer on the Fulcio instance, and even the staging instance writes each signed artifact into a public transparency log. The staging-lane option is recorded below as a follow-up the maintainer can opt into.
 
 **Cadence.** Run the live smoke manually before any release whose diff touches `pkg/sign` or the `SignatureProvider` contract. For releases that do not touch the signing path, the mocked suite in `pkg/sign/sigstore_test.go` is sufficient.
 
-Point the manual run at the Sigstore staging instance (`fulcio.sigstage.dev` / `rekor.sigstage.dev`) rather than production. Staging is free and keeps the public production transparency log clean. The test skips unless `PODIUM_SIGSTORE_FULCIO_URL`, `PODIUM_SIGSTORE_OIDC_TOKEN`, and `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` are all set; `PODIUM_SIGSTORE_REKOR_URL` is read when present.
+Point the manual run at the Sigstore staging instance (`fulcio.sigstage.dev`, the staging Rekor v2 shard, and `timestamp.sigstage.dev`) rather than production. Staging is free and keeps the public production transparency log clean. The test skips unless `PODIUM_SIGSTORE_FULCIO_URL`, `PODIUM_SIGSTORE_REKOR_URL`, `PODIUM_SIGSTORE_TSA_URL`, `PODIUM_SIGSTORE_OIDC_TOKEN`, `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`, `PODIUM_SIGSTORE_CERT_IDENTITY`, and `PODIUM_SIGSTORE_CERT_OIDC_ISSUER` are all set.
 
 ```bash
 export PODIUM_SIGSTORE_FULCIO_URL=https://fulcio.sigstage.dev
-export PODIUM_SIGSTORE_REKOR_URL=https://rekor.sigstage.dev
+export PODIUM_SIGSTORE_REKOR_URL=<the staging Rekor v2 shard URL from the staging signing_config>
+export PODIUM_SIGSTORE_TSA_URL=https://timestamp.sigstage.dev/api/v1/timestamp
 export PODIUM_SIGSTORE_OIDC_TOKEN=$(gcloud auth print-identity-token)   # or any IdP the staging issuer accepts
-export PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE=/path/to/sigstage-trust-bundle.pem
+export PODIUM_SIGSTORE_TRUSTED_ROOT_FILE=/path/to/sigstage-trusted_root.json
+export PODIUM_SIGSTORE_CERT_IDENTITY=<the email or URI SAN the token's identity receives>
+export PODIUM_SIGSTORE_CERT_OIDC_ISSUER=<the issuer URL the token came from>
 go test ./pkg/sign/... -count=1 -v -run TestSigstoreKeyless_LiveSmoke
 ```
 
 The `-run` pattern must name the test exactly. A pattern that matches nothing (for example an outdated `TestSigstore_Live`) reports `PASS` while running zero tests, so the manual smoke would be skipped while appearing to succeed.
+
+`PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` is the `trusted_root.json` target of the staging Sigstore TUF repository. The Rekor endpoint must be a v2 log; a Rekor v1 URL fails `Sign` with `rekor: HTTP 404`. Running the smoke with `export PODIUM_SIGSTORE_RECORD_DIR=$PWD/pkg/sign/testdata/sigstore-staging` from the repository root refreshes the committed fixture: after `Verify` passes, the test writes `envelope.json`, a copy of the trusted root as `trusted_root.json`, and `meta.json` into that directory. The value is absolute because `go test` runs the test with `pkg/sign` as its working directory, so a relative value resolves under `pkg/sign/`. Record with a non-personal OIDC identity, because the committed leaf certificate carries its subject alternative name.
 
 #### Staging-Sigstore release lane (future option)
 
 A release-lane job that runs the live smoke against staging Sigstore on every signing-path release is feasible after the OIDC plumbing is in place. It is not wired today. To add it:
 
 - Grant the signing job `permissions: id-token: write`, mint the Actions OIDC token (`ACTIONS_ID_TOKEN_REQUEST_URL` / `ACTIONS_ID_TOKEN_REQUEST_TOKEN`) with the audience the staging Fulcio issuer expects, and export it as `PODIUM_SIGSTORE_OIDC_TOKEN`.
-- Register the GitHub Actions OIDC issuer as a trusted issuer on the staging Fulcio instance (or reuse sigstage's existing GitHub issuer binding), and ship the staging trust root as `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE`.
+- Register the GitHub Actions OIDC issuer as a trusted issuer on the staging Fulcio instance (or reuse sigstage's existing GitHub issuer binding), and ship the staging `trusted_root.json` as `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`.
 - Gate the job to releases whose diff touches `pkg/sign`, so unrelated releases are not written into staging Rekor.
 
 The payoff is per-release automated coverage of the live signing path. The cost is the issuer-binding setup plus an external-dependency flake surface on the release-blocking path, and each run writes to the staging transparency log. Given the OIDC-token constraint, the manual procedure above is the default.

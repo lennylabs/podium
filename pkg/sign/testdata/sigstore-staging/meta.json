@@ -1,0 +1,5 @@
+{
+  "content_hash": "sha256:583780139d0063e6f665db56966dd015e8240ce09185b070576d5190cd985039",
+  "identity": "https://github.com/sigstore-conformance/extremely-dangerous-public-oidc-beacon/.github/workflows/extremely-dangerous-oidc-beacon.yml@refs/heads/main",
+  "issuer": "https://token.actions.githubusercontent.com"
+}
