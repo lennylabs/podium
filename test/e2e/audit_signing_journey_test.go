@@ -26,9 +26,9 @@ package e2e
 //     scheduler also records as audit.gap_detected.
 //
 // Spec: §8.2 (free-text query redaction before audit, default-on), §8.6
-// (transparency anchoring via the registry-managed key; periodic chain
-// verification with automated gap detection), §4.7.9 (the registry-managed
-// Ed25519 signing key).
+// (local chain-head anchoring with the dedicated anchor key at
+// PODIUM_AUDIT_SIGNING_KEY_PATH; periodic chain verification with automated
+// gap detection), §4.7.9 (the Ed25519 key-file format).
 
 import (
 	"context"
