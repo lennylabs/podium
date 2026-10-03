@@ -1,7 +1,7 @@
 # Proposal 0038: Replace the SDK DeviceCodeRequired contract with a non-blocking start_login/finish_login pair in both SDKs
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-02). Signed off as staged. OQ-1: keep the DeviceCodeError.reason attribute as drafted.
+- Status: Implemented (2026-10-02). Signed off as staged. OQ-1: keep the DeviceCodeError.reason attribute as drafted.
 - Date: 2026-10-02
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -49,27 +49,27 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §6.3 replaces the `DeviceCodeRequired` sub-bullet with the pair contract and scopes the first-use trigger, keychain caching, and transparent refresh to the CLI and the MCP server.
+- [x] **S1 · spec** — SPEC-1. §6.3 replaces the `DeviceCodeRequired` sub-bullet with the pair contract and scopes the first-use trigger, keychain caching, and transparent refresh to the CLI and the MCP server.
       Levels: —. Depends on: —
-- [ ] **S2 · code** — CODE-1. Python `_oauth` gains issue-time anchoring, cancellation, `DeviceCodeError.reason`, transport wrapping, and `PendingLogin`.
+- [x] **S2 · code** — CODE-1. Python `_oauth` gains issue-time anchoring, cancellation, `DeviceCodeError.reason`, transport wrapping, and `PendingLogin`.
       Levels: unit, integration. Depends on: S1
-- [ ] **S3 · code** — CODE-2, TEST-3. Python `Client.start_login`/`finish_login` land, `login()` composes them, `DeviceCodeRequired` is removed, and `TestSDK_PyImport` imports the new names. Bundled because `TestSDK_PyImport` fails with `ImportError` the moment `DeviceCodeRequired` is removed.
+- [x] **S3 · code** — CODE-2, TEST-3. Python `Client.start_login`/`finish_login` land, `login()` composes them, `DeviceCodeRequired` is removed, and `TestSDK_PyImport` imports the new names. Bundled because `TestSDK_PyImport` fails with `ImportError` the moment `DeviceCodeRequired` is removed.
       Levels: integration, e2e. Depends on: S2
-- [ ] **S4 · test** — TEST-1. Python SDK tests for every outcome of the pair against the stub IdP.
+- [x] **S4 · test** — TEST-1. Python SDK tests for every outcome of the pair against the stub IdP.
       Levels: integration. Depends on: S3
-- [ ] **S5 · code** — CODE-3. TypeScript `oauth.ts` gains issue-time anchoring, abortable sleep and fetch, `DeviceCodeErrorReason`, `PendingLogin`, `createPendingLogin`, and `finishPending`.
+- [x] **S5 · code** — CODE-3. TypeScript `oauth.ts` gains issue-time anchoring, abortable sleep and fetch, `DeviceCodeErrorReason`, `PendingLogin`, `createPendingLogin`, and `finishPending`.
       Levels: unit, integration. Depends on: S1
-- [ ] **S6 · code** — CODE-4. TypeScript `startLogin`/`finishLogin` land on `Client`, and `login()` composes them.
+- [x] **S6 · code** — CODE-4. TypeScript `startLogin`/`finishLogin` land on `Client`, and `login()` composes them.
       Levels: integration. Depends on: S5
-- [ ] **S7 · test** — TEST-2. TypeScript vitest tests for every outcome of the pair against the stub fetcher.
+- [x] **S7 · test** — TEST-2. TypeScript vitest tests for every outcome of the pair against the stub fetcher.
       Levels: integration. Depends on: S6
-- [ ] **S8 · docs** — DOC-1. The SDK consumer guide documents the non-blocking login, the anonymous requests before a finish call succeeds, and re-login on token expiry, and the `auth.token_expired` row of the error-code reference names the SDK remedy.
+- [x] **S8 · docs** — DOC-1. The SDK consumer guide documents the non-blocking login, the anonymous requests before a finish call succeeds, and re-login on token expiry, and the `auth.token_expired` row of the error-code reference names the SDK remedy.
       Levels: —. Depends on: S3, S6
-- [ ] **S9 · docs** — DOC-2. The Python SDK README names the pair and cites §6.3.
+- [x] **S9 · docs** — DOC-2. The Python SDK README names the pair and cites §6.3.
       Levels: —. Depends on: S3
-- [ ] **S10 · docs** — CL-1. The `[Unreleased]` `Added` and `Removed` entries.
+- [x] **S10 · docs** — CL-1. The `[Unreleased]` `Added` and `Removed` entries.
       Levels: —. Depends on: S3, S6
-- [ ] **S11 · docs** — MV-1. Manual-validation scenario S78 for the Python pair against a live IdP.
+- [x] **S11 · docs** — MV-1. Manual-validation scenario S78 for the Python pair against a live IdP.
       Levels: manual. Depends on: S3
 
 **Ordering constraints.** S1 lands the contract every later step cites. The Python steps (S2 to S4) and the TypeScript steps (S5 to S7) are independent of each other and may proceed in parallel. Within each SDK the oauth-module step precedes the client step, because the client delegates to it.
