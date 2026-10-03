@@ -161,6 +161,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **The lock file's recorded content hash across sync modes** (§11, §7.5.3, §14.11): a `podium sync` against a filesystem registry and a `podium sync` against `podium serve --standalone --layer-path` on the same directory now record the same `content_hash` for an artifact. The filesystem consumer hashed `SKILL.md` in place of the manifest for a skill, while the registry hashes the manifest, `SKILL.md`, and every bundled resource, so a frontmatter-only edit to `ARTIFACT.md` changed the materialized output while the recorded `content_hash` stood still, and the same artifact carried a different hash in each mode. Both consumers now derive the hash from the shared `version.CanonicalContentHash`. The content hash of every artifact moves in this release, and the `Changed` entry on the content-hash serialization states what moves and what an operator does about it.
 - **The materialization order across sync modes** (§7.5, §11): both modes now materialize the resolved set in ascending canonical artifact ID order, so config-merge fragments and inject blocks compose identically in every deployment mode and the lock's `artifacts:` list follows. A merged target that previously composed in layer order is rewritten once with the same entries in a different order. Inside a shared target the order governs composition: fragments two artifacts contribute to one key of a JSON config-merge target are folded in that order and composed by value kind, and a marker-block target receives each artifact's own Podium-managed block in that order and merges no keys. In filesystem mode the composition inside a shared target can therefore differ from before, matching what server mode already did. Where two artifacts with distinct canonical IDs set the same scalar key of one JSON config-merge target, such as two `mcp-server` artifacts sharing a `name:`, the value comes from the artifact whose canonical ID sorts last, which can be the one from the lower-precedence layer where filesystem mode previously took the higher-precedence one. Re-read merged targets after the first sync on this version.
 - **`$PODIUM_CHANGED` for a `kind: workspace` target reports a change to the files on disk** (§7.5.2, §7.8): a workspace target's `publish` phase now computes the variable as a marketplace target does, by comparing the bytes of every file the sync writes or removes before and after materialization. An edit to an artifact that changes the bytes Podium writes into a shared materialized path reads `true`, whichever artifact's lock entry survived before. A re-sync that rewrites files with a new adapter output format, restores Podium's entry order in a shared config file, or restores a hand-edited or deleted file also reads `true`, so a `skip_if_no_changes` command runs. A re-sync that leaves every file byte-identical reads `false`, including one without a prior `.podium/sync.lock`. The lock file is not compared.
+- `podium sync --config` reads the `PODIUM_REGISTRY` environment variable when
+  no `--registry` flag is set, ahead of `defaults.registry`, as the §7.5.2
+  precedence requires. A CI job that supplies the registry only through
+  `PODIUM_REGISTRY`, as the §7.8 scheduled-publish example does, no longer
+  fails with `config.no_registry`, and a `PODIUM_REGISTRY` exported alongside
+  a config that sets `defaults.registry` now takes precedence over it.
 
 ### Changed
 
@@ -837,6 +843,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   specifies local chain-head anchoring and the key-separation rule.
   `docs/reference/cli.md` and `docs/reference/error-codes.md` list the variables
   and the new codes.
+- §7.5.2 defines the variables Podium injects into a `kind: workspace` target's
+  workflow: `$PODIUM_WORKDIR`, the absolute target directory;
+  `$PODIUM_TARGET_ID`, the target entry's `id`; and `$PODIUM_REGISTRY`, the
+  registry source. The `publish` phase also receives `$PODIUM_CHANGED`, and
+  each `on_error` list receives the variables of its phase. A workspace
+  workflow runs no command under `--dry-run` or `--check`. §7.8 and
+  `docs/consuming/publishing.md` describe `$PODIUM_REGISTRY` as a URL or a
+  filesystem path. The variable names and phases are unchanged; the Fixed entry
+  above records the registry-source precedence change.
 
 ## [0.4.0] - 2026-09-05
 

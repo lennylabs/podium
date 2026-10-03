@@ -119,7 +119,7 @@ A command is an argv list under `run:`, executed directly without a shell, or a 
 | `continue_on_error` | Let the pipeline proceed past a non-zero exit. |
 | `timeout` | Bound the command's wall-clock duration. Takes a duration string such as `"30s"`. |
 
-Each phase also accepts an optional `prepare_on_error` or `publish_on_error` cleanup list, run when that phase fails, before the failure propagates. The pipeline inherits the ambient environment of the `podium sync` process and adds the injected variables, so git authentication relies on the ambient `SSH_AUTH_SOCK`, `GH_TOKEN`, and similar. The pipeline fails fast on the first non-zero exit, except where `continue_on_error` is set.
+Each phase also accepts an optional `prepare_on_error` or `publish_on_error` cleanup list, run when that phase fails, before the failure propagates. A cleanup list receives the injected variables of the phase it cleans up, so `publish_on_error` sees `$PODIUM_CHANGED` and `prepare_on_error` does not. The pipeline inherits the ambient environment of the `podium sync` process and adds the injected variables, so git authentication relies on the ambient `SSH_AUTH_SOCK`, `GH_TOKEN`, and similar. An injected variable replaces an ambient variable of the same name, and a variable Podium does not inject for a phase keeps its ambient value. The pipeline fails fast on the first non-zero exit, except where `continue_on_error` is set.
 
 ### Trust boundary
 
@@ -144,7 +144,7 @@ podium sync --config .podium/sync.yaml
 | Flag | Effect |
 |:--|:--|
 | `--config <path>` | Read this `sync.yaml` and run each `targets:` entry. |
-| `--dry-run` | Render into a temporary directory and print each command with variables substituted; run no publish phase. |
+| `--dry-run` | For a marketplace target, render into a temporary directory and print each command with variables substituted, and run no publish phase. For a `kind: workspace` target, resolve the artifact set without writing, and run and print no workflow command. |
 | `--check` | Validate the config only; render and run nothing. |
 | `--json` | Emit a structured JSON envelope on stdout. |
 
@@ -156,13 +156,14 @@ Podium passes context to the commands through environment variables rather than 
 
 | Variable | Meaning |
 |:--|:--|
-| `$PODIUM_WORKDIR` | The per-target working and checkout directory. |
+| `$PODIUM_WORKDIR` | For a marketplace target, the per-target working and checkout directory. For a `kind: workspace` target, the target directory made absolute against the working directory of `podium sync`. |
 | `$PODIUM_OUTPUT_ID` | The marketplace target identifier. |
+| `$PODIUM_TARGET_ID` | The `kind: workspace` target's `id`. A workspace target receives it in place of `$PODIUM_OUTPUT_ID`. |
 | `$PODIUM_GIT_REMOTE`, `$PODIUM_GIT_BRANCH` | From the target's `git:` block. |
 | `$PODIUM_COMMIT_MESSAGE` | Rendered from `commit_message` with the change count and timestamp. |
 | `$PODIUM_CHANGED` | `true` when materialization changed the bytes on disk of a file Podium writes or removes, including a file it restores after a hand edit or deletion, and `false` otherwise. The comparison starts after the `prepare` phase, so a file that `prepare` clones or pulls is part of the starting state. A file Podium writes or removes that the run cannot read also reads `true`, such as a materialized file without read permission or a stale path from an earlier run that the operator replaced with a directory. The sync lock file is not compared. For a marketplace target the value equals whether the render produced a diff against the checkout. A `kind: workspace` target receives the variable with the same meaning in its `publish` phase. |
 | `$PODIUM_CHANGE_SUMMARY` | A path to a JSON file describing the changed artifacts. |
-| `$PODIUM_REGISTRY`, `$PODIUM_IDENTITY`, `$PODIUM_HARNESSES` | The registry URL, the publishing identity, and the harness set. |
+| `$PODIUM_REGISTRY`, `$PODIUM_IDENTITY`, `$PODIUM_HARNESSES` | The registry source, which is the `--registry` flag, else the `PODIUM_REGISTRY` environment variable, else `defaults.registry`, and is a URL or a filesystem path; the publishing identity; and the comma-separated harness set. A `kind: workspace` target receives `$PODIUM_REGISTRY` and neither of the others. |
 
 ### Exit codes
 

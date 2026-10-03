@@ -38,6 +38,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -531,19 +532,47 @@ func TestPublishing_CheckConfigValidatesWritesNothing(t *testing.T) {
 }
 
 // A kind: workspace target carrying a workflow materializes the project-files
-// layout and runs the target's prepare and publish commands around the
-// materialization (Decision 3). The test asserts the observable side effect: the
-// prepare command writes a marker file before materialization, and the publish
-// command writes a second marker after, both with PODIUM_WORKDIR pointing at the
-// target directory.
+// layout and runs its prepare and publish commands around the materialization.
+// The test pins the literal values Podium injects into each phase: the prepare
+// phase receives $PODIUM_WORKDIR, $PODIUM_TARGET_ID, and $PODIUM_REGISTRY, the
+// publish phase also receives $PODIUM_CHANGED, and neither phase receives
+// $PODIUM_OUTPUT_ID. It also pins that --dry-run and --check neither run nor
+// print a workspace workflow command. The skip_if_no_changes effect of
+// $PODIUM_CHANGED is pinned by TestPublishing_WorkspaceTargetSkipIfNoChanges.
+//
+// Every run blanks the variables under test, so an ambient value in the
+// developer's shell can neither satisfy nor break an assertion.
+//
+// Spec: §7.5.2
 func TestPublishing_WorkspaceTargetRunsWorkflow(t *testing.T) {
 	t.Parallel()
 	reg := writePublishRegistry(t)
 	ws := t.TempDir()
 	target := filepath.Join(ws, "out", "claude")
-	cfg := writeSyncConfigWorkspaceWorkflow(t, ws, reg, target)
+	cfg := writeSyncConfigWorkspaceWorkflow(t, ws, reg, target, "")
+	env := []string{"PODIUM_CHANGED=", "PODIUM_OUTPUT_ID=", "PODIUM_TARGET_ID=", "PODIUM_WORKDIR=", "PODIUM_REGISTRY="}
+	prepMarker := filepath.Join(ws, "prepare-ran")
+	pubMarker := filepath.Join(ws, "publish-ran")
 
-	res := runPodium(t, "", nil, "sync", "--config", cfg, "--json")
+	// A non-materializing run neither runs nor prints the workflow. A printed
+	// command would carry the marker path, so the output must not name it.
+	for _, mode := range []string{"--dry-run", "--check"} {
+		r := runPodium(t, "", env, "sync", "--config", cfg, mode)
+		if r.Exit != 0 {
+			t.Fatalf("sync --config %s exit=%d\nstdout=%s\nstderr=%s", mode, r.Exit, r.Stdout, r.Stderr)
+		}
+		for _, marker := range []string{prepMarker, pubMarker} {
+			if _, err := os.Stat(marker); !os.IsNotExist(err) {
+				t.Errorf("sync --config %s ran a workflow command: %s exists (stat err=%v)", mode, marker, err)
+			}
+			name := filepath.Base(marker)
+			if strings.Contains(r.Stdout, name) || strings.Contains(r.Stderr, name) {
+				t.Errorf("sync --config %s printed a workflow command naming %s\nstdout=%s\nstderr=%s", mode, name, r.Stdout, r.Stderr)
+			}
+		}
+	}
+
+	res := runPodium(t, "", env, "sync", "--config", cfg, "--json")
 	if res.Exit != 0 {
 		t.Fatalf("sync --config (workspace workflow) exit=%d\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
 	}
@@ -555,17 +584,25 @@ func TestPublishing_WorkspaceTargetRunsWorkflow(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(target, ".podium", "sync.lock")); err != nil {
 		t.Errorf("workspace target did not materialize (no sync.lock): %v", err)
 	}
-	// The prepare command ran before materialization and wrote its marker.
-	prepMarker := filepath.Join(ws, "prepare-ran")
-	if b, err := os.ReadFile(prepMarker); err != nil {
-		t.Errorf("prepare workflow command did not run (no marker): %v", err)
-	} else if strings.TrimSpace(string(b)) != target {
-		t.Errorf("prepare marker = %q, want PODIUM_WORKDIR=%q", strings.TrimSpace(string(b)), target)
+	// The prepare phase runs before materialization and lacks $PODIUM_CHANGED.
+	assertWorkflowVars(t, prepMarker, []string{target, "claude-workspace", filepath.Clean(reg), "unset", "unset"})
+	// The publish phase runs after the first sync into an empty target, so
+	// $PODIUM_CHANGED is true.
+	assertWorkflowVars(t, pubMarker, []string{target, "claude-workspace", filepath.Clean(reg), "true", "unset"})
+}
+
+// assertWorkflowVars reads a marker written by workflowVarsMarkerCommand and
+// asserts that it holds exactly the want lines.
+func assertWorkflowVars(t *testing.T, marker string, want []string) {
+	t.Helper()
+	b, err := os.ReadFile(marker)
+	if err != nil {
+		t.Errorf("workflow command did not run (no marker %s): %v", marker, err)
+		return
 	}
-	// The publish command ran after materialization and wrote its marker.
-	pubMarker := filepath.Join(ws, "publish-ran")
-	if _, err := os.Stat(pubMarker); err != nil {
-		t.Errorf("publish workflow command did not run (no marker): %v", err)
+	got := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if !slices.Equal(got, want) {
+		t.Errorf("%s variables:\n got  %q\n want %q", filepath.Base(marker), got, want)
 	}
 }
 
@@ -805,6 +842,116 @@ func TestPublishing_WorkspacePublishFailureExits1(t *testing.T) {
 	}
 }
 
+// Each on_error list of a kind: workspace target receives the variables of the
+// phase it cleans up. The failing phase's only command exits 3, and its
+// on_error command writes the variables to the onerror-ran marker.
+// prepare_on_error runs before materialization, so it lacks $PODIUM_CHANGED
+// and the target carries no sync.lock. publish_on_error runs after the first
+// sync into an empty target, so it receives $PODIUM_CHANGED=true and the
+// sync.lock is present.
+//
+// Every run blanks the variables under test, so an ambient value in the
+// developer's shell can neither satisfy nor break an assertion.
+//
+// Spec: §7.5.2
+func TestPublishing_WorkspaceTargetOnErrorVariables(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		failPhase  string
+		changed    string
+		wantStderr string
+		wantLock   bool
+	}{
+		{failPhase: "prepare", changed: "unset", wantStderr: "prepare[0]", wantLock: false},
+		{failPhase: "publish", changed: "true", wantStderr: "publish[0]", wantLock: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.failPhase, func(t *testing.T) {
+			t.Parallel()
+			reg := writePublishRegistry(t)
+			ws := t.TempDir()
+			target := filepath.Join(ws, "out", "claude")
+			cfg := writeSyncConfigWorkspaceWorkflow(t, ws, reg, target, tc.failPhase)
+			env := []string{"PODIUM_CHANGED=", "PODIUM_OUTPUT_ID=", "PODIUM_TARGET_ID=", "PODIUM_WORKDIR=", "PODIUM_REGISTRY="}
+
+			res := runPodium(t, "", env, "sync", "--config", cfg)
+			if res.Exit != 1 {
+				t.Fatalf("sync --config (failing workspace %s) exit=%d, want 1\nstdout=%s\nstderr=%s", tc.failPhase, res.Exit, res.Stdout, res.Stderr)
+			}
+			if !strings.Contains(res.Stderr, tc.wantStderr) {
+				t.Errorf("stderr does not name the failed command %q:\n%s", tc.wantStderr, res.Stderr)
+			}
+			assertWorkflowVars(t, filepath.Join(ws, "onerror-ran"),
+				[]string{target, "claude-workspace", filepath.Clean(reg), tc.changed, "unset"})
+			_, err := os.Stat(filepath.Join(target, ".podium", "sync.lock"))
+			if tc.wantLock && err != nil {
+				t.Errorf("the materialization must complete before the publish phase: %v", err)
+			}
+			if !tc.wantLock && !os.IsNotExist(err) {
+				t.Errorf("a prepare failure must abort before materialization (stat err=%v)", err)
+			}
+		})
+	}
+}
+
+// podium sync --config resolves its registry source as the --registry flag,
+// then the PODIUM_REGISTRY environment variable, then defaults.registry. The
+// publish phase prints $PODIUM_REGISTRY, so its third marker line records the
+// source the run resolved.
+//
+// The env-only case is the CI configuration with no defaults.registry, which
+// fails with config.no_registry when the env var is not read. The flag-over-env
+// case points the env var at a missing directory, so a run that read it would
+// fail rather than resolve the flag value.
+//
+// Spec: §7.5.2
+func TestPublishing_ConfigRegistrySourcePrecedence(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		fileDefaults bool
+		envMissing   bool
+		flag         bool
+	}{
+		{name: "env-only"},
+		{name: "env-over-file", fileDefaults: true},
+		{name: "flag-over-env", envMissing: true, flag: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			regA := writePublishRegistry(t)
+			regB := writePublishRegistry(t)
+			ws := t.TempDir()
+			target := filepath.Join(ws, "out", "claude")
+			defaults := ""
+			if tc.fileDefaults {
+				defaults = regB
+			}
+			cfg := writeSyncConfigWorkspaceWorkflow(t, ws, defaults, target, "")
+			envRegistry := regA
+			if tc.envMissing {
+				envRegistry = filepath.Join(ws, "missing")
+			}
+			env := []string{"PODIUM_CHANGED=", "PODIUM_OUTPUT_ID=", "PODIUM_TARGET_ID=", "PODIUM_WORKDIR=", "PODIUM_REGISTRY=" + envRegistry}
+			args := []string{"sync", "--config", cfg}
+			if tc.flag {
+				args = append(args, "--registry", regA)
+			}
+
+			res := runPodium(t, "", env, args...)
+			if res.Exit != 0 {
+				t.Fatalf("sync --config (%s) exit=%d\nstdout=%s\nstderr=%s", tc.name, res.Exit, res.Stdout, res.Stderr)
+			}
+			if _, err := os.Stat(filepath.Join(target, ".podium", "sync.lock")); err != nil {
+				t.Errorf("workspace target did not materialize (no sync.lock): %v", err)
+			}
+			assertWorkflowVars(t, filepath.Join(ws, "publish-ran"),
+				[]string{target, "claude-workspace", filepath.Clean(regA), "true", "unset"})
+		})
+	}
+}
+
 // An explicit --config path that does not exist is a config error and exits 2.
 func TestPublishing_MissingConfigExits2(t *testing.T) {
 	t.Parallel()
@@ -970,7 +1117,7 @@ func TestPublishing_WorkspaceCollisionPublishesThenFails(t *testing.T) {
 	reg := writeCollidingPublishRegistry(t)
 	ws := t.TempDir()
 	target := filepath.Join(ws, "out", "claude")
-	cfg := writeSyncConfigWorkspaceWorkflow(t, ws, reg, target)
+	cfg := writeSyncConfigWorkspaceWorkflow(t, ws, reg, target, "")
 
 	res := runPodium(t, "", nil, "sync", "--config", cfg)
 	if res.Exit != 1 {
@@ -1134,36 +1281,64 @@ func writeSyncConfigMixed(t *testing.T, workspace, registry, remote string) stri
 }
 
 // writeSyncConfigWorkspaceWorkflow writes a sync.yaml with one kind: workspace
-// target carrying a workflow whose prepare command writes a "prepare-ran" marker
-// holding $PODIUM_WORKDIR and whose publish command writes a "publish-ran"
-// marker. The markers land in the workspace root so the test reads them after
-// the run.
-func writeSyncConfigWorkspaceWorkflow(t *testing.T, workspace, registry, target string) string {
+// target, id claude-workspace, carrying a prepare and a publish workflow phase.
+// An empty registry omits the registry line under defaults, so the config
+// carries no defaults.registry and the run takes its registry from the
+// --registry flag or the PODIUM_REGISTRY environment variable.
+//
+// With an empty failPhase, the prepare command writes the workflow variables to
+// a "prepare-ran" marker and the publish command writes them to a "publish-ran"
+// marker. With failPhase "prepare" or "publish", that phase's only command exits
+// 3 and its on_error list writes the variables to an "onerror-ran" marker, while
+// the other phase keeps its marker command. Each marker holds one line per
+// variable, in this order: $PODIUM_WORKDIR, $PODIUM_TARGET_ID,
+// $PODIUM_REGISTRY, $PODIUM_CHANGED, and $PODIUM_OUTPUT_ID, where an unset or
+// empty value of either of the last two reads "unset". The markers land in the
+// workspace root so the test reads them after the run.
+func writeSyncConfigWorkspaceWorkflow(t *testing.T, workspace, registry, target, failPhase string) string {
 	t.Helper()
 	dir := filepath.Join(workspace, ".podium")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir .podium: %v", err)
 	}
 	path := filepath.Join(dir, "sync.yaml")
-	prepMarker := filepath.Join(workspace, "prepare-ran")
-	pubMarker := filepath.Join(workspace, "publish-ran")
-	body := "" +
-		"defaults:\n" +
-		"  registry: " + registry + "\n" +
+	phase := func(name string) string {
+		if failPhase != name {
+			return "      " + name + ":\n" +
+				"        - sh: " + workflowVarsMarkerCommand(filepath.Join(workspace, name+"-ran")) + "\n"
+		}
+		return "      " + name + ":\n" +
+			"        - sh: \"exit 3\"\n" +
+			"      " + name + "_on_error:\n" +
+			"        - sh: " + workflowVarsMarkerCommand(filepath.Join(workspace, "onerror-ran")) + "\n"
+	}
+	body := "defaults:\n"
+	if registry != "" {
+		body += "  registry: " + registry + "\n"
+	}
+	body += "" +
 		"targets:\n" +
 		"  - id: claude-workspace\n" +
 		"    kind: workspace\n" +
 		"    harness: claude-code\n" +
 		"    target: " + target + "\n" +
 		"    workflow:\n" +
-		"      prepare:\n" +
-		"        - sh: \"printf %s \\\"$PODIUM_WORKDIR\\\" > " + prepMarker + "\"\n" +
-		"      publish:\n" +
-		"        - sh: \"echo done > " + pubMarker + "\"\n"
+		phase("prepare") +
+		phase("publish")
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatalf("write sync.yaml: %v", err)
 	}
 	return path
+}
+
+// workflowVarsMarkerCommand returns a YAML single-quoted sh scalar that writes
+// the workspace workflow variables to marker, one per line. The YAML
+// single-quoted form keeps the backslash in printf's format literal, and the
+// ${VAR:-unset} form reads an empty override the same as an unset variable, so
+// an e2e run that blanks an ambient value still prints "unset".
+func workflowVarsMarkerCommand(marker string) string {
+	return `'printf ''%s\n'' "$PODIUM_WORKDIR" "$PODIUM_TARGET_ID" "$PODIUM_REGISTRY" ` +
+		`"${PODIUM_CHANGED:-unset}" "${PODIUM_OUTPUT_ID:-unset}" > ` + marker + `'`
 }
 
 // writeSyncConfigWorkspaceSkipWorkflow writes a sync.yaml whose kind: workspace
