@@ -86,6 +86,29 @@ func TestSignedArtifact_NoVerifyKeyRefusesUnderTheDefaults(t *testing.T) {
 	}
 }
 
+// Spec: §6.2 — podium-mcp accepts registry-managed and noop only. A bridge
+// configured with PODIUM_SIGNATURE_PROVIDER=sigstore-keyless under the default
+// policy refuses to start with config.invalid, naming the rejected value and
+// registry-managed, because every delivery signature it verifies is
+// registry-managed (§4.7.10).
+// Matrix: §6.10 (config.invalid)
+func TestMCPStart_SigstoreKeylessProviderRefused(t *testing.T) {
+	t.Parallel()
+	res := mcpExec(t, []string{
+		"PODIUM_REGISTRY=http://127.0.0.1:1",
+		"PODIUM_CACHE_DIR=" + t.TempDir(),
+		"PODIUM_SIGNATURE_PROVIDER=sigstore-keyless",
+	}, toolCall(1, "load_artifact", map[string]any{"id": "x"}))
+	if res.Exit == 0 {
+		t.Fatalf("bridge started under PODIUM_SIGNATURE_PROVIDER=sigstore-keyless\nstdout: %s", res.Stdout)
+	}
+	for _, want := range []string{"config.invalid", "sigstore-keyless", "registry-managed"} {
+		if !strings.Contains(res.Stderr, want) {
+			t.Errorf("stderr %q does not name %s", res.Stderr, want)
+		}
+	}
+}
+
 // Spec: §4.7.9 — a home whose key file an earlier standalone run generated
 // resolves that stale key when the bridge points at a registry signing under a
 // different key: the bridge starts and the load is refused with
