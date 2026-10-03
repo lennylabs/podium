@@ -47,13 +47,21 @@ func withEpochRevision(resp map[string]any) map[string]any {
 // empty ArtifactRevision frames epochRevision, the value a stub serves by
 // default.
 func deliveryHashOf(resp loadArtifactResponse) string {
+	resp.ArtifactRevision = revisionOrEpoch(resp.ArtifactRevision)
+	return servedDeliveryHashOf(resp)
+}
+
+// servedDeliveryHashOf composes the delivery hash of resp with its
+// ArtifactRevision framed as served, an empty value included, so a test can
+// seal a record whose revision a registry would never write.
+func servedDeliveryHashOf(resp loadArtifactResponse) string {
 	rec := version.DeliveryRecord{
 		ID:               resp.ID,
 		Version:          resp.Version,
 		Type:             resp.Type,
 		ContentHash:      resp.ContentHash,
 		Sensitivity:      resp.Sensitivity,
-		ArtifactRevision: revisionOrEpoch(resp.ArtifactRevision),
+		ArtifactRevision: resp.ArtifactRevision,
 		Frontmatter:      resp.Frontmatter,
 		ManifestBody:     resp.ManifestBody,
 		SkillRaw:         resp.SkillRaw,

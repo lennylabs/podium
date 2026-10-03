@@ -126,6 +126,25 @@ func TestResolutionCache_SessionReferences(t *testing.T) {
 	}
 }
 
+// Spec: §6.5 — with a session reference of 300 and the mark at 300, a higher
+// NoteSession and a higher PutLatestAdvancing under the same session leave the
+// session reference at 300 while the stored mark advances to 500.
+func TestResolutionCache_SessionReferenceOutlivesMarkAdvance(t *testing.T) {
+	t.Parallel()
+	r := newResolutionCache(t.TempDir())
+	defer func() { _ = r.Close() }()
+	k := testMarkKey("team/x")
+	r.PutLatestAdvancing(k, "S", "team/x", "3.0.0", "sha256:three", 300, time.Now())
+	r.NoteSession(k, "S", 400)
+	r.PutLatestAdvancing(k, "S", "team/x", "5.0.0", "sha256:five", 500, time.Now())
+	if ref, ok := r.Reference(k, "S"); !ok || ref != 300 {
+		t.Errorf("Reference(k, S) = %d, %v; want 300", ref, ok)
+	}
+	if ref, ok := r.Reference(k, "other"); !ok || ref != 500 {
+		t.Errorf("stored mark = %d, %v; want 500", ref, ok)
+	}
+}
+
 // Spec: §6.5 — the marks persist in the index DB across a reopen, and session
 // references do not.
 func TestResolutionCache_MarksPersist(t *testing.T) {
