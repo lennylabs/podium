@@ -178,11 +178,14 @@ func TestAuditAnchor_UnopenableSinkRefusesStart(t *testing.T) {
 	t.Parallel()
 	logDir := t.TempDir()
 	keyPath := filepath.Join(t.TempDir(), "audit.key")
-	anchorExpectRefusal(t, "config.audit_sink_unavailable",
+	out := anchorExpectRefusal(t, "config.audit_sink_unavailable",
 		"PODIUM_AUDIT_LOG_PATH="+logDir,
 		"PODIUM_AUDIT_SIGNING_KEY_PATH="+keyPath,
 		anchorIntervalOn,
 	)
+	if !strings.Contains(out, logDir) {
+		t.Errorf("refusal does not name %s:\n%s", logDir, out)
+	}
 	if _, err := os.Stat(keyPath); !os.IsNotExist(err) {
 		t.Errorf("refused start touched the absent anchor key %s (stat err %v)", keyPath, err)
 	}
