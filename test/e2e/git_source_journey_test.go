@@ -132,7 +132,7 @@ func deliverWebhook(t testing.TB, reg gitRegisterResponse) map[string]any {
 	}
 	out := new(bytes.Buffer)
 	_, _ = out.ReadFrom(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("webhook delivery: HTTP %d, want 200 (verification + ingest)\nbody: %s",
 			resp.StatusCode, out.Bytes())

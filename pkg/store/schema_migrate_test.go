@@ -21,7 +21,7 @@ func legacyExec(t *testing.T, path string, stmts ...string) {
 	if err != nil {
 		t.Fatalf("open legacy sqlite: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	for _, s := range stmts {
 		if _, err := db.Exec(s); err != nil {
 			t.Fatalf("legacy exec %q: %v", s, err)
@@ -37,12 +37,12 @@ func columnExists(t *testing.T, path, table, col string) bool {
 	if err != nil {
 		t.Fatalf("open sqlite for pragma: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		t.Fatalf("pragma table_info(%s): %v", table, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var cid int
 		var name, ctype string

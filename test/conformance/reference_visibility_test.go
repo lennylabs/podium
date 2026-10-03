@@ -113,7 +113,7 @@ func searchAllIDs(t *testing.T, baseURL, identity string) map[string]bool {
 	if err != nil {
 		t.Fatalf("search_artifacts: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("search_artifacts status=%d", resp.StatusCode)
 	}

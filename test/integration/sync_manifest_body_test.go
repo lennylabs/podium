@@ -88,7 +88,7 @@ func registryManifestBodyURL(t *testing.T, base, id string) *server.LargeResourc
 	if err != nil {
 		t.Fatalf("load %s: %v", id, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(resp.Body)
 		t.Fatalf("load %s = %d: %s", id, resp.StatusCode, b)
@@ -113,7 +113,7 @@ func TestServerSync_ManifestBodyDigestMismatchAbortsTheSync(t *testing.T) {
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(resp.Body)
 		if r.URL.Path == "/v1/load_artifact" && r.URL.Query().Get("id") == "team/big" {
 			body = bytes.Replace(body, []byte(`"content_hash": "sha256:`), []byte(`"content_hash": "sha256:00`), -1)

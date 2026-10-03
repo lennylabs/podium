@@ -88,7 +88,7 @@ func TestLoadArtifact_LargeResourceReturnedAsURL(t *testing.T) {
 		t.Fatalf("GET: %v", err)
 	}
 	body, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	var parsed server.LoadArtifactResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -128,7 +128,7 @@ func TestObjectsRoute_FetchAndVerifyHash(t *testing.T) {
 		t.Fatalf("GET load_artifact: %v", err)
 	}
 	body, _ := io.ReadAll(loadResp.Body)
-	loadResp.Body.Close()
+	_ = loadResp.Body.Close()
 	var parsed server.LoadArtifactResponse
 	_ = json.Unmarshal(body, &parsed)
 	link := parsed.LargeResources["data/big.bin"]
@@ -137,7 +137,7 @@ func TestObjectsRoute_FetchAndVerifyHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET object: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("object GET status = %d", resp.StatusCode)
 	}
@@ -164,7 +164,7 @@ func TestObjectsRoute_UnknownKeyReturnsNotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
@@ -178,7 +178,7 @@ func TestObjectsRoute_RejectsPathTraversal(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 400 or 404", resp.StatusCode)
 	}
@@ -202,7 +202,7 @@ func TestObjectsRoute_NotRegisteredWithoutObjectStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// The default mux returns 404 for an unmatched route.
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)

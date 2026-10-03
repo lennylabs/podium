@@ -53,7 +53,7 @@ func TestBatchLoad_ReturnsPerItemEnvelopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -88,7 +88,7 @@ func TestBatchLoad_PartialFailureSurfacesPerItemErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (partial failure shouldn't 4xx)", resp.StatusCode)
 	}
@@ -124,7 +124,7 @@ func TestBatchLoad_RejectsBatchAboveCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
@@ -143,7 +143,7 @@ func TestBatchLoad_RejectsEmptyIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
@@ -168,7 +168,7 @@ func TestBatchLoad_VersionPinsHonored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var out []server.BatchLoadEnvelope
 	_ = json.NewDecoder(resp.Body).Decode(&out)
 	if len(out) != 1 || out[0].Version != "1.0.0" {

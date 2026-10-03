@@ -40,7 +40,7 @@ func TestLoadArtifact_AlwaysRevalidate_HeadMatchServesCache(t *testing.T) {
 	cache, _ := newContentCache(dir)
 	primeCachedRecord(t, cache, "team/x", fm, "cached-body")
 	resolutions := newResolutionCache(dir)
-	defer resolutions.Close()
+	defer func() { _ = resolutions.Close() }()
 	resolutions.PutVersion("team/x", "1.0.0", hash, time.Now())
 
 	srv := &mcpServer{
@@ -97,7 +97,7 @@ func TestLoadArtifact_AlwaysRevalidate_HeadMismatchFullFetches(t *testing.T) {
 	cache, _ := newContentCache(dir)
 	_ = cache.put(cachedHash, cachedFM, "cached-body", nil)
 	resolutions := newResolutionCache(dir)
-	defer resolutions.Close()
+	defer func() { _ = resolutions.Close() }()
 	resolutions.PutVersion("team/x", "2.0.0", cachedHash, time.Now())
 
 	srv := &mcpServer{

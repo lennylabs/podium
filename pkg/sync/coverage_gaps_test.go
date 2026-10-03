@@ -392,7 +392,7 @@ func TestTreeWatcher_AddTree(t *testing.T) {
 		if err != nil {
 			t.Skipf("fsnotify unavailable in this environment: %v", err)
 		}
-		defer tw.Close()
+		defer func() { _ = tw.Close() }()
 
 		root := t.TempDir()
 		nested := filepath.Join(root, "a", "b", "c")
@@ -410,7 +410,7 @@ func TestTreeWatcher_AddTree(t *testing.T) {
 		if err != nil {
 			t.Skipf("fsnotify unavailable: %v", err)
 		}
-		defer tw.Close()
+		defer func() { _ = tw.Close() }()
 
 		parent := t.TempDir()
 		missing := filepath.Join(parent, "does-not-exist")
@@ -425,7 +425,7 @@ func TestTreeWatcher_AddTree(t *testing.T) {
 		if err != nil {
 			t.Skipf("fsnotify unavailable: %v", err)
 		}
-		defer tw.Close()
+		defer func() { _ = tw.Close() }()
 
 		dir := t.TempDir()
 		file := filepath.Join(dir, "f.txt")
@@ -443,7 +443,7 @@ func TestTreeWatcher_AddTree(t *testing.T) {
 		if err != nil {
 			t.Skipf("fsnotify unavailable: %v", err)
 		}
-		defer tw.Close()
+		defer func() { _ = tw.Close() }()
 		// The empty path was skipped and dir was added; the constructor returning
 		// a usable watcher is the assertion.
 		if tw.Events() == nil || tw.Errors() == nil {

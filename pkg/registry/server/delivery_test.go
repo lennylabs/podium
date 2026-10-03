@@ -113,7 +113,7 @@ func TestLoadArtifact_DeliverySignerFailureRefusesTheLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var envs []server.BatchLoadEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&envs); err != nil || len(envs) != 1 {
 		t.Fatalf("decode batch: %v %v", err, envs)

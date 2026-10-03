@@ -183,7 +183,7 @@ func deliverAs(t *testing.T, url, providerID, body, secret string) (int, string)
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out := new(bytes.Buffer)
 	_, _ = out.ReadFrom(resp.Body)
 	return resp.StatusCode, out.String()

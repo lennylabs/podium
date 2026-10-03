@@ -151,7 +151,7 @@ func TestHandler_ReplaceUserHTTP(t *testing.T) {
 		"userName":"alice@example.com",
 		"active":true
 	}`))
-	defer created.Body.Close()
+	defer func() { _ = created.Body.Close() }()
 	if created.StatusCode != http.StatusCreated {
 		buf, _ := io.ReadAll(created.Body)
 		t.Fatalf("create status = %d: %s", created.StatusCode, buf)
@@ -168,7 +168,7 @@ func TestHandler_ReplaceUserHTTP(t *testing.T) {
 		"userName":"alice2@example.com",
 		"active":true
 	}`))
-	defer put.Body.Close()
+	defer func() { _ = put.Body.Close() }()
 	if put.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(put.Body)
 		t.Fatalf("PUT status = %d: %s", put.StatusCode, buf)
@@ -184,14 +184,14 @@ func TestHandler_ReplaceUserHTTP(t *testing.T) {
 		"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],
 		"userName":"x@example.com"
 	}`))
-	defer notFound.Body.Close()
+	defer func() { _ = notFound.Body.Close() }()
 	if notFound.StatusCode != http.StatusNotFound {
 		t.Errorf("PUT ghost status = %d, want 404", notFound.StatusCode)
 	}
 
 	// Malformed PUT body = 400.
 	bad := authedRequest(t, "tok", http.MethodPut, ts.URL+"/scim/v2/Users/"+id, []byte(`not json`))
-	defer bad.Body.Close()
+	defer func() { _ = bad.Body.Close() }()
 	if bad.StatusCode != http.StatusBadRequest {
 		t.Errorf("PUT bad json status = %d, want 400", bad.StatusCode)
 	}
@@ -206,7 +206,7 @@ func TestHandler_GroupCRUDHTTP(t *testing.T) {
 		"members":[]
 	}`)
 	created := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Groups", body)
-	defer created.Body.Close()
+	defer func() { _ = created.Body.Close() }()
 	if created.StatusCode != http.StatusCreated {
 		buf, _ := io.ReadAll(created.Body)
 		t.Fatalf("POST Groups status = %d: %s", created.StatusCode, buf)
@@ -220,14 +220,14 @@ func TestHandler_GroupCRUDHTTP(t *testing.T) {
 
 	// GET /Groups/{id}.
 	got := authedRequest(t, "tok", http.MethodGet, ts.URL+"/scim/v2/Groups/"+id, nil)
-	defer got.Body.Close()
+	defer func() { _ = got.Body.Close() }()
 	if got.StatusCode != http.StatusOK {
 		t.Errorf("GET Group status = %d", got.StatusCode)
 	}
 
 	// GET /Groups (list).
 	list := authedRequest(t, "tok", http.MethodGet, ts.URL+"/scim/v2/Groups", nil)
-	defer list.Body.Close()
+	defer func() { _ = list.Body.Close() }()
 	if list.StatusCode != http.StatusOK {
 		t.Errorf("LIST Group status = %d", list.StatusCode)
 	}
@@ -245,7 +245,7 @@ func TestHandler_GroupCRUDHTTP(t *testing.T) {
 		"displayName":"engineering-rebrand",
 		"members":[]
 	}`))
-	defer put.Body.Close()
+	defer func() { _ = put.Body.Close() }()
 	if put.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(put.Body)
 		t.Errorf("PUT status = %d: %s", put.StatusCode, buf)
@@ -256,28 +256,28 @@ func TestHandler_GroupCRUDHTTP(t *testing.T) {
 		"schemas":["urn:ietf:params:scim:schemas:core:2.0:Group"],
 		"displayName":"x"
 	}`))
-	defer missingPut.Body.Close()
+	defer func() { _ = missingPut.Body.Close() }()
 	if missingPut.StatusCode != http.StatusNotFound {
 		t.Errorf("PUT ghost status = %d, want 404", missingPut.StatusCode)
 	}
 
 	// Bad JSON PUT = 400.
 	bad := authedRequest(t, "tok", http.MethodPut, ts.URL+"/scim/v2/Groups/"+id, []byte(`not json`))
-	defer bad.Body.Close()
+	defer func() { _ = bad.Body.Close() }()
 	if bad.StatusCode != http.StatusBadRequest {
 		t.Errorf("PUT bad json status = %d, want 400", bad.StatusCode)
 	}
 
 	// DELETE /Groups/{id} = 204.
 	del := authedRequest(t, "tok", http.MethodDelete, ts.URL+"/scim/v2/Groups/"+id, nil)
-	defer del.Body.Close()
+	defer func() { _ = del.Body.Close() }()
 	if del.StatusCode != http.StatusNoContent {
 		t.Errorf("DELETE Group status = %d, want 204", del.StatusCode)
 	}
 
 	// GET after DELETE = 404.
 	gone := authedRequest(t, "tok", http.MethodGet, ts.URL+"/scim/v2/Groups/"+id, nil)
-	defer gone.Body.Close()
+	defer func() { _ = gone.Body.Close() }()
 	if gone.StatusCode != http.StatusNotFound {
 		t.Errorf("GET deleted Group status = %d, want 404", gone.StatusCode)
 	}
@@ -292,11 +292,11 @@ func TestHandler_GroupFilter(t *testing.T) {
 			"displayName":"` + name + `"
 		}`)
 		r := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Groups", body)
-		r.Body.Close()
+		_ = r.Body.Close()
 	}
 	resp := authedRequest(t, "tok", http.MethodGet,
 		ts.URL+`/scim/v2/Groups?filter=displayName+eq+"sales"`, nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("filter LIST status = %d", resp.StatusCode)
 	}

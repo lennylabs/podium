@@ -47,12 +47,12 @@ func TestServer_SearchQPSEnvelope_RetryableWithHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET 1: %v", err)
 	}
-	resp1.Body.Close()
+	_ = resp1.Body.Close()
 	resp2, err := http.Get(ts.URL + "/v1/search_artifacts?query=x")
 	if err != nil {
 		t.Fatalf("GET 2: %v", err)
 	}
-	defer resp2.Body.Close()
+	defer func() { _ = resp2.Body.Close() }()
 	if resp2.StatusCode != http.StatusTooManyRequests {
 		t.Fatalf("second call status = %d, want 429", resp2.StatusCode)
 	}

@@ -108,7 +108,7 @@ func apiDo(t testing.TB, method, u string, body any) (int, []byte) {
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, u, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out := new(bytes.Buffer)
 	_, _ = out.ReadFrom(resp.Body)
 	return resp.StatusCode, out.Bytes()
@@ -159,7 +159,7 @@ func TestHTTPAPI_HealthzReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /healthz: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	apiWantStatus(t, resp.StatusCode, 200, "/healthz read-only", nil)
 	if resp.Header.Get("X-Podium-Read-Only") != "true" {
 		t.Fatalf("missing X-Podium-Read-Only: true header")
@@ -953,7 +953,7 @@ func TestHTTPAPI_IngestWebhookInvalid(t *testing.T) {
 	}
 	badBody := new(bytes.Buffer)
 	_, _ = badBody.ReadFrom(badResp.Body)
-	badResp.Body.Close()
+	_ = badResp.Body.Close()
 	apiWantStatus(t, badResp.StatusCode, 401, "invalid webhook signature", badBody.Bytes())
 	if code := apiJSONObj(t, badBody.Bytes())["code"]; code != "ingest.webhook_invalid" {
 		t.Fatalf("code = %v, want ingest.webhook_invalid\n%s", code, badBody.Bytes())
@@ -972,7 +972,7 @@ func TestHTTPAPI_IngestWebhookInvalid(t *testing.T) {
 	}
 	okBody := new(bytes.Buffer)
 	_, _ = okBody.ReadFrom(okResp.Body)
-	okResp.Body.Close()
+	_ = okResp.Body.Close()
 	if okResp.StatusCode == http.StatusNotFound || okResp.StatusCode == http.StatusUnauthorized {
 		t.Fatalf("valid signature still returned %d (route or verification broken): %s",
 			okResp.StatusCode, okBody.Bytes())
@@ -996,7 +996,7 @@ func TestHTTPAPI_EventsHeartbeat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /v1/events: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if ct := resp.Header.Get("Content-Type"); ct != "application/x-ndjson" {
 		t.Fatalf("Content-Type=%q, want application/x-ndjson", ct)
 	}
@@ -1031,7 +1031,7 @@ func TestHTTPAPI_EventsTypeFilter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /v1/events: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	lines := make(chan string, 8)
 	go func() {
@@ -1173,7 +1173,7 @@ func TestHTTPAPI_ReadOnlyServesReads(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		apiWantStatus(t, resp.StatusCode, 200, "read-only "+path, nil)
 		if resp.Header.Get("X-Podium-Read-Only") != "true" {
 			t.Fatalf("%s: missing X-Podium-Read-Only: true", path)
@@ -1304,7 +1304,7 @@ func TestHTTPAPI_PublicModeAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("public-mode search: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != 200 {
 		t.Fatalf("public-mode search = %d, want 200", resp.StatusCode)
 	}
@@ -1392,7 +1392,7 @@ func TestHTTPAPI_ObjectsServesBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET object: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	apiWantStatus(t, resp.StatusCode, 200, "GET /objects/{key}", nil)
 	if !strings.HasPrefix(resp.Header.Get("X-Content-Hash"), "sha256:") {
 		t.Fatalf("X-Content-Hash=%q, want sha256: prefix", resp.Header.Get("X-Content-Hash"))
@@ -1637,7 +1637,7 @@ func TestHTTPAPI_LoadNonDeprecatedArtifactReturnsReplacedBy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST batchLoad: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var items []map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil || len(items) != 1 {
 		t.Fatalf("decode batchLoad: %v (%d items)", err, len(items))

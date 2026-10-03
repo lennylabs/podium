@@ -75,7 +75,7 @@ func TestDependents_InvisibleTargetReturnsEmpty200(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET dependents %s: %v", id, err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		raw, err := io.ReadAll(resp.Body)
 		if err != nil {
 			t.Fatalf("read dependents %s: %v", id, err)

@@ -339,7 +339,7 @@ func envelope(t *testing.T, resp *http.Response) server.ErrorResponse {
 func (b *browserStack) signInLeg(t *testing.T) (*http.Cookie, string) {
 	t.Helper()
 	resp := b.do(t, http.MethodGet, server.PathWebUISignIn, nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("sign-in status = %d, want 302", resp.StatusCode)
 	}
@@ -351,7 +351,7 @@ func (b *browserStack) signInLeg(t *testing.T) (*http.Cookie, string) {
 	if err != nil {
 		t.Fatalf("authorization request: %v", err)
 	}
-	defer authResp.Body.Close()
+	defer func() { _ = authResp.Body.Close() }()
 	if authResp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(authResp.Body)
 		t.Fatalf("the identity provider refused the authorization request: %d %s", authResp.StatusCode, body)
@@ -391,7 +391,7 @@ func TestBrowserFlow_RoutesCompleteTheExchange(t *testing.T) {
 	state, _, _ := strings.Cut(tx.Value, ".")
 	resp := b.do(t, http.MethodGet,
 		server.PathWebUICallback+"?state="+url.QueryEscape(state)+"&code="+url.QueryEscape(code), nil, tx)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("callback status = %d, want 302", resp.StatusCode)
 	}
@@ -412,7 +412,7 @@ func TestBrowserFlow_RoutesCompleteTheExchange(t *testing.T) {
 	// the group the configured scope put on it. An implementation that put
 	// the ID token in the cookie, or that sent no audience, resolves nothing.
 	sess := b.do(t, http.MethodGet, "/v1/load_artifact?id=eng/secret", nil, session)
-	defer sess.Body.Close()
+	defer func() { _ = sess.Body.Close() }()
 	if sess.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(sess.Body)
 		t.Fatalf("session read = %d, want 200 (the group-scoped layer)\nbody: %s", sess.StatusCode, body)
@@ -430,7 +430,7 @@ func TestBrowserFlow_AudienceDrivesTheSessionToken(t *testing.T) {
 	state, _, _ := strings.Cut(tx.Value, ".")
 	resp := b.do(t, http.MethodGet,
 		server.PathWebUICallback+"?state="+state+"&code="+code, nil, tx)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	session := responseCookie(resp, server.CookieSession)
 	if session == nil {
 		t.Fatal("no session cookie")
@@ -466,7 +466,7 @@ func TestBrowserFlow_CanonicalAudienceIsSentAndTheSetIsVerified(t *testing.T) {
 
 	state, _, _ := strings.Cut(tx.Value, ".")
 	resp := b.do(t, http.MethodGet, server.PathWebUICallback+"?state="+state+"&code="+code, nil, tx)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	session := responseCookie(resp, server.CookieSession)
 	if session == nil {
 		t.Fatal("the callback set no session cookie")
@@ -479,7 +479,7 @@ func TestBrowserFlow_CanonicalAudienceIsSentAndTheSetIsVerified(t *testing.T) {
 		t.Errorf("session token aud = %v, want the canonical entry", claims["aud"])
 	}
 	read := b.do(t, http.MethodGet, "/v1/load_artifact?id=eng/secret", nil, session)
-	defer read.Body.Close()
+	defer func() { _ = read.Body.Close() }()
 	if read.StatusCode != http.StatusOK {
 		t.Errorf("canonical-audience session read = %d, want 200 (the group-scoped layer)", read.StatusCode)
 	}
@@ -493,7 +493,7 @@ func TestBrowserFlow_CanonicalAudienceIsSentAndTheSetIsVerified(t *testing.T) {
 		"exp":    time.Now().Add(10 * time.Minute).Unix(),
 	})}
 	secondRead := b.do(t, http.MethodGet, "/v1/load_artifact?id=eng/secret", nil, other)
-	defer secondRead.Body.Close()
+	defer func() { _ = secondRead.Body.Close() }()
 	if secondRead.StatusCode != http.StatusOK {
 		t.Errorf("second-audience read = %d, want 200; the verifier holds the whole set", secondRead.StatusCode)
 	}
@@ -508,13 +508,13 @@ func TestBrowserFlow_ScopeSetDrivesGroupResolution(t *testing.T) {
 	tx, code := b.signInLeg(t)
 	state, _, _ := strings.Cut(tx.Value, ".")
 	resp := b.do(t, http.MethodGet, server.PathWebUICallback+"?state="+state+"&code="+code, nil, tx)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	session := responseCookie(resp, server.CookieSession)
 	if session == nil {
 		t.Fatal("no session cookie")
 	}
 	read := b.do(t, http.MethodGet, "/v1/load_artifact?id=eng/secret", nil, session)
-	defer read.Body.Close()
+	defer func() { _ = read.Body.Close() }()
 	if read.StatusCode != http.StatusNotFound {
 		t.Errorf("under-scoped session read = %d, want 404; the group claim rides on the configured scope", read.StatusCode)
 	}
@@ -540,7 +540,7 @@ func TestBrowserFlow_ExchangeFailureArms(t *testing.T) {
 		b.stub.mu.Unlock()
 		state, _, _ := strings.Cut(tx.Value, ".")
 		resp := b.do(t, http.MethodGet, server.PathWebUICallback+"?state="+state+"&code="+code, nil, tx)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusBadGateway {
 			t.Fatalf("status = %d, want 502", resp.StatusCode)
 		}
@@ -564,7 +564,7 @@ func TestBrowserFlow_ExchangeFailureArms(t *testing.T) {
 		b.stub.mu.Unlock()
 		state, _, _ := strings.Cut(tx.Value, ".")
 		resp := b.do(t, http.MethodGet, server.PathWebUICallback+"?state="+state+"&code="+code, nil, tx)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500", resp.StatusCode)
 		}
@@ -588,7 +588,7 @@ func TestBrowserFlow_CallbackOutsideTheGateReplacesTheSession(t *testing.T) {
 	resp := b.do(t, http.MethodGet, server.PathWebUICallback+"?state="+state+"&code="+code,
 		map[string]string{"Sec-Fetch-Site": "cross-site"},
 		tx, &http.Cookie{Name: server.CookieSession, Value: "an-earlier-session"})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("status = %d, want 302; the callback is outside the gate", resp.StatusCode)
 	}
@@ -610,7 +610,7 @@ func TestBrowserFlow_SignInOutsideTheGate(t *testing.T) {
 	} {
 		resp := b.do(t, http.MethodGet, server.PathWebUISignIn, headers)
 		func() {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusFound {
 				t.Errorf("%v: sign-in status = %d, want 302", headers, resp.StatusCode)
 			}
@@ -632,7 +632,7 @@ func TestBrowserFlow_ForgedSignOutClearsNothing(t *testing.T) {
 	tx, code := b.signInLeg(t)
 	state, _, _ := strings.Cut(tx.Value, ".")
 	cb := b.do(t, http.MethodGet, server.PathWebUICallback+"?state="+state+"&code="+code, nil, tx)
-	cb.Body.Close()
+	_ = cb.Body.Close()
 	session := responseCookie(cb, server.CookieSession)
 	if session == nil {
 		t.Fatal("no session cookie")
@@ -640,7 +640,7 @@ func TestBrowserFlow_ForgedSignOutClearsNothing(t *testing.T) {
 
 	forged := b.do(t, http.MethodPost, server.PathWebUISignOut,
 		map[string]string{"Sec-Fetch-Site": "cross-site"}, session)
-	defer forged.Body.Close()
+	defer func() { _ = forged.Body.Close() }()
 	if forged.StatusCode != http.StatusForbidden {
 		t.Fatalf("forged sign-out status = %d, want 403", forged.StatusCode)
 	}
@@ -652,7 +652,7 @@ func TestBrowserFlow_ForgedSignOutClearsNothing(t *testing.T) {
 	}
 	// The session still authenticates the browser.
 	read := b.do(t, http.MethodGet, "/v1/load_artifact?id=eng/secret", nil, session)
-	defer read.Body.Close()
+	defer func() { _ = read.Body.Close() }()
 	if read.StatusCode != http.StatusOK {
 		t.Errorf("post-forgery read = %d, want 200; the forged sign-out signed the operator out", read.StatusCode)
 	}
@@ -660,7 +660,7 @@ func TestBrowserFlow_ForgedSignOutClearsNothing(t *testing.T) {
 	// A same-origin sign-out clears both cookies.
 	out := b.do(t, http.MethodPost, server.PathWebUISignOut,
 		map[string]string{"Sec-Fetch-Site": "same-origin"}, session)
-	defer out.Body.Close()
+	defer func() { _ = out.Body.Close() }()
 	if out.StatusCode != http.StatusNoContent {
 		t.Fatalf("sign-out status = %d, want 204", out.StatusCode)
 	}
@@ -689,7 +689,7 @@ func TestBrowserFlow_CSRFCoversLayerWrites(t *testing.T) {
 		for _, headers := range refused {
 			resp := b.do(t, http.MethodDelete, "/v1/layers/some-layer", headers)
 			func() {
-				defer resp.Body.Close()
+				defer func() { _ = resp.Body.Close() }()
 				if resp.StatusCode != http.StatusForbidden {
 					t.Errorf("%v: layer write = %d, want 403", headers, resp.StatusCode)
 					return
@@ -705,7 +705,7 @@ func TestBrowserFlow_CSRFCoversLayerWrites(t *testing.T) {
 	// is what every CLI and SDK writer sends. It answers the route's own
 	// outcome rather than the gate's refusal.
 	resp := enabled.do(t, http.MethodDelete, "/v1/layers/some-layer", nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusForbidden {
 		if e := envelope(t, resp); e.Code == "auth.csrf_invalid" {
 			t.Error("a write carrying no browser-origin evidence was refused by the gate")
@@ -730,7 +730,7 @@ func TestBrowserFlow_ExpiredSessionAcrossSurfaces(t *testing.T) {
 	expired := &http.Cookie{Name: server.CookieSession, Value: b.idp.sign(t, claims)}
 
 	metaTool := b.do(t, http.MethodGet, "/v1/load_artifact?id=eng/secret", nil, expired)
-	defer metaTool.Body.Close()
+	defer func() { _ = metaTool.Body.Close() }()
 	if metaTool.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("meta-tool route = %d, want 401", metaTool.StatusCode)
 	}
@@ -739,7 +739,7 @@ func TestBrowserFlow_ExpiredSessionAcrossSurfaces(t *testing.T) {
 	}
 
 	layers := b.do(t, http.MethodGet, "/v1/layers", nil, expired)
-	defer layers.Body.Close()
+	defer func() { _ = layers.Body.Close() }()
 	if layers.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("layer read = %d, want 401 for a session past the token's exp", layers.StatusCode)
 	}
@@ -748,7 +748,7 @@ func TestBrowserFlow_ExpiredSessionAcrossSurfaces(t *testing.T) {
 	}
 
 	postureResp := b.do(t, http.MethodGet, server.PathWebUISession, nil, expired)
-	defer postureResp.Body.Close()
+	defer func() { _ = postureResp.Body.Close() }()
 	if postureResp.StatusCode != http.StatusOK {
 		t.Fatalf("posture read = %d, want 200", postureResp.StatusCode)
 	}
@@ -780,7 +780,7 @@ func TestBrowserFlow_PostureRead(t *testing.T) {
 
 	read := func(b *browserStack, cookies ...*http.Cookie) map[string]any {
 		resp := b.do(t, http.MethodGet, server.PathWebUISession, nil, cookies...)
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("posture read = %d, want 200", resp.StatusCode)
 		}
@@ -812,7 +812,7 @@ func TestBrowserFlow_PostureRead(t *testing.T) {
 	// The registered paths answer, which is what keeps the page from spelling
 	// a path the mux does not serve.
 	resp := enabled.do(t, http.MethodGet, auth["sign_in_path"].(string), nil)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusFound {
 		t.Errorf("the reported sign_in_path answered %d", resp.StatusCode)
 	}
@@ -820,7 +820,7 @@ func TestBrowserFlow_PostureRead(t *testing.T) {
 	tx, code := enabled.signInLeg(t)
 	state, _, _ := strings.Cut(tx.Value, ".")
 	cb := enabled.do(t, http.MethodGet, server.PathWebUICallback+"?state="+state+"&code="+code, nil, tx)
-	cb.Body.Close()
+	_ = cb.Body.Close()
 	session := responseCookie(cb, server.CookieSession)
 	signedIn := read(enabled, session)
 	if got := signedIn["subject"]; got != "alice@acme.com" {
@@ -844,7 +844,7 @@ func TestBrowserFlow_ReadOnlyServesEveryRoute(t *testing.T) {
 	tx, code := b.signInLeg(t)
 	state, _, _ := strings.Cut(tx.Value, ".")
 	cb := b.do(t, http.MethodGet, server.PathWebUICallback+"?state="+state+"&code="+code, nil, tx)
-	defer cb.Body.Close()
+	defer func() { _ = cb.Body.Close() }()
 	if cb.StatusCode != http.StatusFound {
 		t.Fatalf("callback in read-only mode = %d, want 302", cb.StatusCode)
 	}
@@ -855,7 +855,7 @@ func TestBrowserFlow_ReadOnlyServesEveryRoute(t *testing.T) {
 	// An established session keeps reading while the registry serves from the
 	// replica.
 	read := b.do(t, http.MethodGet, "/v1/load_artifact?id=eng/secret", nil, session)
-	defer read.Body.Close()
+	defer func() { _ = read.Body.Close() }()
 	if read.StatusCode != http.StatusOK {
 		t.Errorf("read-only catalog read = %d, want 200", read.StatusCode)
 	}
@@ -868,7 +868,7 @@ func TestBrowserFlow_ReadOnlyServesEveryRoute(t *testing.T) {
 	} {
 		resp := b.do(t, probe.method, probe.path, map[string]string{"Sec-Fetch-Site": "same-origin"}, session)
 		func() {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode >= 400 {
 				t.Errorf("%s %s in read-only mode = %d", probe.method, probe.path, resp.StatusCode)
 			}
@@ -892,7 +892,7 @@ func TestBrowserFlow_DisabledRegistersNoRoutes(t *testing.T) {
 	} {
 		resp := b.do(t, probe.method, probe.path, nil)
 		func() {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusNoContent {
 				t.Errorf("%s %s answered %d on a registry with the flow disabled", probe.method, probe.path, resp.StatusCode)
 			}
@@ -900,7 +900,7 @@ func TestBrowserFlow_DisabledRegistersNoRoutes(t *testing.T) {
 	}
 	stale := &http.Cookie{Name: server.CookieSession, Value: b.idp.sign(t, gwClaims(b.idp.issuer(), "alice@acme.com", []string{"idp-eng"}))}
 	read := b.do(t, http.MethodGet, "/v1/load_artifact?id=eng/secret", nil, stale)
-	defer read.Body.Close()
+	defer func() { _ = read.Body.Close() }()
 	if read.StatusCode != http.StatusNotFound {
 		t.Errorf("stale cookie read = %d, want 404; a disabled registry reads no cookie", read.StatusCode)
 	}
@@ -926,7 +926,7 @@ func bfLayerRows() []store.LayerConfig {
 func (b *browserStack) layerList(t *testing.T, cookies ...*http.Cookie) ([]string, string) {
 	t.Helper()
 	resp := b.do(t, http.MethodGet, "/v1/layers", nil, cookies...)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read layer list: %v", err)
@@ -1029,7 +1029,7 @@ func TestBrowserFlow_LayerListNarrowsToCaller(t *testing.T) {
 	// with.
 	other := newJWKSIdP(t)
 	resp := b.do(t, http.MethodGet, "/v1/layers", nil, cookie(other, "mallory@acme.com", nil))
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("untrusted-issuer read = %d, want 401", resp.StatusCode)
 	}

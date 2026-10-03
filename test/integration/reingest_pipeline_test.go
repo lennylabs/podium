@@ -91,7 +91,7 @@ func TestReingestPipeline_GitSource(t *testing.T) {
 	}
 	var m map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&m)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || m["accepted"] != float64(1) {
 		t.Fatalf("git reingest status=%d body=%v (want accepted=1)", resp.StatusCode, m)
 	}
@@ -172,7 +172,7 @@ func TestReingestPipeline_SQLiteLocalSource(t *testing.T) {
 	}
 	var m map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&m)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || m["accepted"] != float64(1) {
 		t.Fatalf("reingest status=%d body=%v", resp.StatusCode, m)
 	}
@@ -220,7 +220,7 @@ func TestReingestPipeline_FreezeAndBreakGlass(t *testing.T) {
 		t.Fatalf("reingest: %v", err)
 	}
 	frozenStatus := resp.StatusCode
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if frozenStatus != http.StatusConflict {
 		t.Fatalf("frozen reingest status = %d, want 409", frozenStatus)
 	}
@@ -235,7 +235,7 @@ func TestReingestPipeline_FreezeAndBreakGlass(t *testing.T) {
 		t.Fatalf("break-glass reingest: %v", err)
 	}
 	okStatus := resp2.StatusCode
-	resp2.Body.Close()
+	_ = resp2.Body.Close()
 	if okStatus != http.StatusOK {
 		t.Fatalf("break-glass reingest status = %d, want 200", okStatus)
 	}
@@ -286,7 +286,7 @@ func TestReingestPipeline_MalformedFrontmatterIsContentFault(t *testing.T) {
 	}
 	var m map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&m)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	if resp.StatusCode != http.StatusUnprocessableEntity {
 		t.Errorf("status = %d, want 422 (body %v)", resp.StatusCode, m)

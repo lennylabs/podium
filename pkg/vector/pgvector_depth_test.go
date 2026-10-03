@@ -245,7 +245,7 @@ func TestPgVector_Depth_ANNIndexRecall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Conn: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	for _, stmt := range []string{
 		`SET enable_seqscan = off`,
 		`SET enable_bitmapscan = off`,
@@ -293,7 +293,7 @@ func explainTopK(ctx context.Context, conn *sql.Conn, vec []float32, tenant stri
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var b strings.Builder
 	for rows.Next() {
 		var line string
@@ -318,7 +318,7 @@ func topKOnConn(ctx context.Context, conn *sql.Conn, vec []float32, tenant strin
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		return "", fmt.Errorf("no rows")
 	}

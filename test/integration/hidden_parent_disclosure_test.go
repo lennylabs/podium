@@ -111,7 +111,7 @@ func hpDo(t *testing.T, ts *httptest.Server, method, path string, body []byte) (
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read %s: %v", path, err)

@@ -46,7 +46,7 @@ func editStoredRow(t *testing.T, sqlitePath, id string, frontmatter []byte) {
 	if err != nil {
 		t.Fatalf("open raw sqlite: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	if _, err := db.Exec(`UPDATE manifests SET frontmatter = ?, content_hash = ? WHERE tenant_id = ? AND artifact_id = ?`,
 		frontmatter, hash, rec.TenantID, id); err != nil {
 		t.Fatalf("edit row: %v", err)

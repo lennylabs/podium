@@ -25,7 +25,7 @@ func putJSON(t *testing.T, base, path string, body any) (*http.Response, []byte)
 	if err != nil {
 		t.Fatalf("PUT %s: %v", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out := new(bytes.Buffer)
 	_, _ = out.ReadFrom(resp.Body)
 	return resp, out.Bytes()
@@ -330,7 +330,7 @@ func TestLayerEndpoint_UpdateCannotWidenUserDefined(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET /v1/layers: %v", err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		var list struct {
 			Layers []json.RawMessage `json:"layers"`
 		}

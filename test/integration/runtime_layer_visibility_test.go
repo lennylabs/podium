@@ -41,7 +41,7 @@ func rlvSearchIDs(t *testing.T, base string) []string {
 	if err != nil {
 		t.Fatalf("GET search: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body struct {
 		Results []struct {
 			ID string `json:"id"`
@@ -63,7 +63,7 @@ func rlvStatus(t *testing.T, url string) int {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode
 }
 
@@ -116,7 +116,7 @@ func TestRuntimeLayerVisibility_SQLiteReadPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register layer: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("register layer status = %d, want 201", resp.StatusCode)
 	}

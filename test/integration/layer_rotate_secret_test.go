@@ -51,7 +51,7 @@ func TestLayerRotateWebhookSecret_SQLitePersists(t *testing.T) {
 		t.Fatalf("PUT: %v", err)
 	}
 	out, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200: %s", resp.StatusCode, out)
 	}

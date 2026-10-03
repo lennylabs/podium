@@ -483,7 +483,7 @@ func webhookBearer(t testing.TB, method, url, token string, body []byte) (int, [
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, out
 }
@@ -658,12 +658,12 @@ func openEventStream(t testing.TB, srv *serverProc, eventTypes ...string) *event
 		t.Fatalf("GET %s: %v", url, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		cancel()
 		t.Fatalf("GET /v1/events = HTTP %d, want 200", resp.StatusCode)
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "application/x-ndjson" {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		cancel()
 		t.Fatalf("Content-Type=%q, want application/x-ndjson", ct)
 	}
@@ -746,7 +746,7 @@ func (c *eventStreamClient) close() {
 	}
 	c.cancel()
 	if c.resp != nil {
-		c.resp.Body.Close()
+		_ = c.resp.Body.Close()
 	}
 }
 

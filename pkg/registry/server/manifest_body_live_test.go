@@ -103,7 +103,7 @@ func TestManifestBody_LivePresignedOverS3(t *testing.T) {
 		t.Fatalf("GET presigned body: %v", err)
 	}
 	got, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("presigned body fetch = HTTP %d", resp.StatusCode)
 	}

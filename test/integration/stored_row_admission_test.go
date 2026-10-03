@@ -189,7 +189,7 @@ func (e *admEnv) request(t *testing.T, method, id string, header map[string]stri
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, id, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, body, resp.Header
 }
@@ -202,7 +202,7 @@ func (e *admEnv) batchItem(t *testing.T, id string) (server.BatchLoadEnvelope, [
 	if err != nil {
 		t.Fatalf("POST batchLoad: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	var items []server.BatchLoadEnvelope
 	if err := json.Unmarshal(raw, &items); err != nil || len(items) != 1 {

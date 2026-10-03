@@ -15,7 +15,7 @@ func TestLayerEndpoint_UpdateMissingID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
@@ -31,7 +31,7 @@ func TestLayerEndpoint_UpdateUnknownLayer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
@@ -54,7 +54,7 @@ func TestLayerEndpoint_UpdateMalformedBody(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer bad.Body.Close()
+	defer func() { _ = bad.Body.Close() }()
 	if bad.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", bad.StatusCode)
 	}
@@ -68,7 +68,7 @@ func TestLayerEndpoint_UpdateWrongMethod(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", resp.StatusCode)
 	}
@@ -100,7 +100,7 @@ func TestLayerEndpoint_UpdateMultiFieldPatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer put.Body.Close()
+	defer func() { _ = put.Body.Close() }()
 	if put.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200", put.StatusCode)
 	}

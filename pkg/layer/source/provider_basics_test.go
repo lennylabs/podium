@@ -110,7 +110,7 @@ func TestGit_FSExerciseEntryMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open(.): %v", err)
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	if _, err := dir.(fs.ReadDirFile).ReadDir(-1); err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}

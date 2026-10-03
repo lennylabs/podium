@@ -67,7 +67,7 @@ func TestBrowserOriginGate_RefusesCrossSiteEvidence(t *testing.T) {
 					headers[k] = v
 				}
 				resp, ran := driveGate(t, http.MethodPost, "/v1/layers", headers)
-				defer resp.Body.Close()
+				defer func() { _ = resp.Body.Close() }()
 				if resp.StatusCode != http.StatusForbidden {
 					t.Fatalf("status = %d, want 403", resp.StatusCode)
 				}
@@ -103,7 +103,7 @@ func TestBrowserOriginGate_Admits(t *testing.T) {
 	for name, headers := range cases {
 		t.Run(name, func(t *testing.T) {
 			resp, ran := driveGate(t, http.MethodPost, "/v1/layers", headers)
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK || !ran {
 				t.Errorf("status = %d, handler ran = %v, want the route's own success", resp.StatusCode, ran)
 			}
@@ -117,14 +117,14 @@ func TestBrowserOriginGate_SafeMethodsAdmitted(t *testing.T) {
 	t.Parallel()
 	for _, method := range []string{http.MethodGet, http.MethodHead, http.MethodOptions} {
 		resp, ran := driveGate(t, method, "/v1/layers", map[string]string{"Sec-Fetch-Site": "cross-site"})
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusOK || !ran {
 			t.Errorf("%s: status = %d, handler ran = %v, want admitted", method, resp.StatusCode, ran)
 		}
 	}
 	for _, method := range []string{http.MethodPut, http.MethodPatch, http.MethodDelete} {
 		resp, _ := driveGate(t, method, "/v1/layers", map[string]string{"Sec-Fetch-Site": "cross-site"})
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusForbidden {
 			t.Errorf("%s: status = %d, want 403", method, resp.StatusCode)
 		}
@@ -142,7 +142,7 @@ func TestBrowserOriginGate_ExcludesSignInAndCallback(t *testing.T) {
 			{"Origin": "https://idp.example.com"},
 		} {
 			resp, ran := driveGate(t, http.MethodPost, path, headers)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode != http.StatusOK || !ran {
 				t.Errorf("%s %v: status = %d, handler ran = %v, want admitted", path, headers, resp.StatusCode, ran)
 			}
@@ -151,7 +151,7 @@ func TestBrowserOriginGate_ExcludesSignInAndCallback(t *testing.T) {
 	// Sign-out is not excluded: its POST is what places it inside the gate.
 	resp, ran := driveGate(t, http.MethodPost, server.PathWebUISignOut,
 		map[string]string{"Sec-Fetch-Site": "cross-site"})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusForbidden || ran {
 		t.Errorf("sign-out: status = %d, handler ran = %v, want 403 with no handler run", resp.StatusCode, ran)
 	}

@@ -117,7 +117,7 @@ func TestDecodeHealthMode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if got := decodeHealthMode(resp); got != "ready" {
 		t.Errorf("got %q, want ready", got)
 	}
@@ -132,7 +132,7 @@ func TestDecodeHealthMode_InvalidBodyReturnsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if got := decodeHealthMode(resp); got != "" {
 		t.Errorf("got %q, want empty", got)
 	}

@@ -18,11 +18,11 @@ func clearSearchEnv(t *testing.T) {
 	} {
 		orig, had := os.LookupEnv(k)
 		if had {
-			t.Cleanup(func() { os.Setenv(k, orig) })
+			t.Cleanup(func() { _ = os.Setenv(k, orig) })
 		} else {
-			t.Cleanup(func() { os.Unsetenv(k) })
+			t.Cleanup(func() { _ = os.Unsetenv(k) })
 		}
-		os.Unsetenv(k)
+		_ = os.Unsetenv(k)
 	}
 }
 

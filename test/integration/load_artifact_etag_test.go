@@ -24,7 +24,7 @@ func TestRegistry_LoadArtifactETagRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	etag := resp.Header.Get("ETag")
 	if etag == "" {
 		t.Fatalf("load_artifact response carried no ETag")
@@ -36,7 +36,7 @@ func TestRegistry_LoadArtifactETagRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("conditional GET: %v", err)
 	}
-	defer cond.Body.Close()
+	defer func() { _ = cond.Body.Close() }()
 	if cond.StatusCode != http.StatusNotModified {
 		t.Errorf("conditional GET status = %d, want 304", cond.StatusCode)
 	}

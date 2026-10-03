@@ -84,7 +84,7 @@ func extGenRSAPubKeyFile(t *testing.T) string {
 	if err := pem.Encode(f, block); err != nil {
 		t.Fatalf("pem encode: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 	return f.Name()
 }
 

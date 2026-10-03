@@ -17,7 +17,7 @@ func readReadyz(t *testing.T, baseURL string) (int, server.ReadyResponse) {
 	if err != nil {
 		t.Fatalf("GET /readyz: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body server.ReadyResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode /readyz: %v", err)
@@ -149,7 +149,7 @@ func TestReadOnlyHeader_ReportsObservedLag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /healthz: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if got := resp.Header.Get("X-Podium-Read-Only"); got != "true" {
 		t.Errorf("X-Podium-Read-Only = %q, want true", got)
 	}

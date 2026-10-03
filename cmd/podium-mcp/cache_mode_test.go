@@ -37,7 +37,7 @@ func TestResolutionCache_RoundTrip(t *testing.T) {
 	}
 
 	r2 := newResolutionCache(dir)
-	defer r2.Close()
+	defer func() { _ = r2.Close() }()
 	if got, ok := r2.Resolve("team/finance", "1.0.0", now, 30*time.Second, false); !ok || got != "sha256:abc" {
 		t.Errorf("Resolve(1.0.0) = %q ok=%v, want sha256:abc, true", got, ok)
 	}

@@ -39,7 +39,7 @@ func TestLoadArtifact_HeadReturnsContentHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HEAD: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -73,7 +73,7 @@ func TestLoadArtifact_HeadUnknownArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HEAD: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusOK {
 		t.Errorf("status = 200 for unknown artifact; want an error status")
 	}

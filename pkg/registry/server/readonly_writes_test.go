@@ -49,7 +49,7 @@ func TestAdminGrants_RejectedInReadOnly(t *testing.T) {
 	if code := readOnlyErrorCode(t, resp); code != "registry.read_only" {
 		t.Errorf("POST code = %q, want registry.read_only", code)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	req, _ := http.NewRequest(http.MethodDelete, ts.URL+"/v1/admin/grants?user_id=bob", nil)
 	del, err := http.DefaultClient.Do(req)
@@ -62,7 +62,7 @@ func TestAdminGrants_RejectedInReadOnly(t *testing.T) {
 	if code := readOnlyErrorCode(t, del); code != "registry.read_only" {
 		t.Errorf("DELETE code = %q, want registry.read_only", code)
 	}
-	del.Body.Close()
+	_ = del.Body.Close()
 }
 
 // newReadOnlyWebhookServer builds a webhook-CRUD server pre-flipped into
@@ -108,7 +108,7 @@ func TestWebhookReceiverWrites_RejectedInReadOnly(t *testing.T) {
 	if code := readOnlyErrorCode(t, post); code != "registry.read_only" {
 		t.Errorf("POST code = %q, want registry.read_only", code)
 	}
-	post.Body.Close()
+	_ = post.Body.Close()
 
 	// PUT edit.
 	putBody, _ := json.Marshal(map[string]any{"disabled": true})
@@ -124,7 +124,7 @@ func TestWebhookReceiverWrites_RejectedInReadOnly(t *testing.T) {
 	if code := readOnlyErrorCode(t, put); code != "registry.read_only" {
 		t.Errorf("PUT code = %q, want registry.read_only", code)
 	}
-	put.Body.Close()
+	_ = put.Body.Close()
 
 	// DELETE.
 	delReq, _ := http.NewRequest(http.MethodDelete, ts.URL+"/v1/webhooks/"+id, nil)
@@ -138,7 +138,7 @@ func TestWebhookReceiverWrites_RejectedInReadOnly(t *testing.T) {
 	if code := readOnlyErrorCode(t, del); code != "registry.read_only" {
 		t.Errorf("DELETE code = %q, want registry.read_only", code)
 	}
-	del.Body.Close()
+	_ = del.Body.Close()
 }
 
 // Spec: §13.2.1 — read access to webhook receivers stays available in
@@ -154,7 +154,7 @@ func TestWebhookReceiverReads_AllowedInReadOnly(t *testing.T) {
 	if list.StatusCode != http.StatusOK {
 		t.Errorf("GET list status = %d, want 200", list.StatusCode)
 	}
-	list.Body.Close()
+	_ = list.Body.Close()
 
 	one, err := http.Get(ts.URL + "/v1/webhooks/" + id)
 	if err != nil {
@@ -163,7 +163,7 @@ func TestWebhookReceiverReads_AllowedInReadOnly(t *testing.T) {
 	if one.StatusCode != http.StatusOK {
 		t.Errorf("GET one status = %d, want 200", one.StatusCode)
 	}
-	one.Body.Close()
+	_ = one.Body.Close()
 }
 
 // Spec: §13.2.1 — the re-embed pass is a write endpoint, so a read-only
@@ -182,7 +182,7 @@ func TestAdminReembed_RejectedInReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("status = %d, want 503", resp.StatusCode)
 	}

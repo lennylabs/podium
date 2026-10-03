@@ -65,7 +65,7 @@ func modelCounts(t *testing.T, db *sql.DB, schema string) map[string]int {
 	if err != nil {
 		t.Fatalf("count vec_artifacts by model: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]int{}
 	for rows.Next() {
 		var model string

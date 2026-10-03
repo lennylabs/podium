@@ -136,7 +136,7 @@ func (f *daFixture) do(t *testing.T, method, path, user string, body []byte, hea
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, resp.Header, raw
 }

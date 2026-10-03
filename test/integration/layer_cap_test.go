@@ -53,7 +53,7 @@ func TestLayerCap_SQLiteEnforcesTenantQuota(t *testing.T) {
 		if err != nil {
 			t.Fatalf("POST %s: %v", id, err)
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		out, _ := io.ReadAll(resp.Body)
 		var env struct {
 			Code string `json:"code"`

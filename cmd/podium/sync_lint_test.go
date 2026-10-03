@@ -67,7 +67,7 @@ func TestSyncCmd_NoRegistryFallsBackToConfig(t *testing.T) {
 	if err := os.Chdir(ws); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
-	defer os.Chdir(orig)
+	defer func() { _ = os.Chdir(orig) }()
 
 	withStderr(t, func() {
 		// sync against empty registry should succeed with 0 artifacts.

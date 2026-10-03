@@ -78,7 +78,7 @@ func TestReadOnlyFaultStore_InducesFullJourney(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go probe.Run(ctx)
+	go func() { _ = probe.Run(ctx) }()
 
 	srv := server.New(
 		core.New(fault, "default", []layer.Layer{
@@ -156,7 +156,7 @@ func healthMode(t *testing.T, baseURL string) string {
 	if err != nil {
 		t.Fatalf("GET /healthz: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body struct {
 		Mode string `json:"mode"`
 	}
@@ -173,7 +173,7 @@ func searchStatus(t *testing.T, baseURL string) int {
 	if err != nil {
 		t.Fatalf("GET /v1/search_artifacts: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode
 }
@@ -187,7 +187,7 @@ func grantStatus(t *testing.T, baseURL, userID string) (int, []byte) {
 	if err != nil {
 		t.Fatalf("POST /v1/admin/grants: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	buf, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, buf
 }

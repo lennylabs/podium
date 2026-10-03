@@ -67,7 +67,7 @@ func TestVerify_UntrustedRuntimeRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
 	}
@@ -93,7 +93,7 @@ func TestVerify_TokenExpiredRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", resp.StatusCode)
 	}
@@ -113,7 +113,7 @@ func TestVerify_VerifiedIdentityDrivesVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (finance group should see finance/secret)", resp.StatusCode)
 	}
@@ -130,7 +130,7 @@ func TestVerify_VerifiedIdentityVisibilityFiltered(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (hr caller must not see finance/secret)", resp.StatusCode)
 	}
@@ -202,7 +202,7 @@ func TestVerify_ObjectsRouteEnforcesVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET (member): %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("member /objects status = %d, want 200", resp.StatusCode)
 	}
@@ -215,7 +215,7 @@ func TestVerify_ObjectsRouteEnforcesVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET (non-member): %v", err)
 	}
-	resp2.Body.Close()
+	_ = resp2.Body.Close()
 	if resp2.StatusCode != http.StatusNotFound {
 		t.Errorf("non-member /objects status = %d, want 404 (visibility re-check)", resp2.StatusCode)
 	}
@@ -229,7 +229,7 @@ func TestVerify_ObjectsRouteEnforcesVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET (unverifiable): %v", err)
 	}
-	defer resp3.Body.Close()
+	defer func() { _ = resp3.Body.Close() }()
 	if resp3.StatusCode != http.StatusUnauthorized {
 		t.Errorf("unverifiable /objects status = %d, want 401 (route must be verified)", resp3.StatusCode)
 	}
@@ -249,7 +249,7 @@ func TestVerify_HealthExemptFromVerification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET /healthz: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("/healthz status = %d, want 200 (exempt from verification)", resp.StatusCode)
 	}
@@ -271,7 +271,7 @@ func TestVerify_NoVerifierServesAnonymously(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200 (anonymous passthrough)", resp.StatusCode)
 	}
@@ -315,7 +315,7 @@ func TestVerify_UntrustedTokenMessageNamesNoLocation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GET: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusUnauthorized {
 				t.Fatalf("status = %d, want 401", resp.StatusCode)
 			}
@@ -345,7 +345,7 @@ func TestVerify_TokenExpiredMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	e := decodeEnvelope(t, resp)
 	if e.Message != "The authenticated token has expired." {
 		t.Errorf("message = %q, want the §6.10 canonical message", e.Message)

@@ -47,8 +47,8 @@ func TestLoadFile_SetsUnsetAndKeepsExisting(t *testing.T) {
 	t.Setenv("PODIUM_TESTENV_EXISTING", "fromenv")
 	// Ensure the new vars are absent, and clean them up afterward.
 	for _, k := range []string{"PODIUM_TESTENV_NEW", "PODIUM_TESTENV_EXPORTED"} {
-		os.Unsetenv(k)
-		defer os.Unsetenv(k)
+		_ = os.Unsetenv(k)
+		defer func() { _ = os.Unsetenv(k) }()
 	}
 
 	loadFile(path)

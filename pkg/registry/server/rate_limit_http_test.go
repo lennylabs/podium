@@ -33,7 +33,7 @@ func TestServer_SearchQPSRateLimited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET 1: %v", err)
 	}
-	resp1.Body.Close()
+	_ = resp1.Body.Close()
 	if resp1.StatusCode != http.StatusOK {
 		t.Fatalf("first call status = %d, want 200", resp1.StatusCode)
 	}
@@ -41,7 +41,7 @@ func TestServer_SearchQPSRateLimited(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET 2: %v", err)
 	}
-	resp2.Body.Close()
+	_ = resp2.Body.Close()
 	if resp2.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("second call status = %d, want 429", resp2.StatusCode)
 	}
@@ -67,13 +67,13 @@ func TestServer_LoadArtifactRateLimited(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET %d: %v", i, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 	resp, err := http.Get(ts.URL + "/v1/load_artifact?id=x")
 	if err != nil {
 		t.Fatalf("GET (rate-limited): %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("status = %d, want 429", resp.StatusCode)
 	}

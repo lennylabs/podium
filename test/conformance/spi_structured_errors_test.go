@@ -49,7 +49,7 @@ func TestSPIStructuredErrors(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			assertStructuredSPIError(t, tc.name, tc.err)
+			_ = assertStructuredSPIError(t, tc.name, tc.err)
 		})
 	}
 
