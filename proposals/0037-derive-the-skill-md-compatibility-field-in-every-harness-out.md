@@ -1,7 +1,7 @@
 # Proposal 0037: Derive the SKILL.md compatibility field in every harness output that writes SKILL.md
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-02). Signed off as staged. OQ-1: no harness rejects the key (OpenCode and Pi recognize compatibility; Hermes ignores unknown fields), so the derivation ships for all with no exception. OQ-2: marketplace emitters are in scope.
+- Status: Applied to spec (2026-10-02). Signed off as staged. OQ-1: no harness rejects the key (OpenCode and Pi recognize compatibility; Hermes ignores unknown fields), so the derivation ships for all with no exception. OQ-2: marketplace emitters are in scope.
 - Date: 2026-10-02
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
