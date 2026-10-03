@@ -87,8 +87,16 @@ func apiWantStatus(t testing.TB, got, want int, what string, body []byte) {
 }
 
 // apiDo issues a request with an optional JSON body and returns the
-// status and body, under the shared short-timeout client.
+// status and body, under the shared short-timeout client. It is apiDoAs with
+// no extra headers.
 func apiDo(t testing.TB, method, u string, body any) (int, []byte) {
+	t.Helper()
+	return apiDoAs(t, method, u, nil, body)
+}
+
+// apiDoAs is apiDo with headers added to the request, which carry the
+// caller's identity on a trusted-headers registry.
+func apiDoAs(t testing.TB, method, u string, headers http.Header, body any) (int, []byte) {
 	t.Helper()
 	var r *bytes.Reader
 	if body != nil {
@@ -103,6 +111,11 @@ func apiDo(t testing.TB, method, u string, body any) (int, []byte) {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, vs := range headers {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {

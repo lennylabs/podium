@@ -52,6 +52,23 @@ func gwHeaderGet(t *testing.T, url string, headers map[string]string) (int, []by
 // mounts the §6.3.1 SCIM receiver.
 func gwTrustedHeadersServer(t *testing.T, proxySecret, scimToken string) *serverProc {
 	t.Helper()
+	var extra []string
+	if proxySecret != "" {
+		extra = append(extra, "PODIUM_TRUSTED_PROXY_SECRET="+proxySecret)
+	}
+	if scimToken != "" {
+		extra = append(extra, "PODIUM_SCIM_TOKENS="+scimToken)
+	}
+	srv, _ := gwTrustedHeadersRegistry(t, extra...)
+	return srv
+}
+
+// gwTrustedHeadersRegistry boots the gwTrustedHeadersServer fixture with
+// extraEnv appended to its environment, and returns the server together with
+// the eng-layer source root so a caller can add an artifact to that layer and
+// reingest it.
+func gwTrustedHeadersRegistry(t *testing.T, extraEnv ...string) (*serverProc, string) {
+	t.Helper()
 	home := t.TempDir()
 	pubRoot := writeRegistry(t, map[string]string{"welcome/ARTIFACT.md": contextArtifact("public welcome")})
 	engRoot := writeRegistry(t, map[string]string{"secret/ARTIFACT.md": contextArtifact("engineering secret")})
@@ -74,19 +91,13 @@ func gwTrustedHeadersServer(t *testing.T, proxySecret, scimToken string) *server
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o644); err != nil {
 		t.Fatalf("write registry.yaml: %v", err)
 	}
-	env := []string{
+	env := append([]string{
 		"HOME=" + home,
 		"PODIUM_CONFIG_FILE=" + cfgPath,
 		"PODIUM_INGEST_OFFLINE=true",
 		"PODIUM_IDENTITY_PROVIDER=trusted-headers",
-	}
-	if proxySecret != "" {
-		env = append(env, "PODIUM_TRUSTED_PROXY_SECRET="+proxySecret)
-	}
-	if scimToken != "" {
-		env = append(env, "PODIUM_SCIM_TOKENS="+scimToken)
-	}
-	return startServerArgs(t, env, "serve", "--standalone")
+	}, extraEnv...)
+	return startServerArgs(t, env, "serve", "--standalone"), engRoot
 }
 
 // Spec: §6.3.3 — trusted-headers resolves the caller from gateway-injected

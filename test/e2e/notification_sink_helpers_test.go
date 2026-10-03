@@ -629,12 +629,22 @@ type registryEventLine struct {
 	Data      map[string]any `json:"data"`
 }
 
-// openEventStream opens GET /v1/events?type=... against srv and returns a bounded
-// client. eventTypes filters the subscription server-side (empty = all). The
+// openEventStream opens GET /v1/events?type=... against srv as a caller that
+// presents no identity headers. It is openEventStreamAs with nil headers.
+func openEventStream(t testing.TB, srv *serverProc, eventTypes ...string) *eventStreamClient {
+	t.Helper()
+	return openEventStreamAs(t, srv, nil, eventTypes...)
+}
+
+// openEventStreamAs opens GET /v1/events?type=... against srv with headers set
+// on the request and returns a bounded client. The headers carry the caller's
+// identity (the trusted-headers X-Podium-User-* set, for example), which the
+// registry resolves once when the stream opens and evaluates each §7.6 event
+// against. eventTypes filters the subscription server-side (empty = all). The
 // connection is established synchronously (so the subscription is registered
 // before the caller fires a triggering event) and read on a background
 // goroutine. The caller must call close, which t.Cleanup also enforces.
-func openEventStream(t testing.TB, srv *serverProc, eventTypes ...string) *eventStreamClient {
+func openEventStreamAs(t testing.TB, srv *serverProc, headers http.Header, eventTypes ...string) *eventStreamClient {
 	t.Helper()
 	url := srv.BaseURL + "/v1/events"
 	for i, et := range eventTypes {
@@ -651,6 +661,11 @@ func openEventStream(t testing.TB, srv *serverProc, eventTypes ...string) *event
 	if err != nil {
 		cancel()
 		t.Fatalf("build event-stream request: %v", err)
+	}
+	for k, vs := range headers {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
 	}
 	resp, err := (&http.Client{}).Do(req)
 	if err != nil {
