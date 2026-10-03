@@ -121,7 +121,7 @@ func TestWebhookDebounce_BatchAndWindowlessCoexist(t *testing.T) {
 		Backoff:    []time.Duration{},
 	}
 
-	srv, ts := bootWebhookRegistry(t, server.WithWebhooks(worker), server.WithTenant("default"))
+	srv, ts := bootWebhookRegistry(t, server.WithWebhooks(worker))
 	t.Cleanup(ts.Close)
 
 	registerReceiver(t, ts.URL, windowless.srv.URL, "layer.ingested", "")

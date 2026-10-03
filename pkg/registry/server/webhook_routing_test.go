@@ -59,7 +59,7 @@ func newRoutingServer(t *testing.T, wstore *webhook.MemoryStore, client *http.Cl
 	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	srv := New(core.New(st, "default", nil), WithWebhooks(worker), WithTenant("default"))
+	srv := New(core.New(st, "default", nil), WithWebhooks(worker))
 	return srv, worker
 }
 
@@ -246,7 +246,7 @@ func TestPublishEvent_ListErrorSkipsOutboundDelivery(t *testing.T) {
 		t.Fatalf("CreateTenant: %v", err)
 	}
 	worker := &webhook.Worker{Store: failingWebhookStore{}, HTTPClient: http.DefaultClient, Backoff: []time.Duration{}}
-	srv := New(core.New(st, "default", nil), WithWebhooks(worker), WithTenant("default"))
+	srv := New(core.New(st, "default", nil), WithWebhooks(worker))
 
 	// Must not panic, and the bus publish proceeds.
 	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"L"}}, "artifact.published", map[string]any{"id": "x"})

@@ -462,7 +462,7 @@ func TestEvents_WebhookReceiverIsUnfiltered(t *testing.T) {
 		Backoff:    []time.Duration{},
 	}
 	srv, ts, cs := newEventsRegistry(t, withEventsIdentities(),
-		server.WithWebhooks(worker), server.WithTenant("t"))
+		server.WithWebhooks(worker))
 	if err := cs.GrantAdmin(context.Background(), store.AdminGrant{UserID: "admin", OrgID: "t"}); err != nil {
 		t.Fatalf("GrantAdmin: %v", err)
 	}
