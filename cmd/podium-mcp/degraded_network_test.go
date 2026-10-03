@@ -22,7 +22,7 @@ func TestLoadArtifact_AlwaysRevalidateFallsBackToCacheOnNetworkError(t *testing.
 	if err := srv.cacheVerifiedRecord(rec); err != nil {
 		t.Fatalf("cacheVerifiedRecord: %v", err)
 	}
-	srv.resolutions.PutLatest("team/x", "1.0.0", rec.ContentHash, time.Now())
+	putLatest(srv.resolutions, "team/x", "1.0.0", rec.ContentHash, time.Now())
 
 	out := srv.loadArtifact(map[string]any{"id": "team/x"})
 	wantServed(t, out, "body\n")
@@ -48,7 +48,7 @@ func TestLoadArtifact_AlwaysRevalidateFallbackRefusesAnEditedCacheRecord(t *test
 	if err := srv.cacheVerifiedRecord(rec); err != nil {
 		t.Fatalf("cacheVerifiedRecord: %v", err)
 	}
-	srv.resolutions.PutLatest("team/x", "1.0.0", rec.ContentHash, time.Now())
+	putLatest(srv.resolutions, "team/x", "1.0.0", rec.ContentHash, time.Now())
 	edited := filepath.Join(deliveryDir(dir, rec), "frontmatter")
 	if err := os.WriteFile(edited, []byte(rec.Frontmatter+"injected: true\n"), 0o644); err != nil {
 		t.Fatalf("edit: %v", err)

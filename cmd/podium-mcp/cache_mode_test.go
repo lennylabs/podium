@@ -29,7 +29,7 @@ func TestResolutionCache_RoundTrip(t *testing.T) {
 	r1.PutVersion("team/finance", "1.0.0", "sha256:abc", now)
 	// A latest request resolving to 1.0.0 maps (id,"latest")→semver
 	// and (id,1.0.0)→content_hash (§6.5).
-	r1.PutLatest("team/finance", "1.0.0", "sha256:abc", now)
+	putLatest(r1, "team/finance", "1.0.0", "sha256:abc", now)
 	// Close releases the BoltDB lock so a second handle can open the
 	// same on-disk index.
 	if err := r1.Close(); err != nil {
@@ -639,7 +639,7 @@ func TestRevalidatedLatest_RefreshesOnlyAfterVerification(t *testing.T) {
 				primeLive(t, s, rec, args)
 				stub.notModified = path.notModified
 				past := time.Now().Add(-time.Hour).Truncate(time.Second)
-				s.resolutions.PutLatest("team/x", "1.0.0", rec.ContentHash, past)
+				putLatest(s.resolutions, "team/x", "1.0.0", rec.ContentHash, past)
 				if tamper {
 					fm := filepath.Join(deliveryDir(dir, rec), "frontmatter")
 					if err := os.WriteFile(fm, []byte(rec.Frontmatter+"tampered\n"), 0o644); err != nil {

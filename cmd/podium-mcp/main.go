@@ -51,6 +51,7 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
+	"github.com/lennylabs/podium/internal/revmark"
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/hook"
@@ -1646,10 +1647,19 @@ func (s *mcpServer) writeResolution(w *resolutionWrite, resp loadArtifactRespons
 			s.resolutions.RefreshLatest(w.ID, w.Now)
 		}
 	case w.Version == "":
-		s.resolutions.PutLatest(w.ID, resp.Version, resp.ContentHash, w.Now)
+		// The served revision and the effective session are threaded here by
+		// the §6.5 freshness check. Revision 0 never lowers a stored mark, and
+		// an empty session records no session reference.
+		s.resolutions.PutLatestAdvancing(s.markKey(w.ID), "", w.ID, resp.Version, resp.ContentHash, 0, w.Now)
 	default:
 		s.resolutions.PutVersion(w.ID, w.Version, resp.ContentHash, w.Now)
 	}
+}
+
+// markKey returns the §6.5 revision-mark key for id under the configured
+// registry. The key carries no tenant (§6.5).
+func (s *mcpServer) markKey(id string) revmark.Key {
+	return revmark.Key{Registry: revmark.NormalizeRegistry(s.cfg.registry), ArtifactID: id}
 }
 
 // cacheVerifiedRecord writes a verified record to the §6.5 content cache: the

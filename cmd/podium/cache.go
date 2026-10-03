@@ -82,9 +82,10 @@ func cachePrune(args []string) int {
 		if !e.IsDir() {
 			continue
 		}
-		// §6.5: the resolution index (`.resolutions`) and any other
-		// dot-prefixed bookkeeping directory are not content buckets; never
-		// prune them, or offline resolution loses its (id, version) index.
+		// §6.5: the resolution index (revmark.DirName, which also holds the
+		// revision marks) and any other dot-prefixed bookkeeping directory
+		// are not content buckets; never prune them, or offline resolution
+		// loses its (id, version) index and podium-mcp its revision marks.
 		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
