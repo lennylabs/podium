@@ -1102,6 +1102,7 @@ func TestExtends_MergedDeliveryHashReproducesFromServedBytes(t *testing.T) {
 		Version      string `json:"version"`
 		ContentHash  string `json:"content_hash"`
 		Sensitivity  string `json:"sensitivity"`
+		Revision     string `json:"artifact_revision"`
 		Frontmatter  string `json:"frontmatter"`
 		ManifestBody string `json:"manifest_body"`
 		SkillRaw     string `json:"skill_raw"`
@@ -1123,7 +1124,7 @@ func TestExtends_MergedDeliveryHashReproducesFromServedBytes(t *testing.T) {
 	// ...and the delivery hash recomputed from the served record matches.
 	got := version.DeliveryHash(version.DeliveryRecord{
 		ID: r.ID, Version: r.Version, Type: r.Type, ContentHash: r.ContentHash, Sensitivity: r.Sensitivity,
-		Frontmatter: r.Frontmatter, ManifestBody: r.ManifestBody, SkillRaw: r.SkillRaw,
+		ArtifactRevision: r.Revision, Frontmatter: r.Frontmatter, ManifestBody: r.ManifestBody, SkillRaw: r.SkillRaw,
 	})
 	if r.DeliveryHash == "" || got != r.DeliveryHash {
 		t.Errorf("recomputed delivery hash %s, served %q", got, r.DeliveryHash)

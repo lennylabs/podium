@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -93,6 +94,56 @@ func TestDeliverLoadArtifact_ManifestGatesRunAfterVerification(t *testing.T) {
 	s = newTestServer(t, &config{harness: "none", verifyPolicy: sign.PolicyAlways, signatureProvider: "registry-managed", verifier: sign.RegistryManagedKey{PublicKey: pub}})
 	if got := errorMessageText(s.deliverLoadArtifact(resp)); !strings.HasPrefix(got, "materialize.signature_invalid") {
 		t.Errorf("signature arm: error = %q, want materialize.signature_invalid ahead of the sandbox gate", got)
+	}
+}
+
+// Spec: §6.6 step 2, §6.5 — the §6.5 revision check runs after the delivery
+// hash comparison and the §4.7.9 policy. With a mark of 200, a latest answer
+// at revision 100 that fails either check reports that check's code rather
+// than materialize.stale_resolution, and the mark is unchanged after each.
+func TestDeliverLoadArtifact_FreshnessCheckRunsAfterVerification(t *testing.T) {
+	t.Parallel()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	_, otherPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	stale := fixtureResp("team/x", "---\ntype: context\n---\nbody\n")
+	stale.ArtifactRevision = rev(100)
+	stale = sealDelivery(stale)
+
+	mismatched := stale
+	mismatched.DeliveryHash = "sha256:" + strings.Repeat("0", 64)
+	stripped := stale
+	stripped.ArtifactRevision = ""
+	badSig := stale
+	badSig.DeliverySignature, err = sign.RegistryManagedKey{PrivateKey: otherPriv}.Sign(context.Background(), stale.DeliveryHash)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	for _, tc := range []struct {
+		name, want string
+		resp       loadArtifactResponse
+		cfg        *config
+	}{
+		{"delivery hash mismatch", "materialize.content_hash_mismatch", mismatched, &config{harness: "none", verifyPolicy: sign.PolicyNever}},
+		{"revision removed after sealing", "materialize.content_hash_mismatch", stripped, &config{harness: "none", verifyPolicy: sign.PolicyNever}},
+		{"invalid signature", "materialize.signature_invalid", badSig, &config{harness: "none", verifyPolicy: sign.PolicyAlways, signatureProvider: "registry-managed", verifier: sign.RegistryManagedKey{PublicKey: pub}}},
+	} {
+		tc.cfg.registry = "http://registry.example"
+		s := newTestServer(t, tc.cfg)
+		k := s.markKey("team/x")
+		s.resolutions.PutLatestAdvancing(k, "seed", "team/x", "2.0.0", "sha256:two", 200, time.Now())
+		out := s.deliverLoadArtifact(tc.resp, deliverOpts{resolution: &resolutionWrite{ID: "team/x", Session: "S", Now: time.Now()}})
+		if got := errorMessageText(out); !strings.HasPrefix(got, tc.want) {
+			t.Errorf("%s: error = %q, want %s ahead of the revision check", tc.name, got, tc.want)
+		}
+		if ref, ok := s.resolutions.Reference(k, "S"); !ok || ref != 200 {
+			t.Errorf("%s: mark = (%d, %v), want 200", tc.name, ref, ok)
+		}
 	}
 }
 

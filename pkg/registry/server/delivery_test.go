@@ -11,10 +11,12 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // deliveryTree writes a one-layer registry holding a parent, a child that
@@ -134,5 +136,49 @@ func TestLoadArtifact_NoDeliverySignerServesTheHashAlone(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `"delivery_hash"`) || strings.Contains(string(body), `"delivery_signature"`) {
 		t.Errorf("body %s, want delivery_hash and no delivery_signature", body)
+	}
+}
+
+// Spec: §7.2, §7.6.2, §4.7.10 — the single load and the batch entry serve the
+// same artifact_revision in the §7.2.1 layout and the same delivery_hash over
+// it, the response ETag stays the content-hash validator, and a batch error
+// entry carries no revision key.
+func TestLoadArtifact_ServesTheArtifactRevisionOnBothPaths(t *testing.T) {
+	t.Parallel()
+	ts := deliveryServer(t, nil)
+	resp, err := http.Get(ts.URL + "/v1/load_artifact?id=team/plain")
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var single server.LoadArtifactResponse
+	if err := json.NewDecoder(resp.Body).Decode(&single); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	parsed, err := time.Parse("2006-01-02T15:04:05.000000Z", single.ArtifactRevision)
+	if err != nil || version.FormatArtifactRevision(parsed) != single.ArtifactRevision {
+		t.Errorf("artifact_revision = %q, want the canonical §7.2.1 layout (%v)", single.ArtifactRevision, err)
+	}
+	if got, want := resp.Header.Get("ETag"), `"`+single.ContentHash+`"`; got != want {
+		t.Errorf("ETag = %q, want the content-hash validator %q", got, want)
+	}
+	batch, err := http.Post(ts.URL+"/v1/artifacts:batchLoad", "application/json",
+		strings.NewReader(`{"ids":["team/plain","team/absent"]}`))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer func() { _ = batch.Body.Close() }()
+	var raw []map[string]any
+	if err := json.NewDecoder(batch.Body).Decode(&raw); err != nil || len(raw) != 2 {
+		t.Fatalf("decode batch: %v %v", err, raw)
+	}
+	if raw[0]["artifact_revision"] != single.ArtifactRevision {
+		t.Errorf("batch artifact_revision = %v, want the single-load %q", raw[0]["artifact_revision"], single.ArtifactRevision)
+	}
+	if single.DeliveryHash == "" || raw[0]["delivery_hash"] != single.DeliveryHash {
+		t.Errorf("batch delivery_hash = %v, want the single-load %q", raw[0]["delivery_hash"], single.DeliveryHash)
+	}
+	if _, ok := raw[1]["artifact_revision"]; ok || raw[1]["status"] != "error" {
+		t.Errorf("batch error entry = %v, want status error and no artifact_revision", raw[1])
 	}
 }

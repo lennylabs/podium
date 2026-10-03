@@ -45,7 +45,8 @@ func newMirrorRegistry(t *testing.T, build func(base string) (map[string]any, ma
 		http.NotFound(w, r)
 	}))
 	t.Cleanup(m.ts.Close)
-	m.resp, m.blobs = build(m.ts.URL)
+	resp, blobs := build(m.ts.URL)
+	m.resp, m.blobs = withEpochRevision(resp), blobs
 	return m
 }
 

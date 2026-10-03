@@ -27,15 +27,16 @@ func WithDeliverySigner(p sign.Provider) Option {
 // Spec: §4.7.10.
 func deliveryRecordOf(res *core.LoadArtifactResult) version.DeliveryRecord {
 	rec := version.DeliveryRecord{
-		ID:           res.ID,
-		Version:      res.Version,
-		Type:         res.Type,
-		ContentHash:  res.ContentHash,
-		Sensitivity:  res.Sensitivity,
-		Frontmatter:  string(res.Frontmatter),
-		ManifestBody: res.ManifestBody,
-		SkillRaw:     string(res.SkillRaw),
-		Resources:    make(map[string]string, len(res.Resources)),
+		ID:               res.ID,
+		Version:          res.Version,
+		Type:             res.Type,
+		ContentHash:      res.ContentHash,
+		Sensitivity:      res.Sensitivity,
+		ArtifactRevision: res.ArtifactRevision,
+		Frontmatter:      string(res.Frontmatter),
+		ManifestBody:     res.ManifestBody,
+		SkillRaw:         string(res.SkillRaw),
+		Resources:        make(map[string]string, len(res.Resources)),
 	}
 	for _, ref := range res.Resources {
 		rec.Resources[ref.Path] = ref.ContentHash

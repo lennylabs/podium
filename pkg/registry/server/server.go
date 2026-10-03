@@ -624,6 +624,10 @@ type LoadArtifactResponse struct {
 	// DeliverySignature is the registry-managed signature over DeliveryHash,
 	// absent when the registry runs without a signing key (§4.7.10).
 	DeliverySignature string `json:"delivery_signature,omitempty"`
+	// ArtifactRevision is the §4.7.10 ingest time of the served version in
+	// the §7.2.1 timestamp layout. It is present on every response because
+	// DeliveryHash frames it, and it stays out of the §12 entity tag.
+	ArtifactRevision string `json:"artifact_revision"`
 	// ExtendsPin is the "<id>@<version>" parent pin the artifact resolved at
 	// ingest, present only when the caller can see the parent record (§4.6).
 	// Its absence does not mean the artifact extends nothing.
@@ -1098,6 +1102,7 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
 		ExtendsPin:         res.ExtendsPin,
+		ArtifactRevision:   res.ArtifactRevision,
 	}
 	// Spec: §4.7.10 — attest the record before the manifest-body channel
 	// clears the inline document, because the record frames the served

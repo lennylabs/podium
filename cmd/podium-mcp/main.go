@@ -51,6 +51,7 @@ import (
 	oteltrace "go.opentelemetry.io/otel/trace"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
+	"github.com/lennylabs/podium/internal/revmark"
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/hook"
@@ -1395,7 +1396,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 				if out, served := s.cachedOrRefetch(hash, id, args, deliverOpts{
 					harness:     harnessFromArgs(s.cfg.harness, args),
 					destination: destFromArgs(args),
-					resolution:  &resolutionWrite{ID: id, Version: version, Now: now, RefreshOnly: true},
+					resolution:  &resolutionWrite{ID: id, Version: version, Session: s.effectiveSessionID(args), Now: now, RefreshOnly: true},
 				}); served {
 					return out
 				}
@@ -1422,7 +1423,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		if out, served := s.cachedOrRefetch(condHash, id, args, deliverOpts{
 			harness:     harnessFromArgs(s.cfg.harness, args),
 			destination: destFromArgs(args),
-			resolution:  &resolutionWrite{ID: id, Version: version, Now: now, RefreshOnly: true},
+			resolution:  &resolutionWrite{ID: id, Version: version, Session: s.effectiveSessionID(args), Now: now, RefreshOnly: true},
 		}); served {
 			return out
 		}
@@ -1471,7 +1472,7 @@ func (s *mcpServer) deliverFreshLoad(body []byte, args map[string]any, now time.
 		destination:     destFromArgs(args),
 		refresh:         s.largeResourceRefresher(args),
 		manifestRefresh: s.manifestBodyRefresher(args),
-		resolution:      &resolutionWrite{ID: id, Version: version, Now: now},
+		resolution:      &resolutionWrite{ID: id, Version: version, Session: s.effectiveSessionID(args), Now: now},
 	})
 }
 
@@ -1625,31 +1626,110 @@ type deliverOpts struct {
 }
 
 // resolutionWrite describes one §6.5 resolution-index update. Version is the
-// requested version, empty for `latest`. RefreshOnly restarts an existing
-// `latest` entry's TTL window rather than recording a new resolution, which is
-// what a revalidated cache-served load does.
+// requested version, empty for `latest`. Session is the load's effective
+// session_id, the one the registry pinned `latest` under. RefreshOnly restarts
+// an existing `latest` entry's TTL window rather than recording a new
+// resolution, which is what a revalidated cache-served load does. Revision is
+// the served ingest time that checkFreshness accepted; deliverLoadArtifact
+// sets it on a fresh `latest` load.
 type resolutionWrite struct {
 	ID          string
 	Version     string
+	Session     string
 	Now         time.Time
 	RefreshOnly bool
+	Revision    uint64
 }
 
 // writeResolution applies w against resp, the verified record. A `latest`
 // request records (id, "latest") → semver and (id, semver) → content_hash; a
 // pinned request records the version directly (§6.5). A nil w writes nothing.
+// The revision mark and the session reference are keyed on resp.ID, the
+// served record's ID, which is the key checkFreshness compared under, so the
+// mark that advances is the mark that was compared.
 func (s *mcpServer) writeResolution(w *resolutionWrite, resp loadArtifactResponse) {
 	switch {
 	case w == nil:
 	case w.RefreshOnly:
 		if w.Version == "" {
 			s.resolutions.RefreshLatest(w.ID, w.Now)
+			s.noteCachedSession(w, resp)
 		}
 	case w.Version == "":
-		s.resolutions.PutLatest(w.ID, resp.Version, resp.ContentHash, w.Now)
+		s.resolutions.PutLatestAdvancing(s.markKey(resp.ID), w.Session, w.ID, resp.Version, resp.ContentHash, w.Revision, w.Now)
 	default:
 		s.resolutions.PutVersion(w.ID, w.Version, resp.ContentHash, w.Now)
 	}
+}
+
+// noteCachedSession records the session reference for a cached `latest`
+// record delivered on a HEAD match or a 304. The registry pinned the session
+// to that record on the revalidating lookup (§4.7.6), so the reference keeps
+// the session's later pinned answers comparable with the record it was
+// served. The cache path is never compared and never advances the mark. A
+// cached revision that does not parse records nothing: the record already
+// passed the delivery check.
+//
+// Spec: §6.5
+func (s *mcpServer) noteCachedSession(w *resolutionWrite, resp loadArtifactResponse) {
+	rev, err := revmark.ParseRevision(resp.ArtifactRevision)
+	if err != nil {
+		return
+	}
+	s.resolutions.NoteSession(s.markKey(resp.ID), w.Session, rev)
+}
+
+// checkFreshness compares the ingest time served on a fresh `latest` answer
+// with the reference for its artifact: the session's first accepted answer
+// in this process when one exists, otherwise the persisted revision mark. It
+// returns the parsed served revision and a nil envelope when the answer is
+// admitted. An absent or non-canonical artifact_revision, or one below the
+// reference, is refused with materialize.stale_resolution. Equality is
+// admitted. The check reads no response header, so an answer marked
+// X-Podium-Read-Only is checked like any other.
+//
+// Spec: §6.5, §4.7.10
+func (s *mcpServer) checkFreshness(resp loadArtifactResponse, session string) (uint64, map[string]any) {
+	served, perr := revmark.ParseRevision(resp.ArtifactRevision)
+	ref, hasRef := s.resolutions.Reference(s.markKey(resp.ID), session)
+	if perr == nil && (!hasRef || served >= ref) {
+		return served, nil
+	}
+	refText := ""
+	if hasRef {
+		refText = version.FormatArtifactRevision(time.UnixMicro(int64(ref)))
+	}
+	msg := fmt.Sprintf("latest answer for %s served revision %q below reference %q", resp.ID, resp.ArtifactRevision, refText)
+	if perr != nil {
+		msg = fmt.Sprintf("latest answer for %s carries no canonical artifact_revision: %v", resp.ID, perr)
+	}
+	const code = "materialize.stale_resolution"
+	retryable, suggested := bridgeCodeMeta(code)
+	return 0, errorEnvelope(code, msg, map[string]any{
+		"artifact_id":        resp.ID,
+		"served_version":     resp.Version,
+		"served_revision":    resp.ArtifactRevision,
+		"reference_revision": refText,
+	}, retryable, suggested)
+}
+
+// effectiveSessionID returns the session the registry resolves a call under:
+// the trimmed session_id argument when the host passed one, otherwise this
+// process's own session ID (§3.3, §5). The registry request and the §6.5
+// freshness check both read it, so they agree on the session.
+func (s *mcpServer) effectiveSessionID(args map[string]any) string {
+	if v, ok := args["session_id"]; ok && v != nil {
+		if sid := strings.TrimSpace(fmt.Sprintf("%v", v)); sid != "" {
+			return sid
+		}
+	}
+	return s.sessionID
+}
+
+// markKey returns the §6.5 revision-mark key for id under the configured
+// registry. The key carries no tenant (§6.5).
+func (s *mcpServer) markKey(id string) revmark.Key {
+	return revmark.Key{Registry: revmark.NormalizeRegistry(s.cfg.registry), ArtifactID: id}
 }
 
 // cacheVerifiedRecord writes a verified record to the §6.5 content cache: the
@@ -1668,6 +1748,7 @@ func (s *mcpServer) cacheVerifiedRecord(resp loadArtifactResponse) error {
 		DeliveryHash:      resp.DeliveryHash,
 		DeliverySignature: resp.DeliverySignature,
 		Sensitivity:       resp.Sensitivity,
+		ArtifactRevision:  resp.ArtifactRevision,
 	})
 }
 
@@ -1728,6 +1809,17 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 	}
 	if err := s.verifyServedArtifact(&resp, o); err != nil {
 		return errorResult(err.Error())
+	}
+	// §6.5: a fresh `latest` answer is compared with the session reference or
+	// the revision mark before the audit event, the gates, or any write.
+	if w := o.resolution; w != nil && !w.RefreshOnly && w.Version == "" {
+		rev, env := s.checkFreshness(resp, w.Session)
+		if env != nil {
+			return env
+		}
+		checked := *w
+		checked.Revision = rev
+		o.resolution = &checked
 	}
 	// §8.1 / §8.2: record the local artifact.loaded event with the in-flight
 	// trace id and the manifest's audit_redact directive applied. Emitted here
@@ -1936,15 +2028,16 @@ func verifyDeliveryHash(resp loadArtifactResponse) error {
 		return errors.New("materialize.content_hash_mismatch: the response carries no delivery_hash")
 	}
 	rec := version.DeliveryRecord{
-		ID:           resp.ID,
-		Version:      resp.Version,
-		Type:         resp.Type,
-		ContentHash:  resp.ContentHash,
-		Sensitivity:  resp.Sensitivity,
-		Frontmatter:  resp.Frontmatter,
-		ManifestBody: resp.ManifestBody,
-		SkillRaw:     resp.SkillRaw,
-		Resources:    make(map[string]string, len(resp.Resources)),
+		ID:               resp.ID,
+		Version:          resp.Version,
+		Type:             resp.Type,
+		ContentHash:      resp.ContentHash,
+		Sensitivity:      resp.Sensitivity,
+		ArtifactRevision: resp.ArtifactRevision,
+		Frontmatter:      resp.Frontmatter,
+		ManifestBody:     resp.ManifestBody,
+		SkillRaw:         resp.SkillRaw,
+		Resources:        make(map[string]string, len(resp.Resources)),
 	}
 	for path, body := range resp.Resources {
 		if link, ok := resp.LargeResources[path]; ok {
@@ -2161,6 +2254,9 @@ type loadArtifactResponse struct {
 	// is the registry's signature over it, which the §4.7.9 policy governs.
 	DeliveryHash      string `json:"delivery_hash"`
 	DeliverySignature string `json:"delivery_signature,omitempty"`
+	// ArtifactRevision is the §4.7.10 ingest time of the served version,
+	// which the delivery record frames after the sensitivity.
+	ArtifactRevision string `json:"artifact_revision"`
 }
 
 // largeResourceLink mirrors the registry's per-resource link. The
@@ -2464,8 +2560,10 @@ func (s *mcpServer) newRegistryRequest(method, path string, args map[string]any)
 	// consistently and can observe search-to-load within the session.
 	// This is what backs the advertised sessionCorrelation capability
 	// (§5). A host that passed its own session_id argument keeps it.
-	if q.Get("session_id") == "" && s.sessionID != "" {
-		q.Set("session_id", s.sessionID)
+	if sid := s.effectiveSessionID(args); sid != "" {
+		q.Set("session_id", sid)
+	} else {
+		q.Del("session_id")
 	}
 	u.RawQuery = q.Encode()
 	// §13.8: build on the in-flight call's trace context so the otelhttp
@@ -2799,12 +2897,15 @@ type deliveryFiles struct {
 	DeliveryHash      string
 	DeliverySignature string
 	Sensitivity       string
+	// ArtifactRevision is the served §4.7.10 ingest time. A cache-served
+	// record frames it in the delivery check, so it is cached with the record.
+	ArtifactRevision string
 }
 
 // putDelivery writes d under delivery/<deliverySegment(id)>/ in the bucket
 // for hash, with an id file holding the canonical ID verbatim so a reader can
-// refuse a directory another ID's record occupies. The signature and
-// sensitivity files are written even when empty. Call only with a record that
+// refuse a directory another ID's record occupies. The signature,
+// sensitivity, and artifact_revision files are written even when empty. Call only with a record that
 // passed verification.
 func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
 	if c.dir == "" || hash == "" {
@@ -2821,6 +2922,7 @@ func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
 		"delivery_hash":      d.DeliveryHash,
 		"delivery_signature": d.DeliverySignature,
 		"sensitivity":        d.Sensitivity,
+		"artifact_revision":  d.ArtifactRevision,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			return err

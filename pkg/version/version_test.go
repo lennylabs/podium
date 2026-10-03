@@ -7,6 +7,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // Spec: §4.7.6 — empty string resolves to PinLatest.
@@ -427,8 +429,8 @@ func deliveryStream(parts ...string) []byte {
 }
 
 // Spec: §4.7.10 — the delivery serialization is the framed tag
-// "podium/delivery-record/1", the framed identity, version, type, content
-// hash, and sensitivity, the framed ARTIFACT.md document, manifest body, and
+// "podium/delivery-record/2", the framed identity, version, type, content
+// hash, sensitivity, and ingest time, the framed ARTIFACT.md document, manifest body, and
 // SKILL.md, then each bundled resource's framed path and framed content hash in
 // ascending byte-wise path order, served as sha256:<hex>. This vector is built
 // from the spec text and not from DeliveryHash.
@@ -438,8 +440,9 @@ func TestDeliveryHash_MatchesTheSpecSerialization(t *testing.T) {
 	// Two resources, inserted in reverse of the order the stream frames them
 	// in, so the ascending-path order is what the digest depends on.
 	stream := deliveryStream(
-		"podium/delivery-record/1",
+		"podium/delivery-record/2",
 		"team/review", "1.2.0", "skill", "sha256:abc", "internal",
+		"2025-01-01T00:00:00.000000Z",
 		"---\nname: review\n---\n", "body\n", "---\nname: review\n---\nskill\n",
 		"a.md", "sha256:aaa",
 		"ref.md", "sha256:rrr",
@@ -450,10 +453,11 @@ func TestDeliveryHash_MatchesTheSpecSerialization(t *testing.T) {
 	got := DeliveryHash(DeliveryRecord{
 		ID: "team/review", Version: "1.2.0", Type: "skill",
 		ContentHash: "sha256:abc", Sensitivity: "internal",
-		Frontmatter:  "---\nname: review\n---\n",
-		ManifestBody: "body\n",
-		SkillRaw:     "---\nname: review\n---\nskill\n",
-		Resources:    resources,
+		ArtifactRevision: "2025-01-01T00:00:00.000000Z",
+		Frontmatter:      "---\nname: review\n---\n",
+		ManifestBody:     "body\n",
+		SkillRaw:         "---\nname: review\n---\nskill\n",
+		Resources:        resources,
 	})
 	if want := "sha256:" + sha256Hex(stream); got != want {
 		t.Errorf("DeliveryHash = %q, want %q", got, want)
@@ -462,16 +466,18 @@ func TestDeliveryHash_MatchesTheSpecSerialization(t *testing.T) {
 	// No SKILL.md and one resource: the SKILL.md slot frames a zero-length
 	// value rather than being omitted.
 	noSkill := deliveryStream(
-		"podium/delivery-record/1",
+		"podium/delivery-record/2",
 		"team/rule", "0.1.0", "rule", "sha256:def", "public",
+		"1970-01-01T00:00:00.000000Z",
 		"---\nname: rule\n---\n", "", "",
 		"data/a.txt", "sha256:aaa",
 	)
 	got = DeliveryHash(DeliveryRecord{
 		ID: "team/rule", Version: "0.1.0", Type: "rule",
 		ContentHash: "sha256:def", Sensitivity: "public",
-		Frontmatter: "---\nname: rule\n---\n",
-		Resources:   map[string]string{"data/a.txt": "sha256:aaa"},
+		ArtifactRevision: "1970-01-01T00:00:00.000000Z",
+		Frontmatter:      "---\nname: rule\n---\n",
+		Resources:        map[string]string{"data/a.txt": "sha256:aaa"},
 	})
 	if want := "sha256:" + sha256Hex(noSkill); got != want {
 		t.Errorf("DeliveryHash (no SKILL.md) = %q, want %q", got, want)
@@ -489,10 +495,10 @@ func TestDeliveryHash_RepartitioningChangesTheDigest(t *testing.T) {
 		return DeliveryHash(r)
 	}
 	// The tag/ID boundary: a stream whose tag absorbed the ID's first byte
-	// would frame "podium/delivery-record/1a" then "/b". Hash that stream
+	// would frame "podium/delivery-record/2a" then "/b". Hash that stream
 	// directly, since the tag is not a field a caller sets.
 	shifted := "sha256:" + sha256Hex(deliveryStream(
-		"podium/delivery-record/1a", "/b", "1.0.0", "skill", "", "", "FM", "BODY", ""))
+		"podium/delivery-record/2a", "/b", "1.0.0", "skill", "", "", "", "FM", "BODY", ""))
 	cases := []struct {
 		name string
 		a, b string
@@ -502,6 +508,11 @@ func TestDeliveryHash_RepartitioningChangesTheDigest(t *testing.T) {
 			name: "ID/version",
 			a:    with(func(r *DeliveryRecord) { r.ID, r.Version = "a/b1", ".0.0" }),
 			b:    DeliveryHash(base),
+		},
+		{
+			name: "sensitivity/ingest time",
+			a:    with(func(r *DeliveryRecord) { r.Sensitivity, r.ArtifactRevision = "internal", "1970" }),
+			b:    with(func(r *DeliveryRecord) { r.Sensitivity, r.ArtifactRevision = "internal1970", "" }),
 		},
 		{
 			name: "frontmatter/body",
@@ -518,6 +529,21 @@ func TestDeliveryHash_RepartitioningChangesTheDigest(t *testing.T) {
 		if c.a == c.b {
 			t.Errorf("%s: repartitioned records share the digest %q", c.name, c.a)
 		}
+	}
+}
+
+// Spec: §4.7.10 — the ingest time is a framed field, so two records that
+// differ only in ArtifactRevision carry different delivery digests.
+func TestDeliveryHash_ArtifactRevisionChangesTheDigest(t *testing.T) {
+	t.Parallel()
+	base := DeliveryRecord{
+		ID: "a/b", Version: "1.0.0", Type: "skill", ContentHash: "sha256:c",
+		Sensitivity: "internal", ArtifactRevision: "2025-01-01T00:00:00.000000Z",
+	}
+	later := base
+	later.ArtifactRevision = "2025-01-01T00:00:00.000001Z"
+	if a, b := DeliveryHash(base), DeliveryHash(later); a == b {
+		t.Errorf("records differing only in ArtifactRevision share the digest %q", a)
 	}
 }
 
@@ -539,29 +565,64 @@ func TestDeliveryHash_IgnoresMapInsertionOrder(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.10 — the leading tag separates the delivery digest from the
-// §4.7.6 content hash. The record below is chosen so that its untagged stream
-// is byte-identical to a §4.7.6 stream: the ID and version fill the manifest
-// and SKILL.md slots, and the remaining fields pair up as ascending resource
-// paths and bodies. Without the tag the two digests would coincide.
+// Spec: §4.7.10, §4.7.6 — the delivery digest stays separate from every
+// stored content hash. Equal framed streams frame the same number of values,
+// and the untagged delivery stream frames an odd count while a §4.7.6 stream
+// frames an even one, so only the tagged stream can coincide with a content
+// hash. The record below makes it coincide with the content hash of a package
+// whose ARTIFACT.md bytes are the tag: the tag fills the ARTIFACT.md slot, the
+// ID fills the SKILL.md slot, and the remaining fields pair up as ascending
+// resource paths and bodies. The separation therefore rests on ingest refusing
+// that package, which it does because the tag carries no frontmatter.
 func TestDeliveryHash_DiffersFromContentHashForTheSameBytes(t *testing.T) {
 	t.Parallel()
+	const tag = "podium/delivery-record/2"
 	rec := DeliveryRecord{
-		ID: "a", Version: "b",
-		Type: "c", ContentHash: "C",
-		Sensitivity: "d", Frontmatter: "D",
-		ManifestBody: "e", SkillRaw: "E",
-		Resources: map[string]string{"f": "F"},
+		ID: "s", Version: "p1",
+		Type: "v1", ContentHash: "p2",
+		Sensitivity: "v2", ArtifactRevision: "p3",
+		Frontmatter: "v3", ManifestBody: "p4",
+		SkillRaw:  "v4",
+		Resources: map[string]string{"p5": "v5"},
 	}
-	content := CanonicalContentHash([]byte("a"), []byte("b"), map[string][]byte{
-		"c": []byte("C"), "d": []byte("D"), "e": []byte("E"), "f": []byte("F"),
+	content := CanonicalContentHash([]byte(tag), []byte("s"), map[string][]byte{
+		"p1": []byte("v1"), "p2": []byte("v2"), "p3": []byte("v3"),
+		"p4": []byte("v4"), "p5": []byte("v5"),
 	})
-	untagged := sha256Hex(deliveryStream("a", "b", "c", "C", "d", "D", "e", "E", "f", "F"))
-	if untagged != content {
-		t.Fatalf("fixture does not reproduce the §4.7.6 stream: %q != %q", untagged, content)
+	tagged := sha256Hex(deliveryStream(tag, "s", "p1", "v1", "p2", "v2", "p3", "v3", "p4", "v4", "p5", "v5"))
+	if tagged != content {
+		t.Fatalf("fixture does not reproduce the §4.7.6 stream: %q != %q", tagged, content)
 	}
-	if got := DeliveryHash(rec); got == "sha256:"+content {
-		t.Errorf("DeliveryHash equals the content hash of the same bytes: %q", got)
+	if got, want := DeliveryHash(rec), "sha256:"+content; got != want {
+		t.Errorf("DeliveryHash = %q, want the coinciding content hash %q", got, want)
+	}
+	if _, err := manifest.ParseArtifact([]byte(tag)); !errors.Is(err, manifest.ErrNoFrontmatter) {
+		t.Errorf("ParseArtifact(tag) error = %v, want manifest.ErrNoFrontmatter", err)
+	}
+}
+
+// Spec: §4.7.10, §7.2.1 — the ingest time is written in UTC with exactly six
+// fractional digits and a literal Z, and a zero or pre-1970 ingest time is
+// written as the epoch.
+func TestFormatArtifactRevision(t *testing.T) {
+	t.Parallel()
+	east := time.FixedZone("east", 5*3600)
+	cases := []struct {
+		name string
+		in   time.Time
+		want string
+	}{
+		{name: "zero", in: time.Time{}, want: "1970-01-01T00:00:00.000000Z"},
+		{name: "pre-1970", in: time.Date(1969, 12, 31, 23, 59, 59, 999_999_000, time.UTC), want: "1970-01-01T00:00:00.000000Z"},
+		{name: "epoch", in: time.Unix(0, 0), want: "1970-01-01T00:00:00.000000Z"},
+		{name: "whole second", in: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC), want: "2025-01-01T00:00:00.000000Z"},
+		{name: "sub-microsecond truncated", in: time.Date(2025, 6, 2, 3, 4, 5, 123_456_789, time.UTC), want: "2025-06-02T03:04:05.123456Z"},
+		{name: "non-UTC zone", in: time.Date(2025, 6, 2, 8, 4, 5, 1_000, east), want: "2025-06-02T03:04:05.000001Z"},
+	}
+	for _, c := range cases {
+		if got := FormatArtifactRevision(c.in); got != c.want {
+			t.Errorf("%s: FormatArtifactRevision = %q, want %q", c.name, got, c.want)
+		}
 	}
 }
 

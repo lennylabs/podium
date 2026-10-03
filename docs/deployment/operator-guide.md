@@ -108,6 +108,11 @@ Test restores quarterly. The runbook procedure:
    <name>` for a signed artifact and confirm it exits 0.
 6. Spot-check `load_artifact` for a known-good artifact; should match the
    pre-restore content_hash.
+7. Restoring to an earlier point lowers the artifact revision of every
+   artifact whose newest version postdates the restore point. Each podium-mcp
+   consumer then fails latest loads of those artifacts with
+   materialize.stale_resolution until it stops its MCP servers and runs
+   `podium cache reset-revisions`.
 ```
 
 Step 1 restores the signing key because a registry with signing on, a Postgres store, and no key path is refused at start, and because the drill then also exercises the key backup. In step 5, `podium verify <artifact>` verifies the registry's delivery signature over its delivery hash under the verification key set the default `registry-managed` provider resolves: `PODIUM_SIGNATURE_VERIFY_KEY`, one base64 key or a comma-separated list, or, when that variable is unset, the `public:` line and every `verify:` line of the key file at `PODIUM_SIGN_KEY_PATH`. Run step 5 with the production registry's public key in `PODIUM_SIGNATURE_VERIFY_KEY`, extracted as [Clustered](clustered#2-deploy-the-registry) shows. `--provider noop` is refused for every envelope. A Sigstore envelope passed with `--signature` takes `--provider sigstore-keyless` with `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE`, and verification fails with `no trust root configured` when the trust root is absent; the delivery signature itself is never a Sigstore envelope.

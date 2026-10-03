@@ -96,6 +96,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   and output and now composes the pair; when the device code expires before
   the timeout, it raises reason `expired` where it previously reported
   `login timed out`.
+- **`podium-mcp` refuses a stale `latest` load** (§4.7.10, §6.5): the registry
+  serves `artifact_revision`, the time it stored the served version, and
+  `podium-mcp` refuses a `load_artifact` that resolves `latest` when that
+  revision is below one it already accepted for that registry and artifact ID.
+  The refusal uses `materialize.stale_resolution` and writes nothing. Pinned
+  versions are never compared. `podium cache reset-revisions` deletes the
+  marks, and every MCP server that uses the cache directory must be stopped
+  first.
 
 ### Fixed
 
@@ -573,12 +581,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   change** (§4.7.10, §6.6, §7.2, §7.6.2): the `load_artifact` response and each
   `artifacts:batchLoad` item carry `delivery_hash`, a digest over the record the
   registry served, which for an artifact that declares `extends:` is the merged
-  record, and `delivery_signature`, the registry's signature over it, minted per
-  response with the registry-managed key. The `load_artifact` response also
-  carries `extends_pin`, the parent pin the child resolved at ingest, present
-  only when the caller can see the parent record. The response no longer carries
-  `raw_frontmatter`, `manifest_merged`, or `signature`, and a merged manifest
-  above the inline cutoff is served through `manifest_body_url` like any other.
+  record, `delivery_signature`, the registry's signature over it, minted per
+  response with the registry-managed key, and `artifact_revision`, the time the
+  registry stored the served version. `delivery_hash` covers
+  `artifact_revision`, and the entity tag does not include it. The
+  `load_artifact` response also carries `extends_pin`, the parent pin the child
+  resolved at ingest, present only when the caller can see the parent record.
+  The response no longer carries `raw_frontmatter`, `manifest_merged`, or
+  `signature`, and a merged manifest above the inline cutoff is served through
+  `manifest_body_url` like any other.
   A client that read any of the removed fields reads the new ones: `podium-mcp`
   recomputes `delivery_hash` on every load, independent of
   `PODIUM_VERIFY_SIGNATURES` and of sensitivity, and fails a mismatch with
@@ -586,8 +597,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `delivery_signature`. `podium verify <artifact>` verifies the delivery pair,
   and with `--signature` it verifies that envelope over the content hash. The
   `load_artifact` entity tag folds in the `extends_pin` value the caller is
-  served. The delivery record carries no timestamp and no nonce, so a captured
-  record verifies when it is replayed.
+  served. A captured record still verifies when it is replayed, and
+  `podium-mcp` refuses a replayed record that answers a `latest` resolution
+  when its artifact revision is below the mark.
 
   Operator actions: roll the registry and the consumers together, as the
   content-hash entry above states, because a consumer on the previous binary

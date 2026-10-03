@@ -15,7 +15,9 @@ import (
 // loadArtifactJSON builds a /v1/load_artifact response body whose content_hash
 // is the §4.7.6 hash of frontmatter plus resources and whose delivery_hash is
 // the §4.7.10 hash of the record, so the §6.6 step 2 consumer-side check
-// (verifyDeliveryHash) accepts it. A field the caller sets is kept. Compute it
+// (verifyDeliveryHash) accepts it, and whose artifact_revision defaults to
+// epochRevision so the §6.5 freshness check admits a `latest` answer. A field
+// the caller sets is kept. Compute it
 // in the test goroutine and write the returned string from the stub handler.
 func loadArtifactJSON(t *testing.T, fields map[string]any) string {
 	t.Helper()
@@ -30,6 +32,7 @@ func loadArtifactJSON(t *testing.T, fields map[string]any) string {
 	if _, set := fields["content_hash"]; !set {
 		fields["content_hash"] = "sha256:" + version.CanonicalContentHash([]byte(fm), nil, resources)
 	}
+	withEpochRevision(fields)
 	if _, set := fields["delivery_hash"]; !set {
 		b, err := json.Marshal(fields)
 		if err != nil {

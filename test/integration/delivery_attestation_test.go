@@ -196,7 +196,7 @@ func (f *daFixture) singleRecord(t *testing.T, resp server.LoadArtifactResponse,
 	t.Helper()
 	rec := version.DeliveryRecord{
 		ID: resp.ID, Version: resp.Version, Type: resp.Type, ContentHash: resp.ContentHash,
-		Sensitivity: resp.Sensitivity, Frontmatter: resp.Frontmatter,
+		Sensitivity: resp.Sensitivity, ArtifactRevision: resp.ArtifactRevision, Frontmatter: resp.Frontmatter,
 		ManifestBody: resp.ManifestBody, SkillRaw: resp.SkillRaw, Resources: map[string]string{},
 	}
 	if resp.ManifestBodyURL != nil {
@@ -234,7 +234,7 @@ func (f *daFixture) singleRecord(t *testing.T, resp server.LoadArtifactResponse,
 func batchRecord(env server.BatchLoadEnvelope, sensitivity string) version.DeliveryRecord {
 	rec := version.DeliveryRecord{
 		ID: env.ID, Version: env.Version, Type: env.Type, ContentHash: env.ContentHash,
-		Sensitivity: sensitivity, Frontmatter: env.Frontmatter,
+		Sensitivity: sensitivity, ArtifactRevision: env.ArtifactRevision, Frontmatter: env.Frontmatter,
 		ManifestBody: env.ManifestBody, SkillRaw: env.SkillRaw, Resources: map[string]string{},
 	}
 	for _, r := range env.Resources {
@@ -267,6 +267,9 @@ func TestLoadArtifact_SingleAndBatchAgreeOnTheDeliveryHash(t *testing.T) {
 			env := f.batch(t, id, "alice")
 			if single.DeliveryHash == "" || single.DeliveryHash != env.DeliveryHash {
 				t.Fatalf("delivery hashes: single %q, batch %q; want equal and non-empty", single.DeliveryHash, env.DeliveryHash)
+			}
+			if single.ArtifactRevision == "" || single.ArtifactRevision != env.ArtifactRevision {
+				t.Errorf("artifact_revision: single %q, batch %q; want equal and non-empty", single.ArtifactRevision, env.ArtifactRevision)
 			}
 			for path, sig := range map[string]string{"single": single.DeliverySignature, "batch": env.DeliverySignature} {
 				if err := verifier.Verify(context.Background(), single.DeliveryHash, sig); err != nil {

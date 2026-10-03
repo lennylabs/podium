@@ -35,7 +35,7 @@ func TestLoadArtifact_OfflineFirst_StaleLatestServedFromCache(t *testing.T) {
 	defer func() { _ = resolutions.Close() }()
 	// Prime (team/x, "latest") -> 1.0.0 -> hash, fetched an hour ago (well past
 	// the 30s TTL) so the entry is present but stale.
-	resolutions.PutLatest("team/x", "1.0.0", hash, time.Now().Add(-time.Hour))
+	putLatest(resolutions, "team/x", "1.0.0", hash, time.Now().Add(-time.Hour))
 
 	srv := &mcpServer{
 		cfg:         &config{cacheDir: dir, cacheMode: "offline-first", registry: ts.URL, harness: "none", verifyPolicy: sign.PolicyNever, resolutionTTL: 30 * time.Second},

@@ -224,6 +224,7 @@ Response:
   },
   "delivery_hash": "sha256:...",
   "delivery_signature": "...",
+  "artifact_revision": "2025-01-01T00:00:00.000000Z",
   "extends_pin": "finance/ap/pay-invoice@1.2.0"
 }
 ```
@@ -231,13 +232,14 @@ Response:
 The response carries these integrity and reference fields:
 
 - `content_hash` names the stored artifact. It is the resolution-cache key, the `sync.lock` value, and the target of an `@sha256:` pin. For an artifact that declares `extends:`, it covers the child's pre-merge package, so the merged bytes the response serves do not reproduce it.
-- `delivery_hash` is a SHA-256 digest over the record this response delivers: the identity, version, type, content hash, sensitivity, served `ARTIFACT.md` document, manifest body, `SKILL.md`, and each bundled resource's path and content hash. It is present on every response, for every artifact, whether or not the artifact declares `extends:`.
+- `delivery_hash` is a SHA-256 digest over the record this response delivers: the identity, version, type, content hash, sensitivity, ingest time, served `ARTIFACT.md` document, manifest body, `SKILL.md`, and each bundled resource's path and content hash. It is present on every response, for every artifact, whether or not the artifact declares `extends:`. The record is framed under the tag `podium/delivery-record/2`, so `podium-mcp` and the registry must run matching releases, or every load fails with `materialize.content_hash_mismatch`.
 - `delivery_signature` is the registry's signature over `delivery_hash`, minted per response with the registry-managed key. It is absent when the registry runs without a signing key. It is a registry-managed envelope whatever key model signed the artifact at ingest, so a consumer verifies it with the registry-managed verifier under its verification key set.
+- `artifact_revision` is the time the registry stored the served version, an RFC 3339 UTC timestamp with six fractional digits, such as `2025-01-01T00:00:00.000000Z`. `delivery_hash` covers it. It is present on every response and on every `ok` batch item, and it does not enter the entity tag.
 - `extends_pin` is the `<id>@<version>` parent pin the registry resolved when it ingested the child. It is present only when the calling identity can see the parent record. Its absence does not mean the artifact extends nothing.
 
 `podium-mcp` recomputes `delivery_hash` from the bytes it received on every load and fails the load with `materialize.content_hash_mismatch` when the values differ, before it applies its signature policy to `delivery_signature`. Server-source `podium sync` and the language SDKs receive the delivery fields and do not verify them.
 
-The delivery record carries no timestamp and no nonce, so a record captured from an earlier response verifies when it is replayed. Rollback to an earlier version is detected for `podium sync` by the `sync.lock` pin of `(id, version, content_hash)`. The delivery record also attests that the registry composed and served the bytes. It does not attest that the merge folded the parent the child declared, because a consumer that cannot see a hidden parent cannot check the fold.
+The delivery record carries no nonce, so a record captured from an earlier response verifies when it is replayed. `podium-mcp` refuses a replayed record that answers a `latest` load with an artifact revision below one it already accepted for that registry and artifact, and fails the load with `materialize.stale_resolution`. A replayed record that answers a pinned request is not detected, and neither is a record received by a consumer that does not verify, such as server-source `podium sync` or a language SDK. Rollback is detected for `podium sync` by the `sync.lock` pin of `(id, version, content_hash)`. A registry that stores no ingest time serves `1970-01-01T00:00:00.000000Z` for every version, and replays against it are not detected. The delivery record also attests that the registry composed and served the bytes. It does not attest that the merge folded the parent the child declared, because a consumer that cannot see a hidden parent cannot check the fold.
 
 The response carries no `raw_frontmatter`, `manifest_merged`, or `signature` field. A registry configured with a signer verifies the signature it stored at ingest before it serves a row, and no registry serves that stored signature. No response field marks whether an artifact is merged.
 
@@ -286,7 +288,7 @@ Response: an array of per-item envelopes. Each item has its own `status` (`ok` o
 
 Each entry of an item's `resources` array carries `path` and `content_hash`, and either `presigned_url` or, for a resource the registry holds inline, `inline`, with `inline_base64: true` when the bytes are not valid UTF-8. On a deployment with an object store, a resource at or below the inline cutoff arrives in `inline`, and only a resource the registry read from object storage carries a `presigned_url`.
 
-Each `ok` item carries `delivery_hash` and `delivery_signature`, composed and signed by the same code as the `load_artifact` response, so both endpoints serve one delivery hash per artifact. A batch item carries no `extends_pin`. The MCP server does not call this endpoint and performs no startup cache warm-up.
+Each `ok` item carries `delivery_hash`, `delivery_signature`, and `artifact_revision`, composed and signed by the same code as the `load_artifact` response, so both endpoints serve one delivery hash per artifact. A batch item carries no `extends_pin`. The MCP server does not call this endpoint and performs no startup cache warm-up.
 
 Visibility is identical to `load_artifact`: items the caller can't see come back as `status: "error"` with `visibility.denied`. No leak about whether the artifact exists in some hidden layer.
 

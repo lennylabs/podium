@@ -343,10 +343,10 @@ func TestPodiumMCP_MultiResourceContentHashRoundTrip(t *testing.T) {
 		hashed[k] = []byte(v)
 	}
 	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, hashed)
-	delivery := testharness.SealDelivery(map[string]any{
+	sealed := testharness.SealDelivery(map[string]any{
 		"id": "team/bundle", "version": "1.0.0", "type": "context",
 		"content_hash": hash, "frontmatter": fm, "resources": resources,
-	})["delivery_hash"]
+	})
 
 	serve := func(served map[string]string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -354,7 +354,8 @@ func TestPodiumMCP_MultiResourceContentHashRoundTrip(t *testing.T) {
 				b, _ := json.Marshal(map[string]any{
 					"id": "team/bundle", "version": "1.0.0", "type": "context",
 					"content_hash": hash, "frontmatter": fm, "resources": served,
-					"delivery_hash": delivery,
+					"artifact_revision": sealed["artifact_revision"],
+					"delivery_hash":     sealed["delivery_hash"],
 				})
 				_, _ = w.Write(b)
 				return

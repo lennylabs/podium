@@ -182,6 +182,8 @@ Commands:
   serve               Run the standalone registry server in-process.
   config show         Print the resolved server configuration with sources.
   cache prune         Remove content-cache buckets older than N days.
+  cache reset-revisions
+                      Delete the revision marks podium-mcp keeps for latest loads.
   import              Convert a skills/* tree into a Podium-shaped layer.
   sync                Materialize the caller's effective view through a HarnessAdapter.
   sync override       Add or remove ephemeral artifact toggles.

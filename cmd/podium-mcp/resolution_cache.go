@@ -4,13 +4,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	bolt "go.etcd.io/bbolt"
+
+	"github.com/lennylabs/podium/internal/revmark"
 )
 
 // resolutionCache is the §6.5 (id, version) resolution index. It is backed by
@@ -25,10 +29,28 @@ import (
 // A `latest` lookup chains id@latest → semver → id@semver → content_hash. The
 // latest entry carries the fetch timestamp so the §6.5 30-second TTL can treat
 // a stale `latest` resolution as a miss and fall through to the registry.
+//
+// A second bucket, revmark.Bucket(), holds the §6.5 revision marks: per
+// registry and artifact ID, the highest artifact_revision accepted for a
+// `latest` load, stored as decimal Unix microseconds. The marks are
+// consumer-side state, so the §7.2.1 timestamp encoding does not govern them.
 type resolutionCache struct {
+	// mu serializes every bucket access and both maps below. A mark is read
+	// and advanced in one critical section, so two concurrent loads cannot
+	// interleave a read of the mark with the other's write.
 	mu  sync.Mutex
 	dir string
 	db  *bolt.DB
+	// mem holds the revision marks, keyed by revmark.Key.Encode, when db is
+	// nil: the cache directory is unset, or the index DB could not be opened
+	// (another podium-mcp holds its lock). The marks then last for this
+	// process only.
+	mem map[string]uint64
+	// sessions holds the session references: per mark key and effective
+	// session_id, the revision of the first `latest` answer this process
+	// accepted in that session. They are always in memory, because a session
+	// does not outlive the process that recorded its registry pin.
+	sessions map[sessionMarkKey]uint64
 	// observe, when set, receives one call per Resolve reporting whether the
 	// lookup hit (true) or missed (false). It feeds the §13.8
 	// podium_cache_hits_total / podium_cache_misses_total counters. Calls
@@ -37,8 +59,16 @@ type resolutionCache struct {
 	observe func(hit bool)
 }
 
-// resolutionBucket is the single BoltDB bucket holding every resolution entry.
+// resolutionBucket is the BoltDB bucket holding every resolution entry.
 var resolutionBucket = []byte("resolutions")
+
+// sessionMarkKey identifies one session reference. The encoded mark key and
+// the session are separate fields, so two sessions, two registries, or two
+// artifact IDs never share an entry.
+type sessionMarkKey struct {
+	mark    string
+	session string
+}
 
 // resolutionEntry is the value stored under a resolution key. A latest entry
 // records the resolved semver (§6.5); a version entry records the content hash.
@@ -50,30 +80,46 @@ type resolutionEntry struct {
 }
 
 func newResolutionCache(cacheDir string) *resolutionCache {
+	r := &resolutionCache{mem: map[string]uint64{}, sessions: map[sessionMarkKey]uint64{}}
 	if cacheDir == "" {
-		return &resolutionCache{}
-	}
-	dir := filepath.Join(cacheDir, ".resolutions")
-	r := &resolutionCache{dir: dir}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return r
 	}
-	// A short open timeout keeps a stale lock from another process from
-	// blocking startup indefinitely; a failed open leaves the cache disabled
-	// (db nil) so the bridge still runs against the registry.
-	db, err := bolt.Open(filepath.Join(dir, "index.db"), 0o644, &bolt.Options{Timeout: 2 * time.Second})
+	r.dir = filepath.Join(cacheDir, revmark.DirName)
+	db, err := openIndexDB(revmark.IndexPath(cacheDir))
 	if err != nil {
-		return r
-	}
-	if err := db.Update(func(tx *bolt.Tx) error {
-		_, e := tx.CreateBucketIfNotExists(resolutionBucket)
-		return e
-	}); err != nil {
-		_ = db.Close()
+		// A failed open leaves the index disabled (db nil) so the bridge still
+		// runs against the registry, with its revision marks in mem.
+		log.Printf("warning: podium-mcp: resolution index under %s unavailable (%v); revision marks are held in memory for this process", cacheDir, err)
 		return r
 	}
 	r.db = db
 	return r
+}
+
+// openIndexDB opens the index DB at path and creates the resolution and
+// revision-mark buckets in one transaction. A short open timeout keeps a lock
+// held by another process from blocking startup indefinitely.
+func openIndexDB(path string) (*bolt.DB, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	db, err := bolt.Open(path, 0o644, &bolt.Options{Timeout: 2 * time.Second})
+	if err != nil {
+		return nil, err
+	}
+	if err := db.Update(func(tx *bolt.Tx) error {
+		if _, e := tx.CreateBucketIfNotExists(resolutionBucket); e != nil {
+			return e
+		}
+		_, e := tx.CreateBucketIfNotExists(revmark.Bucket())
+		return e
+	}); err != nil {
+		// Bucket creation fails only on an I/O error against a file bbolt
+		// has just opened read-write, which no unit test can provoke.
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
 }
 
 // Close releases the BoltDB file lock. The bridge holds the cache for its
@@ -138,17 +184,167 @@ func (r *resolutionCache) getEntry(key string) (resolutionEntry, bool) {
 	return e, found
 }
 
-// PutLatest records a resolved `latest` request: the (id, "latest") key maps to
-// the resolved semver (§6.5) and the (id, semver) key maps to the content hash
-// so the hash stays recoverable. When the registry returned no version the hash
-// is stored on the latest key directly so offline reads still resolve.
-func (r *resolutionCache) PutLatest(id, resolvedVersion, contentHash string, now time.Time) {
-	if resolvedVersion == "" {
-		r.putEntry(resolutionKey(id, ""), resolutionEntry{ContentHash: contentHash, FetchedAt: now})
+// Reference returns the value a fresh `latest` answer for k in session is
+// compared with: the session reference when this process accepted an answer
+// for k in session, and otherwise the stored mark. A stored mark that does not
+// parse is deleted, logged by its key, and reported as absent. A nil cache
+// holds no reference.
+//
+// Spec: §6.5
+func (r *resolutionCache) Reference(k revmark.Key, session string) (uint64, bool) {
+	if r == nil {
+		return 0, false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ref, ok := r.sessions[sessionMarkKey{mark: string(k.Encode()), session: session}]; ok {
+		return ref, true
+	}
+	return r.readMarkLocked(k.Encode())
+}
+
+// readMarkLocked returns the stored mark for the encoded key. The caller
+// holds r.mu.
+func (r *resolutionCache) readMarkLocked(key []byte) (uint64, bool) {
+	if r.db == nil {
+		mark, ok := r.mem[string(key)]
+		return mark, ok
+	}
+	var mark uint64
+	found := false
+	_ = r.db.Update(func(tx *bolt.Tx) error {
+		mark, found = readMark(tx.Bucket(revmark.Bucket()), key)
+		return nil
+	})
+	return mark, found
+}
+
+// readMark reads the mark under key from b. A value that does not parse as a
+// decimal within the int64 range is deleted and reported as absent; the
+// warning names the key only, because the value is untrusted bytes. The bound
+// is 63 bits because a mark is a count of Unix microseconds that the freshness
+// check converts back to a time. A nil bucket holds no mark.
+func readMark(b *bolt.Bucket, key []byte) (uint64, bool) {
+	if b == nil {
+		return 0, false
+	}
+	v := b.Get(key)
+	if v == nil {
+		return 0, false
+	}
+	mark, err := strconv.ParseUint(string(v), 10, 63)
+	if err != nil {
+		log.Printf("warning: podium-mcp: deleting unparseable revision mark %q", key)
+		_ = b.Delete(key)
+		return 0, false
+	}
+	return mark, true
+}
+
+// NoteSession records revision as the session reference for (k, session) when
+// session is non-empty and holds none. It never changes an existing reference
+// and never reads or writes a mark, so a revalidated cache delivery and a
+// resources-mirror answer pin the session without advancing the mark.
+//
+// Spec: §6.5
+func (r *resolutionCache) NoteSession(k revmark.Key, session string, revision uint64) {
+	if r == nil {
 		return
 	}
-	r.putEntry(resolutionKey(id, ""), resolutionEntry{ResolvedVersion: resolvedVersion, FetchedAt: now})
-	r.putEntry(resolutionKey(id, resolvedVersion), resolutionEntry{ContentHash: contentHash, FetchedAt: now})
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.noteSessionLocked(k, session, revision)
+}
+
+// noteSessionLocked is NoteSession for a caller that holds r.mu.
+func (r *resolutionCache) noteSessionLocked(k revmark.Key, session string, revision uint64) {
+	if session == "" {
+		return
+	}
+	sk := sessionMarkKey{mark: string(k.Encode()), session: session}
+	if _, ok := r.sessions[sk]; ok {
+		return
+	}
+	if r.sessions == nil {
+		r.sessions = map[sessionMarkKey]uint64{}
+	}
+	r.sessions[sk] = revision
+}
+
+// PutLatestAdvancing records a resolved `latest` request whose served
+// artifact_revision is revision. When revision is at or above the stored mark
+// for k, one transaction advances the mark to revision and writes the
+// (id, "latest") → semver and (id, semver) → content_hash entries (§6.5); when
+// the registry returned no version the hash is stored on the latest key
+// directly so offline reads still resolve. When revision is below the mark
+// (the session reference admitted the answer, or a concurrent load advanced
+// the mark), the transaction writes nothing, so the index never resolves
+// `latest` to an older record than the mark. Either way the session reference
+// is recorded when the session holds none. With no index DB the same rule
+// applies to the in-memory marks.
+//
+// Spec: §6.5
+func (r *resolutionCache) PutLatestAdvancing(k revmark.Key, session, id, version, contentHash string, revision uint64, now time.Time) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.noteSessionLocked(k, session, revision)
+	key := k.Encode()
+	if r.db == nil {
+		if mark, ok := r.mem[string(key)]; !ok || revision >= mark {
+			if r.mem == nil {
+				r.mem = map[string]uint64{}
+			}
+			r.mem[string(key)] = revision
+		}
+		return
+	}
+	entries, err := latestEntries(id, version, contentHash, now)
+	if err != nil {
+		return
+	}
+	_ = r.db.Update(func(tx *bolt.Tx) error {
+		marks := tx.Bucket(revmark.Bucket())
+		res := tx.Bucket(resolutionBucket)
+		if marks == nil || res == nil {
+			return nil
+		}
+		if mark, ok := readMark(marks, key); ok && revision < mark {
+			return nil
+		}
+		if err := marks.Put(key, []byte(strconv.FormatUint(revision, 10))); err != nil {
+			return err
+		}
+		for k, body := range entries {
+			if err := res.Put([]byte(k), body); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// latestEntries returns the encoded resolution entries a `latest` resolution
+// writes, keyed by resolution key.
+func latestEntries(id, version, contentHash string, now time.Time) (map[string][]byte, error) {
+	want := map[string]resolutionEntry{}
+	if version == "" {
+		want[resolutionKey(id, "")] = resolutionEntry{ContentHash: contentHash, FetchedAt: now}
+	} else {
+		want[resolutionKey(id, "")] = resolutionEntry{ResolvedVersion: version, FetchedAt: now}
+		want[resolutionKey(id, version)] = resolutionEntry{ContentHash: contentHash, FetchedAt: now}
+	}
+	out := make(map[string][]byte, len(want))
+	for k, e := range want {
+		body, err := json.Marshal(e)
+		if err != nil {
+			return nil, err
+		}
+		out[k] = body
+	}
+	return out, nil
 }
 
 // PutVersion records a pinned (id, version) → content_hash resolution. Pinned
@@ -255,6 +451,7 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 		Sensitivity:       d.Sensitivity,
 		DeliveryHash:      d.DeliveryHash,
 		DeliverySignature: d.DeliverySignature,
+		ArtifactRevision:  d.ArtifactRevision,
 		Resources:         map[string]string{},
 	}
 	// A skill's verbatim SKILL.md is bucket-level, because the authored
@@ -296,12 +493,14 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 }
 
 // readDeliveryFiles reads the per-ID delivery files putDelivery wrote in dir.
-// The id file, the served document, the body, and the delivery hash are
-// required, and the id file must hold id verbatim; the signature and
-// sensitivity files read as empty when absent.
+// The id file, the served document, the body, the delivery hash, and the
+// artifact revision are required, and the id file must hold id verbatim; the
+// signature and sensitivity files read as empty when absent. A record cached
+// before the artifact_revision file existed is therefore a miss, because its
+// delivery check would frame an empty revision.
 func readDeliveryFiles(dir, id string) (deliveryFiles, error) {
 	required := map[string]string{}
-	for _, name := range []string{"id", "frontmatter", "body", "delivery_hash"} {
+	for _, name := range []string{"id", "frontmatter", "body", "delivery_hash", "artifact_revision"} {
 		b, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return deliveryFiles{}, fmt.Errorf("delivery %s: %w", name, err)
@@ -324,6 +523,7 @@ func readDeliveryFiles(dir, id string) (deliveryFiles, error) {
 		DeliveryHash:      required["delivery_hash"],
 		DeliverySignature: optional("delivery_signature"),
 		Sensitivity:       optional("sensitivity"),
+		ArtifactRevision:  required["artifact_revision"],
 	}, nil
 }
 

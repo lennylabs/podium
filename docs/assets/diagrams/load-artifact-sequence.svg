@@ -151,6 +151,6 @@
   <text class="dg-sub" x="142" y="452">{manifest, materialized}</text>
   <path class="dg-line" d="M 370 460 L 134 460" marker-end="url(#dg-arrow-load-artifact-sequence)"/>
 
-  <text class="dg-foot" x="40" y="510">The MCP server holds no per-session state; identity flows through the registry on every call.</text>
+  <text class="dg-foot" x="40" y="510">Identity flows through the registry on every call.</text>
   <text class="dg-foot" x="40" y="528">Object storage receives presigned-URL GETs only; the registry never proxies resource bytes.</text>
 </svg>

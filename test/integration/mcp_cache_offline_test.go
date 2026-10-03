@@ -10,12 +10,20 @@ import (
 	"github.com/lennylabs/podium/internal/testharness/registryharness"
 )
 
-// loadArtifactover runs one load_artifact call through a freshly spawned MCP
-// bridge process against the given registry URL and cache dir, returning the
-// decoded result map.
+// loadArtifactOver runs one load_artifact call for the artifact "x" through a
+// freshly built and spawned MCP bridge process against the given registry URL
+// and cache dir, returning the decoded result map.
 func loadArtifactOver(t *testing.T, registry, cacheDir string, extraEnv ...string) map[string]any {
 	t.Helper()
-	bin := buildMCP(t)
+	return loadArtifactWith(t, buildMCP(t), registry, cacheDir, map[string]any{"id": "x"}, extraEnv...)
+}
+
+// loadArtifactWith runs one load_artifact call with args through a spawned
+// process of the prebuilt bridge bin against the given registry URL and cache
+// dir, returning the decoded result map. Each call is a separate process, so
+// in-process state such as the bridge's session ID does not carry over.
+func loadArtifactWith(t *testing.T, bin, registry, cacheDir string, args map[string]any, extraEnv ...string) map[string]any {
+	t.Helper()
 	cmd := exec.Command(bin)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
@@ -27,7 +35,7 @@ func loadArtifactOver(t *testing.T, registry, cacheDir string, extraEnv ...strin
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "tools/call", ID: 1, Params: map[string]any{
 			"name":      "load_artifact",
-			"arguments": map[string]any{"id": "x"},
+			"arguments": args,
 		}},
 	}))
 	var stdout bytes.Buffer

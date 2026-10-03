@@ -68,11 +68,12 @@ func (s *mcpServer) handleResourcesList() any {
 // and returns the manifest (frontmatter + body) as the resource content.
 // This is the read-only half of the §5.0 mirror. It runs the same §6.6
 // reconstitution and verification load_artifact runs, through
-// verifyServedArtifact, and performs none of load_artifact's other effects:
-// it emits no read event, caches nothing, runs neither §4.4.1 gate, and
-// materializes nothing.
+// verifyServedArtifact, and the §6.5 freshness check, and performs none of
+// load_artifact's other effects: it emits no read event, caches nothing,
+// advances no revision mark, runs neither §4.4.1 gate, and materializes
+// nothing.
 //
-// Spec: §5.0, §6.6 step 2, §4.7.9
+// Spec: §5.0, §6.6 step 2, §4.7.9, §6.5
 func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 	var args struct {
 		URI string `json:"uri"`
@@ -105,6 +106,15 @@ func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 	}); err != nil {
 		return errorResult(err.Error())
 	}
+	// §6.5: the mirror always requests `latest`, so its answer is compared
+	// like a fresh load_artifact answer. A pass records the session reference
+	// the registry's pin implies and never advances the revision mark.
+	session := s.effectiveSessionID(loadArgs)
+	rev, env := s.checkFreshness(resp, session)
+	if env != nil {
+		return env
+	}
+	s.resolutions.NoteSession(s.markKey(resp.ID), session, rev)
 	return map[string]any{
 		"contents": []map[string]any{
 			{

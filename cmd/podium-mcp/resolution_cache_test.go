@@ -15,7 +15,7 @@ func TestResolutionCache_LatestTTL(t *testing.T) {
 	r := newResolutionCache(t.TempDir())
 	defer func() { _ = r.Close() }()
 	base := time.Unix(1_700_000_000, 0)
-	r.PutLatest("team/x", "1.2.3", "sha256:hash", base)
+	putLatest(r, "team/x", "1.2.3", "sha256:hash", base)
 
 	// Within the TTL window: a hit.
 	if got, ok := r.Resolve("team/x", "", base.Add(10*time.Second), 30*time.Second, false); !ok || got != "sha256:hash" {
@@ -55,7 +55,7 @@ func TestResolutionCache_LatestMapsToSemver(t *testing.T) {
 	r := newResolutionCache(t.TempDir())
 	defer func() { _ = r.Close() }()
 	now := time.Now()
-	r.PutLatest("team/x", "2.0.0", "sha256:abc", now)
+	putLatest(r, "team/x", "2.0.0", "sha256:abc", now)
 
 	// The latest key stores the semver, not the hash, directly.
 	e, ok := r.getEntry(resolutionKey("team/x", ""))
@@ -85,7 +85,7 @@ func TestResolutionCache_RefreshLatest(t *testing.T) {
 	r := newResolutionCache(t.TempDir())
 	defer func() { _ = r.Close() }()
 	base := time.Unix(1_700_000_000, 0)
-	r.PutLatest("team/x", "1.0.0", "sha256:abc", base)
+	putLatest(r, "team/x", "1.0.0", "sha256:abc", base)
 
 	// Stale just before refresh.
 	if _, ok := r.Resolve("team/x", "", base.Add(45*time.Second), 30*time.Second, false); ok {
