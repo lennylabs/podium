@@ -128,7 +128,7 @@ func TestConfigReadOnlyFlip_PostgresPrimaryOutage(t *testing.T) {
 		Store:      fault,
 		Tracker:    mode,
 		TenantID:   roflipTenant,
-		Interval:   10 * time.Millisecond,
+		Interval:   25 * time.Millisecond,
 		Failures:   2,
 		Recoveries: 2,
 		OnEnter: func() {
@@ -209,6 +209,13 @@ func TestConfigReadOnlyFlip_PostgresPrimaryOutage(t *testing.T) {
 	// Sever the primary: the probe's GetTenant health call now fails. The real
 	// probe must flip the tracker to read_only after the failure threshold, with
 	// no ModeTracker.Set call anywhere in the test.
+	//
+	// The probe bounds each health call by its interval, so on a loaded runner a
+	// healthy Postgres GetTenant can exceed the fast test tick and register as a
+	// failure before the sever. Count transitions from a baseline taken in ready
+	// mode so such a cycle does not read as a second entry caused by the outage.
+	roflipWaitMode(t, ts.URL, "ready")
+	enteredBefore := roflipCountEvents(sink, audit.EventReadOnlyEntered)
 	fault.Sever()
 	roflipWaitMode(t, ts.URL, "read_only")
 
@@ -243,12 +250,13 @@ func TestConfigReadOnlyFlip_PostgresPrimaryOutage(t *testing.T) {
 	if got := roflipErrCode(t, gbody); got != "registry.read_only" {
 		t.Errorf("read-only admin grant code = %q, want registry.read_only", got)
 	}
-	// The probe must have recorded exactly one read_only_entered event.
-	if n := roflipCountEvents(sink, audit.EventReadOnlyEntered); n != 1 {
-		t.Errorf("read_only_entered events = %d, want 1", n)
+	// The outage must have recorded exactly one read_only_entered event.
+	if n := roflipCountEvents(sink, audit.EventReadOnlyEntered) - enteredBefore; n != 1 {
+		t.Errorf("read_only_entered events since the sever = %d, want 1", n)
 	}
 
 	// ---- 4. Restore the primary: the probe recovers, writes resume ----
+	exitedBefore := roflipCountEvents(sink, audit.EventReadOnlyExited)
 	fault.Restore()
 	roflipWaitMode(t, ts.URL, "ready")
 
@@ -258,8 +266,8 @@ func TestConfigReadOnlyFlip_PostgresPrimaryOutage(t *testing.T) {
 	if code, _ := roflipGrant(t, ts.URL, "dave@acme.com"); code != http.StatusCreated {
 		t.Errorf("recovered admin grant = %d, want 201", code)
 	}
-	if n := roflipCountEvents(sink, audit.EventReadOnlyExited); n != 1 {
-		t.Errorf("read_only_exited events = %d, want 1", n)
+	if n := roflipCountEvents(sink, audit.EventReadOnlyExited) - exitedBefore; n != 1 {
+		t.Errorf("read_only_exited events since the restore = %d, want 1", n)
 	}
 
 	close(stopReaders)
