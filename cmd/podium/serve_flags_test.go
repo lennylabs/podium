@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -35,6 +36,38 @@ func TestServeCmd_StandaloneFlagsSetEnv(t *testing.T) {
 		if got := os.Getenv(c.env); got != c.want {
 			t.Errorf("%s = %q, want %q (flag side effect)", c.env, got, c.want)
 		}
+	}
+}
+
+// Spec: §13.12 — `podium serve --config <path>` sets PODIUM_CONFIG_FILE
+// for the process, replacing a value inherited from the environment. The
+// inherited value names a missing file, so a run that kept it would print the
+// "does not exist" refusal. Both runs exit 1 here (validate fails on the
+// missing PODIUM_POSTGRES_DSN), so the test asserts the variable and the
+// absence of the refusal rather than the exit status. captureStderr swaps
+// the process-wide os.Stderr, so this test must not run in parallel.
+func TestServeCmd_ConfigFlagOverridesConfigFileEnv(t *testing.T) {
+	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
+	t.Setenv("PODIUM_SIGN", "none")
+	t.Setenv("PODIUM_REGISTRY_STORE", "postgres")
+	t.Setenv("PODIUM_POSTGRES_DSN", "")
+	named := filepath.Join(t.TempDir(), "registry.yaml")
+	if err := os.WriteFile(named, []byte("registry:\n  layer_path: /from/flag\n"), 0o644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	var code int
+	stderr := captureStderr(t, func() {
+		code = serveCmd([]string{"--config", named})
+	})
+	if code != 1 {
+		t.Fatalf("serveCmd exit = %d, want 1 (validate fails on missing PODIUM_POSTGRES_DSN); stderr:\n%s", code, stderr)
+	}
+	if got := os.Getenv("PODIUM_CONFIG_FILE"); got != named {
+		t.Errorf("PODIUM_CONFIG_FILE = %q, want %q (--config override)", got, named)
+	}
+	if strings.Contains(stderr, "does not exist") {
+		t.Errorf("stderr reports a missing config file, want the --config path read:\n%s", stderr)
 	}
 }
 
