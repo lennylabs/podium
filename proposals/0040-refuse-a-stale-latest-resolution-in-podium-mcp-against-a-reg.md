@@ -1,7 +1,7 @@
 # Proposal 0040: Refuse a stale latest resolution in podium-mcp against a registry-signed artifact revision
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), decided on the user's behalf under the overnight authorization. Signed off as staged. OQ-1: accept the protocol change to podium/delivery-record/2 with the signed ingest-time revision; /1 never shipped in a release, so no released consumer breaks, and the semver variant would refuse honest backports. OQ-2: keep the staged key (registry and artifact ID), because identity keying needs an organization the bridge cannot see under trusted-headers; an identity switch is covered by podium cache reset-revisions. Recorded as a possible refinement.
+- Status: Applied to spec (2026-10-03). Approved on 2026-10-03, decided on the user's behalf under the overnight authorization, and signed off as staged. OQ-1: accept the protocol change to podium/delivery-record/2 with the signed ingest-time revision; /1 never shipped in a release, so no released consumer breaks, and the semver variant would refuse honest backports. OQ-2: keep the staged key (registry and artifact ID), because identity keying needs an organization the bridge cannot see under trusted-headers; an identity switch is covered by podium cache reset-revisions. Recorded as a possible refinement.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
