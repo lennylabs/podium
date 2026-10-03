@@ -214,6 +214,24 @@ func (f *tenantWebhookFixture) listIDs(t *testing.T, user, org string) []string 
 	return ids
 }
 
+// getReceiver sends GET /v1/webhooks/{id} as user in org, requires 200, and
+// returns the decoded id and disabled flag.
+func (f *tenantWebhookFixture) getReceiver(t *testing.T, user, org, id string) (string, bool) {
+	t.Helper()
+	status, body := f.do(t, http.MethodGet, "/v1/webhooks/"+id, user, org, nil)
+	if status != http.StatusOK {
+		t.Fatalf("GET %s as %s = %d, want 200: %s", id, user, status, body)
+	}
+	var rec struct {
+		ID       string `json:"id"`
+		Disabled bool   `json:"disabled"`
+	}
+	if err := json.Unmarshal(body, &rec); err != nil {
+		t.Fatalf("decode receiver %q: %v", body, err)
+	}
+	return rec.ID, rec.Disabled
+}
+
 // storedCount returns the number of receivers stored across tenants.
 func (f *tenantWebhookFixture) storedCount(t *testing.T, tenants ...string) int {
 	t.Helper()
@@ -319,10 +337,18 @@ func TestWebhookTenant_CrossTenantIDIsUnknown(t *testing.T) {
 	if rec.Disabled {
 		t.Errorf("receiver %s disabled by another tenant's PUT", rb)
 	}
+	// The owning tenant's GET resolves through the routed tenant, so a GET
+	// handler keyed on the bound tenant fails here rather than passing.
+	if id, disabled := f.getReceiver(t, bobAdmin, tenantB, rb); id != rb || disabled {
+		t.Errorf("bob GET after alice's DELETE = (id %q, disabled %v), want (%s, false)", id, disabled, rb)
+	}
 
 	status, body := f.do(t, http.MethodPut, path, bobAdmin, tenantB, map[string]any{"disabled": true})
 	if status != http.StatusOK {
 		t.Fatalf("bob PUT %s = %d, want 200: %s", rb, status, body)
+	}
+	if id, disabled := f.getReceiver(t, bobAdmin, tenantB, rb); id != rb || !disabled {
+		t.Errorf("bob GET after PUT = (id %q, disabled %v), want (%s, true)", id, disabled, rb)
 	}
 	if rec, err := f.wstore.Get(ctx, tenantB, rb); err != nil || !rec.Disabled {
 		t.Errorf("bob PUT disabled:true not persisted: rec=%+v err=%v", rec, err)
@@ -330,8 +356,11 @@ func TestWebhookTenant_CrossTenantIDIsUnknown(t *testing.T) {
 	if status, body := f.do(t, http.MethodDelete, path, bobAdmin, tenantB, nil); status != http.StatusNoContent {
 		t.Fatalf("bob DELETE %s = %d, want 204: %s", rb, status, body)
 	}
-	if status, body := f.do(t, http.MethodGet, path, bobAdmin, tenantB, nil); status != http.StatusNotFound {
+	status, body = f.do(t, http.MethodGet, path, bobAdmin, tenantB, nil)
+	if status != http.StatusNotFound {
 		t.Errorf("bob GET after DELETE = %d, want 404: %s", status, body)
+	} else if code := bodyErrorCode(t, body); code != "registry.not_found" {
+		t.Errorf("bob GET after DELETE code = %q, want registry.not_found", code)
 	}
 	if _, err := f.wstore.Get(ctx, tenantB, rb); err == nil {
 		t.Errorf("(B, %s) row survives bob's DELETE", rb)
