@@ -7,10 +7,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Client, PendingLogin, RegistryError } from "./index.js";
+import {
+  Client,
+  DeviceCodeError,
+  PendingLogin,
+  RegistryError,
+  type DeviceCodeErrorReason,
+} from "./index.js";
 import { resolveRegistry } from "./config.js";
 import { LocalOverlay, rrfFuse } from "./overlay.js";
-import { DeviceCodeError } from "./oauth.js";
 
 async function writeFileAt(path: string, body: string): Promise<void> {
   await mkdir(join(path, ".."), { recursive: true });
@@ -203,117 +208,468 @@ describe("overlay merge", () => {
 });
 
 describe("login device-code flow", () => {
-  function oauthFetcher(opts: { alwaysPending?: boolean }): typeof fetch {
-    let polls = 0;
-    return async (input, init) => {
-      const url = typeof input === "string" ? input : input.toString();
-      if (url.endsWith("/.well-known/oauth-authorization-server")) {
-        return new Response(
-          JSON.stringify({
-            device_authorization_endpoint: "http://idp/device",
-            token_endpoint: "http://idp/token",
-          }),
-          { status: 200 },
-        );
-      }
-      if (url.endsWith("/device")) {
-        return new Response(
-          JSON.stringify({
-            device_code: "dev-123",
-            user_code: "WXYZ-1234",
-            verification_uri: "http://idp/activate",
-            interval: 0,
-            expires_in: 600,
-          }),
-          { status: 200 },
-        );
-      }
-      if (url.endsWith("/token")) {
-        polls += 1;
-        if (opts.alwaysPending || polls < 2) {
-          return new Response(JSON.stringify({ error: "authorization_pending" }), { status: 400 });
-        }
-        return new Response(JSON.stringify({ access_token: "tok-abc", token_type: "Bearer" }), {
-          status: 200,
-        });
-      }
-      // Catalog call: echo the Authorization header back as a result id.
-      const auth = (init?.headers as Record<string, string>)?.Authorization ?? "";
-      return new Response(JSON.stringify({ total_matched: 0, results: [{ id: auth }] }), {
-        status: 200,
-      });
-    };
+  // TokenReply names one scripted /token reply. Any other string is sent as
+  // an RFC 8628 error code the SDK does not recognize.
+  type TokenReply = "pending" | "slow_down" | "ok" | "expired_token" | "access_denied" | string;
+
+  interface StubOptions {
+    // Replies to successive /token requests; the last one repeats.
+    tokenReplies?: TokenReply[];
+    // Mode of every /token request: reply from the script, hang until the
+    // signal aborts, resolve with a body that errors on abort, or reject
+    // with a TypeError as fetch does on a network failure.
+    tokenMode?: "reply" | "hang" | "body-abort" | "transport-error";
+    completeUri?: boolean;
+    interval?: number;
+    expiresIn?: number;
+    discovery?: "ok" | "404" | "non-json" | "no-device-endpoint" | "no-token-endpoint";
+    device?: "ok" | "404" | "no-device-code";
   }
 
-  it("runs the flow and authenticates subsequent calls", async () => {
-    const c = new Client({ registry: "http://reg", fetcher: oauthFetcher({}) });
-    const tokens = await c.login({ timeoutMs: 10_000 });
-    expect(tokens.accessToken).toBe("tok-abc");
+  interface Stub {
+    fetcher: typeof fetch;
+    // Bodies of the /token requests, in arrival order.
+    tokenRequests: string[];
+    // Every URL the fetcher received, in arrival order.
+    urls: string[];
+    transportError: TypeError;
+  }
+
+  const ACCESS = "tok-abc";
+  const REFRESH = "refresh-xyz";
+
+  function abortError(): DOMException {
+    return new DOMException("aborted", "AbortError");
+  }
+
+  function tokenReply(reply: TokenReply): Response {
+    if (reply === "ok") {
+      return new Response(
+        JSON.stringify({ access_token: ACCESS, refresh_token: REFRESH, token_type: "Bearer" }),
+        { status: 200 },
+      );
+    }
+    const error = reply === "pending" ? "authorization_pending" : reply;
+    return new Response(JSON.stringify({ error }), { status: 400 });
+  }
+
+  // hangUntilAbort models a token request that never completes on its own:
+  // the deferred promise rejects with an AbortError when the signal aborts,
+  // as fetch does.
+  function hangUntilAbort(signal: AbortSignal | null | undefined): Promise<Response> {
+    return new Promise((_resolve, reject) => {
+      signal?.addEventListener("abort", () => reject(abortError()), { once: true });
+    });
+  }
+
+  // bodyAbortResponse resolves the headers at once and leaves the body open
+  // until the signal aborts, which errors the stream as fetch does when an
+  // abort lands during the body read.
+  function bodyAbortResponse(signal: AbortSignal | null | undefined): Response {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        signal?.addEventListener("abort", () => controller.error(abortError()), { once: true });
+      },
+    });
+    return new Response(body, { status: 200 });
+  }
+
+  function discoveryReply(mode: StubOptions["discovery"]): Response {
+    if (mode === "404") return new Response("not found", { status: 404 });
+    if (mode === "non-json") return new Response("<html>", { status: 200 });
+    const meta: Record<string, string> = {};
+    if (mode !== "no-token-endpoint") meta.token_endpoint = "http://idp/token";
+    if (mode !== "no-device-endpoint") meta.device_authorization_endpoint = "http://idp/device";
+    return new Response(JSON.stringify(meta), { status: 200 });
+  }
+
+  function deviceReply(opts: StubOptions): Response {
+    if (opts.device === "404") return new Response("not found", { status: 404 });
+    const body: Record<string, unknown> = {
+      user_code: "WXYZ-1234",
+      verification_uri: "http://idp/activate",
+      interval: opts.interval ?? 0,
+      expires_in: opts.expiresIn ?? 600,
+    };
+    if (opts.device !== "no-device-code") body.device_code = "dev-123";
+    if (opts.completeUri) body.verification_uri_complete = "http://idp/activate?code=WXYZ-1234";
+    return new Response(JSON.stringify(body), { status: 200 });
+  }
+
+  // oauthStub serves RFC 8414 discovery, the device-authorization endpoint,
+  // the token endpoint, and a catalog endpoint that echoes the Authorization
+  // header back as a result id.
+  function oauthStub(opts: StubOptions = {}): Stub {
+    const replies = opts.tokenReplies ?? ["pending", "ok"];
+    const stub: Stub = {
+      tokenRequests: [],
+      urls: [],
+      transportError: new TypeError("fetch failed"),
+      fetcher: async (input, init) => {
+        const url = typeof input === "string" ? input : input.toString();
+        stub.urls.push(url);
+        if (url.endsWith("/.well-known/oauth-authorization-server")) {
+          return discoveryReply(opts.discovery);
+        }
+        if (url.endsWith("/device")) return deviceReply(opts);
+        if (url.endsWith("/token")) {
+          stub.tokenRequests.push(String(init?.body ?? ""));
+          const mode = opts.tokenMode ?? "reply";
+          if (mode === "hang") return hangUntilAbort(init?.signal);
+          if (mode === "body-abort") return bodyAbortResponse(init?.signal);
+          if (mode === "transport-error") throw stub.transportError;
+          return tokenReply(replies[Math.min(stub.tokenRequests.length, replies.length) - 1]);
+        }
+        const auth = (init?.headers as Record<string, string>)?.Authorization ?? "";
+        return new Response(JSON.stringify({ total_matched: 0, results: [{ id: auth }] }), {
+          status: 200,
+        });
+      },
+    };
+    return stub;
+  }
+
+  function client(stub: Stub): Client {
+    return new Client({ registry: "http://reg", fetcher: stub.fetcher });
+  }
+
+  // catch turns a rejection into a value so a test can advance fake timers
+  // before awaiting it without an unhandled rejection in between.
+  function settle<T>(p: Promise<T>): Promise<T | DeviceCodeError> {
+    return p.catch((err: unknown) => err as DeviceCodeError);
+  }
+
+  async function bearerOf(c: Client): Promise<string> {
     const res = await c.searchArtifacts("anything");
-    expect((res.results ?? [])[0].id).toBe("Bearer tok-abc");
+    return String((res.results ?? [])[0].id);
+  }
+
+  function expectReason(err: unknown, reason: DeviceCodeErrorReason): DeviceCodeError {
+    expect(err).toBeInstanceOf(DeviceCodeError);
+    expect((err as DeviceCodeError).reason).toBe(reason);
+    return err as DeviceCodeError;
+  }
+
+  beforeEach(() => {
+    // An operator shell can point PODIUM_OAUTH_* at a real IdP; empty them so
+    // every flow resolves through the stub's discovery document.
+    for (const name of [
+      "PODIUM_OAUTH_CLIENT_ID",
+      "PODIUM_OAUTH_AUDIENCE",
+      "PODIUM_OAUTH_AUTHORIZATION_ENDPOINT",
+      "PODIUM_OAUTH_TOKEN_URL",
+    ]) {
+      vi.stubEnv(name, undefined);
+    }
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
+  // Spec: §6.3
+  it("runs the flow and authenticates subsequent calls", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const c = client(oauthStub());
+    const tokens = await c.login({ timeoutMs: 10_000 });
+    expect(tokens.accessToken).toBe(ACCESS);
+    expect(await bearerOf(c)).toBe(`Bearer ${ACCESS}`);
+  });
+
+  // Spec: §6.3
   it("times out when the IdP never completes", async () => {
-    const c = new Client({ registry: "http://reg", fetcher: oauthFetcher({ alwaysPending: true }) });
-    await expect(c.login({ timeoutMs: 200 })).rejects.toBeInstanceOf(DeviceCodeError);
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const c = client(oauthStub({ tokenReplies: ["pending"] }));
+    expectReason(await settle(c.login({ timeoutMs: 200 })), "timeout");
   });
 
-  describe("startLogin/finishLogin", () => {
-    beforeEach(() => {
-      // An operator shell can point PODIUM_OAUTH_* at a real IdP; clear them so
-      // the flow resolves through the stub's discovery document.
-      for (const name of [
-        "PODIUM_OAUTH_CLIENT_ID",
-        "PODIUM_OAUTH_AUDIENCE",
-        "PODIUM_OAUTH_AUTHORIZATION_ENDPOINT",
-        "PODIUM_OAUTH_TOKEN_URL",
-      ]) {
-        vi.stubEnv(name, undefined);
-      }
+  // Spec: §6.3
+  it("login prints the verification URL and user code to stderr", async () => {
+    const lines: string[] = [];
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+      lines.push(String(chunk));
+      return true;
     });
-    afterEach(() => {
-      vi.unstubAllEnvs();
-      vi.restoreAllMocks();
-    });
+    const c = client(oauthStub());
+    await c.login({ timeoutMs: 10_000 });
+    expect(lines).toEqual(["Visit: http://idp/activate\n", "User code: WXYZ-1234\n"]);
+    expect(await bearerOf(c)).toBe(`Bearer ${ACCESS}`);
+  });
 
-    // Spec: §6.3
-    it("starts without printing and installs the token on finish", async () => {
-      const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      const c = new Client({ registry: "http://reg", fetcher: oauthFetcher({}) });
-      const pending = await c.startLogin();
-      expect(write).not.toHaveBeenCalled();
-      expect(pending).toBeInstanceOf(PendingLogin);
-      expect(pending.userCode).toBe("WXYZ-1234");
-      expect(pending.verificationUri).toBe("http://idp/activate");
-      const tokens = await c.finishLogin(pending, { timeoutMs: 10_000 });
-      expect(tokens.accessToken).toBe("tok-abc");
-      const res = await c.searchArtifacts("anything");
-      expect((res.results ?? [])[0].id).toBe("Bearer tok-abc");
-    });
+  // Spec: §6.3
+  it("login reports expired when the code expires before the timeout", async () => {
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    vi.useFakeTimers();
+    const stub = oauthStub({ tokenReplies: ["pending"], interval: 1, expiresIn: 3 });
+    const p = settle(client(stub).login({ timeoutMs: 600_000 }));
+    await vi.advanceTimersByTimeAsync(5_000);
+    expectReason(await p, "expired");
+    expect(stub.tokenRequests.length).toBeGreaterThan(0);
+  });
 
-    // Spec: §6.3
-    it("leaves the client tokenless when the finish call fails", async () => {
-      const c = new Client({ registry: "http://reg", fetcher: oauthFetcher({ alwaysPending: true }) });
-      const pending = await c.startLogin();
-      const err = await c.finishLogin(pending, { timeoutMs: 50 }).catch((e: unknown) => e);
-      expect(err).toBeInstanceOf(DeviceCodeError);
-      expect((err as DeviceCodeError).reason).toBe("timeout");
-      const again = await c.finishLogin(pending).catch((e: unknown) => e);
-      expect((again as DeviceCodeError).reason).toBe("consumed");
-      const res = await c.searchArtifacts("anything");
-      expect((res.results ?? [])[0].id).toBe("");
-    });
+  // Spec: §6.3
+  it("startLogin returns the handle without printing or polling", async () => {
+    const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const stub = oauthStub({ interval: 7, expiresIn: 900 });
+    const pending = await client(stub).startLogin();
+    expect(write).not.toHaveBeenCalled();
+    expect(pending).toBeInstanceOf(PendingLogin);
+    expect(pending.verificationUri).toBe("http://idp/activate");
+    expect(pending.verificationUriComplete).toBeUndefined();
+    expect(pending.userCode).toBe("WXYZ-1234");
+    expect(pending.expiresInMs).toBe(900_000);
+    expect(pending.intervalMs).toBe(7_000);
+    expect(stub.tokenRequests).toHaveLength(0);
+    expect(JSON.stringify(pending)).not.toContain("dev-123");
+    expect(Object.keys(pending)).not.toContain("deviceCode");
+  });
 
-    // Spec: §6.3
-    it("login prints the verification URL and user code to stderr", async () => {
-      const lines: string[] = [];
-      vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
-        lines.push(String(chunk));
-        return true;
-      });
-      const c = new Client({ registry: "http://reg", fetcher: oauthFetcher({}) });
-      await c.login({ timeoutMs: 10_000 });
-      expect(lines).toEqual(["Visit: http://idp/activate\n", "User code: WXYZ-1234\n"]);
+  // Spec: §6.3
+  it("startLogin exposes verificationUriComplete when the IdP sends it", async () => {
+    const pending = await client(oauthStub({ completeUri: true })).startLogin();
+    expect(pending.verificationUriComplete).toBe("http://idp/activate?code=WXYZ-1234");
+  });
+
+  // Spec: §6.3
+  it("finishLogin installs the access token and leaves the refresh token unused", async () => {
+    const stub = oauthStub({ tokenReplies: ["pending", "ok"] });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    const tokens = await c.finishLogin(pending, { timeoutMs: 10_000 });
+    expect(tokens.accessToken).toBe(ACCESS);
+    expect(tokens.refreshToken).toBe(REFRESH);
+    expect(await bearerOf(c)).toBe(`Bearer ${ACCESS}`);
+    expect(stub.tokenRequests).toHaveLength(2);
+    for (const body of stub.tokenRequests) expect(body).not.toContain(REFRESH);
+  });
+
+  // Spec: §6.3
+  it("slow_down adds five seconds to the polling interval", async () => {
+    vi.useFakeTimers();
+    const stub = oauthStub({ tokenReplies: ["slow_down", "ok"], interval: 1 });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    const p = settle(c.finishLogin(pending));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(stub.tokenRequests).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(5_999);
+    expect(stub.tokenRequests).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(stub.tokenRequests).toHaveLength(2);
+    expect((await p as { accessToken: string }).accessToken).toBe(ACCESS);
+  });
+
+  // Spec: §6.3
+  it("finishLogin reports denied and leaves the client tokenless", async () => {
+    const c = client(oauthStub({ tokenReplies: ["access_denied"] }));
+    const pending = await c.startLogin();
+    expectReason(await settle(c.finishLogin(pending)), "denied");
+    expect(await bearerOf(c)).toBe("");
+  });
+
+  // Spec: §6.3
+  it("finishLogin reports expired when the IdP returns expired_token", async () => {
+    const c = client(oauthStub({ tokenReplies: ["expired_token"] }));
+    const pending = await c.startLogin();
+    expectReason(await settle(c.finishLogin(pending)), "expired");
+  });
+
+  // Spec: §6.3
+  it("finishLogin after local expiry sends no token request", async () => {
+    vi.useFakeTimers();
+    const stub = oauthStub({ expiresIn: 30 });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    await vi.advanceTimersByTimeAsync(pending.expiresInMs + 1);
+    expectReason(await settle(c.finishLogin(pending)), "expired");
+    expect(stub.tokenRequests).toHaveLength(0);
+  });
+
+  // Spec: §6.3
+  it("code expiry ends polling before a longer timeout", async () => {
+    vi.useFakeTimers();
+    const stub = oauthStub({ tokenReplies: ["pending"], interval: 10, expiresIn: 30 });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    const p = settle(c.finishLogin(pending, { timeoutMs: 600_000 }));
+    await vi.advanceTimersByTimeAsync(40_000);
+    expectReason(await p, "expired");
+  });
+
+  // Spec: §6.3
+  it("the timeout runs from the finish call", async () => {
+    vi.useFakeTimers();
+    const stub = oauthStub({ tokenReplies: ["pending"], interval: 10, expiresIn: 600 });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    await vi.advanceTimersByTimeAsync(100_000);
+    const p = settle(c.finishLogin(pending, { timeoutMs: 50_000 }));
+    await vi.advanceTimersByTimeAsync(60_000);
+    expectReason(await p, "timeout");
+    expect(stub.tokenRequests.length).toBeGreaterThan(0);
+  });
+
+  // Spec: §6.3
+  it("an already-aborted signal cancels without a request and consumes the handle", async () => {
+    const stub = oauthStub();
+    const c = client(stub);
+    const pending = await c.startLogin();
+    const controller = new AbortController();
+    controller.abort();
+    const err = expectReason(
+      await settle(c.finishLogin(pending, { signal: controller.signal })),
+      "cancelled",
+    );
+    expect(err.cause).toBe(controller.signal.reason);
+    expect(stub.tokenRequests).toHaveLength(0);
+    expectReason(await settle(c.finishLogin(pending)), "consumed");
+    expect(stub.tokenRequests).toHaveLength(0);
+  });
+
+  // Spec: §6.3
+  it("an abort during the sleep cancels after one token request", async () => {
+    vi.useFakeTimers();
+    const stub = oauthStub({ tokenReplies: ["pending"], interval: 1 });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    const controller = new AbortController();
+    const p = settle(c.finishLogin(pending, { signal: controller.signal }));
+    await vi.advanceTimersByTimeAsync(1_500);
+    expect(stub.tokenRequests).toHaveLength(1);
+    controller.abort();
+    const err = expectReason(await p, "cancelled");
+    expect(err.cause).toBe(controller.signal.reason);
+    expect(stub.tokenRequests).toHaveLength(1);
+    expect(await bearerOf(c)).toBe("");
+  });
+
+  // Spec: §6.3
+  it("an abort while a token request is in flight cancels it", async () => {
+    const stub = oauthStub({ tokenMode: "hang" });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    const controller = new AbortController();
+    const p = settle(c.finishLogin(pending, { signal: controller.signal }));
+    await vi.waitFor(() => expect(stub.tokenRequests).toHaveLength(1));
+    controller.abort();
+    const err = expectReason(await p, "cancelled");
+    expect(err.cause).toBe(controller.signal.reason);
+  });
+
+  // Spec: §6.3
+  it("an abort while the token response body is read cancels it", async () => {
+    const stub = oauthStub({ tokenMode: "body-abort" });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    const controller = new AbortController();
+    const p = settle(c.finishLogin(pending, { signal: controller.signal }));
+    await vi.waitFor(() => expect(stub.tokenRequests).toHaveLength(1));
+    controller.abort();
+    const err = expectReason(await p, "cancelled");
+    expect(err.cause).toBe(controller.signal.reason);
+  });
+
+  // Spec: §6.3
+  it("a transport failure without an abort reports failed with the cause", async () => {
+    const stub = oauthStub({ tokenMode: "transport-error" });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    const err = expectReason(await settle(c.finishLogin(pending)), "failed");
+    expect(err.cause).toBe(stub.transportError);
+  });
+
+  // Spec: §6.3
+  it("concurrent finish calls have a single winner", async () => {
+    const stub = oauthStub({ tokenReplies: ["ok"] });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    const results = await Promise.all([
+      settle(c.finishLogin(pending)),
+      settle(c.finishLogin(pending)),
+    ]);
+    const errors = results.filter((r) => r instanceof DeviceCodeError);
+    const wins = results.filter((r) => !(r instanceof DeviceCodeError));
+    expect(wins).toHaveLength(1);
+    expect(errors).toHaveLength(1);
+    expectReason(errors[0], "consumed");
+    expect(stub.tokenRequests).toHaveLength(1);
+  });
+
+  // Spec: §6.3
+  it("a handle stays consumed after a failed finish", async () => {
+    const stub = oauthStub({ tokenReplies: ["access_denied"] });
+    const c = client(stub);
+    const pending = await c.startLogin();
+    expectReason(await settle(c.finishLogin(pending)), "denied");
+    const sent = stub.tokenRequests.length;
+    expectReason(await settle(c.finishLogin(pending)), "consumed");
+    expect(stub.tokenRequests).toHaveLength(sent);
+  });
+
+  // Spec: §6.3
+  it("startLogin reports failed for a broken discovery or device reply", async () => {
+    const cases: StubOptions[] = [
+      { discovery: "404" },
+      { discovery: "no-device-endpoint" },
+      { device: "404" },
+      { device: "no-device-code" },
+    ];
+    for (const opts of cases) {
+      const stub = oauthStub(opts);
+      expectReason(await settle(client(stub).startLogin()), "failed");
+      expect(stub.tokenRequests).toHaveLength(0);
+    }
+  });
+
+  // Spec: §6.3
+  it("startLogin reports failed with the cause when discovery is not JSON", async () => {
+    const err = expectReason(
+      await settle(client(oauthStub({ discovery: "non-json" })).startLogin()),
+      "failed",
+    );
+    expect(err.cause).toBeInstanceOf(SyntaxError);
+  });
+
+  // Spec: §6.3
+  it("polls the registry's token path when discovery names no token endpoint", async () => {
+    const stub = oauthStub({ discovery: "no-token-endpoint", tokenReplies: ["ok"] });
+    const c = client(stub);
+    const tokens = await c.finishLogin(await c.startLogin());
+    expect(tokens.accessToken).toBe(ACCESS);
+    expect(stub.urls).toContain("http://reg/oauth2/token");
+  });
+
+  // Spec: §6.3
+  it("an unrecognized token error reports failed", async () => {
+    const c = client(oauthStub({ tokenReplies: ["server_on_fire"] }));
+    const pending = await c.startLogin();
+    expectReason(await settle(c.finishLogin(pending)), "failed");
+  });
+
+  // Spec: §6.3
+  it("a PendingLogin built with new reports failed and sends no request", async () => {
+    const stub = oauthStub();
+    const forged = new PendingLogin({
+      deviceCode: "dev-forged",
+      userCode: "FAKE-0000",
+      verificationUri: "http://idp/activate",
+      verificationUriComplete: "",
+      intervalMs: 0,
+      expiresInMs: 600_000,
+      issuedAtMs: Date.now(),
     });
+    expectReason(await settle(client(stub).finishLogin(forged)), "failed");
+    expect(stub.urls).toHaveLength(0);
+  });
+
+  // Spec: §6.3
+  it("the package root exports the login pair's public names", async () => {
+    const reason: DeviceCodeErrorReason = "consumed";
+    expect(new DeviceCodeError("x", reason).reason).toBe("consumed");
+    const pending = await client(oauthStub()).startLogin();
+    expect(pending instanceof PendingLogin).toBe(true);
+    expect(typeof Client.prototype.startLogin).toBe("function");
+    expect(typeof Client.prototype.finishLogin).toBe("function");
   });
 });
