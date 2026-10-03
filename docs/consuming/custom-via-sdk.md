@@ -135,7 +135,7 @@ for event in client.subscribe(["artifact.published", "artifact.deprecated"]):
     handle_event(event)
 ```
 
-The same events fire outbound webhooks; the subscription is the in-process equivalent for code that's already running.
+The subscription delivers only the events whose layer the client's identity can see, narrowed by the client's path-scoped OAuth scopes for artifact and domain events. Outbound webhooks carry the same event types to receivers that a tenant admin configures, and a receiver's event filter is the only narrowing applied to it.
 
 ---
 

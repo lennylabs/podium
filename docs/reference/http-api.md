@@ -590,7 +590,7 @@ Returns the calling tenant's configured limits and current usage. Read-only and 
 GET /v1/events?type={event}&type={event}
 ```
 
-Streams change events as NDJSON (`Content-Type: application/x-ndjson`). The connection stays open until the client disconnects. Repeat `type` to filter by event name; omit it to receive every event. The handler emits a `{"event":"_heartbeat"}` line every 30 seconds so a proxy-buffered consumer sees the connection stay alive. This is the wire surface the SDK `client.subscribe(events)` helper wraps.
+Streams change events as NDJSON (`Content-Type: application/x-ndjson`). The connection stays open until the client disconnects. Repeat `type` to filter by event name; omit it to receive every event type. The handler emits a `{"event":"_heartbeat"}` line every 30 seconds so a proxy-buffered consumer sees the connection stay alive. This is the wire surface the SDK `client.subscribe(events)` helper wraps. The registry delivers an event only when the caller's identity can see the layer the event names under the layer visibility rules. For each event, it reads the layer visibility once and each group's membership once, when a caller's delivery first needs them, and applies those reads to every caller of the event. The caller's path-scoped OAuth scopes also narrow artifact and domain events. A `layer.config_changed` also reaches a caller that could see the layer before the change. The event a reorder records names only the reordered layers the caller can see. An event of another tenant is withheld, and so is an event the registry cannot evaluate, for example because the layer list cannot be read. A withheld event leaves no trace on the stream, and the `_heartbeat` line reaches every caller. The registry resolves the caller's identity when the stream opens, so a credential that expires while the stream is open does not close it, and a group claim in that credential applies until the caller reconnects. A registry started in public mode or with no identity provider configured admits every layer, so a caller there receives every event its scopes permit.
 
 ---
 
@@ -681,7 +681,10 @@ These routes are authorized by the instance-operator role rather than the per-te
 
 ## Outbound webhooks
 
-The registry emits outbound webhooks for change events. Configure receivers per org (URL + HMAC secret).
+The registry emits outbound webhooks for change events. Configure receivers per org (URL + HMAC secret). Layer visibility does not narrow receiver delivery. A receiver receives every event its event filter matches, whatever layer the event names, and it carries no layer scope.
+
+> [!NOTE]
+> On a multi-tenant registry, every routed tenant shares one receiver pool: a receiver registered by one tenant's admin receives the events of every tenant.
 
 | Event | When |
 |:--|:--|
@@ -784,7 +787,7 @@ A receiver cannot call GitHub's `repository_dispatch` endpoint directly: the reg
 
 ## Subscriptions (SDK)
 
-The SDKs expose `client.subscribe(events)` for in-process consumers that don't want to run their own webhook receiver. The wire surface is the `/v1/events` streaming endpoint; the SDK abstracts the connection and reconnection logic.
+The SDKs expose `client.subscribe(events)` for in-process consumers that don't want to run their own webhook receiver. The wire surface is the `/v1/events` streaming endpoint; the SDK abstracts the connection and reconnection logic. The stream applies the caller's layer visibility, as the Events stream section describes.
 
 Useful for sync watchers, downstream rebuild triggers, and eval pipelines reacting to new artifact versions.
 
