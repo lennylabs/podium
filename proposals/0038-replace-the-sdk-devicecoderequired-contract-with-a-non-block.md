@@ -1,7 +1,7 @@
 # Proposal 0038: Replace the SDK DeviceCodeRequired contract with a non-blocking start_login/finish_login pair in both SDKs
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-02). Signed off as staged. OQ-1: keep the DeviceCodeError.reason attribute as drafted.
+- Status: Applied to spec (2026-10-02). Signed off as staged. OQ-1: keep the DeviceCodeError.reason attribute as drafted.
 - Date: 2026-10-02
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
