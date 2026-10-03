@@ -927,3 +927,51 @@ func TestLoadConfig_RefusesWithoutVerificationMaterial(t *testing.T) {
 		t.Fatalf("loadConfig = %v, want config.signature_provider_unavailable", err)
 	}
 }
+
+// Spec: §6.2 — loadConfig reads the runtime-capability variables. The enforce
+// and ignore flags take effect only on the exact value true,
+// PODIUM_HOST_PYTHON and PODIUM_HOST_NODE are copied verbatim (whitespace
+// included), and PODIUM_HOST_PACKAGES is split on commas with each entry
+// trimmed and empty entries dropped.
+func TestLoadConfig_RuntimeVariables(t *testing.T) {
+	cases := []struct {
+		name string
+		env  map[string]string
+		want config
+	}{
+		{name: "flags true", env: map[string]string{"PODIUM_ENFORCE_RUNTIME_REQUIREMENTS": "true", "PODIUM_IGNORE_RUNTIME_REQUIREMENTS": "true"}, want: config{enforceRuntime: true, ignoreRuntime: true}},
+		{name: "flags TRUE", env: map[string]string{"PODIUM_ENFORCE_RUNTIME_REQUIREMENTS": "TRUE", "PODIUM_IGNORE_RUNTIME_REQUIREMENTS": "TRUE"}},
+		{name: "flags 1", env: map[string]string{"PODIUM_ENFORCE_RUNTIME_REQUIREMENTS": "1", "PODIUM_IGNORE_RUNTIME_REQUIREMENTS": "1"}},
+		{name: "flags yes", env: map[string]string{"PODIUM_ENFORCE_RUNTIME_REQUIREMENTS": "yes", "PODIUM_IGNORE_RUNTIME_REQUIREMENTS": "yes"}},
+		{name: "host versions verbatim", env: map[string]string{"PODIUM_HOST_PYTHON": "3.11.4", "PODIUM_HOST_NODE": "20.11.1"}, want: config{hostPython: "3.11.4", hostNode: "20.11.1"}},
+		{name: "whitespace host versions verbatim", env: map[string]string{"PODIUM_HOST_PYTHON": "  ", "PODIUM_HOST_NODE": " \t"}, want: config{hostPython: "  ", hostNode: " \t"}},
+		{name: "packages trimmed", env: map[string]string{"PODIUM_HOST_PACKAGES": "jq, curl,"}, want: config{hostPackages: []string{"jq", "curl"}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hermetic(t)
+			t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
+			for _, k := range []string{"PODIUM_HOST_PYTHON", "PODIUM_HOST_NODE", "PODIUM_HOST_PACKAGES", "PODIUM_ENFORCE_RUNTIME_REQUIREMENTS", "PODIUM_IGNORE_RUNTIME_REQUIREMENTS"} {
+				t.Setenv(k, tc.env[k])
+			}
+			cfg, err := loadConfig()
+			if err != nil {
+				t.Fatalf("loadConfig: %v", err)
+			}
+			if cfg.enforceRuntime != tc.want.enforceRuntime || cfg.ignoreRuntime != tc.want.ignoreRuntime {
+				t.Errorf("enforce=%v ignore=%v, want enforce=%v ignore=%v",
+					cfg.enforceRuntime, cfg.ignoreRuntime, tc.want.enforceRuntime, tc.want.ignoreRuntime)
+			}
+			if cfg.hostPython != tc.want.hostPython || cfg.hostNode != tc.want.hostNode {
+				t.Errorf("hostPython=%q hostNode=%q, want %q %q", cfg.hostPython, cfg.hostNode, tc.want.hostPython, tc.want.hostNode)
+			}
+			wantPkgs := tc.want.hostPackages
+			if wantPkgs == nil {
+				wantPkgs = []string{}
+			}
+			if !reflect.DeepEqual(cfg.hostPackages, wantPkgs) {
+				t.Errorf("hostPackages = %#v, want %#v", cfg.hostPackages, wantPkgs)
+			}
+		})
+	}
+}

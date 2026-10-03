@@ -111,3 +111,63 @@ func TestSandboxProfileOf(t *testing.T) {
 		t.Errorf("absent profile = %q, want unrestricted", got)
 	}
 }
+
+// Spec: §4.4.1 — PODIUM_IGNORE_RUNTIME_REQUIREMENTS takes precedence over
+// PODIUM_ENFORCE_RUNTIME_REQUIREMENTS: with both set, an unsatisfied
+// requirement is admitted.
+func TestRuntimePolicy_IgnoreWinsOverEnforce(t *testing.T) {
+	t.Parallel()
+	srv := &mcpServer{cfg: &config{enforceRuntime: true, ignoreRuntime: true}}
+	if err := srv.enforceRuntimePolicy(runtimeResp("  python: \">=3.10\"\n")); err != nil {
+		t.Errorf("ignore should win over enforce: %v", err)
+	}
+}
+
+// Spec: §4.4.1 — frontmatter enforceRuntimePolicy cannot parse is refused
+// with ErrRuntimeUnavailable even when the ignore flag is set, because the
+// parse runs before the ignore branch.
+//
+// The test pins enforceRuntimePolicy's own branch only. deliverLoadArtifact
+// runs the sandbox gate first, and that gate refuses unparseable frontmatter
+// with materialize.sandbox_unsupported, so a client never receives
+// materialize.runtime_unavailable for this input.
+func TestRuntimePolicy_MalformedFrontmatterRefusedEvenWithIgnore(t *testing.T) {
+	t.Parallel()
+	srv := &mcpServer{cfg: &config{enforceRuntime: true, ignoreRuntime: true}}
+	resp := runtimeResp("")
+	resp.Frontmatter = "---\ntype: [skill\nversion: 1.0.0\n---\n"
+	if err := srv.enforceRuntimePolicy(resp); !errors.Is(err, materialize.ErrRuntimeUnavailable) {
+		t.Errorf("err = %v, want ErrRuntimeUnavailable for malformed frontmatter", err)
+	}
+}
+
+// Spec: §4.4.1 / §6.2 — PODIUM_IGNORE_RUNTIME_REQUIREMENTS has no effect
+// while the gate is inactive: the artifact is admitted because the gate does
+// not run, and no bypass warning is written.
+//
+// The test does not call t.Parallel because captureStderr swaps the
+// process-wide os.Stderr.
+func TestRuntimePolicy_IgnoreNoEffectWhenUnconfigured(t *testing.T) {
+	srv := &mcpServer{cfg: &config{ignoreRuntime: true}}
+	var err error
+	out := captureStderr(t, func() {
+		err = srv.enforceRuntimePolicy(runtimeResp("  python: \">=3.11\"\n"))
+	})
+	if err != nil {
+		t.Errorf("inactive gate should admit: %v", err)
+	}
+	if strings.Contains(out, "WARN:") {
+		t.Errorf("inactive gate wrote a bypass warning: %q", out)
+	}
+}
+
+// Spec: §6.2 — a whitespace-only PODIUM_HOST_PYTHON activates the gate and
+// then fails every python requirement, because loadConfig copies the value
+// verbatim and the version check trims it to empty.
+func TestRuntimePolicy_WhitespaceHostPythonFailsRequirement(t *testing.T) {
+	t.Parallel()
+	srv := &mcpServer{cfg: &config{hostPython: "  "}}
+	if err := srv.enforceRuntimePolicy(runtimeResp("  python: \">=3.10\"\n")); !errors.Is(err, materialize.ErrRuntimeUnavailable) {
+		t.Errorf("err = %v, want ErrRuntimeUnavailable for whitespace host python", err)
+	}
+}
