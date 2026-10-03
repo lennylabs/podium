@@ -25,6 +25,13 @@ func WithURISAN(uri string) EnvOpt {
 // otherName, so it carries no email or URI SAN.
 func WithOtherNameSANOnly() EnvOpt { return func(c *envConfig) { c.leaf.otherNameOnly = true } }
 
+// WithNonCriticalSAN writes the otherName SAN of WithOtherNameSANOnly as a
+// non-critical extension. Go's x509 parser records a critical SAN that holds
+// no email, DNS, IP, or URI name as an unhandled critical extension, which
+// fails the chain check before the identity match runs. A non-critical SAN
+// lets the leaf reach the identity match.
+func WithNonCriticalSAN() EnvOpt { return func(c *envConfig) { c.leaf.sanNonCritical = true } }
+
 // WithIssuerExt sets the leaf extension oid to raw, replacing the default
 // 1.3.6.1.4.1.57264.1.8 issuer when oid names it. IssuerValue encodes a
 // well-formed .1.8 value.

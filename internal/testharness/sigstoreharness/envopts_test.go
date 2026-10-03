@@ -34,11 +34,8 @@ func TestEnvelope_Options(t *testing.T) {
 				t.Fatalf("uris = %v", in.leaf.URIs)
 			}
 		}},
-		{"otherName SAN only", []EnvOpt{WithOtherNameSANOnly()}, func(t *testing.T, in inspection) {
-			if len(in.leaf.EmailAddresses)+len(in.leaf.URIs) != 0 || extValue(in.leaf, oidSubjectAltName) == nil {
-				t.Fatalf("emails %v uris %v", in.leaf.EmailAddresses, in.leaf.URIs)
-			}
-		}},
+		{"otherName SAN only", []EnvOpt{WithOtherNameSANOnly()}, otherNameSANIs(true)},
+		{"non-critical otherName SAN", []EnvOpt{WithOtherNameSANOnly(), WithNonCriticalSAN()}, otherNameSANIs(false)},
 		{"issuer extensions", []EnvOpt{WithIssuerExt(OIDIssuerV2, []byte{0xff}), WithIssuerExt(OIDIssuerV1, []byte(DefaultIssuer))}, func(t *testing.T, in inspection) {
 			equalBytes(t, ".1.8", extValue(in.leaf, OIDIssuerV2), []byte{0xff})
 			equalBytes(t, ".1.1", extValue(in.leaf, OIDIssuerV1), []byte(DefaultIssuer))
@@ -211,5 +208,25 @@ func TestEnvelope_RejectsMalformedContentHash(t *testing.T) {
 	cfg.leaf.uris = []string{"://bad"}
 	if _, err := h.buildEnvelope(hash, cfg); err == nil || !strings.Contains(err.Error(), "uri SAN") {
 		t.Fatalf("bad URI SAN: err = %v", err)
+	}
+}
+
+// otherNameSANIs checks that the leaf carries no email or URI SAN and that
+// its SAN extension has the given criticality.
+func otherNameSANIs(critical bool) func(t *testing.T, in inspection) {
+	return func(t *testing.T, in inspection) {
+		t.Helper()
+		if len(in.leaf.EmailAddresses)+len(in.leaf.URIs) != 0 {
+			t.Fatalf("emails %v uris %v", in.leaf.EmailAddresses, in.leaf.URIs)
+		}
+		for _, e := range in.leaf.Extensions {
+			if e.Id.Equal(oidSubjectAltName) {
+				if e.Critical != critical {
+					t.Fatalf("SAN critical = %v, want %v", e.Critical, critical)
+				}
+				return
+			}
+		}
+		t.Fatal("leaf carries no SAN extension")
 	}
 }

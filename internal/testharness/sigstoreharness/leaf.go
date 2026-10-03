@@ -31,8 +31,10 @@ type leafConfig struct {
 	email         string
 	uris          []string
 	otherNameOnly bool
-	issuerExts    []pkix.Extension
-	eku           []x509.ExtKeyUsage
+	// sanNonCritical writes the otherName SAN extension non-critical.
+	sanNonCritical bool
+	issuerExts     []pkix.Extension
+	eku            []x509.ExtKeyUsage
 }
 
 // defaultLeafConfig is the leaf Fulcio issues for alice@acme.com.
@@ -66,7 +68,7 @@ func (c leafConfig) spec(clock time.Time) (certSpec, error) {
 		extra:     append([]pkix.Extension(nil), c.issuerExts...),
 	}
 	if c.otherNameOnly {
-		san, err := otherNameSAN(DefaultSAN)
+		san, err := otherNameSAN(DefaultSAN, !c.sanNonCritical)
 		if err != nil {
 			return certSpec{}, err
 		}

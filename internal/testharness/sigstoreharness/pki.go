@@ -211,8 +211,10 @@ func (a authority) timestampSigner(cn string, clock time.Time, usage tsaUsage) (
 
 // otherNameSAN returns a subject-alternative-name extension whose only
 // entry is a Fulcio username otherName, so the leaf carries no email or
-// URI SAN.
-func otherNameSAN(username string) (pkix.Extension, error) {
+// URI SAN. Fulcio marks the extension critical because the leaf subject is
+// empty (RFC 5280 §4.2.1.6), and critical is false only for a test that
+// needs the leaf to pass the chain check.
+func otherNameSAN(username string, critical bool) (pkix.Extension, error) {
 	var w derWriter
 	oid := w.marshal(oidFulcioUsername, "")
 	if w.err != nil {
@@ -220,5 +222,5 @@ func otherNameSAN(username string) (pkix.Extension, error) {
 	}
 	// otherName is [0] IMPLICIT OtherName; its value is [0] EXPLICIT.
 	name := tlv(tagContext0, append(oid, tlv(tagContext0, utf8String(username))...))
-	return pkix.Extension{Id: oidSubjectAltName, Critical: true, Value: seq(name)}, nil
+	return pkix.Extension{Id: oidSubjectAltName, Critical: critical, Value: seq(name)}, nil
 }
