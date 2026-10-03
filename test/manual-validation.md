@@ -230,6 +230,7 @@ rm -rf "$WORK"
 | S79 | A workspace target's `$PODIUM_CHANGED` follows the bytes on disk | solo | none | none | none |
 | S80 | Every harness output carries the derived skill compatibility line | solo | none | none | none |
 | S81 | The Python SDK login pair against a live IdP | none (SDK only) | none | none | an IdP with a device-code client, a desktop browser |
+| S82 | The Python SDK rejects a harness other than `none` on materialize | none (SDK only) | none | none | none |
 
 ---
 
@@ -10098,3 +10099,87 @@ silent while the start call runs.
    the IdP's `access_denied` reply was not mapped.
 
 **Cleanup.** `cd /` and `rm -rf "$WORK"`.
+
+---
+
+## S82: The Python SDK rejects a harness other than `none` on materialize
+
+**Goal.** Validate that `materialize()` on a loaded artifact and on a batch
+item writes the canonical layout for `harness="none"` and raises `ValueError`
+for any other value without writing a file.
+
+**Covers.** The §7.6 `harness` argument contract and the §2.2 statement that
+the SDKs run no harness adapter.
+
+**Why by hand.** The SDK unit tests assert the exception type and an empty
+directory. A person reads the error message a caller sees in a terminal and
+confirms that it names the canonical layout and points at `podium sync`.
+
+**Prerequisites.** `python3` 3.10 or later.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then put the
+   SDK on the path and write the script.
+
+   ```bash
+   export PYTHONPATH="$REAL_HOME/projects/podium/sdks/podium-py"
+   cat > "$WORK/mat.py" <<'PY'
+   import os, sys
+   from podium import BatchResult, LoadedArtifact, RegistryError
+   art = LoadedArtifact(id="a/b", type="context", version="1.0.0",
+                        manifest_body="x\n", frontmatter="---\ntype: context\n---\n")
+   bad = BatchResult(id="x/y", status="error",
+                     error=RegistryError("visibility.denied", "no"))
+   out = os.path.join(os.environ["WORK"], "out")
+   os.makedirs(out, exist_ok=True)
+   mode = sys.argv[1]
+   try:
+       if mode == "none":
+           print("WROTE", art.materialize(out, harness="none"))
+       elif mode == "claude":
+           art.materialize(out, harness="claude-code")
+       else:
+           bad.materialize(out, harness="claude-code")
+   except Exception as e:
+       print("RAISED", type(e).__name__, e)
+   print("FILES", sorted(os.listdir(out)))
+   PY
+   ```
+
+   **Expect.** The script file exists.
+
+2. Materialize with `harness="claude-code"`.
+
+   ```bash
+   python3 "$WORK/mat.py" claude
+   ```
+
+   **Expect.** `RAISED ValueError materialize() writes the canonical layout
+   only; harness must be 'none', got 'claude-code'. Use `podium sync --harness
+   <name>` for harness-native files.` followed by `FILES []`. A `FILES` line
+   listing `a` is the shipped behavior this scenario exists to catch.
+
+3. Materialize an error batch item with `harness="claude-code"`.
+
+   ```bash
+   python3 "$WORK/mat.py" batch-error
+   ```
+
+   **Expect.** `RAISED ValueError` with the same message, and `FILES []`.
+   `RAISED VisibilityDenied` or any other registry error means the status
+   check ran first, which is a defect.
+
+4. Materialize with `harness="none"`.
+
+   ```bash
+   python3 "$WORK/mat.py" none
+   cat "$WORK/out/a/b/ARTIFACT.md"
+   ```
+
+   **Expect.** A `WROTE` line naming `.../out/a/b/ARTIFACT.md`, `FILES ['a']`,
+   and the file prints `---`, `type: context`, `---`.
+
+**Cleanup.** `cd /` and `rm -rf "$WORK"`.
+
+---
