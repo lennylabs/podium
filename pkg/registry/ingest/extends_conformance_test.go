@@ -183,6 +183,42 @@ func TestExtends_RangeReingestStaysIdempotentAfterParentDeprecation(t *testing.T
 	}
 }
 
+// Spec: §4.7.6 — a stored child version keeps its extends: pin, and a
+// re-ingest of its unchanged bytes is idempotent even after a newer live
+// parent version lands inside the referenced range.
+// Spec: §4.7 version immutability — the unchanged bytes classify as
+// idempotent rather than as a conflict or a re-pin.
+// The parent 1.1.0 is deliberately live. A deprecated 1.1.0 is skipped by
+// resolution and would leave the pin on 1.0.0 for an unrelated reason, so the
+// test would pass even if an idempotent re-ingest re-folded the child.
+func TestExtends_UnchangedChildReingestKeepsPinAfterNewerLiveParent(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	st := newStore(t)
+	ingestOne(t, st, "L1", "shared/parent", agentParent("live"))
+
+	child := "---\ntype: agent\nversion: 2.0.0\ndescription: child\nsensitivity: low\nextends: shared/parent@1.x\n---\n\nbody\n"
+	if res := ingestOne(t, st, "L2", "finance/child", child); res.Accepted != 1 || len(res.Rejected) != 0 {
+		t.Fatalf("accepted=%d rejected=%+v, want a clean accept", res.Accepted, res.Rejected)
+	}
+	if res := ingestOne(t, st, "L1", "shared/parent", agentVersion("1.1.0", "newer live")); res.Accepted != 1 {
+		t.Fatalf("parent 1.1.0 not accepted: %+v", res)
+	}
+
+	res := ingestOne(t, st, "L2", "finance/child", child)
+	if res.Idempotent != 1 || res.Accepted != 0 || len(res.Rejected) != 0 || len(res.Conflicts) != 0 {
+		t.Fatalf("idempotent=%d accepted=%d rejected=%+v conflicts=%+v, want a single idempotent no-op",
+			res.Idempotent, res.Accepted, res.Rejected, res.Conflicts)
+	}
+	rec, err := st.GetManifest(ctx, "tenant-1", "finance/child", "2.0.0")
+	if err != nil {
+		t.Fatalf("GetManifest child: %v", err)
+	}
+	if rec.ExtendsPin != "shared/parent@1.0.0" {
+		t.Errorf("ExtendsPin = %q, want the stored pin to stay on shared/parent@1.0.0", rec.ExtendsPin)
+	}
+}
+
 // Spec: §4.7.6 — a child published at a new version resolves its range again
 // against the candidate set as it stands then, and the deprecated version that
 // landed in the meantime is skipped.

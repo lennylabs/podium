@@ -165,11 +165,10 @@ func TestExtends_PinNoSilentPropagation(t *testing.T) {
 	t.Skip("pin non-propagation is exercised end to end in multilayer_journeys_test.go TestMultiLayer_PerCallerWinnerAndPinnedParentStable: an org layer publishes a newer base patch and reingests, and the team/personal overlays loaded at their explicit versions still fold the pinned parent version, never the newly published one. Pin stability is also covered at unit scale by pkg/registry/ingest TestIngest_CrossLayerExtendsOverlayAllowed (ExtendsPin is fixed at ingest)")
 }
 
-// re-ingesting the child after a version bump picks up the newer
-// parent version. spec: docs/authoring/extends.md § "Pinning", last paragraph.
+// publishing the child at a new version picks up the newer parent version. spec: docs/authoring/extends.md § "Pinning", last paragraph.
 func TestExtends_PinReingestPicksNewerParent(t *testing.T) {
 	t.Parallel()
-	t.Skip("the post-boot reingest path now ingests (resolved), but driving a newer-parent pin-propagation scenario end to end needs a multi-version layer fixture this harness does not build; pin stability is covered by pkg/registry/ingest TestIngest_CrossLayerExtendsOverlayAllowed")
+	t.Skip("a new child version re-resolving the pin to a newer live parent is exercised end to end in lifecycle_journeys_test.go TestLifecycle_ExtendsPinStabilityAndReingest; an unchanged re-ingest of a stored child version staying idempotent and keeping its pin is covered by pkg/registry/ingest TestExtends_UnchangedChildReingestKeepsPinAfterNewerLiveParent")
 }
 
 // ---- Scalar / list / map field merge --------------------
