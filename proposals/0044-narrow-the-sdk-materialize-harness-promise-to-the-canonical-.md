@@ -1,7 +1,7 @@
 # Proposal 0044: Narrow the SDK materialize() harness promise to the canonical layout and scope model versioning to the built-in vector stores
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-03). Approved on 2026-10-03 on the user's behalf under the overnight authorization and signed off as staged. OQ-1 (the unread batchLoad harness field) and OQ-2 (the nonexistent `reembed --all` token in §4.7) go to a separate follow-up proposal, so this converged text is not reopened.
+- Status: Implemented (2026-10-03). Approved on 2026-10-03 on the user's behalf under the overnight authorization and signed off as staged. OQ-1 (the unread batchLoad harness field) and OQ-2 (the nonexistent `reembed --all` token in §4.7) go to a separate follow-up proposal, so this converged text is not reopened.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -49,25 +49,25 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-2. §7.6 corrects the `materialize()` example and adds the canonical-layout and `harness` argument paragraph.
+- [x] **S1 · spec** — SPEC-2. §7.6 corrects the `materialize()` example and adds the canonical-layout and `harness` argument paragraph.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-1. §2.2 replaces the SDK harness-parameter sentence with the canonical-layout statement, which points at the §7.6 rule that S1 adds.
+- [x] **S2 · spec** — SPEC-1. §2.2 replaces the SDK harness-parameter sentence with the canonical-layout statement, which points at the §7.6 rule that S1 adds.
       Levels: —. Depends on: S1
-- [ ] **S3 · spec** — SPEC-3. §4.7 scopes model versioning to the collocated stores and states the managed-backend fresh-index requirement.
+- [x] **S3 · spec** — SPEC-3. §4.7 scopes model versioning to the collocated stores and states the managed-backend fresh-index requirement.
       Levels: —. Depends on: —
-- [ ] **S4 · code** — CODE-1, TEST-1. The Python helper and its calls land with the updated and new Python tests. Bundled because the existing `harness="claude-code"` test fails as soon as the check lands.
+- [x] **S4 · code** — CODE-1, TEST-1. The Python helper and its calls land with the updated and new Python tests. Bundled because the existing `harness="claude-code"` test fails as soon as the check lands.
       Levels: unit. Depends on: S1, S2
-- [ ] **S5 · code** — CODE-2, TEST-2. The TypeScript helper, type narrowing, and comments land with the updated and new vitest cases. Bundled for the same reason as S4.
+- [x] **S5 · code** — CODE-2, TEST-2. The TypeScript helper, type narrowing, and comments land with the updated and new vitest cases. Bundled for the same reason as S4.
       Levels: unit. Depends on: S1, S2
-- [ ] **S6 · docs** — DOC-1. The consumer SDK page states the `none`-only rule and the argument error.
+- [x] **S6 · docs** — DOC-1. The consumer SDK page states the `none`-only rule and the argument error.
       Levels: —. Depends on: S4, S5
-- [ ] **S7 · docs** — DOC-3. The vector-backends switching paragraph gains the managed-backend procedure and the query behavior during the pass.
+- [x] **S7 · docs** — DOC-3. The vector-backends switching paragraph gains the managed-backend procedure and the query behavior during the pass.
       Levels: —. Depends on: S3
-- [ ] **S8 · docs** — DOC-4. One operator-guide pitfall bullet links to the DOC-3 procedure.
+- [x] **S8 · docs** — DOC-4. One operator-guide pitfall bullet links to the DOC-3 procedure.
       Levels: —. Depends on: S7
-- [ ] **S9 · docs** — CHANGELOG-1. The `[Unreleased]` `Changed` and `Documentation` entries.
+- [x] **S9 · docs** — CHANGELOG-1. The `[Unreleased]` `Changed` and `Documentation` entries.
       Levels: —. Depends on: S4, S5, S7, S8
-- [ ] **S10 · docs** — MV-1. Manual-validation scenario S82 for the Python SDK rejection.
+- [x] **S10 · docs** — MV-1. Manual-validation scenario S82 for the Python SDK rejection.
       Levels: manual. Depends on: S4
 
 **Ordering constraints.** The D4 chain (S1, S2, S4, S5, S6, S10) and the D18 chain (S3, S7, S8) are independent and may proceed in parallel. S9 follows both chains, because its `Documentation` entry names the operator-guide link that S8 adds. SPEC-2 lands before SPEC-1 because the new §2.2 sentence refers to the §7.6 rule, while the SPEC-2 paragraph cites only the existing §2.2 statement that the SDKs do not share the Go module. S4 and S5 are independent of each other. DOC-1 lands after both code steps because its text is false until both SDKs raise.
