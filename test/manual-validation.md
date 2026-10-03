@@ -228,6 +228,7 @@ rm -rf "$WORK"
 | S77 | A filesystem sync that drops a colliding artifact fails | solo, standalone | none | none | none |
 | S78 | The registry refuses an unusable SCIM store, audit sink, or audit anchor key | standalone | none | none | none |
 | S79 | A workspace target's `$PODIUM_CHANGED` follows the bytes on disk | solo | none | none | none |
+| S80 | Every harness output carries the derived skill compatibility line | solo | none | none | none |
 
 ---
 
@@ -9911,5 +9912,82 @@ a teammate edited by hand.
    `$WORK/err5.txt` contains `skipped (no changes)`, because Claude Code's
    output carries `SKILL.md` and no `tags:` field. A counter of 3 means the
    variable still follows the source content hash.
+
+**Cleanup.** `cd /` and `rm -rf "$WORK"`.
+
+---
+
+## S80: Every harness output carries the derived skill compatibility line
+
+**Goal.** Validate that `podium sync` writes a derived `compatibility` line
+into a skill's `SKILL.md` for a non-Claude harness, keeps an authored value
+unchanged, and leaves the `none` output untouched.
+
+**Covers.** The §4.3.4 derivation scope, the §6.7 `none` exception, and the
+§4.7.6 lock-hash stability the changelog states.
+
+**Why by hand.** The unit and end-to-end tests parse the frontmatter. What
+they do not read is the file a developer opens in the harness directory: that
+the line sits at the top of the frontmatter, that it reads as a sentence an
+agent can act on, and that the lock file does not churn.
+
+**Prerequisites.** A built `podium` binary on `PATH`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then create a
+   registry with one skill that declares runtime constraints and omits
+   `compatibility`, and one skill that authors it.
+
+   ```bash
+   mkdir -p "$WORK/reg/tools/greet" "$WORK/reg/tools/authored"
+   printf -- '---\ntype: skill\nversion: 1.0.0\nruntime_requirements:\n  python: ">=3.10"\nsandbox_profile: read-only-fs\n---\n\nGreet.\n' \
+     > "$WORK/reg/tools/greet/ARTIFACT.md"
+   printf -- '---\nname: greet\ndescription: Greets the user.\n---\n\nSay hello.\n' \
+     > "$WORK/reg/tools/greet/SKILL.md"
+   cp "$WORK/reg/tools/greet/ARTIFACT.md" "$WORK/reg/tools/authored/ARTIFACT.md"
+   printf -- '---\nname: authored\ndescription: Authored compatibility.\ncompatibility: Needs a GPU.\n---\n\nRun it.\n' \
+     > "$WORK/reg/tools/authored/SKILL.md"
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and the four
+   files exist.
+
+2. Sync to Cursor.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/cur" --harness cursor; echo "exit=$?"
+   head -4 "$WORK/cur/.cursor/skills/greet/SKILL.md"
+   cat "$WORK/cur/.cursor/skills/authored/SKILL.md"
+   diff "$WORK/reg/tools/authored/SKILL.md" "$WORK/cur/.cursor/skills/authored/SKILL.md" && echo identical
+   ```
+
+   **Expect.** `exit=0`. The greet `SKILL.md` opens with `---` followed by
+   `compatibility: "Requires Python >=3.10; sandbox: read-only-fs"`, then
+   `name: greet`. The authored `SKILL.md` is identical to the source file, so
+   `diff` prints `identical`, and it carries `compatibility: Needs a GPU.`
+   only once. A greet file without the line is the shipped behavior this
+   scenario exists to catch.
+
+3. Sync to `none` and compare.
+
+   ```bash
+   podium sync --registry "$WORK/reg" --target "$WORK/raw" --harness none; echo "exit=$?"
+   diff "$WORK/reg/tools/greet/SKILL.md" "$WORK/raw/tools/greet/SKILL.md" && echo identical
+   ```
+
+   **Expect.** `exit=0` and `identical`. A `compatibility:` line in the `none`
+   output is a defect.
+
+4. Record the lock hashes, re-sync Cursor, and compare.
+
+   ```bash
+   grep content_hash "$WORK/cur/.podium/sync.lock" > "$WORK/h1.txt"
+   podium sync --registry "$WORK/reg" --target "$WORK/cur" --harness cursor; echo "exit=$?"
+   grep content_hash "$WORK/cur/.podium/sync.lock" | diff "$WORK/h1.txt" - && echo stable
+   ```
+
+   **Expect.** `exit=0` and `stable`. A changed `content_hash` means the hash
+   was computed over adapter output, which is a defect.
 
 **Cleanup.** `cd /` and `rm -rf "$WORK"`.
