@@ -70,7 +70,7 @@ export OPENAI_API_KEY=sk-...
 
 ### Clustered with Pinecone
 
-In the registry's config file. The registry reads `~/.podium/registry.yaml` unless `PODIUM_CONFIG_FILE` names another path. The `podium-server` binary parses no flags, so a clustered deployment that keeps the file at `/etc/podium/registry.yaml` sets `PODIUM_CONFIG_FILE=/etc/podium/registry.yaml` in the registry's environment. `podium serve --config <path>` sets the same variable:
+In the registry's config file. The registry reads `~/.podium/registry.yaml` unless `PODIUM_CONFIG_FILE` names another path. The `podium-server` binary has no `--config` option, so a clustered deployment that keeps the file at `/etc/podium/registry.yaml` sets `PODIUM_CONFIG_FILE=/etc/podium/registry.yaml` in the registry's environment. `podium serve --config <path>` sets the same variable:
 
 ```yaml
 registry:
