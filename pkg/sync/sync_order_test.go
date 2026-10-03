@@ -99,12 +99,10 @@ func mcpServerSrc(name, desc string) string {
 		"\nserver_identifier: npx:@acme/" + name + "\n---\n\nbody\n"
 }
 
-// Spec: §11 (idempotent re-sync), §7.5.3 — the change comparison is keyed by
-// (artifact id, materialized path), so every artifact contributing to a shared
-// materialized path participates in Result.Changed. Keyed by path alone, the
-// two mcp-servers writing .mcp.json collapse to whichever entry the lock lists
-// last, and an edit to the other one reports no change though the file was
-// rewritten.
+// Spec: §11 (idempotent re-sync), §7.5.2 — an edit to one of two artifacts
+// that share .mcp.json reports Result.Changed true when it changes an emitted
+// field and the merged file's bytes, and false when it changes only a field the
+// adapter does not emit.
 func TestRun_ChangedSeesEveryContributorToASharedPath(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()
@@ -133,15 +131,31 @@ func TestRun_ChangedSeesEveryContributorToASharedPath(t *testing.T) {
 		t.Fatalf("an unchanged re-sync reported Changed = true")
 	}
 
-	// Edit the artifact whose canonical ID sorts first, which is the entry a
-	// path-only key discards.
+	// The claude-code .mcp.json fragment omits description, so a
+	// description-only edit leaves the merged file byte-identical.
 	edited := filepath.Join(registry, "team", "a-alpha", "server", "ARTIFACT.md")
-	if err := os.WriteFile(edited, []byte(mcpServerSrc("alpha", "Alpha server, revised.")), 0o644); err != nil {
+	revised := mcpServerSrc("alpha", "Alpha server, revised.")
+	if err := os.WriteFile(edited, []byte(revised), 0o644); err != nil {
 		t.Fatalf("WriteFile %s: %v", edited, err)
 	}
 	res, err = Run(opts)
 	if err != nil {
 		t.Fatalf("third sync: %v", err)
+	}
+	if res.Changed {
+		t.Errorf("a description-only edit to a-alpha/server reported Changed = true")
+	}
+
+	// The server_identifier edit changes the config the a-alpha entry derives
+	// from it, so the merged .mcp.json bytes change.
+	reidentified := "---\ntype: mcp-server\nname: alpha\nversion: 1.0.0\n" +
+		"description: Alpha server, revised.\nserver_identifier: npx:@acme/alpha2\n---\n\nbody\n"
+	if err := os.WriteFile(edited, []byte(reidentified), 0o644); err != nil {
+		t.Fatalf("WriteFile %s: %v", edited, err)
+	}
+	res, err = Run(opts)
+	if err != nil {
+		t.Fatalf("fourth sync: %v", err)
 	}
 	if !res.Changed {
 		t.Errorf("editing a-alpha/server, which shares .mcp.json with b-beta/server, reported Changed = false")

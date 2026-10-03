@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -167,14 +168,16 @@ type Result struct {
 	// server-source registry and left the existing materialized output in
 	// place. Callers surface it as the offline status hosts can present.
 	Offline bool
-	// Changed reports whether this run altered the materialized tree relative
-	// to the prior lock: a path written with a different content hash, an added
-	// path, or a removed (stale-cleaned) path. It is the workspace analog of the
-	// marketplace render's RenderResult.Changed and feeds the $PODIUM_CHANGED
-	// variable a kind: workspace target's workflow reads (§7.5.2, Decision 3), so
-	// a skip_if_no_changes publish command skips a re-sync that wrote no delta. A
-	// DryRun run reports the artifact set without writing, so it leaves Changed
-	// false.
+	// Changed reports whether this run altered the bytes on disk of a compared
+	// path: a path the run materialized or a materialized path recorded in the
+	// prior lock. A path whose bytes differ, a path that appeared, and a path the
+	// stale-file cleanup removed each count; the lock file is never compared, and
+	// a compared path unreadable before the write, or a prior-lock path unreadable
+	// after it, counts as changed. It feeds the
+	// $PODIUM_CHANGED variable of a kind: workspace target's publish phase, with
+	// the meaning a marketplace target's RenderResult.Changed has. A DryRun run
+	// writes nothing and leaves Changed false.
+	// Spec: §7.5.2
 	Changed bool
 }
 
@@ -332,20 +335,21 @@ func Run(opts Options) (*Result, error) {
 	// carried so a shared config file is reconciled rather than deleted.
 	priorMerge := lockMergeKinds(priorLock)
 
-	if err := materialize.Write(opts.Target, allFiles); err != nil {
-		return nil, err
-	}
-
 	// fileMerge records the §6.7 config-merge kind per path written this run:
 	// "json" for OpMergeJSON, "inject" for OpInject, empty for a standalone
 	// file. It feeds both the stale-file cleanup and the lock entries.
+	// currentPaths is built before the write because writeTarget snapshots
+	// those paths before materializing them.
 	fileMerge := map[string]string{}
 	currentPaths := map[string]bool{}
 	for _, f := range allFiles {
 		currentPaths[f.Path] = true
 		fileMerge[f.Path] = mergeKind(f.Op)
 	}
-	removeStalePaths(opts.Target, priorMerge, currentPaths)
+	changed, err := writeTarget(opts.Target, allFiles, currentPaths, priorMerge)
+	if err != nil {
+		return nil, err
+	}
 
 	// Persist the new lock entry list so the next run can repeat
 	// the diff. Each artifact records every path it wrote so a
@@ -383,11 +387,7 @@ func Run(opts Options) (*Result, error) {
 			})
 		}
 	}
-	// §7.5.2 $PODIUM_CHANGED: a workspace workflow reads whether the sync altered
-	// the target tree, so compare the new materialized path->hash set against the
-	// prior lock's. A skip_if_no_changes publish command then skips a re-sync that
-	// rewrote no file.
-	res.Changed = lockChanged(priorLock, lock)
+	res.Changed = changed
 	if err := WriteLock(opts.Target, lock); err != nil {
 		// Lock write failure is non-fatal; the sync already
 		// completed. Operators see the warning via the returned
@@ -600,49 +600,6 @@ func lockMergeKinds(lock *LockFile) map[string]string {
 	return out
 }
 
-// lockChanged reports whether the new lock's materialized set differs from the
-// prior lock's: an entry present in one and absent from the other, or an entry
-// whose recorded content hash changed. Entries are compared per (artifact id,
-// materialized path) pair, so every artifact contributing to a shared file
-// participates. It feeds Result.Changed and the workspace workflow's
-// $PODIUM_CHANGED. A nil prior lock (a first sync into an empty target) is
-// treated as changed whenever the new lock materialized anything, and as
-// unchanged when both are empty.
-func lockChanged(prior, next *LockFile) bool {
-	priorHashes := lockEntryHashes(prior)
-	nextHashes := lockEntryHashes(next)
-	if len(priorHashes) != len(nextHashes) {
-		return true
-	}
-	for entry, hash := range nextHashes {
-		if priorHashes[entry] != hash {
-			return true
-		}
-	}
-	return false
-}
-
-// lockEntryHashes returns the content hash recorded against each (artifact id,
-// materialized path) pair in a lock. The key carries the artifact ID because a
-// materialized path is shared whenever two artifacts config-merge or inject into
-// one file (two mcp-servers on .mcp.json, two hooks on .claude/settings.json,
-// two rules on AGENTS.md), and a path-only key kept just the last entry, so
-// editing the artifact whose entry did not survive reported no change though the
-// file was rewritten. A nil lock returns an empty map.
-// Spec: §11 (idempotent re-sync).
-func lockEntryHashes(lock *LockFile) map[string]string {
-	out := map[string]string{}
-	if lock == nil {
-		return out
-	}
-	for _, a := range lock.Artifacts {
-		if a.MaterializedPath != "" {
-			out[a.ID+"\x00"+a.MaterializedPath] = a.ContentHash
-		}
-	}
-	return out
-}
-
 // mergeKind maps an adapter.FileOp to the lock's config-merge kind string.
 func mergeKind(op adapter.FileOp) string {
 	switch op {
@@ -713,6 +670,75 @@ func selectRecords(scope ScopeFilter, all []materialRecord, toggles LockToggles)
 	// only order a server source can produce, since the sync manifest carries
 	// layer IDs and never the tenant's layer_order:.
 	sort.SliceStable(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+// writeTarget materializes files into target, reconciles the prior lock's
+// stale paths, and reports whether any compared path changed on disk.
+// Spec: §7.5.2 — $PODIUM_CHANGED compares the bytes on disk of the paths
+// the run materializes and the prior lock's materialized paths, at the start
+// of materialization (after the prepare phase) and after the stale-file
+// cleanup. A config-merge or inject path is compared as the whole merged file.
+// The before-snapshot reads every compared path tolerantly: materialize.Write
+// replaces a standalone file by rename without reading it, so an unreadable
+// file must not turn a sync that succeeds into a failure; it only makes the
+// result true. A prior-only path is shared with the operator and cleaned up
+// best-effort by removeStalePaths, so it is read tolerantly after the write
+// as well. A current path unreadable after the write fails the sync closed,
+// because the run just wrote it.
+func writeTarget(target string, files []adapter.File, current map[string]bool, priorMerge map[string]string) (bool, error) {
+	priorOnly := map[string]bool{}
+	for p := range priorMerge {
+		if !current[p] {
+			priorOnly[p] = true
+		}
+	}
+	beforeCurrent, unobservedCurrent := tolerantDigests(target, current)
+	beforePrior, unobservedPrior := tolerantDigests(target, priorOnly)
+
+	if err := materialize.Write(target, files); err != nil {
+		return false, err
+	}
+	removeStalePaths(target, priorMerge, current)
+
+	afterCurrent, err := onDiskDigests(target, current)
+	if err != nil {
+		return false, fmt.Errorf("sync: read target after materialize: %w", err)
+	}
+	afterPrior, unobservedAfter := tolerantDigests(target, priorOnly)
+	if unobservedCurrent || unobservedPrior || unobservedAfter {
+		return true, nil
+	}
+	changed, _ := changeSet(mergeDigests(beforeCurrent, beforePrior), mergeDigests(afterCurrent, afterPrior), nil)
+	return changed, nil
+}
+
+// tolerantDigests is the non-failing form of onDiskDigests for the workspace
+// comparison. A path absent from disk contributes no entry, as in
+// onDiskDigests; any other read error is reported through the unobservable
+// flag rather than returned, so the caller counts the run as changed instead
+// of failing it.
+func tolerantDigests(workdir string, paths map[string]bool) (digests map[string]string, unobservable bool) {
+	digests = make(map[string]string, len(paths))
+	for p := range paths {
+		data, err := os.ReadFile(filepath.Join(workdir, filepath.FromSlash(p)))
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				unobservable = true
+			}
+			continue
+		}
+		digests[p] = digest(data)
+	}
+	return digests, unobservable
+}
+
+// mergeDigests returns the union of two digest maps keyed by disjoint path
+// sets: the current paths and the prior-only paths of one snapshot.
+func mergeDigests(a, b map[string]string) map[string]string {
+	out := make(map[string]string, len(a)+len(b))
+	maps.Copy(out, a)
+	maps.Copy(out, b)
 	return out
 }
 
