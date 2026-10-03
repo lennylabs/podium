@@ -232,6 +232,7 @@ rm -rf "$WORK"
 | S81 | The Python SDK login pair against a live IdP | none (SDK only) | none | none | an IdP with a device-code client, a desktop browser |
 | S82 | The Python SDK rejects a harness other than `none` on materialize | none (SDK only) | none | none | none |
 | S83 | The change-event stream withholds events from layers the caller cannot see | standalone | none | none | none |
+| S84 | A replayed stale latest is refused, and an honest regression is not | standalone | none | none | none |
 
 ---
 
@@ -10298,5 +10299,114 @@ after the withdrawal, is the defect this scenario catches.
 
 **Cleanup.** `kill $ALICE_CURL $BOB_CURL $WATCH`, stop the server, and
 `rm -rf "$WORK"`.
+
+---
+
+## S84: A replayed stale latest is refused, and an honest regression is not
+
+**Goal.** Validate that `podium-mcp` refuses a replayed `latest` record signed by a live registry, accepts a pinned load of the same record, accepts a `latest` that stays put when a deprecated version is ingested, and loads again after `podium cache reset-revisions`.
+
+**Covers.** §4.7.10 ingest time, the §6.5 revision mark, the §6.9 `materialize.stale_resolution` row, and the §6.10 envelope.
+
+**Why by hand.** A person reads the bridge's error envelope and the reset command's output against a registry's own signed bytes, including the deprecation ingest that TEST-4 does not drive through the binaries.
+
+**Steps.**
+
+1. Run the isolation block.
+
+2. Generate the key file, scaffold skill `fresh` at 1.0.0, serve it, capture its `latest` body, and load it once.
+
+   ```bash
+   podium admin signing-key generate --key-file "$PODIUM_SIGN_KEY_PATH" > /dev/null
+   KEY="$(awk '/^public:/{print $2}' "$PODIUM_SIGN_KEY_PATH")"
+   podium artifact scaffold --type skill --description "Fresh skill" "$WORK/reg/fresh" > /dev/null
+   setver() { sed -i.bak "s/^version: .*/version: $1/" "$WORK/reg/fresh/ARTIFACT.md"; }
+   setver 1.0.0
+   serve() { podium serve --standalone --no-embeddings --layer-path "$WORK/reg" \
+       --bind 127.0.0.1:8182 > "$WORK/srv$1.log" 2>&1 & SRV=$!
+     curl -s --retry 40 --retry-delay 1 --retry-all-errors -o /dev/null http://127.0.0.1:8182/healthz
+     server_alive "$SRV" "$WORK/srv$1.log"; }
+   stop() { kill "$SRV" 2>/dev/null; wait "$SRV" 2>/dev/null; }
+   serve 1
+   REG=http://127.0.0.1:8182
+   curl -s "$REG/v1/load_artifact?id=fresh" -o "$WORK/v1.body"
+   INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"m","version":"0"}}}'
+   load_mcp() { ARGS="{\"id\":\"fresh\"${2:+,\"version\":\"$2\"}}"
+     printf '%s\n%s\n' "$INIT" "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"load_artifact\",\"arguments\":$ARGS}}" \
+     | PODIUM_REGISTRY="$1" PODIUM_SIGNATURE_VERIFY_KEY="$KEY" PODIUM_CACHE_DIR="$WORK/cache" podium-mcp 2>/dev/null | tail -1 \
+     | python3 -c 'import sys,json; r=json.load(sys.stdin)["result"]["structuredContent"]; print(json.dumps({k:r[k] for k in ("code","details") if k in r}) if r.get("code") else "loaded")'; }
+   load_mcp "$REG"
+   ```
+
+   **Expect.** `loaded`, and `$WORK/v1.body` holds a JSON object whose `version` is `1.0.0` and which carries an `artifact_revision` written as an RFC 3339 UTC timestamp with six fractional digits.
+
+3. Bump to 2.0.0, restart, and load `latest`.
+
+   ```bash
+   stop; setver 2.0.0; serve 2
+   load_mcp "$REG"
+   ```
+
+   **Expect.** `loaded`.
+
+4. Stop the registry, start a stub on the registry's own address that answers every `load_artifact` request with the captured 1.0.0 body, and load `latest` through it. The stub binds `127.0.0.1:8182`, so `PODIUM_REGISTRY` is unchanged and the load meets the mark steps 2 and 3 recorded.
+
+   ```bash
+   cat > "$WORK/stub.py" <<'EOF'
+   import http.server, sys
+   body = open(sys.argv[1], "rb").read()
+   class H(http.server.BaseHTTPRequestHandler):
+       def _head(self):
+           self.send_response(200)
+           self.send_header("Content-Type", "application/json")
+           self.send_header("ETag", '"stub-no-match"')
+           self.send_header("Content-Length", str(len(body)))
+           self.end_headers()
+       def do_HEAD(self): self._head()
+       def do_GET(self): self._head(); self.wfile.write(body)
+       def log_message(self, *a): pass
+   http.server.HTTPServer(("127.0.0.1", 8182), H).serve_forever()
+   EOF
+   replay() { python3 "$WORK/stub.py" "$WORK/v1.body" & STUB=$!; sleep 1; }
+   unreplay() { kill "$STUB" 2>/dev/null; wait "$STUB" 2>/dev/null; }
+   stop; replay
+   load_mcp "$REG"
+   ```
+
+   **Expect.** A JSON object with `"code": "materialize.stale_resolution"` and `details` naming `artifact_id` `fresh`, `served_version` `1.0.0`, and a `served_revision` earlier than `reference_revision`. A `loaded` here means the check is missing or ran on a cache path.
+
+5. Load the pinned version through the stub.
+
+   ```bash
+   load_mcp "$REG" 1.0.0
+   ```
+
+   **Expect.** `loaded`, because a pinned request is never compared with the mark.
+
+6. Stop the stub, ingest a new version 3.0.0 born deprecated, and load `latest` from the registry.
+
+   ```bash
+   unreplay; setver 3.0.0
+   awk '{print} /^version: 3\.0\.0$/{print "deprecated: true"}' "$WORK/reg/fresh/ARTIFACT.md" > "$WORK/a.md" \
+     && mv "$WORK/a.md" "$WORK/reg/fresh/ARTIFACT.md"
+   serve 3
+   load_mcp "$REG"
+   ```
+
+   **Expect.** `loaded`, with `latest` still resolving to 2.0.0. A `materialize.stale_resolution` here means a deprecated ingest lowered the served ingest time.
+
+7. Replay once more to show the mark still refuses it, then reset the mark and replay again.
+
+   ```bash
+   stop; replay
+   load_mcp "$REG"
+   podium cache reset-revisions --dir "$WORK/cache" fresh; echo "exit=$?"
+   load_mcp "$REG"
+   unreplay
+   ```
+
+   **Expect.** First a JSON object with `"code": "materialize.stale_resolution"`, then `cache: reset 1 revision mark(s)`, then `exit=0`, then `loaded`. Every load in this scenario names `$REG`, so the cache holds one mark, and the count is 1. The refusal before the reset and the `loaded` after it, under the same URL and the same replayed body, show that the reset removed the mark.
+
+Each `load_mcp` is a separate `podium-mcp` process, so step 4 already shows the mark persisting across processes. The lock case (exit 1 while `podium-mcp` holds the index) is covered by TEST-4 only, because a one-shot `podium-mcp` does not hold the lock long enough to observe by hand.
 
 ---
