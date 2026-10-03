@@ -51,77 +51,104 @@ func TestBuildSkillCompatibility_Capped(t *testing.T) {
 
 const skillNoCompat = "---\nname: aggregate\ndescription: Aggregate data.\n---\n\nSkill body.\n"
 
-// spec: §4.3.4 — when SKILL.md omits compatibility, the claude-code adapter
-// (which consumes only the agentskills.io subset) derives it from ARTIFACT.md
-// runtime_requirements and sandbox_profile and injects it into SKILL.md.
-func TestClaudeCode_DerivesCompatibilityWhenOmitted(t *testing.T) {
-	t.Parallel()
-	out, err := ClaudeCode{}.Adapt(context.Background(), Source{
-		ArtifactID: "team/aggregate",
-		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\n" +
-			"runtime_requirements:\n  python: \">=3.10\"\nsandbox_profile: read-only-fs\n---\n"),
-		SkillBytes: []byte(skillNoCompat),
-	})
-	if err != nil {
-		t.Fatalf("Adapt: %v", err)
+// artifactWithRuntime is a skill ARTIFACT.md that declares runtime_requirements
+// and, when sandbox is non-empty, a sandbox_profile.
+func artifactWithRuntime(sandbox string) []byte {
+	s := "---\ntype: skill\nversion: 1.0.0\nruntime_requirements:\n  python: \">=3.10\"\n"
+	if sandbox != "" {
+		s += "sandbox_profile: " + sandbox + "\n"
 	}
-	got := skillContent(t, out)
-	if !strings.Contains(got, "compatibility:") {
-		t.Fatalf("materialized SKILL.md missing derived compatibility:\n%s", got)
-	}
-	if !strings.Contains(got, "Python >=3.10") || !strings.Contains(got, "sandbox: read-only-fs") {
-		t.Errorf("derived compatibility missing runtime/sandbox detail:\n%s", got)
-	}
-	// The original body and frontmatter survive the injection.
-	if !strings.Contains(got, "Skill body.") || !strings.Contains(got, "name: aggregate") {
-		t.Errorf("injection corrupted the SKILL.md:\n%s", got)
-	}
-	// The derived value parses back as a valid Skill with the field set.
-	skill, perr := manifest.ParseSkill([]byte(got))
-	if perr != nil {
-		t.Fatalf("derived SKILL.md does not parse: %v", perr)
-	}
-	if skill.Compatibility == "" {
-		t.Errorf("parsed compatibility is empty:\n%s", got)
-	}
+	return []byte(s + "---\n")
 }
 
-// spec: §4.3.4 — an author-supplied compatibility is preserved verbatim; the
-// adapter does not overwrite it.
-func TestClaudeCode_KeepsAuthoredCompatibility(t *testing.T) {
+// adaptSkill runs the named built-in adapter over one skill and returns the
+// materialized SKILL.md content.
+func adaptSkill(t *testing.T, harness string, artifact, skill []byte) string {
+	t.Helper()
+	a, err := DefaultRegistry().Get(harness)
+	if err != nil {
+		t.Fatalf("Get(%q): %v", harness, err)
+	}
+	out, err := a.Adapt(context.Background(), Source{
+		ArtifactID:    "team/aggregate",
+		ArtifactBytes: artifact,
+		SkillBytes:    skill,
+	})
+	if err != nil {
+		t.Fatalf("%s Adapt: %v", harness, err)
+	}
+	return skillContent(t, out)
+}
+
+// Spec: §4.3.4 — every harness adapter that writes a skill's SKILL.md derives
+// compatibility from runtime_requirements and sandbox_profile when the author
+// omitted it, preserves an authored value byte for byte, and leaves SKILL.md
+// unchanged when there is nothing to derive or no leading frontmatter.
+// Spec: §6.7 — the derivation applies to each project-scope adapter's output.
+func TestAdapters_SkillCompatibilityDerivation(t *testing.T) {
 	t.Parallel()
+	// The sandbox_profile subcase covers only the harnesses whose §6.7.1
+	// sandbox_profile cell is translatable; codex and pi reject the field at
+	// the §6.9 guard, so a synced codex or pi SKILL.md never carries the clause.
+	sandboxOK := map[string]bool{"claude-code": true, "cursor": true, "opencode": true, "gemini": true}
 	authored := "---\nname: aggregate\ndescription: Aggregate.\ncompatibility: Hand-written.\n---\n\nbody\n"
-	out, err := ClaudeCode{}.Adapt(context.Background(), Source{
-		ArtifactID:    "team/aggregate",
-		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\nruntime_requirements:\n  python: \">=3.10\"\n---\n"),
-		SkillBytes:    []byte(authored),
-	})
-	if err != nil {
-		t.Fatalf("Adapt: %v", err)
-	}
-	got := skillContent(t, out)
-	if !strings.Contains(got, "Hand-written.") {
-		t.Errorf("authored compatibility lost:\n%s", got)
-	}
-	if strings.Contains(got, "Python >=3.10") {
-		t.Errorf("adapter overwrote the authored compatibility:\n%s", got)
+	noFrontmatter := "name: aggregate\n\nSkill body.\n"
+	for _, harness := range []string{"claude-code", "cursor", "codex", "opencode", "gemini", "pi"} {
+		harness := harness
+		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
+			t.Run("derives_runtime_requirements", func(t *testing.T) {
+				assertDerived(t, adaptSkill(t, harness, artifactWithRuntime(""), []byte(skillNoCompat)), "Requires Python >=3.10")
+			})
+			if sandboxOK[harness] {
+				t.Run("derives_sandbox_profile", func(t *testing.T) {
+					got := adaptSkill(t, harness, artifactWithRuntime("read-only-fs"), []byte(skillNoCompat))
+					assertDerived(t, got, "Requires Python >=3.10; sandbox: read-only-fs")
+				})
+			}
+			unchanged := []struct {
+				name     string
+				artifact []byte
+				skill    string
+			}{
+				{"keeps_authored", artifactWithRuntime(""), authored},
+				{"no_runtime_fields", []byte("---\ntype: skill\nversion: 1.0.0\n---\n"), skillNoCompat},
+				{"no_leading_frontmatter", artifactWithRuntime(""), noFrontmatter},
+			}
+			for _, tc := range unchanged {
+				tc := tc
+				t.Run(tc.name, func(t *testing.T) {
+					if got := adaptSkill(t, harness, tc.artifact, []byte(tc.skill)); got != tc.skill {
+						t.Errorf("SKILL.md changed:\nin:  %q\nout: %q", tc.skill, got)
+					}
+				})
+			}
+		})
 	}
 }
 
-// spec: §4.3.4 — when ARTIFACT.md carries no runtime constraints there is
-// nothing to derive and SKILL.md is materialized unchanged.
-func TestClaudeCode_NoDerivationWithoutRuntimeInfo(t *testing.T) {
+// Spec: §6.7 — the none adapter writes SKILL.md without translation, so it
+// derives no compatibility even when ARTIFACT.md declares runtime fields.
+func TestNone_DoesNotDeriveCompatibility(t *testing.T) {
 	t.Parallel()
-	out, err := ClaudeCode{}.Adapt(context.Background(), Source{
-		ArtifactID:    "team/aggregate",
-		ArtifactBytes: []byte("---\ntype: skill\nversion: 1.0.0\n---\n"),
-		SkillBytes:    []byte(skillNoCompat),
-	})
-	if err != nil {
-		t.Fatalf("Adapt: %v", err)
+	if got := adaptSkill(t, "none", artifactWithRuntime("read-only-fs"), []byte(skillNoCompat)); got != skillNoCompat {
+		t.Errorf("none adapter changed SKILL.md:\nin:  %q\nout: %q", skillNoCompat, got)
 	}
-	if got := skillContent(t, out); got != skillNoCompat {
-		t.Errorf("SKILL.md changed with nothing to derive:\nin:  %q\nout: %q", skillNoCompat, got)
+}
+
+// assertDerived checks that got parses as a SKILL.md whose compatibility is
+// want and whose name and body survived the injection.
+func assertDerived(t *testing.T, got, want string) {
+	t.Helper()
+	skill, err := manifest.ParseSkill([]byte(got))
+	if err != nil {
+		t.Fatalf("derived SKILL.md does not parse: %v\n%s", err, got)
+	}
+	if skill.Compatibility != want {
+		t.Errorf("compatibility = %q, want %q", skill.Compatibility, want)
+	}
+	if skill.Name != "aggregate" || !strings.Contains(got, "Skill body.") {
+		t.Errorf("injection corrupted the SKILL.md:\n%s", got)
 	}
 }
 
