@@ -90,6 +90,17 @@ jobs:
             -c 'mc alias set local http://localhost:9000 minioadmin minioadmin && mc mb --ignore-existing local/podium'
 
       - run: make tools
+      # `make lint` installs the golangci-lint release pinned in the Makefile
+      # into a versioned directory under bin/. Caching that directory keyed on
+      # the pinned version and the Go toolchain skips the install on later runs.
+      - name: Read pinned golangci-lint version
+        id: golangci
+        run: echo "version=$(sed -n 's/^GOLANGCI_LINT_VERSION ?= //p' Makefile)" >> "$GITHUB_OUTPUT"
+      - name: Cache golangci-lint
+        uses: actions/cache@v6
+        with:
+          path: bin/golangci-lint-${{ steps.golangci.outputs.version }}
+          key: ${{ runner.os }}-golangci-lint-${{ steps.golangci.outputs.version }}-${{ hashFiles('go.mod') }}
       - run: make lint
       - run: make speccov-drift
       - name: Test with coverage
