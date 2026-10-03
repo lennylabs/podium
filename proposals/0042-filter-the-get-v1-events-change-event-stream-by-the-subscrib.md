@@ -1,7 +1,7 @@
 # Proposal 0042: Filter the GET /v1/events change-event stream by the subscriber's §4.6 visibility at delivery time, and state the webhook receiver delivery scope
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), decided on the user's behalf under the overnight authorization. Signed off as staged. OQ-1 (keying receivers per routed tenant) goes to a separate follow-up proposal; DOC-1(d) documents the shared pool meanwhile. OQ-2: keep the drafted posture (an admin subscriber gets only its own §4.6 view; overrides stay explicit and audited). Sub-question: accept as drafted (the unverified free-form IdP label case), recorded as a follow-up.
+- Status: Applied to spec (2026-10-03). Signed off as staged. OQ-1 (keying receivers per routed tenant) goes to a separate follow-up proposal; DOC-1(d) documents the shared pool meanwhile. OQ-2: keep the drafted posture (an admin subscriber gets only its own §4.6 view; overrides stay explicit and audited). Sub-question: accept as drafted (the unverified free-form IdP label case), recorded as a follow-up.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
