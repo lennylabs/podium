@@ -1,7 +1,7 @@
 # Proposal 0035: Refuse startup on an unusable SCIM store path, on an unopenable audit sink while anchoring, and on an unusable or shared audit anchor key, and specify the SCIM and anchor variables
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-02). Signed off as staged, including the OQ-1 decision: with anchoring enabled, an audit file sink that cannot be opened refuses startup with config.audit_sink_unavailable; an http(s) sink never refuses; the interval-0 warning is unchanged.
+- Status: Applied to spec (2026-10-02). Signed off as staged, including the OQ-1 decision: with anchoring enabled, an audit file sink that cannot be opened refuses startup with config.audit_sink_unavailable; an http(s) sink never refuses; the interval-0 warning is unchanged.
 - Date: 2026-10-02
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
