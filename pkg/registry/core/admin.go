@@ -22,12 +22,12 @@ func (r *Registry) AdminAuthorize(ctx context.Context, id layer.Identity) error 
 	if id.IsPublic || !id.IsAuthenticated || id.Sub == "" {
 		return fmt.Errorf("%w: admin operations require an authenticated identity", ErrForbidden)
 	}
-	ok, err := r.store.IsAdmin(ctx, id.Sub, r.tenantFor(ctx))
+	ok, err := r.store.IsAdmin(ctx, id.Sub, r.TenantFor(ctx))
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	if !ok {
-		return fmt.Errorf("%w: %s is not an admin in %s", ErrForbidden, id.Sub, r.tenantFor(ctx))
+		return fmt.Errorf("%w: %s is not an admin in %s", ErrForbidden, id.Sub, r.TenantFor(ctx))
 	}
 	return nil
 }
@@ -36,7 +36,7 @@ func (r *Registry) AdminAuthorize(ctx context.Context, id layer.Identity) error 
 // caller must already be an admin; the HTTP handler enforces this.
 func (r *Registry) GrantAdmin(ctx context.Context, userID string) error {
 	return r.store.GrantAdmin(ctx, store.AdminGrant{
-		UserID: userID, OrgID: r.tenantFor(ctx),
+		UserID: userID, OrgID: r.TenantFor(ctx),
 	})
 }
 
@@ -44,7 +44,7 @@ func (r *Registry) GrantAdmin(ctx context.Context, userID string) error {
 // missing grant is a no-op (the underlying store treats it that
 // way too).
 func (r *Registry) RevokeAdmin(ctx context.Context, userID string) error {
-	return r.store.RevokeAdmin(ctx, userID, r.tenantFor(ctx))
+	return r.store.RevokeAdmin(ctx, userID, r.TenantFor(ctx))
 }
 
 // EffectiveLayer is one entry in the result of ShowEffective. It reaches

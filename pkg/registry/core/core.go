@@ -211,10 +211,10 @@ func tenantFromContext(ctx context.Context) (string, bool) {
 	return t, ok && t != ""
 }
 
-// tenantFor returns the tenant the request resolves against: the per-request
+// TenantFor returns the tenant the request resolves against: the per-request
 // tenant carried on the context (multi-tenant routing, §6.3.1) when present,
 // otherwise the registry's bound tenant (the single-tenant default).
-func (r *Registry) tenantFor(ctx context.Context) string {
+func (r *Registry) TenantFor(ctx context.Context) string {
 	if t, ok := tenantFromContext(ctx); ok {
 		return t
 	}
@@ -285,7 +285,7 @@ func (r *Registry) vectorSearchActive() bool {
 // QueryText; otherwise it embeds the query locally and queries by vector.
 func (r *Registry) queryVector(ctx context.Context, query string, topK int) ([]vector.Match, error) {
 	if r.embedder == nil && vector.SelfEmbeds(r.vector) {
-		return r.vector.(vector.TextVectorizer).QueryText(ctx, r.tenantFor(ctx), query, topK)
+		return r.vector.(vector.TextVectorizer).QueryText(ctx, r.TenantFor(ctx), query, topK)
 	}
 	vecs, err := r.embedder.Embed(ctx, []string{query})
 	if err != nil || len(vecs) == 0 {
@@ -295,9 +295,9 @@ func (r *Registry) queryVector(ctx context.Context, query string, topK int) ([]v
 	// the currently-configured model so a transient mixed-model state during a
 	// re-embed never scores the stale model's vectors.
 	if mv, ok := vector.ModelVersionedOf(r.vector); ok {
-		return mv.QueryModel(ctx, r.tenantFor(ctx), vecs[0], topK, r.embedder.Model())
+		return mv.QueryModel(ctx, r.TenantFor(ctx), vecs[0], topK, r.embedder.Model())
 	}
-	return r.vector.Query(ctx, r.tenantFor(ctx), vecs[0], topK)
+	return r.vector.Query(ctx, r.TenantFor(ctx), vecs[0], topK)
 }
 
 // upsertVector persists the embedding for one (tenant, id, version) row from
@@ -410,9 +410,24 @@ func (r *Registry) effectiveLayerComposition(ctx context.Context, id layer.Ident
 // spec: §4.6 — "Resolution of layers 1 and 2 happens at the registry on every
 // load_domain, search_domains, search_artifacts, and load_artifact call."
 func (r *Registry) resolveLayers(ctx context.Context) []layer.Layer {
-	cfgs, err := r.store.ListLayerConfigs(ctx, r.tenantFor(ctx))
-	if err != nil || len(cfgs) == 0 {
+	out, err := r.layerConfigs(ctx, r.TenantFor(ctx))
+	if err != nil || len(out) == 0 {
 		return r.layers
+	}
+	return out
+}
+
+// layerConfigs reads tenant's stored layer configs and composes them in §4.6
+// order: admin-defined layers (config order, lowest precedence) below every
+// user-defined layer. It returns the store error unchanged and applies no
+// fallback, so the read path (resolveLayers) can fall back to the boot-time
+// layers while the §7.6 change-event path withholds on the same error.
+//
+// Spec: §4.6
+func (r *Registry) layerConfigs(ctx context.Context, tenant string) ([]layer.Layer, error) {
+	cfgs, err := r.store.ListLayerConfigs(ctx, tenant)
+	if err != nil {
+		return nil, err
 	}
 	var admin, user []store.LayerConfig
 	for _, c := range cfgs {
@@ -438,7 +453,7 @@ func (r *Registry) resolveLayers(ctx context.Context) []layer.Layer {
 		out = append(out, layerFromConfig(c, prec))
 		prec++
 	}
-	return out
+	return out, nil
 }
 
 // VisibilityOf projects a stored layer config onto the §4.6 visibility
@@ -1341,7 +1356,7 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 func (r *Registry) descriptorBlockHidingChain(ctx context.Context, rec store.ManifestRecord) string {
 	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
 	if err != nil {
-		log.Printf("search: descriptor of %s/%s: %v", r.tenantFor(ctx), rec.ArtifactID, err)
+		log.Printf("search: descriptor of %s/%s: %v", r.TenantFor(ctx), rec.ArtifactID, err)
 		return ""
 	}
 	pins := make([]string, 0, len(chain))
@@ -1787,7 +1802,7 @@ func (r *Registry) resolveExtendsChain(ctx context.Context, rec store.ManifestRe
 		return []store.ManifestRecord{rec}, nil
 	}
 	parentID, parentVer := splitParentRef(rec.ExtendsPin)
-	parent, err := r.store.GetManifest(ctx, r.tenantFor(ctx), parentID, parentVer)
+	parent, err := r.store.GetManifest(ctx, r.TenantFor(ctx), parentID, parentVer)
 	if err != nil {
 		return nil, fmt.Errorf("%w: parent %s: %v", ErrNotFound, rec.ExtendsPin, err)
 	}
@@ -2083,7 +2098,7 @@ func withDeprecationWarning(r *LoadArtifactResult) *LoadArtifactResult {
 // visibility. Used by visibility.denied emission to distinguish
 // filtered records from genuine misses.
 func (r *Registry) artifactExistsAnywhere(ctx context.Context, artifactID string) bool {
-	all, err := r.store.ListManifests(ctx, r.tenantFor(ctx))
+	all, err := r.store.ListManifests(ctx, r.TenantFor(ctx))
 	if err != nil {
 		return false
 	}
@@ -2099,7 +2114,7 @@ func (r *Registry) artifactExistsAnywhere(ctx context.Context, artifactID string
 // originating layer is visible to id. In standalone / filesystem
 // modes (id.IsPublic), every manifest is returned.
 func (r *Registry) visibleManifests(ctx context.Context, id layer.Identity) ([]store.ManifestRecord, error) {
-	all, err := r.store.ListManifests(ctx, r.tenantFor(ctx))
+	all, err := r.store.ListManifests(ctx, r.TenantFor(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
@@ -2145,7 +2160,7 @@ func (r *Registry) adminVisibleManifests(ctx context.Context, id layer.Identity,
 		Target:  target,
 		Context: map[string]string{"override": "visibility"},
 	})
-	all, err := r.store.ListManifests(ctx, r.tenantFor(ctx))
+	all, err := r.store.ListManifests(ctx, r.TenantFor(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}

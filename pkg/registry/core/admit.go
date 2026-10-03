@@ -264,7 +264,7 @@ func setManifestFields(rec *store.ManifestRecord, a *manifest.Artifact) {
 func (r *Registry) admitChain(ctx context.Context, rec store.ManifestRecord, requestedID string) ([]store.ManifestRecord, error) {
 	chain, err := r.walkAdmitted(ctx, rec)
 	if err != nil {
-		log.Printf("admission: refused load of %s/%s: %v", r.tenantFor(ctx), requestedID, err)
+		log.Printf("admission: refused load of %s/%s: %v", r.TenantFor(ctx), requestedID, err)
 		return nil, fmt.Errorf("%w: %s", sentinelOf(err), requestedID)
 	}
 	return chain, nil
@@ -284,7 +284,7 @@ func (r *Registry) walkAdmitted(ctx context.Context, rec store.ManifestRecord) (
 		}
 		seen[current.ExtendsPin] = true
 		parentID, parentVer := splitParentRef(current.ExtendsPin)
-		stored, err := r.store.GetManifest(ctx, r.tenantFor(ctx), parentID, parentVer)
+		stored, err := r.store.GetManifest(ctx, r.TenantFor(ctx), parentID, parentVer)
 		if err != nil {
 			return nil, fmt.Errorf("%w: parent %s: %v", ErrNotFound, current.ExtendsPin, err)
 		}
@@ -355,7 +355,7 @@ func sentinelOf(err error) error {
 func (r *Registry) revalidationRedactKeys(ctx context.Context, rec store.ManifestRecord, requestedID string) ([]string, error) {
 	chain, err := r.resolveExtendsChain(ctx, rec, map[string]bool{})
 	if err != nil {
-		log.Printf("admission: revalidation of %s/%s: %v", r.tenantFor(ctx), requestedID, err)
+		log.Printf("admission: revalidation of %s/%s: %v", r.TenantFor(ctx), requestedID, err)
 		return nil, fmt.Errorf("%w: %s", sentinelOf(err), requestedID)
 	}
 	var keys []string
