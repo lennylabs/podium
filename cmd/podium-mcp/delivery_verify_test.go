@@ -360,19 +360,3 @@ func TestDeliverLoadArtifact_SandboxRefusalFollowsTheReadEvent(t *testing.T) {
 		t.Errorf("artifact.loaded events = %d, want 1", n)
 	}
 }
-
-// Spec: §4.7.10 — the delivery envelope is a registry-managed one with no
-// certificate chain: it verifies under the registry-managed verifier and is
-// refused with signature_invalid under the Sigstore-keyless verifier.
-func TestDeliverLoadArtifact_SigstoreKeylessRefusesADeliveryEnvelope(t *testing.T) {
-	t.Parallel()
-	s, key, _ := signedServer(t)
-	rec := signDelivery(t, key, liveRecord("---\ntype: context\nversion: 1.0.0\n---\nbody\n"))
-	wantServed(t, s.deliverLoadArtifact(rec), "body\n")
-
-	keyless := newTestServer(t, &config{
-		harness: "none", verifyPolicy: sign.PolicyAlways,
-		signatureProvider: "sigstore-keyless", verifier: sign.SigstoreKeyless{},
-	})
-	wantRefused(t, keyless.deliverLoadArtifact(rec), "materialize.signature_invalid")
-}

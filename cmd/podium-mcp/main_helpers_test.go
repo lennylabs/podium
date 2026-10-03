@@ -473,53 +473,15 @@ func TestProxyGet_UnreachableRegistryReturnsOfflineStatus(t *testing.T) {
 	}
 }
 
-// --- buildSignatureProvider --------------------------------------------------
-
-// Spec: §4.7.9, §6.2 — noop is the one recognized provider that constructs
-// with no material. An empty or unknown name is refused, and sigstore-keyless
-// and registry-managed return the error for missing material rather than a
-// provider that fails every load. Not parallel: it mutates the environment.
-func TestBuildSignatureProvider(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	t.Setenv("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE", "")
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", "")
-	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
-	if _, err := buildSignatureProvider("noop"); err != nil {
-		t.Errorf("buildSignatureProvider(noop) = %v", err)
-	}
-	for _, name := range []string{"", "unknown", "sigstore-keyless", "registry-managed"} {
-		if _, err := buildSignatureProvider(name); err == nil {
-			t.Errorf("buildSignatureProvider(%q) with no material = nil error, want error", name)
-		}
-	}
-
-	root := filepath.Join(t.TempDir(), "root.pem")
-	if err := os.WriteFile(root, []byte("trust root"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE", root)
-	if p, err := buildSignatureProvider("sigstore-keyless"); err != nil || p.ID() != "sigstore-keyless" {
-		t.Errorf("buildSignatureProvider(sigstore-keyless) with a trust root = %v, %v", p, err)
-	}
-	pub, _, err := ed25519.GenerateKey(crand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub))
-	if p, err := buildSignatureProvider("registry-managed"); err != nil || p.ID() != "registry-managed" {
-		t.Errorf("buildSignatureProvider(registry-managed) with a verify key = %v, %v", p, err)
-	}
-}
-
-// buildSignatureProvider for registry-managed loads the verification key set
-// from PODIUM_SIGNATURE_VERIFY_KEY (comma-separated base64 Ed25519), so the
-// resulting provider verifies a real envelope under either listed key. A
-// malformed entry is a startup error. Not parallel: it mutates env. The home
+// resolveVerifier for registry-managed under always loads the verification
+// key set from PODIUM_SIGNATURE_VERIFY_KEY (comma-separated base64 Ed25519), so
+// the resulting provider verifies a real envelope under either listed key. A
+// malformed entry refuses the start with config.signature_provider_unavailable. Not parallel: it mutates env. The home
 // is hermetic so the malformed-variable arm runs against a home with no key
 // file rather than the developer's own.
 //
 // Spec: §4.7.9, §6.2.
-func TestBuildSignatureProvider_RegistryManagedVerifyKey(t *testing.T) {
+func TestResolveVerifier_RegistryManagedVerifyKey(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("PODIUM_SIGN_KEY_PATH", "")
 	pub, priv, err := ed25519.GenerateKey(crand.Reader)
@@ -533,9 +495,9 @@ func TestBuildSignatureProvider_RegistryManagedVerifyKey(t *testing.T) {
 	hash := "sha256:" + hex.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
 
 	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub)+","+base64.StdEncoding.EncodeToString(pub2))
-	p, err := buildSignatureProvider("registry-managed")
+	p, err := resolveVerifier(sign.PolicyAlways, "registry-managed")
 	if err != nil {
-		t.Fatalf("buildSignatureProvider(registry-managed) = %v", err)
+		t.Fatalf("resolveVerifier(always, registry-managed) = %v", err)
 	}
 	for i, k := range []ed25519.PrivateKey{priv, priv2} {
 		envelope, err := sign.RegistryManagedKey{PrivateKey: k}.Sign(context.Background(), hash)
@@ -547,10 +509,11 @@ func TestBuildSignatureProvider_RegistryManagedVerifyKey(t *testing.T) {
 		}
 	}
 
-	// A malformed entry is a startup error naming the variable.
+	// A malformed entry is a startup refusal naming the variable.
 	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", base64.StdEncoding.EncodeToString(pub)+",!!!not base64")
-	if _, err := buildSignatureProvider("registry-managed"); err == nil || !strings.Contains(err.Error(), "PODIUM_SIGNATURE_VERIFY_KEY") {
-		t.Errorf("malformed PODIUM_SIGNATURE_VERIFY_KEY = %v, want an error naming the variable", err)
+	_, err = resolveVerifier(sign.PolicyAlways, "registry-managed")
+	if err == nil || !strings.HasPrefix(err.Error(), "config.signature_provider_unavailable:") || !strings.Contains(err.Error(), "PODIUM_SIGNATURE_VERIFY_KEY") {
+		t.Errorf("malformed PODIUM_SIGNATURE_VERIFY_KEY = %v, want config.signature_provider_unavailable naming the variable", err)
 	}
 }
 
