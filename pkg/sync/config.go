@@ -6,8 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/lennylabs/podium/pkg/version"
 	"gopkg.in/yaml.v3"
+
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // Errors related to config files.

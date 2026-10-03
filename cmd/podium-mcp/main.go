@@ -47,6 +47,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	oteltrace "go.opentelemetry.io/otel/trace"
+
 	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/audit"
@@ -61,8 +64,6 @@ import (
 	synccfg "github.com/lennylabs/podium/pkg/sync"
 	"github.com/lennylabs/podium/pkg/tracing"
 	"github.com/lennylabs/podium/pkg/version"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 // protocolVersion is the maximum MCP wire-protocol version this binary

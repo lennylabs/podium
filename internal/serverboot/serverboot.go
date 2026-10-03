@@ -27,6 +27,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/identity"
@@ -49,7 +51,6 @@ import (
 	"github.com/lennylabs/podium/pkg/vector"
 	"github.com/lennylabs/podium/pkg/webhook"
 	"github.com/lennylabs/podium/web"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // envFirst returns the value of the first non-empty env var.

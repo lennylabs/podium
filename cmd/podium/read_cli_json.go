@@ -6,8 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lennylabs/podium/pkg/manifest"
 	"gopkg.in/yaml.v3"
+
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // The read CLI's --json output follows the §7.6.1 documented schemas, which

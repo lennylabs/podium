@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+
 	"github.com/lennylabs/podium/pkg/overlay"
 	synccfg "github.com/lennylabs/podium/pkg/sync"
 )

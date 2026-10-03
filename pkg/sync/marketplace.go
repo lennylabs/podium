@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lennylabs/podium/pkg/adapter"
 	"gopkg.in/yaml.v3"
+
+	"github.com/lennylabs/podium/pkg/adapter"
 )
 
 // This file holds the reusable marketplace-output component types a

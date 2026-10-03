@@ -7,8 +7,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lennylabs/podium/pkg/adapter"
 	"gopkg.in/yaml.v3"
+
+	"github.com/lennylabs/podium/pkg/adapter"
 )
 
 // configFileScope labels which of the three §7.5.2 config files a value or
