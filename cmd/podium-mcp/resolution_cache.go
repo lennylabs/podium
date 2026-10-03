@@ -255,6 +255,7 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 		Sensitivity:       d.Sensitivity,
 		DeliveryHash:      d.DeliveryHash,
 		DeliverySignature: d.DeliverySignature,
+		ArtifactRevision:  d.ArtifactRevision,
 		Resources:         map[string]string{},
 	}
 	// A skill's verbatim SKILL.md is bucket-level, because the authored
@@ -296,12 +297,14 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 }
 
 // readDeliveryFiles reads the per-ID delivery files putDelivery wrote in dir.
-// The id file, the served document, the body, and the delivery hash are
-// required, and the id file must hold id verbatim; the signature and
-// sensitivity files read as empty when absent.
+// The id file, the served document, the body, the delivery hash, and the
+// artifact revision are required, and the id file must hold id verbatim; the
+// signature and sensitivity files read as empty when absent. A record cached
+// before the artifact_revision file existed is therefore a miss, because its
+// delivery check would frame an empty revision.
 func readDeliveryFiles(dir, id string) (deliveryFiles, error) {
 	required := map[string]string{}
-	for _, name := range []string{"id", "frontmatter", "body", "delivery_hash"} {
+	for _, name := range []string{"id", "frontmatter", "body", "delivery_hash", "artifact_revision"} {
 		b, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return deliveryFiles{}, fmt.Errorf("delivery %s: %w", name, err)
@@ -324,6 +327,7 @@ func readDeliveryFiles(dir, id string) (deliveryFiles, error) {
 		DeliveryHash:      required["delivery_hash"],
 		DeliverySignature: optional("delivery_signature"),
 		Sensitivity:       optional("sensitivity"),
+		ArtifactRevision:  required["artifact_revision"],
 	}, nil
 }
 

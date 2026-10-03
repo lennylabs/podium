@@ -58,8 +58,13 @@ func TestResolutionCache_DisabledCache(t *testing.T) {
 
 // ----- fixtures -------------------------------------------------------------
 
+// cachedRevision is the §4.7.10 artifact revision cachedRecord serves. It is a
+// canonical value other than the epoch, so a cache path that dropped or
+// defaulted the revision fails the delivery check of the record it reads back.
+const cachedRevision = "2026-01-02T03:04:05.000006Z"
+
 // cachedRecord returns a sealed context record for id whose content hash is the
-// §4.7.6 digest of its frontmatter and resources.
+// §4.7.6 digest of its frontmatter and resources, served at cachedRevision.
 func cachedRecord(id, frontmatter, body string, resources map[string]string) loadArtifactResponse {
 	raw := make(map[string][]byte, len(resources))
 	for k, v := range resources {
@@ -67,14 +72,15 @@ func cachedRecord(id, frontmatter, body string, resources map[string]string) loa
 	}
 	a := manifestFields(frontmatter)
 	return sealDelivery(loadArtifactResponse{
-		ID:           id,
-		Type:         a["type"],
-		Version:      a["version"],
-		Sensitivity:  a["sensitivity"],
-		Frontmatter:  frontmatter,
-		ManifestBody: body,
-		Resources:    resources,
-		ContentHash:  "sha256:" + version.CanonicalContentHash([]byte(frontmatter), nil, raw),
+		ID:               id,
+		Type:             a["type"],
+		Version:          a["version"],
+		Sensitivity:      a["sensitivity"],
+		Frontmatter:      frontmatter,
+		ManifestBody:     body,
+		Resources:        resources,
+		ContentHash:      "sha256:" + version.CanonicalContentHash([]byte(frontmatter), nil, raw),
+		ArtifactRevision: cachedRevision,
 	})
 }
 
@@ -215,6 +221,9 @@ func TestLoadArtifactFromCache_RecoversBytes(t *testing.T) {
 	if got.Resources["scripts/run.py"] != "print('x')\n" {
 		t.Errorf("Resources = %+v", got.Resources)
 	}
+	if got.ArtifactRevision != cachedRevision {
+		t.Errorf("ArtifactRevision = %q, want the served %q", got.ArtifactRevision, cachedRevision)
+	}
 	if err := verifyDeliveryHash(*got); err != nil {
 		t.Errorf("verifyDeliveryHash on the cache-served record: %v", err)
 	}
@@ -264,7 +273,7 @@ func TestVerifyDeliveryHash_CacheServedSkillWithoutSkillRawFails(t *testing.T) {
 	skillRaw := "---\nname: x\ndescription: x\n---\n\n# x\n"
 	rec := sealDelivery(loadArtifactResponse{
 		ID: "x", Type: "skill", Version: "0.1.0", Frontmatter: frontmatter,
-		ManifestBody: "\n# x\n", SkillRaw: skillRaw,
+		ManifestBody: "\n# x\n", SkillRaw: skillRaw, ArtifactRevision: cachedRevision,
 		ContentHash: "sha256:" + version.CanonicalContentHash([]byte(frontmatter), []byte(skillRaw), nil),
 	})
 	if err := s.cache.put(rec.ContentHash, frontmatter, rec.ManifestBody, nil); err != nil {
@@ -272,6 +281,7 @@ func TestVerifyDeliveryHash_CacheServedSkillWithoutSkillRawFails(t *testing.T) {
 	}
 	if err := s.cache.putDelivery(rec.ContentHash, rec.ID, deliveryFiles{
 		Frontmatter: rec.Frontmatter, Body: rec.ManifestBody, DeliveryHash: rec.DeliveryHash,
+		ArtifactRevision: rec.ArtifactRevision,
 	}); err != nil {
 		t.Fatalf("putDelivery: %v", err)
 	}
@@ -519,6 +529,45 @@ func TestOfflineOnly_ForeignIDFileIsAMiss(t *testing.T) {
 		t.Fatalf("rewrite id file: %v", err)
 	}
 	wantRefused(t, s.loadArtifact(args), "network.offline_cache_miss")
+}
+
+// Spec: §4.7.10, §6.5 — a per-ID directory without the artifact_revision file,
+// the layout a consumer written before the delivery record framed the revision
+// inherits, is a miss, so offline-only reports the offline cache miss rather
+// than failing the delivery check of a record that frames an empty revision.
+func TestOfflineOnly_MissingRevisionFileIsAMiss(t *testing.T) {
+	t.Parallel()
+	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	registry, _ := newCacheStub(t, rec)
+	dir := t.TempDir()
+	s := cacheServer(t, dir, registry.URL, "offline-only")
+	args := map[string]any{"id": "team/x", "version": "1.0.0"}
+	primeLive(t, s, rec, args)
+	if err := os.Remove(filepath.Join(deliveryDir(dir, rec), "artifact_revision")); err != nil {
+		t.Fatalf("remove artifact_revision: %v", err)
+	}
+	wantRefused(t, s.loadArtifact(args), "network.offline_cache_miss")
+}
+
+// Spec: §4.7.10, §6.6 — a per-ID artifact_revision file rewritten to another
+// canonical revision fails the delivery check on the cache-served load,
+// because the record frames the served revision.
+func TestOfflineOnly_RewrittenRevisionFails(t *testing.T) {
+	t.Parallel()
+	rec := cachedRecord("team/x", "---\ntype: context\nversion: 1.0.0\n---\nbody\n", "body\n", nil)
+	registry, _ := newCacheStub(t, rec)
+	dir := t.TempDir()
+	s := cacheServer(t, dir, registry.URL, "offline-only")
+	args := map[string]any{"id": "team/x", "version": "1.0.0"}
+	primeLive(t, s, rec, args)
+	path := filepath.Join(deliveryDir(dir, rec), "artifact_revision")
+	if b, err := os.ReadFile(path); err != nil || string(b) != cachedRevision {
+		t.Fatalf("artifact_revision file = %q (%v), want the served %q", b, err, cachedRevision)
+	}
+	if err := os.WriteFile(path, []byte("2027-01-02T03:04:05.000006Z"), 0o644); err != nil {
+		t.Fatalf("rewrite artifact_revision: %v", err)
+	}
+	wantRefused(t, s.loadArtifact(args), "materialize.content_hash_mismatch")
 }
 
 // Spec: §4.7.10, §6.6 — a per-ID sensitivity file rewritten from high to low

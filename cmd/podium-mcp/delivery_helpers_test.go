@@ -21,15 +21,16 @@ func sealDelivery(resp loadArtifactResponse) loadArtifactResponse {
 // deliveryHashOf composes the delivery hash of resp without modifying it.
 func deliveryHashOf(resp loadArtifactResponse) string {
 	rec := version.DeliveryRecord{
-		ID:           resp.ID,
-		Version:      resp.Version,
-		Type:         resp.Type,
-		ContentHash:  resp.ContentHash,
-		Sensitivity:  resp.Sensitivity,
-		Frontmatter:  resp.Frontmatter,
-		ManifestBody: resp.ManifestBody,
-		SkillRaw:     resp.SkillRaw,
-		Resources:    map[string]string{},
+		ID:               resp.ID,
+		Version:          resp.Version,
+		Type:             resp.Type,
+		ContentHash:      resp.ContentHash,
+		Sensitivity:      resp.Sensitivity,
+		ArtifactRevision: resp.ArtifactRevision,
+		Frontmatter:      resp.Frontmatter,
+		ManifestBody:     resp.ManifestBody,
+		SkillRaw:         resp.SkillRaw,
+		Resources:        map[string]string{},
 	}
 	for path, body := range resp.Resources {
 		raw := []byte(body)

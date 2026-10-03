@@ -1668,6 +1668,7 @@ func (s *mcpServer) cacheVerifiedRecord(resp loadArtifactResponse) error {
 		DeliveryHash:      resp.DeliveryHash,
 		DeliverySignature: resp.DeliverySignature,
 		Sensitivity:       resp.Sensitivity,
+		ArtifactRevision:  resp.ArtifactRevision,
 	})
 }
 
@@ -1936,15 +1937,16 @@ func verifyDeliveryHash(resp loadArtifactResponse) error {
 		return errors.New("materialize.content_hash_mismatch: the response carries no delivery_hash")
 	}
 	rec := version.DeliveryRecord{
-		ID:           resp.ID,
-		Version:      resp.Version,
-		Type:         resp.Type,
-		ContentHash:  resp.ContentHash,
-		Sensitivity:  resp.Sensitivity,
-		Frontmatter:  resp.Frontmatter,
-		ManifestBody: resp.ManifestBody,
-		SkillRaw:     resp.SkillRaw,
-		Resources:    make(map[string]string, len(resp.Resources)),
+		ID:               resp.ID,
+		Version:          resp.Version,
+		Type:             resp.Type,
+		ContentHash:      resp.ContentHash,
+		Sensitivity:      resp.Sensitivity,
+		ArtifactRevision: resp.ArtifactRevision,
+		Frontmatter:      resp.Frontmatter,
+		ManifestBody:     resp.ManifestBody,
+		SkillRaw:         resp.SkillRaw,
+		Resources:        make(map[string]string, len(resp.Resources)),
 	}
 	for path, body := range resp.Resources {
 		if link, ok := resp.LargeResources[path]; ok {
@@ -2161,6 +2163,9 @@ type loadArtifactResponse struct {
 	// is the registry's signature over it, which the §4.7.9 policy governs.
 	DeliveryHash      string `json:"delivery_hash"`
 	DeliverySignature string `json:"delivery_signature,omitempty"`
+	// ArtifactRevision is the §4.7.10 ingest time of the served version,
+	// which the delivery record frames after the sensitivity.
+	ArtifactRevision string `json:"artifact_revision"`
 }
 
 // largeResourceLink mirrors the registry's per-resource link. The
@@ -2799,12 +2804,15 @@ type deliveryFiles struct {
 	DeliveryHash      string
 	DeliverySignature string
 	Sensitivity       string
+	// ArtifactRevision is the served §4.7.10 ingest time. A cache-served
+	// record frames it in the delivery check, so it is cached with the record.
+	ArtifactRevision string
 }
 
 // putDelivery writes d under delivery/<deliverySegment(id)>/ in the bucket
 // for hash, with an id file holding the canonical ID verbatim so a reader can
-// refuse a directory another ID's record occupies. The signature and
-// sensitivity files are written even when empty. Call only with a record that
+// refuse a directory another ID's record occupies. The signature,
+// sensitivity, and artifact_revision files are written even when empty. Call only with a record that
 // passed verification.
 func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
 	if c.dir == "" || hash == "" {
@@ -2821,6 +2829,7 @@ func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
 		"delivery_hash":      d.DeliveryHash,
 		"delivery_signature": d.DeliverySignature,
 		"sensitivity":        d.Sensitivity,
+		"artifact_revision":  d.ArtifactRevision,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			return err
