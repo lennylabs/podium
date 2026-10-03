@@ -229,6 +229,7 @@ rm -rf "$WORK"
 | S78 | The registry refuses an unusable SCIM store, audit sink, or audit anchor key | standalone | none | none | none |
 | S79 | A workspace target's `$PODIUM_CHANGED` follows the bytes on disk | solo | none | none | none |
 | S80 | Every harness output carries the derived skill compatibility line | solo | none | none | none |
+| S81 | The Python SDK login pair against a live IdP | none (SDK only) | none | none | an IdP with a device-code client, a desktop browser |
 
 ---
 
@@ -9989,5 +9990,111 @@ agent can act on, and that the lock file does not churn.
 
    **Expect.** `exit=0` and `stable`. A changed `content_hash` means the hash
    was computed over adapter output, which is a defect.
+
+**Cleanup.** `cd /` and `rm -rf "$WORK"`.
+
+---
+
+## S81: The Python SDK login pair against a live IdP
+
+**Goal.** Validate that `Client.start_login()` returns the verification URL and
+the user code without printing or polling, that `Client.finish_login()` installs
+the token after the user approves, that a finished handle cannot be reused, and
+that a cancelled or denied flow ends with the matching `DeviceCodeError.reason`.
+
+**Covers.** The §6.3 SDK contract for `oauth-device-code`. The SDK suites pin
+each outcome against a stub IdP. This scenario covers what only a live IdP
+establishes: the URL and code a person types into a real verification page,
+and the reply the IdP sends on approval and on denial.
+
+**Why by hand.** A notebook or GUI author reads the handle's fields and shows
+them in their own interface. No automated test reads that the URL opens a real
+verification page, that the code is accepted there, or that the terminal stays
+silent while the start call runs.
+
+**Prerequisites.**
+
+- An IdP whose tenant publishes a device-authorization endpoint and a token
+  endpoint, and a public client registered on it that may use the device-code
+  grant. When none is available, skip the scenario and record the skip and the
+  reason.
+- `python3` 3.10 or later.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then export the
+   IdP coordinates and the SDK path.
+
+   ```bash
+   export DEVICE_URL=<device authorization endpoint>
+   export TOKEN_URL=<token endpoint>
+   export CLIENT_ID=<device-code client id>
+   export PYTHONPATH="$REAL_HOME/projects/podium/sdks/podium-py"
+   unset PODIUM_OAUTH_CLIENT_ID PODIUM_OAUTH_AUDIENCE \
+     PODIUM_OAUTH_AUTHORIZATION_ENDPOINT PODIUM_OAUTH_TOKEN_URL
+   cat > "$WORK/pair.py" <<'PY'
+   import os, sys, threading
+   from podium import Client, DeviceCodeError
+   c = Client(registry="http://localhost:1")
+   kw = dict(client_id=os.environ["CLIENT_ID"],
+             device_authorization_endpoint=os.environ["DEVICE_URL"],
+             token_endpoint=os.environ["TOKEN_URL"])
+   mode = sys.argv[1]
+   p = c.start_login(**kw)
+   print("URI", p.verification_uri, "CODE", p.user_code, "COMPLETE", p.verification_uri_complete)
+   print("REPR", repr(p))
+   cancel = threading.Event()
+   if mode == "cancel":
+       threading.Timer(3, cancel.set).start()
+   try:
+       t = c.finish_login(p, timeout=300, cancel=cancel)
+       print("TOKEN_SET", bool(c.token) and c.token == t.access_token)
+   except DeviceCodeError as e:
+       print("REASON", e.reason)
+   try:
+       c.finish_login(p)
+   except DeviceCodeError as e:
+       print("REUSE", e.reason)
+   PY
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and
+   `$WORK/pair.py` exists.
+
+2. Run the approve path, keeping the streams apart, and approve the request in a
+   browser at the printed URI with the printed code.
+
+   ```bash
+   python3 -u "$WORK/pair.py" approve 2> "$WORK/err.txt" | tee "$WORK/out.txt"
+   wc -c < "$WORK/err.txt"
+   ```
+
+   The `-u` flag keeps stdout unbuffered, so the `URI` line reaches the
+   terminal while `finish_login` waits for the approval.
+
+   **Expect.** The terminal and `out.txt` show a `URI` line with an `https` URL
+   and a non-empty `CODE`, then `TOKEN_SET True`, then `REUSE consumed`.
+   `err.txt` is 0 bytes.
+   The `REPR` line does not contain the device code. A `Visit:` line in
+   `err.txt`, or a second token on reuse, is the defect this step catches.
+
+3. Run the cancel path and do not visit the URL.
+
+   ```bash
+   python3 "$WORK/pair.py" cancel
+   ```
+
+   **Expect.** Within about 3 s plus one poll interval the script prints
+   `REASON cancelled`, then `REUSE consumed`. A run that blocks until the
+   timeout is the defect this step catches.
+
+4. Run the approve path again, and deny the request on the verification page.
+
+   ```bash
+   python3 "$WORK/pair.py" approve
+   ```
+
+   **Expect.** `REASON denied`, then `REUSE consumed`. `REASON failed` means
+   the IdP's `access_denied` reply was not mapped.
 
 **Cleanup.** `cd /` and `rm -rf "$WORK"`.

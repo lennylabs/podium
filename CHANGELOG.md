@@ -84,6 +84,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `key_id=<hex> role=signing|verify` line per key.
   `docs/deployment/clustered.md` generates the chart's signing key with
   `generate` in place of a standalone first start.
+- **Non-blocking SDK login** (§6.3): the Python SDK gains
+  `Client.start_login()` and `Client.finish_login()`, and the TypeScript SDK
+  gains `client.startLogin()` and `client.finishLogin()`. The start call
+  returns a single-use `PendingLogin` handle with the verification URL, the
+  user code, the code lifetime, and the poll interval, and it neither prints
+  nor polls. The finish call polls with a timeout and a cancellation input
+  (`threading.Event`, `AbortSignal`) and installs the token in memory.
+  `DeviceCodeError` gains a `reason` (`denied`, `expired`, `timeout`,
+  `cancelled`, `consumed`, or `failed`). `Client.login()` keeps its signature
+  and output and now composes the pair; when the device code expires before
+  the timeout, it raises reason `expired` where it previously reported
+  `login timed out`.
 
 ### Fixed
 
@@ -787,6 +799,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   calls `/v1/artifacts:batchLoad` at startup, and it no longer reads
   `PODIUM_PREFETCH` or the `prefetch` configuration key. Remove both from a
   consumer's configuration; a value left in place is ignored.
+
+- **`DeviceCodeRequired`** from the Python SDK (§6.3). No code raised it.
+  Catch `DeviceCodeError` instead.
 
 ### Documentation
 

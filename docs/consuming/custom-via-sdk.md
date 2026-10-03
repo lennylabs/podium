@@ -234,7 +234,72 @@ Visibility filtering, layer composition, and audit are the same as in the MCP pa
 
 Custom providers register through the same interface as the MCP server's. For most consumers, the built-in providers are enough:
 
-- **`oauth-device-code`**: `Client.login()` runs the device-code flow, prints the verification URL and the user code to stderr, and keeps the returned access token on the client instance for the life of the process. The SDK does not persist it; `podium login` stores a token in the OS keychain.
+- **`oauth-device-code`**: `Client.login()` runs the device-code flow, prints the verification URL and the user code to stderr, and keeps the returned access token on the client instance for the life of the client. The SDK does not persist it; `podium login` stores a token in the OS keychain. `Client.start_login()` and `Client.finish_login()` split the same flow for callers that show the URL and code in their own interface, as the next section describes.
 - **`injected-session-token`**: a runtime-issued signed JWT. Pass it as `Client(registry=..., token=...)`, or export `PODIUM_SESSION_TOKEN` and construct the client with `Client.from_env()`. The right choice for managed agent runtimes (Bedrock Agents, OpenAI Assistants, custom orchestrators) where the runtime issues credentials per session.
 
 The deployment configures the registry to trust the runtime's signing key at startup through `PODIUM_RUNTIME_KEYS_PATH`, which names a file written with `podium admin runtime register --keys-file`. The registry verifies signatures on every call.
+
+### Non-blocking login
+
+`Client.start_login()` (Python) and `client.startLogin()` (TypeScript) request a
+device code and return a pending-login handle. The start call prints nothing
+and does not poll. The handle carries the verification URL, the complete
+verification URL when the IdP supplies one, the user code, the code's lifetime,
+and the initial poll interval. Show the URL and the code in the application's
+own interface, then call the finish call.
+
+```python
+import threading
+from podium import Client, DeviceCodeError
+
+client = Client(registry="https://podium.acme.com")
+pending = client.start_login()
+show_in_ui(pending.verification_uri, pending.user_code)
+
+cancel = threading.Event()   # set from another thread to stop waiting
+try:
+    client.finish_login(pending, timeout=300, cancel=cancel)
+except DeviceCodeError as err:
+    report(err.reason)
+```
+
+```ts
+import { Client, DeviceCodeError } from "@lennylabs/podium-sdk";
+
+const client = new Client({ registry: "https://podium.acme.com" });
+const pending = await client.startLogin();
+showInUi(pending.verificationUri, pending.userCode);
+
+const controller = new AbortController();
+try {
+  await client.finishLogin(pending, { timeoutMs: 300_000, signal: controller.signal });
+} catch (err) {
+  if (err instanceof DeviceCodeError) report(err.reason);
+}
+```
+
+The finish call follows these rules:
+
+- A handle is single-use. The first finish call consumes it whatever its
+  outcome, and a later finish call fails with reason `consumed`.
+- The code's lifetime runs from the start call. A finish call on an expired
+  handle fails with reason `expired` and sends no token request.
+- The timeout runs from the finish call and defaults to 10 minutes. The SDK
+  checks it, the code's lifetime, and cancellation between token requests.
+- Python cancels through a `threading.Event`, and TypeScript through an
+  `AbortSignal`. A cancelled finish call fails with reason `cancelled`. Python
+  stops at the next check and does not interrupt a token request in flight.
+- `DeviceCodeError.reason` is `denied`, `expired`, `timeout`, `cancelled`,
+  `consumed`, or `failed`. The `failed` reason covers discovery, device
+  authorization, transport, and unrecognized IdP errors.
+- On success the finish call stores the access token on the client it was
+  called on. The token stays in memory for the life of the client, and the
+  SDK neither persists nor refreshes it. Finish a handle on the client that
+  started it.
+- Until a finish call succeeds, the client sends anonymous requests and sees
+  public visibility only. The SDK does not refresh the access token, so when
+  it expires (15 minutes by default) requests fail with `auth.token_expired`.
+  Run the pair or `login()` again to obtain a new token.
+
+`client.login()` runs both calls, prints the URL and the code to stderr, and
+blocks until the flow ends.

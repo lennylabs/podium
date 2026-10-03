@@ -7,6 +7,8 @@ import json
 import os
 import socket
 import threading
+import time
+import urllib.error
 
 import pytest
 
@@ -256,95 +258,509 @@ def test_rrf_fuse_orders_by_reciprocal_rank():
     assert max(fused, key=fused.get) == "b"
 
 
+
 # ---------------------------------------------------------------------------
-# Client.login() runs the device-code flow and the
-# resulting token authenticates requests (spec §6.3, §7.7, §14.8).
+# The device-code login pair (start_login / finish_login) and login(), which
+# composes it, against a stub IdP (spec §6.3, §7.7).
 # ---------------------------------------------------------------------------
+
+_DEVICE_CODE = "dev-123"
+_USER_CODE = "WXYZ-1234"
+_VERIFICATION_URI = "https://idp.example.com/activate"
+_COMPLETE_URI = "https://idp.example.com/activate?code=WXYZ-1234"
+_ACCESS_TOKEN = "tok-abc"
+_REFRESH_TOKEN = "ref-xyz"
+
+# Scripted /token replies by name. "ok" is the only success.
+_TOKEN_REPLIES: dict[str, tuple[int, dict[str, str]]] = {
+    "pending": (400, {"error": "authorization_pending"}),
+    "slow_down": (400, {"error": "slow_down"}),
+    "expired_token": (400, {"error": "expired_token"}),
+    "access_denied": (400, {"error": "access_denied"}),
+    "unknown": (400, {"error": "server_meltdown"}),
+    "ok": (
+        200,
+        {
+            "access_token": _ACCESS_TOKEN,
+            "refresh_token": _REFRESH_TOKEN,
+            "id_token": "",
+            "token_type": "Bearer",
+        },
+    ),
+}
 
 
 class _OAuthHandler(http.server.BaseHTTPRequestHandler):
+    """Stub IdP and registry whose replies a test scripts on the server.
+
+    ``discovery_mode`` is ``ok``, ``404``, or ``no_device``. ``device_mode`` is
+    ``ok``, ``404`` (non-JSON body), ``non_json`` (200 with a non-JSON body),
+    or ``no_device_code``. ``token_script`` lists the /token replies in order,
+    and its last entry repeats once the list is exhausted.
+    """
+
     def log_message(self, *a):
         pass
 
-    def _send(self, obj, status=200):
-        body = json.dumps(obj).encode()
+    def _send_raw(self, body: bytes, status: int, content_type: str) -> None:
         self.send_response(status)
-        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self):  # noqa: N802
-        if self.path == "/.well-known/oauth-authorization-server":
-            base = f"http://127.0.0.1:{self.server.server_address[1]}"
-            self._send(
-                {
-                    "device_authorization_endpoint": base + "/device",
-                    "token_endpoint": base + "/token",
-                }
-            )
-            return
-        # Authenticated catalog call: echo whether a Bearer arrived.
+    def _send(self, obj, status=200):
+        self._send_raw(json.dumps(obj).encode(), status, "application/json")
+
+    def _record(self, body: str) -> None:
         auth = self.headers.get("Authorization", "")
-        self.server.last_auth = auth  # type: ignore[attr-defined]
+        self.server.requests.append(f"{self.command} {self.path} {auth} {body}")  # type: ignore[attr-defined]
+
+    def do_GET(self):  # noqa: N802
+        self._record("")
+        srv = self.server
+        if self.path == "/.well-known/oauth-authorization-server":
+            if srv.discovery_mode == "404":  # type: ignore[attr-defined]
+                self._send_raw(b"not found", 404, "text/plain")
+                return
+            base = f"http://127.0.0.1:{srv.server_address[1]}"
+            meta = {"token_endpoint": base + "/token"}
+            if srv.discovery_mode != "no_device":  # type: ignore[attr-defined]
+                meta["device_authorization_endpoint"] = base + "/device"
+            self._send(meta)
+            return
+        # Authenticated catalog call: record whether a Bearer arrived.
+        srv.last_auth = self.headers.get("Authorization", "")  # type: ignore[attr-defined]
         self._send({"total_matched": 0, "results": []})
 
     def do_POST(self):  # noqa: N802
+        length = int(self.headers.get("Content-Length", "0"))
+        self._record(self.rfile.read(length).decode())
         if self.path == "/device":
-            self._send(
-                {
-                    "device_code": "dev-123",
-                    "user_code": "WXYZ-1234",
-                    "verification_uri": "https://idp.example.com/activate",
-                    "interval": 0,
-                    "expires_in": 600,
-                }
-            )
+            self._device()
             return
-        if self.path == "/token":
-            self.server.token_polls += 1  # type: ignore[attr-defined]
-            if self.server.always_pending:  # type: ignore[attr-defined]
-                self._send({"error": "authorization_pending"}, status=400)
-            elif self.server.token_polls < 2:  # type: ignore[attr-defined]
-                self._send({"error": "authorization_pending"}, status=400)
-            else:
-                self._send({"access_token": "tok-abc", "id_token": "", "token_type": "Bearer"})
+        if self.path in ("/token", "/oauth2/token"):
+            self._token()
             return
         self._send({"error": "not_found"}, status=404)
 
+    def _device(self) -> None:
+        srv = self.server
+        mode = srv.device_mode  # type: ignore[attr-defined]
+        if mode == "404":
+            self._send_raw(b"no such endpoint", 404, "text/plain")
+            return
+        if mode == "non_json":
+            self._send_raw(b"<html>ok</html>", 200, "text/html")
+            return
+        body = {
+            "user_code": _USER_CODE,
+            "verification_uri": _VERIFICATION_URI,
+            "interval": srv.interval,  # type: ignore[attr-defined]
+            "expires_in": srv.expires_in,  # type: ignore[attr-defined]
+        }
+        if mode != "no_device_code":
+            body["device_code"] = _DEVICE_CODE
+        if srv.complete_uri:  # type: ignore[attr-defined]
+            body["verification_uri_complete"] = srv.complete_uri  # type: ignore[attr-defined]
+        self._send(body)
+
+    def _token(self) -> None:
+        srv = self.server
+        script = srv.token_script  # type: ignore[attr-defined]
+        name = script[min(srv.token_polls, len(script) - 1)]  # type: ignore[attr-defined]
+        srv.token_polls += 1  # type: ignore[attr-defined]
+        status, body = _TOKEN_REPLIES[name]
+        self._send(body, status=status)
+
 
 @pytest.fixture()
-def oauth_server():
+def no_oauth_env(monkeypatch):
+    # An operator shell's PODIUM_OAUTH_* must not redirect the stub flow to a
+    # real IdP.
+    for name in (
+        "PODIUM_OAUTH_CLIENT_ID",
+        "PODIUM_OAUTH_AUDIENCE",
+        "PODIUM_OAUTH_AUTHORIZATION_ENDPOINT",
+        "PODIUM_OAUTH_TOKEN_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+def _free_port() -> int:
     sock = socket.socket()
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
     sock.close()
-    server = http.server.HTTPServer(("127.0.0.1", port), _OAuthHandler)
+    return port
+
+
+@pytest.fixture()
+def oauth_server(no_oauth_env):
+    # Requesting no_oauth_env here applies it to every device-flow test.
+    server = http.server.HTTPServer(("127.0.0.1", _free_port()), _OAuthHandler)
     server.token_polls = 0
-    server.always_pending = False
+    server.token_script = ["pending", "ok"]
+    server.discovery_mode = "ok"
+    server.device_mode = "ok"
+    server.complete_uri = ""
+    server.interval = 0
+    server.expires_in = 600
     server.last_auth = ""
+    server.requests = []
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     yield server
     server.shutdown()
 
 
-def test_login_runs_device_flow_and_authenticates(oauth_server):
-    base = f"http://127.0.0.1:{oauth_server.server_address[1]}"
-    client = Client(registry=base)
-    tokens = client.login(timeout=10.0)
-    assert tokens.access_token == "tok-abc"
-    assert client.token == "tok-abc"
-    # the token authenticates subsequent catalog calls.
+def _base(server) -> str:
+    return f"http://127.0.0.1:{server.server_address[1]}"
+
+
+class _FakeClock:
+    """A mutable clock with a sleep that advances it and records each wait.
+
+    ``step`` fixes how far each wait advances the clock, which keeps a loop
+    that the fixture's interval of 0 would otherwise spin in place moving.
+    ``on_wait`` runs after each recorded wait with the wait count.
+    """
+
+    def __init__(self, step: float | None = None, on_wait=None) -> None:
+        self.now = 1000.0
+        self.waits: list[float] = []
+        self._step = step
+        self._on_wait = on_wait
+
+    def __call__(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.waits.append(seconds)
+        self.now += seconds if self._step is None else self._step
+        if self._on_wait is not None:
+            self._on_wait(len(self.waits))
+
+
+def _start(server, clock: _FakeClock | None = None):
+    client = Client(registry=_base(server))
+    pending = client.start_login(clock=clock) if clock else client.start_login()
+    return client, pending
+
+
+# Spec: §6.3
+def test_start_login_returns_handle_silently(oauth_server, capsys):
+    oauth_server.complete_uri = _COMPLETE_URI
+    _, pending = _start(oauth_server)
+    assert pending.verification_uri == _VERIFICATION_URI
+    assert pending.verification_uri_complete == _COMPLETE_URI
+    assert pending.user_code == _USER_CODE
+    assert pending.expires_in == 600
+    assert pending.interval == 0
+    assert capsys.readouterr().err == ""
+    assert oauth_server.token_polls == 0
+    assert "device_code" not in repr(pending)
+    assert _DEVICE_CODE not in repr(pending)
+
+
+# Spec: §6.3
+def test_start_login_complete_uri_absent_is_none(oauth_server):
+    _, pending = _start(oauth_server)
+    assert pending.verification_uri_complete is None
+
+
+# Spec: §6.3
+def test_finish_login_installs_token(oauth_server):
+    client, pending = _start(oauth_server)
+    tokens = client.finish_login(pending, timeout=10.0)
+    assert tokens.access_token == _ACCESS_TOKEN
+    assert client.token == tokens.access_token
+    assert tokens.refresh_token == _REFRESH_TOKEN
     client.search_artifacts("anything")
-    assert oauth_server.last_auth == "Bearer tok-abc"
+    assert oauth_server.last_auth == f"Bearer {_ACCESS_TOKEN}"
+    # The SDK neither refreshes nor otherwise sends the refresh token.
+    assert not any(_REFRESH_TOKEN in r for r in oauth_server.requests)
 
 
-def test_login_times_out_when_always_pending(oauth_server):
-    # spec §7.7 — polling is bounded; an IdP that never completes must not
-    # block forever.
-    oauth_server.always_pending = True
-    base = f"http://127.0.0.1:{oauth_server.server_address[1]}"
-    client = Client(registry=base)
+# Spec: §6.3
+def test_finish_login_slow_down_grows_interval(oauth_server):
+    oauth_server.token_script = ["slow_down", "ok"]
+    clock = _FakeClock()
+    client, pending = _start(oauth_server, clock)
+    client.finish_login(pending, sleep=clock.sleep)
+    assert clock.waits == [0, 5]
+
+
+# Spec: §6.3
+def test_finish_login_denied(oauth_server):
+    oauth_server.token_script = ["access_denied"]
+    client, pending = _start(oauth_server)
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending)
+    assert err.value.reason == "denied"
+    assert client.token == ""
+
+
+# Spec: §6.3
+def test_finish_login_idp_expired_token(oauth_server):
+    oauth_server.token_script = ["expired_token"]
+    client, pending = _start(oauth_server)
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending)
+    assert err.value.reason == "expired"
+
+
+# Spec: §6.3
+def test_finish_login_after_local_expiry_sends_nothing(oauth_server):
+    clock = _FakeClock()
+    client, pending = _start(oauth_server, clock)
+    clock.now += pending.expires_in + 1
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending, sleep=clock.sleep)
+    assert err.value.reason == "expired"
+    assert oauth_server.token_polls == 0
+
+
+# Spec: §6.3
+def test_finish_login_expires_in_loop_before_timeout(oauth_server):
+    oauth_server.expires_in = 30
+    oauth_server.token_script = ["pending"]
+    clock = _FakeClock(step=10)
+    client, pending = _start(oauth_server, clock)
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending, timeout=600, sleep=clock.sleep)
+    assert err.value.reason == "expired"
+    assert oauth_server.token_polls >= 1
+
+
+# Spec: §6.3
+def test_finish_login_timeout_runs_from_finish_call(oauth_server):
+    oauth_server.token_script = ["pending"]
+    clock = _FakeClock(step=10)
+    client, pending = _start(oauth_server, clock)
+    clock.now += 100
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending, timeout=50, sleep=clock.sleep)
+    # A timeout measured from the start call would end before any request.
+    assert oauth_server.token_polls >= 1
+    assert err.value.reason == "timeout"
+
+
+# Spec: §6.3
+def test_finish_login_cancel_before_call(oauth_server):
+    client, pending = _start(oauth_server)
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending, cancel=cancel)
+    assert err.value.reason == "cancelled"
+    assert oauth_server.token_polls == 0
+    with pytest.raises(DeviceCodeError) as again:
+        client.finish_login(pending)
+    assert again.value.reason == "consumed"
+
+
+# Spec: §6.3
+def test_finish_login_cancel_between_polls(oauth_server):
+    oauth_server.token_script = ["pending"]
+    cancel = threading.Event()
+
+    def on_wait(count: int) -> None:
+        if count == 2:
+            cancel.set()
+
+    clock = _FakeClock(step=1, on_wait=on_wait)
+    client, pending = _start(oauth_server, clock)
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending, cancel=cancel, sleep=clock.sleep)
+    assert err.value.reason == "cancelled"
+    assert oauth_server.token_polls == 1
+
+
+# Spec: §6.3
+def test_finish_login_cancel_wait_real_thread(oauth_server):
+    # No injected sleep: the wait is the cancel event's own wait, which
+    # returns when another thread sets it.
+    oauth_server.interval = 1
+    oauth_server.token_script = ["pending"]
+    client, pending = _start(oauth_server)
+    cancel = threading.Event()
+    timer = threading.Timer(0.2, cancel.set)
+    timer.start()
+    try:
+        with pytest.raises(DeviceCodeError) as err:
+            client.finish_login(pending, timeout=30, cancel=cancel)
+    finally:
+        timer.cancel()
+    assert err.value.reason == "cancelled"
+
+
+# Spec: §6.3
+def test_finish_login_concurrent_single_winner(oauth_server):
+    oauth_server.token_script = ["ok"]
+    client, pending = _start(oauth_server)
+    barrier = threading.Barrier(2)
+    results: list[object] = []
+    lock = threading.Lock()
+
+    def finish() -> None:
+        barrier.wait()
+        try:
+            outcome: object = client.finish_login(pending, timeout=10.0)
+        except DeviceCodeError as exc:
+            outcome = exc
+        with lock:
+            results.append(outcome)
+
+    threads = [threading.Thread(target=finish) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+    errors = [r for r in results if isinstance(r, DeviceCodeError)]
+    tokens = [r for r in results if not isinstance(r, DeviceCodeError)]
+    assert len(tokens) == 1
+    assert [e.reason for e in errors] == ["consumed"]
+    assert oauth_server.token_polls == 1
+
+
+# Spec: §6.3
+def test_finish_login_reuse_after_failure(oauth_server):
+    oauth_server.token_script = ["access_denied"]
+    client, pending = _start(oauth_server)
     with pytest.raises(DeviceCodeError):
-        client.login(timeout=0.5)
+        client.finish_login(pending)
+    polls = oauth_server.token_polls
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending)
+    assert err.value.reason == "consumed"
+    assert oauth_server.token_polls == polls
+
+
+@pytest.mark.parametrize(
+    ("discovery_mode", "device_mode", "http_cause"),
+    [
+        ("404", "ok", True),
+        ("no_device", "ok", False),
+        ("ok", "404", True),
+        ("ok", "no_device_code", False),
+    ],
+)
+# Spec: §6.3
+def test_start_login_failed_reasons(oauth_server, discovery_mode, device_mode, http_cause):
+    oauth_server.discovery_mode = discovery_mode
+    oauth_server.device_mode = device_mode
+    client = Client(registry=_base(oauth_server))
+    with pytest.raises(DeviceCodeError) as err:
+        client.start_login()
+    assert err.value.reason == "failed"
+    if http_cause:
+        assert isinstance(err.value.__cause__, urllib.error.HTTPError)
+
+
+# Spec: §6.3
+def test_finish_login_unknown_error_is_failed(oauth_server):
+    oauth_server.token_script = ["unknown"]
+    client, pending = _start(oauth_server)
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending)
+    assert err.value.reason == "failed"
+
+
+# Spec: §6.3
+def test_login_composes_pair(oauth_server, monkeypatch, capsys):
+    from podium import client as client_mod
+
+    opened: list[str] = []
+    monkeypatch.setattr(client_mod, "_open_browser", opened.append)
+    client = Client(registry=_base(oauth_server))
+    tokens = client.login(open_browser=True, timeout=10.0)
+    assert tokens.access_token == _ACCESS_TOKEN
+    assert client.token == _ACCESS_TOKEN
+    client.search_artifacts("anything")
+    assert oauth_server.last_auth == f"Bearer {_ACCESS_TOKEN}"
+    err = capsys.readouterr().err
+    assert f"Visit: {_VERIFICATION_URI}" in err
+    assert f"User code: {_USER_CODE}" in err
+    # The IdP omitted the complete URI, so no browser opens.
+    assert opened == []
+
+
+# Spec: §6.3
+def test_login_opens_complete_uri_with_explicit_endpoints(oauth_server, monkeypatch):
+    from podium import client as client_mod
+
+    oauth_server.complete_uri = _COMPLETE_URI
+    opened: list[str] = []
+    monkeypatch.setattr(client_mod, "_open_browser", opened.append)
+    base = _base(oauth_server)
+    # The registry URL is unreachable, so the explicit endpoints must be used.
+    client = Client(registry="http://127.0.0.1:1")
+    tokens = client.login(
+        open_browser=True,
+        timeout=10.0,
+        device_authorization_endpoint=base + "/device",
+        token_endpoint=base + "/token",
+    )
+    assert tokens.access_token == _ACCESS_TOKEN
+    assert opened == [_COMPLETE_URI]
+
+
+# Spec: §6.3
+def test_login_expired_before_timeout(oauth_server):
+    oauth_server.expires_in = 0.2
+    oauth_server.token_script = ["pending"]
+    client = Client(registry=_base(oauth_server))
+    with pytest.raises(DeviceCodeError) as err:
+        client.login(timeout=10.0, sleep=lambda _s: time.sleep(0.05))
+    assert err.value.reason == "expired"
+    assert str(err.value) == "device code expired before the flow completed"
+
+
+# Spec: §6.3 / §7.7 — polling is bounded; an IdP that never completes must not
+# block forever.
+def test_login_times_out_when_always_pending(oauth_server):
+    oauth_server.token_script = ["pending"]
+    client = Client(registry=_base(oauth_server))
+    with pytest.raises(DeviceCodeError) as err:
+        client.login(timeout=0.5, sleep=lambda _s: time.sleep(0.05))
+    assert err.value.reason == "timeout"
+
+
+# Spec: §6.3 / §7.7 — with no token endpoint configured or discovered, the
+# registry's /oauth2/token is the fallback.
+def test_start_login_token_endpoint_falls_back_to_registry(oauth_server):
+    base = _base(oauth_server)
+    client = Client(registry=base)
+    pending = client.start_login(device_authorization_endpoint=base + "/device")
+    client.finish_login(pending, timeout=10.0)
+    assert any(r.startswith("POST /oauth2/token ") for r in oauth_server.requests)
+
+
+# Spec: §6.3
+def test_import_surface():
+    import podium
+    from podium import DeviceCodeError as _E, PendingLogin as _P, Tokens as _T
+
+    assert (_E, _P, _T) == (podium.DeviceCodeError, podium.PendingLogin, podium.Tokens)
+    assert not hasattr(podium, "DeviceCodeRequired")
+
+
+# Spec: §6.3
+def test_finish_login_unreachable_token_endpoint_is_failed(oauth_server):
+    client = Client(registry=_base(oauth_server))
+    pending = client.start_login(token_endpoint=f"http://127.0.0.1:{_free_port()}/token")
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending, timeout=10.0)
+    assert err.value.reason == "failed"
+    assert isinstance(err.value.__cause__, (urllib.error.URLError, OSError))
+
+
+# Spec: §6.3
+def test_start_login_device_non_json_200_is_failed(oauth_server):
+    oauth_server.device_mode = "non_json"
+    client = Client(registry=_base(oauth_server))
+    with pytest.raises(DeviceCodeError) as err:
+        client.start_login()
+    assert err.value.reason == "failed"
+    assert isinstance(err.value.__cause__, json.JSONDecodeError)

@@ -18,14 +18,42 @@ import {
 } from "./overlay.js";
 import {
   DeviceCodeError,
-  DEFAULT_TIMEOUT_MS,
+  PendingLogin,
+  createPendingLogin,
   discoverIdp,
+  finishPending,
   initiate,
-  poll,
+  type DeviceCodeErrorReason,
   type Tokens,
 } from "./oauth.js";
 
-export { DeviceCodeError, type Tokens };
+export { DeviceCodeError, PendingLogin, type DeviceCodeErrorReason, type Tokens };
+
+// LoginOptions configures the device-authorization request that startLogin()
+// and login() issue. Unset fields fall back to the PODIUM_OAUTH_* environment
+// variables and then to RFC 8414 discovery against the registry.
+export interface LoginOptions {
+  clientID?: string;
+  scopes?: string[];
+  audience?: string;
+  deviceAuthorizationEndpoint?: string;
+  tokenEndpoint?: string;
+}
+
+// FinishLoginOptions bounds a finishLogin() call. timeoutMs runs from the
+// finish call (10 minutes by default); signal cancels the polling.
+export interface FinishLoginOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+interface DeviceFlow {
+  deviceUrl: string;
+  tokenUrl: string;
+  clientID: string;
+  scopes: string[];
+  audience: string;
+}
 
 export interface ArtifactDescriptor {
   id: string;
@@ -897,23 +925,10 @@ export class Client {
     return index;
   }
 
-  // spec §14.8 / §7.7 — login() runs the §6.3 oauth-device-code flow before
-  // any catalog calls. The IdP is discovered from the registry's RFC 8414
-  // metadata (overridable via opts or the PODIUM_OAUTH_* env vars). The
-  // verification URL and user code print to stderr; polling is bounded by
-  // timeoutMs (10 minutes by default). On success the access token is stored
-  // on the client and attached as the Authorization: Bearer credential on
-  // every subsequent request (§7.6).
-  async login(
-    opts: {
-      timeoutMs?: number;
-      clientID?: string;
-      scopes?: string[];
-      audience?: string;
-      deviceAuthorizationEndpoint?: string;
-      tokenEndpoint?: string;
-    } = {},
-  ): Promise<Tokens> {
+  // resolveDeviceFlow resolves the device-flow configuration for startLogin()
+  // and login(): explicit options win, then the PODIUM_OAUTH_* environment
+  // variables, then the registry's RFC 8414 metadata.
+  private async resolveDeviceFlow(opts: LoginOptions): Promise<DeviceFlow> {
     const clientID =
       opts.clientID ?? process.env.PODIUM_OAUTH_CLIENT_ID ?? "podium-cli";
     const scopes = opts.scopes ?? ["openid", "profile", "email", "groups"];
@@ -929,16 +944,50 @@ export class Client {
       if (!tokenUrl) tokenUrl = discovered.tokenUrl;
     }
     if (!tokenUrl) tokenUrl = this.registry.replace(/\/$/, "") + "/oauth2/token";
+    return { deviceUrl, tokenUrl, clientID, scopes, audience };
+  }
 
-    const auth = await initiate(deviceUrl, clientID, scopes, audience, this.fetcher);
-    process.stderr.write(`Visit: ${auth.verificationUri}\n`);
-    process.stderr.write(`User code: ${auth.userCode}\n`);
-    const tokens = await poll(tokenUrl, clientID, auth, {
-      timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-      fetcher: this.fetcher,
-    });
+  // Spec: §6.3 — startLogin() is the start call of the non-blocking pair. It
+  // sends the device-authorization request and returns a PendingLogin whose
+  // code expiry runs from this call. It prints nothing, opens no browser, and
+  // does not poll, so the calling application decides how to show the code.
+  async startLogin(opts: LoginOptions = {}): Promise<PendingLogin> {
+    const flow = await this.resolveDeviceFlow(opts);
+    const auth = await initiate(
+      flow.deviceUrl,
+      flow.clientID,
+      flow.scopes,
+      flow.audience,
+      this.fetcher,
+    );
+    return createPendingLogin(auth, flow.tokenUrl, flow.clientID, this.fetcher, Date.now);
+  }
+
+  // Spec: §6.3 — finishLogin() is the finish call. It polls until the user
+  // approves, the code expires, timeoutMs elapses, or signal aborts, and it
+  // consumes the handle whatever the outcome. On success the access token is
+  // held in memory on this client and attached as the Authorization: Bearer
+  // credential on later requests (§7.6); it is neither persisted nor
+  // refreshed. A handle belongs to the client whose startLogin() produced it.
+  // Finishing it on another client is unsupported: the polling uses the
+  // starting client's fetcher, but the token lands on this one.
+  async finishLogin(
+    pending: PendingLogin,
+    opts: FinishLoginOptions = {},
+  ): Promise<Tokens> {
+    const tokens = await finishPending(pending, opts);
     this.token = tokens.accessToken;
     return tokens;
+  }
+
+  // Spec: §6.3 — login() composes the pair: startLogin(), the verification URL
+  // and user code printed to stderr, then finishLogin(). It blocks until the
+  // flow completes and keeps the blocking contract for scripts.
+  async login(opts: LoginOptions & { timeoutMs?: number } = {}): Promise<Tokens> {
+    const pending = await this.startLogin(opts);
+    process.stderr.write(`Visit: ${pending.verificationUri}\n`);
+    process.stderr.write(`User code: ${pending.userCode}\n`);
+    return this.finishLogin(pending, { timeoutMs: opts.timeoutMs });
   }
 
   // spec: §4.5.4 / §4.5.5 / §5.1 — load_domain proxies the
