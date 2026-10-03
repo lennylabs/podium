@@ -38,9 +38,13 @@ var dfBase = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 // replayProxy fronts the registry handler. While capturing it records the
 // first GET /v1/load_artifact answer; while replaying it answers every GET
 // /v1/load_artifact with that captured body, which stands for a party that
-// recorded a signed answer and serves it again later. It holds only a GET
-// body, so in replay mode it refuses HEAD, and the bridge falls through to the
-// full fetch whose answer the §6.5 freshness check compares.
+// recorded a signed answer and serves it again later. In fresh mode it refuses
+// HEAD and strips If-None-Match, so the bridge's cached id@latest record
+// cannot answer through a HEAD match or a 304 and every load receives a fresh
+// 200 body that the §6.5 freshness check compares with the mark. Replay mode
+// also refuses HEAD, because it holds only a GET body. Every live 200 answer's
+// artifact_revision is recorded, so a step can assert the revision the
+// registry served directly.
 type replayProxy struct {
 	next http.Handler
 
@@ -48,8 +52,11 @@ type replayProxy struct {
 	mu       sync.Mutex
 	capture  bool
 	replay   bool
+	fresh    bool
 	captured []byte
 	header   http.Header
+	// served is the artifact_revision of the last live 200 load answer.
+	served string
 }
 
 func (p *replayProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -58,34 +65,52 @@ func (p *replayProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	p.mu.Lock()
-	replay, capture := p.replay, p.capture && p.captured == nil
+	replay, fresh, capture := p.replay, p.fresh, p.capture && p.captured == nil
 	body, header := p.captured, p.header
 	p.mu.Unlock()
 	switch {
-	case replay && r.Method == http.MethodHead:
+	case (replay || fresh) && r.Method == http.MethodHead:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 	case replay:
-		for k, v := range header {
-			w.Header()[k] = v
+		writeRecorded(w, header, http.StatusOK, body)
+	case r.Method == http.MethodGet:
+		if fresh {
+			r.Header.Del("If-None-Match")
 		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(body)
-	case capture && r.Method == http.MethodGet:
-		rec := httptest.NewRecorder()
-		p.next.ServeHTTP(rec, r)
-		if rec.Code == http.StatusOK {
-			p.mu.Lock()
-			p.captured, p.header = rec.Body.Bytes(), rec.Header().Clone()
-			p.mu.Unlock()
-		}
-		for k, v := range rec.Header() {
-			w.Header()[k] = v
-		}
-		w.WriteHeader(rec.Code)
-		_, _ = w.Write(rec.Body.Bytes())
+		p.serveLive(w, r, capture)
 	default:
 		p.next.ServeHTTP(w, r)
 	}
+}
+
+// serveLive forwards a GET to the registry, records the served
+// artifact_revision of a 200 answer, and captures the answer when capture is
+// set.
+func (p *replayProxy) serveLive(w http.ResponseWriter, r *http.Request, capture bool) {
+	rec := httptest.NewRecorder()
+	p.next.ServeHTTP(rec, r)
+	if rec.Code == http.StatusOK {
+		var served struct {
+			ArtifactRevision string `json:"artifact_revision"`
+		}
+		_ = json.Unmarshal(rec.Body.Bytes(), &served)
+		p.mu.Lock()
+		p.served = served.ArtifactRevision
+		if capture {
+			p.captured, p.header = rec.Body.Bytes(), rec.Header().Clone()
+		}
+		p.mu.Unlock()
+	}
+	writeRecorded(w, rec.Header(), rec.Code, rec.Body.Bytes())
+}
+
+// writeRecorded writes a recorded status, header, and body to w.
+func writeRecorded(w http.ResponseWriter, header http.Header, code int, body []byte) {
+	for k, v := range header {
+		w.Header()[k] = v
+	}
+	w.WriteHeader(code)
+	_, _ = w.Write(body)
 }
 
 func (p *replayProxy) setCapture(on bool) {
@@ -98,6 +123,22 @@ func (p *replayProxy) setReplay(on bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.replay = on
+}
+
+func (p *replayProxy) setFresh(on bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.fresh = on
+}
+
+// takeServed returns the artifact_revision of the last live 200 load answer
+// and clears it, so a load the proxy did not see fresh reads as empty.
+func (p *replayProxy) takeServed() string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	served := p.served
+	p.served = ""
+	return served
 }
 
 // dfFixture is a registry over a memory store behind server.New, signing
@@ -199,7 +240,7 @@ func dfIndex(t *testing.T, cacheDir, registry string) (latest string, mark strin
 
 // dfWantDelivered fails unless res is a delivery of version want. The host
 // result carries no artifact_revision, so the steps read the served revision
-// back from the persisted mark.
+// from the proxy with dfWantServed and the mark from the index.
 func dfWantDelivered(t *testing.T, step string, res map[string]any, want string) {
 	t.Helper()
 	if res["code"] != nil || res["error"] != nil {
@@ -207,6 +248,16 @@ func dfWantDelivered(t *testing.T, step string, res map[string]any, want string)
 	}
 	if res["version"] != want {
 		t.Fatalf("%s: delivered version = %v, want %s", step, res["version"], want)
+	}
+}
+
+// dfWantServed fails unless the last load received a fresh 200 answer whose
+// artifact_revision is want. An empty served revision means the bridge
+// delivered from its cache without a fresh answer.
+func dfWantServed(t *testing.T, step string, p *replayProxy, want string) {
+	t.Helper()
+	if got := p.takeServed(); got != want {
+		t.Fatalf("%s: served artifact_revision = %q, want %q", step, got, want)
 	}
 }
 
@@ -238,22 +289,31 @@ func TestDeliveryFreshness_HonestRegressionsAndReplay(t *testing.T) {
 	}
 	latestArgs := map[string]any{"id": dfArtifact}
 
+	// Steps 1 through 3 force a fresh 200 for every `latest` load, so each
+	// answer reaches the §6.5 comparison rather than a cached HEAD-match or
+	// 304 delivery that is neither compared nor advances the mark.
+	f.proxy.setFresh(true)
+
 	// Step 1: 1.0.0 is delivered and its signed answer captured; 2.0.0,
 	// ingested later, is delivered next.
 	rev100 := f.put(t, "1.0.0", 1, false)
 	f.proxy.setCapture(true)
 	dfWantDelivered(t, "step 1 (1.0.0)", load(latestArgs), "1.0.0")
 	f.proxy.setCapture(false)
+	dfWantServed(t, "step 1 (1.0.0)", f.proxy, rev100)
 	rev200 := f.put(t, "2.0.0", 2, false)
 	dfWantDelivered(t, "step 1 (2.0.0)", load(latestArgs), "2.0.0")
+	dfWantServed(t, "step 1 (2.0.0)", f.proxy, rev200)
 	if _, mark := dfIndex(t, cache, f.url); mark != rev200 {
 		t.Fatalf("step 1: mark = %q, want %q", mark, rev200)
 	}
 
 	// Step 2: 3.0.0 born deprecated is skipped by `latest`, which stays on
-	// 2.0.0 at its unchanged revision; the mark does not move.
+	// 2.0.0 at its unchanged revision. The fresh answer equals the mark, the
+	// equality rule accepts it, and the mark does not move.
 	f.put(t, "3.0.0", 3, true)
 	dfWantDelivered(t, "step 2", load(latestArgs), "2.0.0")
+	dfWantServed(t, "step 2", f.proxy, rev200)
 	if latest, mark := dfIndex(t, cache, f.url); latest != "2.0.0" || mark != rev200 {
 		t.Fatalf("step 2: id@latest = %q, mark = %q; want 2.0.0, %q", latest, mark, rev200)
 	}
@@ -262,9 +322,11 @@ func TestDeliveryFreshness_HonestRegressionsAndReplay(t *testing.T) {
 	// version, so `latest` moves down in semver and up in revision.
 	rev101 := f.put(t, "1.0.1", 4, false)
 	dfWantDelivered(t, "step 3", load(latestArgs), "1.0.1")
+	dfWantServed(t, "step 3", f.proxy, rev101)
 	if latest, mark := dfIndex(t, cache, f.url); latest != "1.0.1" || mark != rev101 {
 		t.Fatalf("step 3: id@latest = %q, mark = %q; want 1.0.1, %q", latest, mark, rev101)
 	}
+	f.proxy.setFresh(false)
 
 	// Step 4: the replayed step-1 answer is refused, and the index keeps
 	// naming 1.0.1 at its mark.
