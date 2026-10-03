@@ -1,7 +1,7 @@
 # Proposal 0036: Define $PODIUM_CHANGED once for both target kinds and compute the workspace value from the bytes on disk
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-02). Signed off as staged. OQ-1: the other workspace workflow variables ($PODIUM_WORKDIR, $PODIUM_TARGET_ID, $PODIUM_REGISTRY) are left to a follow-up proposal.
+- Status: Applied to spec (2026-10-02). Signed off as staged. OQ-1: the other workspace workflow variables ($PODIUM_WORKDIR, $PODIUM_TARGET_ID, $PODIUM_REGISTRY) are left to a follow-up proposal.
 - Date: 2026-10-02
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
