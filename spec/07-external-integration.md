@@ -31,13 +31,14 @@ The registry exposes two surfaces:
 
 At or below the inline cutoff, resources are returned inline. This avoids round-trips for small fixtures.
 
-**Integrity and reference fields.** The registry's HTTP `load_artifact` response carries three fields beside the manifest and the resources:
+**Integrity and reference fields.** The registry's HTTP `load_artifact` response carries these fields beside the manifest and the resources:
 
 - `delivery_hash`: the §4.7.10 digest over the record this response delivers. Present on every response.
 - `delivery_signature`: the registry's §4.7.10 signature over `delivery_hash`. Absent when the registry runs without a signing key.
+- `artifact_revision`: the §4.7.10 ingest time of the served version, an RFC 3339 UTC timestamp in the form §4.7.10 fixes, covered by `delivery_hash`. Present on every response that carries `delivery_hash`, including every `status: ok` batch entry.
 - `extends_pin`: the pinned `<id>@<version>` this artifact extends, as the registry resolved it at ingest; the manifest's `extends:` key may carry a version range, and this field carries the resolved pin rather than the authored reference, present only when the calling identity can see the parent record (§4.6). Its absence does not mean the artifact extends nothing.
 
-These are fields of the HTTP response. The §5 `load_artifact` meta-tool result does not carry them. The entity tag the registry publishes for a `load_artifact` of an `(id, version)` is computed from the content hash and the `extends_pin` value the requesting identity is served, on a full response, on a HEAD, and on a 304 alike, so a response that carries `extends_pin` publishes an entity tag that differs from the one the same `(id, version)` publishes without it, and a conditional request cannot revalidate a cached body whose `extends_pin` value differs from the one the requesting identity is served.
+These are fields of the HTTP response. The §5 `load_artifact` meta-tool result does not carry them. The entity tag the registry publishes for a `load_artifact` of an `(id, version)` is computed from the content hash and the `extends_pin` value the requesting identity is served, on a full response, on a HEAD, and on a 304 alike, so a response that carries `extends_pin` publishes an entity tag that differs from the one the same `(id, version)` publishes without it, and a conditional request cannot revalidate a cached body whose `extends_pin` value differs from the one the requesting identity is served. The artifact revision does not enter the entity tag.
 
 ### 7.2.1 Control-Plane JSON Conventions
 
@@ -708,6 +709,7 @@ for result in artifacts:
     "content_hash": "sha256:...",
     "delivery_hash": "sha256:...",
     "delivery_signature": "...",
+    "artifact_revision": "2025-01-01T00:00:00.000000Z",
     "manifest_body": "...",
     "resources": [
       { "path": "...", "presigned_url": "...", "content_hash": "..." }
