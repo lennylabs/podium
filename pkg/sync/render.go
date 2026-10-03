@@ -345,10 +345,10 @@ func reconcile(workdir, outputID string, rendered []renderedFile) (*RenderResult
 
 // onDiskDigests reads each path's bytes from workdir and returns its hex SHA-256,
 // keyed by the relative path. A path absent from disk is omitted, so a path that
-// did not exist before the render or was removed by the cleanup contributes no
-// entry, and the change-set comparison treats it as added or removed. A read
-// error other than "not present" is returned, because it means the checkout
-// state could not be observed.
+// did not exist before materialization or was removed by the cleanup contributes
+// no entry, and the change-set comparison treats it as added or removed. A read
+// error other than "not present" is returned, because it means the state of the
+// checkout or target directory could not be observed.
 func onDiskDigests(workdir string, paths map[string]bool) (map[string]string, error) {
 	out := make(map[string]string, len(paths))
 	for p := range paths {
@@ -374,8 +374,8 @@ func digest(content []byte) string {
 }
 
 // unionPaths returns the set of relative paths to diff for change detection: the
-// paths this render wrote, plus the prior-render paths the cleanup may remove, so
-// a pure removal is observed as a change against the checkout.
+// paths the run materializes, plus the prior-lock paths the cleanup may remove,
+// so a pure removal is observed as a change.
 func unionPaths(current map[string]bool, priorMerge map[string]string) map[string]bool {
 	out := make(map[string]bool, len(current)+len(priorMerge))
 	for p := range current {
@@ -409,14 +409,16 @@ func writeLock(workdir string, paths map[string]bool, merge map[string]string) e
 	return nil
 }
 
-// changeSet diffs the checkout digests captured before and after the render and
-// returns whether the working tree changed and the sorted canonical IDs of the
-// changed artifacts. A path is changed when its on-disk content differs, when it
-// is newly present (absent before, present after), or when it is gone (present
-// before, absent after). The owner map carries each rendered path's owning
-// artifact ID (or the manifest marker for a shared manifest); a path that
-// disappeared is attributed to the removed marker, because no rendered file owns
-// it.
+// changeSet diffs the digests of a marketplace checkout or a `kind: workspace`
+// target directory captured before and after materialization and returns whether
+// the working tree changed and the sorted canonical IDs of the changed artifacts.
+// A path is changed when its on-disk content differs, when it is newly present
+// (absent before, present after), or when it is gone (present before, absent
+// after). The owner map carries each rendered path's owning artifact ID (or the
+// manifest marker for a shared manifest); a path that disappeared is attributed
+// to the removed marker, because no rendered file owns it. A nil owner map is
+// valid for a caller that reads only the boolean; the returned IDs are then
+// meaningless.
 func changeSet(before, after, owner map[string]string) (bool, []string) {
 	ids := map[string]bool{}
 	for p, d := range after {

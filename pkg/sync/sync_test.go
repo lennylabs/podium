@@ -152,12 +152,10 @@ func TestRun_DryRunWritesNothing(t *testing.T) {
 	}
 }
 
-// §7.5.2 $PODIUM_CHANGED: Result.Changed reports whether a sync altered the
-// target tree relative to the prior lock. A first sync into an empty target
-// changes the tree, a re-sync of the unchanged registry does not, and editing an
-// artifact changes it again. A DryRun run writes nothing, so it leaves Changed
-// false. The workspace workflow reads this so a skip_if_no_changes command skips
-// a re-sync that wrote no delta.
+// Spec: §7.5.2 — Result.Changed reports whether the sync altered the bytes on
+// disk of a compared path. A first sync into an empty target alters them, an
+// unchanged re-sync does not, a DryRun writes nothing, and an edit to an emitted
+// artifact alters them again.
 func TestRun_ChangedTracksOnDiskDelta(t *testing.T) {
 	t.Parallel()
 	registry := t.TempDir()

@@ -542,7 +542,7 @@ var errDropped = errors.New("dropped at least one artifact (ingest.collision)")
 
 // runWorkspaceTarget materializes a kind: workspace plan through sync.Run,
 // wrapped by the operator prepare/publish workflow phases when the plan carries
-// one (Decision 3). Under check it runs sync.Run with DryRun set so no tree or
+// one (§7.5.2). Under check it runs sync.Run with DryRun set so no tree or
 // lock is written, and skips the workflow phases. Under dryRun it resolves and
 // reports without writing, and skips the workflow phases.
 func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, cacheMode string, dryRun, check, asJSON bool) error {
@@ -588,10 +588,11 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, cacheMode s
 		printHuman(res, dryRun)
 	}
 	if runWorkflow {
-		// $PODIUM_CHANGED reflects whether the sync altered the target tree
-		// (§7.5.2, Decision 3), so a skip_if_no_changes publish command skips a
-		// re-sync that wrote no delta. res.Changed is the on-disk diff against the
-		// prior lock, the workspace analog of the marketplace render's Changed.
+		// Spec: §7.5.2 — $PODIUM_CHANGED reports whether the sync altered the bytes
+		// on disk of a compared path (a materialized path or a prior-lock
+		// materialized path; the lock file is excluded), the same meaning a
+		// marketplace target's render reports, so a skip_if_no_changes publish
+		// command is skipped when no compared path changed.
 		vars["PODIUM_CHANGED"] = strconv.FormatBool(res.Changed)
 		if err := runner.Phase(ctx, "publish", p.Workflow.Publish, vars, p.Workflow.PublishOnError); err != nil {
 			return err

@@ -32,6 +32,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -569,12 +570,23 @@ func TestPublishing_WorkspaceTargetRunsWorkflow(t *testing.T) {
 }
 
 // A kind: workspace target whose publish command declares skip_if_no_changes
-// skips the command on a re-sync that wrote no delta (Decision 3, §7.5.2
-// $PODIUM_CHANGED). The first sync into an empty target changes the tree, so the
-// publish command runs; the second sync against the unchanged catalog writes no
-// file, so $PODIUM_CHANGED is false and the command is skipped. The publish
-// command appends a line to a counter file, so the file carries one line after
-// two syncs and the second run reports "skipped (no changes)".
+// runs the command only when materialization altered the bytes on disk of a
+// compared path. The publish command appends a line to a counter file, so the
+// line count records how many runs saw $PODIUM_CHANGED=true.
+//
+// The sequence covers the cases the comparison distinguishes:
+//  1. The first sync into an empty target creates every file, so the command runs.
+//  2. A re-sync against the unchanged catalog writes identical bytes, so the
+//     command is skipped and the run reports "skipped (no changes)".
+//  3. A hand-edit to a materialized file is restored by the next sync, which
+//     alters the bytes on disk, so the command runs although the catalog and the
+//     lock content hashes are unchanged.
+//  4. A further unchanged re-sync is skipped again.
+//  5. A re-sync after the lock file is deleted rewrites identical bytes, so the
+//     command is skipped: the lock is never a compared path, and an absent prior
+//     lock contributes no paths.
+//
+// Spec: §7.5.2
 func TestPublishing_WorkspaceTargetSkipIfNoChanges(t *testing.T) {
 	t.Parallel()
 	reg := writePublishRegistry(t)
@@ -583,23 +595,42 @@ func TestPublishing_WorkspaceTargetSkipIfNoChanges(t *testing.T) {
 	counter := filepath.Join(ws, "publish-count")
 	cfg := writeSyncConfigWorkspaceSkipWorkflow(t, ws, reg, target, counter)
 
-	if r := runPodium(t, "", nil, "sync", "--config", cfg); r.Exit != 0 {
-		t.Fatalf("first sync exit=%d\nstdout=%s\nstderr=%s", r.Exit, r.Stdout, r.Stderr)
-	}
-	if n := countLines(t, counter); n != 1 {
-		t.Fatalf("after first sync publish-count = %d, want 1 (the publish command ran)", n)
+	syncAndCount := func(step string, wantCount int, wantSkipped bool) {
+		t.Helper()
+		r := runPodium(t, "", nil, "sync", "--config", cfg)
+		if r.Exit != 0 {
+			t.Fatalf("%s: sync exit=%d\nstdout=%s\nstderr=%s", step, r.Exit, r.Stdout, r.Stderr)
+		}
+		if n := countLines(t, counter); n != wantCount {
+			t.Errorf("%s: publish-count = %d, want %d", step, n, wantCount)
+		}
+		if got := strings.Contains(r.Stderr, "skipped (no changes)"); got != wantSkipped {
+			t.Errorf("%s: stderr reports 'skipped (no changes)' = %v, want %v:\n%s", step, got, wantSkipped, r.Stderr)
+		}
 	}
 
-	r2 := runPodium(t, "", nil, "sync", "--config", cfg)
-	if r2.Exit != 0 {
-		t.Fatalf("second sync exit=%d\nstdout=%s\nstderr=%s", r2.Exit, r2.Stdout, r2.Stderr)
+	syncAndCount("first sync", 1, false)
+	syncAndCount("unchanged re-sync", 1, true)
+
+	edited := firstMaterializedFile(t, target)
+	original, err := os.ReadFile(edited)
+	if err != nil {
+		t.Fatalf("read %s: %v", edited, err)
 	}
-	if n := countLines(t, counter); n != 1 {
-		t.Errorf("after re-sync of an unchanged catalog publish-count = %d, want 1 (skip_if_no_changes suppressed the publish command)", n)
+	if err := os.WriteFile(edited, append(original, []byte("\nhand edit\n")...), 0o644); err != nil {
+		t.Fatalf("hand-edit %s: %v", edited, err)
 	}
-	if !strings.Contains(r2.Stderr, "skipped (no changes)") {
-		t.Errorf("second sync stderr missing 'skipped (no changes)':\n%s", r2.Stderr)
+	syncAndCount("re-sync after hand-edit", 2, false)
+	if b, err := os.ReadFile(edited); err != nil || !bytes.Equal(b, original) {
+		t.Errorf("re-sync did not restore %s (err=%v)", edited, err)
 	}
+
+	syncAndCount("unchanged re-sync after restore", 2, true)
+
+	if err := os.Remove(filepath.Join(target, ".podium", "sync.lock")); err != nil {
+		t.Fatalf("delete sync.lock: %v", err)
+	}
+	syncAndCount("re-sync after lock deletion", 2, true)
 }
 
 // A marketplace target against a server-source registry passes the resolved
@@ -1162,6 +1193,31 @@ func writeSyncConfigWorkspaceSkipWorkflow(t *testing.T, workspace, registry, tar
 		t.Fatalf("write sync.yaml: %v", err)
 	}
 	return path
+}
+
+// firstMaterializedFile returns the lexically first SKILL.md under target,
+// failing the test when there is none. A standalone skill file is chosen
+// because a hand-edit to it is plain text, whereas an edit to a merged config
+// file such as .mcp.json would have to stay valid JSON.
+func firstMaterializedFile(t *testing.T, target string) string {
+	t.Helper()
+	var found string
+	err := filepath.WalkDir(target, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if found == "" && d.Type().IsRegular() && d.Name() == "SKILL.md" {
+			found = path
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk %s: %v", target, err)
+	}
+	if found == "" {
+		t.Fatalf("no materialized file under %s", target)
+	}
+	return found
 }
 
 // countLines returns the number of newline-terminated lines in the file at path,
