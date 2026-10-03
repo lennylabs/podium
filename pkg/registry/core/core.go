@@ -1488,6 +1488,17 @@ type LoadArtifactResult struct {
 	//
 	// Spec: §4.6 hidden parents (withheld), §7.2.
 	ExtendsPin string
+	// ArtifactRevision is the resolved record's stored ingest time, written by
+	// version.FormatArtifactRevision. It is the served record's own value
+	// rather than a maximum over the caller's candidate versions, because such
+	// a maximum depends on the caller's view and can disclose a version a load
+	// scope withholds. The §4.7.10 delivery record frames it, and podium-mcp
+	// compares it with its revision mark on a latest resolution. Every load
+	// path sets it: content hash, session pin, latest, pinned version, and
+	// revalidation.
+	//
+	// Spec: §4.7.10, §4.7.6.
+	ArtifactRevision string
 }
 
 // LoadArtifactOptions captures §5 arguments. Empty Version means
@@ -1745,14 +1756,18 @@ func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord,
 	if err != nil {
 		return nil, store.ManifestRecord{}, err
 	}
-	if len(chain) == 1 {
-		return withDeprecationWarning(resultFromRecord(chain[0])), chain[0], nil
+	served := chain[0]
+	if len(chain) > 1 {
+		served, err = mergeChain(chain)
+		if err != nil {
+			return nil, store.ManifestRecord{}, err
+		}
 	}
-	merged, err := mergeChain(chain)
-	if err != nil {
-		return nil, store.ManifestRecord{}, err
-	}
-	return withDeprecationWarning(resultFromRecord(merged)), merged, nil
+	res := withDeprecationWarning(resultFromRecord(served))
+	// Spec: §4.7.10 — the revision is the resolved row's ingest time, taken
+	// from rec so a merged extends chain carries the child's value.
+	res.ArtifactRevision = version.FormatArtifactRevision(rec.IngestedAt)
+	return res, served, nil
 }
 
 // revalidationResult is the result a revalidation is answered with: the
@@ -1763,6 +1778,8 @@ func revalidationResult(rec store.ManifestRecord) *LoadArtifactResult {
 		Version:     rec.Version,
 		ContentHash: rec.ContentHash,
 		Layer:       rec.Layer,
+		// Spec: §4.7.10 — a revalidation answers the same delivery record.
+		ArtifactRevision: version.FormatArtifactRevision(rec.IngestedAt),
 	}
 }
 
