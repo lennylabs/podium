@@ -190,7 +190,7 @@ func discoverIdP(registry string, client *http.Client) (deviceURL, tokenURL stri
 	if err != nil {
 		return "", "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return "", "", fmt.Errorf("metadata endpoint returned HTTP %d", resp.StatusCode)
 	}

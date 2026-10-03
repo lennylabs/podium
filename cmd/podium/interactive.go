@@ -57,7 +57,7 @@ func runOverrideTUI(in io.Reader, out io.Writer, view []sync.EffectiveArtifact, 
 	res := overrideTUIResult{}
 	for {
 		if tty {
-			fmt.Fprint(out, "> ")
+			_, _ = fmt.Fprint(out, "> ")
 		}
 		line, err := r.ReadString('\n')
 		line = strings.TrimSpace(line)
@@ -77,12 +77,12 @@ func runOverrideTUI(in io.Reader, out io.Writer, view []sync.EffectiveArtifact, 
 				for i := range selected {
 					selected[i] = true
 				}
-				fmt.Fprintln(out, "selected all")
+				_, _ = fmt.Fprintln(out, "selected all")
 			case "none":
 				for i := range selected {
 					selected[i] = false
 				}
-				fmt.Fprintln(out, "deselected all")
+				_, _ = fmt.Fprintln(out, "deselected all")
 			case "expand":
 				collapsed[strings.TrimSuffix(arg, "/")] = false
 				renderOverrideTree(out, view, selected, collapsed)
@@ -96,9 +96,9 @@ func runOverrideTUI(in io.Reader, out io.Writer, view []sync.EffectiveArtifact, 
 					if selected[n-1] {
 						state = "on"
 					}
-					fmt.Fprintf(out, "toggled %d: %s [%s]\n", n, view[n-1].ID, state)
+					_, _ = fmt.Fprintf(out, "toggled %d: %s [%s]\n", n, view[n-1].ID, state)
 				} else {
-					fmt.Fprintf(out, "unrecognized command %q (try: <number>, all, none, expand <domain>, collapse <domain>, list, save, quit)\n", line)
+					_, _ = fmt.Fprintf(out, "unrecognized command %q (try: <number>, all, none, expand <domain>, collapse <domain>, list, save, quit)\n", line)
 				}
 			}
 		}
@@ -127,10 +127,10 @@ func overrideDiff(view []sync.EffectiveArtifact, selected []bool) (add, remove [
 // Collapsed domains render a one-line summary; expanded domains list each
 // artifact leaf with its checkbox, type, materialization state, and layer.
 func renderOverrideTree(out io.Writer, view []sync.EffectiveArtifact, selected []bool, collapsed map[string]bool) {
-	fmt.Fprintln(out, "podium sync override — interactive checklist")
-	fmt.Fprintln(out, "Toggle an item by its number. Commands: <n>, all, none, expand <domain>, collapse <domain>, list, save, quit.")
+	_, _ = fmt.Fprintln(out, "podium sync override — interactive checklist")
+	_, _ = fmt.Fprintln(out, "Toggle an item by its number. Commands: <n>, all, none, expand <domain>, collapse <domain>, list, save, quit.")
 	if len(view) == 0 {
-		fmt.Fprintln(out, "(no artifacts visible)")
+		_, _ = fmt.Fprintln(out, "(no artifacts visible)")
 		return
 	}
 	// Group leaf indices by domain, preserving the sorted leaf order.
@@ -147,10 +147,10 @@ func renderOverrideTree(out io.Writer, view []sync.EffectiveArtifact, selected [
 	for _, d := range domains {
 		idxs := byDomain[d]
 		if collapsed[d] {
-			fmt.Fprintf(out, "%s/  (collapsed, %d items)\n", d, len(idxs))
+			_, _ = fmt.Fprintf(out, "%s/  (collapsed, %d items)\n", d, len(idxs))
 			continue
 		}
-		fmt.Fprintf(out, "%s/\n", d)
+		_, _ = fmt.Fprintf(out, "%s/\n", d)
 		for _, i := range idxs {
 			a := view[i]
 			box := " "
@@ -165,7 +165,7 @@ func renderOverrideTree(out io.Writer, view []sync.EffectiveArtifact, selected [
 			if typ == "" {
 				typ = "-"
 			}
-			fmt.Fprintf(out, "  [%s] %3d  %-40s %-9s %-14s (%s)\n", box, i+1, a.ID, typ, state, a.Layer)
+			_, _ = fmt.Fprintf(out, "  [%s] %3d  %-40s %-9s %-14s (%s)\n", box, i+1, a.ID, typ, state, a.Layer)
 		}
 	}
 }
@@ -207,7 +207,7 @@ func runProfileEditTUI(in io.Reader, out io.Writer, name string, cur sync.Profil
 	}
 	for {
 		if tty {
-			fmt.Fprint(out, "> ")
+			_, _ = fmt.Fprint(out, "> ")
 		}
 		line, err := r.ReadString('\n')
 		line = strings.TrimSpace(line)
@@ -226,29 +226,29 @@ func runProfileEditTUI(in io.Reader, out io.Writer, name string, cur sync.Profil
 			case "add-include", "ai":
 				if arg != "" {
 					include = appendUnique(include, arg)
-					fmt.Fprintf(out, "include += %s\n", arg)
+					_, _ = fmt.Fprintf(out, "include += %s\n", arg)
 				}
 			case "remove-include", "ri":
 				if next, ok := removeAt(include, arg); ok {
 					include = next
-					fmt.Fprintf(out, "include -= #%s\n", arg)
+					_, _ = fmt.Fprintf(out, "include -= #%s\n", arg)
 				} else {
-					fmt.Fprintf(out, "no include entry #%s\n", arg)
+					_, _ = fmt.Fprintf(out, "no include entry #%s\n", arg)
 				}
 			case "add-exclude", "ae":
 				if arg != "" {
 					exclude = appendUnique(exclude, arg)
-					fmt.Fprintf(out, "exclude += %s\n", arg)
+					_, _ = fmt.Fprintf(out, "exclude += %s\n", arg)
 				}
 			case "remove-exclude", "re":
 				if next, ok := removeAt(exclude, arg); ok {
 					exclude = next
-					fmt.Fprintf(out, "exclude -= #%s\n", arg)
+					_, _ = fmt.Fprintf(out, "exclude -= #%s\n", arg)
 				} else {
-					fmt.Fprintf(out, "no exclude entry #%s\n", arg)
+					_, _ = fmt.Fprintf(out, "no exclude entry #%s\n", arg)
 				}
 			default:
-				fmt.Fprintf(out, "unrecognized command %q (try: add-include <pat>, remove-include <n>, add-exclude <pat>, remove-exclude <n>, list, save, quit)\n", line)
+				_, _ = fmt.Fprintf(out, "unrecognized command %q (try: add-include <pat>, remove-include <n>, add-exclude <pat>, remove-exclude <n>, list, save, quit)\n", line)
 			}
 		}
 		if err != nil {
@@ -260,20 +260,20 @@ func runProfileEditTUI(in io.Reader, out io.Writer, name string, cur sync.Profil
 // renderProfile prints a profile's include and exclude lists with 1-based
 // indices for the remove commands.
 func renderProfile(out io.Writer, name string, include, exclude []string) {
-	fmt.Fprintf(out, "podium profile edit %q\n", name)
-	fmt.Fprintln(out, "Commands: add-include <pattern>, remove-include <n>, add-exclude <pattern>, remove-exclude <n>, list, save, quit.")
+	_, _ = fmt.Fprintf(out, "podium profile edit %q\n", name)
+	_, _ = fmt.Fprintln(out, "Commands: add-include <pattern>, remove-include <n>, add-exclude <pattern>, remove-exclude <n>, list, save, quit.")
 	printPatternList(out, "include", include)
 	printPatternList(out, "exclude", exclude)
 }
 
 func printPatternList(out io.Writer, label string, items []string) {
-	fmt.Fprintf(out, "%s:\n", label)
+	_, _ = fmt.Fprintf(out, "%s:\n", label)
 	if len(items) == 0 {
-		fmt.Fprintln(out, "  (none)")
+		_, _ = fmt.Fprintln(out, "  (none)")
 		return
 	}
 	for i, p := range items {
-		fmt.Fprintf(out, "  %3d  %s\n", i+1, p)
+		_, _ = fmt.Fprintf(out, "  %3d  %s\n", i+1, p)
 	}
 }
 

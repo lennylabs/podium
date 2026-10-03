@@ -2525,7 +2525,7 @@ func (s *mcpServer) fetchJSONConditional(path string, args map[string]any, ifNon
 	if err != nil {
 		return nil, false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotModified {
 		// §12: the registry confirmed the cached content hash is current.
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -2558,7 +2558,7 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -2593,7 +2593,7 @@ func (s *mcpServer) headContentHash(path string, args map[string]any) (string, e
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("HEAD %s: status %d", path, resp.StatusCode)

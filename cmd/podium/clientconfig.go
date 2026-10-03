@@ -161,7 +161,7 @@ func configClientShowAt(cwd, home string, asJSON bool, explain string) int {
 	// config) has nothing to render. Say so rather than printing an empty
 	// screen, and point at how to configure one.
 	if len(defs) == 0 && len(profs) == 0 {
-		fmt.Fprintln(os.Stdout, "(no client configuration in scope; run `podium init` or pass --registry)")
+		_, _ = fmt.Fprintln(os.Stdout, "(no client configuration in scope; run `podium init` or pass --registry)")
 		return 0
 	}
 
@@ -169,7 +169,7 @@ func configClientShowAt(cwd, home string, asJSON bool, explain string) int {
 	// summary line. spec: §7.7 example output.
 	for _, key := range defaultsKeys {
 		if pv, ok := defs[key]; ok {
-			fmt.Fprintf(os.Stdout, "defaults.%s:   %s   (from %s)\n", key, pv.Value, pv.From)
+			_, _ = fmt.Fprintf(os.Stdout, "defaults.%s:   %s   (from %s)\n", key, pv.Value, pv.From)
 		}
 	}
 	names := make([]string, 0, len(profs))
@@ -183,15 +183,15 @@ func configClientShowAt(cwd, home string, asJSON bool, explain string) int {
 		if len(lines) == 0 {
 			// A profile with no printable fields keeps its source on the
 			// header so provenance is not dropped. spec: §7.7.
-			fmt.Fprintf(os.Stdout, "profiles.%s:   (from %s)\n", name, r.Winner)
+			_, _ = fmt.Fprintf(os.Stdout, "profiles.%s:   (from %s)\n", name, r.Winner)
 			continue
 		}
-		fmt.Fprintf(os.Stdout, "profiles.%s:\n", name)
+		_, _ = fmt.Fprintf(os.Stdout, "profiles.%s:\n", name)
 		for _, line := range lines {
 			// spec: §7.7 — annotate each rendered profile field with the
 			// scope it resolved from. Whole-profile overwrite (§7.5.2) means
 			// every field shares the profile's winning scope.
-			fmt.Fprintf(os.Stdout, "  %s   (from %s)\n", line, r.Winner)
+			_, _ = fmt.Fprintf(os.Stdout, "  %s   (from %s)\n", line, r.Winner)
 		}
 	}
 	collisionCount := 0
@@ -206,7 +206,7 @@ func configClientShowAt(cwd, home string, asJSON bool, explain string) int {
 		}
 	}
 	if collisionCount > 0 {
-		fmt.Fprintf(os.Stdout, "\nProfile collisions: %d (%s)\n", collisionCount, strings.Join(collisionLines, "; "))
+		_, _ = fmt.Fprintf(os.Stdout, "\nProfile collisions: %d (%s)\n", collisionCount, strings.Join(collisionLines, "; "))
 	}
 	return 0
 }
@@ -266,45 +266,45 @@ func explainConfigKey(key string, scopes []clientScope) int {
 	switch {
 	case strings.HasPrefix(norm, "defaults."):
 		field := strings.TrimPrefix(norm, "defaults.")
-		fmt.Fprintf(os.Stdout, "%s:\n", norm)
+		_, _ = fmt.Fprintf(os.Stdout, "%s:\n", norm)
 		winner := ""
 		winVal := ""
 		for _, s := range scopes {
 			v := defaultsField(s.cfg, field)
 			if v == "" {
-				fmt.Fprintf(os.Stdout, "  %s: (unset)\n", s.label)
+				_, _ = fmt.Fprintf(os.Stdout, "  %s: (unset)\n", s.label)
 				continue
 			}
-			fmt.Fprintf(os.Stdout, "  %s: %s\n", s.label, v)
+			_, _ = fmt.Fprintf(os.Stdout, "  %s: %s\n", s.label, v)
 			winner = s.label // last (highest precedence) non-empty wins
 			winVal = v
 		}
 		if winner == "" {
-			fmt.Fprintf(os.Stdout, "  resolved: (unset in all scopes)\n")
+			_, _ = fmt.Fprintf(os.Stdout, "  resolved: (unset in all scopes)\n")
 		} else {
-			fmt.Fprintf(os.Stdout, "  resolved: %s (from %s)\n", winVal, winner)
+			_, _ = fmt.Fprintf(os.Stdout, "  resolved: %s (from %s)\n", winVal, winner)
 		}
 		return 0
 	case strings.HasPrefix(norm, "profiles."):
 		name := strings.TrimPrefix(norm, "profiles.")
-		fmt.Fprintf(os.Stdout, "%s:\n", norm)
+		_, _ = fmt.Fprintf(os.Stdout, "%s:\n", norm)
 		winner := ""
 		for _, s := range scopes {
 			if s.cfg == nil {
-				fmt.Fprintf(os.Stdout, "  %s: (unset)\n", s.label)
+				_, _ = fmt.Fprintf(os.Stdout, "  %s: (unset)\n", s.label)
 				continue
 			}
 			if _, ok := s.cfg.Profiles[name]; ok {
-				fmt.Fprintf(os.Stdout, "  %s: defined\n", s.label)
+				_, _ = fmt.Fprintf(os.Stdout, "  %s: defined\n", s.label)
 				winner = s.label
 			} else {
-				fmt.Fprintf(os.Stdout, "  %s: (unset)\n", s.label)
+				_, _ = fmt.Fprintf(os.Stdout, "  %s: (unset)\n", s.label)
 			}
 		}
 		if winner == "" {
-			fmt.Fprintf(os.Stdout, "  resolved: (unset in all scopes)\n")
+			_, _ = fmt.Fprintf(os.Stdout, "  resolved: (unset in all scopes)\n")
 		} else {
-			fmt.Fprintf(os.Stdout, "  resolved: defined (from %s)\n", winner)
+			_, _ = fmt.Fprintf(os.Stdout, "  resolved: defined (from %s)\n", winner)
 		}
 		return 0
 	default:

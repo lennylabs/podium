@@ -337,18 +337,18 @@ func rewriteWithChain(path string, events []Event) error {
 		prev = events[i].Hash
 		line, err := json.Marshal(eventForJSON(events[i]))
 		if err != nil {
-			f.Close()
-			os.Remove(tmp)
+			_ = f.Close()
+			_ = os.Remove(tmp)
 			return err
 		}
 		if _, err := f.Write(append(line, '\n')); err != nil {
-			f.Close()
-			os.Remove(tmp)
+			_ = f.Close()
+			_ = os.Remove(tmp)
 			return err
 		}
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, path)

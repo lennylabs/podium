@@ -1394,7 +1394,7 @@ func (s *Server) handleObjectsRoute(w http.ResponseWriter, r *http.Request) {
 		s.writeObjectStoreError(w, err)
 		return
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 	s.writeObjectHeaders(w, key, info)
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, reader)

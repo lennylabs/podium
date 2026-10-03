@@ -294,13 +294,13 @@ func writeChangeSummary(workdir string, render *RenderResult) (string, error) {
 // --dry-run output. A skip_if_no_changes command that would be skipped is marked
 // so the operator sees the suppression without the command running.
 func printPhase(w io.Writer, phase string, cmds []Command, vars map[string]string) {
-	fmt.Fprintf(w, "# %s\n", phase)
+	_, _ = fmt.Fprintf(w, "# %s\n", phase)
 	for _, c := range cmds {
 		skipped := ""
 		if c.SkipIfNoChanges && vars["PODIUM_CHANGED"] == "false" {
 			skipped = "  # skipped (no changes)"
 		}
-		fmt.Fprintf(w, "  %s%s\n", c.substituted(vars), skipped)
+		_, _ = fmt.Fprintf(w, "  %s%s\n", c.substituted(vars), skipped)
 	}
 }
 

@@ -217,7 +217,7 @@ func (v *SQLiteVec) Query(ctx context.Context, tenantID string, vec []float32, t
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Match
 	for rows.Next() {
 		var m Match
@@ -315,7 +315,7 @@ func (v *SQLiteVec) QueryModel(ctx context.Context, tenantID string, vec []float
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Match
 	for rows.Next() {
 		var m Match
@@ -350,12 +350,12 @@ func (v *SQLiteVec) PurgeModelExcept(ctx context.Context, tenantID, modelID stri
 	for rows.Next() {
 		var r int64
 		if err := rows.Scan(&r); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, err
 		}
 		rowids = append(rowids, r)
 	}
-	rows.Close()
+	_ = rows.Close()
 	for _, r := range rowids {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM vec_artifacts WHERE rowid = ?`, r); err != nil {
 			return 0, err

@@ -355,7 +355,7 @@ func (p *Postgres) ensureOrg(ctx context.Context, orgID string) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, `CREATE SCHEMA IF NOT EXISTS `+ident); err != nil {
 		return "", fmt.Errorf("provision org schema %s: %w", ident, err)
 	}
@@ -411,7 +411,7 @@ func (p *Postgres) listOrgSchemas(ctx context.Context) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var idents []string
 	for rows.Next() {
 		var name string
@@ -439,7 +439,7 @@ func (p *Postgres) DropOrg(ctx context.Context, orgID string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, orgID); err != nil {
 		return err
 	}
@@ -493,7 +493,7 @@ func (p *Postgres) CreateTenant(ctx context.Context, t Tenant) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, t.ID); err != nil {
 		return err
 	}
@@ -519,7 +519,7 @@ func (p *Postgres) GetTenant(ctx context.Context, id string) (Tenant, error) {
 	if err != nil {
 		return Tenant{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, id); err != nil {
 		return Tenant{}, err
 	}
@@ -555,7 +555,7 @@ func (p *Postgres) ListTenants(ctx context.Context) ([]Tenant, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, operatorListSentinel); err != nil {
 		return nil, err
 	}
@@ -565,7 +565,7 @@ func (p *Postgres) ListTenants(ctx context.Context) ([]Tenant, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Tenant
 	for rows.Next() {
 		var t Tenant
@@ -597,7 +597,7 @@ func (p *Postgres) UpdateTenant(ctx context.Context, t Tenant) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, t.ID); err != nil {
 		return err
 	}
@@ -629,7 +629,7 @@ func (p *Postgres) DeactivateTenant(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, id); err != nil {
 		return err
 	}
@@ -838,7 +838,7 @@ func (p *Postgres) ListVectorPending(ctx context.Context, limit int, now time.Ti
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []VectorPending
 	for rows.Next() {
 		var pend VectorPending
@@ -1017,7 +1017,7 @@ func (p *Postgres) listManifests(ctx context.Context, tenantID string, includeDe
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []ManifestRecord{}
 	for rows.Next() {
 		rec, err := scanManifestPG(rows)
@@ -1053,7 +1053,7 @@ func (p *Postgres) purgeDeprecatedInSchema(ctx context.Context, ident string, be
 	if err != nil {
 		return 0, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, `SET search_path TO `+ident+`, public`); err != nil {
 		return 0, err
 	}
@@ -1108,7 +1108,7 @@ func (p *Postgres) ListDomains(ctx context.Context, tenantID string) ([]DomainRe
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []DomainRecord{}
 	for rows.Next() {
 		var rec DomainRecord
@@ -1150,7 +1150,7 @@ func (p *Postgres) DependentsOf(ctx context.Context, tenantID, artifactID string
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []DependencyEdge
 	for rows.Next() {
 		var e DependencyEdge
@@ -1178,7 +1178,7 @@ func (p *Postgres) DependencyInDegree(ctx context.Context, tenantID string) (map
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]int{}
 	for rows.Next() {
 		var to string
@@ -1244,7 +1244,7 @@ func (p *Postgres) ListAdminGrants(ctx context.Context, orgID string) ([]AdminGr
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []AdminGrant
 	for rows.Next() {
 		var g AdminGrant
@@ -1351,7 +1351,7 @@ func (p *Postgres) ListLayerConfigs(ctx context.Context, tenantID string) ([]Lay
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []LayerConfig{}
 	for rows.Next() {
 		cfg, err := scanLayerConfigPG(rows)
@@ -1377,7 +1377,7 @@ func (p *Postgres) DeleteLayerConfig(ctx context.Context, tenantID, id string) e
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE layer_configs SET deleted_at = $1
 		WHERE tenant_id = $2 AND id = $3 AND deleted_at IS NULL`, now, tenantID, id); err != nil {
@@ -1403,7 +1403,7 @@ func (p *Postgres) RestoreLayerConfig(ctx context.Context, tenantID, id string) 
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx, `
 		UPDATE layer_configs SET deleted_at = NULL
 		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NOT NULL`, tenantID, id)
@@ -1441,7 +1441,7 @@ func (p *Postgres) ListDeletedLayerConfigs(ctx context.Context, tenantID string)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []LayerConfig{}
 	for rows.Next() {
 		cfg, err := scanLayerConfigPG(rows)
@@ -1478,7 +1478,7 @@ func (p *Postgres) purgeExpiredLayersInSchema(ctx context.Context, ident string,
 	if err != nil {
 		return 0, err
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	if _, err := conn.ExecContext(ctx, `SET search_path TO `+ident+`, public`); err != nil {
 		return 0, err
 	}
@@ -1486,7 +1486,7 @@ func (p *Postgres) purgeExpiredLayersInSchema(ctx context.Context, ident string,
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM manifests
 		WHERE deleted_at IS NOT NULL AND deleted_at < $1`, cutoff); err != nil {

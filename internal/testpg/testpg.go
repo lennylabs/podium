@@ -79,7 +79,7 @@ func adminExec(baseDSN, stmt string) error {
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	_, err = db.Exec(stmt)
 	return err
 }

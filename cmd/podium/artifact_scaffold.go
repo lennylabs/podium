@@ -103,8 +103,8 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	}
 
 	if path == "" {
-		fmt.Fprintln(errOut, "error: missing positional <path>")
-		fmt.Fprintln(errOut, "usage: podium artifact scaffold --type <type> [flags] <path>")
+		_, _ = fmt.Fprintln(errOut, "error: missing positional <path>")
+		_, _ = fmt.Fprintln(errOut, "usage: podium artifact scaffold --type <type> [flags] <path>")
 		return 2
 	}
 	opts.path = path
@@ -113,7 +113,7 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 
 	if opts.typ == "" {
 		if opts.nonInteractive {
-			fmt.Fprintln(errOut, "error: --type required when --yes is set")
+			_, _ = fmt.Fprintln(errOut, "error: --type required when --yes is set")
 			return 2
 		}
 		opts.typ = promptChoice(reader, out, "Type", firstClassTypes, "")
@@ -124,19 +124,19 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 
 	name := filepath.Base(opts.path)
 	if err := validateName(name, opts.typ); err != nil {
-		fmt.Fprintf(errOut, "error: %v\n", err)
+		_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
 		return 2
 	}
 
 	if opts.description == "" {
 		if opts.nonInteractive {
-			fmt.Fprintln(errOut, "error: --description required when --yes is set")
+			_, _ = fmt.Fprintln(errOut, "error: --description required when --yes is set")
 			return 2
 		}
 		opts.description = strings.TrimSpace(promptString(reader, out, "Description (1 sentence)", ""))
 	}
 	if opts.description == "" {
-		fmt.Fprintln(errOut, "error: description is required")
+		_, _ = fmt.Fprintln(errOut, "error: description is required")
 		return 2
 	}
 
@@ -145,33 +145,33 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 	}
 
 	if err := validateSensitivity(opts.sensitivity); err != nil {
-		fmt.Fprintf(errOut, "error: %v\n", err)
+		_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
 		return 2
 	}
 
 	if _, statErr := os.Stat(opts.path); statErr == nil && !opts.force {
-		fmt.Fprintf(errOut, "error: %s already exists; pass --force to overwrite\n", opts.path)
+		_, _ = fmt.Fprintf(errOut, "error: %s already exists; pass --force to overwrite\n", opts.path)
 		return 1
 	}
 	if err := os.MkdirAll(opts.path, 0o755); err != nil {
-		fmt.Fprintf(errOut, "error: %v\n", err)
+		_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
 		return 1
 	}
 
 	files, err := renderAndWrite(opts.path, name, opts)
 	if err != nil {
-		fmt.Fprintf(errOut, "error: %v\n", err)
+		_, _ = fmt.Fprintf(errOut, "error: %v\n", err)
 		return 1
 	}
 
-	fmt.Fprintf(out, "\nScaffolded %s at %s/\n", opts.typ, opts.path)
+	_, _ = fmt.Fprintf(out, "\nScaffolded %s at %s/\n", opts.typ, opts.path)
 	for _, f := range files {
-		fmt.Fprintf(out, "  %s\n", f)
+		_, _ = fmt.Fprintf(out, "  %s\n", f)
 	}
-	fmt.Fprintln(out)
-	fmt.Fprintln(out, "Next steps:")
-	fmt.Fprintf(out, "  1. Edit %s/\n", opts.path)
-	fmt.Fprintf(out, "  2. Validate: podium lint --registry %s\n", opts.path)
+	_, _ = fmt.Fprintln(out)
+	_, _ = fmt.Fprintln(out, "Next steps:")
+	_, _ = fmt.Fprintf(out, "  1. Edit %s/\n", opts.path)
+	_, _ = fmt.Fprintf(out, "  2. Validate: podium lint --registry %s\n", opts.path)
 	return 0
 }
 
@@ -181,7 +181,7 @@ func artifactScaffoldWithIO(args []string, in io.Reader, out, errOut io.Writer) 
 // or a typo) fails fast instead of writing a malformed manifest.
 func validateType(t string, errOut io.Writer) error {
 	if t == "" {
-		fmt.Fprintln(errOut, "error: --type is required")
+		_, _ = fmt.Fprintln(errOut, "error: --type is required")
 		return errors.New("missing type")
 	}
 	for _, k := range firstClassTypes {
@@ -192,7 +192,7 @@ func validateType(t string, errOut io.Writer) error {
 	// Extension types are allowed by spec §4.3 (`<extension type>`).
 	// Warn so the author knows the scaffolder cannot supply the
 	// extension's type-specific fields.
-	fmt.Fprintf(errOut, "warning: %q is not a first-class type; scaffolding generic ARTIFACT.md\n", t)
+	_, _ = fmt.Fprintf(errOut, "warning: %q is not a first-class type; scaffolding generic ARTIFACT.md\n", t)
 	return nil
 }
 
@@ -231,52 +231,52 @@ func collectTypeSpecific(o *scaffoldOpts, r *bufio.Reader, w, errOut io.Writer) 
 	switch o.typ {
 	case "rule":
 		if !contains(validRuleModes, o.ruleMode) {
-			fmt.Fprintf(errOut, "error: --rule-mode %q must be one of %s\n", o.ruleMode, strings.Join(validRuleModes, ", "))
+			_, _ = fmt.Fprintf(errOut, "error: --rule-mode %q must be one of %s\n", o.ruleMode, strings.Join(validRuleModes, ", "))
 			return errors.New("invalid rule-mode")
 		}
 		if o.ruleMode == "glob" && o.ruleGlobs == "" {
 			if o.nonInteractive {
-				fmt.Fprintln(errOut, "error: --rule-globs required when --rule-mode=glob")
+				_, _ = fmt.Fprintln(errOut, "error: --rule-globs required when --rule-mode=glob")
 				return errors.New("missing rule-globs")
 			}
 			o.ruleGlobs = promptString(r, w, "Rule globs (e.g. src/**/*.ts)", "")
 			if o.ruleGlobs == "" {
-				fmt.Fprintln(errOut, "error: rule-globs is required")
+				_, _ = fmt.Fprintln(errOut, "error: rule-globs is required")
 				return errors.New("missing rule-globs")
 			}
 		}
 		if o.ruleMode == "auto" && o.ruleDesc == "" {
 			if o.nonInteractive {
-				fmt.Fprintln(errOut, "error: --rule-description required when --rule-mode=auto")
+				_, _ = fmt.Fprintln(errOut, "error: --rule-description required when --rule-mode=auto")
 				return errors.New("missing rule-description")
 			}
 			o.ruleDesc = promptString(r, w, "Rule description (when to apply)", "")
 			if o.ruleDesc == "" {
-				fmt.Fprintln(errOut, "error: rule-description is required")
+				_, _ = fmt.Fprintln(errOut, "error: rule-description is required")
 				return errors.New("missing rule-description")
 			}
 		}
 	case "hook":
 		if o.hookEvent == "" {
 			if o.nonInteractive {
-				fmt.Fprintln(errOut, "error: --hook-event required for type=hook")
+				_, _ = fmt.Fprintln(errOut, "error: --hook-event required for type=hook")
 				return errors.New("missing hook-event")
 			}
 			o.hookEvent = promptString(r, w, "Hook event (e.g. pre_tool_use)", "")
 			if o.hookEvent == "" {
-				fmt.Fprintln(errOut, "error: hook-event is required")
+				_, _ = fmt.Fprintln(errOut, "error: hook-event is required")
 				return errors.New("missing hook-event")
 			}
 		}
 	case "mcp-server":
 		if o.serverID == "" {
 			if o.nonInteractive {
-				fmt.Fprintln(errOut, "error: --server-identifier required for type=mcp-server")
+				_, _ = fmt.Fprintln(errOut, "error: --server-identifier required for type=mcp-server")
 				return errors.New("missing server-identifier")
 			}
 			o.serverID = promptString(r, w, "Server identifier (e.g. npx:@org/my-mcp)", "")
 			if o.serverID == "" {
-				fmt.Fprintln(errOut, "error: server-identifier is required")
+				_, _ = fmt.Fprintln(errOut, "error: server-identifier is required")
 				return errors.New("missing server-identifier")
 			}
 		}
@@ -453,9 +453,9 @@ func placeholderBody(typ string) string {
 
 func promptString(r *bufio.Reader, w io.Writer, prompt, def string) string {
 	if def != "" {
-		fmt.Fprintf(w, "%s [%s]: ", prompt, def)
+		_, _ = fmt.Fprintf(w, "%s [%s]: ", prompt, def)
 	} else {
-		fmt.Fprintf(w, "%s: ", prompt)
+		_, _ = fmt.Fprintf(w, "%s: ", prompt)
 	}
 	line, _ := r.ReadString('\n')
 	line = strings.TrimSpace(line)
@@ -466,17 +466,17 @@ func promptString(r *bufio.Reader, w io.Writer, prompt, def string) string {
 }
 
 func promptChoice(r *bufio.Reader, w io.Writer, prompt string, choices []string, def string) string {
-	fmt.Fprintln(w)
-	fmt.Fprintf(w, "%s:\n", prompt)
+	_, _ = fmt.Fprintln(w)
+	_, _ = fmt.Fprintf(w, "%s:\n", prompt)
 	for i, c := range choices {
-		fmt.Fprintf(w, "  %d) %s\n", i+1, c)
+		_, _ = fmt.Fprintf(w, "  %d) %s\n", i+1, c)
 	}
 	for {
 		hint := ""
 		if def != "" {
 			hint = fmt.Sprintf(" [%s]", def)
 		}
-		fmt.Fprintf(w, "Pick (1-%d)%s: ", len(choices), hint)
+		_, _ = fmt.Fprintf(w, "Pick (1-%d)%s: ", len(choices), hint)
 		line, err := r.ReadString('\n')
 		line = strings.TrimSpace(line)
 		if line == "" && def != "" {
@@ -496,7 +496,7 @@ func promptChoice(r *bufio.Reader, w io.Writer, prompt string, choices []string,
 		if err != nil {
 			return ""
 		}
-		fmt.Fprintln(w, "  invalid; pick a number or type the value")
+		_, _ = fmt.Fprintln(w, "  invalid; pick a number or type the value")
 	}
 }
 

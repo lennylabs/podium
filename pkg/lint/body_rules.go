@@ -238,7 +238,7 @@ func (r ruleProseReferenceResolution) checkURL(ctx context.Context, artifactID, 
 			Message:    fmt.Sprintf("prose URL %q HEAD failed: %v", href, err),
 		}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// spec: §4.4 line 347 — a URL reference is valid when HEAD returns 200
 	// or any 3xx redirect. Other 2xx codes (201, 204, 206) do not confirm
 	// the named resource is served, so they are rejected.

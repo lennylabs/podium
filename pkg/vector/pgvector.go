@@ -129,7 +129,7 @@ func (p *PgVector) Query(ctx context.Context, tenantID string, vec []float32, to
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Match
 	for rows.Next() {
 		var m Match
@@ -186,7 +186,7 @@ func (p *PgVector) QueryModel(ctx context.Context, tenantID string, vec []float3
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Match
 	for rows.Next() {
 		var m Match

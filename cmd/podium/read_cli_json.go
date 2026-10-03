@@ -194,5 +194,5 @@ func printReadJSON(v any, raw []byte) {
 		fmt.Println(string(raw))
 		return
 	}
-	fmt.Fprintln(os.Stdout, string(b))
+	_, _ = fmt.Fprintln(os.Stdout, string(b))
 }

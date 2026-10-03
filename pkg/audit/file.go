@@ -98,7 +98,7 @@ func (f *FileSink) Append(_ context.Context, e Event) error {
 	if err != nil {
 		return err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if _, err := file.Write(line); err != nil {
 		return err
 	}

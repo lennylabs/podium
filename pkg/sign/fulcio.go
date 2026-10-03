@@ -102,7 +102,7 @@ func (s SigstoreKeyless) mintCert(ctx context.Context, priv *ecdsa.PrivateKey) (
 	if err != nil {
 		return nil, nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		buf, _ := io.ReadAll(resp.Body)
 		return nil, nil, fmt.Errorf("fulcio: HTTP %d: %s", resp.StatusCode, string(buf))

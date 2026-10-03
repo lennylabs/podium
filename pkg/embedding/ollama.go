@@ -102,7 +102,7 @@ func (p Ollama) embedOne(ctx context.Context, text string) ([]float32, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		buf, _ := io.ReadAll(resp.Body)
 		return nil, classify(resp.StatusCode, string(buf))

@@ -84,7 +84,7 @@ func (f rootFS) Stat(name string) (fs.FileInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	// A fstat on a descriptor the open just returned fails only where the
 	// descriptor was revoked between the two calls, which no test can
 	// arrange; the guard classifies it rather than returning it raw.
@@ -102,7 +102,7 @@ func (f rootFS) ReadDir(name string) ([]fs.DirEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	// The same holds for the directory read: the open succeeded, so a
 	// failure here is a revoked descriptor or an I/O fault.
 	entries, err := file.ReadDir(-1)
@@ -124,7 +124,7 @@ func (f rootFS) ReadFile(name string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(file)
 	if err != nil {
 		return nil, classify("read", name, err)
