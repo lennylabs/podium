@@ -1,7 +1,7 @@
 # Proposal 0037: Derive the SKILL.md compatibility field in every harness output that writes SKILL.md
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-02). Signed off as staged. OQ-1: no harness rejects the key (OpenCode and Pi recognize compatibility; Hermes ignores unknown fields), so the derivation ships for all with no exception. OQ-2: marketplace emitters are in scope.
+- Status: Implemented (2026-10-02). Signed off as staged. OQ-1: no harness rejects the key (OpenCode and Pi recognize compatibility; Hermes ignores unknown fields), so the derivation ships for all with no exception. OQ-2: marketplace emitters are in scope.
 - Date: 2026-10-02
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -41,26 +41,26 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §4.3.4 states the derivation scope for every SKILL.md-writing adapter and emitter, and the `none` exception.
+- [x] **S1 · spec** — SPEC-1. §4.3.4 states the derivation scope for every SKILL.md-writing adapter and emitter, and the `none` exception.
       Levels: —. Depends on: —
-- [ ] **S2 · test** — TEST-2. The `team/hello` golden fixture gains `runtime_requirements` (and no `sandbox_profile`), and the goldens are regenerated before CODE-1.
+- [x] **S2 · test** — TEST-2. The `team/hello` golden fixture gains `runtime_requirements` (and no `sandbox_profile`), and the goldens are regenerated before CODE-1.
       Levels: materialization. Depends on: S1
       Interleave: S2 lands before the code step so the claude-code and none golden diffs are attributable to the fixture alone.
-- [ ] **S3 · code** — CODE-1. `skillOut` and `claudePluginSkill` derive `compatibility`, and the comments in `compatibility.go`, `claudecode.go`, and `none.go` follow SPEC-1.
+- [x] **S3 · code** — CODE-1. `skillOut` and `claudePluginSkill` derive `compatibility`, and the comments in `compatibility.go`, `claudecode.go`, and `none.go` follow SPEC-1.
       Levels: unit, materialization. Depends on: S1, S2
-- [ ] **S4 · test** — TEST-1. Unit tests for every SKILL.md writer, the `none` adapter, the emitters, and the ClaudeMarketplace fallbacks, plus the post-CODE-1 golden regeneration.
+- [x] **S4 · test** — TEST-1. Unit tests for every SKILL.md writer, the `none` adapter, the emitters, and the ClaudeMarketplace fallbacks, plus the post-CODE-1 golden regeneration.
       Levels: unit, materialization. Depends on: S3
-- [ ] **S5 · test** — TEST-3. The §11 equivalence test gains a `cursor` arm with a presence assertion.
+- [x] **S5 · test** — TEST-3. The §11 equivalence test gains a `cursor` arm with a presence assertion.
       Levels: integration. Depends on: S3
-- [ ] **S6 · test** — TEST-4. The end-to-end skill tutorial test runs `--harness cursor`, and the integration comment drops the Claude-only framing.
+- [x] **S6 · test** — TEST-4. The end-to-end skill tutorial test runs `--harness cursor`, and the integration comment drops the Claude-only framing.
       Levels: integration, e2e. Depends on: S3
-- [ ] **S7 · test** — VER-1. The real-harness skill fixture carries `runtime_requirements` (and no `sandbox_profile`), and the Tier C skill subtest asserts the derived line.
+- [x] **S7 · test** — VER-1. The real-harness skill fixture carries `runtime_requirements` (and no `sandbox_profile`), and the Tier C skill subtest asserts the derived line.
       Levels: e2e (opt-in `harness_integration`). Depends on: S3
-- [ ] **S8 · docs** — DOC-1. Three doc lines state the new scope.
+- [x] **S8 · docs** — DOC-1. Three doc lines state the new scope.
       Levels: —. Depends on: S3
-- [ ] **S9 · docs** — CL-1. The `## [Unreleased]` `### Changed` bullet.
+- [x] **S9 · docs** — CL-1. The `## [Unreleased]` `### Changed` bullet.
       Levels: —. Depends on: S3
-- [ ] **S10 · docs** — MV-1. Manual-validation scenario S78.
+- [x] **S10 · docs** — MV-1. Manual-validation scenario S78.
       Levels: manual. Depends on: S3
 
 **Ordering constraints.** S2 precedes S3 so that the S2 regeneration changes only `claude-code.golden` and `none.golden`, and the S4 regeneration adds one line to each of `codex.golden`, `cursor.golden`, `gemini.golden`, `opencode.golden`, and `pi.golden`. S4 depends on S3 because its golden step and its assertions fail before CODE-1 lands.
