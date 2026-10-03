@@ -16,7 +16,14 @@ Per spec §13.2.1.
 
 **Impact.** Read endpoints serve from the replica. Write endpoints
 (ingest webhooks, layer admin operations, admin grants, and tenant
-management) reject with `registry.read_only`.
+management) reject with `registry.read_only`. A read replica that lags
+the primary can serve an older `latest` than a podium-mcp consumer
+already loaded, and that consumer fails the load with
+`materialize.stale_resolution`. The registry pins the consumer's
+session to the older version, and the pin outlives read-only mode.
+After the registry leaves read-only mode, a consumer whose session
+loaded the artifact during the lag restarts `podium-mcp` or starts a
+new host session; no reset is needed.
 
 **Mitigation.**
 1. Confirm the Postgres primary is unreachable; check infrastructure
@@ -25,7 +32,11 @@ management) reject with `registry.read_only`.
    automatically after three consecutive successes.
 3. If failover is permanent, promote the replica via the cloud
    provider tooling, then restart the registry pods so they reattach
-   to the new primary.
+   to the new primary. A promoted replica that lost recent commits
+   serves an older `latest` for the artifacts those commits ingested.
+   Each podium-mcp consumer fails those loads with
+   `materialize.stale_resolution` until it stops its MCP servers and
+   runs `podium cache reset-revisions`.
 
 ## Public mode (intentional or accidental)
 

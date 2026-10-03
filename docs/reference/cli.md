@@ -779,6 +779,21 @@ podium cache prune [--dir <path>] [--days <n>] [--dry-run]
 
 The cache lives at `~/.podium/cache/` by default (override with `PODIUM_CACHE_DIR`). Content cache entries are immutable; safe to prune by age.
 
+### `podium cache reset-revisions`
+
+Deletes the revision marks `podium-mcp` keeps for `latest` loads.
+
+```
+podium cache reset-revisions [--dir <path>] [<artifact-id>...]
+```
+
+| Flag or argument | Effect |
+|:--|:--|
+| `--dir <path>` | Cache directory. Defaults to `PODIUM_CACHE_DIR`, then `~/.podium/cache`. |
+| `<artifact-id>...` | Delete only the marks for these artifact IDs, under every registry. With no IDs, delete every mark. |
+
+When the cache directory holds no marks, the command prints `cache: no revision marks under <path>` and exits 0. Otherwise it prints `cache: reset <n> revision mark(s)` and exits 0, with `<n>` 0 when no mark matches the given IDs. While a running `podium-mcp` holds the cache's index, the command exits 1; stop every MCP server that uses the cache directory and run it again. A `podium-mcp` that could not open the index holds its marks in memory, and they are cleared when that process exits. `podium cache prune` does not touch revision marks.
+
 ### `podium quota`
 
 Shows current usage and limits per quota type.
