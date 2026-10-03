@@ -318,7 +318,7 @@ func WriteFramed(w io.Writer, v []byte) {
 
 // deliveryRecordTag is the framed leading value of every §4.7.10 delivery
 // stream.
-const deliveryRecordTag = "podium/delivery-record/1"
+const deliveryRecordTag = "podium/delivery-record/2"
 
 // DeliveryRecord is the §4.7.10 delivery record: the values one load response
 // serves, as the registry composes them and as the consumer receives them.
@@ -336,6 +336,9 @@ type DeliveryRecord struct {
 	ContentHash string
 	// Sensitivity is the served sensitivity value.
 	Sensitivity string
+	// ArtifactRevision is the §4.7.10 ingest time of the served version in
+	// the FormatArtifactRevision encoding, served as artifact_revision.
+	ArtifactRevision string
 	// Frontmatter is the served ARTIFACT.md document.
 	Frontmatter string
 	// ManifestBody is the served manifest body.
@@ -347,18 +350,22 @@ type DeliveryRecord struct {
 }
 
 // DeliveryHash returns the §4.7.10 delivery hash of rec as "sha256:<hex>":
-// the SHA-256 digest over the framed tag "podium/delivery-record/1", the
-// framed ID, version, type, content hash, and sensitivity, the framed
-// ARTIFACT.md document, manifest body, and SKILL.md, and then each bundled
-// resource's framed path and framed content hash in ascending path order. An
-// absent SKILL.md frames a zero-length value.
+// the SHA-256 digest over the framed tag "podium/delivery-record/2", the
+// framed ID, version, type, content hash, sensitivity, and ingest time, the
+// framed ARTIFACT.md document, manifest body, and SKILL.md, and then each
+// bundled resource's framed path and framed content hash in ascending path
+// order. An absent SKILL.md frames a zero-length value.
 //
-// The leading tag separates this digest's domain from the §4.7.6 content
-// hash. Both use the same framing, the same hex encoding, and are signed under
-// the same registry-managed key, so without the tag a stream that parses as
-// both a delivery record and a stored package would give one digest two
-// meanings, and a signature over either would be accepted as a signature over
-// the other.
+// The delivery digest and the §4.7.6 content hash use the same framing and the
+// same hex encoding, and both are signed under the same registry-managed key,
+// so a stream that framed to the bytes of a stored package would give one
+// digest two meanings. Equal framed streams frame the same number of values.
+// The untagged stream frames nine scalar values plus two per resource, an odd
+// count, and a §4.7.6 stream frames an even count, so no untagged stream
+// reproduces one. The tagged stream reproduces only the content hash of a
+// package whose ARTIFACT.md bytes equal the tag. Ingest refuses that package,
+// because the tag carries no frontmatter and manifest.ParseArtifact returns
+// manifest.ErrNoFrontmatter, so no stored version has that content hash.
 //
 // Resources contribute their content hash rather than their body so that
 // composing the digest reads nothing from object storage on each load. The
@@ -375,6 +382,7 @@ func DeliveryHash(rec DeliveryRecord) string {
 	for _, v := range []string{
 		deliveryRecordTag,
 		rec.ID, rec.Version, rec.Type, rec.ContentHash, rec.Sensitivity,
+		rec.ArtifactRevision,
 		rec.Frontmatter, rec.ManifestBody, rec.SkillRaw,
 	} {
 		WriteFramed(h, []byte(v))
@@ -389,4 +397,21 @@ func DeliveryHash(rec DeliveryRecord) string {
 		WriteFramed(h, []byte(rec.Resources[p]))
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+// artifactRevisionLayout is the §7.2.1 control-plane timestamp layout: RFC 3339
+// in UTC with exactly six fractional digits and a literal Z.
+const artifactRevisionLayout = "2006-01-02T15:04:05.000000Z"
+
+// FormatArtifactRevision encodes an ingest time as the §4.7.10 artifact
+// revision. A zero time, which a record written straight to the store carries,
+// and a time before the Unix epoch both encode as the epoch, so every stored
+// version serves a canonical value that a consumer can parse to unsigned
+// microseconds.
+// Spec: §4.7.10, §7.2.1
+func FormatArtifactRevision(t time.Time) string {
+	if t.IsZero() || t.UnixMicro() < 0 {
+		t = time.Unix(0, 0)
+	}
+	return t.UTC().Truncate(time.Microsecond).Format(artifactRevisionLayout)
 }
