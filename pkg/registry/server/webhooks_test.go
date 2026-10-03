@@ -65,7 +65,7 @@ func TestWebhooks_EndToEndDelivery(t *testing.T) {
 	_ = resp.Body.Close()
 
 	// Publish an event and wait for delivery.
-	srv.PublishEvent(context.Background(), "artifact.published", map[string]any{
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"L"}}, "artifact.published", map[string]any{
 		"id": "x", "version": "1.0.0",
 	})
 	select {
@@ -141,7 +141,7 @@ func TestWebhooks_DeleteStopsDeliveries(t *testing.T) {
 		t.Fatalf("status = %d, want 204", resp.StatusCode)
 	}
 
-	srv.PublishEvent(context.Background(), "artifact.published", nil)
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"L"}}, "artifact.published", nil)
 	time.Sleep(100 * time.Millisecond)
 	if deliveries.Load() != 0 {
 		t.Errorf("deliveries = %d after delete", deliveries.Load())

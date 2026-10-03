@@ -7,6 +7,7 @@ import (
 	"testing"
 	"testing/fstest"
 
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -48,7 +49,7 @@ func TestIngest_ConcurrentSameContentEmitsOnce(t *testing.T) {
 				TenantID: "t",
 				LayerID:  "L",
 				Files:    files,
-				PublishEvent: func(_ context.Context, typ string, _ map[string]any) {
+				PublishEvent: func(_ context.Context, _ core.EventScope, typ string, _ map[string]any) {
 					if typ == "artifact.published" {
 						publishedCount.Add(1)
 					}
@@ -125,7 +126,7 @@ func TestIngest_ConcurrentDifferentContentOneAcceptsRestConflict(t *testing.T) {
 				TenantID: "t",
 				LayerID:  "L",
 				Files:    files,
-				PublishEvent: func(_ context.Context, typ string, _ map[string]any) {
+				PublishEvent: func(_ context.Context, _ core.EventScope, typ string, _ map[string]any) {
 					if typ == "artifact.published" {
 						publishedCount.Add(1)
 					}

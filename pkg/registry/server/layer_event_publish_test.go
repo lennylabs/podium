@@ -4,18 +4,21 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync"
 	"testing"
 
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
 // publishedEvent is one call the endpoint made to its publish hook.
 type publishedEvent struct {
-	Type string
-	Data map[string]any
+	Type  string
+	Scope core.EventScope
+	Data  map[string]any
 }
 
 type eventRecorder struct {
@@ -23,10 +26,24 @@ type eventRecorder struct {
 	events []publishedEvent
 }
 
-func (r *eventRecorder) publish(_ context.Context, eventType string, data map[string]any) {
+func (r *eventRecorder) publish(_ context.Context, scope core.EventScope, eventType string, data map[string]any) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.events = append(r.events, publishedEvent{Type: eventType, Data: data})
+	r.events = append(r.events, publishedEvent{Type: eventType, Scope: scope, Data: data})
+}
+
+// scopeFor returns the scope of the last event whose action is action.
+func (r *eventRecorder) scopeFor(t *testing.T, action string) core.EventScope {
+	t.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i := len(r.events) - 1; i >= 0; i-- {
+		if r.events[i].Data["action"] == action {
+			return r.events[i].Scope
+		}
+	}
+	t.Fatalf("no event with action %q among %+v", action, r.events)
+	return core.EventScope{}
 }
 
 func (r *eventRecorder) typesFor() []string {
@@ -89,6 +106,12 @@ func TestLayerEndpoint_PublishesConfigChangedOnRegister(t *testing.T) {
 	if got := rec.actions(); !containsString(got, "register") {
 		t.Errorf("published actions = %v, want one naming register", got)
 	}
+	// Spec: §7.6 — a register names its tenant and layer and carries no
+	// prior visibility, because the layer had none.
+	want := core.EventScope{TenantID: "t", Layers: []string{"team-a"}}
+	if got := rec.scopeFor(t, "register"); !reflect.DeepEqual(got, want) {
+		t.Errorf("register scope = %+v, want %+v", got, want)
+	}
 }
 
 // Spec: §7.5.4 / §8.1 — reordering admin-defined layers changes the composed
@@ -114,6 +137,12 @@ func TestLayerEndpoint_PublishesConfigChangedOnReorder(t *testing.T) {
 	if got := rec.actions(); !containsString(got, "reorder") {
 		t.Errorf("published actions = %v, want one naming reorder", got)
 	}
+	// Spec: §7.6 — the reorder scope lists every named layer in request
+	// order, which the stream uses to compute each subscriber's subset.
+	want := core.EventScope{TenantID: "t", Layers: []string{"team-b", "team-a"}}
+	if got := rec.scopeFor(t, "reorder"); !reflect.DeepEqual(got, want) {
+		t.Errorf("reorder scope = %+v, want %+v", got, want)
+	}
 }
 
 // Spec: §7.5.4 / §8.1 — unregistering an admin-defined layer removes it from
@@ -124,12 +153,42 @@ func TestLayerEndpoint_PublishesConfigChangedOnUnregister(t *testing.T) {
 	base := layerEventHarness(t, rec, layer.Identity{Sub: "admin", IsAuthenticated: true})
 
 	mustPost(t, base, "/v1/layers", map[string]any{
-		"id": "team-a", "source_type": "local", "local_path": "/x",
+		"id": "team-a", "source_type": "local", "local_path": "/x", "groups": []string{"eng"},
 	})
 	mustDelete(t, base, "/v1/layers?id=team-a")
 
 	if got := rec.actions(); !containsString(got, "unregister") {
 		t.Errorf("published actions = %v, want one naming unregister", got)
+	}
+	// Spec: §7.6 — the unregister carries the deleted record's visibility,
+	// because the tombstone hides the layer from the delivery-time read.
+	want := core.EventScope{TenantID: "t", Layers: []string{"team-a"},
+		Prior: &layer.Visibility{Groups: []string{"eng"}}}
+	if got := rec.scopeFor(t, "unregister"); !reflect.DeepEqual(got, want) {
+		t.Errorf("unregister scope = %+v, want %+v", got, want)
+	}
+}
+
+// Spec: §7.6 — an update carries the visibility the layer held before the
+// update, so a subscriber the update withdraws the layer from still receives
+// the layer.config_changed that withdraws it.
+func TestLayerEndpoint_UpdateCarriesPriorVisibility(t *testing.T) {
+	t.Parallel()
+	rec := &eventRecorder{}
+	base := layerEventHarness(t, rec, layer.Identity{Sub: "admin", IsAuthenticated: true})
+
+	mustPost(t, base, "/v1/layers", map[string]any{
+		"id": "team-a", "source_type": "local", "local_path": "/x", "users": []string{"alice"},
+	})
+	resp, body := putJSON(t, base, "/v1/layers/update?id=team-a", map[string]any{"users": []string{"bob"}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update status %d: %s", resp.StatusCode, body)
+	}
+
+	want := core.EventScope{TenantID: "t", Layers: []string{"team-a"},
+		Prior: &layer.Visibility{Users: []string{"alice"}}}
+	if got := rec.scopeFor(t, "update"); !reflect.DeepEqual(got, want) {
+		t.Errorf("update scope = %+v, want %+v", got, want)
 	}
 }
 

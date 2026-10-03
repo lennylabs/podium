@@ -167,6 +167,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `PODIUM_REGISTRY`, as the §7.8 scheduled-publish example does, no longer
   fails with `config.no_registry`, and a `PODIUM_REGISTRY` exported alongside
   a config that sets `defaults.registry` now takes precedence over it.
+- **The change-event stream applies layer visibility** (§4.6, §7.6): the
+  registry delivers an event on `GET /v1/events`, and therefore through the SDK
+  `subscribe` helpers and the `podium sync` watcher, only when the subscriber's
+  identity can see the layer the event names. For each event, the registry
+  reads the layer visibility once, when a subscriber's delivery first needs it,
+  and applies that read to every subscriber of the event. Artifact and domain
+  events are also narrowed by the subscriber's §6.3.1 path scopes, and an event
+  published for another tenant is withheld. A subscriber that loses visibility
+  of a layer, or whose visible layer is unregistered, still receives the
+  `layer.config_changed` that withdraws it. A reorder's event names only the
+  reordered layers the subscriber can see. A holder of the §4.7.2 admin role
+  receives only the events its own §4.6 view admits. Previously every
+  subscriber received every event, which disclosed artifact IDs, versions,
+  domain paths, and layer names from layers the subscriber could not see.
+  Under public mode and with no identity provider configured, the evaluator
+  still admits every layer, so a subscriber in those modes receives every event
+  of its tenant that its scopes permit.
 
 ### Changed
 
@@ -792,6 +809,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   re-sync or re-publish rewrites the affected `SKILL.md` files. Lock-file
   `content_hash` values do not change, because they hash the authored artifact
   bytes rather than adapter output.
+- `ingest.EventEmitter` and `Server.PublishEvent` take a `core.EventScope`
+  that names the event's tenant, its layers, the artifact ID or domain path,
+  and, on a `layer.config_changed`, the layer's visibility before the change.
+  Every caller is updated, and no compatibility form remains.
 
 ### Removed
 
@@ -877,6 +898,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   above records the registry-source precedence change.
 - §4.7 names the flagless `podium admin reembed` as the full re-embed pass, in
   place of an `--all` flag the CLI never had.
+- §7.6 states the change-event stream visibility rule, and §4.6, §7.3.1, and
+  §7.5.4 point to it. §7.3.2 states that the receiver fan-out applies no layer
+  visibility filter and that a receiver's event filter is the only narrowing
+  applied to it. `docs/consuming/configure-your-harness.md` no longer states
+  that the stream applies no per-caller filtering, and
+  `docs/reference/http-api.md` describes the filtered stream and the receiver
+  delivery scope.
 
 ## [0.4.0] - 2026-09-05
 

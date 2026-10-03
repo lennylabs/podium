@@ -28,6 +28,7 @@ import (
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/registry/projection"
 	"github.com/lennylabs/podium/pkg/store"
@@ -228,8 +229,9 @@ type Request struct {
 	// Optional: when nil, ingest stays silent. Per-artifact:
 	//   - artifact.published with {id, version, content_hash, layer, tenant}
 	//   - artifact.deprecated when an ingested manifest sets deprecated:true
-	// The orchestrator wraps Server.PublishEvent for the production
-	// path; tests use a fake.
+	// Each event carries a core.EventScope naming its tenant, layer,
+	// and artifact ID or domain path. The orchestrator wraps
+	// Server.PublishEvent for the production path; tests use a fake.
 	PublishEvent EventEmitter
 	// Signer signs every newly accepted manifest's content hash and
 	// stores the resulting envelope on the ManifestRecord. Optional:
@@ -316,7 +318,13 @@ func (r *Request) tenantHasNonDeprecatedVersion(ctx context.Context, st store.St
 // Server.PublishEvent so the orchestrator passes the server's method
 // directly. The ctx carries the §7.3.2 trace id and actor (via the
 // request's audit metadata) through to the outbound webhook body.
-type EventEmitter func(ctx context.Context, eventType string, data map[string]any)
+// scope names the tenant, layers, and path the event concerns; the
+// stream evaluates subscriber visibility against it rather than
+// against payload keys, which differ by event type. A scope with no
+// tenant or no layer reaches no stream subscriber.
+//
+// Spec: §7.6
+type EventEmitter func(ctx context.Context, scope core.EventScope, eventType string, data map[string]any)
 
 // EmbedderFunc converts the embedding text projection of a manifest
 // into a vector. Implementations wrap pkg/embedding.Provider.Embed
@@ -485,7 +493,8 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			// the change-event seam and the audit sink fire so receivers
 			// and SIEM pipelines see one event per real change.
 			if req.PublishEvent != nil {
-				req.PublishEvent(ctx, string(audit.EventDomainPublished), map[string]any{
+				scope := core.EventScope{TenantID: dr.TenantID, Layers: []string{dr.Layer}, Path: dr.Path}
+				req.PublishEvent(ctx, scope, string(audit.EventDomainPublished), map[string]any{
 					"domain": dr.Path,
 					"layer":  dr.Layer,
 					"tenant": dr.TenantID,
@@ -837,7 +846,8 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		// rolled back. artifact.published carries the canonical
 		// metadata consumers need to look the artifact up.
 		if req.PublishEvent != nil {
-			req.PublishEvent(ctx, "artifact.published", map[string]any{
+			scope := core.EventScope{TenantID: mr.TenantID, Layers: []string{mr.Layer}, Path: mr.ArtifactID}
+			req.PublishEvent(ctx, scope, "artifact.published", map[string]any{
 				"id":           mr.ArtifactID,
 				"version":      mr.Version,
 				"content_hash": mr.ContentHash,
@@ -845,7 +855,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 				"tenant":       mr.TenantID,
 			})
 			if deprecatedFlip {
-				req.PublishEvent(ctx, "artifact.deprecated", map[string]any{
+				req.PublishEvent(ctx, scope, "artifact.deprecated", map[string]any{
 					"id":      mr.ArtifactID,
 					"version": mr.Version,
 					"layer":   mr.Layer,

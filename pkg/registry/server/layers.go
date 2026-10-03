@@ -82,7 +82,7 @@ type LayerEndpoint struct {
 	// is distinct from auditSink, which records the §8.1 event for an
 	// operator rather than waking a client. Nil is a no-op, which is the
 	// deployment that wires no event bus.
-	publishEvent func(context.Context, string, map[string]any)
+	publishEvent ingest.EventEmitter
 	// auditFile is the file-backed form of the §8.3 registry sink, set only
 	// when the sink writes a local log. The §8.5 erasure pass rewrites the
 	// on-disk hash chain in place (audit.EraseUser), so it needs the concrete
@@ -388,7 +388,10 @@ func (e *LayerEndpoint) WithAudit(sink audit.Sink) *LayerEndpoint {
 // the registry event bus. serverboot passes the registry server's
 // PublishEvent, so the event reaches both the streamed /v1/events
 // subscription a watcher holds and any §7.3.2 outbound webhook receiver.
-func (e *LayerEndpoint) WithEventPublisher(fn func(context.Context, string, map[string]any)) *LayerEndpoint {
+// The event's core.EventScope decides which stream subscribers receive it.
+//
+// Spec: §7.6
+func (e *LayerEndpoint) WithEventPublisher(fn ingest.EventEmitter) *LayerEndpoint {
 	e.publishEvent = fn
 	return e
 }
@@ -433,8 +436,30 @@ func (e *LayerEndpoint) emitLayerEvent(r *http.Request, before, cfg store.LayerC
 	// a change the re-resolve can observe, so an ingest-credential change
 	// records its audit event and wakes nothing.
 	if typ == audit.EventLayerConfigChanged && wakesWatchers(before, cfg) {
-		e.publishConfigChanged(r.Context(), cfg.ID, fields["action"])
+		e.publishConfigChanged(r.Context(), e.layerEventScope(before, cfg, action), cfg.ID, action)
 	}
+}
+
+// layerEventScope builds the §7.6 scope of a layer.config_changed on one
+// layer. Prior carries the visibility the layer held before the change, so
+// the subscribers who could see the layer learn that it changed even when
+// the change withdraws it from them: an unregister tombstones the record
+// before delivery, and an update can narrow it. cfg is the pre-delete
+// record on an unregister. A register and a restore carry no prior
+// visibility, and neither does an update that read no prior record.
+//
+// Spec: §7.6
+func (e *LayerEndpoint) layerEventScope(before, cfg store.LayerConfig, action string) core.EventScope {
+	scope := core.EventScope{TenantID: e.tenantID, Layers: []string{cfg.ID}}
+	switch {
+	case action == "unregister":
+		v := core.VisibilityOf(cfg)
+		scope.Prior = &v
+	case action == "update" && before.ID != "":
+		v := core.VisibilityOf(before)
+		scope.Prior = &v
+	}
+	return scope
 }
 
 // layerConfigEqual reports whether two stored layer records are equal for the
@@ -528,13 +553,15 @@ func precedenceSequence(layers []store.LayerConfig) []string {
 
 // publishConfigChanged fans a §7.5.4 layer.config_changed onto the event bus.
 // The payload names the layer and the action so a receiver can tell a
-// registration from a reorder without a second call.
-func (e *LayerEndpoint) publishConfigChanged(ctx context.Context, layerID, action string) {
+// registration from a reorder without a second call. layerField is the
+// payload's `layer` value, which a reorder sets to the joined layer list;
+// scope carries the layers themselves for the §7.6 stream filter.
+func (e *LayerEndpoint) publishConfigChanged(ctx context.Context, scope core.EventScope, layerField, action string) {
 	if e.publishEvent == nil {
 		return
 	}
-	e.publishEvent(ctx, string(audit.EventLayerConfigChanged), map[string]any{
-		"layer":  layerID,
+	e.publishEvent(ctx, scope, string(audit.EventLayerConfigChanged), map[string]any{
+		"layer":  layerField,
 		"action": action,
 	})
 }
@@ -1563,7 +1590,11 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	if !slices.Equal(precedenceSequence(layers), precedenceSequence(updated)) {
 		emitAuditEvent(e.auditSink, r, e.caller(r), audit.EventLayerConfigChanged,
 			strings.Join(req.Order, ","), map[string]string{"action": "reorder"})
-		e.publishConfigChanged(r.Context(), strings.Join(req.Order, ","), "reorder")
+		// Spec: §7.6 — the scope names every reordered layer, in request
+		// order, so the stream delivers the event to a subscriber who can
+		// see at least one of them and rewrites `layer` to that subset.
+		scope := core.EventScope{TenantID: e.tenantID, Layers: req.Order}
+		e.publishConfigChanged(r.Context(), scope, strings.Join(req.Order, ","), "reorder")
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"layers": e.readableBy(r, caller, updated)})
 }

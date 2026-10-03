@@ -87,8 +87,16 @@ func apiWantStatus(t testing.TB, got, want int, what string, body []byte) {
 }
 
 // apiDo issues a request with an optional JSON body and returns the
-// status and body, under the shared short-timeout client.
+// status and body, under the shared short-timeout client. It is apiDoAs with
+// no extra headers.
 func apiDo(t testing.TB, method, u string, body any) (int, []byte) {
+	t.Helper()
+	return apiDoAs(t, method, u, nil, body)
+}
+
+// apiDoAs is apiDo with headers added to the request, which carry the
+// caller's identity on a trusted-headers registry.
+func apiDoAs(t testing.TB, method, u string, headers http.Header, body any) (int, []byte) {
 	t.Helper()
 	var r *bytes.Reader
 	if body != nil {
@@ -103,6 +111,11 @@ func apiDo(t testing.TB, method, u string, body any) (int, []byte) {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for k, vs := range headers {
+		for _, v := range vs {
+			req.Header.Add(k, v)
+		}
 	}
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -1048,8 +1061,15 @@ func TestHTTPAPI_EventsTypeFilter(t *testing.T) {
 	}()
 
 	time.Sleep(300 * time.Millisecond) // let the handler subscribe
-	srv.PublishEvent(context.Background(), "artifact.published", map[string]any{"id": "finance/run"})
-	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "team-finance"})
+	// Spec: §7.6 — each scope names the tenant apiInProcCore binds, so the
+	// anonymous public-mode subscriber receives both and the type filter
+	// alone decides what the stream carries.
+	srv.PublishEvent(context.Background(),
+		core.EventScope{TenantID: "default", Layers: []string{"L"}, Path: "finance/run"},
+		"artifact.published", map[string]any{"id": "finance/run"})
+	srv.PublishEvent(context.Background(),
+		core.EventScope{TenantID: "default", Layers: []string{"team-finance"}},
+		"layer.ingested", map[string]any{"layer": "team-finance"})
 
 	sawPublished, sawIngested := false, false
 	deadline := time.After(2 * time.Second)
@@ -1103,7 +1123,9 @@ func TestHTTPAPI_OutboundWebhook(t *testing.T) {
 	}
 	worker := &webhook.Worker{Store: wstore}
 	srv := server.New(apiInProcCore(t), server.WithWebhooks(worker))
-	srv.PublishEvent(context.Background(), "artifact.published", map[string]any{"id": "finance/run"})
+	srv.PublishEvent(context.Background(),
+		core.EventScope{TenantID: "default", Layers: []string{"L"}, Path: "finance/run"},
+		"artifact.published", map[string]any{"id": "finance/run"})
 
 	select {
 	case body := <-received:

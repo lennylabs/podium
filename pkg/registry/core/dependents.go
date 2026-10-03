@@ -35,7 +35,7 @@ func (r *Registry) DependentsOf(ctx context.Context, id layer.Identity, artifact
 		Caller: callerOf(id),
 		Target: artifactID,
 	})
-	edges, err := r.store.DependentsOf(ctx, r.tenantFor(ctx), artifactID)
+	edges, err := r.store.DependentsOf(ctx, r.TenantFor(ctx), artifactID)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (v dependentsView) admits(e store.DependencyEdge) bool {
 // when no candidate has dependents or the store lookup fails; ranking is a
 // best-effort signal and a store error must not fail the search.
 func (r *Registry) dependencyRanking(ctx context.Context, allowed map[string]bool) []string {
-	inDegree, err := r.store.DependencyInDegree(ctx, r.tenantFor(ctx))
+	inDegree, err := r.store.DependencyInDegree(ctx, r.TenantFor(ctx))
 	if err != nil || len(inDegree) == 0 {
 		return nil
 	}
@@ -220,7 +220,7 @@ func (r *Registry) PreviewScope(ctx context.Context, id layer.Identity) (*ScopeP
 // the documented default of true; a genuine store failure surfaces as
 // ErrUnavailable so the endpoint reports unavailable rather than disabled.
 func (r *Registry) scopePreviewEnabled(ctx context.Context) (bool, error) {
-	t, err := r.store.GetTenant(ctx, r.tenantFor(ctx))
+	t, err := r.store.GetTenant(ctx, r.TenantFor(ctx))
 	if errors.Is(err, store.ErrTenantNotFound) {
 		return true, nil
 	}

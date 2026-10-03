@@ -42,7 +42,7 @@ func TestPublishEvent_FiresEvent(t *testing.T) {
 	srv := server.New(core.New(st, "default", nil))
 	// Without a webhook worker the call is a no-op; just ensure it
 	// doesn't panic. The signature matches ingest.EventEmitter.
-	srv.PublishEvent(context.Background(), "artifact.published", map[string]any{
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"L"}}, "artifact.published", map[string]any{
 		"id": "x", "version": "1.0.0",
 	})
 }

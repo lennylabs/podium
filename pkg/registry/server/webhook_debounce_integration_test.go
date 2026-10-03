@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/webhook"
 )
@@ -128,7 +129,7 @@ func TestWebhookDebounce_BatchAndWindowlessCoexist(t *testing.T) {
 
 	// A burst: three distinct layers plus a duplicate of the first.
 	for _, l := range []string{"team-shared", "platform", "team-shared", "personal"} {
-		srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": l})
+		srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{l}}, "layer.ingested", map[string]any{"layer": l})
 	}
 
 	// The windowless receiver gets one single-event delivery per event.

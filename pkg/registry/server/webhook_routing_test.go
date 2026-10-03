@@ -91,7 +91,7 @@ func TestPublishEvent_WindowlessReceiverGetsSingleEvent(t *testing.T) {
 	srv, _ := newRoutingServer(t, wstore, rr.srv.Client())
 
 	ctx := withAuditMeta(context.Background(), AuditMeta{TraceID: "trace-1", Email: "alice@acme.com"})
-	srv.PublishEvent(ctx, "artifact.published", map[string]any{"id": "finance/run"})
+	srv.PublishEvent(ctx, core.EventScope{TenantID: "default", Layers: []string{"L"}}, "artifact.published", map[string]any{"id": "finance/run"})
 
 	if !waitFor(t, func() bool { return rr.hits.Load() == 1 }) {
 		t.Fatalf("deliveries = %d, want 1", rr.hits.Load())
@@ -126,7 +126,7 @@ func TestPublishEvent_DebouncedReceiverNoImmediateDelivery(t *testing.T) {
 	})
 	srv, _ := newRoutingServer(t, wstore, rr.srv.Client())
 
-	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "team-shared"})
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"team-shared"}}, "layer.ingested", map[string]any{"layer": "team-shared"})
 
 	// Give the fan-out goroutine time to run; a debounced receiver must not
 	// receive an immediate single-event POST.
@@ -152,10 +152,10 @@ func TestPublishEvent_DebouncedBurstYieldsOneBatch(t *testing.T) {
 	srv, worker := newRoutingServer(t, wstore, rr.srv.Client())
 
 	// A burst: three distinct layers plus a duplicate of the first.
-	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "team-shared"})
-	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "platform"})
-	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "team-shared"})
-	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "personal"})
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"team-shared"}}, "layer.ingested", map[string]any{"layer": "team-shared"})
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"platform"}}, "layer.ingested", map[string]any{"layer": "platform"})
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"team-shared"}}, "layer.ingested", map[string]any{"layer": "team-shared"})
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"personal"}}, "layer.ingested", map[string]any{"layer": "personal"})
 
 	// Wait until all four enqueues have opened/extended the window. The window
 	// is open once at least one event has been enqueued; give the goroutines
@@ -209,8 +209,8 @@ func TestPublishEvent_MixedReceiversRouteIndependently(t *testing.T) {
 	})
 	srv, worker := newRoutingServer(t, wstore, immediate.srv.Client())
 
-	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "a"})
-	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "b"})
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"a"}}, "layer.ingested", map[string]any{"layer": "a"})
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"b"}}, "layer.ingested", map[string]any{"layer": "b"})
 
 	// The windowless receiver gets one delivery per event.
 	if !waitFor(t, func() bool { return immediate.hits.Load() == 2 }) {
@@ -249,7 +249,7 @@ func TestPublishEvent_ListErrorSkipsOutboundDelivery(t *testing.T) {
 	srv := New(core.New(st, "default", nil), WithWebhooks(worker), WithTenant("default"))
 
 	// Must not panic, and the bus publish proceeds.
-	srv.PublishEvent(context.Background(), "artifact.published", map[string]any{"id": "x"})
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"L"}}, "artifact.published", map[string]any{"id": "x"})
 	// Give the fan-out goroutine time to hit the List error and return.
 	time.Sleep(100 * time.Millisecond)
 }
