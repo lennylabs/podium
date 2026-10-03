@@ -10,7 +10,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -165,7 +164,7 @@ func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 		return provider.Sign(ctx, contentHash)
 	}
 	for _, l := range reg.Layers {
-		var layerFS fs.FS = os.DirFS(l.Path)
+		layerFS := os.DirFS(l.Path)
 		if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
 			TenantID: tenant,
 			LayerID:  l.ID,

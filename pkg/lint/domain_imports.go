@@ -296,9 +296,9 @@ func findCycles(graph map[string][]string) [][]string {
 		visited[node] = gray
 		stack = append(stack, node)
 		for _, n := range graph[node] {
-			if visit(n) {
-				// continue to surface multiple cycles
-			}
+			// The result is ignored so the walk continues and surfaces
+			// every cycle rather than stopping at the first.
+			_ = visit(n)
 		}
 		visited[node] = black
 		stack = stack[:len(stack)-1]
@@ -343,9 +343,7 @@ func expandAlternatives(pattern string) []string {
 	choices := strings.Split(pattern[open+1:close], ",")
 	out := []string{}
 	for _, c := range choices {
-		for _, expanded := range expandAlternatives(prefix + c + suffix) {
-			out = append(out, expanded)
-		}
+		out = append(out, expandAlternatives(prefix+c+suffix)...)
 	}
 	return out
 }

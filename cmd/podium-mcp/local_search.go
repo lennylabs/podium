@@ -114,9 +114,7 @@ func overlayTokens(rec filesystem.ArtifactRecord) []string {
 		parts = append(parts, rec.Artifact.Name)
 		parts = append(parts, rec.Artifact.Description)
 		parts = append(parts, strings.Join(rec.Artifact.Tags, " "))
-		for _, w := range rec.Artifact.WhenToUse {
-			parts = append(parts, w)
-		}
+		parts = append(parts, rec.Artifact.WhenToUse...)
 	}
 	parts = append(parts, string(rec.SkillBytes))
 	parts = append(parts, manifestBodyOf(rec))

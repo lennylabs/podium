@@ -56,10 +56,7 @@ func skillArtifactBodyIsAllowed(body []byte) bool {
 	// Reject embedded comment delimiters that would mean two
 	// comments back to back.
 	inner := stripped[len("<!--") : len(stripped)-len("-->")]
-	if bytes.Contains(inner, []byte("-->")) {
-		return false
-	}
-	return true
+	return !bytes.Contains(inner, []byte("-->"))
 }
 
 // bodyAfterFrontmatter returns everything after the closing `---`

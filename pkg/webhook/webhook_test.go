@@ -778,11 +778,10 @@ func TestWorker_ContextCancelAbortsRetry(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 	select {
-	case err := <-done:
-		if err != nil && !errors.Is(err, context.Canceled) {
-			// Deliver is best-effort and may swallow ctx.Canceled
-			// because the per-receiver goroutine handles it.
-		}
+	case <-done:
+		// Deliver is best-effort and may swallow ctx.Canceled because the
+		// per-receiver goroutine handles it, so any returned error is
+		// acceptable here; the test asserts only that Deliver returns.
 	case <-time.After(2 * time.Second):
 		t.Fatal("Deliver did not return after ctx cancel")
 	}

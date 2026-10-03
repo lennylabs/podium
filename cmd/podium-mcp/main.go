@@ -845,12 +845,15 @@ func (s *mcpServer) overlayDomainsSnapshot() map[string]*manifest.Domain {
 // path vanished between the two reads) degrades to an empty domain map rather
 // than failing the artifact load.
 func resolveOverlayAll(path string) ([]filesystem.ArtifactRecord, map[string]*manifest.Domain, error) {
+	// The filesystem overlay reads local files and ignores its context, so
+	// a background context stands in for the nil the SPI forbids.
+	ctx := context.Background()
 	prov := overlay.Filesystem{Path: path}
-	records, err := prov.Resolve(nil)
+	records, err := prov.Resolve(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	domains, derr := prov.ResolveDomains(nil)
+	domains, derr := prov.ResolveDomains(ctx)
 	if derr != nil && !errors.Is(derr, overlay.ErrNoOverlay) {
 		return records, nil, derr
 	}

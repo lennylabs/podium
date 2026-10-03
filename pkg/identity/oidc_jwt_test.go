@@ -248,7 +248,7 @@ func TestOIDCVerifier_RejectsHS256(t *testing.T) {
 	tok := jwt.NewWithClaims(jwt.SigningMethodHS256, validClaims(idp.issuer(), testAudience))
 	tok.Header["kid"] = "key-1"
 	idp.mu.Lock()
-	pub := idp.keys["key-1"].PublicKey.N.Bytes()
+	pub := idp.keys["key-1"].N.Bytes()
 	idp.mu.Unlock()
 	raw, err := tok.SignedString(pub)
 	if err != nil {

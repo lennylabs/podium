@@ -1,6 +1,10 @@
 package objectstore
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/minio/minio-go/v7/pkg/credentials"
+)
 
 // Spec: §13.12 — when both static keys are set the client signs
 // with them and ignores the ambient AWS_* environment; when both are unset it
@@ -11,7 +15,7 @@ func TestS3Credentials_StaticVsChain(t *testing.T) {
 	t.Run("static keys win over the environment", func(t *testing.T) {
 		t.Setenv("AWS_ACCESS_KEY_ID", "env-key")
 		t.Setenv("AWS_SECRET_ACCESS_KEY", "env-secret")
-		v, err := s3Credentials(S3Config{AccessKeyID: "cfg-key", SecretAccessKey: "cfg-secret"}).Get()
+		v, err := s3Credentials(S3Config{AccessKeyID: "cfg-key", SecretAccessKey: "cfg-secret"}).GetWithContext(&credentials.CredContext{})
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -23,7 +27,7 @@ func TestS3Credentials_StaticVsChain(t *testing.T) {
 	t.Run("chain consulted when static keys unset", func(t *testing.T) {
 		t.Setenv("AWS_ACCESS_KEY_ID", "env-key")
 		t.Setenv("AWS_SECRET_ACCESS_KEY", "env-secret")
-		v, err := s3Credentials(S3Config{}).Get()
+		v, err := s3Credentials(S3Config{}).GetWithContext(&credentials.CredContext{})
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -38,7 +42,7 @@ func TestS3Credentials_StaticVsChain(t *testing.T) {
 		// Only the access key is set: this is a misconfiguration, but it must
 		// take the static path rather than silently picking up the ambient
 		// AWS_* environment (which would mask the operator's mistake).
-		v, err := s3Credentials(S3Config{AccessKeyID: "cfg-key"}).Get()
+		v, err := s3Credentials(S3Config{AccessKeyID: "cfg-key"}).GetWithContext(&credentials.CredContext{})
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}

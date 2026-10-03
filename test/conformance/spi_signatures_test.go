@@ -5,7 +5,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"io/fs"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -51,52 +50,70 @@ func TestSPISignatures(t *testing.T) {
 	checked := 0
 	for _, pkg := range spiPkgs {
 		dir := filepath.Join(root, pkg)
-		pkgs, err := parser.ParseDir(fset, dir, func(fi fs.FileInfo) bool {
-			return !strings.HasSuffix(fi.Name(), "_test.go")
-		}, 0)
+		files, err := parseNonTestFiles(fset, dir)
 		if err != nil {
 			t.Fatalf("parse %s: %v", pkg, err)
 		}
-		for _, p := range pkgs {
-			for _, file := range p.Files {
-				ast.Inspect(file, func(n ast.Node) bool {
-					ts, ok := n.(*ast.TypeSpec)
-					if !ok || !ts.Name.IsExported() {
-						return true
-					}
-					// An SPI declared as a bare func type cannot cross a
-					// process boundary. The "...Func" adapter idiom is an
-					// in-process convenience and is exempt.
-					if _, isFunc := ts.Type.(*ast.FuncType); isFunc {
-						if !strings.HasSuffix(ts.Name.Name, "Func") {
-							t.Errorf("%s: exported SPI type %s is a func type, which §9.3 forbids; define it as an interface",
-								pkg, ts.Name.Name)
-						}
-						return true
-					}
-					iface, ok := ts.Type.(*ast.InterfaceType)
-					if !ok {
-						return true
-					}
-					for _, m := range iface.Methods.List {
-						ft, ok := m.Type.(*ast.FuncType)
-						if !ok || len(m.Names) == 0 {
-							continue // embedded interface, not a method
-						}
-						checked++
-						for _, v := range methodViolations(fset, pkg, ts.Name.Name, m.Names[0].Name, ft) {
-							t.Error(v)
-						}
+		for _, file := range files {
+			ast.Inspect(file, func(n ast.Node) bool {
+				ts, ok := n.(*ast.TypeSpec)
+				if !ok || !ts.Name.IsExported() {
+					return true
+				}
+				// An SPI declared as a bare func type cannot cross a
+				// process boundary. The "...Func" adapter idiom is an
+				// in-process convenience and is exempt.
+				if _, isFunc := ts.Type.(*ast.FuncType); isFunc {
+					if !strings.HasSuffix(ts.Name.Name, "Func") {
+						t.Errorf("%s: exported SPI type %s is a func type, which §9.3 forbids; define it as an interface",
+							pkg, ts.Name.Name)
 					}
 					return true
-				})
-			}
+				}
+				iface, ok := ts.Type.(*ast.InterfaceType)
+				if !ok {
+					return true
+				}
+				for _, m := range iface.Methods.List {
+					ft, ok := m.Type.(*ast.FuncType)
+					if !ok || len(m.Names) == 0 {
+						continue // embedded interface, not a method
+					}
+					checked++
+					for _, v := range methodViolations(fset, pkg, ts.Name.Name, m.Names[0].Name, ft) {
+						t.Error(v)
+					}
+				}
+				return true
+			})
 		}
 	}
 
 	if checked == 0 {
 		t.Fatal("no SPI interface methods were inspected; check the package list")
 	}
+}
+
+// parseNonTestFiles parses the non-test Go files in dir. It replaces the
+// deprecated parser.ParseDir; the SPI packages carry no build-tagged files, so
+// parsing every non-test file matches what ParseDir returned.
+func parseNonTestFiles(fset *token.FileSet, dir string) ([]*ast.File, error) {
+	paths, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, err
+	}
+	var files []*ast.File
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, f)
+	}
+	return files, nil
 }
 
 // methodViolations returns the §9.3 parameter-rule violations for a single

@@ -116,7 +116,7 @@ func TestServerSync_ManifestBodyDigestMismatchAbortsTheSync(t *testing.T) {
 		defer func() { _ = resp.Body.Close() }()
 		body, _ := io.ReadAll(resp.Body)
 		if r.URL.Path == "/v1/load_artifact" && r.URL.Query().Get("id") == "team/big" {
-			body = bytes.Replace(body, []byte(`"content_hash": "sha256:`), []byte(`"content_hash": "sha256:00`), -1)
+			body = bytes.ReplaceAll(body, []byte(`"content_hash": "sha256:`), []byte(`"content_hash": "sha256:00`))
 		}
 		w.WriteHeader(resp.StatusCode)
 		_, _ = w.Write(body)

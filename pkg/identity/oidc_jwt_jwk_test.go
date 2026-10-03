@@ -47,6 +47,19 @@ func TestOIDCVerifier_UnknownKidRejected(t *testing.T) {
 
 func b64u(b []byte) string { return base64.RawURLEncoding.EncodeToString(b) }
 
+// ecCoords returns the base64url X and Y coordinates of an EC public key, read
+// from its uncompressed SEC 1 encoding rather than the deprecated X and Y
+// fields.
+func ecCoords(t *testing.T, pub *ecdsa.PublicKey) (x, y string) {
+	t.Helper()
+	raw, err := pub.Bytes()
+	if err != nil {
+		t.Fatalf("encode EC public key: %v", err)
+	}
+	n := (len(raw) - 1) / 2
+	return b64u(raw[1 : 1+n]), b64u(raw[1+n:])
+}
+
 // validRSAJWK returns a usable RSA jwk for building error-case variants.
 func validRSAJWK(t *testing.T) jwk {
 	t.Helper()
@@ -78,13 +91,14 @@ func TestJWK_PublicKey_EC(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		k := jwk{Kty: "EC", Crv: crv, X: b64u(priv.X.Bytes()), Y: b64u(priv.Y.Bytes())}
+		x, y := ecCoords(t, &priv.PublicKey)
+		k := jwk{Kty: "EC", Crv: crv, X: x, Y: y}
 		got, err := k.publicKey()
 		if err != nil {
 			t.Fatalf("%s publicKey: %v", crv, err)
 		}
 		ek, ok := got.(*ecdsa.PublicKey)
-		if !ok || ek.X.Cmp(priv.X) != 0 || ek.Y.Cmp(priv.Y) != 0 {
+		if !ok || !ek.Equal(&priv.PublicKey) {
 			t.Errorf("%s: got %T, want the matching EC public key", crv, got)
 		}
 	}
@@ -110,8 +124,7 @@ func TestJWK_PublicKey_Errors(t *testing.T) {
 	t.Parallel()
 	rsaK := validRSAJWK(t)
 	ecPriv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	validX := b64u(ecPriv.X.Bytes())
-	validY := b64u(ecPriv.Y.Bytes())
+	validX, validY := ecCoords(t, &ecPriv.PublicKey)
 
 	cases := []struct {
 		name string

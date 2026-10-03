@@ -283,12 +283,12 @@ func TestSCIM_FilterMatchSemantics(t *testing.T) {
 func scimEncodeQuery(s string) string {
 	out := []byte{}
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == ' ' {
+		switch c := s[i]; c {
+		case ' ':
 			out = append(out, '+')
-		} else if c == '"' {
+		case '"':
 			out = append(out, '%', '2', '2')
-		} else {
+		default:
 			out = append(out, c)
 		}
 	}

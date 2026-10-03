@@ -514,10 +514,18 @@ func (k jwk) publicKey() (any, error) {
 		if len(x.Bytes()) > byteLen || len(y.Bytes()) > byteLen {
 			return nil, errors.New("ec coordinate out of range")
 		}
-		if !curve.IsOnCurve(x, y) {
-			return nil, errors.New("ec point not on curve")
+		// ParseUncompressedPublicKey rejects a point that is off the curve or
+		// at infinity. It replaces the deprecated elliptic.Curve.IsOnCurve
+		// check and the raw-coordinate PublicKey literal.
+		point := make([]byte, 1+2*byteLen)
+		point[0] = 4 // SEC 1 uncompressed-point prefix
+		x.FillBytes(point[1 : 1+byteLen])
+		y.FillBytes(point[1+byteLen:])
+		pub, err := ecdsa.ParseUncompressedPublicKey(curve, point)
+		if err != nil {
+			return nil, fmt.Errorf("ec point not on curve: %w", err)
 		}
-		return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
+		return pub, nil
 	case "OKP":
 		if k.Crv != "Ed25519" {
 			return nil, fmt.Errorf("unsupported OKP curve %q", k.Crv)

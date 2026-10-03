@@ -18,11 +18,11 @@ func TestAdminCmd_DispatchTable(t *testing.T) {
 	} {
 		t.Run(sub, func(t *testing.T) {
 			withStderr(t, func() {
-				code := adminCmd([]string{sub}) // no extra args → child validates
-				if code == 0 {
-					// Some subcommands accept zero args and succeed
-					// (e.g., admin reembed). 0 is fine.
-				}
+				// No extra args, so the child validates. Some subcommands
+				// accept zero args and succeed (e.g., admin reembed), so any
+				// exit code is acceptable; the test asserts only that the
+				// dispatch does not panic.
+				_ = adminCmd([]string{sub})
 			})
 		})
 	}

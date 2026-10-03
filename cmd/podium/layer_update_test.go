@@ -101,7 +101,6 @@ func TestLayerUpdateCmd_RequiresMutableField(t *testing.T) {
 	if rc != 2 {
 		t.Errorf("rc = %d, want 2 (argument error)", rc)
 	}
-	_ = fmt.Sprintf("noop") // keep fmt import alive on stripped builds
 }
 
 // captureUpdateBody runs layerUpdate against a stub registry and returns the

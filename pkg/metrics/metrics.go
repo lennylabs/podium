@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	promcollectors "github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -166,8 +167,8 @@ func (m *Registry) SetVectorOutboxDepth(n int64) { m.vectorOutbox.Store(n) }
 // the standard process_* and go_* series alongside the Podium metrics.
 func collectors() prometheus.Collector {
 	return collectorSet{
-		runtime: prometheus.NewGoCollector(),
-		process: prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
+		runtime: promcollectors.NewGoCollector(),
+		process: promcollectors.NewProcessCollector(promcollectors.ProcessCollectorOpts{}),
 	}
 }
 

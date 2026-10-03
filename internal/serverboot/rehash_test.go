@@ -296,10 +296,10 @@ func (f *failingObjects) count() int {
 // closes, as Filesystem.Get over a hung mount does.
 type blockingObjects struct {
 	objectstore.Provider
-	mu            sync.Mutex
-	gets          int
-	honorContext  bool
-	release       chan struct{}
+	mu           sync.Mutex
+	gets         int
+	honorContext bool
+	release      chan struct{}
 }
 
 func (b *blockingObjects) Get(ctx context.Context, key string) ([]byte, error) {
