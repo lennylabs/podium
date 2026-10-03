@@ -1,7 +1,7 @@
 # Proposal 0039: Specify the variables a kind: workspace target's workflow receives in §7.5.2
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-03). The approval was decided on the user's behalf under the overnight authorization and signed off as staged. OQ-1: the staged first option (no absolute-path promise). OQ-2: option (1), CODE-1, so podium sync --config reads PODIUM_REGISTRY, matching the §7.5.2 precedence and the existing CI examples.
+- Status: Implemented (2026-10-03). The approval was decided on the user's behalf under the overnight authorization and signed off as staged. OQ-1: the staged first option (no absolute-path promise). OQ-2: option (1), CODE-1, so podium sync --config reads PODIUM_REGISTRY, matching the §7.5.2 precedence and the existing CI examples.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, test, or doc file. Apply the changes in the staged sections after sign-off.
@@ -43,22 +43,26 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.5.2 defines the workspace workflow variables and scopes the `$PODIUM_CHANGED` dry-run clause to `kind: marketplace`.
+- [x] **S1 · spec** — SPEC-1. §7.5.2 defines the workspace workflow variables and scopes the `$PODIUM_CHANGED` dry-run clause to `kind: marketplace`.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §7.8 names the registry, identity, and harness variables and calls the registry a registry source.
+- [x] **S2 · spec** — SPEC-2. §7.8 names the registry, identity, and harness variables and calls the registry a registry source.
       Levels: —. Depends on: S1
-- [ ] **S3 · test** — TEST-1. The fixture change (the `failPhase` parameter and the omitted-registry form), both existing call sites (`TestPublishing_WorkspaceTargetRunsWorkflow` and `TestPublishing_WorkspaceCollisionPublishesThenFails`, each passing `""`), and `TestPublishing_WorkspaceTargetRunsWorkflow` pinning every injected value in both phases and the skipped workflow under `--dry-run` and `--check`.
+- [x] **S3 · test** — TEST-1. The fixture change (the `failPhase` parameter and the omitted-registry form), both existing call sites (`TestPublishing_WorkspaceTargetRunsWorkflow` and `TestPublishing_WorkspaceCollisionPublishesThenFails`, each passing `""`), and `TestPublishing_WorkspaceTargetRunsWorkflow` pinning every injected value in both phases and the skipped workflow under `--dry-run` and `--check`.
       Levels: e2e. Depends on: S1
-- [ ] **S4 · test** — TEST-2. `TestPublishing_WorkspaceTargetOnErrorVariables` pins the variables each on_error list receives.
+- [x] **S4 · test** — TEST-2. `TestPublishing_WorkspaceTargetOnErrorVariables` pins the variables each on_error list receives.
       Levels: e2e. Depends on: S3
-- [ ] **S5 · code** — CODE-1 and TEST-3. `runMultiTargetSync` falls back to `PODIUM_REGISTRY`, and `TestPublishing_ConfigRegistrySourcePrecedence` pins the flag, env, and file order.
+- [x] **S5 · code** — CODE-1 and TEST-3. `runMultiTargetSync` falls back to `PODIUM_REGISTRY`, and `TestPublishing_ConfigRegistrySourcePrecedence` pins the flag, env, and file order.
       Levels: e2e. Depends on: S1, S3
-- [ ] **S6 · docs** — DOC-1. `docs/consuming/publishing.md` aligns the Injected variables table, the execution-semantics paragraph, and the `--dry-run` row with §7.5.2.
+- [x] **S6 · docs** — DOC-1. `docs/consuming/publishing.md` aligns the Injected variables table, the execution-semantics paragraph, and the `--dry-run` row with §7.5.2.
       Levels: —. Depends on: S1, S2
-- [ ] **S7 · docs** — CL-1. The `[Unreleased]` Documentation and Fixed entries.
+- [x] **S7 · docs** — CL-1. The `[Unreleased]` Documentation and Fixed entries.
       Levels: —. Depends on: S1, S2, S5
 
 **Ordering constraints.** S1 lands the text every later step cites, including the registry precedence CODE-1 implements. S2 cross-references the §7.5.2 definition of the registry source, so it follows S1. S4 and S5 reuse the fixture signature S3 introduces, and S5 also uses the fixture's omitted-registry form that S3 adds. S6 and S7 restate the committed spec text, and the CL-1 Fixed entry records the S5 behavior change.
+
+## Deviations from the checklist
+
+- The implementation reported a step S8 as landed. The checklist above carries no S8, so S8 falls outside the staged steps S1 through S7. The commits that implement this proposal map to S1 through S7, and none of them records a separate S8 change.
 
 ## Current state and the gap
 
