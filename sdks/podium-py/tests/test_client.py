@@ -511,8 +511,7 @@ def test_load_artifacts_empty_short_circuits(stub_server):
     assert stub_server.last_path == ""
 
 
-# Spec: §7.6 / §2.2 — the loaded-artifact object exposes
-# materialize(to=..., harness=...) and writes the canonical layout to disk.
+# Spec: §7.6 / §2.2 — materialize writes the canonical layout; harness accepts only "none".
 def test_materialize_context_writes_artifact_md(tmp_path):
     art = LoadedArtifact(
         id="finance/close/run-variance",
@@ -521,7 +520,7 @@ def test_materialize_context_writes_artifact_md(tmp_path):
         manifest_body="# body\n",
         frontmatter="---\ntype: context\n---\n\n# body\n",
     )
-    written = art.materialize(str(tmp_path), harness="claude-code")
+    written = art.materialize(str(tmp_path), harness="none")
     art_md = tmp_path / "finance" / "close" / "run-variance" / "ARTIFACT.md"
     assert art_md.read_text() == "---\ntype: context\n---\n\n# body\n"
     assert str(art_md) in written
@@ -614,7 +613,7 @@ def test_materialize_rejects_path_traversal(tmp_path):
         art.materialize(str(tmp_path))
 
 
-# Spec: §7.6.2 — a batch result materializes ok items and fetches its
+# Spec: §7.6.2 / §7.6 — a batch result materializes ok items and fetches its
 # presigned resources; an error item refuses to materialize.
 def test_batch_result_materialize_ok_and_error(tmp_path):
     ok = BatchResult(
@@ -631,6 +630,43 @@ def test_batch_result_materialize_ok_and_error(tmp_path):
     bad = BatchResult(id="x/y", status="error", error=RegistryError("visibility.denied", "no"))
     with pytest.raises(RegistryError):
         bad.materialize(str(tmp_path))
+    # §7.6: harness is checked before status, so an invalid harness on an
+    # error item raises ValueError rather than the item's RegistryError.
+    with pytest.raises(ValueError):
+        bad.materialize(str(tmp_path), harness="claude-code")
+
+
+def _refusing_fetch(url):
+    raise AssertionError(f"materialize fetched {url} before validating harness")
+
+
+@pytest.mark.parametrize(
+    "item",
+    [
+        LoadedArtifact(
+            id="a/b",
+            type="context",
+            version="1",
+            manifest_body="x",
+            frontmatter="---\ntype: context\n---\n",
+            large_resources={"big.bin": {"url": "https://store/presigned"}},
+        ),
+        BatchResult(
+            id="a/b",
+            status="ok",
+            type="context",
+            manifest_body="x",
+            frontmatter="---\ntype: context\n---\n",
+            resources=[{"path": "r.bin", "presigned_url": "https://store/r"}],
+        ),
+    ],
+    ids=["loaded-artifact", "batch-result"],
+)
+# Spec: §2.2 / §7.6 — a harness other than "none" raises before any fetch or write.
+def test_materialize_rejects_non_none_harness(item, tmp_path):
+    with pytest.raises(ValueError, match="canonical layout only"):
+        item.materialize(str(tmp_path), harness="claude-code", fetch=_refusing_fetch)
+    assert list(tmp_path.iterdir()) == []
 
 
 # Spec: §4.1/§7.2 — load_artifact decodes a base64-flagged inline set

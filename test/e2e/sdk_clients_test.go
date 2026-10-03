@@ -295,24 +295,27 @@ func TestSDK_PyLoadArtifactNotFound(t *testing.T) {
 	csWantStdout(t, res, "CODE registry.not_found RETRY False")
 }
 
-// Python materialize(harness=none) is documented but absent (gap).
-func TestSDK_PyMaterializeNoneGap(t *testing.T) {
+// Spec: §7.6 — the Python SDK materializes a served artifact in the
+// canonical layout when harness is "none".
+func TestSDK_PyMaterializeNone(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
 	res := csRunPy(t, py, srv.BaseURL,
-		"from podium import Client\nc = Client.from_env()\na = c.load_artifact('finance/ap/pay-invoice')\nprint('HAS_MATERIALIZE', hasattr(a, 'materialize'))\n")
-	csWantStdout(t, res, "HAS_MATERIALIZE True")
+		"import os, tempfile\nfrom podium import Client\nc = Client.from_env()\na = c.load_artifact('finance/ap/pay-invoice')\nd = tempfile.mkdtemp()\na.materialize(d, harness='none')\nprint('ARTIFACT_MD', os.path.isfile(os.path.join(d, 'finance', 'ap', 'pay-invoice', 'ARTIFACT.md')))\n")
+	csWantStdout(t, res, "ARTIFACT_MD True")
 }
 
-// Python materialize(harness=claude-code) is absent (gap).
-func TestSDK_PyMaterializeClaudeCodeGap(t *testing.T) {
+// Spec: §2.2 / §7.6 — the Python SDK runs no harness adapter, so
+// materialize with a harness other than "none" raises ValueError against a
+// live registry and writes nothing.
+func TestSDK_PyMaterializeRejectsHarness(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
 	res := csRunPy(t, py, srv.BaseURL,
-		"from podium import Client\nc = Client.from_env()\na = c.load_artifact('finance/close-reporting/run-variance-analysis')\nprint('HAS_MATERIALIZE', hasattr(a, 'materialize'))\n")
-	csWantStdout(t, res, "HAS_MATERIALIZE True")
+		"import os, tempfile\nfrom podium import Client\nc = Client.from_env()\na = c.load_artifact('finance/close-reporting/run-variance-analysis')\nd = tempfile.mkdtemp()\ntry:\n    a.materialize(d, harness='claude-code')\n    print('NO_ERROR')\nexcept ValueError as e:\n    print('REJECTED', 'canonical layout only' in str(e), 'EMPTY', os.listdir(d) == [])\n")
+	csWantStdout(t, res, "REJECTED True EMPTY True")
 }
 
 // Python load_artifacts bulk-fetches in one request.

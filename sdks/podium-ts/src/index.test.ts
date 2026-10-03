@@ -1,13 +1,20 @@
 // Spec coverage: §7.6 SDK surface — TypeScript client mirrors the
 // Python client and the registry HTTP API.
 
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { BatchResult, Client, LoadedArtifact, MaterializeError, RegistryError } from "./index.js";
+import {
+  BatchResult,
+  Client,
+  LoadedArtifact,
+  MaterializeError,
+  type MaterializeOptions,
+  RegistryError,
+} from "./index.js";
 
 describe("Client", () => {
   // Spec: §7.6 — searchArtifacts forwards to GET /v1/search_artifacts
@@ -516,8 +523,7 @@ describe("Client", () => {
   });
 });
 
-// Spec: §7.6 / §2.2 — the loaded-artifact object exposes
-// materialize(to, { harness }) and writes the canonical layout to disk.
+// Spec: §2.2 / §7.6 — materialize writes the canonical layout; harness accepts only "none" and any other value throws before a file is written.
 describe("LoadedArtifact.materialize", () => {
   async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
     const dir = await mkdtemp(join(tmpdir(), "podium-mat-"));
@@ -528,6 +534,7 @@ describe("LoadedArtifact.materialize", () => {
     }
   }
 
+  // Spec: §7.6
   it("writes ARTIFACT.md for a context and no SKILL.md", async () => {
     await withTempDir(async (dir) => {
       const art = new LoadedArtifact({
@@ -537,7 +544,7 @@ describe("LoadedArtifact.materialize", () => {
         manifest_body: "# body\n",
         frontmatter: "---\ntype: context\n---\n\n# body\n",
       });
-      const written = await art.materialize(dir, { harness: "claude-code" });
+      const written = await art.materialize(dir, { harness: "none" });
       const artMd = join(dir, "finance", "close", "run-variance", "ARTIFACT.md");
       expect(await readFile(artMd, "utf8")).toBe("---\ntype: context\n---\n\n# body\n");
       expect(written).toContain(artMd);
@@ -661,6 +668,61 @@ describe("LoadedArtifact.materialize", () => {
         error: { code: "visibility.denied", message: "no" },
       });
       await expect(bad.materialize(dir)).rejects.toBeInstanceOf(RegistryError);
+    });
+  });
+
+  const throwingFetcher: typeof fetch = async (input) => {
+    throw new Error(`unexpected fetch of ${String(input)}`);
+  };
+  const claudeCode = (fetcher?: typeof fetch) =>
+    ({ harness: "claude-code", fetcher }) as unknown as MaterializeOptions;
+
+  // Spec: §2.2 / §7.6
+  it("LoadedArtifact rejects a non-none harness before any fetch or write", async () => {
+    await withTempDir(async (dir) => {
+      const art = new LoadedArtifact({
+        id: "a/b",
+        type: "context",
+        version: "1",
+        manifest_body: "x",
+        frontmatter: "---\ntype: context\n---\n",
+        large_resources: { "big.bin": { url: "https://store/presigned" } },
+      });
+      await expect(art.materialize(dir, claudeCode(throwingFetcher))).rejects.toThrow(
+        /canonical layout only/,
+      );
+      expect(await readdir(dir)).toEqual([]);
+    });
+  });
+
+  // Spec: §2.2 / §7.6
+  it("BatchResult rejects a non-none harness before any fetch or write", async () => {
+    await withTempDir(async (dir) => {
+      const ok = new BatchResult({
+        id: "a/b",
+        status: "ok",
+        type: "context",
+        manifest_body: "x",
+        frontmatter: "---\ntype: context\n---\n",
+        resources: [{ path: "r.bin", presigned_url: "https://store/r" }],
+      });
+      await expect(ok.materialize(dir, claudeCode(throwingFetcher))).rejects.toThrow(
+        /canonical layout only/,
+      );
+      expect(await readdir(dir)).toEqual([]);
+    });
+  });
+
+  // Spec: §2.2 / §7.6
+  it("BatchResult checks the harness before an error item's status", async () => {
+    await withTempDir(async (dir) => {
+      const bad = new BatchResult({
+        id: "x/y",
+        status: "error",
+        error: { code: "visibility.denied", message: "no" },
+      });
+      await expect(bad.materialize(dir, claudeCode())).rejects.toThrow(/canonical layout only/);
+      await expect(bad.materialize(dir, claudeCode())).rejects.not.toBeInstanceOf(RegistryError);
     });
   });
 

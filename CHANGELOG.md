@@ -170,6 +170,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **SDK `materialize()` rejects a harness other than `none`** (§2.2, §7.6):
+  `podium-py` and `podium-ts` write only the canonical layout, and
+  `materialize()` on a loaded artifact or a batch item now raises an argument
+  error (`ValueError` in Python, `Error` in TypeScript) before writing when
+  `harness` is any value other than `none`. Previously the argument was
+  accepted and ignored. Run `podium sync --harness <name>` for harness-native
+  files.
+
 - **The §4.7.6 content hash length-frames its parts** (§4.7.6, §13.4, §6.4,
   §6.5): the canonical serialization now prefixes every part with its length
   before the SHA-256, so every content hash Podium computes moves. This reaches
@@ -811,6 +819,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Documentation
 
+- **Embedding-model switch on managed vector backends** (§4.7): per-row model
+  versioning, query-time model filtering, and the stale-row purge apply to the
+  collocated stores, pgvector and sqlite-vec. The vector-backends page gives the
+  fresh-index procedure for Pinecone, Weaviate, and Qdrant and describes query
+  results during the re-embed, and the operator guide links to it.
 - §13.12 gains a row for `PODIUM_IDP_GROUP_MAPPING`, giving its syntax, its
   absence from the config file, the pass-through of a claim value with no entry,
   and the startup failure. §6.3.1 names the variable as the source of the
