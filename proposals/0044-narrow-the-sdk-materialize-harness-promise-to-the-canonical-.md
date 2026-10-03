@@ -1,7 +1,7 @@
 # Proposal 0044: Narrow the SDK materialize() harness promise to the canonical layout and scope model versioning to the built-in vector stores
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), decided on the user's behalf under the overnight authorization. Signed off as staged. OQ-1 (the unread batchLoad harness field) and OQ-2 (the nonexistent `reembed --all` token in §4.7) go to a separate follow-up proposal, so this converged text is not reopened.
+- Status: Applied to spec (2026-10-03). Approved on 2026-10-03 on the user's behalf under the overnight authorization and signed off as staged. OQ-1 (the unread batchLoad harness field) and OQ-2 (the nonexistent `reembed --all` token in §4.7) go to a separate follow-up proposal, so this converged text is not reopened.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
