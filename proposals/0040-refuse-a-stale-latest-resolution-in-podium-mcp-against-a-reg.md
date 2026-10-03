@@ -1,7 +1,7 @@
 # Proposal 0040: Refuse a stale latest resolution in podium-mcp against a registry-signed artifact revision
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-03). Approved on 2026-10-03, decided on the user's behalf under the overnight authorization, and signed off as staged. OQ-1: accept the protocol change to podium/delivery-record/2 with the signed ingest-time revision; /1 never shipped in a release, so no released consumer breaks, and the semver variant would refuse honest backports. OQ-2: keep the staged key (registry and artifact ID), because identity keying needs an organization the bridge cannot see under trusted-headers; an identity switch is covered by podium cache reset-revisions. Recorded as a possible refinement.
+- Status: Implemented (2026-10-03). Approved on 2026-10-03, decided on the user's behalf under the overnight authorization, and signed off as staged. OQ-1: accept the protocol change to podium/delivery-record/2 with the signed ingest-time revision; /1 never shipped in a release, so no released consumer breaks, and the semver variant would refuse honest backports. OQ-2: keep the staged key (registry and artifact ID), because identity keying needs an organization the bridge cannot see under trusted-headers; an identity switch is covered by podium cache reset-revisions. Recorded as a possible refinement.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -56,39 +56,39 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §4.7.10 adds the ingest time to the delivery record, defines it, moves the tag to `/2`, and rewrites the replay paragraph.
+- [x] **S1 · spec** — SPEC-1. §4.7.10 adds the ingest time to the delivery record, defines it, moves the tag to `/2`, and rewrites the replay paragraph.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2, SPEC-5. §6.5 gains the revision-mark rules, the reset command, and the trust boundary; §6.6 step 2 orders the check; §2.2 and §6.1 restate the MCP server's local and per-session state in the same commit.
+- [x] **S2 · spec** — SPEC-2, SPEC-5. §6.5 gains the revision-mark rules, the reset command, and the trust boundary; §6.6 step 2 orders the check; §2.2 and §6.1 restate the MCP server's local and per-session state in the same commit.
       Levels: —. Depends on: S1
-- [ ] **S3 · spec** — SPEC-3. §6.9 gains the `materialize.stale_resolution` row.
+- [x] **S3 · spec** — SPEC-3. §6.9 gains the `materialize.stale_resolution` row.
       Levels: —. Depends on: S2
-- [ ] **S4 · spec** — SPEC-4. §7.2 lists `artifact_revision` and keeps it out of the entity tag; §7.6.2 adds it to the batch example.
+- [x] **S4 · spec** — SPEC-4. §7.2 lists `artifact_revision` and keeps it out of the entity tag; §7.6.2 adds it to the batch example.
       Levels: —. Depends on: S1
-- [ ] **S5 · code** — CODE-1. `pkg/version` frames `ArtifactRevision` under `/2`, adds `FormatArtifactRevision`, and rewrites the existing framing tests the CODE-1 bullets name, including the domain-separation test.
+- [x] **S5 · code** — CODE-1. `pkg/version` frames `ArtifactRevision` under `/2`, adds `FormatArtifactRevision`, and rewrites the existing framing tests the CODE-1 bullets name, including the domain-separation test.
       Levels: unit. Depends on: S1
-- [ ] **S6 · code** — CODE-2. `core.LoadArtifactResult` carries the served record's ingest time.
+- [x] **S6 · code** — CODE-2. `core.LoadArtifactResult` carries the served record's ingest time.
       Levels: unit. Depends on: S5
-- [ ] **S7 · code** — CODE-3. The registry serves and attests `artifact_revision` on the single and batch paths, `internal/testharness` seals it, `podium-mcp` parses and frames it and carries it through the content cache, and the test fixtures that recompute or serve the hash frame it under the CODE-3 IMPLEMENTOR'S CHOICE constraint.
+- [x] **S7 · code** — CODE-3. The registry serves and attests `artifact_revision` on the single and batch paths, `internal/testharness` seals it, `podium-mcp` parses and frames it and carries it through the content cache, and the test fixtures that recompute or serve the hash frame it under the CODE-3 IMPLEMENTOR'S CHOICE constraint.
       Levels: unit, integration, e2e. Depends on: S4, S6
-- [ ] **S8 · code** — CODE-4. `internal/revmark` lands, and the resolution cache gains the `revisions` bucket, `Reference`, the session values, `NoteSession`, and `PutLatestAdvancing`.
+- [x] **S8 · code** — CODE-4. `internal/revmark` lands, and the resolution cache gains the `revisions` bucket, `Reference`, the session values, `NoteSession`, and `PutLatestAdvancing`.
       Levels: unit. Depends on: S2, S5
-- [ ] **S9 · code** — CODE-5. `podium-mcp` checks the revision on fresh `latest` loads and in the resources mirror, records session references on the revalidated and mirror paths, the bridge and e2e stub fixtures serve and frame a default revision, and `newSignedArtifactFixture` gains `setRecord`.
+- [x] **S9 · code** — CODE-5. `podium-mcp` checks the revision on fresh `latest` loads and in the resources mirror, records session references on the revalidated and mirror paths, the bridge and e2e stub fixtures serve and frame a default revision, and `newSignedArtifactFixture` gains `setRecord`.
       Levels: unit, integration, e2e. Depends on: S3, S7, S8
-- [ ] **S10 · test** — TEST-2, CODE-7. Bridge unit tests for every path, and the §6.10 matrix cell. Bundled because `matrix-audit` fails a cell that no `// Matrix:` test cites, and the citing test is in TEST-2.
+- [x] **S10 · test** — TEST-2, CODE-7. Bridge unit tests for every path, and the §6.10 matrix cell. Bundled because `matrix-audit` fails a cell that no `// Matrix:` test cites, and the citing test is in TEST-2.
       Levels: unit. Depends on: S9
-- [ ] **S11 · code** — CODE-6. `podium cache reset-revisions`.
+- [x] **S11 · code** — CODE-6. `podium cache reset-revisions`.
       Levels: unit, e2e. Depends on: S8
-- [ ] **S12 · test** — TEST-1. Unit tests for the framing, the core field, the served field, `SealDelivery`, and `internal/revmark`.
+- [x] **S12 · test** — TEST-1. Unit tests for the framing, the core field, the served field, `SealDelivery`, and `internal/revmark`.
       Levels: unit. Depends on: S7, S8
-- [ ] **S13 · test** — TEST-3. Integration test of honest regressions and a replay against a booted registry and the spawned bridge.
+- [x] **S13 · test** — TEST-3. Integration test of honest regressions and a replay against a booted registry and the spawned bridge.
       Levels: integration. Depends on: S9
-- [ ] **S14 · test** — TEST-4. End-to-end test of persistence across processes, the envelope over stdio, and the CLI reset and lock paths.
+- [x] **S14 · test** — TEST-4. End-to-end test of persistence across processes, the envelope over stdio, and the CLI reset and lock paths.
       Levels: e2e. Depends on: S9, S11
-- [ ] **S15 · docs** — DOC-1. Error-code, HTTP API, CLI, harness-configuration, and operator-guide pages, the read-only entry of `deploy/runbook.md`, and the `load-artifact-sequence.svg` footer.
+- [x] **S15 · docs** — DOC-1. Error-code, HTTP API, CLI, harness-configuration, and operator-guide pages, the read-only entry of `deploy/runbook.md`, and the `load-artifact-sequence.svg` footer.
       Levels: —. Depends on: S9, S11
-- [ ] **S16 · docs** — CL-1. The `[Unreleased]` entries.
+- [x] **S16 · docs** — CL-1. The `[Unreleased]` entries.
       Levels: —. Depends on: S9, S11
-- [ ] **S17 · docs** — MV-1. Manual-validation scenario S82.
+- [x] **S17 · docs** — MV-1. Manual-validation scenario S82.
       Levels: manual. Depends on: S9, S11
 
 **Ordering constraints.** The spec steps land first. S8 (bridge storage) needs S5, because `internal/revmark.ParseRevision` calls `version.FormatArtifactRevision`, which CODE-1 adds; S7 needs S4, because it serves the §7.2 field that SPEC-4 defines. S6 and S7 (registry side) and S8 are independent of each other. S7 lands the registry's revision and the bridge's framing and cache carry of it together, because from S7 the registry and `SealDelivery` frame a non-empty revision, and a bridge that framed none would fail every spawned-bridge load in `test/integration` and `test/e2e` with `materialize.content_hash_mismatch`; every step from S7 on is green at the levels it lists. S9 needs S7 and S8, because the check reads the revision S7 parses and the marks S8 stores. S10 bundles the matrix cell with its citing test.
