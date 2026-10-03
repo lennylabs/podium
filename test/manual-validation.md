@@ -231,6 +231,7 @@ rm -rf "$WORK"
 | S80 | Every harness output carries the derived skill compatibility line | solo | none | none | none |
 | S81 | The Python SDK login pair against a live IdP | none (SDK only) | none | none | an IdP with a device-code client, a desktop browser |
 | S82 | The Python SDK rejects a harness other than `none` on materialize | none (SDK only) | none | none | none |
+| S83 | The change-event stream withholds events from layers the caller cannot see | standalone | none | none | none |
 
 ---
 
@@ -10181,5 +10182,121 @@ confirms that it names the canonical layout and points at `podium sync`.
    and the file prints `---`, `type: context`, `---`.
 
 **Cleanup.** `cd /` and `rm -rf "$WORK"`.
+
+---
+
+## S83: The change-event stream withholds events from layers the caller cannot see
+
+**Goal.** Validate that `GET /v1/events` delivers each event only to callers
+who can see the layer it names, that a visibility grant and a withdrawal take
+effect on an open stream without reconnecting, that the withdrawing event still
+reaches the caller who lost the layer, and that `podium sync --watch` removes
+what it materialized from that layer.
+
+**Covers.** The §7.6 change-event stream visibility rule and the §7.5.4 watcher
+through the compiled binary. This is an operator check through the compiled
+binary and the `podium sync` watcher, which the trusted-headers end-to-end test
+cannot drive.
+
+**Why by hand.** An operator reads the raw NDJSON stream of two callers side by
+side and the files a watcher writes and deletes. A stream that carries an
+`eng-internal` line for bob, or a watcher that keeps the `eng-internal` files
+after the withdrawal, is the defect this scenario catches.
+
+**Steps.**
+
+1. Run the isolation block. Set up the S12 registry (layers `public-handbook`
+   with `public: true` and `eng-internal` with `groups: [engineering]`), the
+   runtime key, and the SCIM provisioning exactly as S12 steps 2 and 3 do, with
+   `PODIUM_BOOTSTRAP_ADMINS=carol@acme.com` exported before `podium serve`.
+   Mint three tokens.
+
+   ```bash
+   ALICE=$(go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" --sub alice@acme.com --email alice@acme.com --groups engineering)
+   BOB=$(go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" --sub bob@acme.com --email bob@acme.com)
+   CAROL=$(go -C "$REAL_HOME/projects/podium" run ./tools/minttoken --keys "$WORK/keys" --sub carol@acme.com --email carol@acme.com)
+   printf '%s' "$BOB" > "$WORK/bob.tok"
+   ```
+
+   **Expect.** The three tokens are non-empty, and `server_alive` reports the
+   server running.
+
+2. Open a stream as alice and as bob, each logging to a file.
+
+   ```bash
+   curl -sN -H "Authorization: Bearer $ALICE" "$PODIUM_REGISTRY/v1/events" > "$WORK/alice.ndjson" &
+   ALICE_CURL=$!
+   curl -sN -H "Authorization: Bearer $BOB" "$PODIUM_REGISTRY/v1/events" > "$WORK/bob.ndjson" &
+   BOB_CURL=$!
+   ```
+
+   **Expect.** Both files exist and stay empty or carry only `_heartbeat`
+   lines.
+
+3. Add an artifact to `eng-internal` and reingest it as carol.
+
+   ```bash
+   podium artifact scaffold --type skill --description "Engineering rollback" --force "$WORK/eng/rollback"
+   PODIUM_SESSION_TOKEN="$CAROL" podium layer reingest --registry "$PODIUM_REGISTRY" eng-internal
+   sleep 2
+   grep -v _heartbeat "$WORK/alice.ndjson"; echo "--- bob ---"; grep -v _heartbeat "$WORK/bob.ndjson"
+   ```
+
+   **Expect.** alice's file carries `artifact.published` and `layer.ingested`
+   lines naming `eng-internal`. bob's file carries no line other than
+   `_heartbeat`. An `eng-internal` line in bob's file means the stream is
+   unfiltered.
+
+4. Grant bob the layer, then reingest.
+
+   ```bash
+   curl -s -X PUT -H "Authorization: Bearer $CAROL" -H 'Content-Type: application/json' \
+     "$PODIUM_REGISTRY/v1/layers/update?id=eng-internal" -d '{"users":["bob@acme.com"]}'
+   PODIUM_SESSION_TOKEN="$CAROL" podium layer reingest --registry "$PODIUM_REGISTRY" eng-internal
+   sleep 2
+   grep -v _heartbeat "$WORK/bob.ndjson"
+   ```
+
+   **Expect.** bob's file now carries a `layer.config_changed` line naming
+   `eng-internal` with action `update`, followed by the `eng-internal`
+   `layer.ingested` line. bob's `curl` was not restarted.
+
+5. Start a watcher as bob, then withdraw the grant.
+
+   ```bash
+   mkdir -p "$WORK/bob-target"
+   PODIUM_SESSION_TOKEN_FILE="$WORK/bob.tok" podium sync --watch --registry "$PODIUM_REGISTRY" --target "$WORK/bob-target" > "$WORK/watch.log" 2>&1 &
+   WATCH=$!
+   sleep 3; find "$WORK/bob-target" -path '*rollback*' -o -path '*deploy*'
+   curl -s -X PUT -H "Authorization: Bearer $CAROL" -H 'Content-Type: application/json' \
+     "$PODIUM_REGISTRY/v1/layers/update?id=eng-internal" -d '{"users":[]}'
+   sleep 3
+   PODIUM_SESSION_TOKEN="$CAROL" podium layer reingest --registry "$PODIUM_REGISTRY" eng-internal
+   sleep 2
+   tail -n 5 "$WORK/bob.ndjson"; find "$WORK/bob-target" -path '*rollback*' -o -path '*deploy*'
+   ```
+
+   **Expect.** Before the withdrawal, the `find` lists the `eng-internal`
+   artifacts in bob's target. After it, bob's file carries a second
+   `layer.config_changed` line for `eng-internal`, and no `eng-internal` line
+   follows it although carol reingested the layer. The second `find` prints
+   nothing. A missing withdrawal line, or `eng-internal` files left in the
+   target, is the defect.
+
+6. Optional: reorder with bob outside `eng-internal`.
+
+   ```bash
+   curl -s -X POST -H "Authorization: Bearer $CAROL" -H 'Content-Type: application/json' \
+     "$PODIUM_REGISTRY/v1/layers/reorder" -d '{"order":["eng-internal","public-handbook"]}'
+   sleep 2; grep reorder "$WORK/bob.ndjson" "$WORK/alice.ndjson"
+   ```
+
+   **Expect.** bob's reorder line reads `"layer":"public-handbook"`. alice's
+   reads `"layer":"eng-internal,public-handbook"`. When the stored precedence
+   already matches the requested order, no reorder line appears on either
+   stream; swap the order and repeat.
+
+**Cleanup.** `kill $ALICE_CURL $BOB_CURL $WATCH`, stop the server, and
+`rm -rf "$WORK"`.
 
 ---
