@@ -1,7 +1,7 @@
 # Proposal 0036: Define $PODIUM_CHANGED once for both target kinds and compute the workspace value from the bytes on disk
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-02). Signed off as staged. OQ-1: the other workspace workflow variables ($PODIUM_WORKDIR, $PODIUM_TARGET_ID, $PODIUM_REGISTRY) are left to a follow-up proposal.
+- Status: Implemented (2026-10-02). Signed off as staged. OQ-1: the other workspace workflow variables ($PODIUM_WORKDIR, $PODIUM_TARGET_ID, $PODIUM_REGISTRY) are left to a follow-up proposal.
 - Date: 2026-10-02
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -47,25 +47,25 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.5.2 defines `$PODIUM_CHANGED` once for both target kinds.
+- [x] **S1 · spec** — SPEC-1. §7.5.2 defines `$PODIUM_CHANGED` once for both target kinds.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. The §7.8 injected-variable entry for `$PODIUM_CHANGED` becomes a pointer to §7.5.2.
+- [x] **S2 · spec** — SPEC-2. The §7.8 injected-variable entry for `$PODIUM_CHANGED` becomes a pointer to §7.5.2.
       Levels: —. Depends on: S1
-- [ ] **S3 · code** — CODE-1, CODE-2. `sync.Run` computes `Result.Changed` from on-disk digests through `writeTarget`, the render.go helper comments name both callers, and `lockChanged`, `lockEntryHashes`, and `pkg/sync/lock_changed_test.go` are deleted. The comment and body of `TestRun_ChangedSeesEveryContributorToASharedPath` in `sync_order_test.go` are rewritten in the same step, because CODE-2 makes its existing assertion fail. Bundled because CODE-1 is only the comment edit on the helpers CODE-2 starts calling, and one reviewer reads both.
+- [x] **S3 · code** — CODE-1, CODE-2. `sync.Run` computes `Result.Changed` from on-disk digests through `writeTarget`, the render.go helper comments name both callers, and `lockChanged`, `lockEntryHashes`, and `pkg/sync/lock_changed_test.go` are deleted. The comment and body of `TestRun_ChangedSeesEveryContributorToASharedPath` in `sync_order_test.go` are rewritten in the same step, because CODE-2 makes its existing assertion fail. Bundled because CODE-1 is only the comment edit on the helpers CODE-2 starts calling, and one reviewer reads both.
       Levels: unit, integration, materialization. Depends on: S1
-- [ ] **S4 · code** — CODE-3. `runWorkspaceTarget` comments cite §7.5.2 and describe the comparison scope.
+- [x] **S4 · code** — CODE-3. `runWorkspaceTarget` comments cite §7.5.2 and describe the comparison scope.
       Levels: e2e. Depends on: S1, S3
-- [ ] **S5 · test** — TEST-1. Unit tests for the workspace on-disk comparison and the rewritten comment in `sync_test.go`.
+- [x] **S5 · test** — TEST-1. Unit tests for the workspace on-disk comparison and the rewritten comment in `sync_test.go`.
       Levels: unit. Depends on: S3
-- [ ] **S6 · test** — TEST-2. The workspace `skip_if_no_changes` end-to-end test covers a restored hand edit and a missing lock.
+- [x] **S6 · test** — TEST-2. The workspace `skip_if_no_changes` end-to-end test covers a restored hand edit and a missing lock.
       Levels: e2e. Depends on: S3, S4
-- [ ] **S7 · docs** — DOC-1. `docs/consuming/publishing.md` defines the variable once and points the workflow and skip-flag rows at it.
+- [x] **S7 · docs** — DOC-1. `docs/consuming/publishing.md` defines the variable once and points the workflow and skip-flag rows at it.
       Levels: —. Depends on: S1, S3
-- [ ] **S8 · docs** — CL-1. The `## [Unreleased]` `### Fixed` entry replaces the lock-keyed change-reporting entry, and the content-hash upgrade note under `### Changed` drops its every-target-changed clause.
+- [x] **S8 · docs** — CL-1. The `## [Unreleased]` `### Fixed` entry replaces the lock-keyed change-reporting entry, and the content-hash upgrade note under `### Changed` drops its every-target-changed clause.
       Levels: —. Depends on: S3
-- [ ] **S9 · docs** — MV-1. Manual-validation scenario S78 in `test/manual-validation.md`.
+- [x] **S9 · docs** — MV-1. Manual-validation scenario S78 in `test/manual-validation.md`.
       Levels: —. Depends on: S3, S4
-- [ ] **S10 · code** — CODE-4, TEST-3. A marketplace `--dry-run` prints the `prepare` phase with `baseVars`, and a unit test pins the preview. Bundled because the test is the only observer of the change.
+- [x] **S10 · code** — CODE-4, TEST-3. A marketplace `--dry-run` prints the `prepare` phase with `baseVars`, and a unit test pins the preview. Bundled because the test is the only observer of the change.
       Levels: unit. Depends on: S1
       Placed after the docs steps deliberately: no other step consumes CODE-4, so it can land at any point after S1.
 
