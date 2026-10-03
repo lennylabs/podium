@@ -5,9 +5,9 @@
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Client, RegistryError } from "./index.js";
+import { Client, PendingLogin, RegistryError } from "./index.js";
 import { resolveRegistry } from "./config.js";
 import { LocalOverlay, rrfFuse } from "./overlay.js";
 import { DeviceCodeError } from "./oauth.js";
@@ -256,5 +256,64 @@ describe("login device-code flow", () => {
   it("times out when the IdP never completes", async () => {
     const c = new Client({ registry: "http://reg", fetcher: oauthFetcher({ alwaysPending: true }) });
     await expect(c.login({ timeoutMs: 200 })).rejects.toBeInstanceOf(DeviceCodeError);
+  });
+
+  describe("startLogin/finishLogin", () => {
+    beforeEach(() => {
+      // An operator shell can point PODIUM_OAUTH_* at a real IdP; clear them so
+      // the flow resolves through the stub's discovery document.
+      for (const name of [
+        "PODIUM_OAUTH_CLIENT_ID",
+        "PODIUM_OAUTH_AUDIENCE",
+        "PODIUM_OAUTH_AUTHORIZATION_ENDPOINT",
+        "PODIUM_OAUTH_TOKEN_URL",
+      ]) {
+        vi.stubEnv(name, undefined);
+      }
+    });
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+    });
+
+    // Spec: §6.3
+    it("starts without printing and installs the token on finish", async () => {
+      const write = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+      const c = new Client({ registry: "http://reg", fetcher: oauthFetcher({}) });
+      const pending = await c.startLogin();
+      expect(write).not.toHaveBeenCalled();
+      expect(pending).toBeInstanceOf(PendingLogin);
+      expect(pending.userCode).toBe("WXYZ-1234");
+      expect(pending.verificationUri).toBe("http://idp/activate");
+      const tokens = await c.finishLogin(pending, { timeoutMs: 10_000 });
+      expect(tokens.accessToken).toBe("tok-abc");
+      const res = await c.searchArtifacts("anything");
+      expect((res.results ?? [])[0].id).toBe("Bearer tok-abc");
+    });
+
+    // Spec: §6.3
+    it("leaves the client tokenless when the finish call fails", async () => {
+      const c = new Client({ registry: "http://reg", fetcher: oauthFetcher({ alwaysPending: true }) });
+      const pending = await c.startLogin();
+      const err = await c.finishLogin(pending, { timeoutMs: 50 }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(DeviceCodeError);
+      expect((err as DeviceCodeError).reason).toBe("timeout");
+      const again = await c.finishLogin(pending).catch((e: unknown) => e);
+      expect((again as DeviceCodeError).reason).toBe("consumed");
+      const res = await c.searchArtifacts("anything");
+      expect((res.results ?? [])[0].id).toBe("");
+    });
+
+    // Spec: §6.3
+    it("login prints the verification URL and user code to stderr", async () => {
+      const lines: string[] = [];
+      vi.spyOn(process.stderr, "write").mockImplementation((chunk) => {
+        lines.push(String(chunk));
+        return true;
+      });
+      const c = new Client({ registry: "http://reg", fetcher: oauthFetcher({}) });
+      await c.login({ timeoutMs: 10_000 });
+      expect(lines).toEqual(["Visit: http://idp/activate\n", "User code: WXYZ-1234\n"]);
+    });
   });
 });
