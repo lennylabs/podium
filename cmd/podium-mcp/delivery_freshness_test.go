@@ -103,8 +103,8 @@ func TestEffectiveSessionID_PrefersTrimmedHostSession(t *testing.T) {
 func TestNoteCachedSession_RecordsReferenceWithoutAdvancingMark(t *testing.T) {
 	t.Parallel()
 	s := freshnessServer(t)
-	s.noteCachedSession(&resolutionWrite{ID: "team/x", Session: "bad"}, loadArtifactResponse{ArtifactRevision: "x"})
-	s.noteCachedSession(&resolutionWrite{ID: "team/x", Session: "s1"}, loadArtifactResponse{ArtifactRevision: rev(300)})
+	s.noteCachedSession(&resolutionWrite{ID: "team/x", Session: "bad"}, loadArtifactResponse{ID: "team/x", ArtifactRevision: "x"})
+	s.noteCachedSession(&resolutionWrite{ID: "team/x", Session: "s1"}, loadArtifactResponse{ID: "team/x", ArtifactRevision: rev(300)})
 
 	if ref, ok := s.resolutions.Reference(s.markKey("team/x"), "s1"); !ok || ref != 300 {
 		t.Errorf("session reference = (%d, %v), want (300, true)", ref, ok)
@@ -113,5 +113,31 @@ func TestNoteCachedSession_RecordsReferenceWithoutAdvancingMark(t *testing.T) {
 		if ref, ok := s.resolutions.Reference(s.markKey("team/x"), session); ok {
 			t.Errorf("session %s: reference %d recorded, want none (no mark advanced)", session, ref)
 		}
+	}
+}
+
+// TestWriteResolution_KeysMarkOnServedID pins that the latest write and the
+// cached-session note use the key checkFreshness compares under, the served
+// record's ID. A record of team/b answering a request for team/a advances
+// team/b's mark and leaves team/a's mark absent.
+//
+// Spec: §6.5
+func TestWriteResolution_KeysMarkOnServedID(t *testing.T) {
+	t.Parallel()
+	s := freshnessServer(t)
+	resp := loadArtifactResponse{ID: "team/b", Version: "1.0.0", ContentHash: "sha256:b", ArtifactRevision: rev(500)}
+	s.writeResolution(&resolutionWrite{ID: "team/a", Session: "s1", Revision: 500, Now: time.Now()}, resp)
+	s.writeResolution(&resolutionWrite{ID: "team/a", Session: "s2", RefreshOnly: true, Now: time.Now()}, resp)
+
+	for _, session := range []string{"s1", "s2", "other"} {
+		if ref, ok := s.resolutions.Reference(s.markKey("team/b"), session); !ok || ref != 500 {
+			t.Errorf("team/b session %s: reference = (%d, %v), want (500, true)", session, ref, ok)
+		}
+		if ref, ok := s.resolutions.Reference(s.markKey("team/a"), session); ok {
+			t.Errorf("team/a session %s: reference %d recorded, want none", session, ref)
+		}
+	}
+	if _, env := s.checkFreshness(loadArtifactResponse{ID: "team/b", ArtifactRevision: rev(400)}, "other"); env == nil {
+		t.Error("team/b revision below its advanced mark was admitted")
 	}
 }

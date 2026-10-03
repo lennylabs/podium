@@ -1644,6 +1644,9 @@ type resolutionWrite struct {
 // writeResolution applies w against resp, the verified record. A `latest`
 // request records (id, "latest") → semver and (id, semver) → content_hash; a
 // pinned request records the version directly (§6.5). A nil w writes nothing.
+// The revision mark and the session reference are keyed on resp.ID, the
+// served record's ID, which is the key checkFreshness compared under, so the
+// mark that advances is the mark that was compared.
 func (s *mcpServer) writeResolution(w *resolutionWrite, resp loadArtifactResponse) {
 	switch {
 	case w == nil:
@@ -1653,7 +1656,7 @@ func (s *mcpServer) writeResolution(w *resolutionWrite, resp loadArtifactRespons
 			s.noteCachedSession(w, resp)
 		}
 	case w.Version == "":
-		s.resolutions.PutLatestAdvancing(s.markKey(w.ID), w.Session, w.ID, resp.Version, resp.ContentHash, w.Revision, w.Now)
+		s.resolutions.PutLatestAdvancing(s.markKey(resp.ID), w.Session, w.ID, resp.Version, resp.ContentHash, w.Revision, w.Now)
 	default:
 		s.resolutions.PutVersion(w.ID, w.Version, resp.ContentHash, w.Now)
 	}
@@ -1673,7 +1676,7 @@ func (s *mcpServer) noteCachedSession(w *resolutionWrite, resp loadArtifactRespo
 	if err != nil {
 		return
 	}
-	s.resolutions.NoteSession(s.markKey(w.ID), w.Session, rev)
+	s.resolutions.NoteSession(s.markKey(resp.ID), w.Session, rev)
 }
 
 // checkFreshness compares the ingest time served on a fresh `latest` answer
