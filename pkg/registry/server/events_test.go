@@ -47,10 +47,15 @@ func TestEvents_StreamsPublishedEvents(t *testing.T) {
 		t.Errorf("Content-Type = %q, want application/x-ndjson", ct)
 	}
 
-	// Publish a matching event after the connection settles.
+	// Publish a matching event after the connection settles. The event of
+	// another tenant goes first: §7.6 withholds it without a trace, so the
+	// first line the stream carries is the matching event.
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		srv.PublishEvent(context.Background(), "artifact.published", map[string]any{
+		srv.PublishEvent(context.Background(), core.EventScope{TenantID: "other", Layers: []string{"L"}}, "artifact.published", map[string]any{
+			"id": "withheld", "version": "1.0.0",
+		})
+		srv.PublishEvent(context.Background(), core.EventScope{TenantID: "t", Layers: []string{"L"}}, "artifact.published", map[string]any{
 			"id": "finance/run", "version": "1.0.0",
 		})
 	}()
@@ -105,7 +110,7 @@ func TestEvents_FilterDropsUnmatchedTypes(t *testing.T) {
 
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		srv.PublishEvent(context.Background(), "artifact.published", map[string]any{"id": "x"})
+		srv.PublishEvent(context.Background(), core.EventScope{TenantID: "t", Layers: []string{"L"}}, "artifact.published", map[string]any{"id": "x"})
 	}()
 
 	// Read for 300ms; should see no artifact.published event.

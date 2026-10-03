@@ -1048,8 +1048,15 @@ func TestHTTPAPI_EventsTypeFilter(t *testing.T) {
 	}()
 
 	time.Sleep(300 * time.Millisecond) // let the handler subscribe
-	srv.PublishEvent(context.Background(), "artifact.published", map[string]any{"id": "finance/run"})
-	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "team-finance"})
+	// Spec: §7.6 — each scope names the tenant apiInProcCore binds, so the
+	// anonymous public-mode subscriber receives both and the type filter
+	// alone decides what the stream carries.
+	srv.PublishEvent(context.Background(),
+		core.EventScope{TenantID: "default", Layers: []string{"L"}, Path: "finance/run"},
+		"artifact.published", map[string]any{"id": "finance/run"})
+	srv.PublishEvent(context.Background(),
+		core.EventScope{TenantID: "default", Layers: []string{"team-finance"}},
+		"layer.ingested", map[string]any{"layer": "team-finance"})
 
 	sawPublished, sawIngested := false, false
 	deadline := time.After(2 * time.Second)
@@ -1103,7 +1110,9 @@ func TestHTTPAPI_OutboundWebhook(t *testing.T) {
 	}
 	worker := &webhook.Worker{Store: wstore}
 	srv := server.New(apiInProcCore(t), server.WithWebhooks(worker))
-	srv.PublishEvent(context.Background(), "artifact.published", map[string]any{"id": "finance/run"})
+	srv.PublishEvent(context.Background(),
+		core.EventScope{TenantID: "default", Layers: []string{"L"}, Path: "finance/run"},
+		"artifact.published", map[string]any{"id": "finance/run"})
 
 	select {
 	case body := <-received:

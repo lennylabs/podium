@@ -10,6 +10,7 @@ import (
 
 	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer/source"
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 )
 
@@ -50,7 +51,7 @@ func TestSourceIngest_EscapingResourceFailsTheLayer(t *testing.T) {
 			TenantID: "tenant-1",
 			LayerID:  "team-shared",
 			Files:    source.ConfinedFS(root),
-			PublishEvent: func(_ context.Context, eventType string, _ map[string]any) {
+			PublishEvent: func(_ context.Context, _ core.EventScope, eventType string, _ map[string]any) {
 				published = append(published, eventType)
 			},
 			AuditEmit: collectDomainAudit(&audited),

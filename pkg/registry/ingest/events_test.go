@@ -2,9 +2,11 @@ package ingest_test
 
 import (
 	"context"
+	"reflect"
 	"testing"
 	"testing/fstest"
 
+	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -22,7 +24,7 @@ func TestIngest_PublishesArtifactPublished(t *testing.T) {
 		data map[string]any
 	}
 	events := []evt{}
-	publish := func(_ context.Context, typ string, data map[string]any) {
+	publish := func(_ context.Context, _ core.EventScope, typ string, data map[string]any) {
 		events = append(events, evt{typ, data})
 	}
 	res, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -66,7 +68,7 @@ func TestIngest_IdempotentDoesNotRepublish(t *testing.T) {
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
 	count := 0
-	publish := func(_ context.Context, typ string, _ map[string]any) {
+	publish := func(_ context.Context, _ core.EventScope, typ string, _ map[string]any) {
 		if typ == "artifact.published" {
 			count++
 		}
@@ -98,7 +100,7 @@ func TestIngest_PublishesArtifactDeprecatedOnFlip(t *testing.T) {
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
 	types := []string{}
-	publish := func(_ context.Context, typ string, _ map[string]any) {
+	publish := func(_ context.Context, _ core.EventScope, typ string, _ map[string]any) {
 		types = append(types, typ)
 	}
 	mk := func(version string, deprecated bool) fstest.MapFS {
@@ -152,7 +154,7 @@ func TestIngest_BornDeprecatedDoesNotPublishDeprecated(t *testing.T) {
 	st := store.NewMemory()
 	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
 	types := []string{}
-	publish := func(_ context.Context, typ string, _ map[string]any) {
+	publish := func(_ context.Context, _ core.EventScope, typ string, _ map[string]any) {
 		types = append(types, typ)
 	}
 	_, err := ingest.Ingest(context.Background(), st, ingest.Request{
@@ -177,5 +179,91 @@ func TestIngest_BornDeprecatedDoesNotPublishDeprecated(t *testing.T) {
 	}
 	if !sawPublished {
 		t.Errorf("artifact.published not emitted; got %v", types)
+	}
+}
+
+// scopedEvent records one emitted event together with the §7.6 scope
+// its publisher set.
+type scopedEvent struct {
+	typ   string
+	scope core.EventScope
+}
+
+// recordScopes returns an emitter that appends every event to out.
+func recordScopes(out *[]scopedEvent) ingest.EventEmitter {
+	return func(_ context.Context, scope core.EventScope, typ string, _ map[string]any) {
+		*out = append(*out, scopedEvent{typ, scope})
+	}
+}
+
+// scopeOf returns the scope of the first recorded event of type typ.
+func scopeOf(t *testing.T, events []scopedEvent, typ string) core.EventScope {
+	t.Helper()
+	for _, e := range events {
+		if e.typ == typ {
+			return e.scope
+		}
+	}
+	t.Fatalf("no %s event among %+v", typ, events)
+	return core.EventScope{}
+}
+
+// Spec: §7.6 — every ingest publish site names the event's tenant and
+// layer in its scope, plus the artifact ID on artifact events and the
+// domain path on domain.published, so the stream can evaluate
+// subscriber visibility without reading payload keys.
+func TestIngest_EventScopes(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
+	mk := func(version, dep string) fstest.MapFS {
+		return fstest.MapFS{
+			"finance/DOMAIN.md": &fstest.MapFile{Data: []byte("---\ndescription: finance\n---\n\n# Finance\n")},
+			"finance/run/ARTIFACT.md": &fstest.MapFile{Data: []byte("---\ntype: context\nversion: " + version +
+				"\ndescription: x\nsensitivity: low\n" + dep + "---\n\nbody\n")},
+		}
+	}
+	var events []scopedEvent
+	for _, files := range []fstest.MapFS{mk("1.0.0", ""), mk("2.0.0", "deprecated: true\n")} {
+		if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
+			TenantID: "t", LayerID: "L", Files: files, PublishEvent: recordScopes(&events),
+		}); err != nil {
+			t.Fatalf("Ingest: %v", err)
+		}
+	}
+	cases := []struct {
+		typ  string
+		want core.EventScope
+	}{
+		{"domain.published", core.EventScope{TenantID: "t", Layers: []string{"L"}, Path: "finance"}},
+		{"artifact.published", core.EventScope{TenantID: "t", Layers: []string{"L"}, Path: "finance/run"}},
+		{"artifact.deprecated", core.EventScope{TenantID: "t", Layers: []string{"L"}, Path: "finance/run"}},
+	}
+	for _, c := range cases {
+		if got := scopeOf(t, events, c.typ); !reflect.DeepEqual(got, c.want) {
+			t.Errorf("%s scope = %+v, want %+v", c.typ, got, c.want)
+		}
+	}
+}
+
+// Spec: §7.6 — the orchestrator's layer-level events carry the
+// layer's tenant and ID and no path.
+func TestSourceIngest_LayerEventScopes(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	_ = st.CreateTenant(context.Background(), store.Tenant{ID: "t"})
+	cfg := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "fake", LastIngestedRef: "old-sha"}
+	_ = st.PutLayerConfig(context.Background(), cfg)
+	provider := &fakeProvider{files: fstest.MapFS{}, reference: "new-sha", historyRewritten: true}
+	var events []scopedEvent
+	if _, err := ingest.SourceIngestWithOptions(context.Background(), st, provider, cfg,
+		ingest.SourceIngestOptions{PublishEvent: recordScopes(&events)}); err != nil {
+		t.Fatalf("SourceIngestWithOptions: %v", err)
+	}
+	want := core.EventScope{TenantID: "t", Layers: []string{"L"}}
+	for _, typ := range []string{"layer.history_rewritten", "layer.ingested"} {
+		if got := scopeOf(t, events, typ); !reflect.DeepEqual(got, want) {
+			t.Errorf("%s scope = %+v, want %+v", typ, got, want)
+		}
 	}
 }

@@ -3,10 +3,15 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/registry/core"
 )
 
 // eventBus is the in-process pub/sub the §7.6 subscribe path uses.
@@ -52,6 +57,10 @@ type registryEvent struct {
 	Timestamp string         `json:"timestamp,omitempty"`
 	Actor     map[string]any `json:"actor,omitempty"`
 	Data      map[string]any `json:"data,omitempty"`
+	// audience decides which stream subscribers receive the event. It is
+	// unexported, so encoding/json never writes it. A nil audience reaches
+	// no subscriber.
+	audience *core.EventAudience
 }
 
 // newEventBus returns an empty bus with a 30-second heartbeat.
@@ -127,6 +136,11 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			"streaming not supported")
 		return
 	}
+	// Spec: §7.6 — the subscriber's identity and tenant are resolved once,
+	// when the stream opens; each event re-reads the stored layer visibility
+	// and SCIM groups it needs.
+	id := s.identity(r)
+	tenant := s.core.TenantFor(r.Context())
 	types := r.URL.Query()["type"]
 	sub, cancel := s.events.subscribe(types)
 	defer cancel()
@@ -161,6 +175,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			ev, deliver := s.deliverable(r.Context(), ev, id, tenant)
+			if !deliver {
+				continue
+			}
 			if err := enc.Encode(ev); err != nil {
 				return
 			}
@@ -172,6 +190,37 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
+}
+
+// deliverable applies the §7.6 visibility rule to one dequeued event for
+// the subscriber id routed to tenant. An event with no audience, or one the
+// audience withholds, is not delivered and leaves no trace on the stream. A
+// reorder is rewritten so its `layer` value names only the layers this
+// subscriber can see, on a copy of the payload because every subscriber and
+// the webhook goroutine share the published map.
+//
+// ctx is the subscriber's request context. Evaluating under it keeps a read
+// that failed because this subscriber disconnected out of the event's shared
+// memo, so the next subscriber reads again.
+//
+// Spec: §7.6
+func (s *Server) deliverable(ctx context.Context, ev registryEvent, id layer.Identity, tenant string) (registryEvent, bool) {
+	if ev.audience == nil {
+		return ev, false
+	}
+	visible, rewrite, ok := ev.audience.Visible(ctx, id, tenant)
+	if !ok {
+		return ev, false
+	}
+	if rewrite {
+		data := maps.Clone(ev.Data)
+		if data == nil {
+			data = map[string]any{}
+		}
+		data["layer"] = strings.Join(visible, ",")
+		ev.Data = data
+	}
+	return ev, true
 }
 
 // PublishEvent surfaces the bus to callers (e.g., the audit
@@ -188,8 +237,16 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 //
 // When a §7.3.2 outbound webhook worker is wired (WithWebhooks),
 // this also fans the event out to every matching receiver
-// asynchronously.
-func (s *Server) PublishEvent(ctx context.Context, eventType string, data map[string]any) {
+// asynchronously. Receivers are not filtered by scope (§7.3.2).
+//
+// scope names the tenant and layers the event concerns. The stream
+// evaluates it per subscriber at delivery, so publishing performs no
+// store read and never stalls the ingest path. data is shared by every
+// stream subscriber and the webhook goroutine; a per-subscriber rewrite
+// copies it and never mutates it.
+//
+// Spec: §7.6
+func (s *Server) PublishEvent(ctx context.Context, scope core.EventScope, eventType string, data map[string]any) {
 	if s.events == nil {
 		return
 	}
@@ -214,6 +271,7 @@ func (s *Server) PublishEvent(ctx context.Context, eventType string, data map[st
 		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		Actor:     actor,
 		Data:      data,
+		audience:  s.core.NewEventAudience(scope),
 	})
 }
 

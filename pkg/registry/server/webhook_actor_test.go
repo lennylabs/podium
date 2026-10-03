@@ -56,7 +56,7 @@ func TestPublishEvent_WebhookCarriesTraceAndAuthenticatedActor(t *testing.T) {
 		Email:   "alice@acme.com",
 		Groups:  []string{"eng"},
 	})
-	srv.PublishEvent(ctx, "artifact.published", map[string]any{"id": "finance/run"})
+	srv.PublishEvent(ctx, core.EventScope{TenantID: "default", Layers: []string{"L"}}, "artifact.published", map[string]any{"id": "finance/run"})
 
 	select {
 	case raw := <-bodies:
@@ -91,7 +91,7 @@ func TestPublishEvent_WebhookCarriesPublicActor(t *testing.T) {
 		SourceIP:      "203.0.113.7",
 		ForwardedUser: "upstream-bob",
 	})
-	srv.PublishEvent(ctx, "artifact.published", map[string]any{"id": "x"})
+	srv.PublishEvent(ctx, core.EventScope{TenantID: "default", Layers: []string{"L"}}, "artifact.published", map[string]any{"id": "x"})
 
 	select {
 	case raw := <-bodies:
@@ -116,7 +116,7 @@ func TestPublishEvent_WebhookCarriesPublicActor(t *testing.T) {
 // never a missing key.
 func TestPublishEvent_WebhookStableSchemaWithoutMeta(t *testing.T) {
 	srv, bodies := newServerWithReceiver(t)
-	srv.PublishEvent(context.Background(), "layer.ingested", map[string]any{"layer": "L"})
+	srv.PublishEvent(context.Background(), core.EventScope{TenantID: "default", Layers: []string{"L"}}, "layer.ingested", map[string]any{"layer": "L"})
 
 	select {
 	case raw := <-bodies:
