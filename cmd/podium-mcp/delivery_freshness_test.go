@@ -673,7 +673,7 @@ func TestFreshness_ConcurrentLoads(t *testing.T) {
 // Spec: §6.5, §4.7.6 — a cached record delivered on a HEAD match or a 304
 // records the session reference the registry's pin implies, so the session's
 // later pinned answer below an advanced mark is delivered. The mirror path
-// does the same for the bridge's own session.
+// does the same for the bridge's own session when its answer equals the mark.
 func TestFreshness_RevalidatedAndMirrorPathsRecordSession(t *testing.T) {
 	t.Parallel()
 	r300, r400 := revRecord("team/x", "3.0.0", 300), revRecord("team/x", "4.0.0", 400)
@@ -706,6 +706,9 @@ func TestFreshness_RevalidatedAndMirrorPathsRecordSession(t *testing.T) {
 		t.Parallel()
 		stub, ts := newFreshStub(t)
 		s := freshBridge(t, t.TempDir(), ts.URL, "")
+		primeLatest(t, s, stub, r300, "")
+		wantMark(t, s, "team/x", 300)
+
 		stub.set(r300)
 		if out, ok := readResource(s, "team/x").(map[string]any); !ok || out["contents"] == nil {
 			t.Fatalf("resources/read = %v, want contents", out)
