@@ -17,12 +17,16 @@ import (
 // requests fail with registry.invalid_argument.
 const BatchLoadCap = 50
 
-// BatchLoadRequest is the wire shape of POST
-// /v1/artifacts:batchLoad.
+// BatchLoadRequest is the §7.6.2 request body of POST
+// /v1/artifacts:batchLoad. The request selects no harness: the
+// registry runs no harness adapter (§2.2). Like the other JSON
+// handlers, the decoder ignores keys outside this struct, so a body
+// from an older SDK that still sends `harness` loads normally.
+//
+// Spec: §7.6.2
 type BatchLoadRequest struct {
 	IDs         []string          `json:"ids"`
 	SessionID   string            `json:"session_id,omitempty"`
-	Harness     string            `json:"harness,omitempty"`
 	VersionPins map[string]string `json:"version_pins,omitempty"`
 }
 
