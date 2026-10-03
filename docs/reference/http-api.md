@@ -258,7 +258,6 @@ Body:
     "finance/close-reporting/policy-doc"
   ],
   "session_id": "...",
-  "harness": "claude-code",
   "version_pins": { "finance/close-reporting/policy-doc": "1.0.0" }
 }
 ```
