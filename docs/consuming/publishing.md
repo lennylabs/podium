@@ -103,7 +103,7 @@ targets:
 | `commit_message` | A Go template rendered with the change count and timestamp into `$PODIUM_COMMIT_MESSAGE`. |
 | `identity` | The §4.6 effective-view principal the render runs as. Inherited from `defaults.identity` when unset. See [Publishing identity](#publishing-identity-and-the-effective-view). |
 | `plugins` | The plugin list: a `name`, an optional `description` carried into the per-plugin manifest and the root marketplace entry, and a scope filter (`include`, `exclude`, and `type`). |
-| `workflow` | The `prepare` and `publish` command lists Podium runs around the render. A `kind: workspace` target accepts `workflow` too: `podium sync --config` runs its `prepare` phase before materialization and its `publish` phase after, injecting `$PODIUM_WORKDIR`, `$PODIUM_REGISTRY`, and `$PODIUM_TARGET_ID` (the workspace counterpart of `$PODIUM_OUTPUT_ID`), plus `$PODIUM_CHANGED` for the `publish` phase. |
+| `workflow` | The `prepare` and `publish` command lists Podium runs around the render. A `kind: workspace` target accepts `workflow` too: `podium sync --config` runs its `prepare` phase before materialization and its `publish` phase after, injecting `$PODIUM_WORKDIR`, `$PODIUM_REGISTRY`, and `$PODIUM_TARGET_ID` (the workspace counterpart of `$PODIUM_OUTPUT_ID`), plus `$PODIUM_CHANGED` for the `publish` phase, as defined under [Injected variables](#injected-variables). |
 
 ### The publishing identity default
 
@@ -115,7 +115,7 @@ A command is an argv list under `run:`, executed directly without a shell, or a 
 
 | Flag | Effect |
 |:--|:--|
-| `skip_if_no_changes` | Skip the command when the render produced no diff against the checkout. |
+| `skip_if_no_changes` | Skip the command when `$PODIUM_CHANGED` is `false`. See [Injected variables](#injected-variables). |
 | `continue_on_error` | Let the pipeline proceed past a non-zero exit. |
 | `timeout` | Bound the command's wall-clock duration. Takes a duration string such as `"30s"`. |
 
@@ -160,7 +160,7 @@ Podium passes context to the commands through environment variables rather than 
 | `$PODIUM_OUTPUT_ID` | The marketplace target identifier. |
 | `$PODIUM_GIT_REMOTE`, `$PODIUM_GIT_BRANCH` | From the target's `git:` block. |
 | `$PODIUM_COMMIT_MESSAGE` | Rendered from `commit_message` with the change count and timestamp. |
-| `$PODIUM_CHANGED` | Whether the render produced a diff against the checkout. |
+| `$PODIUM_CHANGED` | `true` when materialization changed the bytes on disk of a file Podium writes or removes, including a file it restores after a hand edit or deletion, and `false` otherwise. The comparison starts after the `prepare` phase, so a file that `prepare` clones or pulls is part of the starting state. A file Podium writes or removes that the run cannot read also reads `true`, such as a materialized file without read permission or a stale path from an earlier run that the operator replaced with a directory. The sync lock file is not compared. For a marketplace target the value equals whether the render produced a diff against the checkout. A `kind: workspace` target receives the variable with the same meaning in its `publish` phase. |
 | `$PODIUM_CHANGE_SUMMARY` | A path to a JSON file describing the changed artifacts. |
 | `$PODIUM_REGISTRY`, `$PODIUM_IDENTITY`, `$PODIUM_HARNESSES` | The registry URL, the publishing identity, and the harness set. |
 
