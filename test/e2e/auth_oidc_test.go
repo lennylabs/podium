@@ -1096,10 +1096,14 @@ func TestAuth_LayerRegisterVisibilityFlagNotExist(t *testing.T) {
 
 // ---- SCIM store persists across restart ------------------------
 
+// Spec: §6.3.1, §13.12 — the SCIM directory persists to
+// PODIUM_SCIM_STORE_PATH across a restart. The store path sits under a
+// directory that does not exist yet, so the start also pins that the registry
+// creates a missing parent directory rather than refusing the path as
+// unusable.
 func TestAuth_SCIMStorePersistsAcrossRestart(t *testing.T) {
 	t.Parallel()
-	storeDir := t.TempDir()
-	storePath := filepath.Join(storeDir, "scim.json")
+	storePath := filepath.Join(t.TempDir(), "nested", "scim.json")
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": contextArtifact("seed")})
 
 	// First server instance.
