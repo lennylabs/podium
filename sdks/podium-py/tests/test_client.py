@@ -467,6 +467,15 @@ def test_load_artifacts_returns_envelopes(stub_server):
     assert out[1].error is not None and out[1].error.code == "registry.not_found"
 
 
+# Spec: §7.6.2 — load_artifacts takes no harness keyword. Passing one
+# raises TypeError before any request reaches the registry.
+def test_load_artifacts_rejects_harness_keyword(stub_server):
+    client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
+    with pytest.raises(TypeError):
+        client.load_artifacts(["a"], harness="claude-code")
+    assert stub_server.last_path == ""
+
+
 # Spec: §4.7.10 — load_artifact passes the served delivery attestation
 # through unverified; an absent delivery_signature reads as "".
 def test_load_artifact_passes_delivery_attestation_through(stub_server):
