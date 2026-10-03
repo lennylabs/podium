@@ -28,7 +28,7 @@ Skills split their frontmatter between `SKILL.md` and `ARTIFACT.md` so that `SKI
 | `name` | Yes (matches parent directory) | — | Yes |
 | `description` | Yes (≤ 1024 chars) | — | Yes |
 | `license` | Yes (SPDX) | — | Yes |
-| `compatibility` | Optional (≤ 500 chars; human-readable) | — | — (the Claude Code adapter derives from `runtime_requirements` and `sandbox_profile`) |
+| `compatibility` | Optional (≤ 500 chars; human-readable) | — | — (every adapter that writes a skill's `SKILL.md`, except `none`, derives it from `runtime_requirements` and `sandbox_profile`) |
 | `metadata` | Optional (string-to-string map) | — | — |
 | `allowed-tools` | Optional (experimental) | — | — |
 | `type` | — | Yes (`type: skill`) | Yes |
@@ -115,7 +115,7 @@ allowed-tools:
 
 | Field | Description |
 |:--|:--|
-| `compatibility` | Free-form environment notes (≤ 500 chars). Read by SKILL.md-aware tools to surface preconditions to a reader. When it is omitted, the Claude Code adapter derives a compatibility string from `runtime_requirements` and `sandbox_profile` and injects it into the materialized `SKILL.md`. The other adapters copy `SKILL.md` unchanged, so the derived value reaches Claude Code output only. |
+| `compatibility` | Free-form environment notes (≤ 500 chars). Read by SKILL.md-aware tools to surface preconditions to a reader. When it is omitted, every harness adapter that writes a skill's `SKILL.md` derives a compatibility string from `runtime_requirements` and `sandbox_profile` and adds it to the materialized `SKILL.md`. The `none` adapter copies `SKILL.md` unchanged. Published marketplace output carries the same line. |
 | `metadata` | Open-ended string-to-string map. Use for client-specific properties not defined by the agentskills.io spec. |
 | `allowed-tools` | Experimental. YAML list of tools the skill is pre-approved to call. Podium's parser rejects a bare string here, so write one list entry per tool. Adapter support varies by harness. |
 

@@ -68,6 +68,7 @@ Run the deploy pipeline for the named environment.
 
 === .gemini/skills/hello/SKILL.md ===
 ---
+compatibility: "Requires Python >=3.10"
 name: hello
 description: Greet a teammate warmly by name.
 ---

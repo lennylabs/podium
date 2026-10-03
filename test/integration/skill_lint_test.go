@@ -115,8 +115,8 @@ func TestPodiumLint_SkillPodiumFieldErrors(t *testing.T) {
 }
 
 // TestPodiumSync_DerivesSkillCompatibility covers
-// Spec: §4.3.4 — when SKILL.md omits compatibility, the claude-code adapter
-// (which consumes only the agentskills.io subset) derives it from
+// Spec: §4.3.4 — when SKILL.md omits compatibility, the claude-code adapter,
+// like every adapter that writes a skill's SKILL.md, derives it from
 // runtime_requirements/sandbox_profile and injects it into the materialized
 // SKILL.md. End-to-end through the real binary's sync path.
 func TestPodiumSync_DerivesSkillCompatibility(t *testing.T) {

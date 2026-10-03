@@ -348,32 +348,48 @@ func TestSkillTutorial_ClaudeCodeMaterializes(t *testing.T) {
 	}
 }
 
-// when SKILL.md omits compatibility, the claude-code
-// adapter derives it from runtime_requirements/sandbox_profile and injects it
-// into the materialized SKILL.md (spec §4.3.4). The none adapter,
-// which materializes the canonical layout verbatim, does not.
-func TestSkillTutorial_ClaudeCodeDerivesCompatibility(t *testing.T) {
+// When SKILL.md omits compatibility, every harness adapter that writes a
+// skill's SKILL.md derives the field from runtime_requirements and
+// sandbox_profile and injects it into the materialized SKILL.md. The none
+// adapter materializes the canonical layout verbatim and derives nothing.
+// greetArtifactRuntime declares runtime_requirements only, because a
+// sandbox_profile is untranslatable for codex and would fail its sync.
+// Spec: §4.3.4
+// Spec: §6.7
+func TestSkillTutorial_HarnessesDeriveCompatibility(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
 		"personal/hello/greet/ARTIFACT.md": greetArtifactRuntime,
 		"personal/hello/greet/SKILL.md":    greetSkillBodyFuller,
 	})
-	tgt := t.TempDir()
-	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "claude-code"); res.Exit != 0 {
-		t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
-	}
-	got := readFile(t, filepath.Join(tgt, ".claude/skills/greet/SKILL.md"))
-	if !strings.Contains(got, "compatibility:") || !strings.Contains(got, "Python >=3.10") {
-		t.Errorf("claude-code SKILL.md missing derived compatibility:\n%s", got)
+	for _, tc := range []struct{ harness, skillPath string }{
+		{"claude-code", ".claude/skills/greet/SKILL.md"},
+		{"cursor", ".cursor/skills/greet/SKILL.md"},
+		{"codex", ".agents/skills/greet/SKILL.md"},
+	} {
+		t.Run(tc.harness, func(t *testing.T) {
+			t.Parallel()
+			tgt := t.TempDir()
+			if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", tc.harness); res.Exit != 0 {
+				t.Fatalf("sync exit=%d stderr=%s", res.Exit, res.Stderr)
+			}
+			got := readFile(t, filepath.Join(tgt, tc.skillPath))
+			if !strings.Contains(got, "compatibility:") || !strings.Contains(got, "Python >=3.10") {
+				t.Errorf("%s SKILL.md missing derived compatibility:\n%s", tc.harness, got)
+			}
+		})
 	}
 
-	tgt2 := t.TempDir()
-	if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt2, "--harness", "none"); res.Exit != 0 {
-		t.Fatalf("sync none exit=%d stderr=%s", res.Exit, res.Stderr)
-	}
-	if got := readFile(t, filepath.Join(tgt2, "personal/hello/greet/SKILL.md")); strings.Contains(got, "compatibility:") {
-		t.Errorf("none adapter must materialize SKILL.md verbatim, no derived compatibility:\n%s", got)
-	}
+	t.Run("none", func(t *testing.T) {
+		t.Parallel()
+		tgt := t.TempDir()
+		if res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", tgt, "--harness", "none"); res.Exit != 0 {
+			t.Fatalf("sync none exit=%d stderr=%s", res.Exit, res.Stderr)
+		}
+		if got := readFile(t, filepath.Join(tgt, "personal/hello/greet/SKILL.md")); strings.Contains(got, "compatibility:") {
+			t.Errorf("none adapter must materialize SKILL.md verbatim, no derived compatibility:\n%s", got)
+		}
+	})
 }
 
 // the none harness materializes the canonical layout

@@ -833,3 +833,76 @@ func TestEmitterForHarness_RejectsNonPublishTargets(t *testing.T) {
 		})
 	}
 }
+
+// Spec: §4.3.4, §7.8 — every marketplace emitter that writes a skill's SKILL.md
+// derives compatibility from runtime_requirements when the author omitted it,
+// and preserves an authored value byte for byte.
+func TestEmitters_DeriveSkillCompatibility(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"claude-code": "claude/finance-pack/skills/aggregate/SKILL.md",
+		"codex":       "codex/finance-pack/skills/aggregate/SKILL.md",
+		"cursor":      "cursor/finance-pack/skills/aggregate/SKILL.md",
+		"pi":          "skills/aggregate/SKILL.md",
+		"hermes":      "skills/aggregate/SKILL.md",
+	}
+	authored := "---\nname: aggregate\ndescription: Aggregate.\ncompatibility: Hand-written.\n---\n\nbody\n"
+	for harness, skillPath := range cases {
+		harness, skillPath := harness, skillPath
+		t.Run(harness, func(t *testing.T) {
+			t.Parallel()
+			e, err := EmitterForHarness(harness)
+			if err != nil {
+				t.Fatalf("EmitterForHarness(%q): %v", harness, err)
+			}
+			emit := func(skill string) string {
+				out, err := e.Component(context.Background(), Source{
+					ArtifactID:    "finance/aggregate",
+					ArtifactBytes: artifactWithRuntime(""),
+					SkillBytes:    []byte(skill),
+					Plugin:        finPlugin(e.ID()),
+				})
+				if err != nil {
+					t.Fatalf("Component: %v", err)
+				}
+				return string(fileByPath(t, out, skillPath).Content)
+			}
+			assertDerived(t, emit(skillNoCompat), "Requires Python >=3.10")
+			if got := emit(authored); got != authored {
+				t.Errorf("authored SKILL.md changed:\nin:  %q\nout: %q", authored, got)
+			}
+		})
+	}
+}
+
+// Spec: §4.3.4, §6.7.1 — the Claude emitter's fallbacks for an artifact without
+// a SKILL.md derive nothing: the synthesized rule body carries no
+// compatibility line, and a non-rule ARTIFACT.md copy is written unchanged.
+func TestClaudeMarketplace_FallbackBodiesDoNotDerive(t *testing.T) {
+	t.Parallel()
+	rule := Source{
+		ArtifactID:    "finance/house-rule",
+		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\nrule_mode: always\ndescription: Be careful.\nruntime_requirements:\n  python: \">=3.10\"\nsandbox_profile: read-only-fs\n---\n\nRule prose.\n"),
+		Plugin:        finPlugin("claude"),
+	}
+	out, err := ClaudeMarketplace{}.Component(context.Background(), rule)
+	if err != nil {
+		t.Fatalf("Component(rule): %v", err)
+	}
+	if body := string(fileByPath(t, out, "claude/finance-pack/skills/house-rule/SKILL.md").Content); strings.Contains(body, "compatibility:") {
+		t.Errorf("synthesized rule SKILL.md must not carry compatibility:\n%s", body)
+	}
+
+	skill := Source{
+		ArtifactID:    "finance/aggregate",
+		ArtifactBytes: artifactWithRuntime("read-only-fs"),
+		Plugin:        finPlugin("claude"),
+	}
+	out, err = ClaudeMarketplace{}.Component(context.Background(), skill)
+	if err != nil {
+		t.Fatalf("Component(skill): %v", err)
+	}
+	if got := fileByPath(t, out, "claude/finance-pack/skills/aggregate/SKILL.md").Content; string(got) != string(skill.ArtifactBytes) {
+		t.Errorf("ARTIFACT.md fallback changed:\nin:  %q\nout: %q", skill.ArtifactBytes, got)
+	}
+}

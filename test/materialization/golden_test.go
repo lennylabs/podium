@@ -37,11 +37,19 @@ type fixture struct {
 // canonicalArtifacts is the fixed input set: one artifact per first-class type,
 // plus one rule per mode, exercising the fields the adapters translate
 // (rule_mode/rule_globs/rule_description, hook_event/hook_action,
-// server_identifier, description, bundled resources).
+// server_identifier, description, bundled resources, and runtime_requirements
+// through the derived SKILL.md compatibility line).
+//
+// The team/hello skill declares runtime_requirements and its SKILL.md carries
+// no compatibility field, so each harness that derives the field writes it.
+// The fixture sets no sandbox_profile because §6.9 rejects that field for codex
+// and pi before Adapt runs, and the golden test calls Adapt directly.
+//
+// Spec: §4.3.4
 var canonicalArtifacts = []fixture{
 	{
 		id:        "team/hello",
-		artifact:  "---\ntype: skill\nversion: 1.0.0\n---\n\nUse this skill to greet a teammate.\n",
+		artifact:  "---\ntype: skill\nversion: 1.0.0\nruntime_requirements:\n  python: \">=3.10\"\n---\n\nUse this skill to greet a teammate.\n",
 		skill:     "---\nname: hello\ndescription: Greet a teammate warmly by name.\n---\n\nSay hello to the person and offer help.\n",
 		resources: map[string]string{"scripts/run.py": "print('hello')\n"},
 	},

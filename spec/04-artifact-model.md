@@ -263,7 +263,7 @@ Skill artifacts comply with the [agentskills.io specification](https://agentskil
 | `name` | Top-level (per spec; matches parent directory name) | Omitted (Podium reads from SKILL.md) |
 | `description` | Top-level (per spec; ≤ 1024 chars) | Omitted (Podium reads from SKILL.md) |
 | `license` | Top-level (per spec) | Omitted (Podium reads from SKILL.md) |
-| `compatibility` | Top-level (per spec; ≤ 500 chars; human-readable string) | Omitted; if not authored, the Podium adapter derives it from `runtime_requirements` and `sandbox_profile` at materialization time for harnesses that consume only the agentskills.io subset |
+| `compatibility` | Top-level (per spec; ≤ 500 chars; human-readable string) | Omitted. When `SKILL.md` does not author it, every harness adapter that writes a skill's `SKILL.md` (§6.7) and every marketplace emitter that writes one (§7.8) derives it from `runtime_requirements` and `sandbox_profile` at materialization time and adds it to the materialized `SKILL.md`. An authored value is kept unchanged. The `none` adapter writes `SKILL.md` without translation (§6.7) and derives nothing. |
 | `metadata` | Top-level (per spec; string-to-string map for free-form extension) | Omitted |
 | `allowed-tools` | Top-level (per spec; experimental) | Omitted |
 | `type` | Not present | Top-level (`type: skill`) |

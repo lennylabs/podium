@@ -35,11 +35,28 @@ func referenceRegistryPath(t testing.TB) string {
 // target and profile. The server consumer runs in-process through
 // server.NewFromFilesystem, the same shared library bootstrap the standalone
 // `--layer-path` server uses, so the test owns its lifecycle and never blocks.
+//
+// Spec: §4.3.4 (SKILL.md field allocation) — every harness adapter that writes
+// a skill's SKILL.md derives `compatibility` from runtime_requirements and
+// sandbox_profile, and `none` derives nothing. The cursor arm covers an
+// adapter that reaches the derivation through skillOut. codex, opencode, and
+// pi are absent because the reference fixture carries §6.9 untranslatable
+// cells for them, so sync.Run fails before any comparison.
 func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 	t.Parallel()
 	dir := referenceRegistryPath(t)
 
-	for _, adapterID := range []string{"none", "claude-code"} {
+	// The reference run-variance skill declares runtime_requirements and
+	// sandbox_profile, and its authored SKILL.md omits compatibility, so each
+	// deriving harness writes this line. Byte equality alone also holds when
+	// neither tree carries the line, so the presence check runs first.
+	const wantCompat = `compatibility: "Requires Python >=3.10; sandbox: read-only-fs"`
+	derivedSkillPath := map[string]string{
+		"claude-code": ".claude/skills/run-variance/SKILL.md",
+		"cursor":      ".cursor/skills/run-variance/SKILL.md",
+	}
+
+	for _, adapterID := range []string{"none", "claude-code", "cursor"} {
 		adapterID := adapterID
 		t.Run(adapterID, func(t *testing.T) {
 			t.Parallel()
@@ -82,6 +99,15 @@ func TestSyncEquivalence_FilesystemVsServerByteIdentical(t *testing.T) {
 			srvTree := materializedTree(t, srvTarget)
 			if len(fsTree) == 0 {
 				t.Fatalf("filesystem sync materialized nothing")
+			}
+			if path, ok := derivedSkillPath[adapterID]; ok {
+				body, present := fsTree[path]
+				if !present {
+					t.Fatalf("%s: %s not materialized", adapterID, path)
+				}
+				if !strings.Contains(body, wantCompat) {
+					t.Errorf("%s: %s lacks %q:\n%s", adapterID, path, wantCompat, body)
+				}
 			}
 			assertTreesEqual(t, fsTree, srvTree)
 

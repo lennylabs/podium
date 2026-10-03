@@ -49,12 +49,15 @@ func contextOut(src Source) []File {
 	return out
 }
 
-// skillOut materializes a skill folder at dir: SKILL.md plus the bundled
-// scripts/, references/, and assets/ resources alongside it.
+// skillOut materializes a skill folder at dir: SKILL.md, with compatibility
+// derived per §4.3.4 when the author omitted it, plus the bundled scripts/,
+// references/, and assets/ resources alongside it.
 func skillOut(dir string, src Source) []File {
 	out := []File{}
 	if len(src.SkillBytes) > 0 {
-		out = append(out, File{Path: path.Join(dir, "SKILL.md"), Content: src.SkillBytes})
+		// Spec: §4.3.4: every adapter that writes a skill's SKILL.md derives
+		// compatibility when the author omitted it.
+		out = append(out, File{Path: path.Join(dir, "SKILL.md"), Content: deriveSkillCompatibility(src.SkillBytes, src.ArtifactBytes)})
 	}
 	out = appendResources(out, dir, src.Resources)
 	sortFiles(out)
