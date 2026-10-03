@@ -1,7 +1,7 @@
 # Proposal 0045: Remove the unread harness field from batchLoad and load_artifacts, and drop the nonexistent `reembed --all` flag from §4.7
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-03). Approved (2026-10-03) on the user's behalf under the overnight authorization and signed off as staged: a retired harness key is ignored, following the server's lenient JSON-decoding convention.
+- Status: Implemented (2026-10-03). Approved (2026-10-03) on the user's behalf under the overnight authorization and signed off as staged: a retired harness key is ignored, following the server's lenient JSON-decoding convention.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -43,25 +43,25 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1, SPEC-2. §7.6.2 drops `harness` from the example and the wire format, and §7.6 deletes its `load_artifacts` carve-out. Bundled because both edit `spec/07-external-integration.md` and must land together.
+- [x] **S1 · spec** — SPEC-1, SPEC-2. §7.6.2 drops `harness` from the example and the wire format, and §7.6 deletes its `load_artifacts` carve-out. Bundled because both edit `spec/07-external-integration.md` and must land together.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-3. §4.7 replaces the `--all` parenthetical with the flagless full pass and the scoped passes.
+- [x] **S2 · spec** — SPEC-3. §4.7 replaces the `--all` parenthetical with the flagless full pass and the scoped passes.
       Levels: —. Depends on: —
-- [ ] **S3 · code** — CODE-1. `BatchLoadRequest` loses `Harness`, and its doc comment states that the request selects no harness.
+- [x] **S3 · code** — CODE-1. `BatchLoadRequest` loses `Harness`, and its doc comment states that the request selects no harness.
       Levels: unit, e2e. Depends on: S1
-- [ ] **S4 · code** — CODE-2, TEST-2, TEST-4. Python `load_artifacts` loses `harness`; the unit test pins the body keys and the e2e test drops the argument. Bundled because TEST-4 fails as soon as CODE-2 lands.
+- [x] **S4 · code** — CODE-2, TEST-2, TEST-4. Python `load_artifacts` loses `harness`; the unit test pins the body keys and the e2e test drops the argument. Bundled because TEST-4 fails as soon as CODE-2 lands.
       Levels: unit, e2e. Depends on: S1
-- [ ] **S5 · code** — CODE-3, TEST-3. TypeScript `loadArtifacts` loses `harness`; the unit test pins the body allowlist. Bundled because TEST-3 fails until CODE-3 lands.
+- [x] **S5 · code** — CODE-3, TEST-3. TypeScript `loadArtifacts` loses `harness`; the unit test pins the body allowlist. Bundled because TEST-3 fails until CODE-3 lands.
       Levels: unit. Depends on: S1
-- [ ] **S6 · code** — CODE-4. The four stale `reembed --all` comments name the flagless full pass, and the `cmd/podium/admin.go` tag becomes `// Spec: §4.7`.
+- [x] **S6 · code** — CODE-4. The four stale `reembed --all` comments name the flagless full pass, and the `cmd/podium/admin.go` tag becomes `// Spec: §4.7`.
       Levels: —. Depends on: S2
-- [ ] **S7 · test** — TEST-5. The `TestCLI_AdminReembed` skip message drops the `--all` clause.
+- [x] **S7 · test** — TEST-5. The `TestCLI_AdminReembed` skip message drops the `--all` clause.
       Levels: e2e. Depends on: S2
-- [ ] **S8 · docs** — DOC-1. The HTTP API reference body example drops `harness`.
+- [x] **S8 · docs** — DOC-1. The HTTP API reference body example drops `harness`.
       Levels: —. Depends on: S3
-- [ ] **S9 · docs** — DOC-2. The consumer SDK bulk-load example drops `harness` and its false comment.
+- [x] **S9 · docs** — DOC-2. The consumer SDK bulk-load example drops `harness` and its false comment.
       Levels: —. Depends on: S4
-- [ ] **S10 · docs** — CHANGELOG-1. The `[Unreleased]` `Removed` and `Documentation` entries.
+- [x] **S10 · docs** — CHANGELOG-1. The `[Unreleased]` `Removed` and `Documentation` entries.
       Levels: —. Depends on: S3, S4, S5, S6
 
 **Ordering constraints.** The batchLoad chain (S1, S3, S4, S5, S8, S9) and the reembed chain (S2, S6, S7) are independent and may proceed in parallel. S3, S4, and S5 are independent of each other. S10 follows both chains because its entries describe the SDK, server, and §4.7 changes together.
