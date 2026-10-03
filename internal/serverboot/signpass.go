@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"os"
 
 	"github.com/lennylabs/podium/pkg/sign"
@@ -187,7 +188,12 @@ func openSignPassDeps(cfg *Config, opts signStoredRowsOptions) (rehashDeps, func
 			_ = closer.Close()
 		}
 	}
-	sink, _ := openAuditSink(cfg)
+	// sign-stored-rows never anchors, so an unopenable file sink is logged
+	// and the pass runs without one.
+	sink, _, sinkErr := openAuditSink(cfg)
+	if sinkErr != nil {
+		log.Printf("warning: audit sink disabled: %v", sinkErr)
+	}
 	d := rehashDeps{
 		Store:   st,
 		Objects: openObjectStoreOrNil(cfg),

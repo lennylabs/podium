@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1037,5 +1038,32 @@ func TestRunSignStoredRows_SigningOffRefusesAStrandedSignature(t *testing.T) {
 	}
 	if after := f.row(t, s); after.ContentHash != before.ContentHash || after.Signature != before.Signature || f.recordSet(t) {
 		t.Error("a refused command wrote the store")
+	}
+}
+
+// Spec: §8.3, §13.12 — sign-stored-rows never anchors, so a file audit sink
+// that cannot be opened is logged and the pass opens its collaborators
+// without a sink.
+func TestOpenSignPassDeps_UnopenableSinkLogsAndContinues(t *testing.T) {
+	f := newBootFixture(t)
+	t.Setenv("PODIUM_AUDIT_LOG_PATH", f.home)
+	cfg, err := loadBootConfig()
+	if err != nil {
+		t.Fatalf("loadBootConfig: %v", err)
+	}
+	logs := &syncBuffer{}
+	prev := log.Writer()
+	log.SetOutput(logs)
+	defer log.SetOutput(prev)
+	d, closeStore, err := openSignPassDeps(cfg, signStoredRowsOptions{dryRun: true})
+	if err != nil {
+		t.Fatalf("openSignPassDeps: %v", err)
+	}
+	defer closeStore()
+	if d.Sink != nil {
+		t.Errorf("sink = %v, want nil for an unopenable file sink", d.Sink)
+	}
+	if !strings.Contains(logs.String(), "warning: audit sink disabled: audit: open "+f.home) {
+		t.Errorf("logs do not report the disabled sink:\n%s", logs.String())
 	}
 }

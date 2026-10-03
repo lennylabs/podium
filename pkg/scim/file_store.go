@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,9 +25,16 @@ type FileStore struct {
 	memory *Memory
 }
 
-// LoadFileStore reads path (when present) and returns a SCIM
-// store pre-populated with every record. Missing path yields an
-// empty store that creates the file on the first mutation.
+// LoadFileStore returns a SCIM store pre-populated with every record
+// in path. It reads the file when present, creates the parent
+// directory at load, and creates the file on the first mutation. A
+// missing or empty file loads as an empty store. An unreadable file,
+// a malformed file, and a parent directory that cannot be created or
+// written are errors, prefixed `scim: read`, `scim: parse`,
+// `scim: prepare`, and `scim: probe` respectively, so the caller can
+// refuse startup rather than lose every record pushed afterwards.
+//
+// Spec: §6.3.1, §13.12
 func LoadFileStore(path string) (*FileStore, error) {
 	if path == "" {
 		return nil, errors.New("scim: path required")
@@ -35,7 +43,40 @@ func LoadFileStore(path string) (*FileStore, error) {
 	if err := out.load(); err != nil {
 		return nil, err
 	}
+	if err := probeWritable(filepath.Dir(path)); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// probeWritable confirms that save() can write the store: it creates the
+// parent directory and then a temporary file in it. save() replaces the
+// store by renaming <path>.tmp over it, so the directory's writability is
+// what matters and the existing file's mode is not checked. The probe does
+// not call save(), which would rewrite the operator's file on every start.
+// A remove failure leaves a stray probe file and does not make the store
+// unusable, so it is logged.
+//
+// Spec: §6.3.1, §13.12
+func probeWritable(dir string) error {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("scim: prepare %s: %w", dir, err)
+	}
+	f, err := os.CreateTemp(dir, ".scim-probe-*")
+	if err != nil {
+		return fmt.Errorf("scim: probe %s: %w", dir, err)
+	}
+	name := f.Name()
+	// Close and Remove cannot be made to fail in a unit test once CreateTemp
+	// has succeeded on a local filesystem; the branches stay for a network
+	// filesystem that reports a deferred write error at close.
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("scim: probe %s: %w", dir, err)
+	}
+	if err := os.Remove(name); err != nil {
+		log.Printf("scim: remove probe file %s: %v", name, err)
+	}
+	return nil
 }
 
 type fileStoreSnapshot struct {

@@ -151,8 +151,10 @@ func TestGateway_TrustedHeadersProxySecret(t *testing.T) {
 }
 
 // gwExpectStartupFailure runs `podium serve` with the given extra env and
-// asserts the process exits non-zero with wantCode in its combined output.
-func gwExpectStartupFailure(t *testing.T, wantCode string, extraEnv ...string) {
+// asserts the process exits non-zero with wantCode in its combined output. It
+// returns that output so a caller can assert further detail, such as the path
+// a refusal names.
+func gwExpectStartupFailure(t *testing.T, wantCode string, extraEnv ...string) string {
 	t.Helper()
 	bin := cmdharness.Bin(t, "podium")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -171,6 +173,7 @@ func gwExpectStartupFailure(t *testing.T, wantCode string, extraEnv ...string) {
 	if !strings.Contains(out.String(), wantCode) {
 		t.Errorf("output missing %q:\n%s", wantCode, out.String())
 	}
+	return out.String()
 }
 
 // Spec: §6.3.3 / §13.12 — oidc-jwt requires an https issuer; an http issuer

@@ -141,7 +141,7 @@ Entra pushes user and group records to the registry's SCIM endpoint via the **Pr
 1. **Enterprise applications → \[Podium\] → Provisioning → Get started**.
 2. **Provisioning Mode: Automatic**.
 3. **Tenant URL**: the registry's SCIM endpoint, `https://podium.acme.com/scim/v2`.
-4. **Secret Token**: one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable. The registry mounts `/scim/v2/` only when that variable is set to a comma-separated list of accepted tokens, and returns 404 for every SCIM request otherwise. Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart.
+4. **Secret Token**: one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable. The registry mounts `/scim/v2/` only when that variable is set to a comma-separated list of accepted tokens, and returns 404 for every SCIM request otherwise. Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart. A set path that the registry cannot read, parse, or write refuses startup with `config.scim_store_unavailable`.
 5. **Test connection**, then save and enable.
 6. Configure attribute mappings so each provisioned user's SCIM `userName` matches the `sub` or `email` claim its token carries, and each group's `displayName` matches the name used in the layer's `groups:` filter. The registry expands a `groups:` filter to the group's member `userName` values and compares them against the caller's `sub` and `email`.
 

@@ -722,6 +722,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   higher copy. A server-source `podium sync` and the workspace overlay are
   unchanged. This is a backward-incompatible change and lands in a MINOR bump.
   No flag restores the previous behavior.
+- **SCIM store refusal** (§6.3.1, §13.12): a non-empty `PODIUM_SCIM_STORE_PATH`
+  that the registry cannot read for a reason other than the file's absence, a
+  non-empty file that does not parse as the directory document, a parent
+  directory the registry cannot create, and a parent directory in which it
+  cannot create a file each refuse startup with `config.scim_store_unavailable`.
+  The refusal applies under every identity provider and whether or not
+  `PODIUM_SCIM_TOKENS` mounts the receiver. A missing file and an empty file
+  still load as an empty directory. Previously a read or parse failure logged
+  `warning: SCIM persistence disabled` and kept the directory in memory, and an
+  unwritable directory surfaced only on the first push. In both cases pushed
+  records were lost on restart.
+- **Audit anchor key refusals** (§8.6, §13.12): with
+  `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` above 0 and a file audit sink, an
+  anchor key file that cannot be read, parsed, or generated refuses startup with
+  `config.audit_anchor_key_unavailable`. Previously it logged a warning and the
+  registry ran unanchored. While registry signing is on (`PODIUM_SIGN` or
+  `podium serve --sign` resolves to `registry-key`), an anchor public key equal
+  to the registry signing key or one of its `verify:` keys refuses startup with
+  `config.audit_anchor_key_shared`, which names the `key_id`. Previously that
+  configuration started with no warning. With the interval at 0, the registry
+  does not read the anchor key.
+- **Audit sink refusal while anchoring** (§8.6, §13.12): with
+  `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` above 0, a file `PODIUM_AUDIT_LOG_PATH`
+  that the registry cannot open refuses startup with
+  `config.audit_sink_unavailable`. Previously the registry logged
+  `warning: audit sink disabled` and ran with no audit sink and no anchoring. An
+  `http(s)` value still disables anchoring with a warning, and with the interval
+  at 0 an unopenable file sink is still logged and the registry starts. The
+  warning text is now `warning: audit sink disabled: <cause>`.
+- A deployment carrying one of these configurations stops booting after the
+  upgrade. This is a backward-incompatible change and lands in a MINOR bump. No
+  flag, environment variable, or configuration key restores the in-memory SCIM
+  fallback or the unanchored start.
 
 ### Removed
 
@@ -771,6 +804,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `PODIUM_HOST_NODE`, `PODIUM_HOST_PACKAGES`,
   `PODIUM_ENFORCE_RUNTIME_REQUIREMENTS`, and
   `PODIUM_IGNORE_RUNTIME_REQUIREMENTS`.
+- §13.12 gains rows for `PODIUM_SCIM_TOKENS` and `PODIUM_SCIM_STORE_PATH` and an
+  Audit anchoring table for `PODIUM_AUDIT_LOG_PATH`,
+  `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS`, and `PODIUM_AUDIT_SIGNING_KEY_PATH`.
+  §6.3.1 states how the SCIM receiver is mounted and persisted, and §8.6
+  specifies local chain-head anchoring and the key-separation rule.
+  `docs/reference/cli.md` and `docs/reference/error-codes.md` list the variables
+  and the new codes.
 
 ## [0.4.0] - 2026-09-05
 

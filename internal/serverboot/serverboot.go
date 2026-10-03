@@ -765,6 +765,26 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 	return lc, vis, nil
 }
 
+// openSCIMStore returns the §6.3.1 SCIM directory store. An empty path
+// keeps the directory in memory. A set path that scim.LoadFileStore
+// cannot read, parse, or write refuses startup with
+// config.scim_store_unavailable rather than falling back to memory,
+// because a fallback would silently discard every record the IdP pushes
+// and the operator would learn of it only after the next restart.
+//
+// Spec: §6.3.1, §13.12
+func openSCIMStore(path string) (scim.Store, error) {
+	if path == "" {
+		return scim.NewMemory(), nil
+	}
+	fs, err := scim.LoadFileStore(path)
+	if err != nil {
+		return nil, fmt.Errorf("config.scim_store_unavailable: PODIUM_SCIM_STORE_PATH=%q cannot hold the SCIM directory (§6.3.1, §13.12): %w; fix the file or its directory, or unset PODIUM_SCIM_STORE_PATH to keep the directory in memory", path, err)
+	}
+	log.Printf("SCIM directory persisted at %s", path)
+	return fs, nil
+}
+
 // Run loads configuration, opens the configured backends, mounts every
 // endpoint, and serves until a SIGINT or SIGTERM triggers a graceful shutdown.
 // It installs the signal handler, then delegates to run with the resulting
@@ -957,7 +977,20 @@ func run(ctx context.Context, stop func()) error {
 	// case; the §8.6 anchor/verify, §8.4 retention, and §8.5 erasure paths
 	// rewrite the on-disk chain and run only against it. A nil scrubber means
 	// an operator disabled scrubbing.
-	auditSink, auditFile := openAuditSink(cfg)
+	auditSink, auditFile, sinkErr := openAuditSink(cfg)
+	// §8.6, §13.12: with anchoring on, an unopenable file sink, an anchor key
+	// that cannot be read, parsed, or generated, and an anchor key the
+	// registry key file also carries each refuse the start here, whatever the
+	// bind outcome and before the §13.4 rewrite and the bootstrap ingest, so a
+	// refused start changes no stored row.
+	anchorKey, anchoringOn, err := loadAnchorSigner(cfg, auditFile, sinkErr, signKey, signingOn)
+	if err != nil {
+		return err
+	}
+	// Reached with a sink error only when anchoring is off (§13.12).
+	if sinkErr != nil {
+		log.Printf("warning: audit sink disabled: %v", sinkErr)
+	}
 	scrubber, err := cfg.piiRedaction.BuildScrubber()
 	if err != nil {
 		return fmt.Errorf("pii redaction config: %w", err)
@@ -1133,22 +1166,22 @@ func run(ctx context.Context, stop func()) error {
 	}
 
 	// §6.3.1 SCIM 2.0: when at least one bearer token is configured,
-	// the SCIM IdP receiver is mounted at /scim/v2/. When
-	// PODIUM_SCIM_STORE_PATH is set, IdP-pushed users + groups
-	// persist as a JSON file at that path so they survive server
-	// restarts. Under an identity provider that resolves the caller
-	// from a verified credential, the same store feeds the §4.6
-	// visibility evaluator's `groups:` expander so layer filters
-	// resolve against IdP-pushed group membership.
-	var scimStore scim.Store = scim.NewMemory()
-	if path := os.Getenv("PODIUM_SCIM_STORE_PATH"); path != "" {
-		fs, err := scim.LoadFileStore(path)
-		if err != nil {
-			log.Printf("warning: SCIM persistence disabled: %v", err)
-		} else {
-			scimStore = fs
-			log.Printf("SCIM directory persisted at %s", path)
-		}
+	// the SCIM IdP receiver is mounted at /scim/v2/. Under an identity
+	// provider that resolves the caller from a verified credential, the
+	// store feeds the §4.6 visibility evaluator's `groups:` expander so
+	// layer filters resolve against IdP-pushed group membership. When
+	// PODIUM_SCIM_STORE_PATH is set, the directory persists to that file,
+	// and a path the registry cannot read, parse, or write refuses the
+	// start with config.scim_store_unavailable rather than falling back
+	// to memory. The store opens here, after the bootstrap ingest, as the
+	// config.runtime_keys_unavailable refusal does; opening it earlier
+	// would let the writability probe create the SCIM directory on a
+	// start that a later refusal rejects.
+	//
+	// Spec: §6.3.1, §13.12
+	scimStore, err := openSCIMStore(os.Getenv("PODIUM_SCIM_STORE_PATH"))
+	if err != nil {
+		return err
 	}
 	scimHandler := buildSCIMHandler(scimStore)
 	// The expander is held here so the §7.3.1 layer read filters against the
@@ -1616,20 +1649,21 @@ func run(ctx context.Context, stop func()) error {
 		startVectorOutboxWorker(ctx, cfg, st, vecProvider, embedProvider, mreg, auditSink, tenantID)
 	}
 
-	// §8.6 transparency anchoring: when the operator enables
-	// PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS, a goroutine periodically
-	// anchors new entries via the registry-managed signing key.
-	// Operators monitor audit.anchored / audit.anchor_failed events.
+	// §8.6 local chain-head anchoring: with PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS
+	// above 0 and a file sink, a goroutine signs the chain head with the
+	// dedicated anchor key at PODIUM_AUDIT_SIGNING_KEY_PATH, loaded and checked
+	// above, and appends audit.anchored. Operators monitor audit.anchored and
+	// audit.anchor_failed.
 	var reAnchor func()
-	if cfg.auditAnchorInterval > 0 {
-		if signer := startAnchorScheduler(ctx, cfg, auditFile); signer != nil {
-			// §8.6: after a retention pass drops events the chain
-			// head moves, invalidating the last anchor. Re-anchor the new
-			// head immediately so verifiers do not wait for the next tick.
-			reAnchor = func() {
-				if _, err := audit.Anchor(context.Background(), auditFile, signer); err != nil {
-					log.Printf("audit re-anchor after retention failed: %v", err)
-				}
+	if anchoringOn {
+		startAnchorScheduler(ctx, cfg, auditFile, anchorKey)
+		// §8.6: after a retention pass drops events the chain head moves,
+		// invalidating the last anchor. Re-anchor the new head immediately so
+		// verifiers do not wait for the next tick. Only the periodic
+		// scheduler records audit.anchor_failed; this path logs.
+		reAnchor = func() {
+			if _, err := audit.Anchor(context.Background(), auditFile, anchorKey); err != nil {
+				log.Printf("audit re-anchor after retention failed: %v", err)
 			}
 		}
 	}

@@ -101,9 +101,9 @@ func registrySignerFor(mode string) (sign.RegistryManagedKey, bool, error) {
 // Every error carries config.signature_provider_unavailable in its text and
 // wraps sign.ErrRegistryManagedUnavailable: spi.Error.Error() returns the
 // message alone, and podium-server prints the returned error verbatim, so the
-// code would otherwise never reach the operator. The loader keeps a distinct
-// default path from loadOrGenerateAuditSigner so the ingest-signing key and
-// the audit-anchor key never alias. Spec: §4.7.9, §13.12.
+// code would otherwise never reach the operator. loadAnchorSigner refuses
+// startup with config.audit_anchor_key_shared when the audit anchor key equals
+// the registry public key or any verify: key. Spec: §4.7.9, §8.6, §13.12.
 func loadRegistrySigner(env string, generate bool) (sign.RegistryManagedKey, error) {
 	path, err := registrySigningKeyPath(env)
 	if err != nil {
