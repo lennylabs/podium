@@ -412,14 +412,25 @@ function presignedSigV4(raw: string): boolean {
 }
 
 export interface MaterializeOptions {
-  // Accepted per §2.2 ("The SDKs accept a harness parameter on
-  // materialize()"). Harness-specific adaptation is the registry's shared
-  // module (§2.2); this independent client writes the canonical (`none`)
-  // layout and records the requested harness for forward compatibility.
-  harness?: string;
+  // Spec §2.2 / §7.6. The SDK embeds no harness adapter and writes the
+  // canonical layout, which is the output of the `none` adapter. Any other
+  // value throws before a file is written; run `podium sync --harness <name>`
+  // for harness-native files.
+  harness?: "none";
   // Override the fetcher used to pull §7.2 presigned large resources.
   // Defaults to the global fetch.
   fetcher?: typeof fetch;
+}
+
+// Spec §2.2 / §7.6: the type narrowing protects TypeScript callers only, so
+// a plain JavaScript caller passing another harness is rejected at runtime.
+function requireCanonicalHarness(harness: unknown): void {
+  if (harness !== undefined && harness !== "none") {
+    throw new Error(
+      `materialize() writes the canonical layout only; harness must be "none", got ${JSON.stringify(harness)}. ` +
+        "Use `podium sync --harness <name>` for harness-native files.",
+    );
+  }
 }
 
 // Spec §6.6 sandbox contract: a resource path that escapes the destination
@@ -523,9 +534,9 @@ function decodeInlineForMaterialize(
   return out;
 }
 
-// Spec §7.6 / §2.2 — the loaded-artifact object exposes
-// materialize(to, { harness }). resources are inline bytes; largeResources
-// are §7.2 presigned references fetched on demand.
+// Spec §7.6 / §2.2 — the loaded-artifact object exposes materialize(to),
+// which writes the canonical layout; resources are inline bytes;
+// largeResources are §7.2 presigned references fetched on demand.
 export class LoadedArtifact {
   id: string;
   type: string;
@@ -574,6 +585,7 @@ export class LoadedArtifact {
   }
 
   async materialize(to: string, opts: MaterializeOptions = {}): Promise<string[]> {
+    requireCanonicalHarness(opts.harness);
     return materializeCanonical({
       to,
       id: this.id,
@@ -648,6 +660,7 @@ export class BatchResult {
   }
 
   async materialize(to: string, opts: MaterializeOptions = {}): Promise<string[]> {
+    requireCanonicalHarness(opts.harness);
     if (this.status !== "ok") {
       // spec: §13.2.1 / §6.10 — re-raise the specific subclass so a
       // registry.read_only batch item surfaces as RegistryReadOnly.
