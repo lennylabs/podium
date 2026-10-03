@@ -817,6 +817,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`DeviceCodeRequired`** from the Python SDK (§6.3). No code raised it.
   Catch `DeviceCodeError` instead.
 
+- **The `harness` argument of `load_artifacts` and `loadArtifacts`, and the
+  `harness` field of `POST /v1/artifacts:batchLoad`** (§7.6.2): the registry
+  never read the field and runs no harness adapter (§2.2), so every `ok` item
+  already carried the canonical manifest. Remove the argument from calls.
+  Python raises `TypeError` when `harness=` is passed. TypeScript rejects
+  `harness` in an options object literal at compile time, and `loadArtifacts`
+  never sends the key. The registry decodes the request body as it decodes
+  every other JSON body, so a `harness` key that an older SDK still sends is
+  ignored.
+
 ### Documentation
 
 - **Embedding-model switch on managed vector backends** (§4.7): per-row model
@@ -865,6 +875,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   `docs/consuming/publishing.md` describe `$PODIUM_REGISTRY` as a URL or a
   filesystem path. The variable names and phases are unchanged; the Fixed entry
   above records the registry-source precedence change.
+- §4.7 names the flagless `podium admin reembed` as the full re-embed pass, in
+  place of an `--all` flag the CLI never had.
 
 ## [0.4.0] - 2026-09-05
 

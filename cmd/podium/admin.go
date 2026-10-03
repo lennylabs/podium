@@ -202,8 +202,8 @@ func adminReembedCmd(args []string) int {
 		q.Set("artifact", *artifact)
 		q.Set("version", *version)
 	} else {
-		// spec: §4.7 — `--all` is the no-flag default; `--since` and
-		// `--only-missing` scope a tenant-wide pass and compose.
+		// Spec: §4.7 — with no flags the command runs a full tenant-wide pass; `--since` and
+		// `--only-missing` scope that pass and compose.
 		if *onlyMissing {
 			q.Set("only_missing", "true")
 		}

@@ -33,7 +33,7 @@ type ReembedFailure struct {
 
 // ReembedOptions selects which artifacts a Reembed pass covers. The
 // zero value re-embeds every visible manifest in the tenant, matching
-// the §4.7 "podium admin reembed" default (--all).
+// the full pass that a flagless `podium admin reembed` runs (§4.7).
 type ReembedOptions struct {
 	// OnlyIfMissing skips artifacts that already have a stored vector,
 	// for partial backfills after a transient embedding outage. spec:

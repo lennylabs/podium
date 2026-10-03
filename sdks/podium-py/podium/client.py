@@ -1445,7 +1445,6 @@ class Client:
         ids: list[str],
         *,
         session_id: str = "",
-        harness: str = "",
         version_pins: dict[str, str] | None = None,
     ) -> list[BatchResult]:
         """Bulk-fetch artifacts via §7.6.2 POST /v1/artifacts:batchLoad.
@@ -1467,8 +1466,6 @@ class Client:
             body: dict[str, Any] = {"ids": chunk}
             if session_id:
                 body["session_id"] = session_id
-            if harness:
-                body["harness"] = harness
             if version_pins:
                 body["version_pins"] = {k: v for k, v in version_pins.items() if k in chunk}
             data = json.dumps(body).encode()

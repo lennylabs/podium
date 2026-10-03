@@ -111,7 +111,6 @@ artifacts = client.load_artifacts(
         "finance/ap/pay-invoice",
     ],
     session_id=session_id,        # honors the same `latest`-resolution semantics
-    harness="claude-code",        # recorded on the request; the response and materialize() are canonical
 )
 
 for result in artifacts:

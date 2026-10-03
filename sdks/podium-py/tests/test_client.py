@@ -447,18 +447,20 @@ def test_load_domain_forwards_explicit_depth(stub_server):
 
 
 # Spec: §7.6.2 — load_artifacts POSTs to /v1/artifacts:batchLoad
-# and returns per-item envelopes; partial failures do not raise.
+# and returns per-item envelopes; partial failures do not raise. The
+# body carries ids and session_id and selects no harness.
 def test_load_artifacts_returns_envelopes(stub_server):
     stub_server.next_response = [
         {"id": "a", "status": "ok", "version": "1.0.0", "content_hash": "sha256:a"},
         {"id": "b", "status": "error", "error": {"code": "registry.not_found", "message": "missing"}},
     ]
     client = Client(registry=f"http://127.0.0.1:{stub_server.server_port}")
-    out = client.load_artifacts(["a", "b"])
+    out = client.load_artifacts(["a", "b"], session_id="s")
 
     assert "/v1/artifacts:batchLoad" in stub_server.last_path
     body = json.loads(stub_server.last_body)
     assert body["ids"] == ["a", "b"]
+    assert set(body) == {"ids", "session_id"} and body["session_id"] == "s"
     assert len(out) == 2
     assert out[0].status == "ok"
     assert out[1].status == "error"

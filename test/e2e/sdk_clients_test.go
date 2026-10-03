@@ -366,15 +366,15 @@ func TestSDK_PyBulkSplit(t *testing.T) {
 	csWantStdout(t, res, "N 55")
 }
 
-// Python load_artifacts forwards session_id and harness.
-func TestSDK_PyBulkForwardsParams(t *testing.T) {
+// Spec: §7.6.2 — Python load_artifacts forwards session_id to POST /v1/artifacts:batchLoad.
+func TestSDK_PyBulkForwardsSessionID(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	srv := startServer(t, csSkillReg(t))
-	// The standalone server accepts session_id and harness in the batch body;
-	// a successful call confirms the SDK forwards them without error.
+	// The standalone server accepts session_id in the batch body; a
+	// successful call confirms the SDK forwards it without error.
 	res := csRunPy(t, py, srv.BaseURL,
-		"from podium import Client\nc = Client.from_env()\nout = c.load_artifacts(ids=['finance/ap/pay-invoice'], session_id='sess-abc', harness='claude-code')\nprint('STATUS', out[0].status)\n")
+		"from podium import Client\nc = Client.from_env()\nout = c.load_artifacts(ids=['finance/ap/pay-invoice'], session_id='sess-abc')\nprint('STATUS', out[0].status)\n")
 	csWantStdout(t, res, "STATUS ok")
 }
 

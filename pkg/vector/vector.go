@@ -16,7 +16,7 @@
 //   - Qdrant:    managed cloud (REST API).
 //
 // Selection happens at the operator level via PODIUM_VECTOR_BACKEND.
-// Switching backends requires `podium admin reembed --all` because
+// Switching backends requires a full `podium admin reembed` pass (no flags) because
 // vectors are not portable across stores (cosine distance assumes
 // the same embedding model + dimension on both ends).
 package vector

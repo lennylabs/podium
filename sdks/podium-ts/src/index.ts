@@ -1369,12 +1369,13 @@ export class Client {
   // §7.6.2 hard cap is 50 IDs per request; this method splits
   // larger sets transparently. Each returned envelope carries
   // status="ok" with manifest bytes, or status="error" with a
-  // §6.10 envelope. Partial failure does not throw.
+  // §6.10 envelope. Partial failure does not throw. The request
+  // selects no harness (§7.6.2), so the body carries only ids,
+  // session_id, and version_pins.
   async loadArtifacts(
     ids: string[],
     opts: {
       sessionID?: string;
-      harness?: string;
       versionPins?: Record<string, string>;
     } = {},
   ): Promise<BatchResult[]> {
@@ -1387,7 +1388,6 @@ export class Client {
       const chunk = ids.slice(i, i + cap);
       const body: Record<string, unknown> = { ids: chunk };
       if (opts.sessionID) body.session_id = opts.sessionID;
-      if (opts.harness) body.harness = opts.harness;
       if (opts.versionPins) {
         const subset: Record<string, string> = {};
         for (const id of chunk) {

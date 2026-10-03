@@ -391,6 +391,8 @@ describe("Client", () => {
 
   // Spec: §7.6.2 — loadArtifacts POSTs to /v1/artifacts:batchLoad
   // and surfaces per-item envelopes; partial failures don't throw.
+  // The request selects no harness, so the body carries only the
+  // allowlisted keys even when a caller passes a harness option.
   it("loadArtifacts returns per-item envelopes", async () => {
     let body = "";
     const fetcher: typeof fetch = async (_input, init) => {
@@ -404,8 +406,12 @@ describe("Client", () => {
       );
     };
     const c = new Client({ registry: "http://reg", fetcher });
-    const out = await c.loadArtifacts(["a", "b"]);
-    expect(JSON.parse(body).ids).toEqual(["a", "b"]);
+    // A stray harness option from an untyped caller never reaches the wire.
+    const out = await c.loadArtifacts(["a", "b"], {
+      sessionID: "s",
+      harness: "claude-code",
+    } as unknown as { sessionID: string });
+    expect(JSON.parse(body)).toEqual({ ids: ["a", "b"], session_id: "s" });
     expect(out.length).toBe(2);
     expect(out[0].status).toBe("ok");
     expect(out[1].status).toBe("error");
