@@ -40,11 +40,11 @@ func (c ClaudeCode) Adapt(ctx context.Context, src Source) ([]File, error) {
 	case "skill":
 		skillRoot := path.Join(".claude", "skills", name)
 		if len(src.SkillBytes) > 0 {
-			// Claude Code consumes only the agentskills.io subset
-			// (SKILL.md, not ARTIFACT.md). §4.3.4 — derive
-			// compatibility from runtime_requirements and
-			// sandbox_profile when the author omits it so the
-			// runtime constraints survive into SKILL.md.
+			// Spec: §4.3.4: like every adapter that writes a skill's
+			// SKILL.md, derive compatibility from runtime_requirements
+			// and sandbox_profile when the author omits it. The
+			// derivation runs before the §4.4.2 provenance rewrite, so
+			// the rewrite sees the derived line.
 			skill := deriveSkillCompatibility(src.SkillBytes, src.ArtifactBytes)
 			// §4.4.2 — rewrite imported provenance blocks into
 			// Claude Code <untrusted-data> regions so the host

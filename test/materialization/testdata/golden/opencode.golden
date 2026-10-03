@@ -18,6 +18,7 @@ Run the deploy pipeline for the named environment.
 
 === .opencode/skills/hello/SKILL.md ===
 ---
+compatibility: "Requires Python >=3.10"
 name: hello
 description: Greet a teammate warmly by name.
 ---

@@ -27,6 +27,9 @@ func (None) Adapt(ctx context.Context, src Source) ([]File, error) {
 		})
 	}
 	if len(src.SkillBytes) > 0 {
+		// Spec: §6.6, §6.7: none writes SKILL.md without translation, so it
+		// does not derive the §4.3.4 compatibility field. ARTIFACT.md, written
+		// above, carries runtime_requirements and sandbox_profile directly.
 		out = append(out, File{
 			Path:    path.Join(src.ArtifactID, "SKILL.md"),
 			Content: src.SkillBytes,

@@ -168,6 +168,12 @@ func claudePluginSkill(root string, src Source) []File {
 	name := lastSeg(src.ArtifactID)
 	dir := path.Join(root, "skills", name)
 	body := src.SkillBytes
+	if len(body) > 0 {
+		// Spec: §4.3.4, §7.8: the plugin's SKILL.md carries the derived
+		// compatibility line. The rule and ARTIFACT.md fallbacks below derive
+		// nothing, because §4.3.4 allocates the field only to a skill's SKILL.md.
+		body = deriveSkillCompatibility(body, src.ArtifactBytes)
+	}
 	if len(body) == 0 {
 		if frontmatterType(src.ArtifactBytes) == "rule" {
 			body = ruleSkillBody(src)

@@ -9,6 +9,7 @@ Run the deploy pipeline for the named environment.
 
 === .pi/skills/hello/SKILL.md ===
 ---
+compatibility: "Requires Python >=3.10"
 name: hello
 description: Greet a teammate warmly by name.
 ---

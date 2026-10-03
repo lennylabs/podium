@@ -11,11 +11,12 @@ import (
 const skillCompatibilityMaxChars = 500
 
 // deriveSkillCompatibility implements spec §4.3.4: when a skill's SKILL.md
-// omits compatibility, "the Podium adapter derives it from
-// runtime_requirements and sandbox_profile at materialization time for
-// harnesses that consume only the agentskills.io subset." Those harnesses read
-// SKILL.md but not ARTIFACT.md, so the runtime constraints declared in
-// ARTIFACT.md are otherwise invisible to them. The derived value is injected
+// omits compatibility, every harness adapter that writes a skill's SKILL.md
+// (§6.7) and every marketplace emitter that writes one (§7.8) derives it from
+// runtime_requirements and sandbox_profile at materialization time. The none
+// adapter writes SKILL.md without translation and derives nothing. A harness
+// reads SKILL.md but not ARTIFACT.md, so the runtime constraints declared in
+// ARTIFACT.md are otherwise invisible to it. The derived value is injected
 // as the first SKILL.md frontmatter line. skillBytes is returned unchanged
 // when the author already authored compatibility, when ARTIFACT.md carries
 // nothing to derive from, or when either manifest fails to parse.
