@@ -1,7 +1,7 @@
 # Proposal 0034: Correct the registry.yaml lookup path, the extends: re-ingest statement, and list the runtime-capability variables
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-02). Signed off as staged. OQ-1 resolved: the relayed D5, C30, and C23 decisions belong to proposals 0038, 0035, and 0036 and do not apply here.
+- Status: Implemented (2026-10-02). Signed off as staged. OQ-1 resolved: the relayed D5, C30, and C23 decisions belong to proposals 0038, 0035, and 0036 and do not apply here.
 - Date: 2026-10-02
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -43,23 +43,23 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §13.12 states the `PODIUM_CONFIG_FILE` lookup, the home fallback, and the `--config` override, and drops `/etc/podium/registry.yaml` from the intro and the sample header.
+- [x] **S1 · spec** — SPEC-1. §13.12 states the `PODIUM_CONFIG_FILE` lookup, the home fallback, and the `--config` override, and drops `/etc/podium/registry.yaml` from the intro and the sample header.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §4.6 and §4.7.6 state that a stored child version keeps its pin and that a new child version picks up a newer parent.
+- [x] **S2 · spec** — SPEC-2. §4.6 and §4.7.6 state that a stored child version keeps its pin and that a new child version picks up a newer parent.
       Levels: —. Depends on: —
-- [ ] **S3 · spec** — SPEC-3. §6.2 gains the runtime-variable rows, and §4.4.1 points at them.
+- [x] **S3 · spec** — SPEC-3. §6.2 gains the runtime-variable rows, and §4.4.1 points at them.
       Levels: —. Depends on: —
-- [ ] **S4 · code** — CODE-1. The `extends:` pin comment in `pkg/registry/ingest/ingest.go` matches the corrected §4.7.6.
+- [x] **S4 · code** — CODE-1. The `extends:` pin comment in `pkg/registry/ingest/ingest.go` matches the corrected §4.7.6.
       Levels: unit. Depends on: S2
-- [ ] **S5 · test** — TEST-1, TEST-2. The ingest unit test for an idempotent re-ingest after a newer live parent, and the corrected e2e skip reason that cites it. Bundled because the skip string names the TEST-1 test.
+- [x] **S5 · test** — TEST-1, TEST-2. The ingest unit test for an idempotent re-ingest after a newer live parent, and the corrected e2e skip reason that cites it. Bundled because the skip string names the TEST-1 test.
       Levels: unit, e2e. Depends on: S2
-- [ ] **S6 · test** — TEST-3. Unit, in-process, and e2e tests for the runtime variables.
+- [x] **S6 · test** — TEST-3. Unit, in-process, and e2e tests for the runtime variables.
       Levels: unit, integration, e2e. Depends on: S3
-- [ ] **S7 · test** — TEST-4. Unit and in-process tests for the `registry.yaml` lookup order and the missing-file refusal.
+- [x] **S7 · test** — TEST-4. Unit and in-process tests for the `registry.yaml` lookup order and the missing-file refusal.
       Levels: unit, integration. Depends on: S1
-- [ ] **S8 · docs** — DOC-1. `docs/reference/cli.md` and `docs/authoring/bundled-resources.md` list the variables, and `docs/deployment/vector-backends.md` says that `podium-server` has no `--config` option.
+- [x] **S8 · docs** — DOC-1. `docs/reference/cli.md` and `docs/authoring/bundled-resources.md` list the variables, and `docs/deployment/vector-backends.md` says that `podium-server` has no `--config` option.
       Levels: —. Depends on: S1, S3
-- [ ] **S9 · docs** — CL-1. `## [Unreleased]` `### Documentation` entries for the corrections.
+- [x] **S9 · docs** — CL-1. `## [Unreleased]` `### Documentation` entries for the corrections.
       Levels: —. Depends on: S1, S2, S3, S8
 
 **Ordering constraints.** The spec steps are independent of one another. Each test step cites the spec text its spec step lands, so it follows that step. DOC-1 restates SPEC-1 and SPEC-3, and CL-1 summarizes all three spec steps and the DOC-1 reference rows.
