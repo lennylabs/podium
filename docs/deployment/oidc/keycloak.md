@@ -115,7 +115,7 @@ A member of the `engineering` group sees the layer; a non-member does not.
 
 ## SCIM (optional)
 
-Keycloak does not ship a built-in SCIM server, but extensions exist (for example `keycloak-scim-server`). When one is installed, configure it to push user and group records to the registry's SCIM endpoint at `https://podium.acme.com/scim/v2`, authenticating with one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable. The registry mounts `/scim/v2/` only when that variable is set to a comma-separated list of accepted tokens, and returns 404 for every SCIM request otherwise. Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart.
+Keycloak does not ship a built-in SCIM server, but extensions exist (for example `keycloak-scim-server`). When one is installed, configure it to push user and group records to the registry's SCIM endpoint at `https://podium.acme.com/scim/v2`, authenticating with one of the bearer tokens listed in the registry's `PODIUM_SCIM_TOKENS` environment variable. The registry mounts `/scim/v2/` only when that variable is set to a comma-separated list of accepted tokens, and returns 404 for every SCIM request otherwise. Set `PODIUM_SCIM_STORE_PATH` to a writable file path so the pushed directory survives a restart. A set path that the registry cannot read, parse, or write refuses startup with `config.scim_store_unavailable`.
 
 For most Keycloak users, the OIDC `groups` claim is sufficient. Group changes apply on the user's next login.
 
