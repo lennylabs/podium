@@ -882,7 +882,7 @@ func TestClaudeMarketplace_FallbackBodiesDoNotDerive(t *testing.T) {
 	t.Parallel()
 	rule := Source{
 		ArtifactID:    "finance/house-rule",
-		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\nrule_mode: always\ndescription: Be careful.\nruntime_requirements:\n  python: \">=3.10\"\n---\n\nRule prose.\n"),
+		ArtifactBytes: []byte("---\ntype: rule\nversion: 1.0.0\nrule_mode: always\ndescription: Be careful.\nruntime_requirements:\n  python: \">=3.10\"\nsandbox_profile: read-only-fs\n---\n\nRule prose.\n"),
 		Plugin:        finPlugin("claude"),
 	}
 	out, err := ClaudeMarketplace{}.Component(context.Background(), rule)
@@ -895,7 +895,7 @@ func TestClaudeMarketplace_FallbackBodiesDoNotDerive(t *testing.T) {
 
 	skill := Source{
 		ArtifactID:    "finance/aggregate",
-		ArtifactBytes: artifactWithRuntime(""),
+		ArtifactBytes: artifactWithRuntime("read-only-fs"),
 		Plugin:        finPlugin("claude"),
 	}
 	out, err = ClaudeMarketplace{}.Component(context.Background(), skill)
