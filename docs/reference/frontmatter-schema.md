@@ -106,7 +106,7 @@ A `SKILL.md` carries the [agentskills.io](https://agentskills.io/specification) 
 | `name` | string | yes | 1–64 chars, lowercase Unicode alphanumeric and hyphens, no leading/trailing/consecutive hyphens, must match the parent directory name. |
 | `description` | string | yes | 1–1024 chars. Describes what the skill does and when to use it. |
 | `license` | string | no | License name or reference to a bundled license file. |
-| `compatibility` | string | no | ≤ 500 chars. Free-form environment notes. When it is omitted, the Claude Code adapter derives a string from `runtime_requirements` and `sandbox_profile` at materialization time; the other adapters copy `SKILL.md` unchanged and leave the field absent. |
+| `compatibility` | string | no | ≤ 500 chars. Free-form environment notes. When it is omitted, every harness adapter that writes a skill's `SKILL.md` derives a string from `runtime_requirements` and `sandbox_profile` at materialization time and adds it to the materialized `SKILL.md`. The `none` adapter copies `SKILL.md` unchanged and leaves the field absent. Published marketplace output carries the same line. |
 | `metadata` | map (string → string) | no | Open-ended map for client-specific extension. |
 | `allowed-tools` | list of strings | no | Experimental. Pre-approved tools, one per entry. A scalar fails to parse. |
 
