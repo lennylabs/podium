@@ -1,7 +1,7 @@
 # Proposal 0042: Filter the GET /v1/events change-event stream by the subscriber's §4.6 visibility at delivery time, and state the webhook receiver delivery scope
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-03). Signed off as staged. OQ-1 (keying receivers per routed tenant) goes to a separate follow-up proposal; DOC-1(d) documents the shared pool meanwhile. OQ-2: keep the drafted posture (an admin subscriber gets only its own §4.6 view; overrides stay explicit and audited). Sub-question: accept as drafted (the unverified free-form IdP label case), recorded as a follow-up.
+- Status: Implemented (2026-10-03). Signed off as staged. OQ-1 (keying receivers per routed tenant) goes to a separate follow-up proposal; DOC-1(d) documents the shared pool meanwhile. OQ-2: keep the drafted posture (an admin subscriber gets only its own §4.6 view; overrides stay explicit and audited). Sub-question: accept as drafted (the unverified free-form IdP label case), recorded as a follow-up.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -52,25 +52,25 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.6 gains the change-event stream visibility rule, §4.6 and §7.5.4 gain pointers, and §7.3.1 names §7.6 as the stream's home.
+- [x] **S1 · spec** — SPEC-1. §7.6 gains the change-event stream visibility rule, §4.6 and §7.5.4 gain pointers, and §7.3.1 names §7.6 as the stream's home.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. §7.3.2 states that the receiver fan-out applies no §4.6 or §7.6 filter.
+- [x] **S2 · spec** — SPEC-2. §7.3.2 states that the receiver fan-out applies no §4.6 or §7.6 filter.
       Levels: —. Depends on: —
-- [ ] **S3 · code** — CODE-1. `core.EventScope`, `EventAudience`, the `layerConfigs` split, and `TenantFor` land in `pkg/registry/core`.
+- [x] **S3 · code** — CODE-1. `core.EventScope`, `EventAudience`, the `layerConfigs` split, and `TenantFor` land in `pkg/registry/core`.
       Levels: unit. Depends on: S1
-- [ ] **S4 · code** — CODE-2, CODE-3, CODE-4. The emitter carries the scope, every publish site sets it, and `handleEvents` filters at delivery. Bundled because the `ingest.EventEmitter`, `Server.PublishEvent`, and `WithEventPublisher` signatures must change in one commit for `internal/serverboot` (`serverboot.go` and `reingest.go`) to compile.
+- [x] **S4 · code** — CODE-2, CODE-3, CODE-4. The emitter carries the scope, every publish site sets it, and `handleEvents` filters at delivery. Bundled because the `ingest.EventEmitter`, `Server.PublishEvent`, and `WithEventPublisher` signatures must change in one commit for `internal/serverboot` (`serverboot.go` and `reingest.go`) to compile.
       Levels: unit, integration, e2e. Depends on: S3
-- [ ] **S5 · test** — TEST-1. Core unit suite for the evaluator, the memo, and cancellation.
+- [x] **S5 · test** — TEST-1. Core unit suite for the evaluator, the memo, and cancellation.
       Levels: unit. Depends on: S3
-- [ ] **S6 · test** — TEST-2. In-process HTTP integration suite for `/v1/events` filtering and the unfiltered receiver.
+- [x] **S6 · test** — TEST-2. In-process HTTP integration suite for `/v1/events` filtering and the unfiltered receiver.
       Levels: integration. Depends on: S4
-- [ ] **S7 · test** — TEST-3. Trusted-headers end-to-end suite on the binary, including the standard-stack multi-tenant routing case.
+- [x] **S7 · test** — TEST-3. Trusted-headers end-to-end suite on the binary, including the standard-stack multi-tenant routing case.
       Levels: e2e. Depends on: S4
-- [ ] **S8 · docs** — DOC-1, DOC-2. The HTTP API reference and the harness and SDK consumer pages describe the filtered stream and the receiver delivery scope. Bundled because the passages describe the stream delivery rule and its receiver counterpart, and one reader reviews them together. Land S8 in the same pull request as S4 so no released build documents behavior it lacks.
+- [x] **S8 · docs** — DOC-1, DOC-2. The HTTP API reference and the harness and SDK consumer pages describe the filtered stream and the receiver delivery scope. Bundled because the passages describe the stream delivery rule and its receiver counterpart, and one reader reviews them together. Land S8 in the same pull request as S4 so no released build documents behavior it lacks.
       Levels: —. Depends on: S4
-- [ ] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, and `Documentation` entries.
+- [x] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, and `Documentation` entries.
       Levels: —. Depends on: S4
-- [ ] **S10 · docs** — MV-1. Manual-validation scenario S83.
+- [x] **S10 · docs** — MV-1. Manual-validation scenario S83.
       Levels: manual. Depends on: S4
 
 **Ordering constraints.** S1 and S2 land the rule every later step cites. S3 precedes S4 because S4 constructs `core.EventScope`. S5 may proceed in parallel with S4. S6 and S7 need the server wiring from S4.
