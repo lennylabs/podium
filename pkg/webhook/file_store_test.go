@@ -2,6 +2,7 @@ package webhook_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -89,7 +90,9 @@ func TestFileStore_DeletePersists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "webhooks.json")
 	s, _ := webhook.LoadFileStore(path)
-	_ = s.Put(context.Background(), webhook.Receiver{ID: "x", TenantID: "default"})
+	if err := s.Put(context.Background(), webhook.Receiver{ID: "x", TenantID: "default", URL: "https://example/hook"}); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
 	if err := s.Delete(context.Background(), "default", "x"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -105,9 +108,15 @@ func TestFileStore_ListByTenant(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "webhooks.json")
 	s, _ := webhook.LoadFileStore(path)
-	_ = s.Put(context.Background(), webhook.Receiver{ID: "a", TenantID: "default"})
-	_ = s.Put(context.Background(), webhook.Receiver{ID: "b", TenantID: "default"})
-	_ = s.Put(context.Background(), webhook.Receiver{ID: "c", TenantID: "other"})
+	for _, r := range []webhook.Receiver{
+		{ID: "a", TenantID: "default", URL: "https://example/hook"},
+		{ID: "b", TenantID: "default", URL: "https://example/hook"},
+		{ID: "c", TenantID: "other", URL: "https://example/hook"},
+	} {
+		if err := s.Put(context.Background(), r); err != nil {
+			t.Fatalf("Put %s: %v", r.ID, err)
+		}
+	}
 	got, _ := s.List(context.Background(), "default")
 	if len(got) != 2 {
 		t.Errorf("list len = %d, want 2", len(got))
@@ -115,6 +124,42 @@ func TestFileStore_ListByTenant(t *testing.T) {
 	other, _ := s.List(context.Background(), "other")
 	if len(other) != 1 || other[0].ID != "c" {
 		t.Errorf("other tenant list = %+v", other)
+	}
+}
+
+// Spec: §7.3.2 — FileStore.Put refuses a receiver with an empty URL,
+// tenant, or ID, as MemoryStore.Put does, and persists nothing for it.
+func TestFileStore_PutRejectsIncompleteReceiver(t *testing.T) {
+	t.Parallel()
+	cases := map[string]webhook.Receiver{
+		"empty URL":    {ID: "r1", TenantID: "acme"},
+		"empty tenant": {ID: "r1", URL: "https://example/hook"},
+		"empty ID":     {TenantID: "acme", URL: "https://example/hook"},
+	}
+	for name, rec := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "webhooks.json")
+			s, err := webhook.LoadFileStore(path)
+			must(t, err)
+			putErr := s.Put(context.Background(), rec)
+			reloaded, err := webhook.LoadFileStore(path)
+			must(t, err)
+			got, err := reloaded.List(context.Background(), rec.TenantID)
+			must(t, err)
+			if !errors.Is(putErr, webhook.ErrInvalidConfig) || len(got) != 0 {
+				t.Errorf("Put err = %v, persisted = %+v; want ErrInvalidConfig and nothing persisted", putErr, got)
+			}
+		})
+	}
+}
+
+// must fails the test on a setup error. It keeps each case's checks in
+// one combined assertion.
+func must(t *testing.T, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 

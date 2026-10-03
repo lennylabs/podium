@@ -111,8 +111,14 @@ func (f *FileStore) Get(_ context.Context, tenantID, id string) (Receiver, error
 	return r, nil
 }
 
-// Put writes a receiver and persists the file atomically.
+// Put writes a receiver and persists the file atomically. A receiver
+// with an empty URL, TenantID, or ID is refused with ErrInvalidConfig,
+// matching MemoryStore.Put, so no write path stores a row that no
+// tenant owns.
 func (f *FileStore) Put(_ context.Context, r Receiver) error {
+	if r.URL == "" || r.TenantID == "" || r.ID == "" {
+		return ErrInvalidConfig
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.receivers[receiverKey(r.TenantID, r.ID)] = r
