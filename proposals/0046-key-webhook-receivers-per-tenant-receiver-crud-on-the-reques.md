@@ -1,7 +1,7 @@
 # Proposal 0046: Key webhook receivers per tenant: receiver CRUD on the request's routed tenant and delivery on the event's scope tenant (§7.3.2)
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), decided on the user's behalf under the overnight authorization. Signed off as staged. OQ-1: accept the documented re-registration on upgrade for every deployment that sets PODIUM_WEBHOOK_STORE_PATH, single-tenant included; a load-time rewrite of "default" rows would be a migration path that code-best-practices.md disallows pre-1.0, and the operator action is stated in the CHANGELOG.
+- Status: Applied to spec (2026-10-03). The approval was decided on the user's behalf under the overnight authorization, and the staged edits were signed off as written. OQ-1: accept the documented re-registration on upgrade for every deployment that sets PODIUM_WEBHOOK_STORE_PATH, single-tenant included; a load-time rewrite of "default" rows would be a migration path that code-best-practices.md disallows pre-1.0, and the operator action is stated in the CHANGELOG.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
