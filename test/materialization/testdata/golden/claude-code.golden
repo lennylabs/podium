@@ -74,6 +74,7 @@ Enable strict type-checking in TypeScript files.
 
 === .claude/skills/hello/SKILL.md ===
 ---
+compatibility: "Requires Python >=3.10"
 name: hello
 description: Greet a teammate warmly by name.
 ---

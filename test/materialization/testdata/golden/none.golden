@@ -49,6 +49,8 @@ Guard before each tool use.
 ---
 type: skill
 version: 1.0.0
+runtime_requirements:
+  python: ">=3.10"
 ---
 
 Use this skill to greet a teammate.
