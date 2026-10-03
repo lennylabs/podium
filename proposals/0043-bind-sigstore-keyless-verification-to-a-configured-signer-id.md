@@ -1,7 +1,7 @@
 # Proposal 0043: Bind Sigstore-keyless verification to a configured signer identity, to a transparency-log inclusion proof, and to a timestamp authority's attested time
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-03), decided on the user's behalf under the overnight authorization. Redesigned for Rekor v2 (inclusion proof to a signed checkpoint, RFC 3161 TSA time, trusted_root.json; podium-mcp drops sigstore-keyless), then re-reviewed to convergence (5 rounds). The recorded gap (Sign's outbound calls have no deadline) is a separate follow-up fix.
+- Status: Applied to spec (2026-10-03). Approval was decided on the user's behalf under the overnight authorization. Redesigned for Rekor v2 (inclusion proof to a signed checkpoint, RFC 3161 TSA time, trusted_root.json; podium-mcp drops sigstore-keyless), then re-reviewed to convergence (5 rounds). The recorded gap (Sign's outbound calls have no deadline) is a separate follow-up fix.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
