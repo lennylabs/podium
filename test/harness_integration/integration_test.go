@@ -21,6 +21,7 @@ package harness_integration
 import (
 	"bytes"
 	"context"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -59,9 +60,13 @@ func ruleRegistry() []testharness.WriteTreeOption {
 	}
 }
 
+// skillRegistry declares runtime_requirements so the synced SKILL.md carries a
+// derived compatibility line in every harness output. The fixture omits
+// sandbox_profile: its §6.7.1 cell is ✗ for codex, so the §6.9 guard would
+// fail `podium sync --harness codex` before the agent turn.
 func skillRegistry() []testharness.WriteTreeOption {
 	return []testharness.WriteTreeOption{
-		{Path: "skills/weather/ARTIFACT.md", Content: "---\ntype: skill\nversion: 1.0.0\n---\n\nWeather skill.\n"},
+		{Path: "skills/weather/ARTIFACT.md", Content: "---\ntype: skill\nversion: 1.0.0\nruntime_requirements:\n  python: \">=3.10\"\n---\n\nWeather skill.\n"},
 		{Path: "skills/weather/SKILL.md", Content: "---\nname: weather\ndescription: Reports a special code when the weather skill is invoked.\n---\n\nWhen the user asks to run the weather skill, output exactly: " + skillMarker + "\n"},
 	}
 }
@@ -356,9 +361,10 @@ type behavior struct {
 	registry   []testharness.WriteTreeOption
 	prompt     string
 	marker     string
-	sideEffect string            // relative file to read instead of stdout (hooks)
-	run        []string          // harnesses that materialize+consume this type
-	skip       map[string]string // harness -> reason it is not exercised
+	sideEffect string                             // relative file to read instead of stdout (hooks)
+	checkSync  func(t *testing.T, project string) // optional assertion on the synced tree before the agent turn
+	run        []string                           // harnesses that materialize+consume this type
+	skip       map[string]string                  // harness -> reason it is not exercised
 }
 
 // behaviors covers the artifact types reachable through a single headless agent
@@ -376,7 +382,8 @@ var behaviors = []behavior{
 	{
 		typ: "skill", registry: skillRegistry(),
 		prompt: "Run the weather skill now.", marker: skillMarker,
-		run: []string{"claude-code", "cursor", "codex", "gemini"},
+		checkSync: assertSkillCompatibility,
+		run:       []string{"claude-code", "cursor", "codex", "gemini"},
 	},
 	{
 		typ: "command", registry: commandRegistry(),
@@ -439,6 +446,9 @@ func TestHarnessArtifactTypes(t *testing.T) {
 						t.Skipf("%s/%s: not applicable", harness, b.typ)
 					}
 					project := syncProject(t, harness, b.registry)
+					if b.checkSync != nil {
+						b.checkSync(t, project)
+					}
 					res, ok := runExternal(t, project, os.Environ(), 180*time.Second, d.bin, d.agentExec(b.prompt)...)
 					if !ok {
 						t.Skipf("%s: binary %q not installed", harness, d.bin)
@@ -462,6 +472,46 @@ func TestHarnessArtifactTypes(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// assertSkillCompatibility checks that the synced weather SKILL.md carries the
+// compatibility field derived from the fixture's runtime_requirements. The
+// authored SKILL.md has no compatibility line, so its presence proves the
+// harness adapter derived it. Each harness writes the skill under its own
+// directory, so the check locates skills/weather/SKILL.md by walking the tree.
+//
+// Spec: §4.3.4 (every harness adapter that writes SKILL.md derives compatibility).
+// Spec: §6.7 (per-harness SKILL.md target paths).
+func assertSkillCompatibility(t *testing.T, project string) {
+	t.Helper()
+	var found []string
+	err := filepath.WalkDir(project, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && d.Name() == ".git" {
+			return filepath.SkipDir
+		}
+		if !d.IsDir() && strings.HasSuffix(filepath.ToSlash(path), "/weather/SKILL.md") {
+			found = append(found, path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk synced project: %v", err)
+	}
+	if len(found) == 0 {
+		t.Fatalf("no synced weather SKILL.md under %s", project)
+	}
+	for _, path := range found {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		if !bytes.Contains(b, []byte("compatibility:")) {
+			t.Errorf("%s: derived compatibility field absent:\n%s", path, b)
+		}
 	}
 }
 
