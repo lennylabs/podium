@@ -291,6 +291,62 @@ func TestReadYAMLConfig_MissingFileIsNoOp(t *testing.T) {
 	}
 }
 
+// Spec: §13.12 — with PODIUM_CONFIG_FILE unset, the registry reads
+// ~/.podium/registry.yaml. HOME points at a temporary directory so the test
+// reads a fixture rather than the developer's own config.
+func TestReadYAMLConfig_FallsBackToHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("PODIUM_CONFIG_FILE", "")
+	t.Setenv("HOME", home)
+	writeHomeRegistryYAML(t, home, "registry:\n  layer_path: /from/home\n")
+
+	y, err := readYAMLConfig()
+	if err != nil {
+		t.Fatalf("readYAMLConfig: %v", err)
+	}
+	if y == nil {
+		t.Fatal("yamlConfig nil, want the file under HOME")
+	}
+	if y.LayerPath != "/from/home" {
+		t.Errorf("LayerPath = %q, want /from/home", y.LayerPath)
+	}
+}
+
+// Spec: §13.12 — a PODIUM_CONFIG_FILE that names a missing file is refused,
+// and the registry does not fall back to ~/.podium/registry.yaml.
+// Spec: §13.10 — the operator named a config, so its absence is a startup
+// error rather than a cue to bootstrap standalone defaults.
+func TestLoadBootConfig_MissingConfigFileRefuses(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	writeHomeRegistryYAML(t, home, "registry:\n  layer_path: /from/home\n")
+	missing := filepath.Join(t.TempDir(), "missing.yaml")
+	t.Setenv("PODIUM_CONFIG_FILE", missing)
+
+	cfg, err := loadBootConfig()
+	if cfg != nil {
+		t.Errorf("config = %+v, want nil", cfg)
+	}
+	if err == nil {
+		t.Fatal("loadBootConfig error = nil, want a missing-file refusal")
+	}
+	if msg := err.Error(); !strings.Contains(msg, "does not exist") || !strings.Contains(msg, missing) {
+		t.Errorf("error = %q, want it to say %q does not exist", msg, missing)
+	}
+}
+
+// writeHomeRegistryYAML writes body to <home>/.podium/registry.yaml.
+func writeHomeRegistryYAML(t *testing.T, home, body string) {
+	t.Helper()
+	dir := filepath.Join(home, ".podium")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "registry.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+}
+
 // Spec: §13.10 — readYAMLConfig parses the on-disk file, including
 // nested store / object_store / read_only blocks.
 func TestReadYAMLConfig_ParsesFile(t *testing.T) {

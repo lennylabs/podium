@@ -101,7 +101,7 @@ runtime_requirements:
   system_packages: ["jq", "curl"]
 ```
 
-Adapters surface these requirements to the host where the harness's format carries them; a format that keeps only a fixed field set, such as the Codex agent TOML, drops them. A host that advertises its runtime capabilities to the Podium MCP server, or opts into enforcement, refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable`. A host that advertises no capabilities and does not opt in receives the requirement and proceeds, and `podium sync` materializes the artifact without checking it.
+Adapters surface these requirements to the host where the harness's format carries them; a format that keeps only a fixed field set, such as the Codex agent TOML, drops them. A host that advertises its runtime capabilities to the Podium MCP server, or opts into enforcement, refuses a `load_artifact` it cannot satisfy with `materialize.runtime_unavailable`. A host that advertises no capabilities and does not opt in receives the requirement and proceeds, and `podium sync` materializes the artifact without checking it. `PODIUM_HOST_PYTHON`, `PODIUM_HOST_NODE`, and `PODIUM_HOST_PACKAGES` advertise capabilities, `PODIUM_ENFORCE_RUNTIME_REQUIREMENTS` opts into enforcement, and `PODIUM_IGNORE_RUNTIME_REQUIREMENTS` overrides the refusal; the [environment-variable reference](../reference/cli#environment-variables) gives each variable's format and precedence.
 
 The `sandbox_profile:` field declares execution constraints:
 

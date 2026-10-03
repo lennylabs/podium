@@ -84,3 +84,38 @@ func TestCheckRuntimeRequirements_EmptyAlwaysSatisfied(t *testing.T) {
 		t.Errorf("empty map req: %v", err)
 	}
 }
+
+// Spec: §4.4.1 — a node requirement is checked against the host's
+// advertised Node version: an older host and a host with no Node are
+// refused with ErrRuntimeUnavailable, and the refusal names node.
+func TestCheckRuntimeRequirements_Node(t *testing.T) {
+	t.Parallel()
+	req := map[string]any{"node": ">=20"}
+	cases := []struct {
+		name    string
+		host    string
+		refused bool
+	}{
+		{name: "older host refused", host: "18.19.0", refused: true},
+		{name: "satisfying host admitted", host: "20.11.1", refused: false},
+		{name: "no host node refused", host: "", refused: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := CheckRuntimeRequirements(req, HostCapabilities{Node: tc.host})
+			if !tc.refused {
+				if err != nil {
+					t.Errorf("host node %q should satisfy >=20: %v", tc.host, err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrRuntimeUnavailable) {
+				t.Fatalf("host node %q: err = %v, want ErrRuntimeUnavailable", tc.host, err)
+			}
+			if !strings.Contains(err.Error(), "node") {
+				t.Errorf("refusal should name node: %v", err)
+			}
+		})
+	}
+}

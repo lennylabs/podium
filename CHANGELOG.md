@@ -757,6 +757,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   artifacts on one event to merge into a single entry. Each artifact keeps its
   own marker block, and the `mcp-server` row states the matching consequence for
   a name already present in the file.
+- §13.12 now states the `registry.yaml` lookup. The registry reads the file
+  that `PODIUM_CONFIG_FILE` names, and reads `~/.podium/registry.yaml` when the
+  variable is unset. `podium serve --config <path>` sets the variable for the
+  process. The spec no longer names `/etc/podium/registry.yaml`, which no code
+  reads. The CLI reference gains a `PODIUM_CONFIG_FILE` row.
+- §4.6 and §4.7.6 now state that an `extends:` child picks up a newer parent
+  when it is published at a new `version:`, and that a re-ingest of a stored
+  child version's unchanged bytes is idempotent and keeps the stored pin and
+  folded fields. This corrects the spec text and changes no behavior.
+- §6.2, the CLI reference, and `docs/authoring/bundled-resources.md` list the
+  runtime-gate variables `podium-mcp` reads: `PODIUM_HOST_PYTHON`,
+  `PODIUM_HOST_NODE`, `PODIUM_HOST_PACKAGES`,
+  `PODIUM_ENFORCE_RUNTIME_REQUIREMENTS`, and
+  `PODIUM_IGNORE_RUNTIME_REQUIREMENTS`.
 
 ## [0.4.0] - 2026-09-05
 

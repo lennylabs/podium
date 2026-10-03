@@ -614,6 +614,52 @@ func TestBundled_RuntimeUnavailablePython(t *testing.T) {
 	}
 }
 
+// Spec: §6.2 / §4.4.1 — PODIUM_ENFORCE_RUNTIME_REQUIREMENTS=true activates
+// the runtime gate with no PODIUM_HOST_* capability advertised, so a python
+// requirement is refused and nothing materializes.
+// PODIUM_IGNORE_RUNTIME_REQUIREMENTS=true takes precedence over the enforce
+// flag: the artifact materializes and the bypass warning reaches stderr.
+func TestBundled_RuntimeEnforceAndIgnoreFlags(t *testing.T) {
+	t.Parallel()
+	id := "finance/close-reporting/run-variance-analysis"
+	srv := startServer(t, writeRegistry(t, map[string]string{
+		id + "/ARTIFACT.md": brSkillArtifactPy, // requires python >=3.10
+		id + "/SKILL.md":    brSkillMD("run-variance-analysis", brVarianceDesc, "Run the analysis.\n"),
+	}))
+	load := func(t *testing.T, flags ...string) (map[string]any, cliResult) {
+		t.Helper()
+		env := append(mcpServerEnv(t, srv.BaseURL), "PODIUM_HARNESS=none", "PODIUM_MATERIALIZE_ROOT="+t.TempDir())
+		res := mcpExec(t, append(env, flags...), toolCall(1, "load_artifact", map[string]any{"id": id}))
+		return rpcResult(t, res.Stdout, 1), res
+	}
+
+	t.Run("enforce refuses without host capabilities", func(t *testing.T) {
+		t.Parallel()
+		result, _ := load(t, "PODIUM_ENFORCE_RUNTIME_REQUIREMENTS=true")
+		errStr, _ := result["error"].(string)
+		if !strings.Contains(errStr, "materialize.runtime_unavailable") {
+			t.Errorf("expected materialize.runtime_unavailable, got result=%v", result)
+		}
+		if paths, _ := result["materialized_at"].([]any); len(paths) != 0 {
+			t.Errorf("refused artifact should not materialize: %v", paths)
+		}
+	})
+
+	t.Run("ignore wins over enforce", func(t *testing.T) {
+		t.Parallel()
+		result, res := load(t, "PODIUM_ENFORCE_RUNTIME_REQUIREMENTS=true", "PODIUM_IGNORE_RUNTIME_REQUIREMENTS=true")
+		if e, ok := result["error"]; ok && e != nil {
+			t.Fatalf("ignore should bypass the enforced gate: %v", e)
+		}
+		if paths, _ := result["materialized_at"].([]any); len(paths) == 0 {
+			t.Errorf("expected materialized_at paths: %v", result)
+		}
+		if !strings.Contains(res.Stderr, "PODIUM_IGNORE_RUNTIME_REQUIREMENTS bypassing runtime check") {
+			t.Errorf("expected the bypass warning on stderr:\n%s", res.Stderr)
+		}
+	})
+}
+
 // a host missing a required system package refuses
 // with materialize.runtime_unavailable naming the package (§4.4.1).
 func TestBundled_RuntimeUnavailableSystemPackage(t *testing.T) {
