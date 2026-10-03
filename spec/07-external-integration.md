@@ -161,7 +161,7 @@ Schema:
 }
 ```
 
-Receivers are configured per org (URL + HMAC secret).
+Receivers are configured per org (URL + HMAC secret). The tenant-wide receiver fan-out does not apply the §4.6 layer visibility evaluator or the §7.6 change-event stream visibility rule: a receiver carries no caller identity, and its event filter is the only narrowing applied to the events it receives.
 
 **The receiver object.** The receiver CRUD endpoints return a receiver as the object `{id, url, secret, event_filter, disabled, failure_count, last_delivery, last_failure, created_at, debounce}`, under §7.2.1. `debounce` is the trailing window written in the same duration string the request body accepts, so a client returns a receiver it read without converting the value, and it is omitted on a receiver that sets none. `secret` carries the receiver's HMAC secret on the creating response alone, so the operator records it once; the list, the single read, and the update return it masked. The object carries no tenant identifier, under §7.2.1.
 
