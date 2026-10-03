@@ -842,6 +842,58 @@ func TestPublishing_WorkspacePublishFailureExits1(t *testing.T) {
 	}
 }
 
+// Each on_error list of a kind: workspace target receives the variables of the
+// phase it cleans up. The failing phase's only command exits 3, and its
+// on_error command writes the variables to the onerror-ran marker.
+// prepare_on_error runs before materialization, so it lacks $PODIUM_CHANGED
+// and the target carries no sync.lock. publish_on_error runs after the first
+// sync into an empty target, so it receives $PODIUM_CHANGED=true and the
+// sync.lock is present.
+//
+// Every run blanks the variables under test, so an ambient value in the
+// developer's shell can neither satisfy nor break an assertion.
+//
+// Spec: §7.5.2
+func TestPublishing_WorkspaceTargetOnErrorVariables(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		failPhase  string
+		changed    string
+		wantStderr string
+		wantLock   bool
+	}{
+		{failPhase: "prepare", changed: "unset", wantStderr: "prepare[0]", wantLock: false},
+		{failPhase: "publish", changed: "true", wantStderr: "publish[0]", wantLock: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.failPhase, func(t *testing.T) {
+			t.Parallel()
+			reg := writePublishRegistry(t)
+			ws := t.TempDir()
+			target := filepath.Join(ws, "out", "claude")
+			cfg := writeSyncConfigWorkspaceWorkflow(t, ws, reg, target, tc.failPhase)
+			env := []string{"PODIUM_CHANGED=", "PODIUM_OUTPUT_ID=", "PODIUM_TARGET_ID=", "PODIUM_WORKDIR=", "PODIUM_REGISTRY="}
+
+			res := runPodium(t, "", env, "sync", "--config", cfg)
+			if res.Exit != 1 {
+				t.Fatalf("sync --config (failing workspace %s) exit=%d, want 1\nstdout=%s\nstderr=%s", tc.failPhase, res.Exit, res.Stdout, res.Stderr)
+			}
+			if !strings.Contains(res.Stderr, tc.wantStderr) {
+				t.Errorf("stderr does not name the failed command %q:\n%s", tc.wantStderr, res.Stderr)
+			}
+			assertWorkflowVars(t, filepath.Join(ws, "onerror-ran"),
+				[]string{target, "claude-workspace", filepath.Clean(reg), tc.changed, "unset"})
+			_, err := os.Stat(filepath.Join(target, ".podium", "sync.lock"))
+			if tc.wantLock && err != nil {
+				t.Errorf("the materialization must complete before the publish phase: %v", err)
+			}
+			if !tc.wantLock && !os.IsNotExist(err) {
+				t.Errorf("a prepare failure must abort before materialization (stat err=%v)", err)
+			}
+		})
+	}
+}
+
 // An explicit --config path that does not exist is a config error and exits 2.
 func TestPublishing_MissingConfigExits2(t *testing.T) {
 	t.Parallel()
