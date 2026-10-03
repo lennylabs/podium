@@ -881,7 +881,7 @@ prepare (operator commands)  ->  render (Podium)  ->  publish (operator commands
 - `$PODIUM_COMMIT_MESSAGE`: rendered from `commit_message` with the change count and timestamp.
 - `$PODIUM_CHANGED`: whether the render altered the bytes of the checkout, as §7.5.2 defines for both target kinds.
 - `$PODIUM_CHANGE_SUMMARY`: a path to a JSON file describing the changed artifacts.
-- The registry URL, the publishing identity, and the harness set.
+- `$PODIUM_REGISTRY`, `$PODIUM_IDENTITY`, `$PODIUM_HARNESSES`: the registry source (a URL or a filesystem path, as §7.5.2 defines), the publishing identity, and the comma-separated harness set.
 
 **Execution semantics.** A command is an argv list under `run:`, executed directly without a shell, or a string under `sh:`, executed through `sh -c`. The pipeline inherits the ambient environment of the `podium sync` process and adds the injected variables, because git authentication relies on `SSH_AUTH_SOCK`, `GH_TOKEN`, and similar. The pipeline fails fast on the first non-zero exit, with per-command `continue_on_error`, `timeout`, and `skip_if_no_changes`, and an optional per-phase `on_error` cleanup list. `--dry-run` renders into a temporary directory and prints each command with variables substituted without running the `publish` phase. `--check` validates the config only.
 
