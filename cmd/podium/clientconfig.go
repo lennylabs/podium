@@ -130,16 +130,9 @@ func resolveProfiles(scopes []clientScope) map[string]profileResolution {
 	return out
 }
 
-// configClientShow prints the merged sync.yaml with per-key provenance
-// for the active workspace. spec: §7.7 (podium config show).
-func configClientShow(asJSON bool, explain string) int {
-	cwd, _ := os.Getwd()
-	home, _ := os.UserHomeDir()
-	return configClientShowAt(cwd, home, asJSON, explain)
-}
-
-// configClientShowAt is the testable core of configClientShow: it takes
-// the working directory and home directory explicitly.
+// configClientShowAt prints the merged sync.yaml with per-key provenance
+// for the workspace at cwd. It takes the working directory and home directory
+// explicitly so tests can drive it. spec: §7.7 (podium config show).
 func configClientShowAt(cwd, home string, asJSON bool, explain string) int {
 	scopes, ws, err := loadClientScopes(cwd, home)
 	if err != nil {

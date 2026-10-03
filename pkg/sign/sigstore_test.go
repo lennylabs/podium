@@ -165,10 +165,6 @@ func (h *trustHarness) fakeFulcioRekor(t *testing.T, opts ...fakeOpt) *httptest.
 	mux.HandleFunc("/api/v1/log/entries", func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodPost:
-			if cfg.rekorFail {
-				http.Error(w, "rekor offline", http.StatusServiceUnavailable)
-				return
-			}
 			idx := atomic.AddInt64(&h.rekorEntries, 1)
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				fmt.Sprintf("uuid-%d", idx): map[string]any{
@@ -190,14 +186,12 @@ func (h *trustHarness) fakeFulcioRekor(t *testing.T, opts ...fakeOpt) *httptest.
 
 type fakeConfig struct {
 	fulcioFail        bool
-	rekorFail         bool
 	rekorMissingIndex bool
 }
 
 type fakeOpt func(*fakeConfig)
 
 func withFulcioFail() fakeOpt        { return func(c *fakeConfig) { c.fulcioFail = true } }
-func withRekorFail() fakeOpt         { return func(c *fakeConfig) { c.rekorFail = true } }
 func withRekorMissingIndex() fakeOpt { return func(c *fakeConfig) { c.rekorMissingIndex = true } }
 
 // fakeOIDCToken builds a JWT with no signature; only the payload is

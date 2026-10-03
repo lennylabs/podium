@@ -300,7 +300,6 @@ type blockingObjects struct {
 	gets          int
 	honorContext  bool
 	release       chan struct{}
-	firstKeyBlock bool
 }
 
 func (b *blockingObjects) Get(ctx context.Context, key string) ([]byte, error) {

@@ -138,7 +138,7 @@ func TestDomainShow_FlagsAfterPositional(t *testing.T) {
 
 	// The path is optional here, so an omitted positional is not an error:
 	// the request carries no path and the command exits 0.
-	out = captureStdout(t, func() { rc = domainShow([]string{"--registry", ts.URL, "--json"}) })
+	_ = captureStdout(t, func() { rc = domainShow([]string{"--registry", ts.URL, "--json"}) })
 	if rc != 0 {
 		t.Fatalf("pathless domainShow rc = %d, want 0", rc)
 	}
