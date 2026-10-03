@@ -1,7 +1,7 @@
 # Proposal 0035: Refuse startup on an unusable SCIM store path, on an unopenable audit sink while anchoring, and on an unusable or shared audit anchor key, and specify the SCIM and anchor variables
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-02). Signed off as staged, including the OQ-1 decision: with anchoring enabled, an audit file sink that cannot be opened refuses startup with config.audit_sink_unavailable; an http(s) sink never refuses; the interval-0 warning is unchanged.
+- Status: Implemented (2026-10-02). Signed off as staged, including the OQ-1 decision: with anchoring enabled, an audit file sink that cannot be opened refuses startup with config.audit_sink_unavailable; an http(s) sink never refuses; the interval-0 warning is unchanged.
 - Date: 2026-10-02
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -50,37 +50,37 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §13.12 Identity provider table gains the `PODIUM_SCIM_TOKENS` and `PODIUM_SCIM_STORE_PATH` rows and defines `config.scim_store_unavailable`.
+- [x] **S1 · spec** — SPEC-1. §13.12 Identity provider table gains the `PODIUM_SCIM_TOKENS` and `PODIUM_SCIM_STORE_PATH` rows and defines `config.scim_store_unavailable`.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-3. §13.12 gains the "Audit anchoring" table, which specifies `PODIUM_AUDIT_LOG_PATH`, and defines `config.audit_sink_unavailable`, `config.audit_anchor_key_unavailable`, and `config.audit_anchor_key_shared`.
+- [x] **S2 · spec** — SPEC-3. §13.12 gains the "Audit anchoring" table, which specifies `PODIUM_AUDIT_LOG_PATH`, and defines `config.audit_sink_unavailable`, `config.audit_anchor_key_unavailable`, and `config.audit_anchor_key_shared`.
       Levels: —. Depends on: —
-- [ ] **S3 · spec** — SPEC-2. §6.3.1 gains the "Receiver and persistence" paragraph.
+- [x] **S3 · spec** — SPEC-2. §6.3.1 gains the "Receiver and persistence" paragraph.
       Levels: —. Depends on: S1
-- [ ] **S4 · spec** — SPEC-4. §8.6 gains the "Local chain-head anchoring" paragraph.
+- [x] **S4 · spec** — SPEC-4. §8.6 gains the "Local chain-head anchoring" paragraph.
       Levels: —. Depends on: S2
-- [ ] **S5 · code** — CODE-1. `LoadFileStore` probes the parent directory for writability.
+- [x] **S5 · code** — CODE-1. `LoadFileStore` probes the parent directory for writability.
       Levels: unit. Depends on: S1
-- [ ] **S6 · test** — TEST-1. `pkg/scim` load and probe table test.
+- [x] **S6 · test** — TEST-1. `pkg/scim` load and probe table test.
       Levels: unit. Depends on: S5
-- [ ] **S7 · code** — CODE-2. `serverboot` returns `config.scim_store_unavailable` through `openSCIMStore` in place of the in-memory fallback.
+- [x] **S7 · code** — CODE-2. `serverboot` returns `config.scim_store_unavailable` through `openSCIMStore` in place of the in-memory fallback.
       Levels: unit, e2e. Depends on: S1, S3, S5
-- [ ] **S8 · code** — CODE-3, TEST-2. `openAuditSink` returns a file-sink open failure, `serverboot` loads the anchor key early through `loadAnchorSigner`, refuses an unopenable file sink, an unusable key, or a shared key, corrects the two comments, and the serverboot unit tests are updated and extended. Bundled because the CODE-3 signature changes break the compile of the existing tests TEST-2 rewrites.
+- [x] **S8 · code** — CODE-3, TEST-2. `openAuditSink` returns a file-sink open failure, `serverboot` loads the anchor key early through `loadAnchorSigner`, refuses an unopenable file sink, an unusable key, or a shared key, corrects the two comments, and the serverboot unit tests are updated and extended. Bundled because the CODE-3 signature changes break the compile of the existing tests TEST-2 rewrites.
       Levels: unit, integration. Depends on: S2, S4, S7
-- [ ] **S9 · test** — TEST-3. End-to-end SCIM refusal test and the nested-path extension of the persistence test.
+- [x] **S9 · test** — TEST-3. End-to-end SCIM refusal test and the nested-path extension of the persistence test.
       Levels: e2e. Depends on: S5, S7
-- [ ] **S10 · test** — TEST-4. End-to-end anchor-sink and anchor-key refusal tests and negative controls, and the journey-test comment fix.
+- [x] **S10 · test** — TEST-4. End-to-end anchor-sink and anchor-key refusal tests and negative controls, and the journey-test comment fix.
       Levels: e2e. Depends on: S8, S9
-- [ ] **S11 · code** — CODE-4. The new codes become §6.10 matrix cells. Placed after S9 and S10 because `matrix-audit` fails on a cell that has no `// Matrix:` annotated test.
+- [x] **S11 · code** — CODE-4. The new codes become §6.10 matrix cells. Placed after S9 and S10 because `matrix-audit` fails on a cell that has no `// Matrix:` annotated test.
       Levels: unit (matrix-audit). Depends on: S9, S10
-- [ ] **S12 · docs** — DOC-1. `docs/reference/cli.md` environment rows and `docs/reference/error-codes.md` code rows.
+- [x] **S12 · docs** — DOC-1. `docs/reference/cli.md` environment rows and `docs/reference/error-codes.md` code rows.
       Levels: —. Depends on: S7, S8
-- [ ] **S13 · docs** — DOC-2. Deployment pages state the SCIM refusal and name the anchor variables.
+- [x] **S13 · docs** — DOC-2. Deployment pages state the SCIM refusal and name the anchor variables.
       Levels: —. Depends on: S7, S8
-- [ ] **S14 · docs** — DOC-3. Operator-guide troubleshooting subsection.
+- [x] **S14 · docs** — DOC-3. Operator-guide troubleshooting subsection.
       Levels: —. Depends on: S7, S8
-- [ ] **S15 · docs** — CL-1. `## [Unreleased]` changelog entries.
+- [x] **S15 · docs** — CL-1. `## [Unreleased]` changelog entries.
       Levels: —. Depends on: S7, S8
-- [ ] **S16 · docs** — MV-1. Manual-validation scenario S79.
+- [x] **S16 · docs** — MV-1. Manual-validation scenario S79.
       Levels: manual. Depends on: S7, S8
 
 **Ordering constraints.** SPEC-2 cites the §13.12 rows SPEC-1 adds, and SPEC-4 cites the table SPEC-3 adds. Each code step follows the spec step whose text it implements. TEST-4 reads the output that TEST-3's change to `gwExpectStartupFailure` returns, so S10 follows S9. CODE-4 follows the tests that carry its matrix annotations.
