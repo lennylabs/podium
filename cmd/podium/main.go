@@ -470,6 +470,10 @@ func runWatchLoop(opts sync.Options, overlay string, asJSON bool) int {
 // distribution layout (§7.8) through sync.RunMarketplace. Either kind may carry a
 // workflow of operator prepare/publish commands. Each target writes its own lock.
 //
+// The registry source is registryOverride (the --registry flag) when it is set,
+// else the PODIUM_REGISTRY environment variable, else the config file's
+// defaults.registry, which PlanMultiTarget applies.
+//
 // check routes every plan through its no-side-effect path: a workspace plan runs
 // sync.Run with DryRun set (resolving the artifact set and returning before any
 // file or lock write), and a marketplace plan runs sync.RunMarketplace with Check
@@ -492,6 +496,11 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 		return 2
 	}
 	workspace := filepath.Dir(filepath.Dir(configPath))
+	// Spec: §7.5.2: the precedence list ranks PODIUM_* env vars between CLI
+	// flags and the config file, so the env var fills an empty --registry flag.
+	if registryOverride == "" {
+		registryOverride = os.Getenv("PODIUM_REGISTRY")
+	}
 	plans, err := sync.PlanMultiTarget(cfg, sync.PlanInput{
 		RegistryOverride: registryOverride,
 		Workspace:        workspace,

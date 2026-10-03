@@ -894,6 +894,64 @@ func TestPublishing_WorkspaceTargetOnErrorVariables(t *testing.T) {
 	}
 }
 
+// podium sync --config resolves its registry source as the --registry flag,
+// then the PODIUM_REGISTRY environment variable, then defaults.registry. The
+// publish phase prints $PODIUM_REGISTRY, so its third marker line records the
+// source the run resolved.
+//
+// The env-only case is the CI configuration with no defaults.registry, which
+// fails with config.no_registry when the env var is not read. The flag-over-env
+// case points the env var at a missing directory, so a run that read it would
+// fail rather than resolve the flag value.
+//
+// Spec: §7.5.2
+func TestPublishing_ConfigRegistrySourcePrecedence(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name         string
+		fileDefaults bool
+		envMissing   bool
+		flag         bool
+	}{
+		{name: "env-only"},
+		{name: "env-over-file", fileDefaults: true},
+		{name: "flag-over-env", envMissing: true, flag: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			regA := writePublishRegistry(t)
+			regB := writePublishRegistry(t)
+			ws := t.TempDir()
+			target := filepath.Join(ws, "out", "claude")
+			defaults := ""
+			if tc.fileDefaults {
+				defaults = regB
+			}
+			cfg := writeSyncConfigWorkspaceWorkflow(t, ws, defaults, target, "")
+			envRegistry := regA
+			if tc.envMissing {
+				envRegistry = filepath.Join(ws, "missing")
+			}
+			env := []string{"PODIUM_CHANGED=", "PODIUM_OUTPUT_ID=", "PODIUM_TARGET_ID=", "PODIUM_WORKDIR=", "PODIUM_REGISTRY=" + envRegistry}
+			args := []string{"sync", "--config", cfg}
+			if tc.flag {
+				args = append(args, "--registry", regA)
+			}
+
+			res := runPodium(t, "", env, args...)
+			if res.Exit != 0 {
+				t.Fatalf("sync --config (%s) exit=%d\nstdout=%s\nstderr=%s", tc.name, res.Exit, res.Stdout, res.Stderr)
+			}
+			if _, err := os.Stat(filepath.Join(target, ".podium", "sync.lock")); err != nil {
+				t.Errorf("workspace target did not materialize (no sync.lock): %v", err)
+			}
+			assertWorkflowVars(t, filepath.Join(ws, "publish-ran"),
+				[]string{target, "claude-workspace", filepath.Clean(regA), "true", "unset"})
+		})
+	}
+}
+
 // An explicit --config path that does not exist is a config error and exits 2.
 func TestPublishing_MissingConfigExits2(t *testing.T) {
 	t.Parallel()

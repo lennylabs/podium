@@ -365,9 +365,10 @@ type PlanInput struct {
 }
 
 // PlanMultiTarget resolves every entry in cfg.Targets into a runnable plan
-// (§7.5.2 multi-target). Per entry the registry is the --config-shared registry
-// (in.RegistryOverride or defaults.registry, resolved against in.Workspace), and
-// the entry's kind selects the rest of the resolution.
+// (§7.5.2 multi-target). Per entry the registry is the --config-shared registry:
+// in.RegistryOverride (the --registry flag, else PODIUM_REGISTRY) or else
+// defaults.registry, resolved against in.Workspace. The entry's kind selects
+// the rest of the resolution.
 //
 // A `kind: workspace` entry (the default for an empty kind) resolves the harness
 // (the entry's harness then defaults.harness then "none") and the scope (the
