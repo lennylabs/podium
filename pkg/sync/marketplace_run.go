@@ -172,7 +172,11 @@ func runPipeline(ctx context.Context, opts RunOptions, out ResolvedOutput, workd
 	vars["PODIUM_COMMIT_MESSAGE"] = commitMsg
 
 	if opts.DryRun {
-		printPhase(opts.Stdout, "prepare", out.Workflow.Prepare, vars)
+		// Spec: §7.5.2 — the prepare phase does not receive $PODIUM_CHANGED or the
+		// other render-derived variables, so the preview prints it with the
+		// variables the live prepare phase receives (§7.8 "prints each command
+		// with variables substituted").
+		printPhase(opts.Stdout, "prepare", out.Workflow.Prepare, baseVars(out, workdir))
 		printPhase(opts.Stdout, "publish", out.Workflow.Publish, vars)
 		return res, nil
 	}

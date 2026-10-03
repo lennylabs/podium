@@ -488,6 +488,41 @@ func TestRunMarketplace_DryRunReportsRenderedTreeChanged(t *testing.T) {
 	}
 }
 
+// Spec: §7.5.2, §7.8 — the prepare phase runs before materialization and does
+// not receive $PODIUM_CHANGED, so the --dry-run preview prints prepare commands
+// with the variable left literal and never marks one skipped. The publish preview
+// substitutes the value the render computed, which is true against the empty
+// temporary directory a dry run renders into.
+func TestRunMarketplace_DryRunPrepareOmitsChanged(t *testing.T) {
+	t.Parallel()
+	reg := renderFixtureRegistry(t)
+
+	out := runOutput(reg, []string{"claude-code"}, Workflow{
+		Prepare: []Command{{Sh: `echo "$PODIUM_CHANGED"`, SkipIfNoChanges: true}},
+		Publish: []Command{{Run: []string{"echo", "$PODIUM_CHANGED"}}},
+	})
+
+	var stdout bytes.Buffer
+	if _, err := RunMarketplace(context.Background(), RunOptions{Output: out, DryRun: true, Now: fixedNow(), Stdout: &stdout, Stderr: discardBuf()}); err != nil {
+		t.Fatalf("dry-run: %v", err)
+	}
+
+	printed := stdout.String()
+	prepare, publish, found := strings.Cut(printed, "# publish")
+	if !found || !strings.Contains(prepare, "# prepare") {
+		t.Fatalf("dry-run output must print both phases, prepare first:\n%s", printed)
+	}
+	if !strings.Contains(prepare, "$PODIUM_CHANGED") {
+		t.Errorf("the prepare preview must leave $PODIUM_CHANGED literal:\n%s", prepare)
+	}
+	if strings.Contains(prepare, "skipped (no changes)") {
+		t.Errorf("the prepare preview must not mark a skip_if_no_changes command skipped:\n%s", prepare)
+	}
+	if !strings.Contains(publish, "echo true") {
+		t.Errorf("the publish preview must substitute $PODIUM_CHANGED=true:\n%s", publish)
+	}
+}
+
 // Spec: §7.8 — --check validates the config only and runs neither the render nor
 // any command.
 func TestRunMarketplace_Check(t *testing.T) {
