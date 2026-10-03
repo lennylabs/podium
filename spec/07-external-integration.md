@@ -603,7 +603,7 @@ print(f"showing {len(browse.results)} of {browse.total_matched} artifacts in fin
 # Load (in-memory or to disk)
 artifact = client.load_artifact("finance/close-reporting/run-variance-analysis")
 print(artifact.manifest_body)
-artifact.materialize(to="./artifacts/", harness="claude-code")  # respects the harness adapter
+artifact.materialize(to="./artifacts/")  # canonical layout: ARTIFACT.md, SKILL.md for a skill, and bundled resources
 
 # Streaming change events for sync use cases
 for event in client.subscribe(["artifact.published", "artifact.deprecated"]):
@@ -612,6 +612,8 @@ for event in client.subscribe(["artifact.published", "artifact.deprecated"]):
 # Cross-type dependency walks (for impact analysis in custom tooling)
 deps = client.dependents_of("finance/ap/pay-invoice")
 ```
+
+`materialize()` writes the artifact under `<to>/<id>/` in the canonical layout, which is the output of the `none` harness adapter. The SDKs do not embed the harness adapters (§2.2). A consumer that needs harness-native files runs `podium sync --harness <name>` (§7.5) or loads through the MCP server (§6.7). The `harness` argument of `materialize()` accepts only `none`, and omitting it is equivalent to `none`. Any other value raises an argument error before any resource is fetched or any file is written. On a §7.6.2 bulk-load item the argument is checked before the item's status, so an `error` item called with an invalid `harness` raises the argument error rather than the item's registry error. This rule does not cover the `harness` argument of `load_artifacts` (§7.6.2).
 
 Identity providers, the cache, visibility filtering, layer composition, and audit are all the same as in the MCP path; the SDK is just a different transport. Identity provider plug-points are exposed; custom providers register through the same interface as the MCP server's.
 
