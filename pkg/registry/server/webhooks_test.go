@@ -62,7 +62,7 @@ func TestWebhooks_EndToEndDelivery(t *testing.T) {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d: %s", resp.StatusCode, buf)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// Publish an event and wait for delivery.
 	srv.PublishEvent(context.Background(), "artifact.published", map[string]any{
@@ -100,7 +100,7 @@ func TestWebhooks_ListMasksSecret(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
@@ -136,7 +136,7 @@ func TestWebhooks_DeleteStopsDeliveries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", resp.StatusCode)
 	}

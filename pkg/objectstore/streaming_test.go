@@ -46,7 +46,7 @@ func TestGetStreamAndStat(t *testing.T) {
 				t.Fatalf("GetStream: %v", err)
 			}
 			got, err := io.ReadAll(rc)
-			rc.Close()
+			_ = rc.Close()
 			if err != nil {
 				t.Fatalf("ReadAll: %v", err)
 			}

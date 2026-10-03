@@ -29,6 +29,14 @@ This builds every Go binary in the module (`podium`, `podium-server`, `podium-mc
 go build -o bin/podium ./cmd/podium
 ```
 
+### Lint
+
+```bash
+make lint
+```
+
+`make lint` runs golangci-lint against `.golangci.yml`. On first use it installs the release pinned by `GOLANGCI_LINT_VERSION` in the `Makefile` into `bin/`, so a local run and CI use the same version. A `golangci-lint` binary on `PATH` is not used.
+
 ### Test
 
 The Go suite runs in a single lane:

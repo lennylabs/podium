@@ -29,7 +29,7 @@ type WorkflowRunner struct {
 func (r WorkflowRunner) Phase(ctx context.Context, phase string, cmds []Command, vars map[string]string, onError []Command) error {
 	for i, c := range cmds {
 		if c.SkipIfNoChanges && vars["PODIUM_CHANGED"] == "false" {
-			fmt.Fprintf(r.Stderr, "%s %s[%d]: skipped (no changes): %s\n", r.Label, phase, i, c.display())
+			_, _ = fmt.Fprintf(r.Stderr, "%s %s[%d]: skipped (no changes): %s\n", r.Label, phase, i, c.display())
 			continue
 		}
 		err := r.command(ctx, c, vars)
@@ -37,7 +37,7 @@ func (r WorkflowRunner) Phase(ctx context.Context, phase string, cmds []Command,
 			continue
 		}
 		if c.ContinueOnError {
-			fmt.Fprintf(r.Stderr, "%s %s[%d]: %v (continue_on_error)\n", r.Label, phase, i, err)
+			_, _ = fmt.Fprintf(r.Stderr, "%s %s[%d]: %v (continue_on_error)\n", r.Label, phase, i, err)
 			continue
 		}
 		r.cleanup(ctx, phase, onError, vars)
@@ -53,7 +53,7 @@ func (r WorkflowRunner) Phase(ctx context.Context, phase string, cmds []Command,
 func (r WorkflowRunner) cleanup(ctx context.Context, phase string, cmds []Command, vars map[string]string) {
 	for i, c := range cmds {
 		if err := r.command(ctx, c, vars); err != nil {
-			fmt.Fprintf(r.Stderr, "%s %s_on_error[%d]: %v\n", r.Label, phase, i, err)
+			_, _ = fmt.Fprintf(r.Stderr, "%s %s_on_error[%d]: %v\n", r.Label, phase, i, err)
 			if !c.ContinueOnError {
 				return
 			}

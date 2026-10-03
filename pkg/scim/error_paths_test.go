@@ -13,7 +13,7 @@ func TestHandler_CreateUser_MalformedBody(t *testing.T) {
 	_, ts := bootSCIM(t, "tok")
 	resp := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Users",
 		[]byte("not json"))
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
@@ -29,9 +29,9 @@ func TestHandler_CreateUser_Conflict(t *testing.T) {
 		"externalId":"ext-1"
 	}`)
 	r1 := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Users", body)
-	r1.Body.Close()
+	_ = r1.Body.Close()
 	r2 := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Users", body)
-	defer r2.Body.Close()
+	defer func() { _ = r2.Body.Close() }()
 	if r2.StatusCode != http.StatusConflict {
 		buf, _ := io.ReadAll(r2.Body)
 		t.Errorf("status = %d, want 409: %s", r2.StatusCode, buf)
@@ -44,7 +44,7 @@ func TestHandler_CreateGroup_MalformedBody(t *testing.T) {
 	_, ts := bootSCIM(t, "tok")
 	resp := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Groups",
 		[]byte("not json"))
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
@@ -59,9 +59,9 @@ func TestHandler_CreateGroup_Conflict(t *testing.T) {
 		"displayName":"engineering"
 	}`)
 	r1 := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Groups", body)
-	r1.Body.Close()
+	_ = r1.Body.Close()
 	r2 := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Groups", body)
-	defer r2.Body.Close()
+	defer func() { _ = r2.Body.Close() }()
 	if r2.StatusCode != http.StatusConflict {
 		t.Errorf("status = %d, want 409", r2.StatusCode)
 	}
@@ -74,18 +74,18 @@ func TestHandler_DeleteUser_NoContent(t *testing.T) {
 	create := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Users",
 		[]byte(`{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"x"}`))
 	if create.StatusCode != http.StatusCreated {
-		create.Body.Close()
+		_ = create.Body.Close()
 		t.Fatalf("create status = %d", create.StatusCode)
 	}
 	var got map[string]any
 	_ = json.NewDecoder(create.Body).Decode(&got)
-	create.Body.Close()
+	_ = create.Body.Close()
 	id, _ := got["id"].(string)
 	if id == "" {
 		t.Fatal("no id in create response")
 	}
 	del := authedRequest(t, "tok", http.MethodDelete, ts.URL+"/scim/v2/Users/"+id, nil)
-	defer del.Body.Close()
+	defer func() { _ = del.Body.Close() }()
 	if del.StatusCode != http.StatusNoContent {
 		t.Errorf("status = %d, want 204", del.StatusCode)
 	}
@@ -96,7 +96,7 @@ func TestHandler_ServiceProviderConfigNotImplemented(t *testing.T) {
 	t.Parallel()
 	_, ts := bootSCIM(t, "tok")
 	resp := authedRequest(t, "tok", http.MethodGet, ts.URL+"/scim/v2/ServiceProviderConfig", nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotImplemented {
 		t.Errorf("status = %d, want 501", resp.StatusCode)
 	}
@@ -107,7 +107,7 @@ func TestHandler_UnknownPathReturns404(t *testing.T) {
 	t.Parallel()
 	_, ts := bootSCIM(t, "tok")
 	resp := authedRequest(t, "tok", http.MethodGet, ts.URL+"/scim/v2/Unknown", nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
@@ -122,7 +122,7 @@ func TestHandler_MissingOrInvalidToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status (no auth) = %d, want 401", resp.StatusCode)
 	}
@@ -134,7 +134,7 @@ func TestHandler_MissingOrInvalidToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	resp2.Body.Close()
+	_ = resp2.Body.Close()
 	if resp2.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status (bad token) = %d, want 401", resp2.StatusCode)
 	}
@@ -150,7 +150,7 @@ func TestHandler_MethodNotAllowedOnSubresource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PATCH: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", resp.StatusCode)
 	}

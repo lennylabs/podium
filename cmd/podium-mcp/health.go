@@ -88,7 +88,7 @@ func (s *mcpServer) probeReadyMode() (connected bool, mode string) {
 	if err != nil {
 		return false, "unreachable"
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		// A successful readiness call counts toward last-successful-call.
@@ -129,7 +129,7 @@ func (s *mcpServer) probeHealthzPublic() bool {
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return false

@@ -40,6 +40,7 @@ import (
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/google/uuid"
+
 	"github.com/lennylabs/podium/pkg/store"
 	podiumversion "github.com/lennylabs/podium/pkg/version"
 )

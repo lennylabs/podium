@@ -563,19 +563,19 @@ func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (d
 	// §0 quickstart: one `artifact: <id>@<version>   layer: <layer>` line per
 	// accepted or unchanged artifact.
 	for _, a := range report.Artifacts {
-		fmt.Fprintf(stdout, "artifact: %s@%s   layer: %s\n", a.ID, a.Version, layer)
+		_, _ = fmt.Fprintf(stdout, "artifact: %s@%s   layer: %s\n", a.ID, a.Version, layer)
 	}
 	// §4.6 / §3.3: a non-blocking advisory (for example a cross-layer license
 	// change) is reported without changing the exit status.
 	for _, a := range report.Advisories {
-		fmt.Fprintf(stdout, "advisory: %s [%s] %s (%s)\n", a.ArtifactID, a.Severity, a.Message, a.Code)
+		_, _ = fmt.Fprintf(stdout, "advisory: %s [%s] %s (%s)\n", a.ArtifactID, a.Severity, a.Message, a.Code)
 	}
 	// §7.3.1: a same-version content conflict is rejected as
 	// ingest.immutable_violation even when sibling artifacts ingested. Name each
 	// so the author sees which artifact must have its version bumped. A snapshot
 	// with only conflicts surfaces as a 409 through the transport arm.
 	for _, c := range report.Conflicts {
-		fmt.Fprintf(stderr, "conflict: %s@%s rejected (%s); bump the version\n", c.ArtifactID, c.Version, c.Code)
+		_, _ = fmt.Fprintf(stderr, "conflict: %s@%s rejected (%s); bump the version\n", c.ArtifactID, c.Version, c.Code)
 	}
 	// §13.10 / §4.6 / §4.7.8: an artifact dropped for a non-conflict reason
 	// (sensitivity floor, sandbox profile, cross-layer collision, quota,
@@ -584,12 +584,12 @@ func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (d
 		printRejected(stderr, rj.ArtifactID, rj.Code, rj.Reason)
 	}
 	if report.LintFailures > 0 {
-		fmt.Fprintf(stderr, "lint failures: %d\n", report.LintFailures)
+		_, _ = fmt.Fprintf(stderr, "lint failures: %d\n", report.LintFailures)
 	}
 	// §4.7: the artifact is stored and served, so a failed embedding call is
 	// reported without changing the exit status.
 	for _, ef := range report.EmbeddingFailures {
-		fmt.Fprintf(stderr, "embedding failure: %s@%s: %s\n", ef.ArtifactID, ef.Version, ef.Reason)
+		_, _ = fmt.Fprintf(stderr, "embedding failure: %s@%s: %s\n", ef.ArtifactID, ef.Version, ef.Reason)
 	}
 	return len(report.Conflicts) + len(report.Rejected) + report.LintFailures, true
 }
@@ -598,7 +598,7 @@ func writeIngestReport(stdout, stderr io.Writer, layerID string, body []byte) (d
 // reingest` and a filesystem-source `podium sync` share, so a reader matches the
 // same line from either command.
 func printRejected(w io.Writer, id, code, reason string) {
-	fmt.Fprintf(w, "rejected: %s (%s): %s\n", id, code, reason)
+	_, _ = fmt.Fprintf(w, "rejected: %s (%s): %s\n", id, code, reason)
 }
 
 // reportDropped prints a rejected line for each artifact a filesystem-source
@@ -681,7 +681,7 @@ func doJSON(url, method string, body any) ([]byte, int) {
 	if err != nil {
 		return []byte(err.Error()), 500
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return out, resp.StatusCode
 }

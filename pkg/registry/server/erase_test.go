@@ -100,7 +100,7 @@ func TestErase_PurgesLayersAndRedactsRegistryStream(t *testing.T) {
 	})
 
 	resp := postErase(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "tenant-salt"})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -162,7 +162,7 @@ func TestErase_EmptySaltRejected(t *testing.T) {
 		t.Fatalf("PutLayerConfig: %v", err)
 	}
 	resp := postErase(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": ""})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
@@ -180,7 +180,7 @@ func TestErase_RequiresAdmin(t *testing.T) {
 	t.Parallel()
 	ts, _, _ := eraseTestEndpoint(t, layer.Identity{IsPublic: true}, server.ErrAdminRequired)
 	resp := postErase(t, ts.URL, map[string]any{"user_id": "alice@acme.com", "salt": "s"})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
@@ -194,7 +194,7 @@ func TestErase_MethodNotAllowed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Fatalf("status = %d, want 405", resp.StatusCode)
 	}
@@ -205,7 +205,7 @@ func TestErase_MissingUserID(t *testing.T) {
 	t.Parallel()
 	ts, _, _ := eraseTestEndpoint(t, layer.Identity{Sub: "carol@acme.com", IsAuthenticated: true}, nil)
 	resp := postErase(t, ts.URL, map[string]any{"salt": "s"})
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}

@@ -39,7 +39,7 @@ func gwHeaderGet(t *testing.T, url string, headers map[string]string) (int, []by
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, body
 }

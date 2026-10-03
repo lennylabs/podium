@@ -50,7 +50,7 @@ func TestScopePreview_RejectsNonGET(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", method, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Errorf("%s status = %d, want 405", method, resp.StatusCode)
 		}
@@ -67,7 +67,7 @@ func TestScopePreview_DisabledReturns403(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
@@ -96,7 +96,7 @@ func TestScopePreview_EnabledReturns200(t *testing.T) {
 			if err != nil {
 				t.Fatalf("GET: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusOK {
 				body, _ := io.ReadAll(resp.Body)
 				t.Fatalf("status = %d, want 200 (body: %s)", resp.StatusCode, body)

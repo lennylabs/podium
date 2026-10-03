@@ -80,7 +80,7 @@ func ResolvePineconeHost(ctx context.Context, controlPlane, apiKey, index string
 	if err != nil {
 		return "", fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
 		return "", fmt.Errorf("%w: control-plane HTTP %d: %s", ErrUnreachable, resp.StatusCode, string(body))
@@ -183,7 +183,7 @@ func (p *Pinecone) doRaw(ctx context.Context, method, path, contentType string, 
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
 		return nil, fmt.Errorf("%w: HTTP %d: %s", ErrUnreachable, resp.StatusCode, string(respBody))

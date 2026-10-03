@@ -212,7 +212,7 @@ func (f AuthCodeFlow) Exchange(ctx context.Context, code, verifier string) (*Tok
 	if err != nil {
 		return nil, fmt.Errorf("auth-code exchange: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusOK {
 		var raw struct {

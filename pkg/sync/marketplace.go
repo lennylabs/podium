@@ -7,8 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lennylabs/podium/pkg/adapter"
 	"gopkg.in/yaml.v3"
+
+	"github.com/lennylabs/podium/pkg/adapter"
 )
 
 // This file holds the reusable marketplace-output component types a
@@ -108,9 +109,9 @@ type Command struct {
 func (c Command) validate() error {
 	switch {
 	case len(c.Run) == 0 && c.Sh == "":
-		return fmt.Errorf("%w: command declares neither run: nor sh:", ErrConfigInvalid)
+		return fmt.Errorf("%w: command declares neither the run: nor the sh: key", ErrConfigInvalid)
 	case len(c.Run) > 0 && c.Sh != "":
-		return fmt.Errorf("%w: command declares both run: and sh:", ErrConfigInvalid)
+		return fmt.Errorf("%w: command declares both the run: and the sh: keys", ErrConfigInvalid)
 	}
 	return nil
 }

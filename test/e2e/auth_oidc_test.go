@@ -230,7 +230,7 @@ func oidcSCIMDo(t testing.TB, method, url, token, contentType string, body []byt
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, out
 }

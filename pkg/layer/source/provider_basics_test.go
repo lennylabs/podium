@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
+
 	"github.com/lennylabs/podium/pkg/layer/source"
 )
 
@@ -110,7 +111,7 @@ func TestGit_FSExerciseEntryMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open(.): %v", err)
 	}
-	defer dir.Close()
+	defer func() { _ = dir.Close() }()
 	if _, err := dir.(fs.ReadDirFile).ReadDir(-1); err != nil {
 		t.Fatalf("ReadDir: %v", err)
 	}

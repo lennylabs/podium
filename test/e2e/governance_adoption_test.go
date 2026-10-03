@@ -38,12 +38,6 @@ import (
 
 // ---- local helpers ----------------------------------------------------------
 
-// progArr returns result[key] as a slice (nil when absent or not an array).
-func progArr(result map[string]any, key string) []any {
-	a, _ := result[key].([]any)
-	return a
-}
-
 // progPollAudit polls an audit log file until it contains substr or the
 // deadline elapses.
 func progPollAudit(path, substr string, within time.Duration) bool {
@@ -98,12 +92,6 @@ func progToolErr(t *testing.T, stdout string, id int) string {
 		}
 	}
 	return ""
-}
-
-// progJSON marshals any value to JSON without failing.
-func progJSON(v any) string {
-	b, _ := json.Marshal(v)
-	return string(b)
 }
 
 // ---- — standalone healthz ----------------------------------

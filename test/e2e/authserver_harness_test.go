@@ -427,17 +427,6 @@ func toAnySlice(ss []string) []any {
 	return out
 }
 
-// authGrantAdmin grants the admin role to userID through the §4.7.2 admin
-// grants endpoint as an existing admin, failing the test on a non-201. It lets
-// a test promote a second identity to admin and assert the grant took effect.
-func (as *authServer) authGrantAdmin(adminToken, userID string) {
-	as.t.Helper()
-	body, _ := json.Marshal(map[string]any{"user_id": userID})
-	if st, b := as.do(http.MethodPost, "/v1/admin/grants", adminToken, body); st != http.StatusCreated {
-		as.t.Fatalf("admin grant %s = %d, want 201 (body=%s)", userID, st, b)
-	}
-}
-
 // scimGroupID looks up the server-assigned id of a SCIM group by its
 // displayName, so a test can edit the group's membership at runtime after the
 // declarative seed created it. It uses the SCIM list endpoint with a

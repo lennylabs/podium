@@ -38,7 +38,7 @@ func loadStatus(t *testing.T, baseURL, id string) (int, string) {
 	if err != nil {
 		t.Fatalf("GET load_artifact %s: %v", id, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	b, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(b)
 }

@@ -27,7 +27,7 @@ func TestResolveRepoRoot_WalksUp(t *testing.T) {
 	if err := os.Chdir(sub); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
-	defer os.Chdir(orig)
+	defer func() { _ = os.Chdir(orig) }()
 	got, err := resolveRepoRoot("")
 	if err != nil {
 		t.Fatalf("resolveRepoRoot: %v", err)

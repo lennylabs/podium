@@ -98,7 +98,7 @@ func (r *FilePersistedRuntimeKeyRegistry) Register(rk RuntimeKey) error {
 }
 
 func (r *FilePersistedRuntimeKeyRegistry) save() error {
-	all := r.RuntimeKeyRegistry.All()
+	all := r.All()
 	out := make([]runtimeKeyJSON, 0, len(all))
 	for _, k := range all {
 		pemBytes, err := encodePublicKey(k.Key)

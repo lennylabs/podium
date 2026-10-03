@@ -6,9 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/lennylabs/podium/pkg/sign"
 	synccfg "github.com/lennylabs/podium/pkg/sync"
-	"gopkg.in/yaml.v3"
 )
 
 // applyFlagsAndConfig overlays command-line flags and an optional config

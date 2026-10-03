@@ -47,7 +47,7 @@ func layerWritePost(t *testing.T, base, path string, body any) (int, []byte) {
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out := new(bytes.Buffer)
 	if _, err := out.ReadFrom(resp.Body); err != nil {
 		t.Fatalf("read %s response: %v", path, err)

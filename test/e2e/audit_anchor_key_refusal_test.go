@@ -218,7 +218,7 @@ func TestAuditAnchor_SharedKeyStartsWithSigningOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("healthz: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("healthz status = %d, want 200", resp.StatusCode)
 	}

@@ -116,7 +116,7 @@ func (f DeviceCodeFlow) Initiate(ctx context.Context) (*DeviceAuth, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		var envelope errorEnvelope
 		_ = json.NewDecoder(resp.Body).Decode(&envelope)
@@ -177,7 +177,7 @@ func (f DeviceCodeFlow) PollOnce(ctx context.Context, auth *DeviceAuth) (*Tokens
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusOK {
 		var raw struct {
@@ -254,7 +254,7 @@ func (f DeviceCodeFlow) Refresh(ctx context.Context, refreshToken string) (*Toke
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusOK {
 		var raw struct {

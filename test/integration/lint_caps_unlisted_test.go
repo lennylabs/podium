@@ -139,7 +139,7 @@ func TestConfigurablePackageCap_GatesIngest(t *testing.T) {
 	if err := st2.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
 		t.Fatalf("CreateTenant: %v", err)
 	}
-	os.Unsetenv("PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES")
+	_ = os.Unsetenv("PODIUM_LINT_PER_PACKAGE_SOFT_CAP_BYTES")
 	clean, err := ingest.SourceIngestWithOptions(ctx, st2, source.Local{}, cfg, ingest.SourceIngestOptions{
 		Linter: lint.NewIngestLinter(true),
 	})

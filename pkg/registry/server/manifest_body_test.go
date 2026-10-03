@@ -75,7 +75,7 @@ func mbGetLoadArtifact(t *testing.T, ts *httptest.Server, id string) server.Load
 		t.Fatalf("GET load_artifact: %v", err)
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	var parsed server.LoadArtifactResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		t.Fatalf("unmarshal: %v\n%s", err, raw)
@@ -117,7 +117,7 @@ func TestManifestBody_ContextLargeBodyPresigned(t *testing.T) {
 		t.Fatalf("GET presigned body: %v", err)
 	}
 	got, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("presigned body fetch = HTTP %d", resp.StatusCode)
 	}
@@ -160,7 +160,7 @@ func TestManifestBody_SkillLargeSkillRawPresigned(t *testing.T) {
 		t.Fatalf("GET presigned body: %v", err)
 	}
 	got, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if string(got) != string(skill) {
 		t.Errorf("presigned SKILL.md served %d bytes, want %d", len(got), len(skill))
 	}

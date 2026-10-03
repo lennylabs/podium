@@ -507,7 +507,7 @@ func applyRehash(ctx context.Context, d rehashDeps, plan []rehashRow) (rehashCou
 // counts, given whether the pass wrote it. The dry run calls it with the write
 // it would make, so its totals are the ones a run reports.
 func (c *rehashCounts) countSigningState(row rehashRow, written bool) {
-	if row.rec.Signature == "" && !(written && row.sign) {
+	if row.rec.Signature == "" && (!written || !row.sign) {
 		c.unsignedLeft++
 	}
 	if row.signedBy != "" && !written {

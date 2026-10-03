@@ -101,7 +101,6 @@ func TestLayerUpdateCmd_RequiresMutableField(t *testing.T) {
 	if rc != 2 {
 		t.Errorf("rc = %d, want 2 (argument error)", rc)
 	}
-	_ = fmt.Sprintf("noop") // keep fmt import alive on stripped builds
 }
 
 // captureUpdateBody runs layerUpdate against a stub registry and returns the
@@ -118,7 +117,7 @@ func captureUpdateBody(t *testing.T, args ...string) (map[string]any, int) {
 			t.Errorf("decode body %q: %v", raw, err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{}`)
+		_, _ = fmt.Fprint(w, `{}`)
 	}))
 	t.Cleanup(ts.Close)
 	rc := layerUpdate(append([]string{"--registry", ts.URL, "--id", "team"}, args...))

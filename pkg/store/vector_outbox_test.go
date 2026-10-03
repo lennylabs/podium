@@ -103,7 +103,7 @@ func TestVectorOutbox_ImmutableViolationRollsBack(t *testing.T) {
 			if err := ob.PutManifestWithVectorPending(ctx, mr("a/x", "1.0.0", "sha256:1"), p); err != nil {
 				t.Fatalf("put: %v", err)
 			}
-			ob.MarkVectorPendingDone(ctx, "default", "a/x", "1.0.0")
+			_ = ob.MarkVectorPendingDone(ctx, "default", "a/x", "1.0.0")
 			// Same version, different hash -> immutability violation, no new row.
 			err := ob.PutManifestWithVectorPending(ctx, mr("a/x", "1.0.0", "sha256:2"), p)
 			if !errors.Is(err, ErrImmutableViolation) {

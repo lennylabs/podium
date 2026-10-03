@@ -8,7 +8,7 @@ New code is modular, small, and reuses existing surfaces, and it reads like the 
 
 ## What the linter already enforces
 
-`make lint` runs `golangci-lint` with `errcheck`, `govet`, `staticcheck`, `unused`, `ineffassign`, `misspell`, `gofmt`, `goimports` (local prefix `github.com/lennylabs/podium`), and `nolintlint`. Do not hand-fight formatting or import grouping; run `gofmt` and `goimports`. Never ignore a returned error to satisfy the compiler. Those are machine-checked, and the rules below cover what the linter does not.
+`make lint` runs `golangci-lint` v2, at the version the `Makefile` pins in `GOLANGCI_LINT_VERSION`, with `errcheck`, `govet`, `staticcheck`, `unused`, `ineffassign`, `misspell`, `gofmt`, `goimports` (local prefix `github.com/lennylabs/podium`), and `nolintlint`. Do not hand-fight formatting or import grouping; run `gofmt` and `goimports`. Never ignore a returned error to satisfy the compiler. Those are machine-checked, and the rules below cover what the linter does not.
 
 ## Functions and files
 

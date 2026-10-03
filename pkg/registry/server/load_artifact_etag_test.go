@@ -41,7 +41,7 @@ func TestLoadArtifact_GETSetsETag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -59,7 +59,7 @@ func TestLoadArtifact_IfNoneMatchReturns304(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotModified {
 		t.Fatalf("status = %d, want 304", resp.StatusCode)
 	}
@@ -82,7 +82,7 @@ func TestLoadArtifact_IfNoneMatchStaleReturns200(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -101,7 +101,7 @@ func TestLoadArtifact_IfNoneMatchWildcardReturns304(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotModified {
 		t.Fatalf("status = %d, want 304", resp.StatusCode)
 	}

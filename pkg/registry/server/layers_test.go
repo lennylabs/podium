@@ -38,7 +38,7 @@ func mustPost(t *testing.T, base, path string, body any) (*http.Response, []byte
 	if err != nil {
 		t.Fatalf("POST %s: %v", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return resp, out
 }
@@ -50,7 +50,7 @@ func mustDelete(t *testing.T, base, path string) (*http.Response, []byte) {
 	if err != nil {
 		t.Fatalf("DELETE %s: %v", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return resp, out
 }
@@ -216,7 +216,7 @@ func TestLayerEndpoint_ListReturnsRegisteredLayers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(resp.Body)
 	var listResp struct {
 		Layers []store.LayerConfig `json:"layers"`
@@ -364,7 +364,7 @@ func TestLayerEndpoint_RegisterGitLayer_WebhookURLEscapesLayerID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST webhook: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
 		t.Errorf("POST %s = 404, advertised webhook URL does not reach the ingest endpoint", got.WebhookURL)
 	}
@@ -440,7 +440,7 @@ func layerGet(t *testing.T, base, path string) (*http.Response, []byte) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return resp, out
 }

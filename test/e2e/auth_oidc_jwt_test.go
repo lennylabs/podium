@@ -93,8 +93,8 @@ func startOIDCTestIdP(t *testing.T, accessTokenIssuer string) *oidcTestIdP {
 		_ = json.NewEncoder(w).Encode(doc)
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
-		n := base64.RawURLEncoding.EncodeToString(key.PublicKey.N.Bytes())
-		e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.PublicKey.E)).Bytes())
+		n := base64.RawURLEncoding.EncodeToString(key.N.Bytes())
+		e := base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes())
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"keys": []map[string]string{{"kty": "RSA", "kid": "test-1", "alg": "RS256", "use": "sig", "n": n, "e": e}},

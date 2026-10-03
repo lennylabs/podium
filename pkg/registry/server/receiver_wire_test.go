@@ -82,7 +82,7 @@ func postReceiver(t *testing.T, base string, body map[string]any) map[string]jso
 	if err != nil {
 		t.Fatalf("POST /v1/webhooks: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("POST /v1/webhooks status = %d: %s", resp.StatusCode, out)
@@ -97,7 +97,7 @@ func getReceiverList(t *testing.T, base string) []map[string]json.RawMessage {
 	if err != nil {
 		t.Fatalf("GET /v1/webhooks: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /v1/webhooks status = %d: %s", resp.StatusCode, out)
@@ -122,7 +122,7 @@ func getReceiver(t *testing.T, base, id string) map[string]json.RawMessage {
 	if err != nil {
 		t.Fatalf("GET /v1/webhooks/%s: %v", id, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("GET /v1/webhooks/%s status = %d: %s", id, resp.StatusCode, out)

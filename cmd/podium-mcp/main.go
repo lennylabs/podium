@@ -47,6 +47,9 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	oteltrace "go.opentelemetry.io/otel/trace"
+
 	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/audit"
@@ -61,8 +64,6 @@ import (
 	synccfg "github.com/lennylabs/podium/pkg/sync"
 	"github.com/lennylabs/podium/pkg/tracing"
 	"github.com/lennylabs/podium/pkg/version"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
-	oteltrace "go.opentelemetry.io/otel/trace"
 )
 
 // protocolVersion is the maximum MCP wire-protocol version this binary
@@ -844,12 +845,15 @@ func (s *mcpServer) overlayDomainsSnapshot() map[string]*manifest.Domain {
 // path vanished between the two reads) degrades to an empty domain map rather
 // than failing the artifact load.
 func resolveOverlayAll(path string) ([]filesystem.ArtifactRecord, map[string]*manifest.Domain, error) {
+	// The filesystem overlay reads local files and ignores its context, so
+	// a background context stands in for the nil the SPI forbids.
+	ctx := context.Background()
 	prov := overlay.Filesystem{Path: path}
-	records, err := prov.Resolve(nil)
+	records, err := prov.Resolve(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	domains, derr := prov.ResolveDomains(nil)
+	domains, derr := prov.ResolveDomains(ctx)
 	if derr != nil && !errors.Is(derr, overlay.ErrNoOverlay) {
 		return records, nil, derr
 	}
@@ -2525,7 +2529,7 @@ func (s *mcpServer) fetchJSONConditional(path string, args map[string]any, ifNon
 	if err != nil {
 		return nil, false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotModified {
 		// §12: the registry confirmed the cached content hash is current.
 		_, _ = io.Copy(io.Discard, resp.Body)
@@ -2558,7 +2562,7 @@ func (s *mcpServer) fetchJSON(path string, args map[string]any) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
@@ -2593,7 +2597,7 @@ func (s *mcpServer) headContentHash(path string, args map[string]any) (string, e
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	if resp.StatusCode >= 400 {
 		return "", fmt.Errorf("HEAD %s: status %d", path, resp.StatusCode)

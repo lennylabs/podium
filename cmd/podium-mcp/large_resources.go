@@ -184,7 +184,7 @@ func (s *mcpServer) getLargeResource(rawURL string) ([]byte, int, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 	if httpResp.StatusCode != http.StatusOK {
 		return nil, httpResp.StatusCode, nil
 	}

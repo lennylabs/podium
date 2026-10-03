@@ -41,7 +41,7 @@ func TestSQLite_PersistsAcrossOpens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenSQLite again: %v", err)
 	}
-	defer s2.Close()
+	defer func() { _ = s2.Close() }()
 
 	got, err := s2.GetManifest(ctx, "a", "x", "1.0.0")
 	if err != nil {

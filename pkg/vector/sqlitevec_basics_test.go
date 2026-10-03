@@ -14,7 +14,7 @@ func TestSQLiteVec_IDAndDimensions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenSQLiteVec: %v", err)
 	}
-	defer v.Close()
+	defer func() { _ = v.Close() }()
 	if v.ID() != "sqlite-vec" {
 		t.Errorf("ID = %q", v.ID())
 	}
@@ -32,7 +32,7 @@ func TestSQLiteVec_OpenInMemoryDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenSQLiteVec: %v", err)
 	}
-	defer v.Close()
+	defer func() { _ = v.Close() }()
 	if v.ID() != "sqlite-vec" {
 		t.Errorf("ID = %q", v.ID())
 	}

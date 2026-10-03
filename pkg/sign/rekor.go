@@ -96,7 +96,7 @@ func (s SigstoreKeyless) uploadRekor(ctx context.Context, contentHash string, si
 	if err != nil {
 		return 0, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode/100 != 2 {
 		buf, _ := io.ReadAll(resp.Body)
 		return 0, fmt.Errorf("rekor: HTTP %d: %s", resp.StatusCode, string(buf))
@@ -129,7 +129,7 @@ func (s SigstoreKeyless) fetchRekor(ctx context.Context, logIndex int64) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotFound {
 		return fmt.Errorf("rekor: log index %d not found", logIndex)
 	}

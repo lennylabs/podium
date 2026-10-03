@@ -121,7 +121,7 @@ func startZeroFlagServer(t *testing.T, extraEnv ...string) *serverProc {
 	for time.Now().Before(deadline) {
 		resp, err := httpClient.Get(s.BaseURL + "/healthz")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == 200 {
 				return s
 			}
@@ -394,7 +394,7 @@ func TestConfigPrecedence_CLIFlagBeatsEnv(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reserve env port: %v", err)
 	}
-	defer envLn.Close()
+	defer func() { _ = envLn.Close() }()
 	envBind := envLn.Addr().String()
 
 	srv := startServerArgs(t, []string{

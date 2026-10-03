@@ -55,7 +55,7 @@ func TestBatchLoad_UnresolvableReturnsVisibilityDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var out []server.BatchLoadEnvelope
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		t.Fatalf("decode: %v", err)
@@ -82,7 +82,7 @@ func TestSearchArtifacts_AcceptsSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (session_id must be accepted)", resp.StatusCode)
 	}

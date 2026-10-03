@@ -46,7 +46,7 @@ func TestLayerRecovery_SQLiteSoftDeleteRestoreAndPurge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("register status %d", resp.StatusCode)
 	}
@@ -63,7 +63,7 @@ func TestLayerRecovery_SQLiteSoftDeleteRestoreAndPurge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unregister: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unregister status %d", resp.StatusCode)
 	}
@@ -81,7 +81,7 @@ func TestLayerRecovery_SQLiteSoftDeleteRestoreAndPurge(t *testing.T) {
 		t.Fatalf("restore: %v", err)
 	}
 	out, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("restore status %d, body=%s", resp.StatusCode, out)
 	}
@@ -92,7 +92,7 @@ func TestLayerRecovery_SQLiteSoftDeleteRestoreAndPurge(t *testing.T) {
 	// Unregister again, then simulate the 30-day window passing and purge.
 	req, _ = http.NewRequest(http.MethodDelete, ts.URL+"/v1/layers?id=alice-personal", nil)
 	resp, _ = http.DefaultClient.Do(req)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	// Purge with a cutoff in the future so the just-deleted layer is past
 	// the window; the artifact and layer are hard-deleted.
 	n, err := st.PurgeExpiredLayerDeletions(ctx, time.Now().UTC().Add(1*time.Hour))

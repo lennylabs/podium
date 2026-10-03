@@ -41,10 +41,6 @@ func contextManifest(desc string) string {
 	return "---\ntype: context\nversion: 1.0.0\ndescription: " + desc + "\nsensitivity: low\n---\n\nbody of " + desc + "\n"
 }
 
-func contextManifestVer(desc, ver string) string {
-	return "---\ntype: context\nversion: " + ver + "\ndescription: " + desc + "\nsensitivity: low\n---\n\nbody of " + desc + "\n"
-}
-
 // Spec: §5 load_domain — root call returns top-level subdomains.
 func TestLoadDomain_RootReturnsTopLevelSubdomains(t *testing.T) {
 	t.Parallel()

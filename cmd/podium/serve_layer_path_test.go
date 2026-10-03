@@ -167,7 +167,7 @@ func waitForServer(t *testing.T, port int) {
 		resp, err := http.DefaultClient.Do(req)
 		cancel()
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -182,7 +182,7 @@ func getJSON(t *testing.T, port int, path string) map[string]any {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("GET %s status = %d: %s", url, resp.StatusCode, body)

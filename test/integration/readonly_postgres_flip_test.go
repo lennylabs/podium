@@ -145,7 +145,7 @@ func TestConfigReadOnlyFlip_PostgresPrimaryOutage(t *testing.T) {
 	}
 	probeCtx, cancelProbe := context.WithCancel(context.Background())
 	defer cancelProbe()
-	go probe.Run(probeCtx)
+	go func() { _ = probe.Run(probeCtx) }()
 
 	// One mux serving both the core read/write surface and the §7.3.1
 	// layer-register ingest endpoint, sharing the single ModeTracker so the
@@ -281,7 +281,7 @@ func roflipLoadStatus(t *testing.T, baseURL, id string) int {
 	if err != nil {
 		t.Fatalf("GET load_artifact: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return resp.StatusCode
 }
@@ -292,7 +292,7 @@ func roflipSearchHasID(t *testing.T, baseURL, id string) bool {
 	if err != nil {
 		t.Fatalf("GET search_artifacts: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body struct {
 		Results []struct {
 			ID string `json:"id"`
@@ -316,7 +316,7 @@ func roflipReadyz(t *testing.T, baseURL string) (mode string, status int) {
 	if err != nil {
 		t.Fatalf("GET /readyz: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body struct {
 		Mode string `json:"mode"`
 	}
@@ -343,7 +343,7 @@ func roflipRegisterLayer(t *testing.T, baseURL, layerID string) (int, []byte) {
 	if err != nil {
 		t.Fatalf("POST /v1/layers: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	buf, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, buf
 }
@@ -356,7 +356,7 @@ func roflipGrant(t *testing.T, baseURL, userID string) (int, []byte) {
 	if err != nil {
 		t.Fatalf("POST /v1/admin/grants: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	buf, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, buf
 }

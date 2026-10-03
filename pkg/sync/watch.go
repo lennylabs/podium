@@ -96,7 +96,7 @@ func runWatch(ctx context.Context, opts WatchOptions, events chan<- WatchEvent) 
 	}
 
 	if tw, err := NewTreeWatcher(opts.Sync.RegistryPath, opts.OverlayPath); err == nil {
-		defer tw.Close()
+		defer func() { _ = tw.Close() }()
 		runFSNotifyWatch(ctx, opts, tw, emit)
 		return
 	}
@@ -193,11 +193,11 @@ func signOne(h interface{ Write([]byte) (int, error) }, root string) {
 	})
 	sort.Slice(entries, func(i, j int) bool { return entries[i].path < entries[j].path })
 	for _, e := range entries {
-		fmt.Fprintf(stringWriter{h}, "%s\x00%d\x00%d\x00%t\n",
+		_, _ = fmt.Fprintf(stringWriter{h}, "%s\x00%d\x00%d\x00%t\n",
 			e.path, e.mod, e.size, e.dir)
 	}
 	if walkErr != nil && !os.IsNotExist(walkErr) {
-		fmt.Fprintf(stringWriter{h}, "walkerr:%s\n", walkErr.Error())
+		_, _ = fmt.Fprintf(stringWriter{h}, "walkerr:%s\n", walkErr.Error())
 	}
 }
 

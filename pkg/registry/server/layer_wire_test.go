@@ -42,7 +42,7 @@ func mustPut(t *testing.T, base, path string, body any) (*http.Response, []byte)
 	if err != nil {
 		t.Fatalf("PUT %s: %v", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return resp, out
 }

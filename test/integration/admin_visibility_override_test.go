@@ -22,7 +22,7 @@ func avoSearchIDs(t *testing.T, url string) []string {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("search status = %d, want 200 (%s)", resp.StatusCode, url)
 	}

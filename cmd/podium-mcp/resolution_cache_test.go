@@ -13,7 +13,7 @@ import (
 func TestResolutionCache_LatestTTL(t *testing.T) {
 	t.Parallel()
 	r := newResolutionCache(t.TempDir())
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	base := time.Unix(1_700_000_000, 0)
 	r.PutLatest("team/x", "1.2.3", "sha256:hash", base)
 
@@ -40,7 +40,7 @@ func TestResolutionCache_LatestTTL(t *testing.T) {
 func TestResolutionCache_PinnedNeverExpires(t *testing.T) {
 	t.Parallel()
 	r := newResolutionCache(t.TempDir())
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	base := time.Unix(1_700_000_000, 0)
 	r.PutVersion("team/x", "1.2.3", "sha256:pinned", base)
 	if got, ok := r.Resolve("team/x", "1.2.3", base.Add(72*time.Hour), 30*time.Second, false); !ok || got != "sha256:pinned" {
@@ -53,7 +53,7 @@ func TestResolutionCache_PinnedNeverExpires(t *testing.T) {
 func TestResolutionCache_LatestMapsToSemver(t *testing.T) {
 	t.Parallel()
 	r := newResolutionCache(t.TempDir())
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	now := time.Now()
 	r.PutLatest("team/x", "2.0.0", "sha256:abc", now)
 
@@ -83,7 +83,7 @@ func TestResolutionCache_LatestMapsToSemver(t *testing.T) {
 func TestResolutionCache_RefreshLatest(t *testing.T) {
 	t.Parallel()
 	r := newResolutionCache(t.TempDir())
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	base := time.Unix(1_700_000_000, 0)
 	r.PutLatest("team/x", "1.0.0", "sha256:abc", base)
 
@@ -114,7 +114,7 @@ func TestResolutionCache_PersistsToBoltDB(t *testing.T) {
 	}
 
 	r2 := newResolutionCache(dir)
-	defer r2.Close()
+	defer func() { _ = r2.Close() }()
 	if got, ok := r2.Resolve("team/x", "1.0.0", now, 30*time.Second, false); !ok || got != "sha256:abc" {
 		t.Errorf("after reopen Resolve = %q ok=%v, want sha256:abc, true", got, ok)
 	}

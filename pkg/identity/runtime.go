@@ -322,9 +322,7 @@ func scopesFromClaims(claims jwt.MapClaims) []string {
 	add := func(raw any) {
 		switch v := raw.(type) {
 		case string:
-			for _, f := range strings.Fields(v) {
-				out = append(out, f)
-			}
+			out = append(out, strings.Fields(v)...)
 		case []any:
 			for _, e := range v {
 				if s, ok := e.(string); ok && s != "" {

@@ -94,7 +94,7 @@ func main() {
 func setUsage(fs *flag.FlagSet, description string) {
 	fs.Usage = func() {
 		out := fs.Output()
-		fmt.Fprintf(out, "podium %s - %s\n\nFlags:\n", fs.Name(), description)
+		_, _ = fmt.Fprintf(out, "podium %s - %s\n\nFlags:\n", fs.Name(), description)
 		fs.PrintDefaults()
 	}
 }
@@ -106,7 +106,7 @@ func printGroupHelp(group, description string, items [][2]string) {
 
 // fprintGroupHelp is the testable form: writes the group help block to w.
 func fprintGroupHelp(w io.Writer, group, description string, items [][2]string) {
-	fmt.Fprintf(w, "podium %s - %s\n\nSubcommands:\n", group, description)
+	_, _ = fmt.Fprintf(w, "podium %s - %s\n\nSubcommands:\n", group, description)
 	width := 0
 	for _, it := range items {
 		if l := len(it[0]); l > width {
@@ -114,7 +114,7 @@ func fprintGroupHelp(w io.Writer, group, description string, items [][2]string) 
 		}
 	}
 	for _, it := range items {
-		fmt.Fprintf(w, "  %-*s  %s\n", width, it[0], it[1])
+		_, _ = fmt.Fprintf(w, "  %-*s  %s\n", width, it[0], it[1])
 	}
 }
 
@@ -512,7 +512,7 @@ func runMultiTargetSync(configPath, registryOverride string, dryRun, check, watc
 	defer cancel()
 
 	if check {
-		fmt.Fprintln(os.Stdout, "sync.yaml: ok")
+		_, _ = fmt.Fprintln(os.Stdout, "sync.yaml: ok")
 	}
 	failures := 0
 	for _, p := range plans {
@@ -693,17 +693,17 @@ func printMarketplaceHuman(r *sync.RunResult, dryRun bool) {
 		return
 	}
 	if dryRun {
-		fmt.Fprintln(os.Stdout, "(dry-run; nothing pushed)")
+		_, _ = fmt.Fprintln(os.Stdout, "(dry-run; nothing pushed)")
 	}
-	fmt.Fprintf(os.Stdout, "workdir:  %s\n", r.Workdir)
-	fmt.Fprintf(os.Stdout, "changed:  %t\n", r.Render.Changed)
+	_, _ = fmt.Fprintf(os.Stdout, "workdir:  %s\n", r.Workdir)
+	_, _ = fmt.Fprintf(os.Stdout, "changed:  %t\n", r.Render.Changed)
 	if len(r.Render.ChangedArtifacts) > 0 {
-		fmt.Fprintln(os.Stdout, "artifacts:")
+		_, _ = fmt.Fprintln(os.Stdout, "artifacts:")
 		for _, id := range r.Render.ChangedArtifacts {
-			fmt.Fprintf(os.Stdout, "  - %s\n", id)
+			_, _ = fmt.Fprintf(os.Stdout, "  - %s\n", id)
 		}
 	}
-	fmt.Fprintf(os.Stdout, "published: %t\n", r.Published)
+	_, _ = fmt.Fprintf(os.Stdout, "published: %t\n", r.Published)
 }
 
 // printMarketplaceJSON emits the structured envelope for one marketplace target:
@@ -728,7 +728,7 @@ func printMarketplaceJSON(r *sync.RunResult) {
 		fmt.Fprintf(os.Stderr, "error: encode json: %v\n", err)
 		return
 	}
-	fmt.Fprintln(os.Stdout, string(b))
+	_, _ = fmt.Fprintln(os.Stdout, string(b))
 }
 
 // runSyncCheck implements `podium sync --check` (§7.5.2): it loads the merged
@@ -992,15 +992,15 @@ func formatList(items []string) string {
 
 func printHuman(res *sync.Result, dryRun bool) {
 	if dryRun {
-		fmt.Fprintln(os.Stdout, "(dry-run; nothing written)")
+		_, _ = fmt.Fprintln(os.Stdout, "(dry-run; nothing written)")
 	}
-	fmt.Fprintf(os.Stdout, "adapter: %s\n", res.Adapter)
-	fmt.Fprintf(os.Stdout, "target:  %s\n", res.Target)
-	fmt.Fprintf(os.Stdout, "artifacts:\n")
+	_, _ = fmt.Fprintf(os.Stdout, "adapter: %s\n", res.Adapter)
+	_, _ = fmt.Fprintf(os.Stdout, "target:  %s\n", res.Target)
+	_, _ = fmt.Fprintf(os.Stdout, "artifacts:\n")
 	for _, a := range res.Artifacts {
-		fmt.Fprintf(os.Stdout, "  - %s  [%s]\n", a.ID, a.Layer)
+		_, _ = fmt.Fprintf(os.Stdout, "  - %s  [%s]\n", a.ID, a.Layer)
 		for _, f := range a.Files {
-			fmt.Fprintf(os.Stdout, "      %s\n", f)
+			_, _ = fmt.Fprintf(os.Stdout, "      %s\n", f)
 		}
 	}
 }
@@ -1050,7 +1050,7 @@ func lintCmd(args []string) int {
 	}
 	exit := 0
 	for _, d := range diags {
-		fmt.Fprintln(os.Stdout, d.String())
+		_, _ = fmt.Fprintln(os.Stdout, d.String())
 		if d.Severity == lint.SeverityError {
 			exit = 1
 		}
@@ -1465,7 +1465,7 @@ var (
 func runInitWizard(in io.Reader, out io.Writer) (initWizardResult, error) {
 	r := bufio.NewReader(in)
 	ask := func(prompt string) (string, error) {
-		fmt.Fprint(out, prompt)
+		_, _ = fmt.Fprint(out, prompt)
 		line, err := r.ReadString('\n')
 		if err != nil && err != io.EOF {
 			return "", err
@@ -1579,7 +1579,7 @@ func mustGetJSON(base, path string, params map[string]string) []byte {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -1798,7 +1798,7 @@ func printJSON(res *sync.Result) {
 		fmt.Fprintf(os.Stderr, "error: encode json: %v\n", err)
 		return
 	}
-	fmt.Fprintln(os.Stdout, string(b))
+	_, _ = fmt.Fprintln(os.Stdout, string(b))
 }
 
 // emptyIfNil normalizes a nil slice to a non-nil empty slice so the JSON

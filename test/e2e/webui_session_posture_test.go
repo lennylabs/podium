@@ -104,7 +104,7 @@ func TestServerFlags_BrowserOriginGateCoversLayerWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("forged DELETE: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("forged cross-site DELETE = %d, want 403\nlog:\n%s", resp.StatusCode, srv.log())
 	}
@@ -128,7 +128,7 @@ func TestServerFlags_BrowserOriginGateCoversLayerWrites(t *testing.T) {
 	if err != nil {
 		t.Fatalf("plain DELETE: %v", err)
 	}
-	defer admitted.Body.Close()
+	defer func() { _ = admitted.Body.Close() }()
 	if admitted.StatusCode == http.StatusForbidden {
 		var e struct {
 			Code string `json:"code"`

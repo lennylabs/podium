@@ -145,7 +145,7 @@ func TestPostgres_SchemaPerOrgIsolation_ForgedWhere(t *testing.T) {
 	if err != nil {
 		t.Fatalf("conn: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// A connection scoped to org B forges A's tenant_id. Under schema-per-org
 	// the manifests table in org B's schema is a different table that never
@@ -199,7 +199,7 @@ func TestPostgres_TenantsRLS_DeniesCrossOrgRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("conn: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	// Provision a non-owner, non-superuser role so the RLS policy is actually
 	// enforced rather than bypassed by the privileged suite connection.
@@ -215,7 +215,7 @@ func TestPostgres_TenantsRLS_DeniesCrossOrgRead(t *testing.T) {
 	if _, err := conn.ExecContext(ctx, `CREATE ROLE podium_rls_probe NOSUPERUSER NOLOGIN`); err != nil {
 		t.Skipf("cannot create RLS probe role: %v", err)
 	}
-	defer conn.ExecContext(context.Background(), cleanupRole)
+	defer func() { _, _ = conn.ExecContext(context.Background(), cleanupRole) }()
 	for _, g := range []string{
 		`GRANT USAGE ON SCHEMA public TO podium_rls_probe`,
 		`GRANT SELECT ON public.tenants TO podium_rls_probe`,
@@ -229,7 +229,7 @@ func TestPostgres_TenantsRLS_DeniesCrossOrgRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, "orga"); err != nil {
 		t.Fatalf("set_config: %v", err)

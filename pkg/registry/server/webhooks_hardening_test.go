@@ -68,7 +68,7 @@ func TestWebhookReceiverCRUD_NonAdminForbidden(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%s %s: %v", tc.method, tc.path, err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403", resp.StatusCode)
 			}
@@ -95,7 +95,7 @@ func TestWebhookReceiverCreate_AdminGateBeforeReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
@@ -122,7 +122,7 @@ func TestWebhookReceiverCreate_DebounceStored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d: %s", resp.StatusCode, buf)
@@ -158,7 +158,7 @@ func TestWebhookReceiverCreate_DebounceInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
@@ -187,7 +187,7 @@ func TestWebhookReceiverCreate_DebounceNegative(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
@@ -222,7 +222,7 @@ func TestWebhookReceiverUpdate_DebounceStored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d: %s", resp.StatusCode, buf)
@@ -258,7 +258,7 @@ func TestWebhookReceiverUpdate_DebounceInvalid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
@@ -289,7 +289,7 @@ func TestWebhookReceiverCreate_SSRFRejectsLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
@@ -319,7 +319,7 @@ func TestWebhookReceiverCreate_SSRFRejectsHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
@@ -354,7 +354,7 @@ func TestWebhookReceiverUpdate_SSRFRejectsLoopback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", resp.StatusCode)
 	}
@@ -394,7 +394,7 @@ func TestWebhookReceiverCreate_SSRFAllowlistedHostAccepted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d (allowlisted host should be accepted): %s", resp.StatusCode, buf)
@@ -415,7 +415,7 @@ func TestWebhookReceiverCreate_NilPolicySkipsCheck(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d (nil policy should skip the check): %s", resp.StatusCode, buf)

@@ -89,7 +89,7 @@ func TestDataPlane_LoadArtifactServesResourcesFromCore(t *testing.T) {
 		t.Fatalf("GET: %v", err)
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	// the large-resource reference is named presigned_url.
 	if !strings.Contains(string(raw), "\"presigned_url\"") {
@@ -133,7 +133,7 @@ func TestDataPlane_BatchLoadPresignsOnlyObjectHeldResources(t *testing.T) {
 		t.Fatalf("POST: %v", err)
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	var envelopes []server.BatchLoadEnvelope
 	if err := json.Unmarshal(raw, &envelopes); err != nil {
@@ -172,7 +172,7 @@ func TestDataPlane_ObjectsHeadReportsSizeWithoutBody(t *testing.T) {
 		t.Fatalf("HEAD: %v", err)
 	}
 	headBody, _ := io.ReadAll(headResp.Body)
-	headResp.Body.Close()
+	_ = headResp.Body.Close()
 	if headResp.StatusCode != http.StatusOK {
 		t.Fatalf("HEAD status = %d", headResp.StatusCode)
 	}
@@ -188,7 +188,7 @@ func TestDataPlane_ObjectsHeadReportsSizeWithoutBody(t *testing.T) {
 		t.Fatalf("GET: %v", err)
 	}
 	getBody, _ := io.ReadAll(getResp.Body)
-	getResp.Body.Close()
+	_ = getResp.Body.Close()
 	if string(getBody) != string(large) {
 		t.Errorf("GET streamed %d bytes, want %d", len(getBody), len(large))
 	}
@@ -208,7 +208,7 @@ func TestDataPlane_ObjectsImmutableCacheControl(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", method, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if got := resp.Header.Get("Cache-Control"); got != objectstore.ImmutableCacheControl {
 			t.Errorf("%s Cache-Control = %q, want %q", method, got, objectstore.ImmutableCacheControl)
 		}

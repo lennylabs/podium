@@ -18,7 +18,7 @@ func TestAuditSinkAliases(t *testing.T) {
 	)
 	// A LocalAuditSink value is interchangeable with a Sink value.
 	var ls LocalAuditSink = NewMemory()
-	var s Sink = ls
+	var s Sink = ls //nolint:staticcheck // ST1023: the explicit Sink type is the assignability the test asserts.
 	if err := s.Append(context.Background(), Event{Type: EventArtifactLoaded, Caller: "alice"}); err != nil {
 		t.Fatalf("Append through alias: %v", err)
 	}

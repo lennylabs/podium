@@ -6,8 +6,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/lennylabs/podium/pkg/manifest"
 	"gopkg.in/yaml.v3"
+
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // The read CLI's --json output follows the §7.6.1 documented schemas, which
@@ -194,5 +195,5 @@ func printReadJSON(v any, raw []byte) {
 		fmt.Println(string(raw))
 		return
 	}
-	fmt.Fprintln(os.Stdout, string(b))
+	_, _ = fmt.Fprintln(os.Stdout, string(b))
 }

@@ -6,8 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/lennylabs/podium/pkg/manifest"
 	"gopkg.in/yaml.v3"
+
+	"github.com/lennylabs/podium/pkg/manifest"
 )
 
 // ClaudeCode is the adapter for the Anthropic Claude Code CLI (§6.7).

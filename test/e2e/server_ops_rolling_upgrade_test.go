@@ -78,7 +78,7 @@ func ruSkipIfNoPostgres(t *testing.T) string {
 	if err != nil {
 		t.Skipf("open postgres: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
@@ -187,7 +187,7 @@ func ruStageLegacyDatabase(t *testing.T, dsn string) (id, version, contentHash s
 	if err != nil {
 		t.Fatalf("open postgres for staging: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1) // keep search_path on one session across the staging statements
 
 	schema := ruDefaultOrgSchema(t)
@@ -243,7 +243,7 @@ func ruColumnExists(t *testing.T, dsn, table, col string) bool {
 	if err != nil {
 		t.Fatalf("open postgres for column check: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	var n int
 	if err := db.QueryRowContext(context.Background(),
 		`SELECT count(*) FROM information_schema.columns
@@ -264,7 +264,7 @@ func ruSeededManifestRow(t *testing.T, dsn, id, version string) (hash string, ok
 	if err != nil {
 		t.Fatalf("open postgres for row check: %v", err)
 	}
-	defer db.Close()
+	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
 	ruExec(t, db, "SET search_path TO "+ruDefaultOrgSchema(t))
 	err = db.QueryRowContext(context.Background(),

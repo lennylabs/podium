@@ -67,7 +67,7 @@ func registerReceiver(t *testing.T, base, url, eventType, debounce string) strin
 	if err != nil {
 		t.Fatalf("POST /v1/webhooks: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("register status = %d: %s", resp.StatusCode, buf)

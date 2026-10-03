@@ -85,7 +85,7 @@ func main() {
 	case "tests":
 		os.Exit(listTests(os.Stdout, tests))
 	case "help", "-h", "--help":
-		fmt.Fprint(os.Stdout, usageText)
+		_, _ = fmt.Fprint(os.Stdout, usageText)
 		return
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n%s", cmd, usageText)
@@ -96,15 +96,15 @@ func main() {
 // report prints a section -> count table to w. Returns 0.
 func report(w io.Writer, sections []specparser.Section, tests []specparser.Test) int {
 	bySection := groupBySection(tests)
-	fmt.Fprintln(w, "section                  tests   title")
-	fmt.Fprintln(w, "-------                  -----   -----")
+	_, _ = fmt.Fprintln(w, "section                  tests   title")
+	_, _ = fmt.Fprintln(w, "-------                  -----   -----")
 	for _, s := range sections {
 		count := len(bySection[s.ID])
 		title := s.Title
-		fmt.Fprintf(w, "%-22s   %5d   %s\n", s.ID, count, title)
+		_, _ = fmt.Fprintf(w, "%-22s   %5d   %s\n", s.ID, count, title)
 	}
 	covered, total := coverageStats(sections, bySection)
-	fmt.Fprintf(w, "\n%d/%d sections have at least one citing test (%d uncited).\n",
+	_, _ = fmt.Fprintf(w, "\n%d/%d sections have at least one citing test (%d uncited).\n",
 		covered, total, total-covered)
 	return 0
 }
@@ -119,12 +119,12 @@ func uncovered(w io.Writer, sections []specparser.Section, tests []specparser.Te
 		}
 	}
 	if len(missing) == 0 {
-		fmt.Fprintln(w, "all spec sections have at least one citing test.")
+		_, _ = fmt.Fprintln(w, "all spec sections have at least one citing test.")
 		return 0
 	}
-	fmt.Fprintf(w, "%d spec sections have no citing test:\n\n", len(missing))
+	_, _ = fmt.Fprintf(w, "%d spec sections have no citing test:\n\n", len(missing))
 	for _, s := range missing {
-		fmt.Fprintf(w, "  %s   %s\n", s.ID, s.Title)
+		_, _ = fmt.Fprintf(w, "  %s   %s\n", s.ID, s.Title)
 	}
 	return 1
 }
@@ -145,12 +145,12 @@ func drift(w io.Writer, sections []specparser.Section, tests []specparser.Test) 
 		}
 	}
 	if len(rogue) == 0 {
-		fmt.Fprintln(w, "no spec citation drift detected.")
+		_, _ = fmt.Fprintln(w, "no spec citation drift detected.")
 		return 0
 	}
-	fmt.Fprintf(w, "%d test(s) cite spec sections that no longer exist:\n\n", len(rogue))
+	_, _ = fmt.Fprintf(w, "%d test(s) cite spec sections that no longer exist:\n\n", len(rogue))
 	for _, t := range rogue {
-		fmt.Fprintf(w, "  %s   %s   (%s)\n", t.Citation.SectionID, t.Name, t.File)
+		_, _ = fmt.Fprintf(w, "  %s   %s   (%s)\n", t.Citation.SectionID, t.Name, t.File)
 	}
 	return 1
 }
@@ -158,13 +158,13 @@ func drift(w io.Writer, sections []specparser.Section, tests []specparser.Test) 
 // listTests prints every parsed test.
 func listTests(w io.Writer, tests []specparser.Test) int {
 	sort.Slice(tests, func(i, j int) bool { return tests[i].Name < tests[j].Name })
-	fmt.Fprintln(w, "section          test")
+	_, _ = fmt.Fprintln(w, "section          test")
 	for _, t := range tests {
 		section := t.Citation.SectionID
 		if section == "" {
 			section = "(none)"
 		}
-		fmt.Fprintf(w, "%-15s   %s\n", section, t.Name)
+		_, _ = fmt.Fprintf(w, "%-15s   %s\n", section, t.Name)
 	}
 	return 0
 }

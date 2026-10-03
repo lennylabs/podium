@@ -72,7 +72,7 @@ func registryContentHash(t *testing.T, client *http.Client, baseURL, id string) 
 	if err != nil {
 		t.Fatalf("load_artifact %s: %v", id, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("load_artifact %s: HTTP %d: %s", id, resp.StatusCode, body)

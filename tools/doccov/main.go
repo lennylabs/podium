@@ -96,7 +96,7 @@ func main() {
 	case "check":
 		os.Exit(check(os.Stdout, root, pages, manifest, slugs))
 	case "help", "-h", "--help":
-		fmt.Fprint(os.Stdout, usageText)
+		_, _ = fmt.Fprint(os.Stdout, usageText)
 		return
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command: %s\n%s", cmd, usageText)
@@ -109,27 +109,27 @@ func report(w io.Writer, pages []string, m *Manifest, slugs map[string]string) i
 	byPath := m.byPath()
 	covered, waived, unmapped := 0, 0, 0
 
-	fmt.Fprintln(w, "disposition   doc page")
-	fmt.Fprintln(w, "-----------   --------")
+	_, _ = fmt.Fprintln(w, "disposition   doc page")
+	_, _ = fmt.Fprintln(w, "-----------   --------")
 	for _, p := range pages {
 		entry, ok := byPath[p]
 		switch {
 		case !ok:
-			fmt.Fprintf(w, "UNMAPPED      %s\n", p)
+			_, _ = fmt.Fprintf(w, "UNMAPPED      %s\n", p)
 			unmapped++
 		case entry.Waiver != "":
-			fmt.Fprintf(w, "waived        %s   (%s)\n", p, entry.Waiver)
+			_, _ = fmt.Fprintf(w, "waived        %s   (%s)\n", p, entry.Waiver)
 			waived++
 		default:
 			file := slugs[entry.Slug]
 			if file == "" {
 				file = "<no test file>"
 			}
-			fmt.Fprintf(w, "covered       %s   -> %s (%s)\n", p, entry.Slug, file)
+			_, _ = fmt.Fprintf(w, "covered       %s   -> %s (%s)\n", p, entry.Slug, file)
 			covered++
 		}
 	}
-	fmt.Fprintf(w, "\n%d runnable page(s): %d covered, %d waived, %d unmapped.\n",
+	_, _ = fmt.Fprintf(w, "\n%d runnable page(s): %d covered, %d waived, %d unmapped.\n",
 		len(pages), covered, waived, unmapped)
 	return 0
 }
@@ -189,13 +189,13 @@ func check(w io.Writer, root string, pages []string, m *Manifest, slugs map[stri
 	}
 
 	if len(problems) == 0 {
-		fmt.Fprintf(w, "doccov: %d runnable doc page(s), all mapped to a covering test or a waiver.\n", len(pages))
+		_, _ = fmt.Fprintf(w, "doccov: %d runnable doc page(s), all mapped to a covering test or a waiver.\n", len(pages))
 		return 0
 	}
 	sort.Strings(problems)
-	fmt.Fprintf(w, "doccov found %d problem(s):\n\n", len(problems))
+	_, _ = fmt.Fprintf(w, "doccov found %d problem(s):\n\n", len(problems))
 	for _, p := range problems {
-		fmt.Fprintf(w, "  - %s\n", p)
+		_, _ = fmt.Fprintf(w, "  - %s\n", p)
 	}
 	return 1
 }

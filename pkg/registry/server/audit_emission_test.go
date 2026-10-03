@@ -51,7 +51,7 @@ func TestAdminGrants_EmitsAdminGranted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated {
 		t.Fatalf("grant status = %d, want 201", resp.StatusCode)
 	}
@@ -61,7 +61,7 @@ func TestAdminGrants_EmitsAdminGranted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
 	}
-	delResp.Body.Close()
+	_ = delResp.Body.Close()
 	if delResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("revoke status = %d, want 204", delResp.StatusCode)
 	}

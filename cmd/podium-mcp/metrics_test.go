@@ -104,7 +104,7 @@ func TestStartMetricsListener_ServesScrape(t *testing.T) {
 		resp, err := http.Get("http://" + addr + "/metrics")
 		if err == nil {
 			b, _ := io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			body = string(b)
 			break
 		}

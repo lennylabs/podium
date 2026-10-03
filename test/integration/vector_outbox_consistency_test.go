@@ -110,7 +110,7 @@ func (outboxEmbedder) ID() string        { return "outbox" }
 func (outboxEmbedder) Model() string     { return "outbox" }
 func (e outboxEmbedder) Dimensions() int { return e.dim }
 func (e outboxEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
-	return bagEmbedder{dim: e.dim}.Embed(ctx, texts)
+	return bagEmbedder(e).Embed(ctx, texts)
 }
 
 // drainOutboxOnce mirrors internal/serverboot.vectorDrainWorker.runOnce against

@@ -25,7 +25,7 @@ func TestDirFS_OpenReadDirStat(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	statFS := fsys.(interface {
 		Stat(string) (os.FileInfo, error)

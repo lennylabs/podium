@@ -65,7 +65,7 @@ func TestLatencyObserver_RecordsPerOperationOverHTTP(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET %s: %v", path, err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 	next := func() obsRec {
 		select {

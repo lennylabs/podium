@@ -236,7 +236,7 @@ func httpGetJSON(ctx context.Context, client *http.Client, rawURL, token string,
 		// mode. A non-2xx status below is a structured rejection, not this.
 		return &serverUnreachableError{err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 64<<20))
 	if err != nil {
 		return err
@@ -278,7 +278,7 @@ func fetchBytes(ctx context.Context, client *http.Client, rawURL, token string) 
 	if err != nil {
 		return nil, &serverUnreachableError{err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}

@@ -71,9 +71,9 @@ func configServerShow(asJSON bool) int {
 // printSettingsTable writes the name/value/source table for a settings slice.
 func printSettingsTable(settings []serverboot.Setting) {
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "name\tvalue\tsource")
+	_, _ = fmt.Fprintln(tw, "name\tvalue\tsource")
 	for _, s := range settings {
-		fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, s.Value, s.Source)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, s.Value, s.Source)
 	}
-	tw.Flush()
+	_ = tw.Flush()
 }

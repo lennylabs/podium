@@ -27,6 +27,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/embedding"
 	"github.com/lennylabs/podium/pkg/identity"
@@ -49,7 +51,6 @@ import (
 	"github.com/lennylabs/podium/pkg/vector"
 	"github.com/lennylabs/podium/pkg/webhook"
 	"github.com/lennylabs/podium/web"
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 // envFirst returns the value of the first non-empty env var.
@@ -873,7 +874,7 @@ func run(ctx context.Context, stop func()) error {
 	// pool (and its background opener goroutine) rather than leaking it. The
 	// in-memory store is not an io.Closer and needs no release.
 	if closer, ok := st.(io.Closer); ok {
-		defer closer.Close()
+		defer func() { _ = closer.Close() }()
 	}
 
 	// Standalone bootstrap: ensure the bootstrapped org exists so initial
@@ -1068,7 +1069,7 @@ func run(ctx context.Context, stop func()) error {
 	// (sqlite-vec, pgvector) and its connection-pool goroutine. The memory and
 	// managed backends close to a no-op.
 	if closer, ok := vecProvider.(io.Closer); ok {
-		defer closer.Close()
+		defer func() { _ = closer.Close() }()
 	}
 	// §4.7: ingest-time embedding closures for a collocated backend. The zero
 	// value (managed/outbox backend, self-embedding backend, or no vector
@@ -1809,8 +1810,8 @@ func emitStartupBanner(w io.Writer, publicMode bool) {
 	if !publicMode {
 		return
 	}
-	fmt.Fprintln(w, "⚠  PUBLIC MODE: all artifacts visible to all callers without authentication.")
-	fmt.Fprintln(w, "   Bound to 127.0.0.1 by default; pass --allow-public-bind to bind a non-loopback address.")
+	_, _ = fmt.Fprintln(w, "⚠  PUBLIC MODE: all artifacts visible to all callers without authentication.")
+	_, _ = fmt.Fprintln(w, "   Bound to 127.0.0.1 by default; pass --allow-public-bind to bind a non-loopback address.")
 }
 
 type Config struct {

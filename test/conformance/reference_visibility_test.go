@@ -10,7 +10,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/json"
-	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -113,7 +112,7 @@ func searchAllIDs(t *testing.T, baseURL, identity string) map[string]bool {
 	if err != nil {
 		t.Fatalf("search_artifacts: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("search_artifacts status=%d", resp.StatusCode)
 	}
@@ -165,7 +164,7 @@ func TestReferenceRegistry_SignsAndVerifiesAcrossSensitivities(t *testing.T) {
 		return provider.Sign(ctx, contentHash)
 	}
 	for _, l := range reg.Layers {
-		var layerFS fs.FS = os.DirFS(l.Path)
+		layerFS := os.DirFS(l.Path)
 		if _, err := ingest.Ingest(context.Background(), st, ingest.Request{
 			TenantID: tenant,
 			LayerID:  l.ID,

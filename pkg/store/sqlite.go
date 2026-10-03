@@ -238,7 +238,7 @@ func (s *SQLite) ListTenants(ctx context.Context) ([]Tenant, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Tenant
 	for rows.Next() {
 		var t Tenant
@@ -450,7 +450,7 @@ func (s *SQLite) ListVectorPending(ctx context.Context, limit int, now time.Time
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []VectorPending
 	for rows.Next() {
 		var p VectorPending
@@ -621,7 +621,7 @@ func (s *SQLite) listManifests(ctx context.Context, tenantID string, includeDele
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []ManifestRecord{}
 	for rows.Next() {
 		rec, err := scanManifest(rows)
@@ -682,7 +682,7 @@ func (s *SQLite) ListDomains(ctx context.Context, tenantID string) ([]DomainReco
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []DomainRecord{}
 	for rows.Next() {
 		var rec DomainRecord
@@ -714,7 +714,7 @@ func (s *SQLite) DependentsOf(ctx context.Context, tenantID, artifactID string) 
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []DependencyEdge
 	for rows.Next() {
 		var e DependencyEdge
@@ -737,7 +737,7 @@ func (s *SQLite) DependencyInDegree(ctx context.Context, tenantID string) (map[s
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := map[string]int{}
 	for rows.Next() {
 		var to string
@@ -787,7 +787,7 @@ func (s *SQLite) ListAdminGrants(ctx context.Context, orgID string) ([]AdminGran
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []AdminGrant
 	for rows.Next() {
 		var g AdminGrant
@@ -880,7 +880,7 @@ func (s *SQLite) ListLayerConfigs(ctx context.Context, tenantID string) ([]Layer
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []LayerConfig{}
 	for rows.Next() {
 		cfg, err := scanLayerConfig(rows)
@@ -901,7 +901,7 @@ func (s *SQLite) DeleteLayerConfig(ctx context.Context, tenantID, id string) err
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE layer_configs SET deleted_at = ?
 		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, now, tenantID, id); err != nil {
@@ -922,7 +922,7 @@ func (s *SQLite) RestoreLayerConfig(ctx context.Context, tenantID, id string) er
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	res, err := tx.ExecContext(ctx, `
 		UPDATE layer_configs SET deleted_at = NULL
 		WHERE tenant_id = ? AND id = ? AND deleted_at IS NOT NULL`, tenantID, id)
@@ -955,7 +955,7 @@ func (s *SQLite) ListDeletedLayerConfigs(ctx context.Context, tenantID string) (
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := []LayerConfig{}
 	for rows.Next() {
 		cfg, err := scanLayerConfig(rows)
@@ -975,7 +975,7 @@ func (s *SQLite) PurgeExpiredLayerDeletions(ctx context.Context, before time.Tim
 	if err != nil {
 		return 0, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
 		DELETE FROM manifests
 		WHERE deleted_at IS NOT NULL AND deleted_at < ?`, cutoff); err != nil {

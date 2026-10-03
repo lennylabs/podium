@@ -115,7 +115,9 @@ func TestPodiumOnlySkillFields_ReturnsIndependentCopy(t *testing.T) {
 	first := PodiumOnlySkillFields()
 	n := len(first)
 	first[0] = "mutated"
-	first = append(first, "extra")
+	if grown := append(first, "extra"); len(grown) != n+1 {
+		t.Fatalf("append to the returned copy: len = %d, want %d", len(grown), n+1)
+	}
 
 	second := PodiumOnlySkillFields()
 	if len(second) != n {

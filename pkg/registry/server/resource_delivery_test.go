@@ -79,7 +79,7 @@ func getLoadArtifact(t *testing.T, ts *httptest.Server) (server.LoadArtifactResp
 		t.Fatalf("GET: %v", err)
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, raw)
 	}
@@ -191,7 +191,7 @@ func TestBatchLoad_DeliversInlineResourcesWithoutObjectStore(t *testing.T) {
 		t.Fatalf("POST: %v", err)
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	var envs []server.BatchLoadEnvelope
 	if err := json.Unmarshal(raw, &envs); err != nil {
@@ -267,7 +267,7 @@ func TestResourceDelivery_InlineRefAboveCutoffServedInlineWithObjectStore(t *tes
 	if err := json.NewDecoder(resp.Body).Decode(&single); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -286,7 +286,7 @@ func TestResourceDelivery_InlineRefAboveCutoffServedInlineWithObjectStore(t *tes
 	if err := json.NewDecoder(resp.Body).Decode(&batch); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if len(batch) != 1 || len(batch[0].Resources) != 1 {
 		t.Fatalf("batch = %+v, want one item with one resource", batch)
 	}

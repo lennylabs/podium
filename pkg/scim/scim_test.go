@@ -60,7 +60,7 @@ func TestSCIM_UserCRUD(t *testing.T) {
 		"emails":[{"value":"alice@example.com","primary":true}]
 	}`)
 	resp := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Users", body)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d: %s", resp.StatusCode, buf)
@@ -73,19 +73,19 @@ func TestSCIM_UserCRUD(t *testing.T) {
 	}
 
 	getResp := authedRequest(t, "tok", http.MethodGet, ts.URL+"/scim/v2/Users/"+id, nil)
-	defer getResp.Body.Close()
+	defer func() { _ = getResp.Body.Close() }()
 	if getResp.StatusCode != http.StatusOK {
 		t.Fatalf("get status = %d", getResp.StatusCode)
 	}
 
 	delResp := authedRequest(t, "tok", http.MethodDelete, ts.URL+"/scim/v2/Users/"+id, nil)
-	delResp.Body.Close()
+	_ = delResp.Body.Close()
 	if delResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete status = %d", delResp.StatusCode)
 	}
 
 	notFound := authedRequest(t, "tok", http.MethodGet, ts.URL+"/scim/v2/Users/"+id, nil)
-	notFound.Body.Close()
+	_ = notFound.Body.Close()
 	if notFound.StatusCode != http.StatusNotFound {
 		t.Fatalf("post-delete get status = %d, want 404", notFound.StatusCode)
 	}
@@ -97,7 +97,7 @@ func TestSCIM_RequiresBearerToken(t *testing.T) {
 	t.Parallel()
 	_, ts := bootSCIM(t, "expected")
 	resp := authedRequest(t, "" /* no token */, http.MethodGet, ts.URL+"/scim/v2/Users", nil)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", resp.StatusCode)
 	}
@@ -107,7 +107,7 @@ func TestSCIM_RequiresBearerToken(t *testing.T) {
 	}
 
 	bad := authedRequest(t, "wrong", http.MethodGet, ts.URL+"/scim/v2/Users", nil)
-	bad.Body.Close()
+	_ = bad.Body.Close()
 	if bad.StatusCode != http.StatusUnauthorized {
 		t.Errorf("bad-token status = %d, want 401", bad.StatusCode)
 	}
@@ -120,12 +120,12 @@ func TestSCIM_UserNameUniqueness(t *testing.T) {
 	_, ts := bootSCIM(t, "tok")
 	body := []byte(`{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"u@x","active":true}`)
 	first := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Users", body)
-	first.Body.Close()
+	_ = first.Body.Close()
 	if first.StatusCode != http.StatusCreated {
 		t.Fatalf("first status = %d", first.StatusCode)
 	}
 	second := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Users", body)
-	defer second.Body.Close()
+	defer func() { _ = second.Body.Close() }()
 	if second.StatusCode != http.StatusConflict {
 		t.Errorf("second status = %d, want 409", second.StatusCode)
 	}
@@ -146,7 +146,7 @@ func TestSCIM_GroupAndMembership(t *testing.T) {
 	for _, un := range []string{"alice@x", "bob@x"} {
 		body := []byte(`{"schemas":["urn:ietf:params:scim:schemas:core:2.0:User"],"userName":"` + un + `","active":true}`)
 		resp := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Users", body)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 	}
 	users, _ := store.ListUsers(context.Background(), scim.Filter{})
 	memberIDs := make([]string, len(users))
@@ -162,7 +162,7 @@ func TestSCIM_GroupAndMembership(t *testing.T) {
 		},
 	})
 	resp := authedRequest(t, "tok", http.MethodPost, ts.URL+"/scim/v2/Groups", gbody)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("create group status = %d: %s", resp.StatusCode, buf)
@@ -210,7 +210,7 @@ func TestSCIM_FilterParser(t *testing.T) {
 		_, ts := bootSCIM(t, "tok")
 		url := ts.URL + "/scim/v2/Users?filter=" + scimEncodeQuery(c.input)
 		resp := authedRequest(t, "tok", http.MethodGet, url, nil)
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		if c.wantErr {
 			if resp.StatusCode != http.StatusBadRequest {
 				t.Errorf("filter %q: status = %d, want 400", c.input, resp.StatusCode)
@@ -283,12 +283,12 @@ func TestSCIM_FilterMatchSemantics(t *testing.T) {
 func scimEncodeQuery(s string) string {
 	out := []byte{}
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c == ' ' {
+		switch c := s[i]; c {
+		case ' ':
 			out = append(out, '+')
-		} else if c == '"' {
+		case '"':
 			out = append(out, '%', '2', '2')
-		} else {
+		default:
 			out = append(out, c)
 		}
 	}

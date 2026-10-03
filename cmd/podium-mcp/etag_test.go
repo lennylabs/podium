@@ -48,7 +48,7 @@ func TestLoadArtifact_SendsIfNoneMatchAndServes304FromCache(t *testing.T) {
 	dir := t.TempDir()
 	cache, _ := newContentCache(dir)
 	resolutions := newResolutionCache(dir)
-	t.Cleanup(func() { resolutions.Close() })
+	t.Cleanup(func() { _ = resolutions.Close() })
 	resolutions.PutVersion("team/x", "1.0.0", hash, time.Now())
 
 	srv := &mcpServer{
@@ -112,7 +112,7 @@ func TestLoadArtifact_ConditionalGET200ServesFreshBody(t *testing.T) {
 		t.Fatalf("put: %v", err)
 	}
 	resolutions := newResolutionCache(dir)
-	t.Cleanup(func() { resolutions.Close() })
+	t.Cleanup(func() { _ = resolutions.Close() })
 	resolutions.PutVersion("team/x", "1.0.0", cachedHash, time.Now())
 
 	srv := &mcpServer{

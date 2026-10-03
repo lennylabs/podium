@@ -58,7 +58,7 @@ func (h gitProviderHarness) deliver(t *testing.T, id, providerID, body, secret s
 	if err != nil {
 		t.Fatalf("deliver: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, string(out)
 }

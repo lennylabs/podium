@@ -240,8 +240,7 @@ func TestLayerRegister_HappyPathPostsBody(t *testing.T) {
 		if r.URL.Path != "/v1/layers" || r.Method != http.MethodPost {
 			t.Errorf("got %s %s", r.Method, r.URL.Path)
 		}
-		var buf []byte
-		buf = make([]byte, r.ContentLength)
+		buf := make([]byte, r.ContentLength)
 		_, _ = r.Body.Read(buf)
 		gotBody = string(buf)
 		w.WriteHeader(http.StatusCreated)

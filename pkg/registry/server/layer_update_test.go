@@ -51,7 +51,7 @@ func TestLayerUpdate_PartialPatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -102,7 +102,7 @@ func TestLayerUpdate_RotateWebhookSecret(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
 	}
@@ -152,7 +152,7 @@ func TestLayerUpdate_RotateWebhookSecretRejectsNonGit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
@@ -174,7 +174,7 @@ func TestLayerUpdate_NotFound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}

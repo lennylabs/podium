@@ -102,7 +102,7 @@ func orgPostRaw(t *testing.T, url, contentType string, body []byte, headers map[
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var buf bytes.Buffer
 	_, _ = buf.ReadFrom(resp.Body)
 	return resp.StatusCode, buf.Bytes()
@@ -1641,7 +1641,7 @@ func TestStandardDeploy_LayerWatchPolls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create log file: %v", err)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 
 	cmd := exec.CommandContext(ctx, bin,
 		"layer", "watch",

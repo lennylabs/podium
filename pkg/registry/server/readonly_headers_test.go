@@ -35,7 +35,7 @@ func TestServer_ReadOnlyHeadersOnReadEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if got := resp.Header.Get("X-Podium-Read-Only"); got != "" {
 		t.Errorf("ready mode: X-Podium-Read-Only = %q, want empty", got)
 	}
@@ -46,7 +46,7 @@ func TestServer_ReadOnlyHeadersOnReadEndpoints(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET (read-only): %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if got := resp.Header.Get("X-Podium-Read-Only"); got != "true" {
 		t.Errorf("read-only mode: X-Podium-Read-Only = %q, want true", got)
 	}
@@ -74,7 +74,7 @@ func TestServer_ReadOnlyHeadersOnLoadArtifact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if got := resp.Header.Get("X-Podium-Read-Only"); got != "true" {
 		t.Errorf("X-Podium-Read-Only = %q, want true", got)
 	}

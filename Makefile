@@ -22,7 +22,7 @@ LDFLAGS := -X 'github.com/lennylabs/podium/internal/buildinfo.Version=$(VERSION)
            -X 'github.com/lennylabs/podium/internal/buildinfo.Date=$(DATE)'
 
 .PHONY: help test test-live test-live-external test-live-kind test-auth-dex bench build \
-        lint update-golden \
+        lint golangci-lint update-golden \
         speccov speccov-uncovered speccov-drift speccov-report \
         doccov doccov-report doccov-check \
         coverage coverage-budget coverage-per-package coverage-gate \
@@ -40,7 +40,8 @@ help:
 	@echo "  test-live-kind   Run the Helm chart upgrade from v0.4.0 on a kind cluster (PODIUM_LIVE_KIND=1)"
 	@echo "  test-auth-dex    Bring up the bundled Dex and run the live device-code login e2e"
 	@echo "  bench            Run §7.1 latency benchmarks (informational)"
-	@echo "  lint             Run linters (golangci-lint when available)"
+	@echo "  lint             Run golangci-lint at the pinned GOLANGCI_LINT_VERSION"
+	@echo "  golangci-lint    Install the pinned golangci-lint into ./bin/"
 	@echo "  update-golden    Re-run tests with UPDATE_GOLDEN=1"
 	@echo "  speccov          Print spec-section coverage report"
 	@echo "  speccov-uncovered  Print spec sections with no citing test"
@@ -295,13 +296,22 @@ coverage-gate: lint speccov-drift matrix-audit doccov-check coverage-budget
 
 # ----- Lint / golden / tools / clean ----------------------------------------
 
-lint:
-	@if command -v golangci-lint >/dev/null 2>&1; then \
-	  golangci-lint run; \
-	else \
-	  echo "golangci-lint not installed; running go vet only"; \
-	  $(GO) vet ./...; \
-	fi
+# golangci-lint is pinned and installed into a versioned directory under bin/,
+# so `make lint` runs the same release locally and in CI regardless of what is
+# on PATH. Bumping GOLANGCI_LINT_VERSION installs the new release on the next
+# run. The install builds with the local Go toolchain, which keeps the linter
+# able to load packages that need the go.mod Go version.
+GOLANGCI_LINT_VERSION ?= v2.14.0
+GOLANGCI_LINT := bin/golangci-lint-$(GOLANGCI_LINT_VERSION)/golangci-lint
+
+$(GOLANGCI_LINT):
+	@mkdir -p $(dir $@)
+	GOBIN=$(CURDIR)/$(dir $@) $(GO) install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+
+golangci-lint: $(GOLANGCI_LINT)
+
+lint: $(GOLANGCI_LINT)
+	$(GOLANGCI_LINT) run
 
 update-golden:
 	UPDATE_GOLDEN=1 $(GO) test $(GOFLAGS) -count=1 ./...

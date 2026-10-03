@@ -47,7 +47,7 @@ func TestReadOnlyProbe_FlipsAfterFailures(t *testing.T) {
 		OnExit:   func() { exits.Add(1) },
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	go probe.Run(ctx)
+	go func() { _ = probe.Run(ctx) }()
 
 	// Healthy: tracker stays Ready.
 	time.Sleep(80 * time.Millisecond)
@@ -138,7 +138,7 @@ func TestReadOnlyProbe_RecoveryRequiresConsecutiveSuccesses(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go probe.Run(ctx)
+	go func() { _ = probe.Run(ctx) }()
 
 	// Two consecutive failures flip the tracker to read_only.
 	deadline := time.Now().Add(time.Second)

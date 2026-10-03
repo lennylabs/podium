@@ -623,7 +623,7 @@ func TestServerOps_WebhookInvalidHMAC(t *testing.T) {
 	}
 	buf := new(bytes.Buffer)
 	_, _ = buf.ReadFrom(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	apiWantStatus(t, resp.StatusCode, 401, "invalid webhook signature", buf.Bytes())
 	if code := apiJSONObj(t, buf.Bytes())["code"]; code != "ingest.webhook_invalid" {
 		t.Fatalf("code = %v, want ingest.webhook_invalid\n%s", code, buf.Bytes())

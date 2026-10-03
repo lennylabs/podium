@@ -37,7 +37,7 @@ func loadVersion(t *testing.T, base, query string) (int, string) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", query, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return resp.StatusCode, ""
 	}

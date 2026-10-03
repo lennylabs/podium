@@ -29,7 +29,7 @@ func lcaReingest(t *testing.T, base, id string) map[string]any {
 	if err != nil {
 		t.Fatalf("reingest %s: %v", id, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var m map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
 		t.Fatalf("decode reingest %s: %v", id, err)

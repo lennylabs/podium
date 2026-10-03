@@ -202,7 +202,7 @@ func getRaw(t testing.TB, url string) (int, []byte) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body := new(bytes.Buffer)
 	_, _ = body.ReadFrom(resp.Body)
 	return resp.StatusCode, body.Bytes()
@@ -279,7 +279,7 @@ func postJSON(t testing.TB, url string, reqBody any) (int, []byte) {
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out := new(bytes.Buffer)
 	_, _ = out.ReadFrom(resp.Body)
 	return resp.StatusCode, out.Bytes()
@@ -340,7 +340,7 @@ func (s *serverProc) getMaybeAuth(t testing.TB, url string) (int, []byte) {
 	if err != nil {
 		t.Fatalf("GET %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body := new(bytes.Buffer)
 	_, _ = body.ReadFrom(resp.Body)
 	return resp.StatusCode, body.Bytes()
@@ -430,7 +430,7 @@ func launchServer(t testing.TB, env []string, args ...string) *serverProc {
 	for time.Now().Before(deadline) {
 		resp, err := httpClient.Get(s.BaseURL + "/healthz")
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode == 200 {
 				return s
 			}
@@ -750,7 +750,7 @@ func appendLine(t testing.TB, path, text string) {
 	if err != nil {
 		t.Fatalf("open %s for append: %v", path, err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, err := f.WriteString(text); err != nil {
 		t.Fatalf("append to %s: %v", path, err)
 	}

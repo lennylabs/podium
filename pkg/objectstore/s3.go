@@ -134,7 +134,7 @@ func (s *S3) Get(ctx context.Context, key string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer obj.Close()
+	defer func() { _ = obj.Close() }()
 	body, err := io.ReadAll(obj)
 	if err != nil {
 		// minio-go returns a generic error; the underlying response

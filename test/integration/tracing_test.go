@@ -75,7 +75,7 @@ func TestTracing_RegistryServerSpanJoinsInboundTrace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client.Do: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("load_artifact = HTTP %d, want 200", resp.StatusCode)
 	}

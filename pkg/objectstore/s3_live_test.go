@@ -237,7 +237,7 @@ func TestS3_LivePresignRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET presigned: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("presigned GET status = %d", resp.StatusCode)
 	}

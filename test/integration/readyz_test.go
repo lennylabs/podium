@@ -70,7 +70,7 @@ func getReadyz(t *testing.T, baseURL string) (int, string) {
 	if err != nil {
 		t.Fatalf("GET /readyz: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var body server.ReadyResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("decode /readyz: %v", err)

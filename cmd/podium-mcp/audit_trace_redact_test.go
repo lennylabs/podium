@@ -7,8 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lennylabs/podium/pkg/audit"
 	oteltrace "go.opentelemetry.io/otel/trace"
+
+	"github.com/lennylabs/podium/pkg/audit"
 )
 
 // ctxWithTraceID returns a context carrying a recording-equivalent span

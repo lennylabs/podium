@@ -101,7 +101,7 @@ func TestBrowserAuth_SignInSetsTransactionCookie(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET sign-in: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("status = %d, want 302", resp.StatusCode)
 	}
@@ -147,7 +147,7 @@ func TestBrowserAuth_SignInSubSecondTTLStillBounds(t *testing.T) {
 		if err != nil {
 			t.Fatalf("GET sign-in: %v", err)
 		}
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		c := cookieNamed(resp, server.CookieAuthTransaction)
 		if c == nil {
 			t.Fatalf("ttl %s: sign-in set no __Host-podium_auth cookie", ttl)
@@ -165,7 +165,7 @@ func signIn(t *testing.T, ep *server.BrowserAuthEndpoint) (*http.Cookie, *url.UR
 	rec := httptest.NewRecorder()
 	ep.SignInHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, server.PathWebUISignIn, nil))
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	c := cookieNamed(resp, server.CookieAuthTransaction)
 	if c == nil {
 		t.Fatal("sign-in set no transaction cookie")
@@ -199,7 +199,7 @@ func TestBrowserAuth_CallbackSuccess(t *testing.T) {
 	tx, loc := signIn(t, ep)
 
 	resp := callback(t, ep, "state="+url.QueryEscape(loc.Query().Get("state"))+"&code=the-code", tx)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/app/" {
 		t.Fatalf("status = %d, Location = %q, want 302 to /app/", resp.StatusCode, resp.Header.Get("Location"))
 	}
@@ -258,7 +258,7 @@ func TestBrowserAuth_CallbackTransactionRefusals(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			resp := callback(t, ep, tc.query, tc.cookies...)
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403", resp.StatusCode)
 			}
@@ -311,7 +311,7 @@ func TestBrowserAuth_CallbackDeclinedConsent(t *testing.T) {
 		resp := callback(t, ep, "state="+loc.Query().Get("state")+"&"+q,
 			tx, &http.Cookie{Name: server.CookieSession, Value: "an-earlier-session"})
 		func() {
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusFound || resp.Header.Get("Location") != "/app/" {
 				t.Fatalf("%s: status = %d, Location = %q, want 302 to /app/", q, resp.StatusCode, resp.Header.Get("Location"))
 			}
@@ -368,7 +368,7 @@ func TestBrowserAuth_CallbackExchangeFailures(t *testing.T) {
 			ep := authEndpoint(t, stub.srv.URL, time.Minute)
 			tx, loc := signIn(t, ep)
 			resp := callback(t, ep, "state="+loc.Query().Get("state")+"&code=c", tx)
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != tc.wantStatus {
 				t.Fatalf("status = %d, want %d", resp.StatusCode, tc.wantStatus)
 			}
@@ -413,7 +413,7 @@ func TestBrowserAuth_CallbackExchangeDeadline(t *testing.T) {
 	go func() { done <- callback(t, ep, "state="+loc.Query().Get("state")+"&code=c", tx) }()
 	select {
 	case resp := <-done:
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusInternalServerError {
 			t.Fatalf("status = %d, want 500", resp.StatusCode)
 		}
@@ -435,7 +435,7 @@ func TestBrowserAuth_AnyReplicaServesTheCallback(t *testing.T) {
 
 	tx, loc := signIn(t, first)
 	resp := callback(t, second, "state="+loc.Query().Get("state")+"&code=c", tx)
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusFound {
 		t.Fatalf("status = %d, want 302 from the second replica", resp.StatusCode)
 	}
@@ -452,7 +452,7 @@ func TestBrowserAuth_SignOutClearsBothCookies(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ep.SignOutHandler().ServeHTTP(rec, req)
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", resp.StatusCode)
 	}

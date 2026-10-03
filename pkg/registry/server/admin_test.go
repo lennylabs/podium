@@ -63,7 +63,7 @@ func TestAdminGrants_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusCreated {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d: %s", resp.StatusCode, buf)
@@ -75,7 +75,7 @@ func TestAdminGrants_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DELETE: %v", err)
 	}
-	delResp.Body.Close()
+	_ = delResp.Body.Close()
 	if delResp.StatusCode != http.StatusNoContent {
 		t.Fatalf("delete status = %d, want 204", delResp.StatusCode)
 	}
@@ -91,7 +91,7 @@ func TestAdminGrants_NonAdminRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
@@ -115,7 +115,7 @@ func TestAdminShowEffective_PerLayerVisibility(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d: %s", resp.StatusCode, buf)
@@ -151,7 +151,7 @@ func postReembed(t *testing.T, base string) (int, string) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	var env struct {
 		Code string `json:"code"`
 	}
@@ -233,7 +233,7 @@ func TestAdminReembed_CarveOutDoesNotReopenOtherAdminRoutes(t *testing.T) {
 			if err != nil {
 				t.Fatalf("POST %s: %v", tc.path, err)
 			}
-			defer resp.Body.Close()
+			defer func() { _ = resp.Body.Close() }()
 			if resp.StatusCode != http.StatusForbidden {
 				t.Fatalf("status = %d, want 403", resp.StatusCode)
 			}

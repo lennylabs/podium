@@ -71,7 +71,7 @@ func TestScopePreview_SQLiteAggregation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, body)
@@ -135,7 +135,7 @@ func TestScopePreview_SQLiteTenantGateDisabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusForbidden {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d, want 403: %s", resp.StatusCode, body)

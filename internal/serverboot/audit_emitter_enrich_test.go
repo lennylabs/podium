@@ -50,7 +50,7 @@ func (s sinkServer) drive(t *testing.T, traceparent, forwardedUser string) strin
 	if err != nil {
 		t.Fatalf("GET search_artifacts: %v", err)
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("search status = %d, want 200", resp.StatusCode)
 	}

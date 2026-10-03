@@ -41,7 +41,7 @@ func TestServe_WebUIServedWhenEnabled(t *testing.T) {
 		cancel()
 		if err2 == nil {
 			body, _ = io.ReadAll(resp.Body)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			err = nil
 			break
 		}

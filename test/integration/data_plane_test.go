@@ -81,7 +81,7 @@ func TestDataPlane_IngestToLoadArtifactRoundTrip(t *testing.T) {
 		t.Fatalf("GET load_artifact: %v", err)
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 
 	var parsed server.LoadArtifactResponse
 	if err := json.Unmarshal(raw, &parsed); err != nil {
@@ -107,7 +107,7 @@ func TestDataPlane_IngestToLoadArtifactRoundTrip(t *testing.T) {
 		t.Fatalf("GET presigned: %v", err)
 	}
 	objBody, _ := io.ReadAll(objResp.Body)
-	objResp.Body.Close()
+	_ = objResp.Body.Close()
 	if objResp.StatusCode != http.StatusOK {
 		t.Fatalf("presigned fetch = HTTP %d", objResp.StatusCode)
 	}
@@ -173,7 +173,7 @@ func TestDataPlane_NoObjectStoreServesResourcesInline(t *testing.T) {
 		t.Fatalf("GET load_artifact: %v", err)
 	}
 	raw, _ := io.ReadAll(resp.Body)
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("load_artifact status = %d, want 200: %s", resp.StatusCode, raw)
 	}
@@ -207,7 +207,7 @@ func TestDataPlane_NoObjectStoreServesResourcesInline(t *testing.T) {
 		t.Fatalf("POST batchLoad: %v", err)
 	}
 	braw, _ := io.ReadAll(bresp.Body)
-	bresp.Body.Close()
+	_ = bresp.Body.Close()
 	var envs []server.BatchLoadEnvelope
 	if err := json.Unmarshal(braw, &envs); err != nil {
 		t.Fatalf("unmarshal batch: %v\n%s", err, braw)

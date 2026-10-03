@@ -69,7 +69,7 @@ func TestResolveExtends_SameIDOverlayMergesFrontmatter(t *testing.T) {
 		t.Errorf("Version = %q, want child's 2.0.0", a.Version)
 	}
 	// tags: append-unique union.
-	if !(contains(a.Tags, "shared") && contains(a.Tags, "team")) {
+	if !contains(a.Tags, "shared") || !contains(a.Tags, "team") {
 		t.Errorf("Tags = %v, want union of shared+team", a.Tags)
 	}
 	// extends stripped from the served frontmatter (§4.6 hidden parent).
@@ -112,7 +112,7 @@ func TestResolveExtends_DifferentIDParent(t *testing.T) {
 	if string(a.Sensitivity) != "medium" {
 		t.Errorf("Sensitivity = %q, want inherited medium", a.Sensitivity)
 	}
-	if !(contains(a.Tags, "base") && contains(a.Tags, "derived")) {
+	if !contains(a.Tags, "base") || !contains(a.Tags, "derived") {
 		t.Errorf("Tags = %v, want union of base+derived", a.Tags)
 	}
 	// The parent record is untouched (no extends of its own).

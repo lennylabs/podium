@@ -55,7 +55,7 @@ func requestNoFollow(t *testing.T, method, url string) (int, string) {
 	if err != nil {
 		t.Fatalf("%s %s: %v", method, url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode, resp.Header.Get("Location")
 }
 

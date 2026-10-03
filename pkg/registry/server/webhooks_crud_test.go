@@ -33,7 +33,7 @@ func TestWebhookOne_GetMasksSecret(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d", resp.StatusCode)
 	}
@@ -51,7 +51,7 @@ func TestWebhookOne_GetUnknownReturns404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
@@ -72,7 +72,7 @@ func TestWebhookOne_PutPatchesFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		buf, _ := io.ReadAll(resp.Body)
 		t.Fatalf("status = %d: %s", resp.StatusCode, buf)
@@ -96,7 +96,7 @@ func TestWebhookOne_PutOnUnknownReturns404(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", resp.StatusCode)
 	}
@@ -112,7 +112,7 @@ func TestWebhookOne_PutBadJSONReturns400(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PUT: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400", resp.StatusCode)
 	}
@@ -126,7 +126,7 @@ func TestWebhookOne_PostReturns405(t *testing.T) {
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("status = %d, want 405", resp.StatusCode)
 	}
@@ -140,7 +140,7 @@ func TestWebhookOne_MissingIDReturns400(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	// Either 400 (caught by handler) or 405 (caught by mux) is fine —
 	// we just want to exercise the "id is required" path.
 	if resp.StatusCode < 400 {

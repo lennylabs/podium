@@ -420,7 +420,7 @@ func (w *Worker) postOnce(ctx context.Context, r Receiver, payload []byte) error
 	if err != nil {
 		return fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode >= 200 && resp.StatusCode < 300:
 		_, _ = io.Copy(io.Discard, resp.Body)

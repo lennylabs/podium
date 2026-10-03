@@ -113,7 +113,7 @@ func readServerEventStream(ctx context.Context, client *http.Client, url, token 
 	if err != nil {
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		// Returning silently here is why a rejected subscription looked like an
 		// idle one: the caller reconnects on a fixed delay, so an auth failure

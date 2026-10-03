@@ -117,7 +117,7 @@ func (w *Weaviate) doStatus(ctx context.Context, method, path string, body any) 
 	if err != nil {
 		return 0, nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
 		return resp.StatusCode, respBody, fmt.Errorf("%w: HTTP %d: %s", ErrUnreachable, resp.StatusCode, string(respBody))

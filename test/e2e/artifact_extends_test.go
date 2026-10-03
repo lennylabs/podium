@@ -1289,7 +1289,7 @@ func exHeaderPost(t *testing.T, url string, headers map[string]string, body stri
 	if err != nil {
 		t.Fatalf("POST %s: %v", url, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	out, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("read POST %s body: %v", url, err)

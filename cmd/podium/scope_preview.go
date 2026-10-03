@@ -55,7 +55,7 @@ func fetchScopePreview(registry string) (*scopePreview, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return nil, err
@@ -100,9 +100,9 @@ func runScopePreview(registry string, asJSON bool) int {
 // printScopePreview renders a §3.5 scope preview as a stable, human-readable
 // block. Map keys are sorted so repeated invocations print identically.
 func printScopePreview(w io.Writer, p *scopePreview) {
-	fmt.Fprintf(w, "  artifacts:        %d\n", p.ArtifactCount)
+	_, _ = fmt.Fprintf(w, "  artifacts:        %d\n", p.ArtifactCount)
 	if len(p.Layers) > 0 {
-		fmt.Fprintf(w, "  layers:           %v\n", p.Layers)
+		_, _ = fmt.Fprintf(w, "  layers:           %v\n", p.Layers)
 	}
 	printCountMap(w, "by type", p.ByType)
 	printCountMap(w, "by sensitivity", p.BySensitivity)
@@ -119,8 +119,8 @@ func printCountMap(w io.Writer, label string, m map[string]int) {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-	fmt.Fprintf(w, "  %s:\n", label)
+	_, _ = fmt.Fprintf(w, "  %s:\n", label)
 	for _, k := range keys {
-		fmt.Fprintf(w, "      %-12s %d\n", k, m[k])
+		_, _ = fmt.Fprintf(w, "      %-12s %d\n", k, m[k])
 	}
 }
