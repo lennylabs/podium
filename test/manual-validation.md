@@ -226,6 +226,7 @@ rm -rf "$WORK"
 | S75 | `podium-server sign-stored-rows` refuses without a key and never writes one | standalone | none | none | none |
 | S76 | Chart upgrade from v0.4.0 | standard (Kubernetes) | none | none | kind, helm, kubectl, Docker |
 | S77 | A filesystem sync that drops a colliding artifact fails | solo, standalone | none | none | none |
+| S78 | The registry refuses an unusable SCIM store, audit sink, or audit anchor key | standalone | none | none | none |
 
 ---
 
@@ -9690,3 +9691,132 @@ what a CI step gates on.
    honored.
 
 **Cleanup.** `kill "$SRV"` and `rm -rf "$WORK"`.
+
+---
+
+## S78: The registry refuses an unusable SCIM store, audit sink, or audit anchor key
+
+**Goal.** Validate that `podium serve` refuses to start when a set
+`PODIUM_SCIM_STORE_PATH` cannot hold the SCIM directory, when an enabled audit
+anchor's file sink cannot be opened or its key cannot be loaded, and when the
+anchor key is also the registry signing key, and that a deployment with
+anchoring disabled never reads the anchor key.
+
+**Covers.** The `config.scim_store_unavailable`, `config.audit_sink_unavailable`,
+`config.audit_anchor_key_unavailable`, and `config.audit_anchor_key_shared`
+startup refusals, the refusal without `PODIUM_SCIM_TOKENS`, and the
+anchoring-disabled negative control (§6.3.1, §8.6, §13.12).
+
+**Why by hand.** The end-to-end suite asserts the code in the output. It does
+not show the operator's terminal: that the message names the path or the
+`key_id` an operator has to act on, that it prints no private key, and that
+`$?` is 1 for a supervisor to gate on.
+
+**Prerequisites.** A built `podium` binary on `PATH`.
+
+**Steps.**
+
+1. Run the isolation block, then scaffold a one-artifact layer the server can
+   load.
+
+   ```bash
+   mkdir -p "$WORK/reg/seed"
+   podium artifact scaffold --type context --description "seed" --force "$WORK/reg/seed"
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and
+   `$WORK/reg/seed/ARTIFACT.md` exists.
+
+2. A malformed SCIM store file is refused with `PODIUM_SCIM_TOKENS` unset. This
+   runs in the foreground and exits immediately.
+
+   ```bash
+   printf '{' > "$WORK/scim.json"
+   PODIUM_SCIM_STORE_PATH="$WORK/scim.json" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8146
+   echo "exit=$?"
+   ```
+
+   **Expect.** `exit=1`, and the output contains `config.scim_store_unavailable`
+   and `$WORK/scim.json`. No `listening on` line appears.
+
+3. A SCIM store path that names a directory is refused.
+
+   ```bash
+   PODIUM_SCIM_STORE_PATH="$WORK" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8146
+   echo "exit=$?"
+   ```
+
+   **Expect.** `exit=1`, and the output contains `config.scim_store_unavailable`.
+
+4. An anchor key that is the registry signing key is refused. The isolation
+   block already exports `PODIUM_SIGN_KEY_PATH`; the first command generates
+   the registry key by starting and stopping the server once.
+
+   ```bash
+   podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8146 > "$WORK/srv.log" 2>&1 &
+   PID=$!; server_alive "$PID" "$WORK/srv.log"; kill "$PID"; wait "$PID" 2>/dev/null
+   PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS=60 PODIUM_AUDIT_SIGNING_KEY_PATH="$PODIUM_SIGN_KEY_PATH" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8146
+   echo "exit=$?"
+   ```
+
+   **Expect.** `exit=1`, and the output contains `config.audit_anchor_key_shared`,
+   a 16-character hexadecimal `key_id`, and both key paths. The output does not
+   contain the `private:` value from `$PODIUM_SIGN_KEY_PATH`.
+
+5. An anchor key file with no `private:` line is refused while anchoring is
+   enabled.
+
+   ```bash
+   grep '^public:' "$PODIUM_SIGN_KEY_PATH" > "$WORK/anchor-public-only.key"
+   PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS=60 PODIUM_AUDIT_SIGNING_KEY_PATH="$WORK/anchor-public-only.key" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8146
+   echo "exit=$?"
+   ```
+
+   **Expect.** `exit=1`, and the output contains
+   `config.audit_anchor_key_unavailable` and `$WORK/anchor-public-only.key`.
+
+6. The same key file with anchoring disabled starts, and the file is untouched.
+
+   ```bash
+   shasum "$WORK/anchor-public-only.key" > "$WORK/before.sum"
+   PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS=0 PODIUM_AUDIT_SIGNING_KEY_PATH="$WORK/anchor-public-only.key" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8146 > "$WORK/srv.log" 2>&1 &
+   PID=$!; server_alive "$PID" "$WORK/srv.log"
+   curl -fsS --retry 40 --retry-connrefused --retry-delay 1 http://127.0.0.1:8146/healthz; echo
+   kill "$PID"; wait "$PID" 2>/dev/null
+   shasum -c "$WORK/before.sum"
+   ```
+
+   **Expect.** `/healthz` answers, `srv.log` contains no
+   `config.audit_anchor_key_unavailable`, and `shasum -c` prints `OK`.
+
+7. An audit log path that names a directory is refused while anchoring is enabled.
+
+   ```bash
+   mkdir -p "$WORK/auditdir"
+   PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS=60 PODIUM_AUDIT_LOG_PATH="$WORK/auditdir" PODIUM_AUDIT_SIGNING_KEY_PATH="$WORK/anchor-new.key" \
+     podium serve --standalone --no-embeddings --layer-path "$WORK/reg" --bind 127.0.0.1:8146
+   echo "exit=$?"; ls "$WORK/anchor-new.key"
+   ```
+
+   **Expect.** `exit=1`, the output contains `config.audit_sink_unavailable` and
+   `$WORK/auditdir`, and `ls` reports that `anchor-new.key` does not exist.
+
+**Expected.**
+
+- Steps 2 and 3 exit 1 with `config.scim_store_unavailable`. A wrong build
+  prints `warning: SCIM persistence disabled` and starts.
+- Step 4 exits 1 with `config.audit_anchor_key_shared` and a `key_id`. A wrong
+  build starts and anchors with the registry key.
+- Step 5 exits 1 with `config.audit_anchor_key_unavailable`. A wrong build
+  prints `warning: audit anchor disabled (signer)` and starts unanchored.
+- Step 6 starts and leaves the key file unchanged. A wrong build refuses or
+  rewrites the file.
+- Step 7 exits 1 with `config.audit_sink_unavailable`. A wrong build prints
+  `warning: audit sink disabled` and starts unanchored.
+
+**Cleanup.** `rm -rf "$WORK"`.
