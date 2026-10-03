@@ -1,7 +1,7 @@
 # Proposal 0034: Correct the registry.yaml lookup path, the extends: re-ingest statement, and list the runtime-capability variables
 
 - Issue: (to be filed)
-- Status: Approved (2026-10-02). Signed off as staged. OQ-1 resolved: the relayed D5, C30, and C23 decisions belong to proposals 0038, 0035, and 0036 and do not apply here.
+- Status: Applied to spec (2026-10-02). Signed off as staged. OQ-1 resolved: the relayed D5, C30, and C23 decisions belong to proposals 0038, 0035, and 0036 and do not apply here.
 - Date: 2026-10-02
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
