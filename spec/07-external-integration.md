@@ -877,7 +877,7 @@ prepare (operator commands)  ->  render (Podium)  ->  publish (operator commands
 - `$PODIUM_OUTPUT_ID`: the marketplace output identifier.
 - `$PODIUM_GIT_REMOTE`, `$PODIUM_GIT_BRANCH`: from the output's `git:` block.
 - `$PODIUM_COMMIT_MESSAGE`: rendered from `commit_message` with the change count and timestamp.
-- `$PODIUM_CHANGED`: whether the render produced a diff against the checkout.
+- `$PODIUM_CHANGED`: whether the render altered the bytes of the checkout, as §7.5.2 defines for both target kinds.
 - `$PODIUM_CHANGE_SUMMARY`: a path to a JSON file describing the changed artifacts.
 - The registry URL, the publishing identity, and the harness set.
 
