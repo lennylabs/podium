@@ -26,7 +26,7 @@ type PgVectorConfig struct {
 	DSN string
 	// Dimensions is the embedding vector size; the schema is
 	// created at this dimension on first connect. Switching
-	// dimensions requires a `podium admin reembed --all` and a
+	// dimensions requires a full `podium admin reembed` pass and a
 	// schema rebuild.
 	Dimensions int
 }
