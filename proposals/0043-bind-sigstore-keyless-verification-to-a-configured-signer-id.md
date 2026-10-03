@@ -1,7 +1,7 @@
 # Proposal 0043: Bind Sigstore-keyless verification to a configured signer identity, to a transparency-log inclusion proof, and to a timestamp authority's attested time
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-03). Approval was decided on the user's behalf under the overnight authorization. Redesigned for Rekor v2 (inclusion proof to a signed checkpoint, RFC 3161 TSA time, trusted_root.json; podium-mcp drops sigstore-keyless), then re-reviewed to convergence (5 rounds). The recorded gap (Sign's outbound calls have no deadline) is a separate follow-up fix.
+- Status: Implemented (2026-10-03). Approval was decided on the user's behalf under the overnight authorization. Redesigned for Rekor v2 (inclusion proof to a signed checkpoint, RFC 3161 TSA time, trusted_root.json; podium-mcp drops sigstore-keyless), then re-reviewed to convergence (5 rounds). The recorded gap (Sign's outbound calls have no deadline) is a separate follow-up fix.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -58,30 +58,30 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §4.7.9 replaces the Sigstore-keyless bullet with the acceptance conditions, the fail-closed identity rule, attested-time validity, and the offline check.
+- [x] **S1 · spec** — SPEC-1. §4.7.9 replaces the Sigstore-keyless bullet with the acceptance conditions, the fail-closed identity rule, attested-time validity, and the offline check.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2, SPEC-3. §6.2 replaces the trust-root row with `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` and adds the `PODIUM_SIGSTORE_CERT_IDENTITY`, `PODIUM_SIGSTORE_CERT_OIDC_ISSUER`, `PODIUM_SIGSTORE_FULCIO_URL`, `PODIUM_SIGSTORE_REKOR_URL`, and `PODIUM_SIGSTORE_TSA_URL` rows; §6.2 restricts the MCP server's `PODIUM_SIGNATURE_PROVIDER` values, §6.9 drops the `sigstore-keyless` clause, and §9.1 names `podium verify` as the keyless verifier.
+- [x] **S2 · spec** — SPEC-2, SPEC-3. §6.2 replaces the trust-root row with `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` and adds the `PODIUM_SIGSTORE_CERT_IDENTITY`, `PODIUM_SIGSTORE_CERT_OIDC_ISSUER`, `PODIUM_SIGSTORE_FULCIO_URL`, `PODIUM_SIGSTORE_REKOR_URL`, and `PODIUM_SIGSTORE_TSA_URL` rows; §6.2 restricts the MCP server's `PODIUM_SIGNATURE_PROVIDER` values, §6.9 drops the `sigstore-keyless` clause, and §9.1 names `podium verify` as the keyless verifier.
       Levels: —. Depends on: S1
-- [ ] **S3 · test** — TEST-1. `internal/testharness/sigstoreharness` generates the trusted root, leaves, keyless envelopes, tamper variants, and a fake Fulcio, Rekor v2, and timestamp-authority server in-process.
+- [x] **S3 · test** — TEST-1. `internal/testharness/sigstoreharness` generates the trusted root, leaves, keyless envelopes, tamper variants, and a fake Fulcio, Rekor v2, and timestamp-authority server in-process.
       Levels: unit. Depends on: S1, S2
       Interleave: this test step precedes the code steps because the rewritten tests in S4 and the tests in S8 build their envelopes with the harness.
-- [ ] **S4 · code** — CODE-1, CODE-2, CODE-3, TEST-2. `IdentityPolicy`, the `tlog` envelope, the trusted-root parser, `Sign` requiring Rekor v2 and a timestamp authority, the offline `Verify`, the `pkg/audit` anchor read, and the rewritten `pkg/sign` and `pkg/audit` tests. Bundled because the `pkg/sign` tests do not compile, and the `pkg/audit` anchor tests fail, between the four deliverables.
+- [x] **S4 · code** — CODE-1, CODE-2, CODE-3, TEST-2. `IdentityPolicy`, the `tlog` envelope, the trusted-root parser, `Sign` requiring Rekor v2 and a timestamp authority, the offline `Verify`, the `pkg/audit` anchor read, and the rewritten `pkg/sign` and `pkg/audit` tests. Bundled because the `pkg/sign` tests do not compile, and the `pkg/audit` anchor tests fail, between the four deliverables.
       Levels: unit. Depends on: S1, S2, S3
-- [ ] **S5 · code** — CODE-4. `podium sign` and `podium verify` read the trusted root from `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`, the signing endpoints with their §6.2 defaults, and `PODIUM_SIGSTORE_CERT_IDENTITY` and `PODIUM_SIGSTORE_CERT_OIDC_ISSUER` into `sign.SigstoreKeyless`.
+- [x] **S5 · code** — CODE-4. `podium sign` and `podium verify` read the trusted root from `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`, the signing endpoints with their §6.2 defaults, and `PODIUM_SIGSTORE_CERT_IDENTITY` and `PODIUM_SIGSTORE_CERT_OIDC_ISSUER` into `sign.SigstoreKeyless`.
       Levels: unit, e2e. Depends on: S4
-- [ ] **S6 · code** — CODE-5 and the `cmd/podium-mcp` unit part of TEST-3. `resolveVerifier` refuses `sigstore-keyless` with `config.invalid`; `buildSignatureProvider` is deleted; the `TestLoadConfig_VerifierResolution` rows are replaced, the registry-managed resolution test is rewritten, and the bridge and builder tests are deleted. Bundled because `cmd/podium-mcp/main_helpers_test.go` does not compile, and the "sigstore trust root readable" row fails, between CODE-5 and those test edits.
+- [x] **S6 · code** — CODE-5 and the `cmd/podium-mcp` unit part of TEST-3. `resolveVerifier` refuses `sigstore-keyless` with `config.invalid`; `buildSignatureProvider` is deleted; the `TestLoadConfig_VerifierResolution` rows are replaced, the registry-managed resolution test is rewritten, and the bridge and builder tests are deleted. Bundled because `cmd/podium-mcp/main_helpers_test.go` does not compile, and the "sigstore trust root readable" row fails, between CODE-5 and those test edits.
       Levels: unit. Depends on: S2
-- [ ] **S7 · test** — The `test/e2e` part of TEST-3. `TestMCPStart_SigstoreKeylessProviderRefused` drives the start refusal through the binary.
+- [x] **S7 · test** — The `test/e2e` part of TEST-3. `TestMCPStart_SigstoreKeylessProviderRefused` drives the start refusal through the binary.
       Levels: e2e. Depends on: S6
-- [ ] **S8 · test** — TEST-4. End-to-end `podium verify --provider sigstore-keyless` and `podium sign --provider sigstore-keyless` through the binary, and the `TestLoadSignatureProvider` table for the §6.2 endpoint defaults.
+- [x] **S8 · test** — TEST-4. End-to-end `podium verify --provider sigstore-keyless` and `podium sign --provider sigstore-keyless` through the binary, and the `TestLoadSignatureProvider` table for the §6.2 endpoint defaults.
       Levels: unit, e2e. Depends on: S3, S5
-- [ ] **S9 · test** — TEST-5. The live smoke reads the identity policy, the TSA URL, and the trusted root, records the staging fixture under `PODIUM_SIGSTORE_RECORD_DIR`, and commits `pkg/sign/testdata/sigstore-staging/` with `TestSigstoreKeyless_VerifiesRecordedStagingEnvelope`. `RELEASING.md` documents the new inputs.
+- [x] **S9 · test** — TEST-5. The live smoke reads the identity policy, the TSA URL, and the trusted root, records the staging fixture under `PODIUM_SIGSTORE_RECORD_DIR`, and commits `pkg/sign/testdata/sigstore-staging/` with `TestSigstoreKeyless_VerifiesRecordedStagingEnvelope`. `RELEASING.md` documents the new inputs.
       Levels: unit (the live smoke is skipped by default; the recorded-fixture test runs by default). Depends on: S4. S9 runs on S4's branch, and the two merge together once the recorded fixture verifies.
-- [ ] **S10 · docs** — DOC-1. CLI reference, harness configuration, error-code reference, operator guide, extension guide, `OPERATIONS.md`, and the env examples.
+- [x] **S10 · docs** — DOC-1. CLI reference, harness configuration, error-code reference, operator guide, extension guide, `OPERATIONS.md`, and the env examples.
       Levels: —. Depends on: S5, S6, S9
-- [ ] **S11 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, and `Removed` entries, and the existing `Changed` delivery-attestation entry that CL-1 amends.
+- [x] **S11 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, and `Removed` entries, and the existing `Changed` delivery-attestation entry that CL-1 amends.
       Levels: —. Depends on: S5, S6
-- [ ] **S12 · docs** — MV-1. Manual-validation scenario S83 for `podium sign` and `podium verify` against the Sigstore staging instance, and for the `podium-mcp` start refusal under `sigstore-keyless`.
+- [x] **S12 · docs** — MV-1. Manual-validation scenario S83 for `podium sign` and `podium verify` against the Sigstore staging instance, and for the `podium-mcp` start refusal under `sigstore-keyless`.
       Levels: manual. Depends on: S5, S6
 
 **Ordering constraints.** S1 and S2 land the contract every later step cites. S3 precedes every step that generates an envelope. S6 depends only on S2 because the start refusal reads no `pkg/sign` change, so S6 and S7 may proceed in parallel with S3, S4, and S5. S4 and S9 merge together, because the recorded fixture S9 captures is the only check of the wire formats S4 parses.
