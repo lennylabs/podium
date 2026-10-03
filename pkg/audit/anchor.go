@@ -20,8 +20,8 @@ import (
 // log produces an anchor with chainHead="" (recorded as a no-op so
 // callers can run Anchor unconditionally on a schedule).
 //
-// Anchor returns the log index Sigstore assigned (or -1 if the
-// provider had no Rekor configured). The index is also recorded in
+// Anchor returns the log index the envelope's tlog.log_index records
+// (or -1 when the signer produced no transparency-log entry). The index is also recorded in
 // the audit.anchored event's Context so the chain itself can be
 // queried for past anchors.
 func Anchor(ctx context.Context, sink *FileSink, signer sign.Provider) (int64, error) {
@@ -73,23 +73,25 @@ func chainHeadOf(sink *FileSink) (string, error) {
 	return events[len(events)-1].Hash, nil
 }
 
-// extractRekorLogIndex pulls the Rekor log index out of the
-// Sigstore-keyless envelope. Returns -1 only when the envelope does
-// not carry a log_index field at all (e.g., RegistryManagedKey or a
-// Sigstore-keyless flow with no Rekor configured).
+// extractRekorLogIndex pulls the Rekor log index out of a
+// Sigstore-keyless envelope's tlog.log_index. Returns -1 when the
+// envelope carries no tlog object or no log_index in it (e.g.,
+// RegistryManagedKey or the Noop signer), or does not decode.
 //
 // Rekor indices are zero-based, so the first entry recorded against
-// an instance has index 0. The decode uses a *int64 so a field that
-// is present and zero is preserved as 0 and only true absence (or a
-// decode failure) maps to -1. spec: §8.6.
+// an instance has index 0. The decode uses a nested pointer so a
+// field that is present and zero is preserved as 0 and only true
+// absence (or a decode failure) maps to -1.
+//
+// Spec: §8.6.
 func extractRekorLogIndex(envelope string) int64 {
-	type partial struct {
-		LogIndex *int64 `json:"log_index"`
+	var p struct {
+		TLog *struct {
+			LogIndex *int64 `json:"log_index"`
+		} `json:"tlog"`
 	}
-	var p partial
-	// Best-effort decode; any failure or absent field returns -1.
-	if err := json.Unmarshal([]byte(envelope), &p); err != nil || p.LogIndex == nil {
+	if err := json.Unmarshal([]byte(envelope), &p); err != nil || p.TLog == nil || p.TLog.LogIndex == nil {
 		return -1
 	}
-	return *p.LogIndex
+	return *p.TLog.LogIndex
 }

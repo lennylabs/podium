@@ -10,8 +10,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/spi"
@@ -20,45 +23,49 @@ import (
 // SigstoreKeyless implements §4.7.9 Sigstore-keyless signing.
 //
 // Sign generates an ephemeral ECDSA P-256 key, mints a short-lived
-// cert from Fulcio using the configured OIDC token, signs the
-// content hash with the ephemeral key, and (when RekorURL is set)
-// records the signature in the Rekor transparency log. The returned
-// signature is a compact JSON envelope carrying the cert chain, the
-// signature bytes, and the Rekor log index.
+// certificate from Fulcio with the configured OIDC token, signs the
+// SHA-256 content hash with the ephemeral key, obtains an RFC 3161
+// timestamp over the signature from the timestamp authority, and records
+// the entry in a Rekor v2 transparency log. The returned signature is a
+// JSON envelope carrying the certificate chain, the signature, the
+// timestamp token, and a tlog object holding the log index, the entry
+// body, the inclusion-proof hashes, and the signed checkpoint.
 //
-// Verify decodes the envelope, validates the cert chain against the
-// configured trust root, and verifies the signature over the content
-// hash. When RekorURL is set, it also confirms the entry exists in
-// the transparency log.
+// Verify is offline. It verifies the timestamp under a timestamp
+// authority of the trusted root and takes its time as the attested time,
+// verifies the inclusion proof and the checkpoint signature under a
+// transparency-log key, binds the entry body to the digest, the
+// signature, and the leaf, checks the leaf's chain and code-signing usage
+// at the attested time, checks the signature, and matches the leaf
+// against the identity policy.
 //
-// SigstoreKeyless is safe to use as a Provider directly. Test code
-// supplies Client + TrustRoot + Now to drive the implementation
-// against an httptest fixture; production code points FulcioURL +
-// RekorURL at the live (or staging) endpoints and leaves Client nil.
+// Test code points the three URLs at an httptest fixture and supplies
+// Client; production code points them at the live or staging endpoints
+// and leaves Client nil.
 type SigstoreKeyless struct {
 	// FulcioURL is the Fulcio CA endpoint, e.g.
 	// "https://fulcio.sigstore.dev". Required for Sign.
 	FulcioURL string
-	// RekorURL is the Rekor transparency-log endpoint. When empty,
-	// signatures still validate locally but are not anchored in
-	// any external log.
+	// RekorURL is the base URL of the Rekor v2 transparency log. Required
+	// for Sign; Verify does not read it.
 	RekorURL string
+	// TSAURL is the RFC 3161 timestamp-authority endpoint. Required for
+	// Sign; Verify does not read it.
+	TSAURL string
 	// OIDCToken is the caller's identity token used to mint the
 	// short-lived signing cert. Required for Sign. Verify ignores it.
 	OIDCToken string
-	// TrustRoot is the PEM-encoded set of certificates that anchor
-	// the cert chain during Verify. Empty means "no implicit trust"
-	// and Verify will fail; production deployments load the Sigstore
-	// public-good root from disk and assign it here.
+	// TrustRoot holds the bytes of a Sigstore trusted_root.json. Verify
+	// parses it on every call; empty means no trust and Verify refuses
+	// every envelope. Sign ignores it.
 	TrustRoot []byte
-	// Client overrides the HTTP client used for Fulcio + Rekor calls.
-	// Tests inject httptest-backed clients; production leaves it nil
-	// to use http.DefaultClient.
+	// Identity is the §4.7.9 signer identity Verify accepts. An empty
+	// policy accepts no envelope.
+	Identity IdentityPolicy
+	// Client overrides the HTTP client Sign uses for Fulcio, Rekor, and
+	// the timestamp authority. Production leaves it nil to use
+	// http.DefaultClient.
 	Client *http.Client
-	// Now overrides the clock used during cert chain validation.
-	// Tests pass a fixed time so vendored fixtures with expired
-	// certs continue to verify.
-	Now func() time.Time
 }
 
 // ID returns "sigstore-keyless".
@@ -73,72 +80,93 @@ func (s SigstoreKeyless) httpClient() *http.Client {
 	return http.DefaultClient
 }
 
-// now returns the configured clock, defaulting to time.Now.
-func (s SigstoreKeyless) now() time.Time {
-	if s.Now != nil {
-		return s.Now()
+// post sends req with the configured client and returns the body of a
+// 2xx response.
+func (s SigstoreKeyless) post(req *http.Request) ([]byte, error) {
+	resp, err := s.httpClient().Do(req)
+	if err != nil {
+		return nil, err
 	}
-	return time.Now()
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
+	}
+	return body, nil
 }
 
-// envelope is the JSON encoding of a Sigstore-keyless signature.
-// Cert is the PEM-concatenated cert chain (leaf first); Signature is
-// the base64-encoded ECDSA signature; LogIndex is the Rekor log
-// index, or -1 when no log entry was created.
+// maxResponseBytes bounds a Rekor or timestamp-authority response body.
+// A genuine response is a few kilobytes.
+const maxResponseBytes = 4 << 20
+
+// envelope is the JSON encoding of a Sigstore-keyless signature. Cert is
+// the PEM-concatenated chain (leaf first) and Signature the base64 ECDSA
+// signature.
 type envelope struct {
-	Cert      string `json:"cert"`
-	Signature string `json:"signature"`
-	LogIndex  int64  `json:"log_index"`
+	Cert      string     `json:"cert"`
+	Signature string     `json:"signature"`
+	TLog      *tlogEntry `json:"tlog"`
+	Timestamp string     `json:"timestamp"` // base64 DER RFC 3161 TimeStampToken (CMS ContentInfo)
 }
 
-// ErrSigstoreUnavailable signals that the Sigstore endpoints are
-// not configured and the keyless flow cannot proceed. Sign returns
-// this when FulcioURL or OIDCToken is empty. Structured per §9.3.
+// tlogEntry is the Rekor v2 entry and inclusion proof a keyless envelope
+// carries.
+//
+// Spec: §4.7.9.
+type tlogEntry struct {
+	LogIndex   int64    `json:"log_index"`
+	Body       string   `json:"body"`       // base64 canonicalized hashedrekord v0.0.2 body
+	Hashes     []string `json:"hashes"`     // base64 audit path, leaf to root
+	Checkpoint string   `json:"checkpoint"` // signed-note text, as Rekor returns it
+}
+
+// ErrSigstoreUnavailable signals that the Sigstore endpoints are not
+// configured and the keyless flow cannot proceed. Sign returns it when
+// FulcioURL, RekorURL, TSAURL, or OIDCToken is empty, before any network
+// call. Structured per §9.3.
 var ErrSigstoreUnavailable = &spi.Error{Code: "config.signature_provider_unavailable", Message: "sign: sigstore-keyless not configured"}
 
-// Sign produces a Sigstore-keyless envelope over contentHash.
+// Sign produces a Sigstore-keyless envelope over contentHash, which must
+// be of the form "sha256:hex". A malformed or non-SHA-256 hash returns an
+// error before the network is touched.
 //
-// contentHash must be of the form "alg:hex" (e.g. "sha256:abc...").
-// The hex must decode cleanly; invalid forms return an error before
-// the network is touched.
+// Spec: §4.7.9.
 func (s SigstoreKeyless) Sign(ctx context.Context, contentHash string) (string, error) {
-	if s.FulcioURL == "" || s.OIDCToken == "" {
-		return "", ErrSigstoreUnavailable
+	if s.FulcioURL == "" || s.RekorURL == "" || s.TSAURL == "" || s.OIDCToken == "" {
+		return "", fmt.Errorf("%w: FulcioURL, RekorURL, TSAURL, and OIDCToken are all required", ErrSigstoreUnavailable)
 	}
-	hashBytes, err := decodeContentHash(contentHash)
+	digest, err := sha256Digest(contentHash)
 	if err != nil {
 		return "", err
 	}
-
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return "", fmt.Errorf("ephemeral key: %w", err)
 	}
-
 	leaf, intermediates, err := s.mintCert(ctx, priv)
 	if err != nil {
 		return "", fmt.Errorf("fulcio: %w", err)
 	}
-
-	sig, err := ecdsa.SignASN1(rand.Reader, priv, hashBytes)
+	sig, err := ecdsa.SignASN1(rand.Reader, priv, digest)
 	if err != nil {
 		return "", fmt.Errorf("sign: %w", err)
 	}
-
-	logIndex := int64(-1)
-	if s.RekorURL != "" {
-		idx, err := s.uploadRekor(ctx, contentHash, sig, leaf)
-		if err != nil {
-			return "", fmt.Errorf("rekor: %w", err)
-		}
-		logIndex = idx
+	token, err := s.requestTimestamp(ctx, sig)
+	if err != nil {
+		return "", fmt.Errorf("tsa: %w", err)
 	}
-
-	chain := append([]*x509.Certificate{leaf}, intermediates...)
+	tl, err := s.uploadRekor(ctx, digest, sig, leaf)
+	if err != nil {
+		return "", fmt.Errorf("rekor: %w", err)
+	}
 	body, err := json.Marshal(envelope{
-		Cert:      pemEncodeCerts(chain),
+		Cert:      pemEncodeCerts(append([]*x509.Certificate{leaf}, intermediates...)),
 		Signature: base64.StdEncoding.EncodeToString(sig),
-		LogIndex:  logIndex,
+		TLog:      tl,
+		Timestamp: base64.StdEncoding.EncodeToString(token),
 	})
 	if err != nil {
 		return "", fmt.Errorf("envelope: %w", err)
@@ -146,65 +174,135 @@ func (s SigstoreKeyless) Sign(ctx context.Context, contentHash string) (string, 
 	return string(body), nil
 }
 
-// Verify validates a Sigstore-keyless envelope.
+// Verify validates a Sigstore-keyless envelope offline. Every failure
+// wraps ErrSignatureInvalid. ctx is unused: Verify makes no network call.
 //
-// The verification chain: parse envelope → walk cert chain to the
-// configured trust root → verify signature with the leaf cert's
-// public key against contentHash. When RekorURL is set, also
-// confirm the log entry exists.
-func (s SigstoreKeyless) Verify(ctx context.Context, contentHash, signature string) error {
-	var env envelope
-	if err := json.Unmarshal([]byte(signature), &env); err != nil {
-		return fmt.Errorf("%w: parse envelope: %v", ErrSignatureInvalid, err)
+// Spec: §4.7.9.
+func (s SigstoreKeyless) Verify(_ context.Context, contentHash, signature string) error {
+	if err := s.verify(contentHash, signature); err != nil {
+		return fmt.Errorf("%w: %w", ErrSignatureInvalid, err)
 	}
-	if env.Cert == "" || env.Signature == "" {
-		return fmt.Errorf("%w: empty envelope", ErrSignatureInvalid)
-	}
+	return nil
+}
 
+// verify runs the §4.7.9 acceptance conditions in order. The timestamp
+// verifies first because its time is the time every later validity check
+// runs at.
+func (s SigstoreKeyless) verify(contentHash, signature string) error {
+	if err := s.Identity.Validate(); err != nil {
+		return err
+	}
+	root, err := parseTrustedRoot(s.TrustRoot)
+	if err != nil {
+		return err
+	}
+	env, err := decodeEnvelope(signature)
+	if err != nil {
+		return err
+	}
+	attested, err := verifyTimestamp(root, env.token, env.sig)
+	if err != nil {
+		return err
+	}
+	if err := verifyInclusion(root, env.TLog, attested); err != nil {
+		return err
+	}
 	leaf, intermediates, err := pemDecodeChain(env.Cert)
 	if err != nil {
-		return fmt.Errorf("%w: cert chain: %v", ErrSignatureInvalid, err)
+		return fmt.Errorf("cert chain: %w", err)
 	}
-	if len(s.TrustRoot) == 0 {
-		return fmt.Errorf("%w: no trust root configured", ErrSignatureInvalid)
+	digest, err := sha256Digest(contentHash)
+	if err != nil {
+		return err
 	}
-	roots := x509.NewCertPool()
-	if !roots.AppendCertsFromPEM(s.TrustRoot) {
-		return fmt.Errorf("%w: invalid trust root", ErrSignatureInvalid)
+	if err := bindEntry(env.TLog.Body, digest, env.sig, leaf); err != nil {
+		return err
 	}
-	intPool := x509.NewCertPool()
-	for _, c := range intermediates {
-		intPool.AddCert(c)
+	if err := verifyLeafChain(root, leaf, intermediates, attested); err != nil {
+		return err
 	}
-	if _, err := leaf.Verify(x509.VerifyOptions{
-		Roots:         roots,
-		Intermediates: intPool,
-		CurrentTime:   s.now(),
-		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
-	}); err != nil {
-		return fmt.Errorf("%w: cert chain: %v", ErrSignatureInvalid, err)
+	if err := verifyLeafSignature(leaf, digest, env.sig); err != nil {
+		return err
 	}
+	return s.Identity.match(leaf)
+}
 
+// decodedEnvelope is an envelope with its signature and timestamp
+// decoded.
+type decodedEnvelope struct {
+	envelope
+	sig   []byte
+	token []byte
+}
+
+// decodeEnvelope parses the envelope JSON and refuses one that lacks a
+// certificate, a signature, a complete log entry, or a timestamp,
+// including every envelope minted before the tlog format.
+func decodeEnvelope(signature string) (decodedEnvelope, error) {
+	var env decodedEnvelope
+	if err := json.Unmarshal([]byte(signature), &env.envelope); err != nil {
+		return env, fmt.Errorf("parse envelope: %w", err)
+	}
+	switch {
+	case env.Cert == "" || env.Signature == "":
+		return env, errors.New("empty envelope")
+	case env.TLog == nil:
+		return env, errors.New("envelope carries no transparency-log entry")
+	case env.TLog.Body == "" || env.TLog.Checkpoint == "":
+		return env, errors.New("transparency-log entry is incomplete")
+	case env.Timestamp == "":
+		return env, errors.New("envelope carries no timestamp")
+	}
+	var err error
+	if env.sig, err = base64.StdEncoding.DecodeString(env.Signature); err != nil {
+		return env, fmt.Errorf("signature decode: %w", err)
+	}
+	if env.token, err = base64.StdEncoding.DecodeString(env.Timestamp); err != nil {
+		return env, fmt.Errorf("timestamp does not parse: %w", err)
+	}
+	return env, nil
+}
+
+// verifyLeafChain chains the leaf to a certificate authority valid at the
+// attested time t. The pools come from certificateAuthorities alone, so a
+// timestamp-authority root never anchors a code-signing leaf.
+func verifyLeafChain(root trustedRoot, leaf *x509.Certificate, envIntermediates []*x509.Certificate, t time.Time) error {
+	roots, intermediates, ok := authorityPools(root.certificateAuthorities, t, envIntermediates)
+	if !ok {
+		return fmt.Errorf("no certificate authority valid at timestamp time %s", stamp(t))
+	}
+	_, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         roots,
+		Intermediates: intermediates,
+		CurrentTime:   t,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning},
+	})
+	var invalid x509.CertificateInvalidError
+	if errors.As(err, &invalid) && invalid.Reason == x509.Expired {
+		return fmt.Errorf("certificate not valid at timestamp time %s: %w", stamp(t), err)
+	}
+	if err != nil {
+		return fmt.Errorf("cert chain: %w", err)
+	}
+	// KeyUsages alone admits a leaf with no extended-key-usage extension or
+	// one listing only ExtKeyUsageAny, because crypto/x509 skips the usage
+	// check for the first and passes the second, so the leaf's own usage
+	// is checked here.
+	if !slices.Contains(leaf.ExtKeyUsage, x509.ExtKeyUsageCodeSigning) {
+		return errors.New("leaf lacks the code-signing usage")
+	}
+	return nil
+}
+
+// verifyLeafSignature checks the ECDSA signature over the digest under
+// the leaf's key.
+func verifyLeafSignature(leaf *x509.Certificate, digest, sig []byte) error {
 	pub, ok := leaf.PublicKey.(*ecdsa.PublicKey)
 	if !ok {
-		return fmt.Errorf("%w: leaf is not ECDSA", ErrSignatureInvalid)
+		return errors.New("leaf is not ECDSA")
 	}
-	sigBytes, err := base64.StdEncoding.DecodeString(env.Signature)
-	if err != nil {
-		return fmt.Errorf("%w: signature decode: %v", ErrSignatureInvalid, err)
-	}
-	hashBytes, err := decodeContentHash(contentHash)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrSignatureInvalid, err)
-	}
-	if !ecdsa.VerifyASN1(pub, hashBytes, sigBytes) {
-		return fmt.Errorf("%w: signature does not verify", ErrSignatureInvalid)
-	}
-
-	if s.RekorURL != "" && env.LogIndex >= 0 {
-		if err := s.fetchRekor(ctx, env.LogIndex); err != nil {
-			return fmt.Errorf("%w: rekor: %v", ErrSignatureInvalid, err)
-		}
+	if !ecdsa.VerifyASN1(pub, digest, sig) {
+		return errors.New("signature does not verify")
 	}
 	return nil
 }
@@ -248,8 +346,7 @@ func pemDecodeChain(s string) (*x509.Certificate, []*x509.Certificate, error) {
 }
 
 // decodeContentHash parses an "alg:hex" string and returns the raw
-// hash bytes. The algorithm string is informational; the bytes are
-// what ECDSA signs over.
+// hash bytes.
 func decodeContentHash(s string) ([]byte, error) {
 	_, hexStr, err := splitContentHash(s)
 	if err != nil {

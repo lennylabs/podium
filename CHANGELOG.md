@@ -192,6 +192,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   Under public mode and with no identity provider configured, the evaluator
   still admits every layer, so a subscriber in those modes receives every event
   of its tenant that its scopes permit.
+- **Sigstore-keyless verification checks the signer** (§4.7.9, §6.2):
+  `podium verify --provider sigstore-keyless` accepts an envelope only when its
+  certificate's email or URI subject alternative name appears in
+  `PODIUM_SIGSTORE_CERT_IDENTITY` and its OIDC issuer equals
+  `PODIUM_SIGSTORE_CERT_OIDC_ISSUER`, when its timestamp verifies under a
+  timestamp authority in the trusted root, when its inclusion proof leads to a
+  checkpoint signed by a log key in the trusted root, and when the log entry
+  records the content hash, the signature, and the certificate. The certificate
+  is checked at the timestamp's time, so an envelope keeps verifying after its
+  Fulcio certificate expires. Verification makes no network call.
 
 ### Changed
 
@@ -607,14 +617,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   is not on a standalone registry's machine with the registry's public key in
   `PODIUM_SIGNATURE_VERIFY_KEY`, and leave `PODIUM_SIGNATURE_PROVIDER` at its
   `registry-managed` default, because the delivery signature is a
-  registry-managed envelope whatever key model signed the artifact at ingest,
-  and a consumer configured for `sigstore-keyless` refuses it with
-  `materialize.signature_invalid`. A registry running with `PODIUM_SIGN=none`
-  serves each delivery record unsigned. A registry process signs under a
-  rotated key from its next response onward; rotate the key as the
-  "Rotating the signing key" procedure in `docs/deployment/operator-guide.md`
-  states, which adds the new key to each consumer's set before the registry
-  signs under it.
+  registry-managed envelope whatever key model signed the artifact at ingest;
+  `podium-mcp` refuses to start under `sigstore-keyless` with `config.invalid`.
+  A registry running with `PODIUM_SIGN=none` serves each delivery record
+  unsigned. A registry process signs under a rotated key from its next response
+  onward; rotate the key as the "Rotating the signing key" procedure in
+  `docs/deployment/operator-guide.md` states, which adds the new key to each
+  consumer's set before the registry signs under it.
 - **`PODIUM_SIGNATURE_VERIFY_KEY` takes a verification key set** (§4.7.9,
   §6.2): the variable takes one base64 Ed25519 public key or a comma-separated
   list of them, and `podium-mcp` and `podium verify` accept a delivery
@@ -825,6 +834,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   that names the event's tenant, its layers, the artifact ID or domain path,
   and, on a `layer.config_changed`, the layer's visibility before the change.
   Every caller is updated, and no compatibility form remains.
+- **The Sigstore-keyless envelope carries its log proof and a timestamp**
+  (§4.7.9): the top-level `log_index` is replaced by a `tlog` object with
+  `log_index`, `body`, `hashes`, and `checkpoint`, and a `timestamp` field
+  carries an RFC 3161 token. Envelopes from earlier releases are refused.
+- **`podium sign --provider sigstore-keyless` uses Rekor v2 and a timestamp
+  authority** (§6.2): `PODIUM_SIGSTORE_FULCIO_URL`,
+  `PODIUM_SIGSTORE_REKOR_URL`, and the new `PODIUM_SIGSTORE_TSA_URL` default to
+  the Sigstore public-good instances, and a Rekor v1 URL fails the signing.
+- **The Sigstore trust root is `trusted_root.json`** (§6.2):
+  `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` names Sigstore's `trusted_root.json`, and
+  its certificate authorities, transparency-log keys, and timestamp authorities
+  apply only within their validity windows.
 
 ### Removed
 
@@ -859,6 +880,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   never sends the key. The registry decodes the request body as it decodes
   every other JSON body, so a `harness` key that an older SDK still sends is
   ignored.
+
+- **`PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE`** (§6.2). It is no longer read. Set
+  `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` instead.
+
+- **`podium-mcp` no longer accepts
+  `PODIUM_SIGNATURE_PROVIDER=sigstore-keyless`** (§6.2): the start refuses with
+  `config.invalid`, naming `registry-managed`. Every delivery signature is
+  registry-managed (§4.7.10), so the provider verified no load, and it accepted
+  a keyless envelope from any OIDC identity. `podium sign` and `podium verify`
+  keep `sigstore-keyless`.
 
 ### Documentation
 

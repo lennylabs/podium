@@ -909,7 +909,23 @@ The audit-volume limit is a per-tenant daily cap on emitted audit events. Each e
 Each artifact version is signed by the author's key at commit time, or by a registry-managed key at ingest. Two key models:
 
 - **Registry-managed key.** One Ed25519 signing keypair per registry deployment, held in the key file at `PODIUM_SIGN_KEY_PATH` and generated on first run when absent. The key file carries the signing keypair on a `private:` line and a `public:` line, and zero or more `verify:` lines, each a base64 Ed25519 public key trusted for verification only. The signing public key and the `verify:` keys form the registry's **verification key set**. The registry signs under the signing key alone, across every tenant that deployment serves, and verifies a stored signature under any key of its verification key set (§13.4). The registry signs at ingest by default (§13.10).
-- **Sigstore-keyless.** An OIDC-attested signature with a transparency-log entry and no key management. No registry signing mode produces one; the consumer-side verifier does not check the certificate's signer identity and does not check the log entry's contents, so a keyless envelope attests that some certificate the configured trust root issued signed the digest, and nothing about who holds it.
+- **Sigstore-keyless.** An OIDC-attested signature with a transparency-log entry and no key management. No registry signing mode produces one. A keyless envelope carries:
+  - the signer's certificate chain, leaf first;
+  - the signature over the SHA-256 digest;
+  - the transparency-log entry that records them: its log index, its entry body, the inclusion-proof hashes, and the signed checkpoint the proof leads to;
+  - an RFC 3161 timestamp token over the signature.
+
+A keyless envelope `podium sign` produces carries the log entry and the timestamp token, which it obtains from the transparency log and the timestamp authority configured under §6.2. A verifier accepts a keyless envelope only when all of the following hold:
+  - The timestamp token is signed by a certificate whose extended key usage lists time stamping and that chains to a timestamp authority of the configured trust root at the time the token states, and its message imprint is the SHA-256 digest of the envelope's signature. That time is the attested time.
+  - The RFC 6962 Merkle audit path from the entry body at the log index yields the root hash and tree size the checkpoint states.
+  - The checkpoint carries a signature that verifies under a transparency-log key of the configured trust root.
+  - The entry body is a `hashedrekord` version `0.0.2` entry that records the digest being verified, the envelope's signature, and the envelope's leaf certificate.
+  - The leaf certificate chains to a certificate authority of the configured trust root, lists code signing in its extended key usage, and is valid at the attested time.
+  - The signature verifies over the digest under the leaf's public key.
+  - One of the leaf's email or URI subject alternative names equals an entry of the certificate identity configured under §6.2. No other subject alternative name type is matched.
+  - The OIDC issuer the leaf's Fulcio issuer extension carries equals the OIDC issuer configured under §6.2.
+
+A certificate that carries no extended key usage, or whose extended key usage lists only the any-purpose usage, lists neither time stamping nor code signing. A trust-root authority or log key whose validity period excludes the attested time is not used. A verifier with no certificate identity or no OIDC issuer configured accepts no keyless envelope. Validity is evaluated at the attested time, so an envelope stays verifiable after its short-lived certificate expires. The verifier makes no network call. An envelope that carries no log entry or no timestamp token is refused, and every refusal is `materialize.signature_invalid`.
 
 The signature the registry mints at ingest attests the artifact's `content_hash` (§4.7.6) and nothing else, and it is stored with the artifact. A registry configured with a signer verifies it at its §13.4 stored-row admission before it serves the artifact. No registry serves it. The signature a consumer verifies is the §4.7.10 delivery signature, which the registry-managed key mints per response over the served record's `delivery_hash`, and it is the one the policy below governs; in this section "signature" means that delivery signature unless a sentence names the stored one. A Sigstore-keyless or author-key signature stored alongside content is neither served nor verified on materialization.
 

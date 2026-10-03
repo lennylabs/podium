@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -110,7 +111,11 @@ func TestEnvDefault(t *testing.T) {
 // half its keyUse names, on a hermetic home: with no material each use
 // refuses with config.signature_provider_unavailable, the sign half never
 // reads PODIUM_SIGNATURE_VERIFY_KEY, and with a key file each use returns the
-// half it needs. Not parallel: it mutates the environment.
+// half it needs. The sigstore-keyless arm takes the §6.2 endpoint defaults
+// and reads the trusted root (see assertKeylessEndpoints). Not parallel: it
+// mutates the environment.
+//
+// Spec: §6.2
 func TestLoadSignatureProvider(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -165,6 +170,56 @@ func TestLoadSignatureProvider(t *testing.T) {
 	signer, err := loadSignatureProvider("registry-managed", keyForSign)
 	if err != nil || !signer.(sign.RegistryManagedKey).PrivateKey.Equal(priv) {
 		t.Errorf("sign half with a key file = %v, %v; want the file's private key", signer, err)
+	}
+	assertKeylessEndpoints(t)
+}
+
+// assertKeylessEndpoints pins the sigstore-keyless arm of
+// loadSignatureProvider: PODIUM_SIGSTORE_FULCIO_URL, PODIUM_SIGSTORE_REKOR_URL,
+// and PODIUM_SIGSTORE_TSA_URL take the literal §6.2 defaults when unset and
+// when empty, a set value overrides each one, and TrustRoot holds the bytes of
+// the file PODIUM_SIGSTORE_TRUSTED_ROOT_FILE names.
+//
+// Spec: §6.2
+func assertKeylessEndpoints(t *testing.T) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "trusted_root.json")
+	rootBytes := []byte(`{"mediaType":"application/vnd.dev.sigstore.trustedroot+json;version=0.1"}`)
+	if err := os.WriteFile(root, rootBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PODIUM_SIGSTORE_TRUSTED_ROOT_FILE", root)
+	keys := []string{"PODIUM_SIGSTORE_FULCIO_URL", "PODIUM_SIGSTORE_REKOR_URL", "PODIUM_SIGSTORE_TSA_URL"}
+	defaults := [3]string{
+		"https://fulcio.sigstore.dev",
+		"https://log2025-1.rekor.sigstore.dev",
+		"https://timestamp.sigstore.dev/api/v1/timestamp",
+	}
+	overrides := [3]string{"https://fulcio.acme.test", "https://rekor.acme.test", "https://tsa.acme.test/api/v1/timestamp"}
+	cases := []struct {
+		name string
+		set  func(key string, i int)
+		want [3]string
+	}{
+		{"unset", func(key string, _ int) { t.Setenv(key, ""); _ = os.Unsetenv(key) }, defaults},
+		{"empty", func(key string, _ int) { t.Setenv(key, "") }, defaults},
+		{"set", func(key string, i int) { t.Setenv(key, overrides[i]) }, overrides},
+	}
+	for _, c := range cases {
+		for i, key := range keys {
+			c.set(key, i)
+		}
+		p, err := loadSignatureProvider("sigstore-keyless", keyForSign)
+		if err != nil {
+			t.Fatalf("%s: loadSignatureProvider = %v", c.name, err)
+		}
+		k := p.(sign.SigstoreKeyless)
+		if got := [3]string{k.FulcioURL, k.RekorURL, k.TSAURL}; got != c.want {
+			t.Errorf("%s: endpoints = %v, want %v", c.name, got, c.want)
+		}
+		if string(k.TrustRoot) != string(rootBytes) {
+			t.Errorf("%s: TrustRoot = %q, want the bytes of %s", c.name, k.TrustRoot, root)
+		}
 	}
 }
 

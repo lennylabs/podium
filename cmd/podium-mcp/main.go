@@ -2437,67 +2437,32 @@ func splitCSV(s string) []string {
 }
 
 // resolveVerifier resolves the §4.7.9 verification material for the policy
-// and provider name. It is the whole resolution: an unrecognized name refuses
-// with config.invalid under every policy, never resolves no material and
-// returns a nil verifier, noop under an enforcing policy refuses because it
-// verifies nothing, and every other name takes its material through
-// buildSignatureProvider, whose failure refuses the start with
-// config.signature_provider_unavailable. It never returns a nil verifier with
-// a nil error under a policy above never.
+// and provider name. A name other than registry-managed or noop refuses with
+// config.invalid under every policy, before any material is read:
+// sigstore-keyless is refused there too, because every delivery signature
+// the bridge verifies is registry-managed (§4.7.10). Under never no material
+// is resolved and the verifier is nil. noop under an enforcing policy refuses
+// because it verifies nothing, and registry-managed refuses with
+// config.signature_provider_unavailable when its key set does not resolve.
 //
-// Spec: §4.7.9, §6.2, §6.9.
+// Spec: §4.7.9, §4.7.10, §6.2, §6.9.
 func resolveVerifier(policy sign.VerificationPolicy, name string) (sign.Provider, error) {
 	switch name {
-	case "noop", "registry-managed", "sigstore-keyless":
+	case "noop", "registry-managed":
 	default:
-		return nil, fmt.Errorf("config.invalid: unknown PODIUM_SIGNATURE_PROVIDER %q; want noop | registry-managed | sigstore-keyless", name)
+		return nil, fmt.Errorf("config.invalid: PODIUM_SIGNATURE_PROVIDER %q is not a podium-mcp provider; want registry-managed or noop (every delivery signature is registry-managed; sigstore-keyless applies to podium sign and podium verify only)", name)
 	}
 	if policy == sign.PolicyNever {
 		return nil, nil
 	}
 	if name == "noop" {
-		return nil, fmt.Errorf("config.signature_provider_unavailable: PODIUM_SIGNATURE_PROVIDER=noop verifies no signature and PODIUM_VERIFY_SIGNATURES=%s requires verification; select registry-managed or sigstore-keyless, or set PODIUM_VERIFY_SIGNATURES=never", policy)
+		return nil, fmt.Errorf("config.signature_provider_unavailable: PODIUM_SIGNATURE_PROVIDER=noop verifies no signature and PODIUM_VERIFY_SIGNATURES=%s requires verification; select registry-managed, or set PODIUM_VERIFY_SIGNATURES=never", policy)
 	}
-	provider, err := buildSignatureProvider(name)
+	keys, err := registryManagedVerifyKey()
 	if err != nil {
 		return nil, fmt.Errorf("config.signature_provider_unavailable: %w; supply the verification material or set PODIUM_VERIFY_SIGNATURES=never", err)
 	}
-	return provider, nil
-}
-
-// buildSignatureProvider constructs the named provider with its verification
-// material. It is resolveVerifier's provider-construction half and has no
-// other caller in the bridge. sigstore-keyless needs a readable trust root at
-// PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE. registry-managed takes its §4.7.9
-// verification key set from registryManagedVerifyKey and verifies under any
-// key of it.
-func buildSignatureProvider(name string) (sign.Provider, error) {
-	switch name {
-	case "noop":
-		return sign.Noop{}, nil
-	case "sigstore-keyless":
-		rootPath := os.Getenv("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE")
-		if rootPath == "" {
-			return nil, errors.New("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE is unset; sigstore-keyless verification needs a trust root")
-		}
-		root, err := os.ReadFile(rootPath)
-		if err != nil {
-			return nil, fmt.Errorf("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE: %w", err)
-		}
-		return sign.SigstoreKeyless{
-			FulcioURL: os.Getenv("PODIUM_SIGSTORE_FULCIO_URL"),
-			RekorURL:  os.Getenv("PODIUM_SIGSTORE_REKOR_URL"),
-			OIDCToken: os.Getenv("PODIUM_SIGSTORE_OIDC_TOKEN"),
-			TrustRoot: root,
-		}, nil
-	case "registry-managed":
-		keys, err := registryManagedVerifyKey()
-		if err != nil {
-			return nil, err
-		}
-		return sign.RegistryManagedKey{Trusted: keys}, nil
-	}
-	return nil, fmt.Errorf("unknown PODIUM_SIGNATURE_PROVIDER: %s", name)
+	return sign.RegistryManagedKey{Trusted: keys}, nil
 }
 
 // registryManagedVerifyKey resolves the registry's verification key set in

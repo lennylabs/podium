@@ -194,8 +194,9 @@ const (
 )
 
 // loadSignatureProvider builds the named provider. The noop and
-// sigstore-keyless arms ignore use; sigstore-keyless reads the
-// PODIUM_SIGSTORE_* variables. The registry-managed arm, the default, resolves
+// sigstore-keyless arms ignore use; sigstore-keyless is built by
+// sigstoreKeylessProvider from the PODIUM_SIGSTORE_* variables. The
+// registry-managed arm, the default, resolves
 // exactly the material use names: the verification key set from
 // PODIUM_SIGNATURE_VERIFY_KEY when set (authoritative, so a malformed list is
 // an error) and otherwise from the public: and verify: lines of the registry
@@ -211,13 +212,7 @@ func loadSignatureProvider(name string, use keyUse) (sign.Provider, error) {
 	case "noop":
 		return sign.Noop{}, nil
 	case "sigstore-keyless":
-		root, _ := os.ReadFile(os.Getenv("PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE"))
-		return sign.SigstoreKeyless{
-			FulcioURL: os.Getenv("PODIUM_SIGSTORE_FULCIO_URL"),
-			RekorURL:  os.Getenv("PODIUM_SIGSTORE_REKOR_URL"),
-			OIDCToken: os.Getenv("PODIUM_SIGSTORE_OIDC_TOKEN"),
-			TrustRoot: root,
-		}, nil
+		return sigstoreKeylessProvider(), nil
 	case "registry-managed":
 		if use == keyForSign {
 			return registryManagedSigner()
@@ -225,6 +220,43 @@ func loadSignatureProvider(name string, use keyUse) (sign.Provider, error) {
 		return registryManagedVerifier()
 	}
 	return nil, fmt.Errorf("unknown signature provider: %s", name)
+}
+
+// The §6.2 defaults for the sigstore-keyless signing endpoints. The library
+// applies no default, so only the CLI ever reaches a public-good instance.
+// The Rekor value is the Rekor v2 shard the public-good signing_config lists
+// as current; the shard rotates, so a later release updates it.
+//
+// Spec: §6.2.
+const (
+	defaultFulcioURL = "https://fulcio.sigstore.dev"
+	defaultRekorURL  = "https://log2025-1.rekor.sigstore.dev"
+	defaultTSAURL    = "https://timestamp.sigstore.dev/api/v1/timestamp"
+)
+
+// sigstoreKeylessProvider builds the keyless provider from the environment.
+// The trust root is the trusted_root.json at
+// PODIUM_SIGSTORE_TRUSTED_ROOT_FILE; a read failure leaves it empty rather
+// than failing the command, because Verify refuses every envelope against an
+// empty trust root and Sign does not read it. The signing endpoints take their
+// §6.2 defaults when unset or empty. The identity policy comes from
+// PODIUM_SIGSTORE_CERT_IDENTITY and PODIUM_SIGSTORE_CERT_OIDC_ISSUER, and an
+// incomplete policy makes Verify refuse every envelope.
+//
+// Spec: §4.7.9, §6.2.
+func sigstoreKeylessProvider() sign.SigstoreKeyless {
+	root, _ := os.ReadFile(os.Getenv("PODIUM_SIGSTORE_TRUSTED_ROOT_FILE"))
+	return sign.SigstoreKeyless{
+		FulcioURL: envDefault("PODIUM_SIGSTORE_FULCIO_URL", defaultFulcioURL),
+		RekorURL:  envDefault("PODIUM_SIGSTORE_REKOR_URL", defaultRekorURL),
+		TSAURL:    envDefault("PODIUM_SIGSTORE_TSA_URL", defaultTSAURL),
+		OIDCToken: os.Getenv("PODIUM_SIGSTORE_OIDC_TOKEN"),
+		TrustRoot: root,
+		Identity: sign.NewIdentityPolicy(
+			os.Getenv("PODIUM_SIGSTORE_CERT_IDENTITY"),
+			os.Getenv("PODIUM_SIGSTORE_CERT_OIDC_ISSUER"),
+		),
+	}
 }
 
 // registryManagedSigner reads the private half from the registry key file.

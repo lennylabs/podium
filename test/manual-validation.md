@@ -233,6 +233,7 @@ rm -rf "$WORK"
 | S82 | The Python SDK rejects a harness other than `none` on materialize | none (SDK only) | none | none | none |
 | S83 | The change-event stream withholds events from layers the caller cannot see | standalone | none | none | none |
 | S84 | A replayed stale latest is refused, and an honest regression is not | standalone | none | none | none |
+| S85 | Sigstore-keyless sign and verify against the staging instance | none | none | none | Sigstore staging instance, an OIDC token it accepts |
 
 ---
 
@@ -10408,5 +10409,132 @@ after the withdrawal, is the defect this scenario catches.
    **Expect.** First a JSON object with `"code": "materialize.stale_resolution"`, then `cache: reset 1 revision mark(s)`, then `exit=0`, then `loaded`. Every load in this scenario names `$REG`, so the cache holds one mark, and the count is 1. The refusal before the reset and the `loaded` after it, under the same URL and the same replayed body, show that the reset removed the mark.
 
 Each `load_mcp` is a separate `podium-mcp` process, so step 4 already shows the mark persisting across processes. The lock case (exit 1 while `podium-mcp` holds the index) is covered by TEST-4 only, because a one-shot `podium-mcp` does not hold the lock long enough to observe by hand.
+
+---
+
+## S85: Sigstore-keyless sign and verify against the staging instance
+
+**Goal.** Validate that `podium sign --provider sigstore-keyless` records a
+Rekor v2 inclusion proof and a timestamp-authority timestamp, that
+`podium verify` accepts the envelope only for the configured signer and
+issuer, that it makes no network call, that the envelope still verifies after
+the Fulcio certificate expires, and that `podium-mcp` refuses to start under
+`sigstore-keyless`.
+
+**Covers.** The §4.7.9 Sigstore-keyless acceptance conditions, the §6.2
+`PODIUM_SIGSTORE_CERT_IDENTITY`, `PODIUM_SIGSTORE_CERT_OIDC_ISSUER`,
+trusted-root, and signing-endpoint rows, and the §6.2
+`PODIUM_SIGNATURE_PROVIDER` restriction on the MCP server. The unit and
+end-to-end tests run against an in-process Fulcio, Rekor, and timestamp
+authority. This scenario covers what only a running Sigstore instance
+establishes: the SAN and issuer extension Fulcio writes for a token, the body,
+inclusion proof, and checkpoint Rekor v2 returns, the token the timestamp
+authority issues, and the keys a published `trusted_root.json` carries.
+
+**Why by hand.** The staging instance needs an OIDC token that a person or a
+credentialed lane mints, and it writes every signature into a public log.
+
+**Prerequisites.**
+
+- An OIDC token the Sigstore staging Fulcio accepts, and the email or URI SAN
+  and issuer URL that token produces. When none is available, skip the
+  scenario and record the skip and the reason.
+- The staging `trusted_root.json` from the Sigstore staging TUF repository, and
+  the staging Rekor v2 shard URL from the staging `signing_config`.
+- Built `podium` and `podium-mcp` binaries on `PATH`.
+
+**Steps.**
+
+1. Run the isolation block from "Per-scenario isolation" above, then export the
+   staging coordinates and compute a content hash.
+
+   ```bash
+   export PODIUM_SIGSTORE_FULCIO_URL=https://fulcio.sigstage.dev
+   export PODIUM_SIGSTORE_REKOR_URL=<staging Rekor v2 shard URL>
+   export PODIUM_SIGSTORE_TSA_URL=https://timestamp.sigstage.dev/api/v1/timestamp
+   export PODIUM_SIGSTORE_OIDC_TOKEN=<token>
+   export PODIUM_SIGSTORE_TRUSTED_ROOT_FILE=<staging trusted_root.json>
+   export PODIUM_SIGSTORE_CERT_IDENTITY=<expected SAN>
+   export PODIUM_SIGSTORE_CERT_OIDC_ISSUER=<expected issuer URL>
+   H="sha256:$(printf 'podium s85' | shasum -a 256 | cut -d' ' -f1)"
+   echo "$H"
+   ```
+
+   **Expect.** `which podium` prints `$PODIUM_BIN/podium`, and `$H` is
+   `sha256:` followed by 64 hex characters.
+
+2. Sign and inspect the envelope.
+
+   ```bash
+   podium sign --provider sigstore-keyless --content-hash "$H" > "$WORK/env.json"; echo "exit=$?"
+   python3 -c 'import json,sys; e=json.load(open(sys.argv[1])); print(sorted(e)); print(sorted(e["tlog"]))' "$WORK/env.json"
+   ```
+
+   **Expect.** `exit=0`. The first list is
+   `['cert', 'signature', 'timestamp', 'tlog']`, and the second is
+   `['body', 'checkpoint', 'hashes', 'log_index']`. A `log_index` key at the
+   top level, or a missing `timestamp` or `checkpoint`, is the defect this
+   step catches.
+
+3. Verify with the matching policy and with the network blocked for Rekor and
+   the timestamp authority.
+
+   ```bash
+   PODIUM_SIGSTORE_REKOR_URL=http://127.0.0.1:1 PODIUM_SIGSTORE_TSA_URL=http://127.0.0.1:1 \
+     podium verify --provider sigstore-keyless --content-hash "$H" --signature "$(cat "$WORK/env.json")"; echo "exit=$?"
+   ```
+
+   **Expect.** `verify ok` and `exit=0`. A connection error naming
+   `127.0.0.1:1` means `Verify` still contacts the log or the timestamp
+   authority.
+
+4. Verify with another identity and with no identity.
+
+   ```bash
+   PODIUM_SIGSTORE_CERT_IDENTITY=bob@acme.com \
+     podium verify --provider sigstore-keyless --content-hash "$H" --signature "$(cat "$WORK/env.json")"; echo "exit=$?"
+   PODIUM_SIGSTORE_CERT_IDENTITY= \
+     podium verify --provider sigstore-keyless --content-hash "$H" --signature "$(cat "$WORK/env.json")"; echo "exit=$?"
+   ```
+
+   **Expect.** The first run prints `verify failed:` with
+   `certificate identity mismatch` and the SAN the certificate carries, then
+   `exit=1`. The second prints `verify failed:` naming
+   `PODIUM_SIGSTORE_CERT_IDENTITY`, then `exit=1`. `verify ok` on either run
+   means `Verify` accepts an envelope without matching the configured signer
+   identity.
+
+5. Wait at least 15 minutes, so the 10-minute Fulcio certificate has expired,
+   and repeat step 3.
+
+   ```bash
+   podium verify --provider sigstore-keyless --content-hash "$H" --signature "$(cat "$WORK/env.json")"; echo "exit=$?"
+   ```
+
+   **Expect.** `verify ok` and `exit=0`. A `certificate has expired` error
+   means the chain check runs at the wall-clock time rather than at the
+   timestamp's time.
+
+6. Sign with no OIDC token.
+
+   ```bash
+   PODIUM_SIGSTORE_OIDC_TOKEN= podium sign --provider sigstore-keyless --content-hash "$H"; echo "exit=$?"
+   ```
+
+   **Expect.** `sign failed:` with `sigstore-keyless not configured`, then
+   `exit=1`, and no envelope on stdout.
+
+7. Start `podium-mcp` under `sigstore-keyless`, under the default policy and
+   under `never`.
+
+   ```bash
+   PODIUM_SIGNATURE_PROVIDER=sigstore-keyless PODIUM_REGISTRY=http://127.0.0.1:1 podium-mcp </dev/null; echo "exit=$?"
+   PODIUM_SIGNATURE_PROVIDER=sigstore-keyless PODIUM_VERIFY_SIGNATURES=never PODIUM_REGISTRY=http://127.0.0.1:1 podium-mcp </dev/null; echo "exit=$?"
+   ```
+
+   **Expect.** Each run prints a line naming `config.invalid`,
+   `sigstore-keyless`, and `registry-managed` on stderr, then a non-zero
+   `exit=`. A run that starts serving, or that refuses with
+   `config.signature_provider_unavailable`, is the defect this step catches.
 
 ---

@@ -48,7 +48,7 @@ func hermetic(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PODIUM_CONFIG", "")
 	t.Setenv("PODIUM_VERIFY_SIGNATURES", "never")
-	for _, k := range []string{"PODIUM_SIGNATURE_PROVIDER", "PODIUM_SIGNATURE_VERIFY_KEY", "PODIUM_SIGN_KEY_PATH", "PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE"} {
+	for _, k := range []string{"PODIUM_SIGNATURE_PROVIDER", "PODIUM_SIGNATURE_VERIFY_KEY", "PODIUM_SIGN_KEY_PATH"} {
 		t.Setenv(k, "")
 	}
 	chdirTemp(t)
@@ -756,14 +756,15 @@ func TestLoadArtifact_PerCallDestinationMaterializes(t *testing.T) {
 // policy, never resolves no material, even from a malformed
 // PODIUM_SIGNATURE_VERIFY_KEY, noop under always refuses, a set
 // PODIUM_SIGNATURE_VERIFY_KEY is authoritative over the key file, the key file
-// answers only when the variable is unset, and sigstore-keyless needs a
-// readable trust root.
+// answers only when the variable is unset, and sigstore-keyless refuses with
+// config.invalid under every policy.
 func TestLoadConfig_VerifierResolution(t *testing.T) {
 	type outcome struct {
 		code string                     // refusal code, or "" when loadConfig returns
 		id   string                     // resolved verifier ID, or "" for a nil verifier
 		keys func() []ed25519.PublicKey // expected registry-managed Trusted set, when set
 		msg  []string                   // strings the refusal names
+		not  []string                   // strings the refusal must not name
 	}
 	var keyA ed25519.PublicKey
 	keyB := testVerifyKey(t)
@@ -776,7 +777,7 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 		}
 		return out
 	}
-	rootFile := filepath.Join(t.TempDir(), "root.pem")
+	rootFile := filepath.Join(t.TempDir(), "trusted_root.json")
 	if err := os.WriteFile(rootFile, []byte("trust root"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -795,7 +796,7 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 		{name: "never resolves nothing", policy: "never", provider: "registry-managed", want: outcome{}},
 		{name: "never with noop", policy: "never", provider: "noop", want: outcome{}},
 		{name: "never with a malformed verify key", policy: "never", provider: "registry-managed", env: map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": "!!!not base64"}, want: outcome{}},
-		{name: "noop under always", policy: "always", provider: "noop", keyFile: true, want: outcome{code: "config.signature_provider_unavailable", msg: []string{"noop"}}},
+		{name: "noop under always", policy: "always", provider: "noop", keyFile: true, want: outcome{code: "config.signature_provider_unavailable", msg: []string{"noop", "registry-managed"}, not: []string{"sigstore-keyless"}}},
 		{
 			name: "verify key set and decodes", policy: "always", provider: "registry-managed", keyFile: true,
 			env:  map[string]string{"PODIUM_SIGNATURE_VERIFY_KEY": keyB},
@@ -843,19 +844,11 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 			name: "nothing resolves", policy: "always", provider: "registry-managed",
 			want: outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGNATURE_VERIFY_KEY", "PODIUM_SIGN_KEY_PATH", "registry-signing.key"}},
 		},
+		{name: "sigstore-keyless under never", policy: "never", provider: "sigstore-keyless", want: outcome{code: "config.invalid:", msg: []string{"sigstore-keyless", "registry-managed"}}},
 		{
-			name: "sigstore trust root readable", policy: "always", provider: "sigstore-keyless",
-			env:  map[string]string{"PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE": rootFile},
-			want: outcome{id: "sigstore-keyless"},
-		},
-		{
-			name: "sigstore trust root unset", policy: "always", provider: "sigstore-keyless",
-			want: outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE"}},
-		},
-		{
-			name: "sigstore trust root unreadable", policy: "always", provider: "sigstore-keyless",
-			env:  map[string]string{"PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE": filepath.Join(t.TempDir(), "absent.pem")},
-			want: outcome{code: "config.signature_provider_unavailable", msg: []string{"PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE"}},
+			name: "sigstore-keyless under always", policy: "always", provider: "sigstore-keyless", keyFile: true,
+			env:  map[string]string{"PODIUM_SIGSTORE_TRUSTED_ROOT_FILE": rootFile},
+			want: outcome{code: "config.invalid:", msg: []string{"sigstore-keyless", "registry-managed"}},
 		},
 	}
 	for _, c := range cases {
@@ -881,6 +874,11 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 				for _, m := range c.want.msg {
 					if !strings.Contains(err.Error(), m) {
 						t.Errorf("refusal %q does not name %q", err, m)
+					}
+				}
+				for _, m := range c.want.not {
+					if strings.Contains(err.Error(), m) {
+						t.Errorf("refusal %q names %q", err, m)
 					}
 				}
 				return

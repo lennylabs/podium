@@ -277,14 +277,18 @@ The target database needs the `vector` extension installed (`CREATE EXTENSION ve
 
 ### Sigstore (keyless signing)
 
-`TestSigstoreKeyless_LiveSmoke` in `pkg/sign/sigstore_live_test.go` skips unless `PODIUM_SIGSTORE_FULCIO_URL`, `PODIUM_SIGSTORE_OIDC_TOKEN`, and `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` are set; `PODIUM_SIGSTORE_REKOR_URL` is read when present. Run it manually against the staging instance, never production. See `RELEASING.md` → "Sigstore live tests are manual" for the cadence and the reason a credentialed CI lane is not wired.
+`TestSigstoreKeyless_LiveSmoke` in `pkg/sign/sigstore_live_test.go` skips unless `PODIUM_SIGSTORE_FULCIO_URL`, `PODIUM_SIGSTORE_REKOR_URL`, `PODIUM_SIGSTORE_TSA_URL`, `PODIUM_SIGSTORE_OIDC_TOKEN`, `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`, `PODIUM_SIGSTORE_CERT_IDENTITY`, and `PODIUM_SIGSTORE_CERT_OIDC_ISSUER` are all set. Run it manually against the staging instance, never production. See `RELEASING.md` → "Sigstore live tests are manual" for the cadence and the reason a credentialed CI lane is not wired.
 
 | Variable                              | Purpose                                                                       | Example                        |
 | :------------------------------------ | :---------------------------------------------------------------------------- | :----------------------------- |
 | `PODIUM_SIGSTORE_FULCIO_URL`          | Fulcio CA endpoint. Use the staging instance for manual runs.                | `https://fulcio.sigstage.dev`  |
-| `PODIUM_SIGSTORE_REKOR_URL`           | Rekor transparency log. Use the staging instance for manual runs.            | `https://rekor.sigstage.dev`   |
+| `PODIUM_SIGSTORE_REKOR_URL`           | Rekor v2 transparency log. Use the staging instance for manual runs.         | `<staging Rekor v2 shard URL>` |
+| `PODIUM_SIGSTORE_TSA_URL`             | RFC 3161 timestamp authority. Use the staging instance for manual runs.      | `https://timestamp.sigstage.dev/api/v1/timestamp` |
 | `PODIUM_SIGSTORE_OIDC_TOKEN`          | OIDC token Fulcio binds into the cert. The configured issuer must accept it.  | `eyJ…`                         |
-| `PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE` | Path to the trust bundle (intermediate + root CA chain) for the chosen instance. | `/path/to/sigstage-root.pem`   |
+| `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`   | Path to the Sigstore `trusted_root.json` for the chosen instance.            | `/path/to/sigstage-trusted_root.json` |
+| `PODIUM_SIGSTORE_CERT_IDENTITY`       | Email or URI subject alternative name the token's identity receives in the Fulcio certificate. | `<email or URI SAN>` |
+| `PODIUM_SIGSTORE_CERT_OIDC_ISSUER`    | Issuer URL of the OIDC token.                                                 | `<issuer URL>`                 |
+| `PODIUM_SIGSTORE_RECORD_DIR`          | Optional. Absolute path of the fixture directory the smoke writes `envelope.json`, `trusted_root.json`, and `meta.json` into after `Verify` passes. The path is absolute because `go test` runs the test in `pkg/sign`. | `$PWD/pkg/sign/testdata/sigstore-staging`, run from the repository root |
 
 ### What's not gated by env vars today
 
@@ -331,7 +335,10 @@ export PODIUM_S3_USE_SSL="false"
 export PODIUM_SIGSTORE_FULCIO_URL=""
 export PODIUM_SIGSTORE_REKOR_URL=""
 export PODIUM_SIGSTORE_OIDC_TOKEN=""
-export PODIUM_SIGSTORE_TRUST_ROOT_PEM_FILE=""
+export PODIUM_SIGSTORE_TRUSTED_ROOT_FILE=""
+export PODIUM_SIGSTORE_TSA_URL=""
+export PODIUM_SIGSTORE_CERT_IDENTITY=""
+export PODIUM_SIGSTORE_CERT_OIDC_ISSUER=""
 ```
 
 In CI, every variable above maps to a repo Secret (Settings → Secrets and variables → Actions). `integration-live.yml` provides Postgres and MinIO via service containers, so only Sigstore needs a real secret today.
