@@ -220,8 +220,10 @@ func (r *resolutionCache) readMarkLocked(key []byte) (uint64, bool) {
 }
 
 // readMark reads the mark under key from b. A value that does not parse as a
-// decimal uint64 is deleted and reported as absent; the warning names the key
-// only, because the value is untrusted bytes. A nil bucket holds no mark.
+// decimal within the int64 range is deleted and reported as absent; the
+// warning names the key only, because the value is untrusted bytes. The bound
+// is 63 bits because a mark is a count of Unix microseconds that the freshness
+// check converts back to a time. A nil bucket holds no mark.
 func readMark(b *bolt.Bucket, key []byte) (uint64, bool) {
 	if b == nil {
 		return 0, false
@@ -230,7 +232,7 @@ func readMark(b *bolt.Bucket, key []byte) (uint64, bool) {
 	if v == nil {
 		return 0, false
 	}
-	mark, err := strconv.ParseUint(string(v), 10, 64)
+	mark, err := strconv.ParseUint(string(v), 10, 63)
 	if err != nil {
 		log.Printf("warning: podium-mcp: deleting unparseable revision mark %q", key)
 		_ = b.Delete(key)

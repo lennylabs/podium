@@ -269,39 +269,45 @@ func TestResolutionCache_NilReceiver(t *testing.T) {
 }
 
 // Spec: §6.5 — a stored mark that does not parse is deleted with a warning
-// naming its key and never its value, and is treated as absent. The test swaps
+// naming its key and never its value, and is treated as absent. A decimal
+// above the int64 range counts as unparseable, because the mark is a count of
+// Unix microseconds that the bridge converts back to a time. The test swaps
 // the global log output, so it does not run in parallel.
 func TestResolutionCache_UnparseableMarkDeleted(t *testing.T) {
-	dir := t.TempDir()
-	r := newResolutionCache(dir)
-	defer func() { _ = r.Close() }()
-	k := testMarkKey("team/x")
-	if err := r.db.Update(func(tx *bolt.Tx) error {
-		return tx.Bucket(revmark.Bucket()).Put(k.Encode(), []byte("secret-garbage"))
-	}); err != nil {
-		t.Fatal(err)
-	}
-	var buf bytes.Buffer
-	log.SetOutput(&buf)
-	defer log.SetOutput(os.Stderr)
+	for _, stored := range []string{"secret-garbage", "9223372036854775808"} {
+		t.Run(stored, func(t *testing.T) {
+			dir := t.TempDir()
+			r := newResolutionCache(dir)
+			defer func() { _ = r.Close() }()
+			k := testMarkKey("team/x")
+			if err := r.db.Update(func(tx *bolt.Tx) error {
+				return tx.Bucket(revmark.Bucket()).Put(k.Encode(), []byte(stored))
+			}); err != nil {
+				t.Fatal(err)
+			}
+			var buf bytes.Buffer
+			log.SetOutput(&buf)
+			defer log.SetOutput(os.Stderr)
 
-	if _, ok := r.Reference(k, ""); ok {
-		t.Fatal("an unparseable mark was reported")
-	}
-	out := buf.String()
-	if !strings.Contains(out, "team/x") || strings.Contains(out, "secret-garbage") {
-		t.Errorf("warning = %q; want the key and not the value", out)
-	}
-	_ = r.db.View(func(tx *bolt.Tx) error {
-		if tx.Bucket(revmark.Bucket()).Get(k.Encode()) != nil {
-			t.Error("the unparseable mark was not deleted")
-		}
-		return nil
-	})
-	// An unparseable mark does not block the next advance.
-	r.PutLatestAdvancing(k, "", "team/x", "1.0.0", "sha256:one", 5, time.Now())
-	if ref, ok := r.Reference(k, ""); !ok || ref != 5 {
-		t.Errorf("mark after advance = %d, %v; want 5", ref, ok)
+			if _, ok := r.Reference(k, ""); ok {
+				t.Fatal("an unparseable mark was reported")
+			}
+			out := buf.String()
+			if !strings.Contains(out, "team/x") || strings.Contains(out, stored) {
+				t.Errorf("warning = %q; want the key and not the value", out)
+			}
+			_ = r.db.View(func(tx *bolt.Tx) error {
+				if tx.Bucket(revmark.Bucket()).Get(k.Encode()) != nil {
+					t.Error("the unparseable mark was not deleted")
+				}
+				return nil
+			})
+			// An unparseable mark does not block the next advance.
+			r.PutLatestAdvancing(k, "", "team/x", "1.0.0", "sha256:one", 5, time.Now())
+			if ref, ok := r.Reference(k, ""); !ok || ref != 5 {
+				t.Errorf("mark after advance = %d, %v; want 5", ref, ok)
+			}
+		})
 	}
 }
 
