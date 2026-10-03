@@ -1156,8 +1156,11 @@ func run(ctx context.Context, stop func()) error {
 	// the SCIM IdP receiver is mounted at /scim/v2/. Under an identity
 	// provider that resolves the caller from a verified credential, the
 	// store feeds the §4.6 visibility evaluator's `groups:` expander so
-	// layer filters resolve against IdP-pushed group membership. The
-	// store opens here, after the bootstrap ingest, as the
+	// layer filters resolve against IdP-pushed group membership. When
+	// PODIUM_SCIM_STORE_PATH is set, the directory persists to that file,
+	// and a path the registry cannot read, parse, or write refuses the
+	// start with config.scim_store_unavailable rather than falling back
+	// to memory. The store opens here, after the bootstrap ingest, as the
 	// config.runtime_keys_unavailable refusal does; opening it earlier
 	// would let the writability probe create the SCIM directory on a
 	// start that a later refusal rejects.
