@@ -362,7 +362,7 @@ runtime_requirements:
   system_packages: ["jq", "curl"]
 ```
 
-Adapters surface these requirements to the host where supported. Once a host advertises its runtime capabilities to the Podium MCP server, or opts into enforcement, the MCP server refuses a `load_artifact` whose requirements the advertised capabilities do not satisfy with `materialize.runtime_unavailable`. A host that advertises no capabilities and does not opt in receives the requirements without a refusal. An explicit host override bypasses the refusal and logs a warning. `podium sync` does not evaluate runtime requirements.
+Adapters surface these requirements to the host where supported. Once a host advertises its runtime capabilities to the Podium MCP server, or opts into enforcement, the MCP server refuses a `load_artifact` whose requirements the advertised capabilities do not satisfy with `materialize.runtime_unavailable`. A host that advertises no capabilities and does not opt in receives the requirements without a refusal. An explicit host override bypasses the refusal and logs a warning. §6.2 lists the environment variables through which a host advertises its runtime capabilities, opts into enforcement, and sets the override. `podium sync` does not evaluate runtime requirements.
 
 The `sandbox_profile:` field declares execution constraints:
 
