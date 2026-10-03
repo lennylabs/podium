@@ -296,6 +296,11 @@ class _OAuthHandler(http.server.BaseHTTPRequestHandler):
                     "device_code": "dev-123",
                     "user_code": "WXYZ-1234",
                     "verification_uri": "https://idp.example.com/activate",
+                    **(
+                        {"verification_uri_complete": self.server.complete_uri}  # type: ignore[attr-defined]
+                        if self.server.complete_uri  # type: ignore[attr-defined]
+                        else {}
+                    ),
                     "interval": 0,
                     "expires_in": 600,
                 }
@@ -323,6 +328,7 @@ def oauth_server():
     server.token_polls = 0
     server.always_pending = False
     server.last_auth = ""
+    server.complete_uri = ""
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
     yield server
@@ -348,3 +354,75 @@ def test_login_times_out_when_always_pending(oauth_server):
     client = Client(registry=base)
     with pytest.raises(DeviceCodeError):
         client.login(timeout=0.5)
+
+
+@pytest.fixture()
+def _no_oauth_env(monkeypatch):
+    # An operator shell's PODIUM_OAUTH_* must not redirect the stub flow.
+    for name in (
+        "PODIUM_OAUTH_CLIENT_ID",
+        "PODIUM_OAUTH_AUDIENCE",
+        "PODIUM_OAUTH_AUTHORIZATION_ENDPOINT",
+        "PODIUM_OAUTH_TOKEN_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+# Spec: §6.3 — login() composes the pair: it prints the URL and code to stderr
+# and opens the complete verification URI only when open_browser is true.
+def test_login_opens_complete_uri_with_explicit_endpoints(
+    oauth_server, _no_oauth_env, monkeypatch, capsys
+):
+    from podium import client as client_mod
+
+    oauth_server.complete_uri = "https://idp.example.com/activate?code=WXYZ-1234"
+    opened: list[str] = []
+    monkeypatch.setattr(client_mod, "_open_browser", opened.append)
+    base = f"http://127.0.0.1:{oauth_server.server_address[1]}"
+    # The registry URL is unreachable, so the explicit endpoints must be used.
+    client = Client(registry="http://127.0.0.1:1")
+    tokens = client.login(
+        open_browser=True,
+        timeout=10.0,
+        device_authorization_endpoint=base + "/device",
+        token_endpoint=base + "/token",
+    )
+    assert tokens.access_token == "tok-abc"
+    assert opened == ["https://idp.example.com/activate?code=WXYZ-1234"]
+    err = capsys.readouterr().err
+    assert "Visit: https://idp.example.com/activate" in err
+    assert "User code: WXYZ-1234" in err
+
+
+# Spec: §6.3 — login() opens no browser when the IdP omits the complete URI.
+def test_login_skips_browser_without_complete_uri(
+    oauth_server, _no_oauth_env, monkeypatch
+):
+    from podium import client as client_mod
+
+    opened: list[str] = []
+    monkeypatch.setattr(client_mod, "_open_browser", opened.append)
+    base = f"http://127.0.0.1:{oauth_server.server_address[1]}"
+    client = Client(registry=base)
+    client.login(open_browser=True, timeout=10.0)
+    assert opened == []
+
+
+# Spec: §6.3 — start_login prints nothing and returns the handle; finish_login
+# installs the token on the client and consumes the handle.
+def test_start_and_finish_login_pair(oauth_server, _no_oauth_env, capsys):
+    base = f"http://127.0.0.1:{oauth_server.server_address[1]}"
+    client = Client(registry=base)
+    pending = client.start_login()
+    assert capsys.readouterr().err == ""
+    assert pending.user_code == "WXYZ-1234"
+    assert pending.verification_uri_complete is None
+    assert oauth_server.token_polls == 0
+    tokens = client.finish_login(pending, timeout=10.0)
+    assert tokens.access_token == "tok-abc"
+    assert client.token == "tok-abc"
+    polls = oauth_server.token_polls
+    with pytest.raises(DeviceCodeError) as err:
+        client.finish_login(pending)
+    assert err.value.reason == "consumed"
+    assert oauth_server.token_polls == polls

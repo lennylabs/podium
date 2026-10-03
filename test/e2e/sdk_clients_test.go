@@ -119,13 +119,16 @@ func csSkillReg(t *testing.T) string {
 
 // ---- install + import -------------------------------------------------------
 
-// Python SDK imports the documented names.
+// Python SDK imports the documented names, including the device-code error
+// and the pending-login handle, and Client exposes the non-blocking login pair.
+// Spec: §6.3
 func TestSDK_PyImport(t *testing.T) {
 	t.Parallel()
 	py := csPython(t)
 	res := csRunPy(t, py, "http://localhost:1",
-		"from podium import Client, RegistryError, DeviceCodeRequired\nprint('IMPORT_OK', Client.__name__)\n")
-	csWantStdout(t, res, "IMPORT_OK")
+		"from podium import Client, RegistryError, DeviceCodeError, PendingLogin\n"+
+			"print('IMPORT_OK', Client.__name__, hasattr(Client, 'start_login'), hasattr(Client, 'finish_login'))\n")
+	csWantStdout(t, res, "IMPORT_OK Client True True")
 }
 
 // TypeScript SDK exports Client and RegistryError.

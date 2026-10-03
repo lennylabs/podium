@@ -7,6 +7,7 @@ import json
 import os
 import re
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -51,14 +52,6 @@ def _check_top_k(top_k: int) -> None:
     """Reject top_k > 50 before the request is sent (spec §11, §6.10)."""
     if top_k > _MAX_TOP_K:
         raise RegistryError("registry.invalid_argument", "top_k > 50")
-
-
-class DeviceCodeRequired(Exception):
-    """Raised when the configured identity provider needs a device-code flow.
-
-    Stage 3 does not implement OAuth; this exception is wired so callers
-    can catch it once oauth-device-code lands in Phase 11.
-    """
 
 
 class RegistryReadOnly(RegistryError):
@@ -806,29 +799,22 @@ class Client:
             self._overlay_cache[session_id] = index
         return index
 
-    def login(
+    def _resolve_device_flow(
         self,
-        *,
-        open_browser: bool = False,
-        timeout: float = _oauth.DEFAULT_TIMEOUT,
-        client_id: str | None = None,
-        scopes: list[str] | None = None,
-        audience: str = "",
-        device_authorization_endpoint: str = "",
-        token_endpoint: str = "",
-        opener: Callable[[Any], Any] | None = None,
-        sleep: Callable[[float], None] | None = None,
-    ) -> _oauth.Tokens:
-        """Run the §6.3 oauth-device-code flow and cache the access token.
+        client_id: str | None,
+        scopes: list[str] | None,
+        audience: str,
+        device_authorization_endpoint: str,
+        token_endpoint: str,
+        opener: Callable[[Any], Any] | None,
+    ) -> tuple[str, str, str, list[str], str]:
+        """Resolve the device-code configuration for ``start_login``.
 
-        spec §14.8 / §7.7 — ``client.login()`` performs the device-code
-        flow before any catalog calls. The IdP is discovered from the
-        registry's RFC 8414 metadata (overridable via the endpoint
-        parameters or the ``PODIUM_OAUTH_*`` env vars). The verification URL
-        and user code print to stderr; polling is bounded by ``timeout``
-        (10 minutes by default). On success the access token is stored on
-        the client and attached as the ``Authorization: Bearer`` credential
-        on every subsequent request (§7.6).
+        Returns ``(device_url, token_url, client_id, scopes, audience)``. An
+        explicit parameter wins over its ``PODIUM_OAUTH_*`` variable. A missing
+        device-authorization endpoint is discovered from the registry's RFC 8414
+        metadata (§7.7), which also supplies the token endpoint when none is
+        set; the registry's ``/oauth2/token`` is the last fallback.
         """
         cid = client_id or os.environ.get("PODIUM_OAUTH_CLIENT_ID") or "podium-cli"
         req_scopes = scopes if scopes is not None else ["openid", "profile", "email", "groups"]
@@ -844,22 +830,112 @@ class Client:
                 tok_url = discovered
         if not tok_url:
             tok_url = self.registry.rstrip("/") + "/oauth2/token"
+        return device_url, tok_url, cid, req_scopes, aud
 
-        auth = _oauth.initiate(device_url, cid, req_scopes, aud, opener=opener)
-        print(f"Visit: {auth.verification_uri}", file=sys.stderr)
-        print(f"User code: {auth.user_code}", file=sys.stderr)
-        if open_browser and auth.verification_uri_complete:
-            _open_browser(auth.verification_uri_complete)
+    def start_login(
+        self,
+        *,
+        client_id: str | None = None,
+        scopes: list[str] | None = None,
+        audience: str = "",
+        device_authorization_endpoint: str = "",
+        token_endpoint: str = "",
+        opener: Callable[[Any], Any] | None = None,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> _oauth.PendingLogin:
+        """Start the §6.3 oauth-device-code flow and return its handle.
+
+        spec §6.3 — the call performs the device-authorization request and
+        returns a single-use :class:`PendingLogin` carrying the verification
+        URI, the complete verification URI when the IdP supplies one, the user
+        code, the code's lifetime, and the initial poll interval. It prints
+        nothing, opens no browser, and does not poll; the calling code shows
+        the URL and code to the user and then calls :meth:`finish_login`. The
+        code's lifetime runs from this call. ``clock`` is injectable for tests.
+        Failures raise :class:`DeviceCodeError` with reason ``failed``.
+        """
+        device_url, tok_url, cid, req_scopes, aud = self._resolve_device_flow(
+            client_id, scopes, audience, device_authorization_endpoint, token_endpoint, opener
+        )
+        auth = _oauth.initiate(device_url, cid, req_scopes, aud, opener=opener, clock=clock)
+        return _oauth.PendingLogin(auth, tok_url, cid, opener=opener, clock=clock)
+
+    def finish_login(
+        self,
+        pending: _oauth.PendingLogin,
+        *,
+        timeout: float = _oauth.DEFAULT_TIMEOUT,
+        cancel: threading.Event | None = None,
+        sleep: Callable[[float], None] | None = None,
+    ) -> _oauth.Tokens:
+        """Poll a started login to completion and install its access token.
+
+        spec §6.3 — the call polls the token endpoint until the user completes
+        the flow, the IdP denies it, the code expires, ``cancel`` is set, or
+        ``timeout`` (10 minutes by default, measured from this call) elapses.
+        The handle is consumed at entry whatever the outcome, so a second call
+        on it raises reason ``consumed`` without contacting the IdP. Setting
+        ``cancel`` takes effect at the next check and does not interrupt an
+        in-flight request. On success the access token is held in memory on
+        this client, attached as the ``Authorization: Bearer`` credential on
+        later requests, and neither persisted nor refreshed.
+
+        A handle belongs to the client whose :meth:`start_login` produced it.
+        Finishing it on another client is unsupported.
+        """
+        pending._consume()
         tokens = _oauth.poll(
-            tok_url,
-            cid,
-            auth,
+            pending._token_url,
+            pending._client_id,
+            pending._auth,
             timeout=timeout,
-            opener=opener,
-            sleep=sleep or time.sleep,
+            opener=pending._opener,
+            sleep=sleep,
+            clock=pending._clock,
+            cancel=cancel,
         )
         self.token = tokens.access_token
         return tokens
+
+    def login(
+        self,
+        *,
+        open_browser: bool = False,
+        timeout: float = _oauth.DEFAULT_TIMEOUT,
+        client_id: str | None = None,
+        scopes: list[str] | None = None,
+        audience: str = "",
+        device_authorization_endpoint: str = "",
+        token_endpoint: str = "",
+        opener: Callable[[Any], Any] | None = None,
+        sleep: Callable[[float], None] | None = None,
+    ) -> _oauth.Tokens:
+        """Run the §6.3 oauth-device-code flow and cache the access token.
+
+        spec §6.3 / §7.7 — ``login()`` composes :meth:`start_login` and
+        :meth:`finish_login`. The IdP is discovered from the registry's RFC
+        8414 metadata (overridable via the endpoint parameters or the
+        ``PODIUM_OAUTH_*`` env vars). The verification URL and user code print
+        to stderr, and the complete verification URI opens in the system
+        browser only when ``open_browser`` is true and the IdP supplies one.
+        The call blocks until the flow completes, is denied, expires, or
+        ``timeout`` (10 minutes by default) elapses, and every failure raises
+        :class:`DeviceCodeError` with a ``reason``. An IdP whose code lifetime
+        is shorter than ``timeout`` ends the flow with reason ``expired``.
+        """
+        pending = self.start_login(
+            client_id=client_id,
+            scopes=scopes,
+            audience=audience,
+            device_authorization_endpoint=device_authorization_endpoint,
+            token_endpoint=token_endpoint,
+            opener=opener,
+        )
+        print(f"Visit: {pending.verification_uri}", file=sys.stderr)
+        print(f"User code: {pending.user_code}", file=sys.stderr)
+        if open_browser and pending.verification_uri_complete is not None:
+            _open_browser(pending.verification_uri_complete)
+        return self.finish_login(pending, timeout=timeout, sleep=sleep)
 
     # spec §4.5.5 — the default render depth for an overlay-introduced subtree.
     # The SDK does not know the tenant's resolved max_depth, so it renders to
