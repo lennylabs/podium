@@ -765,6 +765,26 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 	return lc, vis, nil
 }
 
+// openSCIMStore returns the §6.3.1 SCIM directory store. An empty path
+// keeps the directory in memory. A set path that scim.LoadFileStore
+// cannot read, parse, or write refuses startup with
+// config.scim_store_unavailable rather than falling back to memory,
+// because a fallback would silently discard every record the IdP pushes
+// and the operator would learn of it only after the next restart.
+//
+// Spec: §6.3.1, §13.12
+func openSCIMStore(path string) (scim.Store, error) {
+	if path == "" {
+		return scim.NewMemory(), nil
+	}
+	fs, err := scim.LoadFileStore(path)
+	if err != nil {
+		return nil, fmt.Errorf("config.scim_store_unavailable: PODIUM_SCIM_STORE_PATH=%q cannot hold the SCIM directory (§6.3.1, §13.12): %w; fix the file or its directory, or unset PODIUM_SCIM_STORE_PATH to keep the directory in memory", path, err)
+	}
+	log.Printf("SCIM directory persisted at %s", path)
+	return fs, nil
+}
+
 // Run loads configuration, opens the configured backends, mounts every
 // endpoint, and serves until a SIGINT or SIGTERM triggers a graceful shutdown.
 // It installs the signal handler, then delegates to run with the resulting
@@ -1133,22 +1153,19 @@ func run(ctx context.Context, stop func()) error {
 	}
 
 	// §6.3.1 SCIM 2.0: when at least one bearer token is configured,
-	// the SCIM IdP receiver is mounted at /scim/v2/. When
-	// PODIUM_SCIM_STORE_PATH is set, IdP-pushed users + groups
-	// persist as a JSON file at that path so they survive server
-	// restarts. Under an identity provider that resolves the caller
-	// from a verified credential, the same store feeds the §4.6
-	// visibility evaluator's `groups:` expander so layer filters
-	// resolve against IdP-pushed group membership.
-	var scimStore scim.Store = scim.NewMemory()
-	if path := os.Getenv("PODIUM_SCIM_STORE_PATH"); path != "" {
-		fs, err := scim.LoadFileStore(path)
-		if err != nil {
-			log.Printf("warning: SCIM persistence disabled: %v", err)
-		} else {
-			scimStore = fs
-			log.Printf("SCIM directory persisted at %s", path)
-		}
+	// the SCIM IdP receiver is mounted at /scim/v2/. Under an identity
+	// provider that resolves the caller from a verified credential, the
+	// store feeds the §4.6 visibility evaluator's `groups:` expander so
+	// layer filters resolve against IdP-pushed group membership. The
+	// store opens here, after the bootstrap ingest, as the
+	// config.runtime_keys_unavailable refusal does; opening it earlier
+	// would let the writability probe create the SCIM directory on a
+	// start that a later refusal rejects.
+	//
+	// Spec: §6.3.1, §13.12
+	scimStore, err := openSCIMStore(os.Getenv("PODIUM_SCIM_STORE_PATH"))
+	if err != nil {
+		return err
 	}
 	scimHandler := buildSCIMHandler(scimStore)
 	// The expander is held here so the §7.3.1 layer read filters against the
