@@ -89,3 +89,48 @@ func TestDeliveryCheck_VerifyWrapsSignatureSentinels(t *testing.T) {
 		t.Fatalf("malformed envelope = %v, want ErrSignatureInvalid", err)
 	}
 }
+
+// Spec: §4.7.10 — a large resource enters the record under its link
+// content_hash, so a record built from a differing link hash fails the
+// delivery hash comparison.
+func TestDeliveryCheck_VerifyFramesLargeResourceLink(t *testing.T) {
+	t.Parallel()
+	inline := map[string][]byte{"r.txt": []byte("r")}
+	linkHash := version.ResourceDigest([]byte("large body"))
+	rec, _, key, _ := deliveryFixture(t)
+	rec.Resources = version.ResourceHashes(inline, map[string]string{"big.bin": linkHash})
+	hash := version.DeliveryHash(rec)
+	sig, err := key.Sign(context.Background(), hash)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	check := sign.DeliveryCheck{Policy: sign.PolicyAlways, Verifier: key}
+	if err := check.Verify(context.Background(), rec, hash, sig); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	altered := rec
+	altered.Resources = version.ResourceHashes(inline, map[string]string{"big.bin": version.ResourceDigest([]byte("other"))})
+	err = check.Verify(context.Background(), altered, hash, sig)
+	if err == nil || !strings.HasPrefix(err.Error(), "materialize.content_hash_mismatch: ") {
+		t.Fatalf("Verify = %v, want materialize.content_hash_mismatch", err)
+	}
+}
+
+// Spec: §4.7.10 — under always the delivery hash comparison runs before the
+// signature check, so a tampered record carrying a wrong-key signature reports
+// materialize.content_hash_mismatch rather than materialize.signature_invalid.
+func TestDeliveryCheck_VerifyHashBeforeSignatureUnderAlways(t *testing.T) {
+	t.Parallel()
+	rec, hash, key, _ := deliveryFixture(t)
+	_, other := genKeys(t, 1)
+	wrongSig, err := sign.RegistryManagedKey{PrivateKey: other[0]}.Sign(context.Background(), hash)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	rec.ManifestBody = "altered\n"
+	check := sign.DeliveryCheck{Policy: sign.PolicyAlways, Verifier: key}
+	err = check.Verify(context.Background(), rec, hash, wrongSig)
+	if err == nil || !strings.HasPrefix(err.Error(), "materialize.content_hash_mismatch: ") {
+		t.Fatalf("Verify = %v, want materialize.content_hash_mismatch", err)
+	}
+}

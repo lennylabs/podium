@@ -220,8 +220,26 @@ func TestParseLoadResponse_Refusals(t *testing.T) {
 			}
 		})
 	}
-	if _, err := ParseLoadResponse([]byte(`[]`)); !errors.Is(err, ErrMalformedRecord) {
-		t.Fatalf("array body = %v, want ErrMalformedRecord", err)
+	for name, body := range map[string]string{
+		"array body":         `[]`,
+		"unpaired surrogate": `{"id":"team/a","frontmatter":"\ud83d"}`,
+	} {
+		if _, err := ParseLoadResponse([]byte(body)); !errors.Is(err, ErrMalformedRecord) {
+			t.Fatalf("%s = %v, want ErrMalformedRecord", name, err)
+		}
+	}
+}
+
+// Spec: §4.7.10 — step 1 accepts a surrogate pair escape, and the record
+// frames the UTF-8 encoding of the code point it denotes.
+func TestParseLoadResponse_SurrogatePairEscape(t *testing.T) {
+	t.Parallel()
+	s, err := ParseLoadResponse([]byte(`{"id":"team/a","frontmatter":"\ud83d\ude00"}`))
+	if err != nil {
+		t.Fatalf("ParseLoadResponse: %v", err)
+	}
+	if got := []byte(s.Record.Frontmatter); !reflect.DeepEqual(got, []byte{0xF0, 0x9F, 0x98, 0x80}) {
+		t.Fatalf("Frontmatter = % X, want F0 9F 98 80", got)
 	}
 }
 

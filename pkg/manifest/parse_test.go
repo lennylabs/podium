@@ -67,6 +67,7 @@ func TestManifestBodyOf(t *testing.T) {
 		{"crlf", "---\r\nname: a\r\n---\r\n\r\nbody\r\n", "body\r\n"},
 		{"leading blank lines", "---\nname: a\n---\n\n\nbody", "body"},
 		{"no trailing newline", "---\nname: a\n---", ""},
+		{"text after close", "---\nname: a\n---body\n", "body\n"},
 		{"earliest close", "---\na\n---\nb\n---\nc", "b\n---\nc"},
 		{"malformed yaml", "---\n: : [\n---\nbody", "body"},
 		{"no frontmatter", "body only\n", ""},
