@@ -59,14 +59,18 @@ Optional sampling for high-volume low-sensitivity events (e.g., `domain.loaded` 
 
 ```
 podium admin erase <user_id>
+podium admin erase <user_id> --local --audit-path <file> --operator <admin-id> --salt <salt>
 ```
 
-- Unregisters and purges any user-defined layers owned by the user (and the artifacts ingested from them).
-- Redacts the user identity in audit records (replaces with `redacted-<sha256(user_id+salt)>`).
-- Preserves audit event sequencing for integrity.
-- On a multi-tenant registry, erasure is refused with `403 auth.forbidden` for every caller, before the admin check, before any layer is read, and before any audit record is rewritten, because the redaction this section describes would reach audit records outside the requesting tenant's audit stream (§4.7.1). The erasure endpoint selects no tenant, so this refusal also answers a request whose verified organization names no provisioned tenant, in place of the §6.3.1 `auth.tenant_unknown` rejection.
+The first form calls the registry. The second form is the offline erasure form: it rewrites the audit file at `<file>` directly without calling the registry, reaches every record in that file whatever its tenant, and records `<admin-id>` as the invoking admin on a `user.erased` event that names no tenant.
 
-Use this command for GDPR right-to-erasure. Erasure is itself logged as a `user.erased` event.
+- Unregisters and purges any user-defined layers owned by the user (and the artifacts ingested from them).
+- Redacts the user identity (replaces it with `redacted-<sha256(user_id+salt)>`) in the requesting tenant's audit records. On a multi-tenant registry, these are the records whose `tenant` (§8.1) is the tenant §6.3.1 selects for the request. Alias discovery reads only those records. On a single-tenant registry, these are the records whose `tenant` is the sole tenant and the records that name no tenant.
+- Preserves audit event sequencing for integrity.
+- On a multi-tenant registry, erasure acts in the tenant §6.3.1 selects for the request. The admin check (§4.7.2) runs in that tenant, and only that tenant's layers are purged. Under `oidc-jwt`, a request whose verified organization names no provisioned tenant is rejected with `auth.tenant_unknown` (§6.3.1). Any other request that resolves to no tenant is refused with `403 auth.forbidden` before the admin check, before any layer is read, and before any audit record is rewritten.
+- On a multi-tenant registry, erasure leaves records that name no tenant (§8.1) unchanged, and the response carries no information about them, so a tenant admin cannot learn whether the user appears in records outside the tenant. An operator redacts them with the offline erasure form shown above, run against the registry's file sink (`PODIUM_AUDIT_LOG_PATH`, §13.12) while the registry is stopped. That form reaches every record in the file whatever its tenant, and every tombstone it writes uses the salt the operator supplies.
+
+Use this command for GDPR right-to-erasure. Erasure is itself logged as a `user.erased` event that names the requesting tenant. The event is recorded whether the registry sink is a file or an external endpoint, and with an external endpoint the registry rewrites no record and the receiving system owns redaction of the shipped stream.
 
 ## 8.6 Audit Integrity
 
