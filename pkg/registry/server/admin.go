@@ -3,7 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/lennylabs/podium/pkg/audit"
@@ -108,15 +108,25 @@ func (s *Server) handleAdminShowEffective(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// errAdminUnevaluable is the refusal requireAdmin returns when the admin
+// check itself fails. Its message is fixed because the callers write the
+// error to the client, and the underlying store error can name internal
+// detail, such as the schema ID a multi-tenant registry derives for a request
+// that resolves to no tenant.
+var errAdminUnevaluable = errors.New("admin authorization could not be evaluated")
+
 // requireAdmin enforces admin auth on the caller. Tests bypass via
-// WithIdentityResolver; production wires the JWT-decoded identity.
+// WithIdentityResolver; production wires the JWT-decoded identity. A check
+// that cannot be evaluated denies the request: the store error is logged and
+// the caller receives errAdminUnevaluable.
 func (s *Server) requireAdmin(r *http.Request) error {
 	id := s.identity(r)
 	if err := s.core.AdminAuthorize(r.Context(), id); err != nil {
 		if errors.Is(err, core.ErrForbidden) {
 			return err
 		}
-		return fmt.Errorf("admin authorization: %w", err)
+		log.Printf("admin authorization for %q in tenant %q: %v", id.Sub, s.core.TenantFor(r.Context()), err)
+		return errAdminUnevaluable
 	}
 	return nil
 }
