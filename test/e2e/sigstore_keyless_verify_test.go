@@ -58,6 +58,7 @@ func (f keylessFixture) env(overrides map[string]string) []string {
 		"PODIUM_SIGSTORE_OIDC_TOKEN":          "",
 		"PODIUM_SIGSTORE_CERT_IDENTITY":       sigstoreharness.DefaultSAN,
 		"PODIUM_SIGSTORE_CERT_OIDC_ISSUER":    sigstoreharness.DefaultIssuer,
+		"PODIUM_SIGSTORE_REQUEST_TIMEOUT":     "",
 		"PODIUM_SIGNATURE_PROVIDER":           "",
 	}
 	for k, v := range overrides {

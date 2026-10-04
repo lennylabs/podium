@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/sign"
 )
@@ -193,10 +194,11 @@ const (
 	keyForVerify
 )
 
-// loadSignatureProvider builds the named provider. The noop and
-// sigstore-keyless arms ignore use; sigstore-keyless is built by
-// sigstoreKeylessProvider from the PODIUM_SIGSTORE_* variables. The
-// registry-managed arm, the default, resolves
+// loadSignatureProvider builds the named provider. The noop arm ignores use.
+// The sigstore-keyless arm is built by sigstoreKeylessProvider from the
+// PODIUM_SIGSTORE_* variables, and only its sign use reads
+// PODIUM_SIGSTORE_REQUEST_TIMEOUT. The registry-managed arm, the default,
+// resolves
 // exactly the material use names: the verification key set from
 // PODIUM_SIGNATURE_VERIFY_KEY when set (authoritative, so a malformed list is
 // an error) and otherwise from the public: and verify: lines of the registry
@@ -212,7 +214,7 @@ func loadSignatureProvider(name string, use keyUse) (sign.Provider, error) {
 	case "noop":
 		return sign.Noop{}, nil
 	case "sigstore-keyless":
-		return sigstoreKeylessProvider(), nil
+		return sigstoreKeylessProvider(use)
 	case "registry-managed":
 		if use == keyForSign {
 			return registryManagedSigner()
@@ -241,10 +243,21 @@ const (
 // empty trust root and Sign does not read it. The signing endpoints take their
 // §6.2 defaults when unset or empty. The identity policy comes from
 // PODIUM_SIGSTORE_CERT_IDENTITY and PODIUM_SIGSTORE_CERT_OIDC_ISSUER, and an
-// incomplete policy makes Verify refuse every envelope.
+// incomplete policy makes Verify refuse every envelope. For keyForSign the
+// per-request deadline comes from PODIUM_SIGSTORE_REQUEST_TIMEOUT, and an
+// invalid value fails before Sign contacts any Sigstore endpoint. For
+// keyForVerify the variable is not read, because verification is offline and
+// a stray value must not break it.
 //
 // Spec: §4.7.9, §6.2.
-func sigstoreKeylessProvider() sign.SigstoreKeyless {
+func sigstoreKeylessProvider(use keyUse) (sign.SigstoreKeyless, error) {
+	var timeout time.Duration
+	if use == keyForSign {
+		var err error
+		if timeout, err = sigstoreRequestTimeout(); err != nil {
+			return sign.SigstoreKeyless{}, err
+		}
+	}
 	root, _ := os.ReadFile(os.Getenv("PODIUM_SIGSTORE_TRUSTED_ROOT_FILE"))
 	return sign.SigstoreKeyless{
 		FulcioURL: envDefault("PODIUM_SIGSTORE_FULCIO_URL", defaultFulcioURL),
@@ -256,7 +269,28 @@ func sigstoreKeylessProvider() sign.SigstoreKeyless {
 			os.Getenv("PODIUM_SIGSTORE_CERT_IDENTITY"),
 			os.Getenv("PODIUM_SIGSTORE_CERT_OIDC_ISSUER"),
 		),
+		RequestTimeout: timeout,
+	}, nil
+}
+
+// sigstoreRequestTimeout reads PODIUM_SIGSTORE_REQUEST_TIMEOUT. An unset
+// value, or one that is blank after trimming, takes the library default. A
+// value that is not a positive duration is refused with config.invalid,
+// because an interactive command reports an operator's typo rather than
+// silently signing under a different bound.
+//
+// Spec: §4.7.9, §6.2.
+func sigstoreRequestTimeout() (time.Duration, error) {
+	raw := os.Getenv("PODIUM_SIGSTORE_REQUEST_TIMEOUT")
+	v := strings.TrimSpace(raw)
+	if v == "" {
+		return sign.DefaultRequestTimeout, nil
 	}
+	d, err := time.ParseDuration(v)
+	if err != nil || d <= 0 {
+		return 0, fmt.Errorf("config.invalid: PODIUM_SIGSTORE_REQUEST_TIMEOUT %q is not a positive duration such as 60s", raw)
+	}
+	return d, nil
 }
 
 // registryManagedSigner reads the private half from the registry key file.
