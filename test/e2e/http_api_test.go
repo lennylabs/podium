@@ -864,7 +864,9 @@ func TestDocHTTPAPI_LayerCapDefaultThree(t *testing.T) {
 }
 
 // spec: §7.3.1 / §4.4 — the cap is configurable per tenant.
-// PODIUM_MAX_USER_LAYERS=1 lowers the standalone deployment's cap, so the
+// PODIUM_MAX_USER_LAYERS is the deployment default that a tenant record with a
+// zero max_user_layers selects (§4.7.8, §13.12). The standalone bootstrap
+// tenant holds zero, so PODIUM_MAX_USER_LAYERS=1 sets its cap to 1 and the
 // second user-defined registration is rejected.
 func TestDocHTTPAPI_LayerCapConfigurable(t *testing.T) {
 	srv := startServerArgs(t,

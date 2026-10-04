@@ -819,6 +819,65 @@ func TestArtifactResponse_QuotaMaterialize(t *testing.T) {
 	}
 }
 
+// TestArtifactResponse_BatchLoadQuotaMaterialize drives the compiled binary's
+// bulk load under PODIUM_QUOTA_MATERIALIZE_RATE=1. The bucket holds one token,
+// so the first item is admitted and the second is refused with a per-item
+// quota.materialize_rate_exceeded envelope inside the batch's 200 response.
+// The test issues no other load and does not sleep: a load_artifact call
+// before the batch would spend the only token, and a pause would let it
+// refill.
+//
+// Spec: §4.7.8, §7.6.2, §13.12
+func TestArtifactResponse_BatchLoadQuotaMaterialize(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"finance/ap/pay-invoice/ARTIFACT.md":     contextArtifact("pay"),
+		"finance/ap/approve-invoice/ARTIFACT.md": contextArtifact("approve"),
+	})
+	srv := startServerArgs(t, []string{"HOME=" + t.TempDir(), "PODIUM_QUOTA_MATERIALIZE_RATE=1"},
+		"serve", "--standalone", "--layer-path", reg)
+	ids := []string{"finance/ap/pay-invoice", "finance/ap/approve-invoice"}
+	st, body := postJSON(t, srv.BaseURL+"/v1/artifacts:batchLoad", map[string]any{"ids": ids})
+	if st != 200 {
+		t.Fatalf("status=%d, want 200: %s", st, body)
+	}
+	var arr []struct {
+		ID           string `json:"id"`
+		Status       string `json:"status"`
+		ManifestBody string `json:"manifest_body"`
+		Error        *struct {
+			Code            string `json:"code"`
+			Retryable       bool   `json:"retryable"`
+			SuggestedAction string `json:"suggested_action"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(body, &arr); err != nil {
+		t.Fatalf("decode batch response: %v\n%s", err, body)
+	}
+	if len(arr) != 2 {
+		t.Fatalf("got %d items, want 2: %s", len(arr), body)
+	}
+	if arr[0].ID != ids[0] || arr[0].Status != "ok" || arr[0].Error != nil {
+		t.Errorf("item 0 = %+v, want %s admitted with status ok", arr[0], ids[0])
+	}
+	refused := arr[1]
+	if refused.ID != ids[1] || refused.Status != "error" || refused.Error == nil {
+		t.Fatalf("item 1 = %+v, want %s refused with status error", refused, ids[1])
+	}
+	if refused.Error.Code != "quota.materialize_rate_exceeded" {
+		t.Errorf("item 1 code=%q, want quota.materialize_rate_exceeded", refused.Error.Code)
+	}
+	if !refused.Error.Retryable {
+		t.Errorf("item 1 retryable=false, want true")
+	}
+	if refused.Error.SuggestedAction == "" {
+		t.Errorf("item 1 suggested_action is empty")
+	}
+	if refused.ManifestBody != "" {
+		t.Errorf("refused item carries a manifest_body: %q", refused.ManifestBody)
+	}
+}
+
 // a load the caller is not authorized to see
 // surfaces as registry.not_found, not a 403, so the response does not leak the
 // artifact's existence in a hidden layer (the doc's "auth.scope_denied
