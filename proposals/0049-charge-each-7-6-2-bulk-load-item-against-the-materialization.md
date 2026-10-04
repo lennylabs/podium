@@ -1,7 +1,7 @@
 # Proposal 0049: Charge each §7.6.2 bulk-load item against the materialization rate, and resolve the user-layer cap tenant-first
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-03). The proposal was approved on the same date, decided on the user's behalf under the overnight authorization, and signed off as staged. OQ-1: keep the staged behavior (the user-layer cap reads the tenant record on both deployment modes, D10); ignoring it on single-tenant would add plumbing and tests and make GET /v1/quota's stored max_user_layers differ from the enforced value, while the stale-record edge case is documented in SPEC-3(b), DOC-1(d), and CL-1.
+- Status: Implemented (2026-10-03). The proposal was approved on the same date, decided on the user's behalf under the overnight authorization, and signed off as staged. OQ-1: keep the staged behavior (the user-layer cap reads the tenant record on both deployment modes, D10); ignoring it on single-tenant would add plumbing and tests and make GET /v1/quota's stored max_user_layers differ from the enforced value, while the stale-record edge case is documented in SPEC-3(b), DOC-1(d), and CL-1.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -50,23 +50,23 @@ This document stages the proposed spec, code, test, and documentation changes. I
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-1. §7.6.2 gains the **Materialization rate** bullet.
+- [x] **S1 · spec** — SPEC-1. §7.6.2 gains the **Materialization rate** bullet.
       Levels: —. Depends on: —
-- [ ] **S2 · spec** — SPEC-2. The first sentence of the 0048 §4.7.8 charge-site paragraph names each bulk-load item (SPEC-2(a)), and the 0048 §13.12 `PODIUM_QUOTA_MATERIALIZE_RATE` row's refusal sentence names `load_artifact` and the per-item bulk-load report (SPEC-2(b)).
+- [x] **S2 · spec** — SPEC-2. The first sentence of the 0048 §4.7.8 charge-site paragraph names each bulk-load item (SPEC-2(a)), and the 0048 §13.12 `PODIUM_QUOTA_MATERIALIZE_RATE` row's refusal sentence names `load_artifact` and the per-item bulk-load report (SPEC-2(b)).
       Levels: —. Depends on: S1
-- [ ] **S3 · spec** — SPEC-3. §4.7.8 states the tenant-first user-layer cap order, and §13.12 gains the `PODIUM_MAX_USER_LAYERS` row.
+- [x] **S3 · spec** — SPEC-3. §4.7.8 states the tenant-first user-layer cap order, and §13.12 gains the `PODIUM_MAX_USER_LAYERS` row.
       Levels: —. Depends on: —
-- [ ] **S4 · code** — CODE-1. `Server.allowMaterialize`, `admitPrefix`, the shared message constant, `materializeQuotaEnvelope`, the per-item charge in `handleBatchLoad`, and the `suggested_action` text land.
+- [x] **S4 · code** — CODE-1. `Server.allowMaterialize`, `admitPrefix`, the shared message constant, `materializeQuotaEnvelope`, the per-item charge in `handleBatchLoad`, and the `suggested_action` text land.
       Levels: unit, integration, e2e. Depends on: S1, S2
-- [ ] **S5 · code** — CODE-2, TEST-2. `effectiveLayerCap` reads the tenant record first, the cap comments and flag help follow, and the layer-cap unit tests change with it. Bundled because the existing `TestLayerCap_NegativeDisablesCap` fails on the reordered code, so neither half is green alone.
+- [x] **S5 · code** — CODE-2, TEST-2. `effectiveLayerCap` reads the tenant record first, the cap comments and flag help follow, and the layer-cap unit tests change with it. Bundled because the existing `TestLayerCap_NegativeDisablesCap` fails on the reordered code, so neither half is green alone.
       Levels: unit, integration, e2e. Depends on: S3
-- [ ] **S6 · test** — TEST-1. Unit and in-process integration tests for the batch charge, and the §6.10 matrix cell.
+- [x] **S6 · test** — TEST-1. Unit and in-process integration tests for the batch charge, and the §6.10 matrix cell.
       Levels: unit, integration. Depends on: S4
-- [ ] **S7 · test** — TEST-3. The end-to-end bulk-load quota test on the binary and the comment update on `TestDocHTTPAPI_LayerCapConfigurable`.
+- [x] **S7 · test** — TEST-3. The end-to-end bulk-load quota test on the binary and the comment update on `TestDocHTTPAPI_LayerCapConfigurable`.
       Levels: e2e. Depends on: S4, S5
-- [ ] **S8 · docs** — DOC-1. The HTTP API, SDK, error-code, CLI, and clustered deployment references describe the per-item charge and the tenant-first cap. Land S8 in the same pull request as S4 and S5 so no released build documents behavior it lacks.
+- [x] **S8 · docs** — DOC-1. The HTTP API, SDK, error-code, CLI, and clustered deployment references describe the per-item charge and the tenant-first cap. Land S8 in the same pull request as S4 and S5 so no released build documents behavior it lacks.
       Levels: —. Depends on: S4, S5
-- [ ] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, and `Documentation` entries.
+- [x] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, and `Documentation` entries.
       Levels: —. Depends on: S8
 
 **Ordering constraints.** S1 to S3 land the rules the later steps cite. S2 follows S1 because its sentence points to the §7.6.2 bullet. S4 and S5 touch different files and may proceed in parallel. S6 needs the helpers S4 adds, and S7 needs both code steps. S1 starts only after proposals 0046, 0047, and 0048 are implemented.
