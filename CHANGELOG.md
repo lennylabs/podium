@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Added
 
+- **Registry audit events record a `tenant` attribute** (§8.1): each record
+  names the org whose audit stream it belongs to. Events about the registry as
+  a whole, operator `tenant.managed` events, events from requests that resolve
+  to no provisioned tenant, and records written before this release carry no
+  tenant. The attribute is part of the hash chain only when set, so existing
+  logs still verify.
 - **A verification key set for the registry signing key** (§4.7.9, §13.4,
   §13.12): the key file at `PODIUM_SIGN_KEY_PATH` takes zero or more `verify:`
   lines, each a base64 Ed25519 public key trusted for verification only. The
@@ -107,6 +113,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 
+- **Erasure is logged with an external audit endpoint, and the chain is
+  re-anchored after an erasure** (§8.5, §8.6): a registry whose
+  `PODIUM_AUDIT_LOG_PATH` names an endpoint now sends `user.erased`, and a
+  registry with local anchoring enabled anchors the rewritten chain
+  immediately. `user.erased` records the superseded head as
+  `superseded_head`.
 - **An admin check that cannot be evaluated no longer exposes store detail** (§4.7.2): when the
   admin-grant lookup fails, the admin-gated endpoints still refuse with `403 auth.forbidden`, and the
   message is now `admin authorization could not be evaluated`. The registry logs the store error with
@@ -280,15 +292,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   URL on the source repository for every Git layer on a multi-tenant registry,
   default-tenant layers included; the default tenant's segment is its tenant ID.
   Single-tenant registries keep `/v1/ingest/webhook/{layer-id}`.
-- **`POST /v1/admin/erase` is refused on a multi-tenant registry** (§8.5,
-  §4.7.1): on a registry started with `PODIUM_MULTI_TENANT=true`, erasure
-  answers `403 auth.forbidden` for every caller, including a caller whose
-  verified organization names no provisioned tenant, and changes nothing,
-  because the registry keeps one audit file for every tenant and a redaction
-  would rewrite other tenants' records. A registry with an identity provider
-  configured and public mode off already refused it; a registry in public mode
-  or with no identity provider configured previously admitted it and redacted
-  every tenant's records. Single-tenant registries are unchanged.
+- **`POST /v1/admin/erase` acts in the request's tenant on a multi-tenant
+  registry** (§8.5, §6.3.1): on a registry started with
+  `PODIUM_MULTI_TENANT=true`, erasure purges the user's layers and redacts the
+  audit records of the tenant the caller's organization selects. A request
+  that resolves to no tenant is refused with `403 auth.forbidden`, and under
+  `oidc-jwt` an organization that names no provisioned tenant gets
+  `401 auth.tenant_unknown`. Audit records that carry no tenant, which
+  includes every record written before this release, are left unchanged, and
+  the response reports nothing about them.
+  `podium admin erase --local --audit-path <PODIUM_AUDIT_LOG_PATH>` redacts
+  them while the registry is stopped.
 - **Persisted webhook receivers must be registered again** (§7.3.2): a
   `PODIUM_WEBHOOK_STORE_PATH` file written by an earlier release keys every
   receiver under `default`. That key matches no tenant ID, including the
