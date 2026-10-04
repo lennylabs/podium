@@ -62,6 +62,7 @@ podium admin erase <user_id>
 - Unregisters and purges any user-defined layers owned by the user (and the artifacts ingested from them).
 - Redacts the user identity in audit records (replaces with `redacted-<sha256(user_id+salt)>`).
 - Preserves audit event sequencing for integrity.
+- On a multi-tenant registry, erasure is refused with `403 auth.forbidden` for every caller, before the admin check, before any layer is read, and before any audit record is rewritten, because the redaction this section describes would reach audit records outside the requesting tenant's audit stream (§4.7.1). The erasure endpoint selects no tenant, so this refusal also answers a request whose verified organization names no provisioned tenant, in place of the §6.3.1 `auth.tenant_unknown` rejection.
 
 Use this command for GDPR right-to-erasure. Erasure is itself logged as a `user.erased` event.
 
