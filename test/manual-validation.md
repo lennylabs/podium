@@ -3300,9 +3300,10 @@ content hash, so verification could not succeed.
 **Watch out for.** Two commands look like they exercise this and do not.
 `PODIUM_SIGNATURE_PROVIDER` is read by `podium sign`, `podium verify`, and
 `podium-mcp`; `podium serve` does not read it. Ingest signing is on unless
-`PODIUM_SIGN=none` or `--sign none` turns it off. And `podium sync` runs no
-signature check at all, so `PODIUM_VERIFY_SIGNATURES` in front of it is a no-op that accepts an
-invalid value silently. A scenario built on either one passes whether or not
+`PODIUM_SIGN=none` or `--sign none` turns it off. And a filesystem-source
+`podium sync` runs no signature check, so `PODIUM_VERIFY_SIGNATURES` in front of it
+has no effect. Server-source `podium sync` does verify, and it refuses an invalid
+`PODIUM_VERIFY_SIGNATURES` value with exit status 2. A scenario built on either one passes whether or not
 the defect is present.
 
 **Steps.**
