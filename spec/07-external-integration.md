@@ -38,7 +38,7 @@ At or below the inline cutoff, resources are returned inline. This avoids round-
 **Integrity and reference fields.** The registry's HTTP `load_artifact` response carries these fields beside the manifest and the resources:
 
 - `delivery_hash`: the §4.7.10 digest over the record this response delivers. Present on every response.
-- `delivery_signature`: the registry's §4.7.10 signature over `delivery_hash`. Absent when the registry runs without a signing key.
+- `delivery_signature`: the registry's §4.7.10 signature over `delivery_hash`. Absent when the registry runs without a signing key. A client verifies the pair by the §4.7.10 verification procedure.
 - `artifact_revision`: the §4.7.10 ingest time of the served version, an RFC 3339 UTC timestamp in the form §4.7.10 fixes, covered by `delivery_hash`. Present on every response that carries `delivery_hash`, including every `status: ok` batch entry.
 - `extends_pin`: the pinned `<id>@<version>` this artifact extends, as the registry resolved it at ingest; the manifest's `extends:` key may carry a version range, and this field carries the resolved pin rather than the authored reference, present only when the calling identity can see the parent record (§4.6). Its absence does not mean the artifact extends nothing.
 
@@ -711,14 +711,19 @@ for result in artifacts:
   {
     "id": "finance/close-reporting/run-variance-analysis",
     "status": "ok",
+    "type": "skill",
     "version": "1.2.0",
     "content_hash": "sha256:...",
+    "sensitivity": "internal",
     "delivery_hash": "sha256:...",
     "delivery_signature": "...",
     "artifact_revision": "2025-01-01T00:00:00.000000Z",
+    "frontmatter": "...",
     "manifest_body": "...",
+    "skill_raw": "...",
     "resources": [
-      { "path": "...", "presigned_url": "...", "content_hash": "..." }
+      { "path": "...", "presigned_url": "...", "content_hash": "..." },
+      { "path": "...", "inline": "...", "content_hash": "..." }
     ]
   },
   {
@@ -729,12 +734,15 @@ for result in artifacts:
 ]
 ```
 
+The example is illustrative. The **Delivery record** bullet below states the presence and JSON type of each member of an `ok` entry.
+
 **Semantics.**
 
 - **Hard cap:** 50 IDs per batch. The SDK splits larger sets transparently.
 - **Visibility:** identical to `load_artifact`. Items the caller cannot see come back as `status: "error"` with `visibility.denied`; no leak about whether the artifact exists in some hidden layer.
 - **Session consistency:** with `session_id`, the first occurrence of each `(id, "latest")` in the batch freezes the resolved version for the rest of the batch and session.
 - **Partial failure** does not fail the batch. Each item carries its own status.
+- **Delivery record:** this bullet is the only statement of the presence and JSON type of each batch-entry member the §4.7.10 procedure reads. An `ok` entry carries the strings `id`, `delivery_hash`, and `artifact_revision`. It carries each other member to which §7.2 "Record fields" maps a delivery-record field as a string under the same name, absent when its value is empty. It carries `delivery_signature` as a string, absent when the registry runs without a signing key. The §4.7.10 procedure reads an absent string as the empty value (step 2). The other members that paragraph names do not describe a batch entry. The entry carries no `manifest_body_url`, `resources_base64`, or `large_resources`, and none of the members §7.2 "Other response members" names. Its `resources` member is an array of reference objects. Each reference carries the strings `path` and `content_hash`. A reference to a resource the registry does not hold inline on the manifest record also carries the string `presigned_url`. Every other reference, including one whose resource also has a copy in object storage, carries its body in the string `inline`, absent when the body is empty, and the boolean `inline_base64`, absent when false. A consumer classifies each reference by §4.7.10 step 2. A consumer verifies the entry by the §4.7.10 procedure (§7.6.3). An entry that fails verification is returned with `status: "error"` and the failure's code.
 - **Materialization rate:** each item counts as one load against the §4.7.8 materialization rate of the tenant the request resolves to, as a `load_artifact` request does. Items are charged in request order whatever their outcome, so an item that comes back with `visibility.denied` is charged. When the rate refuses an item, that item and every later item come back as `status: "error"` with `quota.materialize_rate_exceeded`. They are neither loaded nor charged, and they resolve no `latest` version for the session. The items before the refused one are served as usual. A request rejected as a whole, such as one above the hard cap, charges nothing.
 - **Bandwidth:** a bundled resource the registry does not hold inline on the manifest record travels via a presigned URL (§4.4) so the response body stays small, and the SDK fetches those resources concurrently after the response. A resource the registry holds inline on the manifest record travels in the reference's `inline` field in place of `presigned_url`, including when a copy of it also exists in object storage, base64-encoded with `inline_base64: true` when its bytes are not valid UTF-8. The registry holds inline every resource at or below the §4.1 inline cutoff, and every resource of a row ingested while no object store was configured (§7.2), so every link it serves names an object the §13.4 stored-row admission read.
 
