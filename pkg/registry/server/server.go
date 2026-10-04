@@ -1099,8 +1099,8 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusMethodNotAllowed, "registry.method_not_allowed", "method not allowed: "+r.Method)
 		return
 	}
-	if !s.quota.AllowMaterialize(s.core.TenantFor(r.Context()), tenantQuotaFrom(r.Context())) {
-		writeQuotaError(w, "quota.materialize_rate_exceeded", "tenant materialize budget exhausted")
+	if !s.allowMaterialize(r.Context()) {
+		writeQuotaError(w, "quota.materialize_rate_exceeded", materializeQuotaMessage)
 		return
 	}
 	q := r.URL.Query()

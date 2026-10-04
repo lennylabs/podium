@@ -318,3 +318,47 @@ func TestQuotaLimiter_ConcurrentRateChangeBoundsAdmissions(t *testing.T) {
 		t.Errorf("bucket rate = %v, want 1 or 2", rate)
 	}
 }
+
+// Spec: §7.6.2 — admission is a prefix: charging stops at the first refusal,
+// and an empty batch makes no charge.
+func TestAdmitPrefix(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		n         int
+		answers   []bool
+		wantCount int
+		wantCalls int
+	}{
+		{"empty", 0, nil, 0, 0},
+		{"all admitted", 3, []bool{true, true, true}, 3, 3},
+		{"first refused", 3, []bool{false, true, true}, 0, 1},
+		{"middle refused", 4, []bool{true, false, true, true}, 1, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			calls := 0
+			got := admitPrefix(tc.n, func() bool {
+				ok := tc.answers[calls]
+				calls++
+				return ok
+			})
+			if got != tc.wantCount || calls != tc.wantCalls {
+				t.Errorf("admitPrefix = %d after %d calls, want %d after %d", got, calls, tc.wantCount, tc.wantCalls)
+			}
+		})
+	}
+}
+
+// Spec: §7.6.2, §6.10 — a refused bulk-load item carries the enriched
+// quota.materialize_rate_exceeded envelope.
+func TestMaterializeQuotaEnvelope(t *testing.T) {
+	t.Parallel()
+	e := materializeQuotaEnvelope()
+	if e.Code != "quota.materialize_rate_exceeded" || e.Message != materializeQuotaMessage {
+		t.Errorf("envelope = %+v", e)
+	}
+	if !e.Retryable || e.SuggestedAction == "" {
+		t.Errorf("envelope not enriched: %+v", e)
+	}
+}

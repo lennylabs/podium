@@ -208,6 +208,33 @@ func (q *QuotaLimiter) charge(buckets map[string]*rateBucket, tenantID string, r
 	return bucket.allow(rate)
 }
 
+// materializeQuotaMessage is the message of every quota.materialize_rate_exceeded
+// refusal, whether the refused request is a load_artifact call or one item of a
+// bulk load.
+const materializeQuotaMessage = "tenant materialize budget exhausted"
+
+// allowMaterialize charges one materialization token against the request's
+// tenant, keyed on the tenant ID and resolved from the quota record routing
+// carried on ctx. handleLoadArtifact and handleBatchLoad both charge through
+// it, so the two charge sites cannot drift to different keys or limits. A nil
+// limiter allows every charge.
+//
+// Spec: §4.7.8, §7.6.2
+func (s *Server) allowMaterialize(ctx context.Context) bool {
+	return s.quota.AllowMaterialize(s.core.TenantFor(ctx), tenantQuotaFrom(ctx))
+}
+
+// materializeQuotaEnvelope returns the §6.10 envelope of a bulk-load item the
+// materialization rate refused. It runs enrichEnvelope so the item carries the
+// same retryable flag and suggested_action as the load_artifact refusal.
+//
+// Spec: §7.6.2, §6.10
+func materializeQuotaEnvelope() *ErrorResponse {
+	e := &ErrorResponse{Code: "quota.materialize_rate_exceeded", Message: materializeQuotaMessage}
+	enrichEnvelope(e)
+	return e
+}
+
 // writeQuotaError emits the §6.10 structured error envelope for
 // rate-limited requests.
 func writeQuotaError(w http.ResponseWriter, code, message string) {

@@ -83,7 +83,13 @@ type BatchResource struct {
 // handleBatchLoad answers POST /v1/artifacts:batchLoad per
 // §7.6.2. Partial failure is the rule: items the caller cannot
 // see come back as status=error with the §6.10 envelope; the
-// batch HTTP status stays 200.
+// batch HTTP status stays 200. Each item of a valid request is
+// charged against the tenant's §4.7.8 materialization rate before
+// any item loads. The items admitPrefix refuses come back as
+// per-item quota.materialize_rate_exceeded errors, and a request
+// rejected as a whole charges nothing.
+//
+// Spec: §7.6.2, §4.7.8
 func (s *Server) handleBatchLoad(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "registry.invalid_argument",
@@ -106,11 +112,39 @@ func (s *Server) handleBatchLoad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := s.identity(r)
+	admitted := admitPrefix(len(req.IDs), func() bool { return s.allowMaterialize(r.Context()) })
 	out := make([]BatchLoadEnvelope, 0, len(req.IDs))
-	for _, artifactID := range req.IDs {
+	for i, artifactID := range req.IDs {
+		if i >= admitted {
+			out = append(out, BatchLoadEnvelope{ID: artifactID, Status: "error", Error: materializeQuotaEnvelope()})
+			continue
+		}
 		out = append(out, s.loadOneForBatch(r.Context(), id, artifactID, req.VersionPins[artifactID], req.SessionID))
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// admitPrefix charges n items in request order through allow and returns how
+// many were admitted. Admission is a prefix: the first refusal ends charging,
+// so allow is never called after it returns false, and that item and every
+// later one are refused. Stopping at the first refusal keeps a token that
+// refills mid-batch from admitting a later item after an earlier one was
+// refused. n == 0 makes no call.
+//
+// The handler charges every item before it loads the first one, whatever each
+// item's outcome turns out to be, so a visibility.denied item still costs a
+// token and no charge is refunded. Charging ahead of the loads is safe because
+// core.LoadArtifact draws no tokens, so the admitted count does not depend on
+// the loads.
+//
+// Spec: §7.6.2, §4.7.8
+func admitPrefix(n int, allow func() bool) int {
+	for i := 0; i < n; i++ {
+		if !allow() {
+			return i
+		}
+	}
+	return n
 }
 
 func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifactID, version, sessionID string) BatchLoadEnvelope {
