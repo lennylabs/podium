@@ -578,6 +578,16 @@ podium admin tenant deactivate <id> --registry <url>
 
 `podium admin tenant create` derives the org ID from the name and provisions the tenant; repeating the call for an already-provisioned name is a no-op that returns the existing tenant. `podium admin tenant update` sends only the flags the operator passes, so an omitted flag leaves the corresponding field unchanged server-side; it cannot change the tenant name, which is fixed at create. `update --active true` reactivates a deactivated tenant, and `update --active false` deactivates it, the same soft operation as `deactivate`. `list --json` emits the wire array for scripting.
 
+### Quotas
+
+| Var | Description | Default |
+| --- | --- | --- |
+| `PODIUM_QUOTA_SEARCH_QPS` | Deployment default for the §4.7.8 search QPS limit. It applies to every tenant whose own `search_qps` is zero, and on a multi-tenant registry it applies to requests that resolve to no tenant. A request over the limit is refused with `quota.search_qps_exceeded`. A value of 0 sets no deployment default. A negative or non-integer value is treated as 0. Environment only; no config-file key. | `0` |
+| `PODIUM_QUOTA_MATERIALIZE_RATE` | Deployment default for the §4.7.8 materialization rate limit. It applies to every tenant whose own `materialize_rate` is zero, and on a multi-tenant registry it applies to requests that resolve to no tenant. A request over the limit is refused with `quota.materialize_rate_exceeded`. A value of 0 sets no deployment default. A negative or non-integer value is treated as 0. Environment only; no config-file key. | `0` |
+| `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY` | Deployment default for the §4.7.8 daily audit-event cap. It applies to every tenant whose own `audit_volume_per_day` is zero. Once a tenant's count for the current UTC day reaches the limit, new ingest writes to that tenant's layers are refused with `quota.audit_volume_exceeded`. Reads continue to serve. A value of 0 sets no deployment default. A negative or non-integer value is treated as 0. Environment only; no config-file key. | `0` |
+
+A single-tenant registry rejects `/v1/admin/tenants` (§7.3.3) and does not read its tenant's stored search QPS, materialization rate, or audit volume values, so these variables set its limits for those budgets.
+
 ### Config file format
 
 ```yaml
