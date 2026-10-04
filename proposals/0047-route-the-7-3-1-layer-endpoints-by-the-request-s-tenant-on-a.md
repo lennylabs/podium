@@ -1,7 +1,7 @@
 # Proposal 0047: Route the §7.3.1 layer endpoints by the request's tenant on a multi-tenant registry
 
 - Issue: (to be filed)
-- Status: Applied to spec (2026-10-03). Approved on 2026-10-03 and decided on the user's behalf under the overnight authorization. Signed off as staged. OQ-1: keep both webhook route forms as drafted (single-tenant URLs unchanged; the tenant-qualified form only on a multi-tenant registry), so no single-tenant operator re-registers. OQ-2: the existing §7.6 behavior stands and DOC-1(a) documents the stream-versus-list difference; a containment rule, if wanted, is a separate decision proposal. OQ-3: refuse erasure on a multi-tenant registry as staged; tenant-scoped audit records or a per-tenant audit sink is recorded as a follow-up.
+- Status: Implemented (2026-10-03). Approved on 2026-10-03 and decided on the user's behalf under the overnight authorization. Signed off as staged. OQ-1: keep both webhook route forms as drafted (single-tenant URLs unchanged; the tenant-qualified form only on a multi-tenant registry), so no single-tenant operator re-registers. OQ-2: the existing §7.6 behavior stands and DOC-1(a) documents the stream-versus-list difference; a containment rule, if wanted, is a separate decision proposal. OQ-3: refuse erasure on a multi-tenant registry as staged; tenant-scoped audit records or a per-tenant audit sink is recorded as a follow-up.
 - Date: 2026-10-03
 
 This document stages the proposed spec, code, test, and documentation changes. It does not modify any spec, code, or doc file. Apply the changes in the staged sections after sign-off.
@@ -55,25 +55,25 @@ The problem statement raised two items. Item 1, the multi-tenant layer endpoints
 
 ## Implementation checklist
 
-- [ ] **S1 · spec** — SPEC-2. §7.3.1 gains Tenant selection, the tenant-qualified webhook sentence, the per-request layer-object wording, and the Tenant selection qualifier on the Layer read visibility whole-list sentence; §8.5 gains the multi-tenant erasure refusal bullet; §7.3.4 qualifies `manage_any_layer` by Tenant selection; §13.10 gains the layer-panel exception for the Tenant selection refusal.
+- [x] **S1 · spec** — SPEC-2. §7.3.1 gains Tenant selection, the tenant-qualified webhook sentence, the per-request layer-object wording, and the Tenant selection qualifier on the Layer read visibility whole-list sentence; §8.5 gains the multi-tenant erasure refusal bullet; §7.3.4 qualifies `manage_any_layer` by Tenant selection; §13.10 gains the layer-panel exception for the Tenant selection refusal.
       Levels: —. Depends on: —
-- [ ] **S2 · code** — CODE-1. `routeTenant`, `writeTenantUnknown`, and the exported `(*Server).TenantRouted` and `(*Server).TenantRoutedNoReject` land in `pkg/registry/server/server.go`; `withTenantRouting` calls the helper.
+- [x] **S2 · code** — CODE-1. `routeTenant`, `writeTenantUnknown`, and the exported `(*Server).TenantRouted` and `(*Server).TenantRoutedNoReject` land in `pkg/registry/server/server.go`; `withTenantRouting` calls the helper.
       Levels: unit, integration. Depends on: S1
-- [ ] **S3 · code** — CODE-2. `LayerEndpoint` resolves its tenant per request, refuses unrouted writes, refuses erasure on a multi-tenant endpoint, `Capabilities` reports false for an unrouted request, and `core.TenantFromContext` is exported. After it, `e.tenantID` is read only in the single-tenant arm of `tenant`.
+- [x] **S3 · code** — CODE-2. `LayerEndpoint` resolves its tenant per request, refuses unrouted writes, refuses erasure on a multi-tenant endpoint, `Capabilities` reports false for an unrouted request, and `core.TenantFromContext` is exported. After it, `e.tenantID` is read only in the single-tenant arm of `tenant`.
       Levels: unit, integration. Depends on: S1
-- [ ] **S4 · code** — CODE-3. The tenant-qualified webhook route and URL on a multi-tenant endpoint.
+- [x] **S4 · code** — CODE-3. The tenant-qualified webhook route and URL on a multi-tenant endpoint.
       Levels: unit, integration. Depends on: S3
-- [ ] **S5 · code** — CODE-4. serverboot mounts the layer routes through `TenantRouted`, leaves the erase and webhook routes unwrapped, mounts the posture read through `TenantRoutedNoReject`, and calls `WithTenantRouting()` when `PODIUM_MULTI_TENANT` is set.
+- [x] **S5 · code** — CODE-4. serverboot mounts the layer routes through `TenantRouted`, leaves the erase and webhook routes unwrapped, mounts the posture read through `TenantRoutedNoReject`, and calls `WithTenantRouting()` when `PODIUM_MULTI_TENANT` is set.
       Levels: integration, e2e. Depends on: S2, S3, S4
-- [ ] **S6 · test** — TEST-1. In-process routing, refusal, erasure, posture, no-router, and webhook suite in `pkg/registry/server`, built through `newTenantRoutingFixture` over the poisoned boot tenant `P`.
+- [x] **S6 · test** — TEST-1. In-process routing, refusal, erasure, posture, no-router, and webhook suite in `pkg/registry/server`, built through `newTenantRoutingFixture` over the poisoned boot tenant `P`.
       Levels: unit, integration. Depends on: S2, S3, S4
-- [ ] **S7 · test** — TEST-3. `TestLayerEndpoint_MultiTenantRouting`, `TestLayerEndpoint_MultiTenantNoRouter`, and `TestLayerEndpoint_MultiTenantUnknownOrgRejected` (under `oidc-jwt` with the `startOIDCTestIdP` TLS IdP, Linux only) on the standard-stack binary, and the stale comment in `TestEventStream_MultiTenantRouting`.
+- [x] **S7 · test** — TEST-3. `TestLayerEndpoint_MultiTenantRouting`, `TestLayerEndpoint_MultiTenantNoRouter`, and `TestLayerEndpoint_MultiTenantUnknownOrgRejected` (under `oidc-jwt` with the `startOIDCTestIdP` TLS IdP, Linux only) on the standard-stack binary, and the stale comment in `TestEventStream_MultiTenantRouting`.
       Levels: e2e. Depends on: S5
-- [ ] **S8 · docs** — DOC-1. HTTP API reference, deployment, layer, access-control, and CLI pages. Land in the same pull request as S5 so no released build documents behavior it lacks.
+- [x] **S8 · docs** — DOC-1. HTTP API reference, deployment, layer, access-control, and CLI pages. Land in the same pull request as S5 so no released build documents behavior it lacks.
       Levels: —. Depends on: S5
-- [ ] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, and `Documentation` entries.
+- [x] **S9 · docs** — CL-1. The `[Unreleased]` `Fixed`, `Changed`, and `Documentation` entries.
       Levels: —. Depends on: S5
-- [ ] **S10 · docs** — MV-1. Manual-validation scenario S87 (S85 and S86 were taken by earlier proposals).
+- [x] **S10 · docs** — MV-1. Manual-validation scenario S87 (S85 and S86 were taken by earlier proposals).
       Levels: manual. Depends on: S5
 
 **Ordering constraints.** S2 and S3 are independent and may proceed in parallel. S4 needs the multi-tenant field S3 introduces. S5 compiles only against S2, S3, and S4. Until S5 lands, no binary behavior changes, because serverboot neither wraps the routes nor enables per-request resolution.
