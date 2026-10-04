@@ -21,6 +21,7 @@ package e2e
 import (
 	"encoding/json"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -227,10 +228,10 @@ func TestLayerEndpoint_MultiTenantRouting(t *testing.T) {
 // re-anchor after the erase anchors a head at or after user.erased.
 func ltrEraseInDefault(t *testing.T, f *ltrFixture, carolH http.Header, daveDefault string) {
 	t.Helper()
-	globexBefore := ltrCountNaming(auditReadRecords(t, f.auditPath), f.globexID, f.dave)
-	if globexBefore == 0 {
+	if ltrCountNaming(auditReadRecords(t, f.auditPath), f.globexID, f.dave) == 0 {
 		t.Fatalf("no globex audit record names %s before the erase\nlog:\n%s", f.dave, brReadOrEmpty(f.auditPath))
 	}
+	outOfScope := ltrOutOfScopeBodies(t, f.auditPath, f.globexID)
 	salt := "ltr-salt-" + randHex(4)
 	st, body := apiDoAs(t, http.MethodPost, f.srv.BaseURL+"/v1/admin/erase", carolH,
 		map[string]any{"user_id": f.dave, "salt": salt})
@@ -245,12 +246,10 @@ func ltrEraseInDefault(t *testing.T, f *ltrFixture, carolH http.Header, daveDefa
 	if ltrCountNaming(recs, ltrDefaultID, tombstone) == 0 {
 		t.Errorf("no default-tenant record carries the tombstone %s", tombstone)
 	}
-	if n := ltrCountNaming(recs, f.globexID, f.dave); n != globexBefore {
-		t.Errorf("globex records naming %s = %d after the erase, want the %d before it", f.dave, n, globexBefore)
+	if n := ltrCountNaming(recs, f.globexID, tombstone) + ltrCountNaming(recs, "", tombstone); n != 0 {
+		t.Errorf("%d globex or unlabeled records carry the tombstone %s", n, tombstone)
 	}
-	if n := ltrCountNaming(recs, "", f.dave); n != 1 {
-		t.Errorf("unlabeled records naming %s = %d after the erase, want the seeded one", f.dave, n)
-	}
+	ltrWantUnchanged(t, outOfScope, ltrOutOfScopeBodies(t, f.auditPath, f.globexID))
 	erased := auditFindType(t, recs, string(audit.EventUserErased))
 	if erased.tenant() != ltrDefaultID {
 		t.Errorf("user.erased tenant = %q, want the default org ID %q", erased.tenant(), ltrDefaultID)
@@ -282,6 +281,60 @@ func ltrWantEraseBody(t *testing.T, body []byte, daveDefault string) {
 	var purged []string
 	if err := json.Unmarshal(resp["layers_purged"], &purged); err != nil || len(purged) != 1 || purged[0] != daveDefault {
 		t.Errorf("layers_purged = %s (decode error %v), want [%q]", resp["layers_purged"], err, daveDefault)
+	}
+}
+
+// ltrOutOfScopeBodies returns, in log order, every globex-labeled and
+// unlabeled line of the audit log at path with its hash and prev_hash keys
+// removed. A default-tenant erase rewrites the chain, so those two keys change
+// on every record; the rest of an out-of-scope record stays byte-identical
+// under §8.5, including the caller fields a partial redaction would alter
+// without changing whether the record still names the user.
+func ltrOutOfScopeBodies(t *testing.T, path, globexID string) []string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read audit log: %v", err)
+	}
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var rec map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode audit line %q: %v", line, err)
+		}
+		var tenant string
+		if v, ok := rec["tenant"]; ok {
+			if err := json.Unmarshal(v, &tenant); err != nil {
+				t.Fatalf("decode tenant of audit line %q: %v", line, err)
+			}
+		}
+		if tenant != "" && tenant != globexID {
+			continue
+		}
+		delete(rec, "hash")
+		delete(rec, "prev_hash")
+		body, err := json.Marshal(rec)
+		if err != nil {
+			t.Fatalf("encode audit line %q: %v", line, err)
+		}
+		out = append(out, string(body))
+	}
+	return out
+}
+
+// ltrWantUnchanged asserts that every out-of-scope record present before the
+// erase is still present, in order and with the same content, after it. The
+// erase and its re-anchor append unlabeled deployment-wide records such as
+// audit.anchored, so after may extend before but must not alter it.
+func ltrWantUnchanged(t *testing.T, before, after []string) {
+	t.Helper()
+	if len(after) < len(before) {
+		t.Fatalf("%d globex or unlabeled records after the erase, want at least the %d before it", len(after), len(before))
+	}
+	for i, b := range before {
+		if after[i] != b {
+			t.Errorf("out-of-scope record %d changed across the erase\nbefore: %s\nafter:  %s", i, b, after[i])
+		}
 	}
 }
 
